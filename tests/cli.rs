@@ -3420,13 +3420,16 @@ fn service_probe_unavailable_without_dev_reports_diagnostic() {
     let dir = isolated_cwd("service_probe_no_env");
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
-    fs::write(dir.join("src/main.jet"), r#"module perf.package {
+    fs::write(dir.join("src/main.jet"), r#"module env.dev {
+    services: { mydb: { enable: true, init: "echo mydb", ready: "true" } }
+}
+module perf.package {
     budgets: [Budget.{
         name: "readiness",
         scope: .Service("mydb"),
         metric: .ServiceReadiness,
         provider: .ServiceProbe("mydb"),
-        comparison: .Absolute,
+        comparison: .AbsoluteFrom("local/mydb"),
         limit: .AtMost(500ms),
         enforcement: .Warn,
     }],

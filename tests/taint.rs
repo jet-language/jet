@@ -224,3 +224,71 @@ fn run() {
         codes(src)
     );
 }
+
+// ── D-TAINT2=A tests: `#Tainted(Credential)` + E0722 ─────────────────────────
+
+/// `#Tainted(Credential)` reaching bare `print` is E0722.
+#[test]
+fn tainted_credential_to_print_is_e0722() {
+    let src = r#"
+fn run() {
+    token :: #Tainted(Credential) "bearer eyJhbGci..."
+    print(token)
+}
+"#;
+    assert!(
+        codes(src).iter().any(|c| c == "E0722"),
+        "credential reaching print must be E0722: {:?}",
+        codes(src)
+    );
+}
+
+/// Bare `#Tainted` (no kind) at `print` is NOT E0722 — only Credential kind triggers it.
+/// (E0721 would fire only at Db/Exec/Net sinks; bare taint at print is permitted.)
+#[test]
+fn tainted_input_to_print_is_not_e0722() {
+    let src = r#"
+fn run() {
+    user_input :: #Tainted "hello world"
+    print(user_input)
+}
+"#;
+    assert!(
+        !codes(src).iter().any(|c| c == "E0722"),
+        "bare #Tainted reaching print must NOT be E0722: {:?}",
+        codes(src)
+    );
+}
+
+/// Credential taint propagates through a binding — the derived variable is also E0722.
+#[test]
+fn tainted_credential_propagates_through_binding() {
+    let src = r#"
+fn run() {
+    raw_token :: #Tainted(Credential) "s3cr3t"
+    derived := raw_token
+    print(derived)
+}
+"#;
+    assert!(
+        codes(src).iter().any(|c| c == "E0722"),
+        "credential taint must propagate through binding to print: {:?}",
+        codes(src)
+    );
+}
+
+/// A clean value (no taint) at `print` is fine — no E0722.
+#[test]
+fn clean_value_to_print_is_not_e0722() {
+    let src = r#"
+fn run() {
+    msg := "hello"
+    print(msg)
+}
+"#;
+    assert!(
+        codes(src).is_empty(),
+        "clean value at print must produce no errors: {:?}",
+        codes(src)
+    );
+}

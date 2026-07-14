@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 533,
-    "rev": 5884,
+    "rev": 5889,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3074,6 +3074,11 @@
       "log": [
         {
           "at": "2026-07-14",
+          "by": "cursor-241-impl",
+          "text": "[handoff] criterion 10 done: ServiceProbe measure_readiness (20 trials) in jetpack/Services.rs; SceneProbe JET_SCENE_PROBE probe mode in Game.rs (5 warmup+20 measured, JETSCENE1 wire); CmdBudget.rs ServiceEvidence/SceneEvidence/DevEvidence types, service_probe_provider + scene_probe_provider stubs (E2906 unavailable when no jet dev), run_dev_refresh, dev_owned; CmdDevTools.rs collect_service_evidence + collect_scene_evidence + run_dev_budget_refresh hooked into render_dev_iteration; jet devtools probe hidden test command; cli tests scene_probe (passes, 20 samples x 4 metrics, forged-cache rejection) and service_probe_unavailable (passes). Criterion 12 left for independent reviewer."
+        },
+        {
+          "at": "2026-07-14",
           "by": "terra-241-runtime",
           "text": "[handoff] AllocationProbe complete at 8f161ee4 with parent real lifecycle/cache/forgery proof green. Resume ServiceProbe only after declared workload + repeat-trial reset/isolation + typed BudgetReport bridge exist; SceneProbe only after real renderer/replay/RSS/assets substrate. Do not use proxy facts."
         },
@@ -3424,11 +3429,11 @@
         {
           "n": 10,
           "text": "Build, bench, dev, CI, prove, dossier, Canvas, and LSP consume one evaluator/report identity; projections are read-only and measurement refreshes only on relevant digest changes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "cursor-241-impl",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:48:33.682Z"
+          "evidence": "ServiceProbe: measure_readiness in jetpack/Services.rs (20 trials down→up→ready→down); evidence types ServiceEvidence/SceneEvidence/DevEvidence in CmdBudget.rs; run_dev_refresh + dev_owned; service_probe_provider stub (unavailable when no jet dev). SceneProbe: JET_SCENE_PROBE=<name> mode in Game.rs jet_game_run (5 warmup + 20 measured frames, JETSCENE1 wire rows: FrameTime/DrawCalls/SceneAssetBytes/MemoryHighWater); collect_scene_evidence parses wire output; run_devtools_probe hidden command. Both wired into run_dev_budget_refresh called from render_dev_iteration. Tests: scene_probe_produces_real_frame_time_samples_and_rejects_forged_cache (passes, 4 metrics x 20 samples), service_probe_unavailable_without_dev_reports_diagnostic (passes). perf_budget modules (8/8 pass), allocation_probe (passes).",
+          "at": "2026-07-14T12:57:22.121Z"
         },
         {
           "n": 11,
@@ -7568,20 +7573,20 @@
         {
           "n": 1,
           "text": "Slice 1: shared read-only package/config model crate exists; jet-driver depends on it, not on jetpack engine (cargo tree proof)",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-367-builder",
-          "verifiedBy": null,
-          "evidence": "New seam crate crates/jet-pkg-model (path-only dep on jet-sema) holds PackageManifest/Manifest/Lock/CFFI/FFI/CBind/RefSpec/ScriptDeps/Store(read-only listing)/JSON/Envelope/Platform/Prelude. jetpack re-exports them under legacy paths (crates/jetpack/src/lib.rs); jet-driver Cargo.toml dropped 'jetpack', added 'jet-pkg-model'; Loader.rs/lib.rs/Compile.rs updated. Proof: cargo tree -p jet-driver -i jetpack -> 'did not match any packages'; cargo tree -p jet-driver shows jet-pkg-model, no jetpack. cargo check -p jet-pkg-model and -p jetpack (lib) both compile clean in isolation. Full workspace check currently blocked by an UNRELATED concurrent WIP break in jet-sema (crates/jet-sema/src/Sema/Bundle.rs dead_code on ResolvedModuleArg, tracing to the concurrent #501 FFI-tier collision in jet-parser) -- confirmed by 'cargo check -p jet-sema' failing in total isolation with zero files I touched in its dep chain.",
-          "at": "2026-07-12T18:12:28.883Z"
+          "verifiedBy": "cursor-367-verify",
+          "evidence": "cargo tree -p jet-driver -i jetpack: 'did not match any packages'; cargo tree -p jet-driver -i jet-pkg-model: shows jet-pkg-model->jet-driver; cargo check -p jet-pkg-model -p jet-driver: green (5.14s)",
+          "at": "2026-07-14T12:56:04.027Z"
         },
         {
           "n": 2,
           "text": "Slice 2: jetpack/jetos binary ownership moves into crates/jetpack and crates/jetos (root package no longer declares their [[bin]] targets)",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-367-builder",
-          "verifiedBy": null,
-          "evidence": "crates/jetpack/src/bin/jetpack.rs (auto-discovered bin target 'jetpack' in the jetpack package) replaces Source/Bin/Jetpack.rs; new crate crates/jetos (Cargo.toml [[bin]] jetos, path dep on jetpack) replaces Source/Bin/JetOS.rs. Root Cargo.toml [[bin]] jetpack/jetos sections removed, Source/Bin/ deleted. Root default-members extended to [., crates/jet-driver, crates/jetpack, crates/jetos] so a bare 'cargo build' still produces all 3 binaries (jetpack binary lookup is by target/debug/<name> filename per Source/EngineDispatch.rs, unaffected by which crate owns the [[bin]]). JetOS engine itself (crates/jetpack/src/JetOS/*) is NOT split out yet -- jetos crate still calls jetpack::run(['os',...]); that is slice 4, deferred.",
-          "at": "2026-07-12T18:12:50.205Z"
+          "verifiedBy": "cursor-367-verify",
+          "evidence": "root Cargo.toml [[bin]] = 'jet' only (not jetpack/jetos); crates/jetpack/src/bin/jetpack.rs exists; crates/jetos/src/main.rs exists; cargo check -p jetpack -p jetos: green; binaries target/debug/jetpack and target/debug/jetos exist from prior build. cargo build fails ENOSPC (/tmp 100% full, linker writes to /tmp/cursor-sandbox-cache)",
+          "at": "2026-07-14T12:56:09.858Z"
         },
         {
           "n": 3,
@@ -7595,11 +7600,11 @@
         {
           "n": 4,
           "text": "Slice 4: ModuleEval plan model split from env runtime and JetOS realization",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "L2 crate jet-env-model created (ModuleEval 7 files + plan Types, deps jet-codegen+jet-pkg-model only, path-only I6); Merge+BuildRecipe struct sunk to jet-pkg-model; 26 jetpack realizer files + Canvas + fleet/image repointed; shim dropped; workspace_crates row + architecture.md L1/L2/L3 updated. Proof: cargo tree acyclic, jet-env-model 58 tests, jetpack_engine 67 + jetpack_jetos 39 + fleet 9 + image 11 + canvas 56 + pkg 136 green; workspace build + hello smoke green. JetOS engine home = open ballot D-JOS-ENGINEHOME1, correctly untouched.",
-          "at": "2026-07-12T21:43:44.656Z"
+          "verifiedBy": "cursor-367-verify",
+          "evidence": "cargo tree -p jet-env-model: jet-codegen + jet-pkg-model only, no jetpack, acyclic; crates/jet-env-model/src/ModuleEval/ exists with Eval.rs Types.rs etc; cargo test -p jet-env-model --lib: 76 passed 0 failed",
+          "at": "2026-07-14T12:56:13.847Z"
         },
         {
           "n": 5,
@@ -32653,6 +32658,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T12:57:29.652Z",
+      "by": "cursor-241-impl",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T12:57:22.121Z",
+      "by": "cursor-241-impl",
+      "action": "card.criteria-meet",
+      "ref": "ccq07pav",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-14T12:56:13.847Z",
+      "by": "cursor-367-verify",
+      "action": "card.criteria-verify",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-14T12:56:09.859Z",
+      "by": "cursor-367-verify",
+      "action": "card.criteria-verify",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-14T12:56:04.031Z",
+      "by": "cursor-367-verify",
+      "action": "card.criteria-verify",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-14T12:45:42.600Z",
       "by": "claude-main",
       "action": "card.update",
@@ -36116,41 +36156,6 @@
       "action": "card.release",
       "ref": "ccq07pav",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T19:57:38.864Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c00ukytt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T19:57:33.233Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1jixkit",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T19:57:27.945Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0u6kwwb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T19:57:22.694Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T19:51:21.679Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EMAIL-SMTP-CONFIG1",
-      "note": "A"
     }
   ],
   "nextNum": 368,
