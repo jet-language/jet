@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 599,
-    "rev": 6545,
+    "rev": 6549,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17796,40 +17796,46 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Diagnose project-root ascent and workspace membership. Write the boundary test first; make isolated unlisted entries stay isolated while declared workspace members still project ancestor workspace/env state. Preserve Canvas protocol and edit conflict semantics. Run Canvas target, then parent full verification.",
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "terra-canvas-boundary",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-14",
+          "by": "terra-canvas-boundary",
+          "text": "Root cause: Canvas treated any ancestor workspace declaration or unified lock as ownership. Added membership-gated nearest-workspace boundary; unlisted local packages and loose files remain isolated while declared members retain ancestor workspace/env/lock projection."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Canvas project discovery does not absorb ancestor workspace/env/lock state for an entry that is not a declared workspace member; declared members still resolve through the real workspace.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-canvas-boundary",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T21:14:29.937Z"
+          "evidence": "tests/canvas.rs::canvas_project_discovery_requires_declared_workspace_membership proves unlisted nested package => package mode, loose entry => single_file, neither absorbs ancestor workspace/env/lock; declared member => workspace mode with workspace.jet, env.jet, and .jet/lock.",
+          "at": "2026-07-14T21:25:12.373Z"
         },
         {
           "n": 2,
           "text": "Project source-id queries, manifest/env edits, dependency/target mutations, and source-control file sets stay scoped to the projected project with deterministic conflict revisions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-canvas-boundary",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T21:14:30.039Z"
+          "evidence": "Repo-local TMPDIR Canvas suite passes source-id graph/query, manifest/env/dependency/target transactions, deterministic touched-file conflicts, and project source-control file-set tests after project-root scoping fix.",
+          "at": "2026-07-14T21:25:12.477Z"
         },
         {
           "n": 3,
           "text": "All 57 Canvas tests pass without protocol, diagnostic, dependency, unsafe, or user-syntax changes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-canvas-boundary",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T21:14:30.143Z"
+          "evidence": "TMPDIR=$PWD/target/test-tmp cargo test --test canvas: 58 passed, 0 failed; no protocol, diagnostic, dependency, unsafe, or user-syntax changes.",
+          "at": "2026-07-14T21:25:12.582Z"
         },
         {
           "n": 4,
@@ -17842,8 +17848,8 @@
         }
       ],
       "refs": [
+        "crates/jet-devserver/src/Canvas/project_scan.rs",
         "tests/canvas.rs",
-        "Source/Canvas.rs",
         "workspace.jet",
         "env.jet",
         "scripts/agent/verify-full.sh"
@@ -38869,6 +38875,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T21:25:12.582Z",
+      "by": "terra-canvas-boundary",
+      "action": "card.criteria-meet",
+      "ref": "c06k81ci",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-14T21:25:12.477Z",
+      "by": "terra-canvas-boundary",
+      "action": "card.criteria-meet",
+      "ref": "c06k81ci",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-14T21:25:12.373Z",
+      "by": "terra-canvas-boundary",
+      "action": "card.criteria-meet",
+      "ref": "c06k81ci",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-14T21:25:12.268Z",
+      "by": "terra-canvas-boundary",
+      "action": "card.update",
+      "ref": "c06k81ci",
+      "note": "phase,logEntry,refs"
+    },
+    {
       "at": "2026-07-14T21:14:30.354Z",
       "by": "terra-canvas-boundary",
       "action": "card.claim",
@@ -42339,34 +42373,6 @@
       "action": "card.update",
       "ref": "c04x8do3",
       "note": "body,refs"
-    },
-    {
-      "at": "2026-07-14T15:39:48.298Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0bo7bp5",
-      "note": "body,refs"
-    },
-    {
-      "at": "2026-07-14T15:39:39.553Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0q35155",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:39:39.346Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c04x8do3",
-      "note": "plan,blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:39:39.136Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0bo7bp5",
-      "note": "plan,blockedBy"
     }
   ],
   "nextNum": 368,

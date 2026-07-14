@@ -1917,6 +1917,92 @@ fn canvas_project_json_reports_single_file_without_manifest() {
 }
 
 #[test]
+fn canvas_project_discovery_requires_declared_workspace_membership() {
+    let dir = temp_dir("project_workspace_membership_boundary");
+    let member = dir.join("packages/member");
+    let unlisted = dir.join("scratch");
+    let loose = dir.join("loose");
+    fs::create_dir_all(&member).unwrap();
+    fs::create_dir_all(&unlisted).unwrap();
+    fs::create_dir_all(&loose).unwrap();
+    fs::create_dir_all(dir.join(".jet")).unwrap();
+    fs::write(
+        dir.join("workspace.jet"),
+        "module workspace {\n    members: [\"./packages/member\"]\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("env.jet"),
+        "module env.dev {\n    prompt: \"ancestor\"\n}\n",
+    )
+    .unwrap();
+    fs::write(dir.join(".jet/lock"), "version = 1\n").unwrap();
+    fs::write(
+        member.join("pkg.jet"),
+        "payload: { name: \"member\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let member_entry = member.join("main.jet");
+    fs::write(&member_entry, "fn run() {\n    print(\"member\")\n}\n").unwrap();
+    fs::write(
+        unlisted.join("pkg.jet"),
+        "payload: { name: \"scratch\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let unlisted_entry = unlisted.join("main.jet");
+    fs::write(&unlisted_entry, "fn run() {\n    print(\"scratch\")\n}\n").unwrap();
+    fs::write(
+        unlisted.join("helper.jet"),
+        "fn helper() -> Int {\n    return 1\n}\n",
+    )
+    .unwrap();
+    let loose_entry = loose.join("main.jet");
+    fs::write(&loose_entry, "fn run() {\n    print(\"loose\")\n}\n").unwrap();
+
+    let unlisted_json = jet::Canvas::project_json_for_entry(&unlisted_entry);
+    assert!(
+        unlisted_json.contains("\"mode\":\"package\""),
+        "{unlisted_json}"
+    );
+    assert_eq!(
+        json_field(&unlisted_json, "project_root"),
+        unlisted.to_string_lossy()
+    );
+    assert!(
+        unlisted_json.contains("\"workspace\":null"),
+        "{unlisted_json}"
+    );
+    assert!(unlisted_json.contains("\"envs\":[]"), "{unlisted_json}");
+    assert!(unlisted_json.contains("\"locks\":[]"), "{unlisted_json}");
+    assert!(
+        unlisted_json.contains("\"path\":\"helper.jet\""),
+        "{unlisted_json}"
+    );
+    assert!(!unlisted_json.contains("workspace.jet"), "{unlisted_json}");
+
+    let loose_json = jet::Canvas::project_json_for_entry(&loose_entry);
+    assert!(
+        loose_json.contains("\"mode\":\"single_file\""),
+        "{loose_json}"
+    );
+    assert!(loose_json.contains("\"workspace\":null"), "{loose_json}");
+    assert!(loose_json.contains("\"envs\":[]"), "{loose_json}");
+    assert!(loose_json.contains("\"locks\":[]"), "{loose_json}");
+
+    let member_json = jet::Canvas::project_json_for_entry(&member_entry);
+    assert!(
+        member_json.contains("\"mode\":\"workspace\""),
+        "{member_json}"
+    );
+    assert!(
+        member_json.contains("\"workspace\":{\"path\":\"workspace.jet\""),
+        "{member_json}"
+    );
+    assert!(member_json.contains("\"path\":\"env.jet\""), "{member_json}");
+    assert!(member_json.contains("\"path\":\".jet/lock\""), "{member_json}");
+}
+
+#[test]
 fn canvas_project_json_projects_workspace_packages_and_files() {
     let dir = temp_dir("project_workspace");
     let hello = dir.join("packages/hello");

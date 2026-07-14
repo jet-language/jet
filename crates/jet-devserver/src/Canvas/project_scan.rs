@@ -55,10 +55,30 @@ pub(super) struct ProjectChange {
     pub(super) after: String,
 }
 
+struct WorkspaceBoundary {
+    root: PathBuf,
+    member_root: Option<PathBuf>,
+}
+
 pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     let entry_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let manifest_root = jet_driver::Loader::find_manifest_root(entry_dir);
-    let workspace_root = find_workspace_root(manifest_root.as_deref().unwrap_or(entry_dir));
+    let workspace_boundary = find_workspace_boundary(entry_dir);
+    let workspace_root = workspace_boundary
+        .as_ref()
+        .filter(|boundary| boundary.member_root.is_some())
+        .map(|boundary| boundary.root.clone());
+    let manifest_root = jet_driver::Loader::find_manifest_root(entry_dir).filter(|manifest| {
+        let Some(boundary) = &workspace_boundary else {
+            return true;
+        };
+        match &boundary.member_root {
+            Some(member_root) => path_is_within(manifest, member_root),
+            None => {
+                path_is_within(manifest, &boundary.root)
+                    && !same_path(manifest, &boundary.root)
+            }
+        }
+    });
     let project_root = workspace_root
         .as_deref()
         .or(manifest_root.as_deref())
@@ -81,19 +101,71 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     }
 }
 
-fn find_workspace_root(start: &Path) -> Option<PathBuf> {
+fn find_workspace_boundary(start: &Path) -> Option<WorkspaceBoundary> {
     let mut dir = start.to_path_buf();
     loop {
-        if jet_env_model::WorkspaceFile::load(&dir).is_some()
-            || jet_env_model::WorkspaceLock::load(&dir).is_some()
-        {
-            return Some(dir);
+        match jet_env_model::WorkspaceFile::load(&dir) {
+            Some(Ok(plan)) => {
+                let member_root = matching_member_root(&dir, start, &plan);
+                return Some(WorkspaceBoundary {
+                    root: dir,
+                    member_root,
+                });
+            }
+            Some(Err(_)) => {
+                return Some(WorkspaceBoundary {
+                    root: dir,
+                    member_root: None,
+                });
+            }
+            None => {}
+        }
+        if let Some(plan) = jet_env_model::WorkspaceLock::load(&dir) {
+            if !plan.members.is_empty() {
+                let member_root = matching_member_root(&dir, start, &plan);
+                return Some(WorkspaceBoundary {
+                    root: dir,
+                    member_root,
+                });
+            }
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
             None => return None,
         }
     }
+}
+
+fn matching_member_root(
+    workspace_root: &Path,
+    entry_dir: &Path,
+    plan: &jet_env_model::WorkspaceFile::WorkspacePlan,
+) -> Option<PathBuf> {
+    plan.members
+        .iter()
+        .map(|member| workspace_root.join(&member.path))
+        .filter(|member_root| path_is_within(entry_dir, member_root))
+        .max_by_key(|member_root| member_root.components().count())
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    comparable_path(path).starts_with(comparable_path(root))
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    comparable_path(left) == comparable_path(right)
+}
+
+fn comparable_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
+        }
+    })
 }
 
 fn collect_project_files(
