@@ -351,6 +351,32 @@ pub fn evaluate_with_imports_opts_collecting(
     allow_impure: bool,
     initial_impure_depth: usize,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+    evaluate_with_imports_opts_collecting_structs(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        allow_impure,
+        initial_impure_depth,
+        empty_structs(),
+    )
+}
+
+/// Whole-item comptime evaluation variant. Codable encoding needs declared
+/// field types so `[U8]` retains byte-string identity after CtValue erasure.
+pub fn evaluate_with_imports_opts_collecting_structs<'a>(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &'a Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    allow_impure: bool,
+    initial_impure_depth: usize,
+    structs: &HashMap<String, &'a StructDef>,
+) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
     }
@@ -373,7 +399,7 @@ pub fn evaluate_with_imports_opts_collecting(
         emitted_fragments: Vec::new(),
         globals,
         methods: empty_methods(),
-        structs: empty_structs(),
+        structs,
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         migrations: empty_migrations(),

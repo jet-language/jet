@@ -1154,6 +1154,9 @@ pub(super) fn apply_core_call(
         ("core.encoding.cbor", "to_bytes") => Ok(CtValue::ResOk(Box::new(
             CtValue::Bytes(super::super::EncodingLite::cbor_encode(one(0)?)),
         ))),
+        ("core.encoding.cbor", "to_bytes_canonical") => Ok(CtValue::ResOk(Box::new(
+            CtValue::Bytes(super::super::EncodingLite::cbor_encode_canonical(one(0)?)),
+        ))),
         ("core.encoding.cbor", "parse") => {
             let bytes = as_bytes(one(0)?, span)?;
             match super::super::EncodingLite::cbor_decode(&bytes) {

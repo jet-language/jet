@@ -276,6 +276,40 @@ fn cbor_current_whole_encode_parse_matches_comptime_and_aot() {
 }
 
 #[test]
+fn cbor_canonical_typed_corpus_matches_comptime_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping canonical CBOR comptime differential");
+        return;
+    }
+    let src = r#"use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+
+@[Codable]
+struct Packet { id: Int, payload: [U8] }
+
+comptime MAP = hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+comptime FLOATS = hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
+comptime NAN = hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+comptime TYPED = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+
+fn run() {
+    map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+    floats := hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
+    nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+    typed := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+    if MAP != "a261620262616101" { panic("canonical encoded-key order drift") }
+    if FLOATS != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
+    if NAN != "f97e00" { panic("canonical NaN drift") }
+    if TYPED != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
+    print("{MAP}|{FLOATS}|{NAN}|{TYPED}")
+    print("{map}|{floats}|{nan}|{typed}")
+}
+"#;
+    check_comptime_src(2002, "canonical CBOR map/float/typed corpus", src);
+}
+
+#[test]
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"

@@ -2325,11 +2325,15 @@ pub(crate) fn eval_comptime_items(
     let mut results: Vec<(String, crate::Comptime::CtValue)> = Vec::new();
     {
         let mut funcs: HashMap<String, &Func> = HashMap::new();
+        let mut structs = HashMap::new();
         let mut externs: HashSet<String> = HashSet::new();
         for item in items.iter() {
             match item {
                 Item::Func(f) => {
                     funcs.insert(f.name.clone(), f);
+                }
+                Item::Struct(s) => {
+                    structs.insert(s.name.clone(), s);
                 }
                 Item::ExternRust(b) => {
                     for ef in &b.functions {
@@ -2345,7 +2349,7 @@ pub(crate) fn eval_comptime_items(
             if let Item::Const(c) = item {
                 if c.is_comptime {
                     // D-CTCORE1: evaluate_with_imports so Core whitelist calls work.
-                    match crate::Comptime::evaluate_with_imports_opts_collecting(
+                    match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
                         &c.value,
                         &funcs,
                         &externs,
@@ -2354,6 +2358,7 @@ pub(crate) fn eval_comptime_items(
                         core_imports,
                         false,
                         0,
+                        &structs,
                     ) {
                         Ok((v, inputs)) => {
                             // `v.jet_type()` reads the element type off the value's

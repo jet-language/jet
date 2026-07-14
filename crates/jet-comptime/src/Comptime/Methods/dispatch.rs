@@ -1100,6 +1100,43 @@ impl<'a> Interp<'a> {
                 ) {
                     return self.eval_data_call(method, argv, type_args, span);
                 }
+                // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
+                // declared field types. CtValue intentionally erases `[U8]`
+                // to an integer list, so generic by-value dispatch cannot
+                // distinguish CBOR byte strings from ordinary arrays.
+                if module == "core.encoding.cbor"
+                    && matches!(method, "to_bytes" | "to_bytes_canonical")
+                {
+                    let Some(value) = argv.first() else {
+                        return Err(unsupported(
+                            "core.encoding.cbor.to_bytes(): missing arg 0",
+                            span,
+                        ));
+                    };
+                    return Ok(match super::super::EncodingLite::cbor_encode_typed(
+                        value,
+                        self.structs,
+                        method == "to_bytes_canonical",
+                    ) {
+                        Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                        Err(reason) => CtValue::ResErr(Box::new(CtValue::Struct {
+                            type_name: "CBORError".to_string(),
+                            fields: vec![
+                                (
+                                    "kind".to_string(),
+                                    CtValue::Enum {
+                                        type_name: "CBORErrorKind".to_string(),
+                                        variant: "Unsupported".to_string(),
+                                        args: Vec::new(),
+                                    },
+                                ),
+                                ("byte_offset".to_string(), CtValue::Int(0)),
+                                ("path".to_string(), CtValue::Str("$".to_string())),
+                                ("reason".to_string(), CtValue::Str(reason)),
+                            ],
+                        })),
+                    });
+                }
                 // D-MIGRATE3=A / D-SERDE6: `decode<T>`/`decode_traced<T>` — typed
                 // Decode dispatch. Untyped `.decode()` (no turbofish, D-JSON3
                 // lenient form) keeps its existing `apply_core_call` arm below.

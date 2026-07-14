@@ -26,9 +26,9 @@
 //! so no new value machinery is needed — just new parse/render walkers that
 //! build/consume that shape instead of `DataTree`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
-use crate::AST::{CtKey, CtValue};
+use crate::AST::{CtKey, CtValue, StructDef, Type};
 
 use super::JsonInterp::{json_payload, json_variant};
 
@@ -1795,25 +1795,153 @@ fn cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
         out.extend_from_slice(&n.to_be_bytes());
     }
 }
-fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>) {
-    if let Some(entries) = json_object_entries(v) {
-        let mut sorted = entries;
-        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        cbor_push_len(out, 5, sorted.len() as u64);
-        for (k, val) in sorted {
-            cbor_encode_val(&json_variant("Text", Some(CtValue::Str(k))), out);
-            cbor_encode_val(&val, out);
+fn cbor_f32_to_half_bits(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 255) as i32;
+    let frac = bits & 0x7fffff;
+    if exp == 255 {
+        return sign | 0x7c00 | if frac == 0 { 0 } else { 0x0200 };
+    }
+    let half_exp = exp - 127 + 15;
+    if half_exp >= 31 {
+        return sign | 0x7c00;
+    }
+    if half_exp <= 0 {
+        if half_exp < -10 {
+            return sign;
         }
+        let mant = frac | 0x800000;
+        let shift = (14 - half_exp) as u32;
+        let mut rounded = mant >> shift;
+        let rem = mant & ((1u32 << shift) - 1);
+        let halfway = 1u32 << (shift - 1);
+        if rem > halfway || (rem == halfway && rounded & 1 != 0) {
+            rounded += 1;
+        }
+        return sign | rounded as u16;
+    }
+    let mut rounded = frac >> 13;
+    let rem = frac & 0x1fff;
+    if rem > 0x1000 || (rem == 0x1000 && rounded & 1 != 0) {
+        rounded += 1;
+    }
+    if rounded == 0x0400 {
+        return sign | (((half_exp + 1) as u16) << 10);
+    }
+    sign | ((half_exp as u16) << 10) | rounded as u16
+}
+
+fn cbor_half_exact(value: f64) -> Option<u16> {
+    if value.is_nan() {
+        return Some(0x7e00);
+    }
+    let narrowed = value as f32;
+    if (narrowed as f64).to_bits() != value.to_bits() {
+        return None;
+    }
+    let bits = cbor_f32_to_half_bits(narrowed);
+    (cbor_half_to_f64(bits).to_bits() == value.to_bits()).then_some(bits)
+}
+
+fn cbor_push_preferred_float(out: &mut Vec<u8>, value: f64) {
+    if let Some(bits) = cbor_half_exact(value) {
+        out.push(0xf9);
+        out.extend_from_slice(&bits.to_be_bytes());
+    } else if ((value as f32) as f64).to_bits() == value.to_bits() {
+        out.push(0xfa);
+        out.extend_from_slice(&(value as f32).to_bits().to_be_bytes());
+    } else {
+        out.push(0xfb);
+        out.extend_from_slice(&value.to_bits().to_be_bytes());
+    }
+}
+
+fn cbor_encode_map(entries: Vec<(CtValue, CtValue)>, out: &mut Vec<u8>, canonical: bool) {
+    let mut encoded = entries
+        .into_iter()
+        .map(|(key, value)| {
+            let mut key_bytes = Vec::new();
+            let mut value_bytes = Vec::new();
+            cbor_encode_val(&key, &mut key_bytes, canonical);
+            cbor_encode_val(&value, &mut value_bytes, canonical);
+            (key_bytes, value_bytes)
+        })
+        .collect::<Vec<_>>();
+    if canonical {
+        encoded.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    cbor_push_len(out, 5, encoded.len() as u64);
+    for (key, value) in encoded {
+        out.extend_from_slice(&key);
+        out.extend_from_slice(&value);
+    }
+}
+
+fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>, canonical: bool) {
+    if let Some(entries) = json_object_entries(v) {
+        cbor_encode_map(
+            entries
+                .into_iter()
+                .map(|(key, value)| (CtValue::Str(key), value))
+                .collect(),
+            out,
+            canonical,
+        );
         return;
     }
     if let Some(items) = json_array_items(v) {
         cbor_push_len(out, 4, items.len() as u64);
         for x in &items {
-            cbor_encode_val(x, out);
+            cbor_encode_val(x, out, canonical);
         }
         return;
     }
     match v {
+        CtValue::Unit | CtValue::None(_) => out.push(0xf6),
+        CtValue::Bool(false) => out.push(0xf4),
+        CtValue::Bool(true) => out.push(0xf5),
+        CtValue::Int(n) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
+        CtValue::Int(n) => cbor_push_len(out, 1, (-1 - *n) as u64),
+        CtValue::Float(f) => cbor_push_preferred_float(out, *f),
+        CtValue::Char(c) => {
+            let text = c.to_string();
+            cbor_push_len(out, 3, text.len() as u64);
+            out.extend_from_slice(text.as_bytes());
+        }
+        CtValue::Str(s) => {
+            cbor_push_len(out, 3, s.len() as u64);
+            out.extend_from_slice(s.as_bytes());
+        }
+        CtValue::Bytes(bytes) => {
+            cbor_push_len(out, 2, bytes.len() as u64);
+            out.extend_from_slice(bytes);
+        }
+        CtValue::List(items) => {
+            cbor_push_len(out, 4, items.len() as u64);
+            for item in items {
+                cbor_encode_val(item, out, canonical);
+            }
+        }
+        CtValue::Map(entries) => cbor_encode_map(
+            entries
+                .iter()
+                .map(|(key, value)| (key.to_value(), value.clone()))
+                .collect(),
+            out,
+            canonical,
+        ),
+        CtValue::Struct { fields, .. } => cbor_encode_map(
+            fields
+                .iter()
+                .map(|(key, value)| (CtValue::Str(key.clone()), value.clone()))
+                .collect(),
+            out,
+            canonical,
+        ),
+        CtValue::Some(value) | CtValue::ResOk(value) | CtValue::ResErr(value) => {
+            cbor_encode_val(value, out, canonical);
+        }
         CtValue::Enum { variant, args, .. } => match (variant.as_str(), args.first()) {
             ("Null", _) => out.push(0xf6),
             ("Bool", Some((_, CtValue::Bool(false)))) => out.push(0xf4),
@@ -1821,8 +1949,7 @@ fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>) {
             ("Int", Some((_, CtValue::Int(n)))) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
             ("Int", Some((_, CtValue::Int(n)))) => cbor_push_len(out, 1, (-1 - *n) as u64),
             ("Float", Some((_, CtValue::Float(f)))) => {
-                out.push(0xfb);
-                out.extend_from_slice(&f.to_be_bytes());
+                cbor_push_preferred_float(out, *f);
             }
             ("Text", Some((_, CtValue::Str(s)))) => {
                 cbor_push_len(out, 3, s.len() as u64);
@@ -1830,13 +1957,131 @@ fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>) {
             }
             _ => out.push(0xf6),
         },
-        _ => out.push(0xf6),
+        CtValue::BigInt(_) | CtValue::Closure(_) => out.push(0xf6),
     }
 }
 pub(super) fn cbor_encode(v: &CtValue) -> Vec<u8> {
     let mut out = Vec::new();
-    cbor_encode_val(v, &mut out);
+    cbor_encode_val(v, &mut out, false);
     out
+}
+pub(super) fn cbor_encode_canonical(v: &CtValue) -> Vec<u8> {
+    let mut out = Vec::new();
+    cbor_encode_val(v, &mut out, true);
+    out
+}
+
+fn cbor_is_u8_list(ty: Option<&Type>) -> bool {
+    matches!(
+        ty,
+        Some(Type::List(elem) | Type::FixedList { elem, .. })
+            if matches!(elem.as_ref(), Type::IntN { signed: false, bits: 8 })
+    )
+}
+
+fn cbor_codable_value(
+    value: &CtValue,
+    ty: Option<&Type>,
+    structs: &HashMap<String, &StructDef>,
+) -> Result<CtValue, String> {
+    let ty = match ty {
+        Some(Type::Shared(inner) | Type::Tagged { inner, .. }) => Some(inner.as_ref()),
+        other => other,
+    };
+    match value {
+        CtValue::List(items) if cbor_is_u8_list(ty) => items
+            .iter()
+            .map(|item| match item {
+                CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
+                _ => Err("CBOR [U8] contains an out-of-range byte".to_string()),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(CtValue::Bytes),
+        CtValue::List(items) => {
+            let elem_ty = match ty {
+                Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(elem.as_ref()),
+                _ => None,
+            };
+            items
+                .iter()
+                .map(|item| cbor_codable_value(item, elem_ty, structs))
+                .collect::<Result<Vec<_>, _>>()
+                .map(CtValue::List)
+        }
+        CtValue::Map(entries) => {
+            let value_ty = match ty {
+                Some(Type::Map { value, .. }) => Some(value.as_ref()),
+                _ => None,
+            };
+            let mut mapped = BTreeMap::new();
+            for (key, value) in entries {
+                if !matches!(key, CtKey::Str(_)) {
+                    return Err("CBOR Codable maps require text keys".to_string());
+                }
+                mapped.insert(key.clone(), cbor_codable_value(value, value_ty, structs)?);
+            }
+            Ok(CtValue::Map(mapped))
+        }
+        CtValue::Struct { type_name, fields } => {
+            let definition = structs
+                .get(type_name)
+                .ok_or_else(|| format!("CBOR comptime encoder has no schema for `{type_name}`"))?;
+            let mut mapped = Vec::with_capacity(fields.len());
+            for (name, value) in fields {
+                let field_ty = definition
+                    .fields
+                    .iter()
+                    .find(|field| field.name == *name)
+                    .map(|field| &field.ty);
+                mapped.push((
+                    name.clone(),
+                    cbor_codable_value(value, field_ty, structs)?,
+                ));
+            }
+            Ok(CtValue::Struct {
+                type_name: type_name.clone(),
+                fields: mapped,
+            })
+        }
+        CtValue::Some(inner) => Ok(CtValue::Some(Box::new(cbor_codable_value(
+            inner,
+            match ty {
+                Some(Type::Option(inner)) => Some(inner.as_ref()),
+                _ => None,
+            },
+            structs,
+        )?))),
+        CtValue::None(_) => Ok(value.clone()),
+        CtValue::BigInt(_) => Err("CBOR cannot encode BigInt outside Jet Int".to_string()),
+        CtValue::Closure(_) => Err("CBOR cannot encode a function value".to_string()),
+        CtValue::ResOk(_) | CtValue::ResErr(_) => {
+            Err("CBOR cannot encode a Result without an explicit Codable schema".to_string())
+        }
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "Float" && variant == "NAN" && args.is_empty() => {
+            Ok(CtValue::Float(f64::NAN))
+        }
+        CtValue::Enum { type_name, .. } if type_name != "Json" => Err(format!(
+            "CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"
+        )),
+        _ => Ok(value.clone()),
+    }
+}
+
+pub(super) fn cbor_encode_typed(
+    value: &CtValue,
+    structs: &HashMap<String, &StructDef>,
+    canonical: bool,
+) -> Result<Vec<u8>, String> {
+    let value = cbor_codable_value(value, None, structs)?;
+    Ok(if canonical {
+        cbor_encode_canonical(&value)
+    } else {
+        cbor_encode(&value)
+    })
 }
 fn cbor_read_len(input: &[u8], i: &mut usize, add: u8) -> Result<u64, String> {
     let need = match add {
