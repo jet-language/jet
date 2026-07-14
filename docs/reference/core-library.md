@@ -2348,9 +2348,9 @@ shift count past the type's width traps (no leaked Rust panic).
 ## `core.net` — sockets and DNS
 
 `core.net` is the low-level socket layer. Calls look blocking at the Jet
-surface. On Linux, TCP read/write park through the native scheduler readiness
-backend and observe task cancellation and available `#Context` deadlines.
-Windows IOCP lifecycle and platform proof remains #527.
+surface. On Unix, TCP, UDP, and Unix-socket operations park through the shared
+scheduler readiness backend and observe task cancellation and available
+`#Context` deadlines. Windows IOCP lifecycle and platform proof remains #527.
 Beginner calls accept strings; expert calls accept typed
 `IpAddr` / `SocketAddr` values.
 
@@ -2375,12 +2375,12 @@ Beginner calls accept strings; expert calls accept typed
 | `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `() ? NetError` | Directional timeouts |
 | `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? NetError` | Datagram sockets |
 | `udp_local_addr(socket)` | `SocketAddr ? NetError` | Typed local address |
-| `udp_set_timeout(socket, ms)` | `() ? NetError` | Read/write datagram timeouts |
+| `udp_set_timeout(socket, ms)` | `() ? NetError` | Persistent read/write deadline budget; earliest ambient deadline wins |
 | `udp_send_bytes_to(socket, bytes, addr)` | `Int ? NetError` | Send one arbitrary-byte datagram |
 | `udp_receive(socket, limit)` | `UdpPacket ? NetError` | Full datagram receive with bounded returned payload |
 | `udp_packet_bytes/address/original_len/truncated(packet)` | `[U8]` / `SocketAddr` / `Int` / `Bool` | Packet data, source, wire length, and truncation fact |
 | `unix_listen(path)` / `unix_connect(path)` | `UnixListener ? NetError` / `UnixStream ? NetError` | Unix-domain sockets where supported |
-| `unix_accept(listener)` | `UnixStream ? NetError` | Accept one Unix stream |
+| `unix_accept(listener)` | `UnixStream ? NetError` | Accept one Unix stream; scheduler-aware cancellation and deadlines |
 | `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] ? NetError` / `() ? NetError` | Unix byte stream operations; same deadline/close law as TCP |
 | `unix_shutdown(stream, how)` / `unix_close(stream)` | `() ? NetError` | Explicit shutdown and idempotent close |
 | `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? NetError` | System resolver config, timeout in ms |

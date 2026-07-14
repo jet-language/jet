@@ -3375,11 +3375,19 @@ fn run() {{
         print("read:{{first.len()}}+{{second.len()}}")
         eof :: receive(&stream, 2) ?? panic("eof")
         if eof.len() == 0 {{ print("eof") }}
+        net.unix_write_all_bytes(&stream, [9]) ?? panic("reply")
         net.unix_close(&stream) ?? panic("server close")
     }})
     client := net.unix_connect("{socket}") ?? panic("connect")
     first_count :: send_four(&client) ?? panic("write")
     print("wrote:{{first_count}}")
+    net.unix_shutdown(&client, .Write) ?? panic("half close")
+    reply :: receive(&client, 1) ?? panic("reply")
+    print("reply:{{reply.len()}}")
+    if net.unix_write_all_bytes(&client, [5]) == {{
+        ok(_) -> panic("write after half-close succeeded")
+        err(error) -> print(if net.error_operation(error) == "unix write" {{ "half-closed" }} else {{ "wrong-half-close" }})
+    }}
     net.unix_close(&client) ?? panic("close")
     net.unix_close(&client) ?? panic("second close")
     if receive(&client, 1) == {{
@@ -3399,7 +3407,70 @@ fn run() {{
     assert_eq!(code, 0, "{stderr}");
     let mut lines: Vec<_> = stdout.lines().collect();
     lines.sort_unstable();
-    assert_eq!(lines, ["closed", "eof", "invalid", "read:2+2", "wrote:2"]);
+    assert_eq!(lines, ["closed", "eof", "half-closed", "invalid", "read:2+2", "reply:1", "wrote:2"]);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn core_net_udp_and_unix_waits_use_typed_scheduler_interrupts() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_datagram_unix_interrupts_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let socket = jet_string_path(&dir.join("interrupt.sock"));
+    let source = format!(
+        r#"
+use core.net as net
+use core.tasks as tasks
+
+fn run() {{
+    udp_timeout :: net.udp_bind("127.0.0.1:0") ?? panic("udp timeout bind")
+    net.udp_set_timeout(udp_timeout, 20) ?? panic("udp timeout")
+    if net.udp_receive(udp_timeout, 8) == {{
+        ok(_) -> panic("udp timeout returned data")
+        err(error) -> print(net.error_message(error))
+    }}
+
+    udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
+    (udp_ready_tx, udp_ready_rx) :: tasks.channel<Int>()
+    udp_wait :: tasks.spawn(take(udp, udp_ready_tx) () => {{
+        udp_ready_tx.send(1)
+        if net.udp_receive(udp, 8) == {{
+            ok(_) -> panic("udp cancel returned data")
+            err(error) -> print(net.error_message(error))
+        }}
+    }})
+    _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
+    udp_wait.cancel()
+    udp_wait.join()
+
+    listener :: net.unix_listen("{socket}") ?? panic("unix listen")
+    (unix_ready_tx, unix_ready_rx) :: tasks.channel<Int>()
+    unix_wait :: tasks.spawn(take(listener, unix_ready_tx) () => {{
+        unix_ready_tx.send(1)
+        if net.unix_accept(listener) == {{
+            ok(_) -> panic("unix cancel accepted stream")
+            err(error) -> print(net.error_message(error))
+        }}
+    }})
+    _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
+    unix_wait.cancel()
+    unix_wait.join()
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "net_datagram_unix_interrupts", &source, &[], None);
+    assert_eq!(code, 0, "{stderr}");
+    let mut lines: Vec<_> = stdout.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(
+        lines,
+        ["deadline exceeded while waiting in udp receive", "udp receive cancelled", "unix accept cancelled"]
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

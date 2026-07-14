@@ -1159,7 +1159,6 @@ impl IoPoller {
         }
     }
     // jet:scheduler-native-iocp-end
-    // jet:scheduler-native-end
 
     #[cfg(not(all(target_os = "windows", feature = "jet_native_io")))]
     fn run_iocp(self: Arc<Self>) {
@@ -1212,6 +1211,204 @@ impl IoPoller {
         }
     }
 }
+
+// Unix-domain streams and UDP sockets cannot be represented as `TcpStream`,
+// but they must park on the same task slots instead of blocking worker threads.
+// One process-wide poller owns all raw-descriptor readiness registrations.
+#[cfg(unix)]
+enum JetRawIoHandle {
+    UnixStream(std::os::unix::net::UnixStream),
+    UnixListener(std::os::unix::net::UnixListener),
+    Udp(std::net::UdpSocket),
+}
+
+#[cfg(unix)]
+impl JetRawIoHandle {
+    fn fd(&self) -> i32 {
+        use std::os::fd::AsRawFd;
+        match self {
+            JetRawIoHandle::UnixStream(handle) => handle.as_raw_fd(),
+            JetRawIoHandle::UnixListener(handle) => handle.as_raw_fd(),
+            JetRawIoHandle::Udp(handle) => handle.as_raw_fd(),
+        }
+    }
+}
+
+#[cfg(unix)]
+struct JetRawIoInterest {
+    id: usize,
+    handle: JetRawIoHandle,
+    slot: Arc<ParkSlot>,
+    readable: bool,
+    writable: bool,
+}
+
+#[cfg(unix)]
+struct JetRawIoPoller {
+    interests: Mutex<Vec<JetRawIoInterest>>,
+    notify: Condvar,
+    next_key: AtomicUsize,
+}
+
+#[cfg(unix)]
+impl JetRawIoPoller {
+    fn register(
+        &self,
+        handle: JetRawIoHandle,
+        readable: bool,
+        writable: bool,
+    ) -> (usize, Arc<ParkSlot>) {
+        let id = self.next_key.fetch_add(1, Ordering::Relaxed);
+        let slot = ParkSlot::new();
+        self.interests.lock().unwrap().push(JetRawIoInterest {
+            id,
+            handle,
+            slot: slot.clone(),
+            readable,
+            writable,
+        });
+        self.notify.notify_one();
+        (id, slot)
+    }
+
+    fn unregister(&self, id: usize) {
+        self.interests.lock().unwrap().retain(|interest| interest.id != id);
+        self.notify.notify_one();
+    }
+
+    fn run(self: Arc<Self>) {
+        #[repr(C)]
+        struct PollFd {
+            fd: i32,
+            events: i16,
+            revents: i16,
+        }
+        extern "C" {
+            fn poll(fds: *mut PollFd, count: usize, timeout_ms: i32) -> i32;
+        }
+        const POLLIN: i16 = 0x0001;
+        const POLLOUT: i16 = 0x0004;
+        loop {
+            let (mut descriptors, descriptor_ids) = {
+                let interests = self.interests.lock().unwrap();
+                if interests.is_empty() {
+                    let _guard = self.notify.wait(interests).unwrap();
+                    continue;
+                }
+                let descriptors = interests
+                    .iter()
+                    .map(|interest| PollFd {
+                        fd: interest.handle.fd(),
+                        events: (if interest.readable { POLLIN } else { 0 })
+                            | (if interest.writable { POLLOUT } else { 0 }),
+                        revents: 0,
+                    })
+                    .collect::<Vec<_>>();
+                let ids = interests.iter().map(|interest| interest.id).collect::<Vec<_>>();
+                (descriptors, ids)
+            };
+            let ready = unsafe { poll(descriptors.as_mut_ptr(), descriptors.len(), 50) };
+            if ready <= 0 {
+                continue;
+            }
+            let ready_ids = descriptors
+                .iter()
+                .enumerate()
+                .filter(|(_, descriptor)| descriptor.revents != 0)
+                .filter_map(|(index, _)| descriptor_ids.get(index).copied())
+                .collect::<HashSet<_>>();
+            let slots = {
+                let mut interests = self.interests.lock().unwrap();
+                let slots = interests
+                    .iter()
+                    .filter(|interest| ready_ids.contains(&interest.id))
+                    .map(|interest| interest.slot.clone())
+                    .collect::<Vec<_>>();
+                interests.retain(|interest| !ready_ids.contains(&interest.id));
+                slots
+            };
+            METRIC_POLLER_WAKE.fetch_add(slots.len(), Ordering::Relaxed);
+            for slot in slots {
+                slot.wake();
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn jet_raw_io_poller() -> Arc<JetRawIoPoller> {
+    static POLLER: OnceLock<Arc<JetRawIoPoller>> = OnceLock::new();
+    POLLER
+        .get_or_init(|| {
+            let poller = Arc::new(JetRawIoPoller {
+                interests: Mutex::new(Vec::new()),
+                notify: Condvar::new(),
+                next_key: AtomicUsize::new(0),
+            });
+            let worker = poller.clone();
+            thread::spawn(move || worker.run());
+            poller
+        })
+        .clone()
+}
+
+#[cfg(unix)]
+fn jet_scheduler_raw_io_wait(
+    handle: JetRawIoHandle,
+    readable: bool,
+    writable: bool,
+    wait_kind: &str,
+) {
+    let poller = jet_raw_io_poller();
+    let (id, slot) = poller.register(handle, readable, writable);
+    struct Registration(Arc<JetRawIoPoller>, usize);
+    impl Drop for Registration {
+        fn drop(&mut self) {
+            self.0.unregister(self.1);
+        }
+    }
+    let _registration = Registration(poller, id);
+    jet_scheduler_yield(wait_kind, &slot, None);
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_unix_stream_io_wait(
+    stream: &std::os::unix::net::UnixStream,
+    read: bool,
+    write: bool,
+    wait_kind: &str,
+) {
+    let handle = stream
+        .try_clone()
+        .unwrap_or_else(|_| jet_scheduler_fatal("unix stream clone failed"));
+    jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind);
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_unix_listener_io_wait(
+    listener: &std::os::unix::net::UnixListener,
+    wait_kind: &str,
+) {
+    let handle = listener
+        .try_clone()
+        .unwrap_or_else(|_| jet_scheduler_fatal("unix listener clone failed"));
+    jet_scheduler_raw_io_wait(JetRawIoHandle::UnixListener(handle), true, false, wait_kind);
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_udp_io_wait(
+    socket: &std::net::UdpSocket,
+    read: bool,
+    write: bool,
+    wait_kind: &str,
+) {
+    let handle = socket
+        .try_clone()
+        .unwrap_or_else(|_| jet_scheduler_fatal("udp socket clone failed"));
+    jet_scheduler_raw_io_wait(JetRawIoHandle::Udp(handle), read, write, wait_kind);
+}
+
+// jet:scheduler-native-end
 
 static IO_POLLER: OnceLock<Arc<IoPoller>> = OnceLock::new();
 

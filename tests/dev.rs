@@ -1212,6 +1212,29 @@ fn dev_default_runs_env_program_via_aot_fallback() {
     assert_eq!(got, expected);
 }
 
+#[cfg(unix)]
+#[test]
+fn dev_default_aot_fallback_matches_socket_echo() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_socket_echo_parity_{}",
+        std::process::id()
+    ));
+    let file = "examples/features/net/socket_echo.jet";
+    let expected = compiled_binary_output(&dir, "socket_echo", 0, "net/socket_echo", file);
+    let got = match dev_iteration(file, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("default dev should AOT-fallback-run socket echo: {diags:?}")
+        }
+    };
+    assert_eq!(got, expected);
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[test]
 fn dev_default_aot_fallback_matches_io_log() {
     let dir = std::env::temp_dir();

@@ -1998,11 +1998,13 @@ index, not a substitute for that law.
   per-call deadline. The same handles expose readiness; cancellation and
   expiry are distinct `.Cancelled` and `.Timeout` values. **Implementation
   status:** TCP reads and writes use nonblocking handles plus the shared AOT
-  readiness backend; a blocked operation returns typed `.Cancelled` or
-  `.Timeout` when the scheduler reports either condition. Same-handle readiness
-  and deadline bounding exist. UDP, Unix, DNS, TLS, per-call deadline coverage,
-  JIT parity, and remaining platform proof stay tracked by #300; #306's shared
-  cancellation/runtime prerequisite is complete.
+  readiness backend. On Unix, UDP send/receive and Unix-socket accept/read/write
+  use the same scheduler park slots; blocked operations return typed
+  `.Cancelled` or `.Timeout`, UDP preserves datagram atomicity, and Unix streams
+  preserve the shared byte/half-close/idempotent-close contract. Same-handle TCP
+  readiness and deadline bounding exist. DNS, TLS, per-call deadline coverage,
+  JIT parity, Windows IOCP, and remaining platform proof stay tracked by #300;
+  #306's shared cancellation/runtime prerequisite is complete.
 - **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
   returns a `TlsStream` with the same byte and close law. Safe defaults verify the server name
   with system roots; advanced roots, ALPN, identity, protocol bounds, peer
