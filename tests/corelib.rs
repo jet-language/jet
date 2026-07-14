@@ -1121,6 +1121,49 @@ fn run() {{
 }
 
 #[test]
+fn csv_whole_value_handles_multiline_quotes_crlf_and_typed_decode() {
+    let dir = std::env::temp_dir().join(format!("jet_csv_whole_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.csv as csv
+
+@[Codable]
+struct Note { name: String, note: String }
+
+fn run() {
+    raw :: "name,note\nAda,\"line1\nline2\"\nLin,\"said \"\"hi\"\"\"\n"
+    rows :: csv.parse(raw) ?? panic("parse")
+    print(rows.len())
+    print(rows[1][1])
+    print(rows[2][1])
+    print(csv.to_string(rows).replace("\n", "|"))
+
+    notes :: csv.decode<Note>(raw) ?? panic("decode")
+    print(notes.len())
+    print(notes[0].name)
+    print(notes[0].note)
+
+    if csv.parse("a,\"unterminated") == {
+        ok(_) -> { print("unterminated-missed") }
+        err(message) -> { print(message.contains("quoted field ended before its closing quote")) }
+    }
+    if csv.parse("a,\"ok\"junk") == {
+        ok(_) -> { print("closing-junk-missed") }
+        err(message) -> { print(message.contains("may follow a closing quote")) }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "csv_whole", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "3\nline1\nline2\nsaid \"hi\"\nname,note|Ada,\"line1|line2\"|Lin,\"said \"\"hi\"\"\"\n2\nAda\nline1\nline2\ntrue\ntrue\n"
+    );
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn csv_stream_records_are_incremental_rfc4180_bounded_and_terminal() {
     let dir = std::env::temp_dir().join(format!("jet_csv_stream_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
@@ -1253,6 +1296,15 @@ fn run() {{
     );
     assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
     assert_eq!(stderr, "");
+    let dev_path = dir.join("csv_stream.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("CSV stream default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

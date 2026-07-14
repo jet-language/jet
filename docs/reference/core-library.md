@@ -1371,7 +1371,10 @@ fractional to `.Float`; objects keep field order.
 **`JSONError`** — `line` and `message` pointing at the parse failure.
 
 **`core.encoding.csv`** — `parse(text) -> [[String]] ? String` (rows of fields),
-`to_string(rows) -> String`. **`core.encoding.toml`** / **`core.encoding.yaml`**
+`to_string(rows) -> String`, plus bounded `reader` / `writer` handles over
+RFC-4180 records. Quoted fields preserve commas, escaped quotes, and embedded
+newlines; malformed quote closure is an error rather than a partial row.
+**`core.encoding.toml`** / **`core.encoding.yaml`**
 — `parse(text) -> TOML ? JSONError` / `YAML ? JSONError` (full adapters over
 `DataTree`, not a flat map), `to_string(value)`.
 
@@ -1386,6 +1389,7 @@ test vectors, and edition migrations are normative in
 |--------|---------|--------------|
 | `core.encoding.json` | `canonical(data, limits)`, `reader`, `writer` | Edition-2027 RFC 8785 JCS; pull `DataEvent` streaming; shipped `events(DataTree)->String` remains separate until migration |
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[DataTree]` |
+| `core.encoding.csv` | `parse(text)`, `decode<T>`, `to_string(rows)`, `reader`, `writer` | Whole-value and bounded pull records over the same CSV quoting and validation law |
 | `core.encoding.xml` | `parse`, `parse_bytes`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`DataTree` tree/events with namespaces, token-local lexical evidence, safe entities/limits, and W3C C14N |
 | `core.encoding.cbor` | `parse`, `decode<T>`, `to_bytes`, `to_bytes_canonical`, `reader`, `writer` | RFC 8949 typed/native bytes and Core deterministic profile |
 

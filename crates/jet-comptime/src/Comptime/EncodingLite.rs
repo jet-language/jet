@@ -35,57 +35,81 @@ use super::JsonInterp::{json_payload, json_variant};
 // ── core.encoding.csv ───────────────────────────────────────────────────────
 
 pub(super) fn csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut rows = Vec::new();
-    for (line_no, line) in text.lines().enumerate() {
-        match csv_parse_row(line) {
-            Ok(row) => rows.push(row),
-            Err(msg) => return Err(format!("E2701: CSV row {} — {}", line_no + 1, msg)),
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut chars = text.chars().peekable();
+    let mut quoted = false;
+    let mut closed_quote = false;
+    let mut record = 1usize;
+    let mut line = 1usize;
+    let mut column = 0usize;
+    let mut ended_record = false;
+
+    while let Some(ch) = chars.next() {
+        column += 1;
+        ended_record = false;
+        if quoted {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    column += 1;
+                    field.push('"');
+                } else {
+                    quoted = false;
+                    closed_quote = true;
+                }
+            } else {
+                field.push(ch);
+                if ch == '\n' {
+                    line += 1;
+                    column = 0;
+                }
+            }
+            continue;
         }
+        if closed_quote {
+            match ch {
+                ',' => { row.push(std::mem::take(&mut field)); closed_quote = false; }
+                '\r' if chars.peek() == Some(&'\n') => {
+                    chars.next(); row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
+                    closed_quote = false; ended_record = true; record += 1; line += 1; column = 0;
+                }
+                '\n' => {
+                    row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
+                    closed_quote = false; ended_record = true; record += 1; line += 1; column = 0;
+                }
+                _ => return Err(format!("E2701: CSV row {record}, line {line}, column {column} — only quote, comma, CRLF, LF, or EOF may follow a closing quote")),
+            }
+            continue;
+        }
+        match ch {
+            '"' if field.is_empty() => quoted = true,
+            '"' => return Err(format!("E2701: CSV row {record}, line {line}, column {column} — quote inside an unquoted field")),
+            ',' => row.push(std::mem::take(&mut field)),
+            '\r' if chars.peek() == Some(&'\n') => {
+                chars.next(); row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
+                ended_record = true; record += 1; line += 1; column = 0;
+            }
+            '\r' => return Err(format!("E2701: CSV row {record}, line {line}, column {column} — bare CR is not a record ending")),
+            '\n' => {
+                row.push(std::mem::take(&mut field)); rows.push(std::mem::take(&mut row));
+                ended_record = true; record += 1; line += 1; column = 0;
+            }
+            _ => field.push(ch),
+        }
+    }
+    if quoted {
+        return Err(format!("E2701: CSV row {record}, line {line}, column {} — quoted field ended before its closing quote", column + 1));
+    }
+    if !ended_record {
+        row.push(field);
+        rows.push(row);
     }
     Ok(rows)
-}
-
-fn csv_parse_row(line: &str) -> Result<Vec<String>, String> {
-    let mut fields = Vec::new();
-    let mut chars = line.chars().peekable();
-    loop {
-        let field = if chars.peek() == Some(&'"') {
-            chars.next();
-            let mut s = String::new();
-            loop {
-                match chars.next() {
-                    Some('"') => {
-                        if chars.peek() == Some(&'"') {
-                            chars.next();
-                            s.push('"');
-                        } else {
-                            break;
-                        }
-                    }
-                    Some(c) => s.push(c),
-                    None => break,
-                }
-            }
-            s
-        } else {
-            let mut s = String::new();
-            while let Some(&c) = chars.peek() {
-                if c == ',' {
-                    break;
-                }
-                s.push(c);
-                chars.next();
-            }
-            s
-        };
-        fields.push(field);
-        match chars.next() {
-            Some(',') => {}
-            None => break,
-            Some(c) => return Err(format!("unexpected character {:?} after field", c)),
-        }
-    }
-    Ok(fields)
 }
 
 pub(super) fn csv_render(rows: &[Vec<String>]) -> String {
@@ -93,7 +117,7 @@ pub(super) fn csv_render(rows: &[Vec<String>]) -> String {
         .map(|row| {
             row.iter()
                 .map(|field| {
-                    if field.contains(',') || field.contains('"') || field.contains('\n') {
+                    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
                         format!("\"{}\"", field.replace('"', "\"\""))
                     } else {
                         field.clone()
