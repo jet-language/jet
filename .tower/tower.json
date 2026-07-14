@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 614,
-    "rev": 6784,
+    "nextNum": 615,
+    "rev": 6837,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22,8 +22,8 @@
         "radar:e5",
         "radar:e6",
         "radar:e3",
-        "radar:e4",
-        "radar-sq"
+        "radar-sq",
+        "board-ideas"
       ]
     },
     "digestCursor": "2026-07-14T14:28:45.620Z"
@@ -15485,6 +15485,11 @@
       "log": [
         {
           "at": "2026-07-14",
+          "by": "terra-541-builder",
+          "text": "Acceptance gap closed: added process-level grouped-route and optional typed-entry behavior criteria; auditing inherited implementation before edits."
+        },
+        {
+          "at": "2026-07-14",
           "by": "codex-orchestrator",
           "text": "Builder assigned to audit current grouped-command/input implementation against both ratified decisions, complete missing syntax/docs/grammar/snapshot work, and run focused proof."
         },
@@ -15538,6 +15543,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-07-14T14:38:07.178Z"
+        },
+        {
+          "n": 5,
+          "text": "Grouped command grammar routes jet inspect dossier and jet registry publish to real handlers, while bare moved forms fail with E2101 and name the canonical route",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:15:01.643Z"
+        },
+        {
+          "n": 6,
+          "text": "The resolved fn run parameter type is the single typed CLI source for parsing/defaults/help, while plain fn run() remains a valid runnable entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:15:01.740Z"
         }
       ],
       "refs": [
@@ -17280,6 +17303,11 @@
       "log": [
         {
           "at": "2026-07-14",
+          "by": "codex-orchestrator",
+          "text": "Integrated gate: 119/126 CLI tests pass. Two failures are stale repository-owned bare devtools probe invocations; grouped E2101 behavior is correct. Seven-test failure report captured; criterion 4 remains open."
+        },
+        {
+          "at": "2026-07-14",
           "by": "codex-cli-reviewer",
           "text": "[verify] Independent registry/generator review clean. jet-cli 31/31 and five exact CLI regressions green. Criteria 1-3 verified; criterion 4 remains parent full-suite gate."
         },
@@ -17325,6 +17353,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-07-14T22:58:45.683Z"
+        },
+        {
+          "n": 5,
+          "text": "All repository-owned devtools probe invocations use the ratified jet self devtools route; scene and service probe tests pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:18:34.525Z"
         }
       ],
       "refs": [
@@ -17530,6 +17567,80 @@
       "needsAcceptance": false,
       "created": "2026-07-14T23:05:59.233Z",
       "updated": "2026-07-14"
+    },
+    {
+      "id": "c0c008wm",
+      "num": 614,
+      "title": "Full suite red: budget CLI tests race compiler identity and build deadlines",
+      "body": "CLI target passes budget tests alone but fails under default parallel execution: concurrent tests report missing running-compiler executable during digesting, selected artifact builds time out at the fixed 30-second provider deadline, and dependent bench/allocation cases fail. Paths are otherwise unique and isolated.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Write deterministic concurrency regression first. Identify which tests mutate or replace the shared compiler executable and remove shared-state coupling; bound or serialize native artifact builds at the narrow test seam without weakening production provider deadlines. Preserve real measurement, provenance, and hostile-path coverage. Run focused parallel CLI slice, full CLI target, independent review, then parent full verification.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "codex-orchestrator",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Parallel CLI execution never makes the running compiler identity path disappear; compiler digesting is stable while child native builds run.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:19:11.559Z"
+        },
+        {
+          "n": 2,
+          "text": "Real BuildArtifact, bench, allocation, scene, and service providers remain measured locally with verified provenance; no fake measurements or weakened production deadline.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:19:11.657Z"
+        },
+        {
+          "n": 3,
+          "text": "A focused parallel regression and the full 126-test CLI target pass under the default test scheduler without global single-thread mode.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:19:11.750Z"
+        },
+        {
+          "n": 4,
+          "text": "No new syntax, diagnostic code, dependency, unsafe code, or owner decision is introduced.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:19:11.848Z"
+        },
+        {
+          "n": 5,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T23:19:11.946Z"
+        }
+      ],
+      "refs": [
+        "tests/cli.rs",
+        "Source/CmdBudget.rs",
+        "Source/BudgetProviders.rs",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T23:18:34.763Z",
+      "updated": "2026-07-14",
+      "claimedAt": "2026-07-14T23:19:12.037Z"
     }
   ],
   "decisions": [
@@ -33682,7 +33793,7 @@
       "lesson": "A semantic graph records values and dependencies after source files are understood. Its boundary determines whether tools can trace one path from a system service to the package, action, toolchain, and input that produced it.\n\nOne graph does not require one source file. Current `pkg.jet`, `env.jet`, `workspace.jet`, and role modules can still be separate editing surfaces. Source layout has its own ballot.\n\nThis choice also does not reopen ratified variant or resolver laws. It decides whether those laws apply once across the whole project or separately inside several linked systems.",
       "explainer": "",
       "story": "Rin debugs a failed JetOS service. The service uses an executable built by a package, tested in a development environment, and cross-compiled through a pinned toolchain.",
-      "inWild": "// Current ratified source surfaces shown conceptually.\n+// pkg.jet\n+payload: { name: \"flight\", version: \"1.0.0\" }\n+packages: { api: api }\n+\n+// env.jet\n+module env.dev { packages: [api, debugger] }\n+\n+// system.jet\n+module system.halcyon { services: [api_service] }\n+\n+$ jet explain system.halcyon.services.api\n+system.halcyon\n+  -> service api_service\n+  -> package api\n+  -> build action compile-api\n+  -> target aarch64-linux\n+  -> input http#3.4.2\n+\n+error: system.halcyon references missing package output api.release\n+fix: define that output or select an existing output",
+      "inWild": "// Current ratified source surfaces shown conceptually.\n// pkg.jet\npayload: { name: \"flight\", version: \"1.0.0\" }\npackages: { api: api }\n\n// env.jet\nmodule env.dev { packages: [api, debugger] }\n\n// system.jet\nmodule system.halcyon { services: [api_service] }\n\n$ jet explain system.halcyon.services.api\nsystem.halcyon\n  -> service api_service\n  -> package api\n  -> build action compile-api\n  -> target aarch64-linux\n  -> input http#3.4.2\n\nerror: system.halcyon references missing package output api.release\nfix: define that output or select an existing output",
       "detail": "",
       "options": [
         {
@@ -33690,28 +33801,28 @@
           "name": "GNU Guix direct: one system graph",
           "detail": "Host language: Guile Scheme. Guix represents packages, environments, images, services, and operating systems as related Scheme values. Users love code-as-data, macros, modules, and REPL exploration.",
           "technical": "Adopt Guix records, derivations, service extensions, profiles, and operating-system values as one graph.",
-          "code": "(define api (package ...))\n+(operating-system\n+  (packages (list api))\n+  (services (list (service api-service-type api))))\n+\n+$ guix graph api"
+          "code": "(define api (package ...))\n(operating-system\n  (packages (list api))\n  (services (list (service api-service-type api))))\n\n$ guix graph api"
         },
         {
           "key": "B",
           "name": "Jet adaptation: one nominal typed graph",
           "detail": "Every package, environment, check, action, image, system, service, policy, and receipt node belongs to one typed graph. Existing files are source views over that graph.",
           "technical": "Node references are typed and globally explainable. Ratified BuildContext, variant, resolver, and policy laws run once. Graph identity remains separate from source location except where current path laws explicitly apply.",
-          "code": "module env.dev { packages: [api] }\n+module system.halcyon { services: [Service.from(api)] }\n+\n+$ jet graph --from system.halcyon --to http\n+// one typed path across system, service, package, action, and input"
+          "code": "module env.dev { packages: [api] }\nmodule system.halcyon { services: [Service.from(api)] }\n\n$ jet graph --from system.halcyon --to http\n// one typed path across system, service, package, action, and input"
         },
         {
           "key": "C",
           "name": "Bazel direct: labeled target graph",
           "detail": "Host language: Starlark. Bazel places build rules, toolchains, platforms, and actions in one labeled graph. Users love exact queries and deterministic extension at enormous scale.",
           "technical": "Represent environments, images, and systems as additional target kinds in the Bazel graph.",
-          "code": "jet_binary(name = \"api\", ...)\n+jetos_system(name = \"halcyon\", services = [\":api_service\"])\n+\n+$ bazel query 'allpaths(//systems:halcyon, @http//:lib)'"
+          "code": "jet_binary(name = \"api\", ...)\njetos_system(name = \"halcyon\", services = [\":api_service\"])\n\n$ bazel query 'allpaths(//systems:halcyon, @http//:lib)'"
         },
         {
           "key": "D",
           "name": "Federated role graphs",
           "detail": "Packages, environments, images, and JetOS each resolve their own graph, then connect through typed bridge artifacts. Boundaries stay explicit, but selection and proof can diverge.",
           "technical": "Every role graph owns a root and receipt. Bridges import exported artifacts by digest and declared interface.",
-          "code": "package_graph.export(api.release) -> artifact:abc\n+system_graph.import(artifact:abc)\n+\n+// separate resolver and receipt roots on each side"
+          "code": "package_graph.export(api.release) -> artifact:abc\nsystem_graph.import(artifact:abc)\n\n// separate resolver and receipt roots on each side"
         }
       ],
       "comparisons": [
@@ -35259,7 +35370,7 @@
       "lesson": "Access and support are different promises. A public function can be callable while its maintainer warns that outside callers should not depend on it.\n\nJet already uses private-by-default names, `pub`, and `pub(package)` for access. An underscore must not become a second access-control system.\n\nThis ballot concerns public API stability only. Bare `_`, compiler-reserved names, and module discovery have their own laws and ballots.",
       "explainer": "",
       "story": "Mira publishes a parser. Plugin authors sometimes need its tokenizer for debugging, but she needs freedom to reorganize that tokenizer without a normal compatibility promise.",
-      "inWild": "// Library author\n+pub fn parse(text: String) -> Tree { ... }\n+pub fn _scan_token(text: String) -> Token { ... }\n+\n+// Normal caller\n+tree :: parser.parse(source)\n+\n+// Expert caller deliberately crosses the support boundary\n+token :: parser._scan_token(source)\n+// warning: `_scan_token` is unsupported API\n+// fix: depend on `parse`, or allow this exact use in package policy\n+\n+$ jet doc parser\n+parse(text) -> Tree\n+Unsupported API (collapsed): _scan_token(text) -> Token\n+\n+$ jet check --policy strict-api\n+error: package `app` uses unsupported API `parser._scan_token`",
+      "inWild": "// Supported and unsupported public API are separate from access.\npub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\nfn _scan_private(text: String) -> Token { ... }\n\n// Inside the package: both public functions are callable.\ntoken :: _scan_token(source)\n\n// Outside under default policy: deliberate reach-through is visible.\ntoken :: parser._scan_token(source)\n// warning: `_scan_token` is unsupported API\n// fix: use `parse`, or allow this exact symbol in package policy\n\nparser._scan_private(source)\n// error: `_scan_private` is private\n// underscore did not change visibility\n\n// Unused analysis stays exact.\n_temporary :: compute()\n// warning: `_temporary` is never used\n_ :: compute() // bare underscore is the ratified discard placeholder\n\n$ jet doc parser\nparse(text) -> Tree\nUnsupported API (collapsed, searchable): _scan_token(text) -> Token\n\n$ jet inspect symbol parser._scan_token\nvisibility: Public\nsupport: Unsupported\ncompatibility promise: none\n\n$ jet check --policy strict-api\nerror: package `app` uses unsupported API `parser._scan_token`\n\n// Prefix grants no patching or override power.\nparser._scan_token = replacement\n// error: declarations are not assignable",
       "detail": "",
       "options": [
         {
@@ -35267,28 +35378,28 @@
           "name": "Python direct: soft non-public API",
           "detail": "Host language: Python. `_name` marks non-public API without preventing deliberate access. Python users love this pragmatic transparency because debugging and introspection remain possible.",
           "technical": "Follow PEP 8. Import-star omits underscore names. The convention carries no compiler-enforced compatibility tier.",
-          "code": "# Python\n+def parse(text): ...\n+def _scan_token(text): ...\n+\n+token = parser._scan_token(source)  # possible, unsupported by convention"
+          "code": "# Python\ndef parse(text): ...\ndef _scan_token(text): ...\n\ntoken = parser._scan_token(source)  # possible, unsupported by convention"
         },
         {
           "key": "B",
           "name": "Jet adaptation: supportedness metadata",
           "detail": "A public `_name` remains reachable but is unsupported API. Documentation and completion de-emphasize it. Package policy may warn or reject outside use without changing name resolution.",
           "technical": "The semantic index records supported or unsupported status. `_name` never suppresses unused warnings. Visibility remains the only access rule. Exact policy allowances live in project configuration and semantic receipts.",
-          "code": "pub fn parse(text: String) -> Tree { ... }\n+pub fn _scan_token(text: String) -> Token { ... }\n+\n+token :: parser._scan_token(source)\n+// default: warning with supported replacement\n+// strict-api: error unless this exact symbol is allowed\n+// inside parser package: normal call, normal unused checks"
+          "code": "pub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\n\ntoken :: parser._scan_token(source)\n// default: warning with supported replacement\n// strict-api: error unless this exact symbol is allowed\n// inside parser package: normal call, normal unused checks"
         },
         {
           "key": "C",
           "name": "Visibility only",
           "detail": "A leading underscore has no API meaning. Public means supported. Maintainers use private names, `pub(package)`, or an explicitly named experimental module for every unstable surface.",
           "technical": "Reject leading underscores or treat them as ordinary spelling. No unsupported-public metadata or policy exists.",
-          "code": "pub fn parse(text: String) -> Tree { ... }\n+pub(package) fn scan_token(text: String) -> Token { ... }\n+\n+// Outside callers cannot reach scan_token.\n+// Reachable experimental APIs need a named module."
+          "code": "pub fn parse(text: String) -> Tree { ... }\npub(package) fn scan_token(text: String) -> Token { ... }\n\n// Outside callers cannot reach scan_token.\n// Reachable experimental APIs need a named module."
         },
         {
           "key": "D",
           "name": "Hard external ban",
           "detail": "A public `_name` is visible to tools but cannot be called outside its package. This makes the signal enforceable, but duplicates `pub(package)` under another spelling.",
           "technical": "Name resolution adds a package boundary check for one-leading-underscore declarations.",
-          "code": "pub fn _scan_token(text: String) -> Token { ... }\n+\n+token :: parser._scan_token(source)\n+// error: underscore APIs are package-only\n+// fix: use parser.parse(source)"
+          "code": "pub fn _scan_token(text: String) -> Token { ... }\n\ntoken :: parser._scan_token(source)\n// error: underscore APIs are package-only\n// fix: use parser.parse(source)"
         }
       ],
       "comparisons": [
@@ -35426,7 +35537,7 @@
       "lesson": "Jet already guarantees scope-owned cleanup through S63. Owned resources release on normal exit, error propagation, panic, and task cancellation. That safety law is not open.\n\nThe remaining question is early timing. A file may be needed for the first ten lines of a long function. Releasing it early reduces scarce handle lifetime and ends associated borrows.\n\nFallible archive finishing, transaction committing, and graceful shutdown are protocol completion. A separate ballot decides those results and receiver states.",
       "explainer": "",
       "story": "Dev reads one file at the start of a long request. The handle should release before expensive analysis, without changing what cancellation or error cleanup guarantees.",
-      "inWild": "fn handle(path: Path) -> Result<Report> {\n+    data :: {\n+        file :: File.open(path)?\n+        file.read_all()?\n+    } // candidate B releases file here on every exit path\n+\n+    analyze(data)\n+}\n+\n+// Borrow timing is equally visible.\n+summary :: {\n+    view :: buffer.view(0..16)\n+    parse(view)?\n+} // view ends; buffer may now resize",
+      "inWild": "fn handle(path: Path) -> Result<Report> {\n    data :: {\n        file :: File.open(path)?\n        lock :: cache.lock()\n        file.read_all()?\n    } // file and lock clean up here through existing S63 ownership order\n\n    analyze(data)\n}\n\n// Every iteration owns and releases its handle.\nloop path in paths {\n    bytes :: { file :: File.open(path)?; file.read_all()? }\n    consume(bytes)\n}\n\n// return, ?, panic/unwind, and task cancellation use the same infallible cleanup.\n// No option may weaken that invariant.\n\n// Moving ownership out moves cleanup too.\nfile :: { opened :: File.open(path)?; opened }\n// opened was not released at block end; file now owns it\n\n// Borrow lifetime ends with the block.\nsummary :: { view :: buffer.view(0..16); parse(view)? }\nbuffer.push(0) // valid after view ends\n\nview.read(0)\n// error: `view` ended with its scope\n\nunused.drop(\"benchmark intentionally ignores result\")\n// forced value discard, not archive finish or transaction commit\n\n// Socket half-close and transaction commit remain protocol operations.\nsocket.shutdown(.Write)?\ntransaction.commit()?",
       "detail": "",
       "options": [
         {
@@ -35434,35 +35545,28 @@
           "name": "Rust direct: RAII plus drop(value)",
           "detail": "Host language: Rust. Scope exit runs destructors and `drop(value)` consumes one value early. Rust users love predictable, memory-safe, zero-cost cleanup without garbage collection.",
           "technical": "Copy Rust destructor timing and `std::mem::drop`. Destructors remain infallible. Fallible protocol completion stays in consuming methods.",
-          "code": "// Rust\n+let file = File::open(path)?;\n+let data = read(&file)?;\n+drop(file);\n+analyze(data);\n+\n+let writer = Archive::create(out)?;\n+writer.finish()?;"
+          "code": "// Rust\nlet file = File::open(path)?;\nlet data = read(&file)?;\ndrop(file);\nanalyze(data);\n\nlet writer = Archive::create(out)?;\nwriter.finish()?;"
         },
         {
           "key": "B",
           "name": "Jet adaptation: smallest lexical scope",
           "detail": "A smaller block is the only early-release control. Its end releases owned resources and borrows on success, error, panic, and cancellation.",
           "technical": "No universal close or early-drop operation is added. Existing `.drop(reason)` keeps its forced-discard meaning. Protocol completion remains separate.",
-          "code": "data :: {\n+    file :: File.open(path)?\n+    file.read_all()?\n+} // file released here\n+analyze(data)\n+\n+// ? inside the block also releases file before propagating"
-        },
-        {
-          "key": "D",
-          "name": "Explicit defer cleanup",
-          "detail": "Every acquisition registers a visible deferred cleanup action. Ordering is obvious, but safe defaults depend on remembering the registration at every acquisition site.",
-          "technical": "A scope-owned defer stack executes in reverse order on every exit path. Protocol completion still needs a separate consuming method.",
-          "code": "file :: File.open(path)?\n+defer file.close()\n+data :: file.read_all()?\n+\n+// forgetting defer leaks or requires a lint to repair"
+          "code": "data :: {\n    file :: File.open(path)?\n    file.read_all()?\n} // file released here\nanalyze(data)\n\n// ? inside the block also releases file before propagating"
         },
         {
           "key": "C",
           "name": "Universal consume-now operation",
           "detail": "A compiler-known operation consumes any value immediately. It makes the endpoint explicit, but duplicates lexical lifetime control and risks confusion with protocol completion.",
           "technical": "The operation is infallible and never means flush, commit, finish, or graceful shutdown. A new spelling must avoid Jet’s ratified `.drop(reason)` vocabulary.",
-          "code": "file :: File.open(path)?\n+data :: file.read_all()?\n+release(^file)\n+analyze(data)"
+          "code": "file :: File.open(path)?\ndata :: file.read_all()?\nrelease(^file)\nanalyze(data)"
         },
         {
           "key": "D",
           "name": "Go direct: explicit defer",
           "detail": "Host language: Go. `defer` schedules cleanup at function return. Go users love seeing cleanup beside acquisition, though long functions retain resources longer unless another function creates a scope.",
           "technical": "Add a scope-owned deferred action stack. Execution is reverse order on every exit path.",
-          "code": "// Go\n+file, err := os.Open(path)\n+if err != nil { return err }\n+defer file.Close()\n+// release occurs at function return"
+          "code": "// Go\nfile, err := os.Open(path)\nif err != nil { return err }\ndefer file.Close()\n// release occurs at function return"
         }
       ],
       "comparisons": [
@@ -35779,7 +35883,7 @@
       "lesson": "A read-only view borrows storage without copying it. Several read-only views may overlap. The compiler rejects escape beyond the owner, use after moving the owner, and owner mutations that could invalidate live storage.\n\nThis ballot chooses creation spelling only. Those safety rules are mandatory under I1. Mutable exclusive views have a separate ballot because their aliasing and operation surface differ.\n\nThe chosen law must explicitly reconcile `source.view(range)` with D-API-CTOR1’s older `.over(existing)` constructor guidance.",
       "explainer": "",
       "story": "Inez parses two overlapping fields in a network frame and returns an owned result. She needs zero-copy reads without a hidden coercion.",
-      "inWild": "packet :: receive()?\n+header :: packet.view(0..16)\n+version :: packet.view(4..8) // overlapping read-only view is valid\n+owned :: parse_header(header)?.to_owned()\n+\n+packet.push(0)\n+// error: packet cannot change storage while header or version views it\n+\n+fn bad(bytes: [Byte]) -> View<Byte> { bytes.view() }\n+// error: returned view would outlive bytes\n+\n+copy :: header.to_owned()\n+// explicit ownership boundary",
+      "inWild": "bytes :: receive()?\n\n// Copy and borrow remain visibly different costs.\ncopy :: bytes[0..16]\nheader: View<Byte> :: bytes.view(0..16)\nall :: bytes.view()\n// Empty projection uses the existing checked range API; this ballot adds no range spelling.\n\nversion :: bytes.view(4..8) // overlapping read-only views are valid\nowned :: parse_header(header)?.to_owned()\n\nbytes.push(0)\n// error: bytes cannot change storage while header or version views it\n\nconsume(header)\nconsume(version)\nbytes.push(0) // valid after the final view use\n\nknown_bad :: bytes.view(0..999999)\n// compile error when bounds are statically known\nruntime_view :: bytes.view(start..finish)?\n// runtime range validation is explicit and checked\n\nfn bad(local: [Byte]) -> View<Byte> { local.view() }\n// error: returned view would outlive local\n\ntask.detach(fn { consume(bytes.view()) })\n// error: detached task cannot capture a borrowed view\n\n// Custom owner, same operation.\ntile :: image.view(x: 10..20, y: 30..40)",
       "detail": "",
       "options": [
         {
@@ -35787,28 +35891,28 @@
           "name": "Swift direct: container span",
           "detail": "Host language: Swift. Containers vend nonescapable spans tied to their storage. Swift users love reaching bounds-checked, pointer-level performance without exposing raw pointers in normal code.",
           "technical": "Copy Swift Span lifetime dependence and nonescapability. Shared and mutable projections preserve exclusivity.",
-          "code": "// Swift\n+let bytes: [UInt8] = receive()\n+let span = bytes.span\n+consume(span)"
+          "code": "// Swift\nlet bytes: [UInt8] = receive()\nlet span = bytes.span\nconsume(span)"
         },
         {
           "key": "B",
           "name": "Jet adaptation: source projection",
           "detail": "Keep `source.view()` and `source.view(range)` as the sole read-only projection. The source owns storage, while sema infers lifetime and rejects escape or invalidation.",
           "technical": "This supersedes D-API-CTOR1 only for non-owning read-only view construction. Standalone View types do not add `.over`. Result annotations never insert a borrow.",
-          "code": "all :: bytes.view()\n+header: View<Byte> :: bytes.view(0..16)\n+\n+// Custom storage owners implement the same read-only projection.\n+tile :: image.view(x: 10..20, y: 30..40)"
+          "code": "all :: bytes.view()\nheader: View<Byte> :: bytes.view(0..16)\n\n// Custom storage owners implement the same read-only projection.\ntile :: image.view(x: 10..20, y: 30..40)"
         },
         {
           "key": "C",
           "name": "Type-owned View.over",
           "detail": "Every view begins at `View<T>.over(source)`. The view type is prominent, but the owning source and its projection capability become secondary.",
           "technical": "Apply D-API-CTOR1 `.over(existing)` to all views. Mutable views use another type-owned constructor.",
-          "code": "header :: View<Byte>.over(bytes, range: 0..16)\n+payload :: ViewMut<Byte>.over(bytes, range: 16..)"
+          "code": "header :: View<Byte>.over(bytes, range: 0..16)\npayload :: ViewMut<Byte>.over(bytes, range: 16..)"
         },
         {
           "key": "D",
           "name": "Rust direct: borrow and slice syntax",
           "detail": "Host language: Rust. `&source[range]` creates a shared slice. Rust users love compact syntax backed by precise ownership and lifetime checking.",
           "technical": "Add a borrow operator plus indexing or slicing projection. This would expand Jet’s ownership syntax beyond method calls.",
-          "code": "// Rust\n+let header: &[u8] = &bytes[0..16];\n+let version = &bytes[4..8];"
+          "code": "// Rust\nlet header: &[u8] = &bytes[0..16];\nlet version = &bytes[4..8];"
         }
       ],
       "comparisons": [
@@ -36035,7 +36139,7 @@
       "lesson": "A dimension describes physical meaning such as length, time, or mass. A unit provides a scale inside one dimension. A quantity combines a number with a dimension.\n\nLinear algebra says matching dimensions may add, while multiplication and division produce derived dimensions. That semantic relation can belong to the compiler, a shared library protocol, or each domain separately.\n\nThis ballot chooses the owner only. It does not choose declaration grammar, public type notation, conversion spelling, affine points, or currency behavior. Those become focused follow-ups if needed.",
       "explainer": "",
       "story": "Ari passes distance, time, speed, and force across package boundaries. Every package must agree that distance divided by time is speed without importing incompatible quantity frameworks.",
-      "inWild": "// Conceptual behavior shared across options; syntax is illustrative only.\n+distance = 120 kilometers\n+duration = 2 hours\n+speed = distance / duration\n+\n+print(speed) // 60 kilometers per hour\n+\n+bad = distance + duration\n+// must fail before execution with Length versus Time\n+\n+// Public API needs one stable named speed type.\n+fn arrival(speed, distance) -> duration { distance / speed }\n+\n+// Follow-up ballots choose exact Jet declarations, signatures, and conversions.",
+      "inWild": "// Conceptual semantics only. Follow-up ballots choose exact Jet spelling.\nlength_a = 120 kilometers\nlength_b = 30 meters\nduration = 2 hours\n\nlength_a + length_b  // succeeds after scale normalization\nlength_a + duration\n// error: cannot add Length to Time\n// diagnostic names source units and dimensions, never raw compiler vectors\n\nspeed = length_a / duration // one canonical Speed identity\nspeed * duration           // Length\narea = length_a * length_b // Length squared\n// roots and fractional powers are rejected unless a later narrow law proves exact exponents\n\n// Two packages declaring the same owned dimension identity agree.\n// Two unrelated declarations named Speed conflict with provenance, not text matching.\n\n// Generic same-dimension operations need no concrete unit.\nscale<D>(quantity: D, factor: Float) -> D\nequal<D>(left: D, right: D) -> Bool\n\n// Metadata erases. Layout and foreign-function boundaries use the backing number.\n// Crossing FFI still requires an explicit chosen unit contract.\n\ncurrency = 10 usd\n// currency remains nominal and runtime-rate-based, outside dimensional algebra\n\n$ jet explain-type speed\ndimension: Length * Time^-1\ndeclared identity and provenance: shown\nruntime representation: Float\nreceipt normalization: recorded",
       "detail": "",
       "options": [
         {
@@ -36043,28 +36147,28 @@
           "name": "F# direct: compiler-owned units of measure",
           "detail": "Host language: F#. The compiler normalizes measure expressions on numeric types and erases them at runtime. Users love terse inference and strong domain checks with little ceremony.",
           "technical": "Copy measure declarations, normalized products, quotients, powers, and zero-cost erasure. F# permits free-form measure expressions in type annotations.",
-          "code": "// F#\n+[<Measure>] type m\n+[<Measure>] type s\n+let speed: float<m/s> = 120.0<m> / 2.0<s>\n+let bad = 1.0<m> + 1.0<s> // type error"
+          "code": "// F#\n[<Measure>] type m\n[<Measure>] type s\nlet speed: float<m/s> = 120.0<m> / 2.0<s>\nlet bad = 1.0<m> + 1.0<s> // type error"
         },
         {
           "key": "B",
           "name": "Jet adaptation: narrow compiler dimension relation",
           "detail": "The compiler owns normalized linear dimensions and scale relationships. Existing nominal unit families opt in only through later-ratified declarations. Runtime representation remains the underlying number.",
           "technical": "This would narrowly amend S26 at the semantic-relation level only. It does not authorize `#UnitFamily(speed: length / time)`, `Quantity<Speed>`, free-form type expressions, affine points, or conversion syntax.",
-          "code": "// Compiler fact model, not proposed source spelling.\n+Length / Time -> Speed\n+Length + Time -> compile error\n+Speed * Time -> Length\n+\n+// normalized exponents appear in tooling and receipts\n+// runtime remains the underlying Int or Float"
+          "code": "// Compiler fact model, not proposed source spelling.\nLength / Time -> Speed\nLength + Time -> compile error\nSpeed * Time -> Length\n\n// normalized exponents appear in tooling and receipts\n// runtime remains the underlying Int or Float"
         },
         {
           "key": "C",
           "name": "Library quantity protocol",
           "detail": "Core defines ordinary protocols and libraries encode dimension products and quotients through generic types. Compiler ownership stays small, but packages may disagree about normalization and conversions.",
           "technical": "No language-owned dimension vector exists. Wrapper types and trait implementations carry every relation.",
-          "code": "speed :: Quantity.divide(distance, duration)\n+fn arrival(v: Ratio<Length, Time>, d: Length) -> Time { ... }"
+          "code": "speed :: Quantity.divide(distance, duration)\nfn arrival(v: Ratio<Length, Time>, d: Length) -> Time { ... }"
         },
         {
           "key": "D",
           "name": "Domain-owned nominal types",
           "detail": "Each domain defines unrelated Distance, Duration, and Speed types with named operations. Safety is explicit, but generic dimensional reasoning and shared cross-package algebra disappear.",
           "technical": "Ordinary structs and functions only. No cross-package algebra or normalization.",
-          "code": "speed :: Speed.from(distance, duration)\n+arrival :: ArrivalTime.from(speed, distance)"
+          "code": "speed :: Speed.from(distance, duration)\narrival :: ArrivalTime.from(speed, distance)"
         }
       ],
       "comparisons": [
@@ -36479,7 +36583,7 @@
       "lesson": "A reserved namespace prevents user code from colliding with names generated or consumed by compilers, debuggers, serializers, and other tools.\n\nJet already has ordinary private fields, `pub`, `pub(package)`, derives, attributes, and semantic-index tooling. Users do not need compiler-shaped names for normal encapsulation.\n\nThis choice is separate from `_name` API stability. It decides declarations and source access for every `__name` spelling.",
       "explainer": "",
       "story": "Sam debugs generated collection metadata while a library author defines a field named `__state`. A future compiler release must not silently reinterpret the library field.",
-      "inWild": "struct Stack {\n+    items: [Int]\n+    __layout: Int\n+}\n+// error: names beginning with `__` are reserved for Jet and its tools\n+// fix: rename this field to `layout`\n+\n+stack.__layout\n+// same error at access sites; no hidden user backdoor\n+\n+$ jet inspect Stack --compiler\n+layout: contiguous\n+capacity: 32\n+// Tools expose compiler state through typed channels, not source fields.",
+      "inWild": "struct Stack {\n    items: [Int]\n    __layout: Int\n}\n// error: names beginning with `__` are reserved for Jet and its tools\n// fix: rename this field to `layout`\n\nstack.__layout = 0\n// same reservation error; no raw replacement path\n\nfn __text__(self) -> String { ... }\n// error: `__text__` is reserved\n// fix: implement the ratified Display trait\n\n// Wrapping needs no mangling because Jet has no inheritance collision.\nstruct LoggedStack { inner: Stack, items: [AuditItem] }\n\n// Compiler and generated binders remain collision-free.\n// internal generated identities such as __bindgen__ are untypeable by users\n\n$ jet inspect Stack --compiler\nlayout: contiguous\ncapacity: 32\nserialization fields: items\ngenerated state: hidden from source reflection\n\n// Type authors expose invariant-preserving expert operations normally.\nfn Stack.debug_items(self) -> [Int] { self.items.clone() }\nfn &Stack.restore(snapshot: StackSnapshot) -> Result<()> {\n    validate(snapshot)?\n    self.items = snapshot.items\n}",
       "detail": "",
       "options": [
         {
@@ -36487,28 +36591,28 @@
           "name": "Python direct: mangled class names",
           "detail": "Host language: Python. Double-leading class names are rewritten to reduce accidental subclass collisions. Python users love deliberate introspection because mangled state remains reachable when debugging requires it.",
           "technical": "Copy private-name mangling. The transformation depends on the declaring class name and does not provide true privacy.",
-          "code": "# Python\n+class Stack:\n+    def __init__(self): self.__items = []\n+\n+stack._Stack__items = []  # deliberate reach-through remains possible"
+          "code": "# Python\nclass Stack:\n    def __init__(self): self.__items = []\n\nstack._Stack__items = []  # deliberate reach-through remains possible"
         },
         {
           "key": "B",
           "name": "Jet adaptation: compiler-reserved namespace",
           "detail": "Every `__name` declaration and source access is rejected. Compiler and tool metadata travels through semantic-index, debugger, derive, reflection, or audited runtime channels.",
           "technical": "Lexer accepts the token for a precise diagnostic. Name resolution never interns it as a user declaration. Generated Rust names remain irrelevant to Jet source.",
-          "code": "struct Stack { __items: [Int] }\n+// error: `__items` is reserved for Jet and its tools\n+\n+info :: reflect.type(Stack)\n+debug.inspect(stack)\n+// supported typed channels, no raw slot replacement"
+          "code": "struct Stack { __items: [Int] }\n// error: `__items` is reserved for Jet and its tools\n\ninfo :: reflect.type(Stack)\ndebug.inspect(stack)\n// supported typed channels, no raw slot replacement"
         },
         {
           "key": "C",
           "name": "Type-owned hidden storage",
           "detail": "Types may declare `__name` storage. Outside source cannot access it normally, but an audited expert scope may inspect or replace it.",
           "technical": "Add a second hidden-field visibility tier plus an audited capability for raw replacement. Memory safety holds, but semantic invariants may not.",
-          "code": "struct Stack { __items: [Int] }\n+#Internal(Stack, \"recovery\") {\n+    stack.__items = repaired\n+}"
+          "code": "struct Stack { __items: [Int] }\n#Internal(Stack, \"recovery\") {\n    stack.__items = repaired\n}"
         },
         {
           "key": "D",
           "name": "No special meaning",
           "detail": "Double underscore is ordinary spelling. Compiler-generated names use an untypeable internal identity instead. This avoids reservation but permits misleading protocol-like names in user APIs.",
           "technical": "Source names and compiler symbols inhabit separate internal namespaces. Style policy may lint user dunders.",
-          "code": "struct Stack { __items: [Int] }\n+stack.__items.push(1) // ordinary private field access inside the type"
+          "code": "struct Stack { __items: [Int] }\nstack.__items.push(1) // ordinary private field access inside the type"
         }
       ],
       "comparisons": [
@@ -36557,7 +36661,7 @@
       "lesson": "Automatic discovery finds module contributions under a directory. Discovery convenience must not make a filename or scan order define semantic identity.\n\nA developer may want helpers that remain available for explicit tests or tools without joining the default project graph. That differs from disabling source completely.\n\nCurrent U3 says a leading underscore disables a module. This ballot explicitly decides whether to keep or amend that rule.",
       "explainer": "",
       "story": "Mira keeps benchmark helpers beside normal project parts. Production discovery must ignore them, while an explicit benchmark command still needs to import them.",
-      "inWild": "// project.jet\n+project :: Project.{ parts: find(\"parts/*.jet\") }\n+\n+// parts/web.jet\n+module web { pub part :: ProjectPart.{ packages: [web] } }\n+\n+// parts/_bench.jet\n+module _bench { pub fixtures :: make_fixtures() }\n+\n+$ jet project explain parts\n+included: web (declared identity: web)\n+skipped: _bench (internal module; explicit use required)\n+\n+// benchmarks/run.jet\n+use project._bench\n+data :: fixtures()\n+\n+// Moving either file does not change its declared identity.",
+      "inWild": "// project root keeps ratified discovery inside a module.\nmodule workspace { imports: find(\"./project-parts\") }\n\n// project-parts/web.jet\nmodule web { pub part :: ProjectPart.{ packages: [web] } }\n\n// project-parts/_bench.jet\nmodule _bench { pub fixtures :: make_fixtures() }\n\n$ jet project explain --sources\nincluded: web (declared identity web)\nskipped: _bench (internal module; explicit use required)\n\n// An explicit use opts in; filename placement does not.\nuse project._bench\ndata :: fixtures()\n\n// Normal visibility still applies to members.\nuse project._bench.private_fixture\n// error: `private_fixture` is private\n\n// Explicit selection of the module overrides discovery skipping under B.\nmodule benchmark_suite { selected: [project._bench] }\n\n// Renaming the declaration changes discovery intent.\nmodule bench { ... } // now automatically discovered\n\n// Moving _bench.jet within a discovered tree does not change declared identity.\n// Relative paths inside it retain their existing path-sensitive meaning.\n\n// If explicit inclusion creates an unequal duplicate contribution:\nerror: benchmark contribution conflicts with env.dev.packages\n// diagnostic names both declaration origins",
       "detail": "",
       "options": [
         {
@@ -36565,28 +36669,28 @@
           "name": "Current U3: disabled module",
           "detail": "A leading underscore disables the module everywhere. Discovery skips it and explicit use fails. Re-enabling requires renaming the declaration.",
           "technical": "Preserve U3 exactly. Parser records the module, but resolver excludes it from every graph and import path.",
-          "code": "module _bench { ... }\n+use project._bench\n+// error: module `_bench` is disabled\n+// fix: rename it without the leading underscore"
+          "code": "module _bench { ... }\nuse project._bench\n// error: module `_bench` is disabled\n// fix: rename it without the leading underscore"
         },
         {
           "key": "B",
           "name": "Jet adaptation: internal, discovery-skipped",
           "detail": "A leading-underscore module is omitted from automatic discovery but remains available to explicit `use` when visibility permits. The declared module name, not its filename, controls the rule.",
           "technical": "Amend U3. `find` records a skipped internal contribution with provenance. Explicit resolution follows normal private, pub, and pub(package) visibility.",
-          "code": "module _bench { pub fixtures :: make_fixtures() }\n+\n+// find(\"parts/*.jet\") skips it\n+use project._bench // explicit and allowed\n+\n+$ jet project explain --skipped\n+_bench: internal module; source parts/_bench.jet"
+          "code": "module _bench { pub fixtures :: make_fixtures() }\n\n// find(\"parts/*.jet\") skips it\nuse project._bench // explicit and allowed\n\n$ jet project explain --skipped\n_bench: internal module; source parts/_bench.jet"
         },
         {
           "key": "C",
           "name": "Configuration-only exclusion",
           "detail": "Underscore has no module meaning. Discovery includes every visible contribution unless the root lists an exclusion pattern. The root stays authoritative, but local helper intent becomes remote configuration.",
           "technical": "Module names remain ordinary. `find` gains include and exclude configuration whose resolved membership enters the receipt.",
-          "code": "project :: Project.{\n+    parts: find(\"parts/*.jet\", exclude: [\"_bench\"]),\n+}\n+module _bench { ... } // ordinary module"
+          "code": "project :: Project.{\n    parts: find(\"parts/*.jet\", exclude: [\"_bench\"]),\n}\nmodule _bench { ... } // ordinary module"
         },
         {
           "key": "D",
           "name": "Explicit members only",
           "detail": "Remove automatic discovery. The root lists each contribution explicitly. Membership is obvious, but drop-in modular growth and import-tree replacement disappear.",
           "technical": "No `find` walk participates in composition. Paths locate source declarations named by the root.",
-          "code": "project :: Project.{\n+    parts: [web.part, cli.part, database.part],\n+}\n+// _bench is absent until listed"
+          "code": "project :: Project.{\n    parts: [web.part, cli.part, database.part],\n}\n// _bench is absent until listed"
         }
       ],
       "comparisons": [
@@ -36635,7 +36739,7 @@
       "lesson": "Composition combines partial declarations into one graph. It must produce the same result regardless of file order, directory order, or evaluation scheduling.\n\nDifferent fields need different algebra. A unique scalar can be absent or equal. A keyed collection can unite distinct identities. Ordered steps need a schema-owned order. Conflicting values need provenance from every contributor.\n\nExpert replacement must be explicit and auditable. Hidden priority numbers, last-file-wins behavior, and general language-level unification would make the graph hard to explain.",
       "explainer": "",
       "story": "Three teams contribute development packages and one JetOS host. Two system contributions set different hostnames. Rin needs one precise error and one deliberate repair.",
-      "inWild": "// a.jet\n+module env.dev { packages: [api, debugger] }\n+module system.halcyon { hostname: \"halcyon\", services: [api_service] }\n+\n+// b.jet\n+module env.dev { packages: [metrics] }\n+module system.halcyon { hostname: \"build-box\" }\n+\n+$ jet project check\n+error: system.halcyon.hostname has two unequal values\n+  \"halcyon\" from a.jet:2\n+  \"build-box\" from b.jet:2\n+fix: make them agree, or use the option’s explicit replacement mechanism\n+\n+// Package sets unite by semantic identity, independent of discovery order.\n+$ jet explain env.dev.packages\n+api from a.jet; debugger from a.jet; metrics from b.jet",
+      "inWild": "// a.jet\nmodule env.dev { packages: [api, debugger] }\nmodule system.halcyon { hostname: \"halcyon\", services: [api_service] }\n\n// b.jet\nmodule env.dev { packages: [metrics] }\nmodule system.halcyon { hostname: \"build-box\" }\n\n$ jet project check\nerror: system.halcyon.hostname has two unequal values\n  \"halcyon\" from a.jet:2\n  \"build-box\" from b.jet:2\nfix: make them agree, or use the option’s explicit replacement mechanism\n\n// Package sets unite by semantic identity, independent of discovery order.\n$ jet explain env.dev.packages\napi from a.jet; debugger from a.jet; metrics from b.jet",
       "detail": "",
       "options": [
         {
@@ -36643,35 +36747,35 @@
           "name": "CUE direct: constraint unification",
           "detail": "Host language: CUE, implemented in Go. Every file contributes constraints that unify commutatively. Users love one model for schema, data, defaults, and validation without order-dependent overrides.",
           "technical": "Adopt CUE conjunction, open and closed structs, defaults, and bottom conflicts. External package realization consumes the unified value.",
-          "code": "// CUE\n+service: api: port: int & >1024\n+service: api: port: 8080\n+\n+// conflicting concrete value produces bottom with both paths"
+          "code": "// CUE\nservice: api: port: int & >1024\nservice: api: port: 8080\n\n// conflicting concrete value produces bottom with both paths"
         },
         {
           "key": "B",
           "name": "Guix direct: service compose and extend",
           "detail": "Host language: Guile Scheme. Each service type owns procedures that compose extensions and extend a base value. Guix users love programmable, domain-specific extension in one language.",
           "technical": "Copy service-type compose and extend functions. Meaning may depend on list order and arbitrary Scheme procedures.",
-          "code": "(service-type\n+  (extensions (list ...))\n+  (compose concatenate)\n+  (extend extend-service))"
+          "code": "(service-type\n  (extensions (list ...))\n  (compose concatenate)\n  (extend extend-service))"
         },
         {
           "key": "C",
           "name": "Jet adaptation: schema-owned typed merge",
           "detail": "Each receiving field declares one finite composition law. Keyed values unite by semantic identity. Scalars agree or conflict. Ordered fields own stable order. Every result retains provenance.",
           "technical": "Composition is commutative, associative, and idempotent where the field permits it. This is not D-SOLVER-LIB unification. Root replacement is a typed operation with authority, reason, and receipt entry.",
-          "code": "module env.dev { packages: [api, debugger] }\n+module env.dev { packages: [metrics] }\n+// keyed/set fields unite; equal duplicates retain both origins\n+\n+module system.halcyon { hostname: \"a\" }\n+module system.halcyon { hostname: \"b\" }\n+// unequal unique scalar: conflict with both origins"
+          "code": "module env.dev { packages: [api, debugger] }\nmodule env.dev { packages: [metrics] }\n// keyed/set fields unite; equal duplicates retain both origins\n\nmodule system.halcyon { hostname: \"a\" }\nmodule system.halcyon { hostname: \"b\" }\n// unequal unique scalar: conflict with both origins"
         },
         {
           "key": "D",
           "name": "Central explicit assembly",
           "detail": "The root lists every part and manually constructs the final value. Control is obvious, but every extension requires editing the central assembly and repeating merge logic.",
           "technical": "No implicit field composition exists. Ordinary Jet functions assemble all values in one root-owned order.",
-          "code": "project :: Project.{\n+    packages: api.packages + web.packages,\n+    checks: api.checks + policy.checks,\n+    services: merge_services(api.services, production.services),\n+}"
+          "code": "project :: Project.{\n    packages: api.packages + web.packages,\n    checks: api.checks + policy.checks,\n    services: merge_services(api.services, production.services),\n}"
         },
         {
           "key": "E",
           "name": "Ordered edit overlays",
           "detail": "Each part mutates the graph produced by earlier parts. This is flexible and familiar, but file order becomes semantic and explanations require replaying every edit.",
           "technical": "Parts are graph-to-graph functions. Later writes win unless an operation rejects them.",
-          "code": "base\n+|> api.apply\n+|> production.override\n+|> local.patch\n+// reordering changes the result"
+          "code": "base\n|> api.apply\n|> production.override\n|> local.patch\n// reordering changes the result"
         }
       ],
       "comparisons": [
@@ -36724,7 +36828,7 @@
       "lesson": "The semantic graph says what the project means after current resolver, variant, policy, and BuildContext laws run. Realization lowers that meaning into executable actions and immutable outputs.\n\nAn action digest identifies declared work before execution. An output digest identifies produced bytes afterward. They must remain separate so reproducibility checks can compare outputs from the same action.\n\nA semantic receipt records normalized nodes, edge roles, toolchains, policies, provenance, and selection proof. JetOS adds an activation proof and generation parent without creating a second receipt system.",
       "explainer": "",
       "story": "A security update changes one package. Rin previews the exact action frontier, rebuilds an image, verifies a server generation, switches atomically, and can still explain or roll back every node.",
-      "inWild": "$ jet update http --precise 3.4.2 --dry-run\n+UPDATE http 3.4.1 -> 3.4.2 requested\n+UPDATE tls-core 1.8.0 -> 1.8.1 required\n+KEEP 412 unrelated lock records byte-identical\n+REBUILD api.release, api_image, system.halcyon\n+\n+$ jet receipt show api.release\n+semantic node: package api, output release\n+action digest: sha256:aaa\n+output digest: sha256:bbb\n+target/profile/toolchain: aarch64-linux / Release / jet-0.8\n+edge: http node 7 as Target\n+BuildContext: os=Linux, cpu=Arm64\n+policy and selection proof: recorded\n+\n+$ jet os build halcyon\n+generation 44 realized from receipt root sha256:ccc\n+activation proof: pending\n+\n+$ jet os switch halcyon\n+proof passed; generation 43 -> 44 atomically\n+\n+$ jet os rollback halcyon\n+generation 44 -> parent 43",
+      "inWild": "$ jet update http --precise 3.4.2 --dry-run\nUPDATE http 3.4.1 -> 3.4.2 requested\nUPDATE tls-core 1.8.0 -> 1.8.1 required\nKEEP 412 unrelated lock records byte-identical\nREBUILD api.release, api_image, system.halcyon\n\n$ jet receipt show api.release\nsemantic node: package api, output release\naction digest: sha256:aaa\noutput digest: sha256:bbb\ntarget/profile/toolchain: aarch64-linux / Release / jet-0.8\nedge: http node 7 as Target\nBuildContext: os=Linux, cpu=Arm64\npolicy and selection proof: recorded\n\n$ jet os build halcyon\ngeneration 44 realized from receipt root sha256:ccc\nactivation proof: pending\n\n$ jet os switch halcyon\nproof passed; generation 43 -> 44 atomically\n\n$ jet os rollback halcyon\ngeneration 44 -> parent 43",
       "detail": "",
       "options": [
         {
@@ -36732,35 +36836,35 @@
           "name": "Spack direct: manifest plus normalized lock DAG",
           "detail": "Host language: Python. Spack stores roots and normalized concrete specs in an environment lock. Users love inspecting exact compiler, variants, architecture, and dependency choices.",
           "technical": "Adopt roots referencing hashed concrete specs. Concrete node records form a reusable normalized DAG.",
-          "code": "spack:\n+  specs: [hdf5+mpi]\n+\n+_meta: { file-type: spack-lockfile }\n+roots: [{spec: hdf5+mpi, hash: ...}]\n+concrete_specs: {...}"
+          "code": "spack:\n  specs: [hdf5+mpi]\n\n_meta: { file-type: spack-lockfile }\nroots: [{spec: hdf5+mpi, hash: ...}]\nconcrete_specs: {...}"
         },
         {
           "key": "B",
           "name": "Jet adaptation: realization and receipt DAG",
           "detail": "One normalized DAG holds semantic nodes, actions, outputs, proofs, and generation parents. Package builds and JetOS activation use the same addressable records.",
           "technical": "Semantic digest excludes realized output bytes. Output digest is attached after execution. Named roots preserve generations. Preview and why paths derive from the same DAG.",
-          "code": "semantic graph\n+  -> normalized action nodes (action digests)\n+  -> realized outputs (output digests)\n+  -> image/system candidate\n+  -> activation proof\n+  -> generation root\n+\n+// update unlocks only the required frontier"
+          "code": "semantic graph\n  -> normalized action nodes (action digests)\n  -> realized outputs (output digests)\n  -> image/system candidate\n  -> activation proof\n  -> generation root\n\n// update unlocks only the required frontier"
         },
         {
           "key": "C",
           "name": "Guix direct: channels, derivations, profiles",
           "detail": "Host language: Guile Scheme. Guix records channel commits, derivations, store paths, profiles, and generations. Users love reproducible time travel and atomic rollback.",
           "technical": "Channel commits identify the package universe. Derivations describe builds. Ordinary derivations are not all content-addressed in advance; fixed-output inputs have known content hashes.",
-          "code": "$ guix time-machine -C channels.scm -- build my-app\n+$ guix package --list-generations\n+$ guix package --roll-back"
+          "code": "$ guix time-machine -C channels.scm -- build my-app\n$ guix package --list-generations\n$ guix package --roll-back"
         },
         {
           "key": "D",
           "name": "Cargo direct: version lock and conservative update",
           "detail": "Host language: Rust. Cargo locks versions and checksums, then updates a named package conservatively. Users love precise CLI intent and dependable project behavior.",
           "technical": "Adopt `cargo update -p` and `--precise` behavior, extended with Jet source and action facts.",
-          "code": "$ cargo update -p http --precise 3.4.2\n+// unrelated packages remain locked when constraints permit"
+          "code": "$ cargo update -p http --precise 3.4.2\n// unrelated packages remain locked when constraints permit"
         },
         {
           "key": "E",
           "name": "Monolithic workspace receipt",
           "detail": "One lock snapshot stores the complete resolved graph inline. Reading is direct, but shared nodes repeat across roots and small updates rewrite a large file.",
           "technical": "Every project generation owns a full serialized graph. Node-level addressing and reuse do not exist.",
-          "code": "project.lock:\n+  generation: 44\n+  graph: [every complete node inline]\n+// one update rewrites the snapshot"
+          "code": "project.lock:\n  generation: 44\n  graph: [every complete node inline]\n// one update rewrites the snapshot"
         }
       ],
       "comparisons": [
@@ -36818,7 +36922,7 @@
       "lesson": "An operating-system configuration combines packages with files, users, boot settings, services, images, activation steps, retention, and rollback. These values depend on the same inputs, variants, targets, policies, and receipts as ordinary builds.\n\nA system generation is an immutable candidate. Realization builds it without changing the machine. Verification checks declared health and policy. Activation switches atomically only after proof passes. Rollback selects an older realized generation.\n\nService extensions need typed composition and dependency ordering. They must not depend on file order or hidden priorities.",
       "explainer": "",
       "story": "Rin grows an API package into a laptop, production server, and recovery image. One command should explain every file and service, preview changes, verify health, switch atomically, and roll back.",
-      "inWild": "module system.server {\n+    target: .Aarch64Linux\n+    boot: Boot.limine\n+    files: [\n+        \"/etc/api.toml\": File.from(\"config/prod.toml\"),\n+        \"/etc/motd\": File.text(\"managed by JetOS\\n\"),\n+    ]\n+    users: [deploy: User.{ groups: [services] }]\n+    services: [\n+        network,\n+        api: Service.from(packages.api.release).{\n+            after: [network]\n+            health: Http.get(\"http://127.0.0.1:8080/health\")\n+        },\n+    ]\n+    activation: .ProofBeforeSwitch\n+    generations: .Keep(10)\n+}\n+\n+$ jet os build server\n+generation 44 realized; current remains 43\n+$ jet os diff server\n++ /etc/api.toml; ~ service api 3.4.1 -> 3.4.2; = user deploy\n+$ jet os switch server\n+proof passed; generation 43 -> 44 atomically\n+$ jet os rollback server\n+generation 44 -> 43",
+      "inWild": "module system.server {\n    target: .Aarch64Linux\n    boot: Boot.limine\n    files: [\n        \"/etc/api.toml\": File.from(\"config/prod.toml\"),\n        \"/etc/motd\": File.text(\"managed by JetOS\\n\"),\n    ]\n    users: [deploy: User.{ groups: [services] }]\n    services: [\n        network,\n        api: Service.from(packages.api.release).{\n            after: [network]\n            health: Http.get(\"http://127.0.0.1:8080/health\")\n        },\n    ]\n    activation: .ProofBeforeSwitch\n    generations: .Keep(10)\n}\n\n$ jet os build server\ngeneration 44 realized; current remains 43\n$ jet os diff server\n /etc/api.toml; ~ service api 3.4.1 -> 3.4.2; = user deploy\n$ jet os switch server\nproof passed; generation 43 -> 44 atomically\n$ jet os rollback server\ngeneration 44 -> 43",
       "detail": "",
       "options": [
         {
@@ -36826,35 +36930,35 @@
           "name": "GNU Guix System direct",
           "detail": "Host language: Guile Scheme. Guix combines packages, services, bootloaders, file systems, images, generations, reconfigure, and rollback. Users love one programmable language and transactional system history.",
           "technical": "Adopt operating-system records, service types, shepherd services, system derivations, generations, and reconfigure semantics.",
-          "code": "(operating-system\n+  (bootloader (bootloader-configuration ...))\n+  (users (cons deploy %base-user-accounts))\n+  (services (cons api-service %base-services)))\n+\n+$ guix system reconfigure config.scm\n+$ guix system roll-back"
+          "code": "(operating-system\n  (bootloader (bootloader-configuration ...))\n  (users (cons deploy %base-user-accounts))\n  (services (cons api-service %base-services)))\n\n$ guix system reconfigure config.scm\n$ guix system roll-back"
         },
         {
           "key": "B",
           "name": "Jet adaptation: systems are project values",
           "detail": "A `System` is another typed value in the same Project graph. Packages, files, users, boot, services, images, proof, generations, and rollback share composition, variants, inputs, and receipts.",
           "technical": "System parts contribute through schema-owned merge. Realize, verify, and activate are distinct receipt-addressed actions. Activation is atomic and proof-gated. Service dependencies form a checked DAG.",
-          "code": "module system.server {\n+    files: [...]\n+    users: [...]\n+    boot: ...\n+    services: [...]\n+    activation: .ProofBeforeSwitch\n+    generations: .Keep(10)\n+}\n+\n+jet os build|diff|switch|rollback server"
+          "code": "module system.server {\n    files: [...]\n    users: [...]\n    boot: ...\n    services: [...]\n    activation: .ProofBeforeSwitch\n    generations: .Keep(10)\n}\n\njet os build|diff|switch|rollback server"
         },
         {
           "key": "C",
           "name": "NixOS direct: recursive option modules",
           "detail": "Host language: Nix. NixOS modules merge option declarations through types, defaults, priorities, and conditional definitions. Users love vast reusable module coverage and declarative rollback.",
           "technical": "Adopt recursive module evaluation, option declarations, `mkDefault`, `mkForce`, conditional definitions, derivations, and generations.",
-          "code": "{ config, pkgs, lib, ... }: {\n+  services.api.enable = true;\n+  users.users.deploy.isSystemUser = true;\n+  environment.etc.\"api.toml\".source = ./prod.toml;\n+}"
+          "code": "{ config, pkgs, lib, ... }: {\n  services.api.enable = true;\n  users.users.deploy.isSystemUser = true;\n  environment.etc.\"api.toml\".source = ./prod.toml;\n}"
         },
         {
           "key": "D",
           "name": "Bazel-style system targets",
           "detail": "Host language: Starlark. Files, services, images, and activation bundles become labeled build targets and actions. Users gain precise queries and remote execution, but system configuration becomes a ruleset.",
           "technical": "A system target depends on file-tree, user-db, service-graph, boot, image, and activation targets. Deployment is an external action.",
-          "code": "jetos_system(\n+  name = \"server\",\n+  files = [\":etc_tree\"],\n+  services = [\"//services:api\"],\n+)\n+\n+bazel build //systems:server"
+          "code": "jetos_system(\n  name = \"server\",\n  files = [\":etc_tree\"],\n  services = [\"//services:api\"],\n)\n\nbazel build //systems:server"
         },
         {
           "key": "E",
           "name": "Separate imperative JetOS layer",
           "detail": "The project builds packages, then a JetOS script installs files, edits users, starts services, and records rollback steps. Experts can do anything, but desired state and actual mutation diverge.",
           "technical": "System management is an ordered task program. Rollback requires inverse operations or snapshots.",
-          "code": "fn deploy(server: Host) {\n+    server.copy(api, \"/opt/api\")\n+    server.write_file(\"/etc/api.toml\", config)\n+    server.restart(\"api\")\n+}"
+          "code": "fn deploy(server: Host) {\n    server.copy(api, \"/opt/api\")\n    server.write_file(\"/etc/api.toml\", config)\n    server.restart(\"api\")\n}"
         }
       ],
       "comparisons": [
@@ -36907,7 +37011,7 @@
       "lesson": "Jet currently assigns different roles to `pkg.jet`, `env.jet`, and `workspace.jet`. Role modules use names such as `module env.dev` and `module system.halcyon`. Discovery is `imports: find(...)` inside a module.\n\nA single control file could replace the filename division while preserving those role modules. Splitting would move ordinary module contributions into discovered files. The root would still declare discovery.\n\nThis ballot is the only place proposing that amendment. U7 remains absolute: a lone Jet program never needs a project file. Relative paths and generated-module identity keep their existing path-sensitive laws.",
       "explainer": "",
       "story": "Rin begins with one package and development environment. Later, system modules and reusable parts move into separate files, but one root still shows what belongs to the project.",
-      "inWild": "// Candidate B: tiny project.jet, complete by itself.\n+payload: { name: \"todo\", version: \"1.0.0\" }\n+packages: { todo: todo }\n+module env.dev { packages: [todo, debugger] }\n+module workspace { imports: find(\"./project-parts\") }\n+module system.halcyon { services: [Service.from(todo)] }\n+\n+// Grown tree; directories carry no role meaning.\n+project.jet\n+project-parts/dev.jet      // module env.dev { ... }\n+project-parts/host.jet     // module system.halcyon { ... }\n+\n+$ jet project sources\n+root: project.jet\n+discovery: module workspace -> ./project-parts\n+contributor: env.dev from project-parts/dev.jet\n+contributor: system.halcyon from project-parts/host.jet\n+\n+$ jet project fold --check\n+semantic graph unchanged\n+\n+// Caveat: moving a file that owns a relative path may change that path.\n+// The tool reports such changes instead of claiming universal path independence.",
+      "inWild": "// Candidate B: tiny project.jet, complete by itself.\npayload: { name: \"todo\", version: \"1.0.0\" }\npackages: { todo: todo }\nmodule env.dev { packages: [todo, debugger] }\nmodule workspace { imports: find(\"./project-parts\") }\nmodule system.halcyon { services: [Service.from(todo)] }\n\n// Grown tree; directories carry no role meaning.\nproject.jet\nproject-parts/dev.jet      // module env.dev { ... }\nproject-parts/host.jet     // module system.halcyon { ... }\n\n$ jet project sources\nroot: project.jet\ndiscovery: module workspace -> ./project-parts\ncontributor: env.dev from project-parts/dev.jet\ncontributor: system.halcyon from project-parts/host.jet\n\n$ jet project fold --check\nsemantic graph unchanged\n\n// Caveat: moving a file that owns a relative path may change that path.\n// The tool reports such changes instead of claiming universal path independence.",
       "detail": "",
       "options": [
         {
@@ -36915,35 +37019,35 @@
           "name": "GNU Guix direct: root program plus modules",
           "detail": "Host language: Guile Scheme. One Scheme file returns a complete manifest or operating system and imports ordinary modules as it grows. Users love starting with one value and extracting code freely.",
           "technical": "Use a privileged executable root module. Imported Scheme modules may compute any part of the result.",
-          "code": ";; config.scm\n+(use-modules (project services))\n+(operating-system\n+  (packages (list todo))\n+  (services project-services))"
+          "code": ";; config.scm\n(use-modules (project services))\n(operating-system\n  (packages (list todo))\n  (services project-services))"
         },
         {
           "key": "B",
           "name": "Jet adaptation: one project.jet control file",
           "detail": "One `project.jet` replaces the current filename division. It may contain payload fields and multiple existing role modules. Split contributors remain ordinary modules found through root-declared `imports: find(...)`.",
           "technical": "Explicitly supersede S52 and D-JPK-FILENAME2 filename roles. Preserve U3 module names, U4 discovery, U8 nested imports, U7 lone files, and D-GENMOD-IDENTITY1 path identity. No `parts:` field is added.",
-          "code": "// project.jet\n+payload: { name: \"todo\", version: \"1.0.0\" }\n+packages: { todo: todo }\n+module env.dev { packages: [todo] }\n+module workspace { imports: find(\"./project-parts\") }\n+module system.halcyon { services: [todo_service] }"
+          "code": "// project.jet\npayload: { name: \"todo\", version: \"1.0.0\" }\npackages: { todo: todo }\nmodule env.dev { packages: [todo] }\nmodule workspace { imports: find(\"./project-parts\") }\nmodule system.halcyon { services: [todo_service] }"
         },
         {
           "key": "C",
           "name": "Preserve current role files",
           "detail": "Keep `pkg.jet`, `env.jet`, and `workspace.jet` as separate semantic roots. Their purpose is obvious from filenames, but a complete project remains distributed across mandatory role files.",
           "technical": "Reaffirm S52, D-JPK-FILENAME2, and U10 without amendment.",
-          "code": "pkg.jet\n+env.jet\n+workspace.jet\n+systems/halcyon.jet\n+\n+// each tool begins from its role-specific root"
+          "code": "pkg.jet\nenv.jet\nworkspace.jet\nsystems/halcyon.jet\n\n// each tool begins from its role-specific root"
         },
         {
           "key": "D",
           "name": "CUE direct: peer package files",
           "detail": "Host language: CUE, implemented in Go. Every file in a package contributes constraints without a privileged root. Users love order-independent composition and one schema-data model.",
           "technical": "Project membership follows CUE package and module rules. No root file owns the whole contributor set.",
-          "code": "// project.cue\n+project: packages: todo: {...}\n+// system.cue\n+project: systems: halcyon: {...}"
+          "code": "// project.cue\nproject: packages: todo: {...}\n// system.cue\nproject: systems: halcyon: {...}"
         },
         {
           "key": "E",
           "name": "Cargo direct: root plus member manifests",
           "detail": "Host surface: TOML. Engine: Rust. A root workspace controls members while each package retains its own manifest. Users love obvious review and dependable tooling.",
           "technical": "Use root membership patterns, member manifests, shared lock, and parent workspace discovery.",
-          "code": "# Cargo.toml\n+[workspace]\n+members = [\"packages/*\", \"systems/*\"]\n+\n+# packages/todo/Cargo.toml\n+[package]\n+name = \"todo\""
+          "code": "# Cargo.toml\n[workspace]\nmembers = [\"packages/*\", \"systems/*\"]\n\n# packages/todo/Cargo.toml\n[package]\nname = \"todo\""
         }
       ],
       "comparisons": [
@@ -37001,7 +37105,7 @@
       "lesson": "An extensible project model cannot hard-code every future service or build tool. Users need to define new typed contributors without changing the compiler.\n\nExtension authority is different from merge behavior. An extension produces normal graph values; the receiving schema still decides how those values compose. Extensions must declare inputs, outputs, effects, capabilities, and identity.\n\nThe compiler remains external-crate-free under I6. Foreign systems are design precedents, not runtime dependencies.",
       "explainer": "",
       "story": "A database vendor ships a PostgreSQL service and migration action. Rin uses it in development, an image, and JetOS without installing a second plugin language.",
-      "inWild": "// Conceptual ordinary Jet API; exact Core names follow this ballot.\n+struct PostgresService { version: Int, data: Path }\n+\n+fn postgres(config: PostgresService) -> ProjectPart {\n+    // declares package, service, files, health check, and capabilities\n+}\n+\n+module env.dev { services: [postgres(PostgresService.{ version: 18, data: data })] }\n+module system.halcyon { services: [postgres(prod_database)] }\n+\n+$ jet explain system.halcyon.services.postgres\n+provider type: PostgresService\n+provider package: registry@postgres-service#2.1.0\n+declared inputs: postgres, data directory\n+capabilities: Fs(data), Net(local)\n+health: pg_isready\n+\n+error: extension requested undeclared global precedence\n+fix: produce a typed contribution and let the receiving field compose it",
+      "inWild": "// Conceptual ordinary Jet API; exact Core names follow this ballot.\nstruct PostgresService { version: Int, data: Path }\n\nfn postgres(config: PostgresService) -> ProjectPart {\n    // declares package, service, files, health check, and capabilities\n}\n\nmodule env.dev { services: [postgres(PostgresService.{ version: 18, data: data })] }\nmodule system.halcyon { services: [postgres(prod_database)] }\n\n$ jet explain system.halcyon.services.postgres\nprovider type: PostgresService\nprovider package: registry@postgres-service#2.1.0\ndeclared inputs: postgres, data directory\ncapabilities: Fs(data), Net(local)\nhealth: pg_isready\n\nerror: extension requested undeclared global precedence\nfix: produce a typed contribution and let the receiving field compose it",
       "detail": "",
       "options": [
         {
@@ -37009,35 +37113,35 @@
           "name": "GNU Guix direct: service types",
           "detail": "Host language: Guile Scheme. User-defined service types declare extensions, composition, and base extension procedures. Users love extending packages and operating systems in one real language.",
           "technical": "Copy service-type records and arbitrary Scheme compose or extend procedures.",
-          "code": "(service-type\n+  (name 'postgres)\n+  (extensions (list ...))\n+  (compose compose-configs)\n+  (extend extend-system))"
+          "code": "(service-type\n  (name 'postgres)\n  (extensions (list ...))\n  (compose compose-configs)\n  (extend extend-system))"
         },
         {
           "key": "B",
           "name": "Jet adaptation: typed contributor contract",
           "detail": "Ordinary Jet types and functions produce finite typed contributions. Custom actions, services, images, toolchains, schedulers, and policies declare exact facts and use the same graph as built-ins.",
           "technical": "Core exposes std-only contributor interfaces. Produced nodes are closed and immutable. Extensions cannot mutate prior graph state, create global precedence, or hide capabilities.",
-          "code": "struct PostgresService { ... }\n+fn postgres(config: PostgresService) -> ProjectPart { ... }\n+\n+// Same value works in env and system modules.\n+// Receipt records extension code identity and normalized output nodes."
+          "code": "struct PostgresService { ... }\nfn postgres(config: PostgresService) -> ProjectPart { ... }\n\n// Same value works in env and system modules.\n// Receipt records extension code identity and normalized output nodes."
         },
         {
           "key": "C",
           "name": "Bazel direct: Starlark rules",
           "detail": "Host language: Starlark. Rules declare attributes, providers, toolchains, and actions. Users love deterministic extension and exact control across large multi-language ecosystems.",
           "technical": "Adopt rule definitions and providers as a separate deterministic extension language.",
-          "code": "def _postgres_impl(ctx):\n+    return [ServiceInfo(...)]\n+postgres_service = rule(implementation = _postgres_impl, attrs = {...})"
+          "code": "def _postgres_impl(ctx):\n    return [ServiceInfo(...)]\npostgres_service = rule(implementation = _postgres_impl, attrs = {...})"
         },
         {
           "key": "D",
           "name": "Core-only vocabulary",
           "detail": "Users instantiate built-in node types but cannot define new graph kinds. The surface stays closed and uniform, while every new ecosystem integration waits for Core.",
           "technical": "Only compiler and standard library code may mint contributor node types.",
-          "code": "module system.halcyon {\n+    services: [Service.postgres(...)]\n+}\n+// custom service kinds unavailable"
+          "code": "module system.halcyon {\n    services: [Service.postgres(...)]\n}\n// custom service kinds unavailable"
         },
         {
           "key": "E",
           "name": "Arbitrary graph callbacks",
           "detail": "User code receives the partially built graph and may edit it freely. Extension power is unlimited, but order, authority, provenance, and reproducibility become callback behavior.",
           "technical": "Extensions are graph-to-graph functions executed in registration order.",
-          "code": "fn plugin(graph: mut ProjectGraph) {\n+    graph.services[\"postgres\"] = ...\n+    graph.priority = 999\n+}"
+          "code": "fn plugin(graph: mut ProjectGraph) {\n    graph.services[\"postgres\"] = ...\n    graph.priority = 999\n}"
         }
       ],
       "comparisons": [
@@ -37090,7 +37194,7 @@
       "lesson": "Safety cleanup releases memory, handles, locks, and other resources on every scope exit. It must remain reliable and cannot promise that a business protocol completed successfully.\n\nProtocol completion writes an archive footer, commits a transaction, flushes durable data, or performs graceful shutdown. Callers need its result. A failure also needs a clear receiver state.\n\nThis ballot decides only fallible completion. Automatic cleanup still runs afterward and cancellation never fabricates a successful finish.",
       "explainer": "",
       "story": "Dev writes an archive and a database transaction. Disk failure during `finish` needs a report. Transaction conflict may permit a deliberate retry with preserved transaction state.",
-      "inWild": "writer :: Archive.create(output)?\n+writer.add(report)?\n+writer.finish()?\n+// success: writer consumed; footer confirmed\n+\n+writer.add(other)\n+// error: writer was consumed by finish\n+\n+transaction :: database.begin()?\n+match transaction.commit() {\n+    .Ok -> publish_success()\n+    .Err(conflict) -> report(conflict)\n+}\n+// Ballot decides whether transaction state can be recovered or retried.\n+\n+task.cancel()\n+// safety cleanup runs; no finish/commit success is reported",
+      "inWild": "// Non-retryable completion consumes by signature.\nwriter :: Archive.create(output)?\nwriter.add(report)?\narchive :: writer.finish()?\nwriter.add(other)\n// error: writer was consumed by finish\n\n// Commit consumes; abandonment still performs rollback cleanup.\ntransaction :: database.begin()?\ntransaction.update(row)?\ntransaction.commit()?\n// If commit was omitted, scope cleanup rolls back. It never claims success.\n\n// Retryable work borrows instead of consuming.\nbuffered.flush()?\nbuffered.write(more)? // valid because flush borrowed buffered\n\n// Half-close changes protocol state but does not end ownership.\nsocket.shutdown(.Write)?\nresponse :: socket.read_all()?\n\n// A type may return explicit recovery state.\nmatch transaction.commit() {\n    .Ok -> publish_success()\n    .Err(CommitError.{ retry }) -> retry.with_backoff()?\n}\n\nwriter.finish()?\nwriter.finish()?\n// second call is a compile-time use-after-move, not a runtime double finish\n\ntask.cancel()\n// synchronous S63 cleanup runs; no fallible async completion is invented",
       "detail": "",
       "options": [
         {
@@ -37098,35 +37202,35 @@
           "name": "Rust direct: consuming finish",
           "detail": "Host language: Rust. Many builders expose `finish(self) -> Result<Output>`, consuming state even on failure. Rust users love ownership making later misuse impossible.",
           "technical": "The receiver moves into the call before execution. Error variants may include partial output facts but not the original receiver.",
-          "code": "// Rust\n+let encoder = Encoder::new(out);\n+let result = encoder.finish()?;\n+// encoder is moved regardless of Ok or Err"
+          "code": "// Rust\nlet encoder = Encoder::new(out);\nlet result = encoder.finish()?;\n// encoder is moved regardless of Ok or Err"
         },
         {
           "key": "B",
           "name": "Jet adaptation: consuming finish by default",
           "detail": "Type-owned `finish`, `commit`, or `shutdown` methods consume their receiver when retry would be unsafe or ambiguous. The result reports protocol success or failure. Cleanup still releases remaining resources.",
           "technical": "A consuming receiver moves before the call. Sema rejects later use on every result path. A type needing recovery returns explicit recovery state in its error payload.",
-          "code": "fn Archive.finish(^self) -> Result<ArchiveOutput, FinishError> { ... }\n+output :: writer.finish()?\n+\n+// Recoverable protocol chooses an explicit error payload.\n+fn Transaction.commit(^self) -> Result<(), CommitError<TransactionRetry>>"
+          "code": "fn Archive.finish(^self) -> Result<ArchiveOutput, FinishError> { ... }\noutput :: writer.finish()?\n\n// Recoverable protocol chooses an explicit error payload.\nfn Transaction.commit(^self) -> Result<(), CommitError<TransactionRetry>>"
         },
         {
           "key": "C",
           "name": "Recoverable-state result",
           "detail": "Every completion error returns the receiver alongside the error. Callers can inspect, retry, or abort explicitly. This preserves maximum control but burdens non-retryable protocols with meaningless state.",
           "technical": "The universal result shape is `Result<Output, CompletionFailure<Self, Error>>`. Success consumes the receiver.",
-          "code": "match writer.finish() {\n+    .Ok(output) -> use(output)\n+    .Err(failure) -> {\n+        log(failure.error)\n+        failure.resource.abort()\n+    }\n+}"
+          "code": "match writer.finish() {\n    .Ok(output) -> use(output)\n    .Err(failure) -> {\n        log(failure.error)\n        failure.resource.abort()\n    }\n}"
         },
         {
           "key": "D",
           "name": "Borrowing retryable finish",
           "detail": "Completion borrows the receiver and leaves it usable after any failure. Retry is easy, but types must represent partial progress and prevent duplicate commit or footer writes.",
           "technical": "Method receiver is mutable borrow. Success marks an internal completed state; later calls fail dynamically.",
-          "code": "writer.finish()? // borrows writer\n+writer.finish()? // runtime AlreadyFinished after success\n+// after error, retry is allowed"
+          "code": "writer.finish()? // borrows writer\nwriter.finish()? // runtime AlreadyFinished after success\n// after error, retry is allowed"
         },
         {
           "key": "E",
           "name": "Cleanup reports completion failure",
           "detail": "Automatic scope cleanup attempts completion and reports failure through ambient runtime logging or panic. Call sites stay short, but ordinary error handling loses the result.",
           "technical": "Destructor or cleanup path performs fallible work. Error propagation requires ambient state because scope cleanup has no result expression.",
-          "code": "writer :: Archive.create(output)?\n+writer.add(report)?\n+// scope exit tries finish; failure appears outside normal Result flow"
+          "code": "writer :: Archive.create(output)?\nwriter.add(report)?\n// scope exit tries finish; failure appears outside normal Result flow"
         }
       ],
       "comparisons": [
@@ -37179,7 +37283,7 @@
       "lesson": "A mutable view can change borrowed storage. To remain safe, it must have exclusive access to its region for its whole lifetime. The owner cannot be read, moved, resized, or projected incompatibly during that time.\n\nDisjoint mutable regions may coexist only when sema can prove they do not overlap. Unknown overlap must fail unless a checked splitting operation proves it at runtime.\n\nThis ballot chooses the visible mutable operation. It cannot weaken lifetime, bounds, or alias guarantees under I1.",
       "explainer": "",
       "story": "Inez decrypts a packet payload in place while preserving the header. She needs zero-copy mutation and a precise error if two mutable windows might overlap.",
-      "inWild": "packet :: receive_mut()?\n+payload :: packet.view_mut(16..)\n+payload.decrypt_in_place(key)?\n+\n+packet.read(0)\n+// error: packet is exclusively borrowed by payload\n+\n+left :: packet.view_mut(0..16)\n+right :: packet.view_mut(16..32) // valid when disjointness is proven\n+\n+a :: packet.view_mut(i..j)\n+b :: packet.view_mut(k..m)\n+// error: mutable view ranges may overlap\n+// fix: use split_mut with a checked boundary, or end a before creating b",
+      "inWild": "packet :: receive_mut()?\npayload :: packet.view_mut(16..)\npayload[0] = 0\n\npacket.read(0)\n// error: packet is exclusively borrowed by payload\npacket.push(0)\n// error: resizing would invalidate payload\n\nshared :: packet.view(0..4)\n// error when shared overlaps the live mutable projection\n\nleft :: packet.view_mut(0..15)\nright :: packet.view_mut(16..31) // valid when static disjointness is proven\n\na :: packet.view_mut(i..j)\nb :: packet.view_mut(k..m)\n// error: ranges may overlap\n[a, b] :: packet.split_mut(boundary)? // checked disjoint proof\n\nsub :: payload.view_mut(0..3)\n// sub cannot outlive payload or widen its authority\n\npayload[1] = 9 // element replacement keeps storage valid\npayload.push(9)\n// error: ViewMut cannot resize owner storage\n\ntask.detach(fn { consume(payload) })\n// error unless owner, view type, and task boundary prove safe transfer\n\n// Third-party owners implement the same exclusive projection contract.\ntile :: image.view_mut(x: 10..20, y: 30..40)\n\n// Unchecked pointer projection is never ViewMut.\n#Unsafe(\"device memory contract\") { raw_view :: core.mem.view(...) }",
       "detail": "",
       "options": [
         {
@@ -37187,35 +37291,35 @@
           "name": "Rust direct: mutable slices",
           "detail": "Host language: Rust. `&mut source[range]` creates an exclusive mutable slice. Rust users love compile-time prevention of aliasing and data races with zero runtime ownership cost.",
           "technical": "Copy exclusive borrow and mutable slice laws. Disjoint dynamic regions use checked splitting APIs such as `split_at_mut`.",
-          "code": "// Rust\n+let payload: &mut [u8] = &mut packet[16..];\n+payload.fill(0);\n+\n+let (left, right) = packet.split_at_mut(16);"
+          "code": "// Rust\nlet payload: &mut [u8] = &mut packet[16..];\npayload.fill(0);\n\nlet (left, right) = packet.split_at_mut(16);"
         },
         {
           "key": "B",
           "name": "Jet adaptation: explicit view_mut projection",
           "detail": "The owner exposes `.view_mut()` and `.view_mut(range)`, returning `ViewMut<T>`. The distinct operation and type make exclusive mutation visible.",
           "technical": "Sema grants an exclusive borrow for the view lifetime. Static disjoint ranges may coexist. Dynamic ranges require a checked `split_mut` operation returning disjoint views.",
-          "code": "payload: ViewMut<Byte> :: packet.view_mut(16..)\n+payload.fill(0)\n+\n+[left, right] :: packet.split_mut(16)?\n+// result proves non-overlap"
+          "code": "payload: ViewMut<Byte> :: packet.view_mut(16..)\npayload.fill(0)\n\n[left, right] :: packet.split_mut(16)?\n// result proves non-overlap"
         },
         {
           "key": "C",
           "name": "One view method inferred by use",
           "detail": "Both read-only and mutable projections use `.view`. Expected type or later mutation decides whether the borrow is shared or exclusive. Source stays small, but ownership intent becomes contextual.",
           "technical": "Overload resolution selects View or ViewMut from expected type and operations. Unannotated bindings may require later-use inference.",
-          "code": "payload :: packet.view(16..)\n+payload.fill(0) // retroactively requires exclusive view\n+\n+header: View<Byte> :: packet.view(0..16)"
+          "code": "payload :: packet.view(16..)\npayload.fill(0) // retroactively requires exclusive view\n\nheader: View<Byte> :: packet.view(0..16)"
         },
         {
           "key": "D",
           "name": "Capability method on read-only View",
           "detail": "Every projection first creates a read-only `View`, then `.mutable()` requests exclusive access. This suggests upgrading a shared borrow and can fail after other views already exist.",
           "technical": "The conversion must return Result<ViewMut> after runtime or static alias checks. The original view is consumed.",
-          "code": "payload :: packet.view(16..).mutable()?\n+payload.fill(0)\n+// conversion may fail because another shared view exists"
+          "code": "payload :: packet.view(16..).mutable()?\npayload.fill(0)\n// conversion may fail because another shared view exists"
         },
         {
           "key": "E",
           "name": "Copy-edit-writeback buffer",
           "detail": "Mutable projection always copies into owned storage, then writes back explicitly. Aliasing is simple, but zero-copy mutation and immediate shared-state semantics disappear.",
           "technical": "Projection returns an owned edit buffer with a consuming commit operation.",
-          "code": "edit :: packet.edit(16..)\n+edit.fill(0)\n+edit.write_back()?"
+          "code": "edit :: packet.edit(16..)\nedit.fill(0)\nedit.write_back()?"
         }
       ],
       "comparisons": [
@@ -38058,6 +38162,363 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T23:19:12.037Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c0c008wm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T23:19:11.946Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0c008wm",
+      "note": "#5 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-14T23:19:11.849Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0c008wm",
+      "note": "#4 No new syntax, diagnostic code, dependency, unsafe code, or "
+    },
+    {
+      "at": "2026-07-14T23:19:11.751Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0c008wm",
+      "note": "#3 A focused parallel regression and the full 126-test CLI targ"
+    },
+    {
+      "at": "2026-07-14T23:19:11.657Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0c008wm",
+      "note": "#2 Real BuildArtifact, bench, allocation, scene, and service pr"
+    },
+    {
+      "at": "2026-07-14T23:19:11.559Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0c008wm",
+      "note": "#1 Parallel CLI execution never makes the running compiler iden"
+    },
+    {
+      "at": "2026-07-14T23:19:11.459Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0x3pi8i",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-07-14T23:18:34.763Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c0c008wm",
+      "note": "Full suite red: budget CLI tests race compiler identity and build deadlines"
+    },
+    {
+      "at": "2026-07-14T23:18:34.653Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0x3pi8i",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T23:18:34.525Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0x3pi8i",
+      "note": "#5 All repository-owned devtools probe invocations use the rati"
+    },
+    {
+      "at": "2026-07-14T23:15:01.862Z",
+      "by": "terra-541-builder",
+      "action": "card.update",
+      "ref": "c0bo7bp5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T23:15:01.741Z",
+      "by": "terra-541-builder",
+      "action": "card.criteria-add",
+      "ref": "c0bo7bp5",
+      "note": "#6 The resolved fn run parameter type is the single typed CLI s"
+    },
+    {
+      "at": "2026-07-14T23:15:01.643Z",
+      "by": "terra-541-builder",
+      "action": "card.criteria-add",
+      "ref": "c0bo7bp5",
+      "note": "#5 Grouped command grammar routes jet inspect dossier and jet r"
+    },
+    {
+      "at": "2026-07-14T23:14:54.028Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:10.049Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEWMUT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:09.891Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCEFINISH1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:09.742Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-EXTENSION1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:09.595Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-SOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:09.431Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-JETOS2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:09.265Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-RECEIPT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:09.114Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-COMPOSE2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:08.966Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-MODULEINTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:08.809Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-DUNDER2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:08.665Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-QUANTITY1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:08.519Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:08.378Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:08.232Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:14:08.086Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:44.493Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEWMUT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:44.354Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCEFINISH1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:44.215Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-EXTENSION1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:44.079Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-SOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:43.944Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-JETOS2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:43.806Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-RECEIPT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:43.666Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-COMPOSE2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:43.528Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-MODULEINTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:43.395Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-DUNDER2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:43.258Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-QUANTITY1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:43.118Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:42.982Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:42.840Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:10:42.702Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:55.459Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-QUANTITY1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:55.313Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEWMUT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:55.172Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:55.035Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:54.891Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCEFINISH1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:54.743Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:54.597Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-MODULEINTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:54.454Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-DUNDER2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:09:54.309Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": "marked ready"
+    },
     {
       "at": "2026-07-14T23:09:13.766Z",
       "by": "codex-orchestrator",
@@ -41200,363 +41661,6 @@
       "action": "decision.add",
       "ref": "D-SHAPE-DUNDER1",
       "note": "What does __name mean?"
-    },
-    {
-      "at": "2026-07-14T18:30:14.005Z",
-      "by": "codex",
-      "action": "card.add",
-      "ref": "c0h376ay",
-      "note": "Choose what double underscore means"
-    },
-    {
-      "at": "2026-07-14T18:30:13.906Z",
-      "by": "codex",
-      "action": "decision.add",
-      "ref": "D-SHAPE-HASH1",
-      "note": "What should # mean if @ owns applied rules?"
-    },
-    {
-      "at": "2026-07-14T18:30:13.810Z",
-      "by": "codex",
-      "action": "card.add",
-      "ref": "c0dv54re",
-      "note": "Choose the one job for freed #"
-    },
-    {
-      "at": "2026-07-14T18:24:24.173Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-QUANTITY1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:24.075Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEW1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.978Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-MERGE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.879Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-RESOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.784Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-PIPE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.689Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.588Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE8",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.491Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE3a",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.398Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-LIFECYCLE",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.297Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:24:23.199Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T17:53:53.391Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-DURATION1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:53:53.391Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qlg5mi",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T17:53:53.391Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qlg5mi",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T17:53:53.391Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qlg5mi",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T17:53:53.391Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qlg5mi",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T17:42:34.445Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-EXPOSE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:42:34.444Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c04fdyk6",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T17:42:34.444Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c04fdyk6",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T17:42:34.444Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c04fdyk6",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T17:42:34.444Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c04fdyk6",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T17:41:36.740Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-MERGEPROVENANCE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:39:57.360Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-DURATIONCONVERT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:39:57.360Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0njy69h",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T17:39:57.360Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0njy69h",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T17:39:57.360Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0njy69h",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T17:39:57.360Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0njy69h",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T17:38:59.449Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-OPAQUE-INFER1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:38:59.449Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0a689h5",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T17:38:59.449Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0a689h5",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T17:38:59.449Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0a689h5",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T17:38:59.449Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0a689h5",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T17:37:24.648Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-CONVERT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:37:24.648Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03qvxt7",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T17:37:24.648Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03qvxt7",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T17:37:24.648Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03qvxt7",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T17:37:24.648Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03qvxt7",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T17:36:44.243Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-CLI1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:34:24.521Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE5b",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:34:18.309Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE5a",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T17:28:17.658Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-CLINEST1",
-      "note": "How command groups and subcommands are written"
-    },
-    {
-      "at": "2026-07-14T17:28:17.569Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-CLIINPUT1",
-      "note": "How command fields choose their shell source"
-    },
-    {
-      "at": "2026-07-14T17:28:17.470Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-ENTRY1",
-      "note": "How a package output points to its start function"
-    },
-    {
-      "at": "2026-07-14T17:28:17.369Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-OUTPUT-ALIAS1",
-      "note": "How one output name selects other outputs"
-    },
-    {
-      "at": "2026-07-14T17:28:17.275Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-MERGEOVERRIDE1",
-      "note": "How an expert deliberately replaces package data"
-    },
-    {
-      "at": "2026-07-14T17:28:17.181Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-RESOURCEASYNC1",
-      "note": "What cancellation does while a resource cleans up"
-    },
-    {
-      "at": "2026-07-14T17:28:17.087Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-RESOURCEERROR1",
-      "note": "How cleanup reports an error"
-    },
-    {
-      "at": "2026-07-14T17:28:16.993Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-EFFECTROW1",
-      "note": "How an effect set stays open"
     }
   ],
   "nextNum": 368,
