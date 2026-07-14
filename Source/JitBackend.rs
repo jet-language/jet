@@ -138,6 +138,10 @@ fn try_aot_subprocess(bundle: &ProgramBundle) -> AotAttempt {
             .arg("2021")
             .arg("--crate-name")
             .arg("jet_dev_aot")
+            // Transparent fallback must use the same optimization mode as
+            // default `jet run`; otherwise cfg(debug_assertions) changes
+            // observable runtime behavior such as E3002 propagation traces.
+            .arg("-O")
             .arg(&rs)
             .arg("-o")
             .arg(&bin);

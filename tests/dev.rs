@@ -97,6 +97,17 @@ fn compiled_binary_output(
     stem: &str,
     file: &str,
 ) -> ProgramOutput {
+    compiled_binary_output_with_stdin(dir, tag, i, stem, file, None)
+}
+
+fn compiled_binary_output_with_stdin(
+    dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    stem: &str,
+    file: &str,
+    stdin: Option<&std::path::Path>,
+) -> ProgramOutput {
     let src = fs::read_to_string(file).unwrap();
     let compiled = match jet::compile_with_path(&src, file) {
         Ok(c) => c,
@@ -113,6 +124,9 @@ fn compiled_binary_output(
     let mut rustc_cmd = Command::new("rustc");
     rustc_cmd
         .args(["--edition", "2021"])
+        // Match default `jet run` optimization. Parity tests compare product
+        // behavior, including cfg(debug_assertions)-gated stderr.
+        .arg("-O")
         .arg(&rs)
         .arg("-o")
         .arg(&bin);
@@ -150,7 +164,10 @@ fn compiled_binary_output(
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    let run_cmd = Command::new(&bin);
+    let mut run_cmd = Command::new(&bin);
+    if let Some(path) = stdin {
+        run_cmd.stdin(fs::File::open(path).unwrap());
+    }
     let run = command_output_with_timeout(
         run_cmd,
         DEV_DIFF_TIMEOUT,
@@ -357,6 +374,10 @@ fn parse_jit_gap_manifest() -> (Vec<String>, Vec<String>, Vec<String>) {
     covered.sort();
     gaps.sort();
     parity_divergences.sort();
+    assert!(
+        parity_divergences.is_empty(),
+        "parity_divergences must stay empty: default dev and interpreter output must exactly match default AOT output; fix the shared semantics or use transparent fallback"
+    );
     (covered, gaps, parity_divergences)
 }
 
@@ -477,7 +498,11 @@ const BOUNDARY_CODES: &[&str] = &[
     "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265",
 ];
 
-const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &["ui/ui_native_linux"];
+// The in-process harness cannot close or inject its own ambient stdin without
+// changing product behavior. `stdin_filter` gets a real piped-stdin CLI parity
+// test below; keeping it here as an exact boundary prevents a hanging battery.
+const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] =
+    &["io/stdin_filter", "ui/ui_native_linux"];
 
 #[derive(Default, Clone)]
 struct DevBatteryStats {
@@ -809,15 +834,59 @@ fn dev_default_matches_compiled_binary() {
 }
 
 #[test]
-fn stdin_filter_uses_transparent_aot_fallback() {
+fn stdin_filter_cli_uses_transparent_aot_fallback() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_stdin_boundary_{}",
         std::process::id()
     ));
-    let stats = check_dev_default_stem(0, "io/stdin_filter", &dir, &[]);
-    assert_eq!(stats.ran, 1);
-    assert_eq!(stats.boundary, 0);
-    assert_eq!(stats.manifested, 0);
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("stdin.txt");
+    fs::write(&input, "jet one\nnope\njet two\n").unwrap();
+    let file = example_path("io/stdin_filter");
+    let compiled = compiled_binary_output_with_stdin(
+        &dir,
+        "stdin_filter_aot",
+        0,
+        "io/stdin_filter",
+        &file,
+        Some(&input),
+    );
+
+    let mut dev_cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+    dev_cmd
+        .args(["dev", &file, "--watch=off"])
+        .stdin(fs::File::open(&input).unwrap());
+    let dev = command_output_with_timeout(dev_cmd, DEV_DIFF_TIMEOUT, "piped-input jet dev");
+    let dev_stdout = String::from_utf8_lossy(&dev.stdout);
+    let (runtime_stdout, status) = dev_stdout
+        .rsplit_once("✓ ran in ")
+        .expect("one-shot jet dev must print its completion status");
+    assert!(
+        status
+            .strip_suffix(" ms\n")
+            .is_some_and(|millis| !millis.is_empty() && millis.bytes().all(|b| b.is_ascii_digit())),
+        "unexpected one-shot jet dev completion status: {status:?}"
+    );
+    assert_eq!(runtime_stdout, compiled.stdout);
+    assert_eq!(String::from_utf8_lossy(&dev.stderr), compiled.stderr);
+    assert_eq!(dev.status.code().unwrap_or(1), compiled.exit_code);
+}
+
+#[test]
+fn former_parity_divergences_match_default_aot() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_former_parity_divergences_{}",
+        std::process::id()
+    ));
+    for (i, stem) in ["errors/typed_error_families", "serde/json_coerce"]
+        .into_iter()
+        .enumerate()
+    {
+        let stats = check_dev_default_stem(i, stem, &dir, &[]);
+        assert_eq!(stats.ran, 1, "{stem} must execute through the fallback ladder");
+        assert_eq!(stats.boundary, 0, "{stem} must not be a dev boundary");
+        assert_eq!(stats.manifested, 0, "{stem} must exactly match default AOT");
+    }
 }
 
 #[test]
