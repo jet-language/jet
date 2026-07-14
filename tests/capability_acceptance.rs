@@ -17,92 +17,175 @@ fn read(rel: &str) -> String {
     fs::read_to_string(root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"))
 }
 
-fn skip_jet_string(bytes: &[u8], quote: usize) -> usize {
-    let mut i = quote + 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i = (i + 2).min(bytes.len()),
-            b'"' => return i + 1,
-            _ => i += 1,
-        }
-    }
-    bytes.len()
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JetByteKind {
+    Code,
+    Comment,
+    String,
+    StringDelimiter,
 }
 
-fn jet_code_without_line_comments_or_strings(source: &str) -> String {
+/// Classify every original UTF-8 byte without decoding it. The one-to-one mask
+/// keeps byte offsets, token-separating comment space, and newlines intact.
+fn jet_lexical_mask(source: &str) -> Vec<JetByteKind> {
     let bytes = source.as_bytes();
-    let mut active = String::with_capacity(source.len());
+    let mut mask = vec![JetByteKind::Code; bytes.len()];
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
             while i < bytes.len() && bytes[i] != b'\n' {
+                mask[i] = JetByteKind::Comment;
                 i += 1;
             }
-            active.push('\n');
+        } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            let mut depth = 0usize;
+            while i < bytes.len() {
+                if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                    mask[i] = JetByteKind::Comment;
+                    mask[i + 1] = JetByteKind::Comment;
+                    depth += 1;
+                    i += 2;
+                } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                    mask[i] = JetByteKind::Comment;
+                    mask[i + 1] = JetByteKind::Comment;
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    mask[i] = JetByteKind::Comment;
+                    i += 1;
+                }
+            }
         } else if bytes[i] == b'"' {
-            i = skip_jet_string(bytes, i);
-            active.push_str("\"\"");
+            mask[i] = JetByteKind::StringDelimiter;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    mask[i] = JetByteKind::String;
+                    i += 1;
+                    if i < bytes.len() {
+                        mask[i] = JetByteKind::String;
+                        i += 1;
+                    }
+                } else if bytes[i] == b'"' {
+                    mask[i] = JetByteKind::StringDelimiter;
+                    i += 1;
+                    break;
+                } else {
+                    mask[i] = JetByteKind::String;
+                    i += 1;
+                }
+            }
         } else {
-            active.push(bytes[i] as char);
             i += 1;
         }
     }
-    active
+    mask
+}
+
+fn code_starts_with(bytes: &[u8], mask: &[JetByteKind], at: usize, needle: &[u8]) -> bool {
+    bytes.get(at..at + needle.len()) == Some(needle)
+        && mask
+            .get(at..at + needle.len())
+            .is_some_and(|kinds| kinds.iter().all(|kind| *kind == JetByteKind::Code))
+}
+
+fn skip_jet_trivia(bytes: &[u8], mask: &[JetByteKind], mut at: usize) -> usize {
+    while at < bytes.len()
+        && (mask[at] == JetByteKind::Comment
+            || (mask[at] == JetByteKind::Code && bytes[at].is_ascii_whitespace()))
+    {
+        at += 1;
+    }
+    at
+}
+
+fn code_identifier_continues(bytes: &[u8], mask: &[JetByteKind], at: usize) -> bool {
+    mask.get(at) == Some(&JetByteKind::Code)
+        && bytes
+            .get(at)
+            .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
 }
 
 fn has_executable_drop_with_reason(source: &str) -> bool {
     let bytes = source.as_bytes();
+    let mask = jet_lexical_mask(source);
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
-            }
-            continue;
-        }
-        if bytes[i] == b'"' {
-            i = skip_jet_string(bytes, i);
-            continue;
-        }
-        if bytes[i..].starts_with(b".drop") {
+        if code_starts_with(bytes, &mask, i, b".drop") {
             let mut cursor = i + ".drop".len();
-            if bytes
-                .get(cursor)
-                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            if code_identifier_continues(bytes, &mask, cursor) {
+                i += 1;
+                continue;
+            }
+            cursor = skip_jet_trivia(bytes, &mask, cursor);
+            if !code_starts_with(bytes, &mask, cursor, b"(") {
+                i += 1;
+                continue;
+            }
+            cursor = skip_jet_trivia(bytes, &mask, cursor + 1);
+            if bytes.get(cursor) != Some(&b'"')
+                || mask.get(cursor) != Some(&JetByteKind::StringDelimiter)
             {
                 i += 1;
                 continue;
             }
-            while bytes.get(cursor).is_some_and(|b| b.is_ascii_whitespace()) {
-                cursor += 1;
-            }
-            if bytes.get(cursor) != Some(&b'(') {
-                i += 1;
-                continue;
-            }
-            cursor += 1;
-            while bytes.get(cursor).is_some_and(|b| b.is_ascii_whitespace()) {
-                cursor += 1;
-            }
-            if bytes.get(cursor) != Some(&b'"') {
-                i += 1;
-                continue;
-            }
             let reason_start = cursor + 1;
-            let after_reason = skip_jet_string(bytes, cursor);
-            if after_reason <= reason_start + 1 {
+            let Some(reason_end) = mask[reason_start..]
+                .iter()
+                .position(|kind| *kind == JetByteKind::StringDelimiter)
+                .map(|offset| reason_start + offset)
+            else {
+                i += 1;
+                continue;
+            };
+            if reason_end == reason_start {
                 i += 1;
                 continue;
             }
-            cursor = after_reason;
-            while bytes.get(cursor).is_some_and(|b| b.is_ascii_whitespace()) {
-                cursor += 1;
-            }
-            if bytes.get(cursor) == Some(&b')') {
+            cursor = skip_jet_trivia(bytes, &mask, reason_end + 1);
+            if code_starts_with(bytes, &mask, cursor, b")") {
                 return true;
             }
         }
         i += 1;
+    }
+    false
+}
+
+fn has_active_suppress_must_use_block(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mask = jet_lexical_mask(source);
+    for i in 0..bytes.len() {
+        if !code_starts_with(bytes, &mask, i, b"#") {
+            continue;
+        }
+        let mut cursor = skip_jet_trivia(bytes, &mask, i + 1);
+        if !code_starts_with(bytes, &mask, cursor, b"Suppress")
+            || code_identifier_continues(bytes, &mask, cursor + "Suppress".len())
+        {
+            continue;
+        }
+        cursor = skip_jet_trivia(bytes, &mask, cursor + "Suppress".len());
+        if !code_starts_with(bytes, &mask, cursor, b"(") {
+            continue;
+        }
+        cursor = skip_jet_trivia(bytes, &mask, cursor + 1);
+        if !code_starts_with(bytes, &mask, cursor, b"MustUse")
+            || code_identifier_continues(bytes, &mask, cursor + "MustUse".len())
+        {
+            continue;
+        }
+        cursor = skip_jet_trivia(bytes, &mask, cursor + "MustUse".len());
+        if !code_starts_with(bytes, &mask, cursor, b")") {
+            continue;
+        }
+        cursor = skip_jet_trivia(bytes, &mask, cursor + 1);
+        if code_starts_with(bytes, &mask, cursor, b"{") {
+            return true;
+        }
     }
     false
 }
@@ -223,20 +306,43 @@ fn audited_discard() {
     );
 
     let example = read("examples/features/errors/discard_fallible.jet");
+    for fake in [
+        "// value.drop(\"line comment\")",
+        "/* value.drop(\"block comment\") */",
+        "/* outer /* value.drop(\"nested comment\") */ still comment */",
+        "print(\"value.drop(\\\"string contents\\\")\")",
+        "value.drop(\"\")",
+        "value.drop(reason)",
+        "value.dropper(\"not the method\")",
+    ] {
+        assert!(
+            !has_executable_drop_with_reason(fake),
+            "discard probe accepted inactive or non-literal call: {fake}"
+        );
+    }
     assert!(
-        !has_executable_drop_with_reason(
-            "// fake.drop(\"comment\")\nprint(\"fake.drop(\\\"string\\\")\")"
-        ),
-        "discard probe must ignore comments and string contents"
+        has_executable_drop_with_reason("value.drop(\"理由\")"),
+        "discard probe must accept an active nonempty Unicode reason"
     );
-    let active_code = jet_code_without_line_comments_or_strings(&example);
-    let compact_active_code: String = active_code
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .collect();
+    assert!(
+        has_active_suppress_must_use_block(
+            "#Suppress /* outer /* nested */ comment */ (\n MustUse /* gap */ ) { }"
+        ),
+        "discard probe must detect active retired blocks across trivia"
+    );
+    for fake in [
+        "// #Suppress(MustUse) { }",
+        "/* outer /* #Suppress(MustUse) { } */ still comment */",
+        "print(\"#Suppress(MustUse) { }\")",
+    ] {
+        assert!(
+            !has_active_suppress_must_use_block(fake),
+            "discard probe treated comments or string contents as active: {fake}"
+        );
+    }
     assert!(
         has_executable_drop_with_reason(&example)
-            && !compact_active_code.contains("#Suppress(MustUse){"),
+            && !has_active_suppress_must_use_block(&example),
         "I5 example must exercise the sole discard channel"
     );
     let expected = read("examples/features/expected/errors/discard_fallible.out");
