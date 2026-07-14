@@ -169,6 +169,14 @@ pub(super) fn canonical_action_key(
         }
         None => w.bool(false),
     }
+    w.str("variant");
+    match &action.variant_identity {
+        Some(identity) => {
+            w.bool(true);
+            w.str(identity);
+        }
+        None => w.bool(false),
+    }
     w.str("labels");
     w.map_str(&action.labels);
     w.str("resource-pools");
@@ -320,6 +328,15 @@ fn encode_toolchain(w: &mut KeyWriter, toolchain: &BuildToolchain) {
             w.bool(true);
             w.str(&linker.name);
             encode_provenance(w, &linker.provenance);
+        }
+        None => w.bool(false),
+    }
+    match &toolchain.sysroot {
+        Some(sysroot) => {
+            w.bool(true);
+            w.str(&sysroot.name);
+            w.str(&sysroot.path_digest);
+            encode_provenance(w, &sysroot.provenance);
         }
         None => w.bool(false),
     }

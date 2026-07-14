@@ -95,6 +95,29 @@ impl LinkerIdentity {
     }
 }
 
+/// Sysroot identity for cross compilation (E4-JP15) — enters action keys with
+/// toolchain / SDK / linker / signing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SysrootIdentity {
+    pub name: String,
+    pub path_digest: String,
+    pub provenance: BuildProvenance,
+}
+
+impl SysrootIdentity {
+    pub fn new(
+        name: impl Into<String>,
+        path_digest: impl Into<String>,
+        provenance: BuildProvenance,
+    ) -> Self {
+        SysrootIdentity {
+            name: name.into(),
+            path_digest: path_digest.into(),
+            provenance,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SigningIdentitySpec {
     pub label: String,
@@ -131,6 +154,7 @@ pub struct ToolchainSpec {
     pub target_triple: String,
     pub sdk: Option<SdkIdentity>,
     pub linker: Option<LinkerIdentity>,
+    pub sysroot: Option<SysrootIdentity>,
     pub provenance: BuildProvenance,
 }
 
@@ -142,6 +166,7 @@ impl ToolchainSpec {
             target_triple: target_triple.into(),
             sdk: None,
             linker: None,
+            sysroot: None,
             provenance,
         }
     }
@@ -154,6 +179,7 @@ impl ToolchainSpec {
             host_triple,
             sdk: None,
             linker: None,
+            sysroot: None,
             provenance,
         }
     }
@@ -172,6 +198,11 @@ impl ToolchainSpec {
         self.linker = Some(linker);
         self
     }
+
+    pub fn with_sysroot(mut self, sysroot: SysrootIdentity) -> Self {
+        self.sysroot = Some(sysroot);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +214,7 @@ pub struct BuildToolchain {
     pub target_triple: String,
     pub sdk: Option<SdkIdentity>,
     pub linker: Option<LinkerIdentity>,
+    pub sysroot: Option<SysrootIdentity>,
     pub provenance: BuildProvenance,
 }
 

@@ -65,6 +65,7 @@ impl BuildContext {
                 target_triple: "host".to_string(),
                 sdk: None,
                 linker: None,
+                sysroot: None,
                 provenance: BuildProvenance::inferred_host(),
             }],
             signing_identities: Vec::new(),
@@ -104,6 +105,7 @@ impl BuildContext {
             target_triple: spec.target_triple,
             sdk: spec.sdk,
             linker: spec.linker,
+            sysroot: spec.sysroot,
             provenance: spec.provenance,
         });
         Ok(ToolchainHandle {
@@ -490,6 +492,7 @@ impl BuildContext {
             resource_pools: spec.resource_pools,
             legacy_wrapper: spec.legacy_wrapper,
             plugin,
+            variant_identity: spec.variant_identity,
         });
         Ok(ActionHandle {
             id,

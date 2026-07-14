@@ -26,7 +26,7 @@ pub use jet_codegen::{
 // `super::RefSpec`, `crate::EffectBudget`, etc.) is unchanged.
 pub use jet_pkg_model::{
     AdaBind, CBind, CFFI, DartBind, EffectBudget, Envelope, FFI, FortranBind, JavaBind, PascalBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, PackageManifest,
-    Platform, RefSpec, ScriptDeps, JSON,
+    Platform, RefSpec, ScriptDeps, Variant, JSON,
 };
 
 pub mod Bridge;

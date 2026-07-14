@@ -125,6 +125,10 @@ pub struct ActionSpec {
     pub helper_versions: BTreeMap<String, String>,
     pub resource_pools: BTreeSet<BuildResourcePool>,
     pub legacy_wrapper: Option<LegacyWrapperKind>,
+    /// Selected typed variant identity (E4-JP15 / D-JPK-VARIANT1). Canonical
+    /// `PackageVariant::identity_key()` string; empty means host defaults were
+    /// never materialised into the action (legacy plans).
+    pub variant_identity: Option<String>,
 }
 
 impl ActionSpec {
@@ -149,6 +153,7 @@ impl ActionSpec {
             helper_versions: BTreeMap::new(),
             resource_pools: BTreeSet::new(),
             legacy_wrapper: None,
+            variant_identity: None,
         }
     }
 
@@ -241,6 +246,11 @@ impl ActionSpec {
         self.resource_pools.insert(pool);
         self
     }
+
+    pub fn with_variant_identity(mut self, identity: impl Into<String>) -> Self {
+        self.variant_identity = Some(identity.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,6 +273,8 @@ pub struct BuildAction {
     pub resource_pools: BTreeSet<BuildResourcePool>,
     pub legacy_wrapper: Option<LegacyWrapperKind>,
     pub plugin: Option<PluginHandle>,
+    /// Selected typed variant identity keyed into the CAS action key (E4-JP15).
+    pub variant_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -491,6 +503,7 @@ impl LegacyWrapperSpec {
             helper_versions: BTreeMap::new(),
             resource_pools: BTreeSet::new(),
             legacy_wrapper: Some(self.kind),
+            variant_identity: None,
         })
     }
 }

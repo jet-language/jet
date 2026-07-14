@@ -22,6 +22,8 @@ pub enum LockRecordKind {
     JetosActivationClosure,
     ReplacementOverlay,
     PackageOverlay,
+    /// Selected typed variant domain (E4-JP15 / D-JPK-VARIANT1).
+    Variant,
     Future(String),
 }
 
@@ -42,6 +44,7 @@ impl LockRecordKind {
             LockRecordKind::JetosActivationClosure => "jetos-activation-closure",
             LockRecordKind::ReplacementOverlay => "replacement-overlay",
             LockRecordKind::PackageOverlay => "package-overlay",
+            LockRecordKind::Variant => "variant",
             LockRecordKind::Future(s) => s.as_str(),
         }
     }
@@ -62,6 +65,7 @@ impl LockRecordKind {
             "jetos-activation-closure" => LockRecordKind::JetosActivationClosure,
             "replacement-overlay" => LockRecordKind::ReplacementOverlay,
             "package-overlay" => LockRecordKind::PackageOverlay,
+            "variant" => LockRecordKind::Variant,
             other => LockRecordKind::Future(other.to_string()),
         }
     }
@@ -440,4 +444,50 @@ pub fn explain(lock: &SemanticLockFile, key: &str) -> Option<ExplainFact> {
         update_command: first.update_command,
         offline_satisfied: !rec.identity.hash.is_empty(),
     })
+}
+
+/// Record a selected typed variant into the semantic lock (E4-JP15).
+/// `platform` holds the canonical `PackageVariant::identity_key()`.
+pub fn record_selected_variant(
+    lock: &mut SemanticLockFile,
+    package: &str,
+    variant_identity: &str,
+    hash: &str,
+    reason: &str,
+) {
+    let identity = LockIdentity {
+        kind: LockRecordKind::Variant,
+        key: package.to_string(),
+        exact: variant_identity.to_string(),
+        hash: hash.to_string(),
+        platform: variant_identity.to_string(),
+    };
+    let rationale = LockRationale {
+        owner_package: package.to_string(),
+        reason: reason.to_string(),
+        source_ref: String::new(),
+        provider: "native".to_string(),
+        channel_input: String::new(),
+        exact_output: variant_identity.to_string(),
+        policy_fingerprint: String::new(),
+        recipe_id: String::new(),
+        adapter_id: String::new(),
+        signature: String::new(),
+        cache_provenance: String::new(),
+        update_command: String::new(),
+    };
+    // Replace existing variant record for the same package key.
+    lock.records
+        .retain(|r| !(r.identity.kind == LockRecordKind::Variant && r.identity.key == package));
+    lock.records
+        .push(SemanticRecord::new(identity, rationale));
+}
+
+/// Identity keys of every locked variant domain (universal lock coverage).
+pub fn locked_variant_domains(lock: &SemanticLockFile) -> BTreeSet<String> {
+    lock.records
+        .iter()
+        .filter(|r| r.identity.kind == LockRecordKind::Variant)
+        .map(|r| r.identity.exact.clone())
+        .collect()
 }

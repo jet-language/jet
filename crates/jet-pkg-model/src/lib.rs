@@ -56,6 +56,9 @@ pub mod Manifest;
 pub mod Merge;
 pub mod PackageManifest;
 pub mod Platform;
+// E4-JP15 / D-JPK-VARIANT1=D: closed typed variant axes + deterministic
+// selection. Pure data/matching — jetpack + BuildPlan action keys consume it.
+pub mod Variant;
 // Card #367 slice 4: the `BuildRecipe`/`BuildStep` *data* shape only — the
 // build engine (validate/run/fetch/exec/sandbox) stays in `jetpack`'s
 // `Recipe.rs`, which imports these types from here (data-down / engine-up,
