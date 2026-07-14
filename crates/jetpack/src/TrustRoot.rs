@@ -1214,7 +1214,7 @@ fn require_ed25519_pub_hex(field: &str, value: &str) -> Result<(), TrustError> {
 pub fn fixture_threshold_root(
     version: u64,
     expires_unix: u64,
-) -> (RootMetadata, Keyring, Vec<TrustKey>) {
+) -> Result<(RootMetadata, Keyring, Vec<TrustKey>), TrustError> {
     let k1 = TrustKey::generate("root-1");
     let k2 = TrustKey::generate("root-2");
     let k3 = TrustKey::generate("root-3");
@@ -1228,19 +1228,22 @@ pub fn fixture_threshold_root(
     let mut roles = BTreeMap::new();
     roles.insert(
         MetadataRole::Root,
-        RoleKeys::new(vec![k1.key_id.clone(), k2.key_id.clone(), k3.key_id.clone()], 2).unwrap(),
+        RoleKeys::new(
+            vec![k1.key_id.clone(), k2.key_id.clone(), k3.key_id.clone()],
+            2,
+        )?,
     );
     roles.insert(
         MetadataRole::Targets,
-        RoleKeys::new(vec![targets.key_id.clone()], 1).unwrap(),
+        RoleKeys::new(vec![targets.key_id.clone()], 1)?,
     );
     roles.insert(
         MetadataRole::Snapshot,
-        RoleKeys::new(vec![snapshot.key_id.clone()], 1).unwrap(),
+        RoleKeys::new(vec![snapshot.key_id.clone()], 1)?,
     );
     roles.insert(
         MetadataRole::Timestamp,
-        RoleKeys::new(vec![timestamp.key_id.clone()], 1).unwrap(),
+        RoleKeys::new(vec![timestamp.key_id.clone()], 1)?,
     );
     let mut public_key_ids = BTreeMap::new();
     for k in [&k1, &k2, &k3, &targets, &snapshot, &timestamp] {
@@ -1253,17 +1256,17 @@ pub fn fixture_threshold_root(
         roles,
         delegations: vec![Delegation {
             name: "jetsrc".into(),
-            role: RoleKeys::new(vec![targets.key_id.clone()], 1).unwrap(),
+            role: RoleKeys::new(vec![targets.key_id.clone()], 1)?,
             path_prefixes: vec!["jetsrc/".into()],
             terminating: true,
         }],
         public_key_ids,
     };
-    (
+    Ok((
         root,
         keyring,
         vec![k1, k2, k3, targets, snapshot, timestamp],
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -1286,7 +1289,7 @@ mod tests {
 
     fn boot(now: u64) -> (TrustEngine, Vec<TrustKey>, PathBuf) {
         let dir = scratch_dir("boot");
-        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600);
+        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600).unwrap();
         let signed = sign_root(&root, &[&keys[0], &keys[1]]).unwrap();
         let eng = TrustEngine::bootstrap(
             &signed,
@@ -1306,7 +1309,7 @@ mod tests {
     #[test]
     fn bootstrap_pins_digest_and_rejects_mismatch() {
         let now = 1_700_000_000;
-        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600);
+        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600).unwrap();
         let signed = sign_root(&root, &[&keys[0], &keys[1]]).unwrap();
         let dig = SHA256::sha256_hex(canonical_root(&root).as_bytes());
         let eng = TrustEngine::bootstrap(
@@ -1334,7 +1337,7 @@ mod tests {
     #[test]
     fn signature_stripping_rejected() {
         let now = 1_700_000_000;
-        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600);
+        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600).unwrap();
         let mut signed = sign_root(&root, &[&keys[0], &keys[1]]).unwrap();
         signed.signatures.clear();
         let err = TrustEngine::bootstrap(
@@ -1358,7 +1361,7 @@ mod tests {
     fn threshold_minus_one_cannot_bootstrap_or_rotate() {
         let now = 1_700_000_000;
         let (eng, keys, _) = boot(now);
-        let (mut new_root, _, _) = fixture_threshold_root(2, now + 7200);
+        let (mut new_root, _, _) = fixture_threshold_root(2, now + 7200).unwrap();
         new_root.version = 2;
         // Drill API.
         eng.recovery_drill_threshold_minus_one(&new_root, &[&keys[0]], &FixedClock(now))
@@ -1381,7 +1384,7 @@ mod tests {
     fn root_rotation_with_threshold_succeeds_and_rollback_fails() {
         let now = 1_700_000_000;
         let (mut eng, keys, _) = boot(now);
-        let (mut new_root, _, _) = fixture_threshold_root(2, now + 7200);
+        let (mut new_root, _, _) = fixture_threshold_root(2, now + 7200).unwrap();
         new_root.version = 2;
         // Keep same root key ids so current threshold keys still verify.
         new_root.roles = eng.root.roles.clone();
@@ -1464,7 +1467,7 @@ mod tests {
     #[test]
     fn bad_clock_expiry_and_size_limits() {
         let now = 1_700_000_000;
-        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600);
+        let (root, keyring, keys) = fixture_threshold_root(1, now + 3600).unwrap();
         let signed = sign_root(&root, &[&keys[0], &keys[1]]).unwrap();
         let err = TrustEngine::bootstrap(
             &signed,
@@ -1572,7 +1575,7 @@ mod tests {
         let (eng, keys, dir) = boot(now);
         let pin = RootBootstrap::load(&dir).unwrap();
         assert_eq!(pin.pin_digest, eng.root_digest);
-        let (root, keyring, _) = fixture_threshold_root(1, now + 3600);
+        let (root, keyring, _) = fixture_threshold_root(1, now + 3600).unwrap();
         // Re-sign with same fixture keys from boot — need the boot keys.
         let signed = sign_root(&eng.root, &[&keys[0], &keys[1]]).unwrap();
         let reloaded = TrustEngine::from_bootstrap_pin(

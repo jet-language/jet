@@ -73,7 +73,14 @@ impl Provider for LuaRocksProvider {
         let order = dependency_order(root_name, &specs)?;
         let mut artifacts = Vec::new();
         for name in &order {
-            let rockspec = specs.get(name).expect("resolved closure member").clone();
+            let rockspec = specs
+                .get(name)
+                .ok_or_else(|| {
+                    error(format!(
+                        "resolved LuaRocks dependency `{name}` has no rockspec"
+                    ))
+                })?
+                .clone();
             let rockspec_path = scratch
                 .path
                 .join(format!("{}-{}.rockspec", rockspec.name, rockspec.version));
@@ -113,7 +120,13 @@ impl Provider for LuaRocksProvider {
             }
         }
 
-        let root = specs.get(root_name).expect("root was resolved");
+        let root = specs
+            .get(root_name)
+            .ok_or_else(|| {
+                error(format!(
+                    "resolved LuaRocks root `{root_name}` has no rockspec"
+                ))
+            })?;
         let out_dir = ctx.store_dir.join(format!(
             "{}-{}-{}",
             root.name,
@@ -146,14 +159,15 @@ impl Provider for LuaRocksProvider {
             .map_err(|e| error(format!("could not seal LuaRocks output: {e}")))?;
         let out = out_dir.to_string_lossy().into_owned();
         let envelope = crate::Envelope::Envelope::for_output(&out, &spec.raw, RECIPE_ID);
-        let deps = order
-            .iter()
-            .filter(|name| name.as_str() != root_name)
-            .map(|name| {
-                let dep = specs.get(name).expect("ordered dependency");
-                format!("{}#version={}", dep.name, dep.version)
-            })
-            .collect();
+        let mut deps = Vec::new();
+        for name in order.iter().filter(|name| name.as_str() != root_name) {
+            let dep = specs.get(name).ok_or_else(|| {
+                error(format!(
+                    "ordered LuaRocks dependency `{name}` has no rockspec"
+                ))
+            })?;
+            deps.push(format!("{}#version={}", dep.name, dep.version));
+        }
         if let Some(project) = ctx.project_dir {
             crate::Lock::record_luarocks_realization(
                 project,

@@ -286,7 +286,7 @@ impl<'a> Cursor<'a> {
         Some(ch)
     }
 
-    fn expect(&mut self, want: char) -> Result<()> {
+    fn consume(&mut self, want: char) -> Result<()> {
         match self.bump() {
             Some(c) if c == want => Ok(()),
             other => Err(NixDrvError::Parse(format!(
@@ -298,7 +298,7 @@ impl<'a> Cursor<'a> {
 
     /// Unquoted ATerm string: `"..."` with no escape processing (Nix `printUnquotedString`).
     fn parse_raw_string(&mut self) -> Result<String> {
-        self.expect('"')?;
+        self.consume('"')?;
         let start = self.i;
         while self.i < self.s.len() {
             if self.s.as_bytes()[self.i] == b'"' {
@@ -313,10 +313,12 @@ impl<'a> Cursor<'a> {
 
     /// Escaped ATerm string (Nix `printString`): `\\` `\"` `\n` `\r` `\t`.
     fn parse_escaped_string(&mut self) -> Result<String> {
-        self.expect('"')?;
+        self.consume('"')?;
         let mut out = String::new();
         while self.i < self.s.len() {
-            let c = self.bump().unwrap();
+            let c = self
+                .bump()
+                .ok_or_else(|| NixDrvError::Parse("unterminated escaped string".into()))?;
             if c == '"' {
                 return Ok(out);
             }
@@ -341,7 +343,7 @@ impl<'a> Cursor<'a> {
     where
         F: FnMut(&mut Self) -> Result<T>,
     {
-        self.expect('[')?;
+        self.consume('[')?;
         let mut items = Vec::new();
         if self.peek() == Some(']') {
             self.bump();
@@ -405,15 +407,15 @@ pub fn parse_derive(aterm: &str) -> Result<Derivation> {
     c.i = "Derive(".len();
 
     let outputs_raw = c.parse_list(|c| {
-        c.expect('(')?;
+        c.consume('(')?;
         let name = c.parse_raw_string()?;
-        c.expect(',')?;
+        c.consume(',')?;
         let path = c.parse_raw_string()?;
-        c.expect(',')?;
+        c.consume(',')?;
         let method_algo = c.parse_raw_string()?;
-        c.expect(',')?;
+        c.consume(',')?;
         let hash_hex = c.parse_raw_string()?;
-        c.expect(')')?;
+        c.consume(')')?;
         Ok(DerivationOutput {
             name,
             path,
@@ -421,43 +423,43 @@ pub fn parse_derive(aterm: &str) -> Result<Derivation> {
             hash_hex,
         })
     })?;
-    c.expect(',')?;
+    c.consume(',')?;
 
     let input_drvs = c.parse_list(|c| {
-        c.expect('(')?;
+        c.consume('(')?;
         let path = c.parse_raw_string()?;
-        c.expect(',')?;
+        c.consume(',')?;
         if c.peek() == Some('(') {
             return Err(NixDrvError::Unsupported(
                 "dynamic derivation input childMap (xp-dyn-drv)".into(),
             ));
         }
         let outs = c.parse_list(|c| c.parse_raw_string())?;
-        c.expect(')')?;
+        c.consume(')')?;
         Ok(InputDrv {
             path,
             outputs: outs.into_iter().collect(),
         })
     })?;
-    c.expect(',')?;
+    c.consume(',')?;
 
     let input_srcs: BTreeSet<String> = c.parse_list(|c| c.parse_raw_string())?.into_iter().collect();
-    c.expect(',')?;
+    c.consume(',')?;
     let platform = c.parse_raw_string()?;
-    c.expect(',')?;
+    c.consume(',')?;
     let builder = c.parse_escaped_string()?;
-    c.expect(',')?;
+    c.consume(',')?;
     let args = c.parse_list(|c| c.parse_escaped_string())?;
-    c.expect(',')?;
+    c.consume(',')?;
     let env_pairs = c.parse_list(|c| {
-        c.expect('(')?;
+        c.consume('(')?;
         let k = c.parse_escaped_string()?;
-        c.expect(',')?;
+        c.consume(',')?;
         let v = c.parse_escaped_string()?;
-        c.expect(')')?;
+        c.consume(')')?;
         Ok((k, v))
     })?;
-    c.expect(')')?;
+    c.consume(')')?;
 
     let mut outputs = BTreeMap::new();
     for o in outputs_raw {
@@ -957,6 +959,19 @@ mod tests {
         };
         verify_output_paths(&mut store, DEFAULT_STORE_DIR, &format!("{real}.drv"), &drv)
             .expect("fod paths");
+    }
+
+    #[test]
+    fn malformed_aterm_strings_return_parse_errors() {
+        for aterm in [
+            r#"Derive([("out"#,
+            r#"Derive([],[],[],"x86_64-linux","unterminated"#,
+        ] {
+            assert!(
+                matches!(parse_derive(aterm), Err(NixDrvError::Parse(_))),
+                "malformed ATerm must return a parse error: {aterm:?}"
+            );
+        }
     }
 
     #[test]

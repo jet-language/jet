@@ -22,7 +22,7 @@ fn jp6a_bootstrap_threshold_delegation_snapshot_and_identities() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
-    let (root, keyring, keys) = fixture_threshold_root(1, now + 86_400);
+    let (root, keyring, keys) = fixture_threshold_root(1, now + 86_400).unwrap();
     let signed_root = sign_root(&root, &[&keys[0], &keys[1]]).unwrap();
     let pin = SHA256::sha256_hex(canonical_root(&root).as_bytes());
 

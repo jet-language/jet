@@ -72,7 +72,11 @@ impl Provider for CranProvider {
         for name in &order {
             let record = records
                 .get(name)
-                .expect("dependency order only contains records")
+                .ok_or_else(|| {
+                    ProviderError::Cran(format!(
+                        "resolved CRAN dependency `{name}` has no metadata record"
+                    ))
+                })?
                 .clone();
             let filename = format!("{}_{}.tar.gz", record.name, record.version);
             let path = scratch.path.join(&filename);

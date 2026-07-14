@@ -145,6 +145,11 @@ fn ingest_tree_unlocked(
             "ingest requires a named output `out`".into(),
         ));
     }
+    if let Some(name) = req.outputs.keys().find(|name| !valid_output_name(name)) {
+        return Err(IngestError::Invalid(format!(
+            "named output `{name}` must be one path component"
+        )));
+    }
     let hangar = roots.hangar_dir();
     fs::create_dir_all(&hangar)?;
     recover_hangar_staging(roots)?;
@@ -158,7 +163,10 @@ fn ingest_tree_unlocked(
         let mut staged_outs = BTreeMap::new();
         for (name, src) in &req.outputs {
             let dst = stage.join("outputs").join(name);
-            fs::create_dir_all(dst.parent().unwrap())?;
+            let parent = dst.parent().ok_or_else(|| {
+                IngestError::Invalid(format!("named output `{name}` has no staging parent"))
+            })?;
+            fs::create_dir_all(parent)?;
             // Gate semantic xattrs on the *source* tree (byte copy drops them).
             if !req.allow_semantic_xattrs() {
                 reject_semantic_xattrs_tree(src)?;
@@ -196,7 +204,10 @@ fn ingest_tree_unlocked(
             .get("out")
             .cloned()
             .ok_or_else(|| IngestError::Invalid("missing `out` digest".into()))?;
-        let primary_stage = staged_outs.get("out").unwrap().clone();
+        let primary_stage = staged_outs
+            .get("out")
+            .cloned()
+            .ok_or_else(|| IngestError::Invalid("missing staged `out` output".into()))?;
 
         let objects = hangar.join(OBJECTS_DIR);
         fs::create_dir_all(&objects)?;
@@ -216,7 +227,10 @@ fn ingest_tree_unlocked(
                     continue;
                 }
                 let dest = partial.join(".named").join(name);
-                fs::create_dir_all(dest.parent().unwrap())?;
+                let parent = dest.parent().ok_or_else(|| {
+                    IngestError::Invalid(format!("named output `{name}` has no object parent"))
+                })?;
+                fs::create_dir_all(parent)?;
                 if staged.exists() {
                     fs::rename(staged, &dest)?;
                 }
@@ -284,7 +298,9 @@ fn ingest_tree_unlocked(
     // Always scrub this stage dir (success moved trees out; failure quarantines).
     if result.is_err() {
         let quarantine = hangar.join("quarantine").join(format!("ingest-{stamp}"));
-        let _ = fs::create_dir_all(quarantine.parent().unwrap());
+        if let Some(parent) = quarantine.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
         if stage.exists() {
             if fs::rename(&stage, &quarantine).is_err() {
                 let _ = fs::remove_dir_all(&stage);
@@ -294,6 +310,12 @@ fn ingest_tree_unlocked(
         let _ = fs::remove_dir_all(&stage);
     }
     result
+}
+
+fn valid_output_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }
 
 /// Referrers of `digest`: objects that list it in `references`.

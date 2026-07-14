@@ -847,6 +847,36 @@ mod tests {
     }
 
     #[test]
+    fn ingest_rejects_output_names_that_escape_staging() {
+        let (roots, _g) = temp_roots();
+        let src = roots.root.join("src-output-name");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("payload"), "bytes").unwrap();
+        let escaped = roots.root.join("escaped-output");
+        let mut outputs = BTreeMap::new();
+        outputs.insert("out".to_string(), src.clone());
+        outputs.insert("../escaped-output".to_string(), src);
+        let err = ingest_tree(
+            &roots,
+            &IngestRequest {
+                name: "bad-output-name".into(),
+                version: "1".into(),
+                reference: "path:bad-output-name".into(),
+                cache_identity: test_identity(),
+                references: Vec::new(),
+                outputs,
+                signature: String::new(),
+                provenance: String::new(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "E1315");
+        assert!(err.what().contains("one path component"), "{err:?}");
+        assert!(!escaped.exists());
+    }
+
+    #[test]
     fn ingest_path_independent_digest_ignores_source_dirname() {
         let (roots, _g) = temp_roots();
         let left = roots.root.join("left-name");
