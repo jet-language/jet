@@ -2003,6 +2003,155 @@ fn canvas_project_discovery_requires_declared_workspace_membership() {
 }
 
 #[test]
+fn canvas_project_discovery_keeps_malformed_root_workspace_visible() {
+    let no_pkg = temp_dir("project_malformed_workspace_root");
+    fs::write(no_pkg.join("workspace.jet"), "").unwrap();
+    let no_pkg_entry = no_pkg.join("main.jet");
+    fs::write(&no_pkg_entry, "fn run() {\n    print(\"root\")\n}\n").unwrap();
+
+    let no_pkg_json = jet::Canvas::project_json_for_entry(&no_pkg_entry);
+    assert_eq!(
+        json_field(&no_pkg_json, "project_root"),
+        no_pkg.to_string_lossy()
+    );
+    assert!(no_pkg_json.contains("\"mode\":\"workspace\""), "{no_pkg_json}");
+    assert!(
+        no_pkg_json.contains("\"workspace\":{\"path\":\"workspace.jet\""),
+        "{no_pkg_json}"
+    );
+    assert!(no_pkg_json.contains("\"code\":\"E0995\""), "{no_pkg_json}");
+    assert!(no_pkg_json.contains("\"packages\":[]"), "{no_pkg_json}");
+
+    let with_pkg = temp_dir("project_malformed_workspace_root_pkg");
+    fs::write(
+        with_pkg.join("workspace.jet"),
+        "module workspace {\n    members: 1\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        with_pkg.join("pkg.jet"),
+        "payload: { name: \"rootpkg\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let with_pkg_entry = with_pkg.join("main.jet");
+    fs::write(&with_pkg_entry, "fn run() {\n    print(\"rootpkg\")\n}\n").unwrap();
+
+    let with_pkg_json = jet::Canvas::project_json_for_entry(&with_pkg_entry);
+    assert_eq!(
+        json_field(&with_pkg_json, "project_root"),
+        with_pkg.to_string_lossy()
+    );
+    assert!(with_pkg_json.contains("\"mode\":\"workspace\""), "{with_pkg_json}");
+    assert!(with_pkg_json.contains("\"code\":\"E0996\""), "{with_pkg_json}");
+    assert!(with_pkg_json.contains("\"name\":\"rootpkg\""), "{with_pkg_json}");
+    assert!(
+        with_pkg_json.contains("\"manifest\":\"pkg.jet\""),
+        "{with_pkg_json}"
+    );
+}
+
+#[test]
+fn canvas_project_discovery_malformed_ancestor_does_not_own_nested_package() {
+    let dir = temp_dir("project_malformed_workspace_ancestor");
+    let nested = dir.join("scratch");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(
+        dir.join("workspace.jet"),
+        "module workspace {\n    members: 1\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("env.jet"),
+        "module env.dev {\n    prompt: \"ancestor\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        nested.join("pkg.jet"),
+        "payload: { name: \"scratch\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let entry = nested.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"scratch\")\n}\n").unwrap();
+
+    let json = jet::Canvas::project_json_for_entry(&entry);
+    assert_eq!(json_field(&json, "project_root"), nested.to_string_lossy());
+    assert!(json.contains("\"mode\":\"package\""), "{json}");
+    assert!(json.contains("\"workspace\":null"), "{json}");
+    assert!(json.contains("\"envs\":[]"), "{json}");
+    assert!(!json.contains("workspace.jet"), "{json}");
+    assert!(!json.contains("E0996"), "{json}");
+}
+
+#[test]
+fn canvas_project_discovery_does_not_promote_lock_only_roots() {
+    let populated = temp_dir("project_lock_only_populated");
+    let member = populated.join("packages/app");
+    fs::create_dir_all(populated.join(".jet")).unwrap();
+    fs::create_dir_all(&member).unwrap();
+    fs::write(
+        populated.join(".jet/lock"),
+        "version = 1\n\n[[workspace_member]]\nname = \"app\"\npath = \"packages/app\"\n",
+    )
+    .unwrap();
+    fs::write(
+        populated.join("env.jet"),
+        "module env.dev {\n    prompt: \"lock-only\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        member.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let member_entry = member.join("main.jet");
+    fs::write(&member_entry, "fn run() {\n    print(\"app\")\n}\n").unwrap();
+
+    let populated_json = jet::Canvas::project_json_for_entry(&member_entry);
+    assert_eq!(
+        json_field(&populated_json, "project_root"),
+        member.to_string_lossy()
+    );
+    assert!(populated_json.contains("\"mode\":\"package\""), "{populated_json}");
+    assert!(populated_json.contains("\"workspace\":null"), "{populated_json}");
+    assert!(populated_json.contains("\"envs\":[]"), "{populated_json}");
+    assert!(populated_json.contains("\"locks\":[]"), "{populated_json}");
+    assert!(populated_json.contains("\"manifest\":\"pkg.jet\""), "{populated_json}");
+    assert!(!populated_json.contains("workspace.jet"), "{populated_json}");
+
+    let empty = temp_dir("project_lock_only_empty");
+    fs::create_dir_all(empty.join(".jet")).unwrap();
+    fs::create_dir_all(empty.join("loose")).unwrap();
+    fs::write(empty.join(".jet/lock"), "version = 1\n").unwrap();
+    let loose_entry = empty.join("loose/main.jet");
+    fs::write(&loose_entry, "fn run() {\n    print(\"loose\")\n}\n").unwrap();
+    let empty_json = jet::Canvas::project_json_for_entry(&loose_entry);
+    assert!(empty_json.contains("\"mode\":\"single_file\""), "{empty_json}");
+    assert!(empty_json.contains("\"workspace\":null"), "{empty_json}");
+    assert!(empty_json.contains("\"locks\":[]"), "{empty_json}");
+}
+
+#[test]
+fn canvas_project_discovery_accepts_workspace_root_member() {
+    let dir = temp_dir("project_workspace_root_member");
+    fs::write(
+        dir.join("workspace.jet"),
+        "module workspace {\n    members: [\".\"]\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"rootpkg\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"rootpkg\")\n}\n").unwrap();
+    let json = jet::Canvas::project_json_for_entry(&entry);
+    assert!(json.contains("\"mode\":\"workspace\""), "{json}");
+    assert!(json.contains("\"path\":\".\""), "{json}");
+    assert!(json.contains("\"manifest\":\"pkg.jet\""), "{json}");
+}
+
+#[test]
 fn canvas_project_json_projects_workspace_packages_and_files() {
     let dir = temp_dir("project_workspace");
     let hello = dir.join("packages/hello");

@@ -65,7 +65,9 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     let workspace_boundary = find_workspace_boundary(entry_dir);
     let workspace_root = workspace_boundary
         .as_ref()
-        .filter(|boundary| boundary.member_root.is_some())
+        .filter(|boundary| {
+            boundary.member_root.is_some() || same_path(entry_dir, &boundary.root)
+        })
         .map(|boundary| boundary.root.clone());
     let manifest_root = jet_driver::Loader::find_manifest_root(entry_dir).filter(|manifest| {
         let Some(boundary) = &workspace_boundary else {
@@ -73,6 +75,7 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         };
         match &boundary.member_root {
             Some(member_root) => path_is_within(manifest, member_root),
+            None if same_path(entry_dir, &boundary.root) => same_path(manifest, &boundary.root),
             None => {
                 path_is_within(manifest, &boundary.root)
                     && !same_path(manifest, &boundary.root)
@@ -119,15 +122,6 @@ fn find_workspace_boundary(start: &Path) -> Option<WorkspaceBoundary> {
                 });
             }
             None => {}
-        }
-        if let Some(plan) = jet_env_model::WorkspaceLock::load(&dir) {
-            if !plan.members.is_empty() {
-                let member_root = matching_member_root(&dir, start, &plan);
-                return Some(WorkspaceBoundary {
-                    root: dir,
-                    member_root,
-                });
-            }
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
