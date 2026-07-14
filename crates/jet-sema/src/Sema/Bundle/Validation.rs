@@ -126,8 +126,8 @@ pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
 
-/// D-ENCSTREAM-SURFACE1=A: the shared value + opaque-handle type names
-/// `core.encoding` exports. Naming one in an annotation needs the Core prelude
+/// Core value/container + opaque-handle type names backed by `jet_std`.
+/// Naming one in an annotation needs the Core prelude
 /// even without a method call for the expression walker to observe.
 fn is_encoding_surface_type(name: &str) -> bool {
     // Annotations may spell the type module-qualified (`encoding.EncodingError`,
@@ -135,7 +135,12 @@ fn is_encoding_surface_type(name: &str) -> bool {
     let base = name.rsplit('.').next().unwrap_or(name);
     matches!(
         base,
-        "EncodingLimits"
+        "DataTree"
+            | "Table"
+            | "Series"
+            | "LazyFrame"
+            | "DataJoin"
+            | "EncodingLimits"
             | "EncodingError"
             | "CBOROptions"
             | "CBORError"
@@ -267,18 +272,10 @@ pub(crate) fn collect_used_core(
     let mut ffi_cb = HashSet::new();
     for (idx, module) in bundle.modules.iter().enumerate() {
         let imports = &states[idx].core_imports;
-        // D-ENCSTREAM-SURFACE1=A: core.encoding now exports runtime value and
-        // opaque handle types. A program may name those in an annotation without
-        // a core method call for the expression walker to observe; the generated
-        // Rust then still needs the Core prelude that defines them. Only mark the
-        // prelude needed when such a type actually appears in an annotation — a
-        // bare `use core.encoding.json` with no call and no annotation must stay
-        // free of the Core prelude (importing_core_without_calls_is_free_in_codegen).
-        if imports
-            .values()
-            .any(|module| module == "core.encoding" || module.starts_with("core.encoding."))
-            && module_annotations_mention_encoding_surface(module)
-        {
+        // Annotation-only core values still need their Rust definitions even
+        // when globally named rather than reached through a core-module call.
+        // A bare core import remains free: only an annotation makes this true.
+        if module_annotations_mention_encoding_surface(module) {
             used.insert("core.encoding::types".to_string());
         }
         for item in &module.items {

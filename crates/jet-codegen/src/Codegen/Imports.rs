@@ -406,6 +406,9 @@ pub(crate) fn import_ret_map(
 
 pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: bool) {
     let has_serde_protocol_impl = items.iter().any(|item| match item {
+        Item::Func(f) => f.type_params.iter().any(|param| param.bounds.iter().any(|bound| {
+            matches!(bound.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE)
+        })),
         Item::Struct(s) => s.trait_impls.iter().any(|block| {
             matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE)
         }),

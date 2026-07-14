@@ -335,7 +335,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(&mod_idx) = self.imports.get(alias) {
                     self.record_import_alias_reference(alias, *alias_span);
-                    return self.infer_import_call(mod_idx, method, *alias_span, span, args);
+                    return self.infer_import_call(mod_idx, method, *alias_span, span, type_args, args);
                 }
                 // D-MOD2: inline code module call — `math.double(x)` where `math` is an
                 // inline `module math { … }` in this file. Resolve via mangled name.

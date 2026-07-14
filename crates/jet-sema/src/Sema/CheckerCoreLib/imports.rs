@@ -4,6 +4,7 @@ use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{private_item, type_fix_hint};
 use crate::Sema::FFI::e3211;
 use crate::Syntax;
+use std::collections::HashMap;
 impl<'a> Checker<'a> {
         /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
         /// The function was registered as `{alias}__{method}` in `self.funcs`.
@@ -98,6 +99,7 @@ impl<'a> Checker<'a> {
             name: &str,
             alias_span: Span,
             span: Span,
+            type_args: &[Type],
             args: &mut [crate::AST::CallArg],
         ) -> Option<Type> {
             let Some(mods) = self.modules else {
@@ -108,7 +110,7 @@ impl<'a> Checker<'a> {
             // submodule and re-exported. Redirect to the real definition.
             if let Some((real_name, real_idx)) = target.reexports.get(name) {
                 let (real_name, real_idx) = (real_name.clone(), *real_idx);
-                return self.infer_import_call(real_idx, &real_name, alias_span, span, args);
+                return self.infer_import_call(real_idx, &real_name, alias_span, span, type_args, args);
             }
             if target.funcs.contains_key(name) {
                 let is_pub = target.func_pub.get(name).copied().unwrap_or(false)
@@ -122,6 +124,20 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
+                let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();
+                let mut subst = HashMap::new();
+                if !type_params.is_empty() && !type_args.is_empty() {
+                    if type_args.len() != type_params.len() {
+                        self.diags.push(crate::Generics::e0904(span, &type_params[0].name));
+                    } else {
+                        for (param, actual) in type_params.iter().zip(type_args) {
+                            subst.insert(param.name.clone(), actual.clone());
+                        }
+                    }
+                }
+                let effective_params: Vec<(AccessConvention, Type)> = sig.params.iter().map(|(conv, ty)| {
+                    (*conv, self.trait_reg.instantiate_type(ty, &subst))
+                }).collect();
                 let target_alias = target.module_alias.clone();
                 self.record_edge(format!("{target_alias}.{name}"));
                 self.record_function_reference(mod_idx, name, span);
@@ -140,7 +156,7 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                for (arg, (pconv, pty)) in args.iter_mut().zip(sig.params.iter()) {
+                for (arg, (pconv, pty)) in args.iter_mut().zip(effective_params.iter()) {
                     if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                         self.borrow_ctx = true;
                     }
@@ -241,7 +257,9 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                return sig.return_type.clone();
+                return sig.return_type.as_ref().map(|ty| self.resolve_type(
+                    self.trait_reg.instantiate_type(ty, &subst)
+                ));
             }
             if target.registry.contains(name) {
                 let is_pub = self.type_is_pub_in(mod_idx, name);

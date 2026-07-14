@@ -7,6 +7,37 @@ use std::fs;
 
 use tir_support::{build_and_run, build_and_run_multi, have_rustc};
 
+/// Imported public adapters may carry core.data containers across a module
+/// boundary. Their signatures are ordinary TIR types; codegen must not fall out
+/// of the typed-IR seam merely because the row is dynamic or generic.
+#[test]
+fn imported_public_table_adapters_stay_in_tir() {
+    if !have_rustc() {
+        return;
+    }
+    let main_src = "\
+module adapter
+fn run() {
+    print(\"ok\")
+}
+";
+    let adapter_src = "\
+pub fn concrete(table: ^Table<DataTree>) -> Table<DataTree> {
+    return table
+}
+pub fn generic<T>(table: ^Table<T>) -> Table<T> {
+    return table
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_imported_table_adapter",
+        "main.jet",
+        &[("main.jet", main_src), ("adapter.jet", adapter_src)],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "ok\n");
+}
+
 /// c109 Phase 14: a qualified inline code-module call `math.double(5)` (D-MOD2).
 /// `main` routes through the TIR (`ModuleCall::InlineMangled` → `user_math__double`),
 /// as do the module's own functions. rustc accepting proves byte-parity.

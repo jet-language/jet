@@ -43,17 +43,21 @@ pub(crate) fn enc_is_json_name(n: &str) -> bool {
 pub(crate) fn enc_ok_is_json(ret_ty: &Type) -> bool {
     matches!(ret_ty, Type::Result { ok, .. } if matches!(&**ok, Type::Named(n) if enc_is_json_name(n)))
 }
-/// The Rust type a typed `decode<T>` constructs — `T` for json/toml/yaml, the element
-/// `T` for CSV's `[T]`. Read from the resolved `Result<…, DecodeError>` return type.
+/// The Rust type a typed whole-value `decode<T>` constructs.
 pub(crate) fn enc_target_rust(ret_ty: &Type, cx: &Cx) -> String {
     if let Type::Result { ok, .. } = ret_ty {
-        match &**ok {
-            Type::List(elem) => cx.rust_type(elem),
-            other => cx.rust_type(other),
-        }
+        cx.rust_type(ok)
     } else {
         cx.rust_type(ret_ty)
     }
+}
+pub(crate) fn enc_row_target_rust(ret_ty: &Type, cx: &Cx) -> String {
+    if let Type::Result { ok, .. } = ret_ty {
+        if let Type::List(elem) = &**ok {
+            return cx.rust_type(elem);
+        }
+    }
+    enc_target_rust(ret_ty, cx)
 }
 /// D-MIGRATE3=A: the Rust type a typed `decode_traced<T>` constructs — same
 /// target as [`enc_target_rust`], one layer deeper through the resolved
@@ -62,14 +66,21 @@ pub(crate) fn enc_target_rust_traced(ret_ty: &Type, cx: &Cx) -> String {
     if let Type::Result { ok, .. } = ret_ty {
         if let Type::Apply { args, .. } = &**ok {
             if let Some(inner) = args.first() {
-                return match inner {
-                    Type::List(elem) => cx.rust_type(elem),
-                    other => cx.rust_type(other),
-                };
+                return cx.rust_type(inner);
             }
         }
     }
     cx.rust_type(ret_ty)
+}
+pub(crate) fn enc_row_target_rust_traced(ret_ty: &Type, cx: &Cx) -> String {
+    if let Type::Result { ok, .. } = ret_ty {
+        if let Type::Apply { args, .. } = &**ok {
+            if let Some(Type::List(elem)) = args.first() {
+                return cx.rust_type(elem);
+            }
+        }
+    }
+    enc_target_rust_traced(ret_ty, cx)
 }
 pub(crate) fn enc_arg_is_json(args: &[TExpr]) -> bool {
     matches!(args.first().map(|a| &a.ty), Some(Type::Named(n)) if enc_is_json_name(n))

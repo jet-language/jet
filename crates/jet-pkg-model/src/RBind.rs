@@ -67,6 +67,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let mut wrappers = String::new();
     for name in &functions {
         wrappers.push_str(&format!("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\n"));
+        wrappers.push_str(&format!("const char* {abi}_invoke_{name}_table(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"__jet_table__{name}\",input,deadline);}}\n"));
     }
     let bridge = crate::PowerShellBind::render_supervisor_c(
         &abi,
@@ -202,6 +203,23 @@ from_wire <- function(value) {{
   }}
   value
 }}
+table_from_wire <- function(rows) {{
+  if (!is.list(rows)) stop("invalid table rows")
+  if (length(rows) == 0) return(data.frame())
+  columns <- names(rows[[1]])
+  valid_row <- function(row) is.list(row) && identical(names(row), columns)
+  if (is.null(columns) || anyDuplicated(columns) || !all(vapply(rows, valid_row, logical(1)))) stop("invalid table row shape")
+  frames <- lapply(rows, function(row) {{
+    cells <- lapply(row, function(cell) {{
+      item <- from_wire(cell)
+      if (is.null(item)) return(NA)
+      if (!is.atomic(item) || length(item) != 1) stop("table cells must be scalar")
+      item
+    }})
+    as.data.frame(cells, stringsAsFactors = FALSE, optional = TRUE)
+  }})
+  do.call(rbind, frames)
+}}
 writeBin(c(little(5, 4), charToRaw("READY")), output)
 flush(output)
 repeat {{
@@ -217,9 +235,11 @@ repeat {{
     if (!is.list(request) || is.null(request$op)) stop("invalid request")
     if (identical(request$op, "shutdown")) NULL else {{
       command <- request$command
+      table_mode <- startsWith(command, "__jet_table__")
+      if (table_mode) command <- substring(command, 14)
       if (!identical(request$op, "invoke") || is.null(command) || is.na(allowed[[command]])) stop("rejected command")
       fn <- get(command, envir = script, inherits = FALSE)
-      value <- fn(from_wire(request$input))
+      value <- fn(if (table_mode) table_from_wire(request$input) else from_wire(request$input))
       list(id = request$id, ok = TRUE, value = value)
     }}
   }}, error = function(error) list(id = if (is.list(request) && !is.null(request$id)) request$id else 0, ok = FALSE, code = "CommandFailed", value = NULL))
@@ -238,10 +258,12 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
     let mut out=format!("#Extern module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for name in functions {
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n"));
+        out.push_str(&format!("    fn {name}_table(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}_table\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\npub fn open() -> Session ? RError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return err(RError.NotRunning) }}\n    return ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\npub fn close(session: ^Session) {{ abi.close(session.value) }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\nuse core.data as data\n\npub struct Session {{ value: Int }}\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\npub fn open() -> Session ? RError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return err(RError.NotRunning) }}\n    return ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\npub fn close(session: ^Session) {{ abi.close(session.value) }}\n\n"));
     for name in functions {
         out.push_str(&format!("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree ? RError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return err(RError.NotRunning) }}\n    if code == 2 {{ return err(RError.Timeout) }}\n    if code == 3 {{ return err(RError.Cancelled) }}\n    if code == 5 {{ return err(RError.Limit) }}\n    if code != 0 {{ return err(RError.Protocol) }}\n    response := json.parse(raw) ?? return err(RError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return err(RError.CommandFailed) }}\n    return ok(response.field(\"value\") ?? DataTree.Null)\n}}\n\n"));
+        out.push_str(&format!("pub fn {name}_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) -> Table<T> ? RError {{\n    raw :: abi.{name}_table(session.value, json.to_string(data.rows(table)), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return err(RError.NotRunning) }}\n    if code == 2 {{ return err(RError.Timeout) }}\n    if code == 3 {{ return err(RError.Cancelled) }}\n    if code == 5 {{ return err(RError.Limit) }}\n    if code != 0 {{ return err(RError.Protocol) }}\n    response := json.parse(raw) ?? return err(RError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return err(RError.CommandFailed) }}\n    value := response.field(\"value\") ?? return err(RError.Protocol)\n    rows := json.decode<[T]>(json.to_string(value)) ?? return err(RError.Protocol)\n    return ok(data.table(rows))\n}}\n\n"));
     }
     out
 }

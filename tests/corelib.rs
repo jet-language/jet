@@ -3520,6 +3520,14 @@ use core.random as random
 use core.time as time
 use core.encoding.json as json
 
+struct Plain {
+    value: String
+}
+
+fn identity(value: ^Plain) -> Plain {
+    return value
+}
+
 fn run() {
     print("ok")
 }

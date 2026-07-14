@@ -456,6 +456,7 @@ impl<'a> Checker<'a> {
                         &fn_name,
                         call.name_span,
                         call.name_span,
+                        &[],
                         &mut call.args,
                     );
                     return Some(result);
