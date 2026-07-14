@@ -686,7 +686,10 @@ A solo dev folds forever; a team shards fully; same semantics.
 
 ---
 
-## Reviewer's reframe & recommendation
+## Archived reviewer recommendation — superseded
+
+This recommendation compared file layouts only. D-ECO1 now decides the full
+project graph and supersedes it; Fold is not a live option or recommendation.
 
 Adversarial review reframed the axis: the real choice is **fixed file model vs
 user-chosen file model**. Fold subsumes the other two as states — folded *is*

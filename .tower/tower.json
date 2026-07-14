@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 600,
-    "rev": 6675,
+    "rev": 6682,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -33262,10 +33262,10 @@
       "group": "ecosystem",
       "title": "Choose Jet's complete project, package, and operating-system graph",
       "gist": "Choose one architecture replacing flakes, flake-parts, import trees, Nix modules, and NixOS from one root file.",
-      "lesson": "A complete project graph contains packages, inputs, environments, checks, target variants, images, systems, services, policies, and exact receipts. One root file should hold the whole graph when small and remain its control point when split.\n\nModularity needs a deterministic composition law. File order and paths should not decide meaning. Input identity must include every build-changing fact, and each resolved build cell needs an addressable receipt with provenance.\n\nThe same graph must power JetOS. Package, environment, image, and operating-system configuration cannot become separate languages or loosely connected module systems.",
+      "lesson": "A complete project graph contains packages, inputs, environments, checks, target variants, images, systems, services, policies, and exact receipts. One root file should hold the whole graph when small and remain its control point when split.\n\nModularity needs a deterministic composition law. Paths may discover source files, but declared names and types carry identity. Moving files, changing discovery order, or formatting the root cannot change meaning.\n\nThe same graph must power JetOS. Files, users, boot, services, activation, images, generations, and rollback cannot become a separate language or loosely connected module system.",
       "explainer": "",
       "story": "Rin starts with one command and one dependency. The project grows into services, development tools, cross-compiled images, three machines, and reusable policy without replacing its first file or losing whole-project control.",
-      "inWild": "// project.jet — complete project and permanent control point\nproject :: Project.{\n    packages: [app, web],\n    environments: [dev],\n    systems: [halcyon],\n    parts: find(\"./project-parts\"),\n}\n\n$ jet project explain systems.halcyon\n$ jet lock why packages.web.inputs.http",
+      "inWild": "// project.jet — tiny\nproject :: Project.{ packages: [hello] }\n\n// Same root after growth\nproject :: Project.{\n    inputs: [http],\n    packages: [api, api.release, api.wasm],\n    environments: [dev],\n    checks: [unit, policy],\n    actions: [generate_api],\n    images: [api_image],\n    systems: [halcyon],\n    parts: find(\"project-parts/*.jet\"),\n}\n\n$ jet project explain systems.halcyon.services.api\n$ jet lock why packages.api.inputs.http\n$ jet update http --dry-run\n$ jet os switch halcyon\n$ jet os rollback",
       "detail": "",
       "options": [
         {
@@ -33279,15 +33279,15 @@
           "key": "B",
           "name": "Typed Guix adapted to Jet",
           "detail": "Translate Guix records and service extensions into typed Jet values. One `project.jet` defines packages through systems. Each service type owns composition and extension; typed derivations produce generations and rollback.",
-          "technical": "Project parts are ordinary Jet modules. Service types expose typed `compose` and `extend`. Input records lower to content-addressed derivations. A root channel set pins the universe, following Guix closely.",
+          "technical": "Project parts are ordinary Jet modules. Service types expose typed `compose` and `extend`. Inputs lower to Guix-style derivations and store paths; only fixed-output inputs are content-known in advance. Jet may deliberately add content-addressed realization nodes. A root channel set pins the universe.",
           "code": "project :: Project.{\n    packages: base.packages + [my_app],\n    systems: [OperatingSystem.{\n        name: halcyon,\n        services: base.services + [my_service],\n    }],\n}"
         },
         {
           "key": "C",
           "name": "Jet-native typed project graph",
-          "detail": "Use one nominal graph with schema-owned composition. The root can contain everything or index typed parts. Paths never carry meaning. The graph includes role-aware inputs, sparse variants, explicit overrides, and normalized semantic receipts.",
-          "technical": "Unique scalars must agree; keyed collections unite by identity; ordered fields declare stable order. Input identity includes source authority, compatibility line, variant, role, and target ABI. Sparse target/profile deltas specialize by predicate. One root receipt indexes content-addressed package and action nodes. Selective updates unlock only the required frontier.",
-          "code": "project :: Project.{\n    packages: [app, web],\n    environments: [dev],\n    systems: [halcyon],\n    parts: find(\"./project-parts\"),\n}\n\n// conflict: systems.halcyon.network.host_name\n// project.jet:8 says \"halcyon\"\n// office.jet:4 says \"build-box\"\n// fix: remove one claim or write one audited override"
+          "detail": "Use one nominal graph with schema-owned composition. The root can contain everything or discover typed parts. Paths locate source; declared names and types carry identity. Role-aware inputs, sparse variants, actions, checks, images, systems, and normalized receipts share one model.",
+          "technical": "Core owns the finite root field families and each receiving field's composition law. Users extend the graph by defining package, service, image, and module types that produce typed `ProjectPart` values. They cannot invent global precedence or mutate the graph. Unique scalars must agree; keyed collections unite by identity; ordered fields declare stable order. Input identity includes source authority, compatibility line, variant, role, and target ABI. Sparse deltas specialize targets and profiles. Selective updates unlock only the required dependency frontier. Receipts record every resolved node and JetOS activation proof.",
+          "code": "project :: Project.{\n    inputs: [http: { source: registry@http#3, role: .Target }],\n    packages: [\n        api,\n        api.release: { profile: .Release, optimize: .Speed },\n        api.wasm: { target: .Wasm },\n    ],\n    checks: [unit, policy],\n    actions: [generate_api],\n    environments: [dev],\n    images: [api_image],\n    systems: [System.{\n        name: halcyon, boot: Boot.limine,\n        files: [\"/etc/api.toml\": file(\"config/api.toml\")],\n        users: [nate: User.{ groups: [wheel] }],\n        services: [api: Service.from(api.release)],\n        activation: .ProofBeforeSwitch, generations: .Keep(10),\n    }],\n    parts: find(\"project-parts/*.jet\"),\n}\n\n// project-parts/office.jet\npub office :: ProjectPart.{ systems: [office] }\n\n// Discovery finds contributions; `office` and its types define identity.\n// File order and location do not change composition."
         },
         {
           "key": "D",
@@ -34860,10 +34860,10 @@
       "group": "syntax",
       "title": "Choose one underscore naming system",
       "gist": "Choose what `_name` and `__name` promise, including access, replacement, and module discovery.",
-      "lesson": "An identifier may be reachable while excluded from a package's supported API. That distinction lets maintainers reorganize internals without promising compatibility to outside callers.\n\nA reserved namespace instead protects compiler and tool names from accidental collision. Real access control is another job, already handled by private-by-default names, `pub`, and `pub(package)`.\n\nThis ballot decides the whole underscore family together. Unused bindings, disabled modules, expert access, and replacement cannot assign unrelated meanings later.",
+      "lesson": "An identifier may be reachable while excluded from a package's supported API. That distinction lets maintainers reorganize internals without promising compatibility to outside callers.\n\nA reserved namespace protects compiler and tool names from accidental collision. Real access control remains private-by-default names, `pub`, and `pub(package)`.\n\nBare `_` is Jet's discard placeholder. `_name` never suppresses an unused-binding warning. This ballot also replaces the old disabled-module reading of `module _name` with one coherent internal-name rule.",
       "explainer": "",
       "story": "Mira publishes a parser while Sam debugs compiler-generated collection metadata. Ordinary users need a clean supported API; expert tools need inspection without letting application code corrupt invariants.",
-      "inWild": "pub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\n\n// _scan_token is reachable but unsupported\n// __state is reserved for Jet and tools",
+      "inWild": "pub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\nmodule _bench_helpers { ... }\n_ :: trace_result()\n\n// _scan_token is reachable but unsupported\n// _bench_helpers is skipped by discovery; explicit use remains possible\n// _ is the only discard spelling; __state is reserved",
       "detail": "",
       "options": [
         {
@@ -34877,8 +34877,8 @@
           "key": "B",
           "name": "Jet adaptation: API signal and reserved tools",
           "detail": "`_name` means reachable but unsupported API. Docs and completion de-emphasize it; strict package policy may reject outside use. Every `__name` is reserved for compiler and tool protocols. Existing visibility still decides access.",
-          "technical": "One underscore adds semantic-index stability metadata. It never changes resolution. A leading-underscore module is internal and excluded from auto-discovery, not silently disabled. Double underscore in user declarations or access is rejected. Tools use semindex and debugger channels.",
-          "code": "pub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\n\n// error: `__state` is reserved for Jet and its tools"
+          "technical": "One underscore adds semantic-index stability metadata without changing name resolution. `_name` never suppresses unused warnings. Bare `_` remains the sole discard placeholder. This amends U3: `module _name` is internal and excluded from auto-discovery, not disabled. Explicit `use` works when normal visibility permits it. Double underscore in user declarations or access is rejected. Tools use semindex and debugger channels.",
+          "code": "pub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\nmodule _bench_helpers { ... }\n_ :: trace_result()\n\n// explicit import is allowed when visibility permits\nuse package._bench_helpers\n// error: `__state` is reserved for Jet and its tools"
         },
         {
           "key": "C",
@@ -35038,7 +35038,7 @@
           "name": "Rust direct: RAII plus drop(value)",
           "detail": "Host language: Rust. Values release at scope end, and `drop(value)` consumes one early. Rust users love this because ownership provides predictable, memory-safe, zero-cost cleanup without garbage collection.",
           "technical": "Copy Rust destructor timing and `std::mem::drop`. Destructors cannot be called directly. Fallible completion remains a separate method.",
-          "code": "// Rust\nlet file = File::open(path)?;\nlet data = read(file)?;\ndrop(file);\ndo_cpu_work(data);"
+          "code": "// Rust\nlet file = File::open(path)?;\nlet data = read(&file)?;\ndrop(file);\ndo_cpu_work(data);"
         },
         {
           "key": "B",
@@ -35357,7 +35357,7 @@
       "group": "syntax",
       "title": "How does source request a non-owning view?",
       "gist": "Choose one visible operation that creates a lifetime-checked non-owning view.",
-      "lesson": "A view reads storage owned by another value without copying it. The compiler must prevent the view from outliving that owner or surviving a mutation that invalidates its storage.\n\nCreation should look like an operation because ownership and lifetime behavior change. A type annotation should describe a result, not secretly perform that operation.\n\nJet already documents `source.view(range)` and reserves `.over(existing)` for explicit view constructors. This ballot reconciles those laws instead of adding a third path.",
+      "lesson": "A view reads storage owned by another value without copying it. The compiler must prevent the view from outliving that owner or surviving a mutation that invalidates its storage.\n\nCreation should look like an operation because ownership and lifetime behavior change. A type annotation should describe a result, not secretly perform that operation.\n\nJet already documents `source.view(range)`. This ballot decides whether that source projection supersedes the older `.over(existing)` constructor guidance for all non-owning views.",
       "explainer": "",
       "story": "Inez parses a network frame. She needs a checked window over bytes for speed, then returns an owned result without copying the whole frame.",
       "inWild": "header :: packet.view(0..16)\nparse_header(header)?\n\n// header cannot escape packet or survive invalidating mutation",
@@ -35374,7 +35374,7 @@
           "key": "B",
           "name": "Jet adaptation: source projection",
           "detail": "Keep `source.view()` and `source.view(range)` as the ordinary path. The source owns storage; the result type is `View<T>`; sema infers lifetime and rejects escape or invalidating mutation.",
-          "technical": "This reaffirms existing diagnostics and D-DYNARRAY1. A normal explicit type annotation may document `View<T>`, but never triggers conversion.",
+          "technical": "This reaffirms existing diagnostics and D-DYNARRAY1. It supersedes D-API-CTOR1 for non-owning view creation: `.view()` and `.view(range)` are the sole canonical operation. Third-party source types implement `view`; standalone view types do not add `.over`. An explicit `View<T>` annotation may document the result but never triggers conversion.",
           "code": "all :: bytes.view()\nheader: View<Byte> :: bytes.view(0..16)"
         },
         {
@@ -35416,7 +35416,7 @@
             "reason": "D makes a type annotation perform an ownership-changing operation, weakening readability and one-path semantics."
           }
         ],
-        "tradeoff": "Custom standalone view types may also need `.over(existing)`. That remains the explicit constructor law, while built-in projections keep one primary source-facing path."
+        "tradeoff": "A custom view cannot own a second constructor spelling. Its source type implements `.view`, keeping one visible operation and one lifetime-checking rule."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -35608,10 +35608,10 @@
       "group": "syntax",
       "title": "Where should checked quantity algebra live?",
       "gist": "Choose whether dimensions are compiler facts, library conventions, or nominal domain types.",
-      "lesson": "A quantity combines a number with a dimension such as length, time, or temperature. Correct arithmetic changes dimensions: distance divided by time becomes speed, while distance plus time is invalid.\n\nUnits such as meters and feet are scaled representations of one dimension. Good systems erase unit metadata at runtime, so safety adds no storage or arithmetic cost.\n\nJet already has `#UnitFamily` and typed literals. This vote decides whether one compiler-owned dimension algebra completes that feature or each library rebuilds it.",
+      "lesson": "A linear quantity combines a number with a dimension such as length or time. Correct arithmetic changes dimensions: distance divided by time becomes speed, while distance plus time is invalid.\n\nAffine points need a different law. Temperature points may subtract into differences, but two points cannot be added. Nominal families such as currency may depend on runtime rates and must not silently enter static dimension algebra.\n\nJet already has `#UnitFamily` and typed literals. This vote decides whether explicitly algebraic families share one compiler-owned, erased relation while existing nominal families remain nominal.",
       "explainer": "",
       "story": "Ari writes flight-planning code. Distance, fuel, duration, and speed cross package boundaries. One accidental addition of meters to seconds must fail before launch.",
-      "inWild": "distance :: 120km\ntime :: 2h\nspeed :: distance / time\n// inferred dimension: Length / Time\n\nbad :: distance + time // checked error",
+      "inWild": "#UnitFamily(speed: length / time) { mps: 1m / 1s }\n\ndistance :: 120km\ntime :: 2h\nspeed: Quantity<Speed> :: distance / time\n\nbad :: distance + time // checked error",
       "detail": "",
       "options": [
         {
@@ -35624,9 +35624,9 @@
         {
           "key": "B",
           "name": "Jet adaptation: inferred dimension facts",
-          "detail": "Let `#UnitFamily` declare dimensions and scales. Arithmetic produces a canonical erased dimension vector. Users normally write literals; experts may name dimensions such as `Speed` for signatures and generic constraints.",
-          "technical": "Dimension algebra is a narrow sema relation, not general type-level execution or operator overloading. It amends S26 and D-VECARITH1 only for compiler-known quantity families.",
-          "code": "#UnitFamily(length) { m, km: 1000m }\n#UnitFamily(time) { s, h: 3600s }\n\nspeed :: 120km / 2h\nfn travel(v: Quantity<Length / Time>) { ... }"
+          "detail": "Let a `#UnitFamily` explicitly opt into linear, derived, or affine-point laws. Linear arithmetic produces a canonical erased dimension vector. Users write literals and nominal names such as `Speed`; free-form measure expressions never enter ordinary type syntax. Families without an algebra declaration, including currency, keep S26's nominal behavior.",
+          "technical": "This explicitly extends S26. `speed: length / time` declares a derived linear family; `mps: 1m / 1s` declares its scale. A point family declares an origin and offsets: point minus point yields its difference family, and point plus or minus a difference yields a point. Point plus point is rejected. The compiler mints nominal family types and checks conversions. Algebra is confined to marker declarations and quantity arithmetic, never general type-level execution or free-form `Quantity<Length / Time>` syntax.",
+          "code": "#UnitFamily(length) { m, km: 1000m }\n#UnitFamily(time) { s, h: 3600s }\n#UnitFamily(speed: length / time) { mps: 1m / 1s }\n#UnitFamily(temperature: point) { K: origin, C: K - 273.15 }\n#UnitFamily(currency) { usd, eur } // nominal; runtime rates\n\nspeed: Quantity<Speed> :: 120km / 2h\nfn travel(v: Quantity<Speed>) { ... }"
         },
         {
           "key": "C",
@@ -35652,7 +35652,7 @@
       ],
       "rec": "B",
       "recommendation": {
-        "why": "B completes Jet's existing unit feature with one zero-cost algebra. Literals remain beginner-friendly, while experts get inferred and named dimensions across packages.",
+        "why": "B completes Jet's existing unit feature without forcing unlike domains together. Linear and affine laws are explicit and zero-cost; runtime-valued nominal families remain nominal.",
         "whyNot": [
           {
             "key": "A",
@@ -35667,7 +35667,7 @@
             "reason": "D catches direct mixing but loses generic products, quotients, conversions, and shared dimensional APIs."
           }
         ],
-        "tradeoff": "The compiler owns one narrow algebraic relation. That is acceptable because every quantity family shares it and runtime representation stays unchanged."
+        "tradeoff": "The compiler owns narrow linear and affine relations. Families opt in explicitly, so currency and other runtime-valued domains keep nominal semantics and runtime representation stays unchanged."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -35857,12 +35857,12 @@
       "id": "D-SHAPE-HASH1",
       "cardId": "c0dv54re",
       "group": "syntax",
-      "title": "What single job does `#` keep?",
-      "gist": "Choose whether `#` remains Jet's visible directive plane or gains a second unrelated job.",
-      "lesson": "A directive changes how the compiler or build system treats nearby source. Jet already uses `#` for audited gates, tests, targets, tasks, unit families, and other compiler-known declarations.\n\nBuild facts are values such as target operating system, architecture, and profile. Values should live in typed namespaces so ordinary expressions, completion, and receipts can inspect them.\n\nThis choice must respect the existing marker map. Reusing `#` for handles or facts would give one sigil unrelated reading rules.",
+      "title": "What single conceptual plane does `#` keep?",
+      "gist": "Choose whether `#` remains Jet's compiler and compile-time plane or gains an unrelated reference job.",
+      "lesson": "Jet's ratified marker-family law assigns `#` to the compiler and compile-time-value plane. That includes audited gates, tests, targets, tasks, capability sets such as `#(Fs)`, lengths such as `[T#N]`, package lines such as `pkg#1.2.3`, and compiler values such as `#Caller()`.\n\nBuild facts are compiler-known comptime subjects such as target operating system. Completion and receipts must expose their exact resolved values.\n\nReusing `#` for declaration handles would add an unrelated reference job to this otherwise coherent plane.",
       "explainer": "",
       "story": "Noah cross-compiles a command and a JetOS image. He needs target facts in conditions and visible audited directives around exceptional compiler behavior.",
-      "inWild": "if build.target.os == .Linux {\n    packages += [pkgs.bubblewrap]\n}\n\n#Unsafe(\"MMIO register\") { ... }",
+      "inWild": "comptime if build.os == {\n    .Linux -> packages + [pkgs.bubblewrap]\n    else -> packages\n}\n\n#Unsafe(\"MMIO register\") { ... }",
       "detail": "",
       "options": [
         {
@@ -35874,10 +35874,10 @@
         },
         {
           "key": "B",
-          "name": "Jet adaptation: directives plus build facts",
-          "detail": "Keep `#` solely for compiler and build directives with explicit scope. Put target, toolchain, profile, and graph facts in typed `build` values used by packages, JetOS, receipts, and ordinary comptime conditions.",
-          "technical": "Reaffirm D-SHAPE2's marker plane. BuildContext owns typed facts; locks and receipts record their exact values. No new hash expression form appears.",
-          "code": "if build.target.os == .Linux { ... }\n#Target(.Web) fn render() { ... }\n#Test { ... }"
+          "name": "Jet adaptation: compiler and comptime plane",
+          "detail": "Keep all ratified hash forms on Jet's compiler and compile-time-value plane. Preserve D-OSTARGET2 exactly: `comptime if build.os ==`. Packages, JetOS, locks, and receipts consume the same resolved build subject.",
+          "technical": "Reaffirm D-MARKER-FAMILY1 and the block-plane law without claiming every hash form is a scoped declaration marker. `#(Fs)`, `[T#N]`, `pkg#1.2.3`, and `#Caller()` remain valid members of the same plane. `build` is the compiler-known D-OSTARGET2 subject, not a new general namespace. Receipts record resolved branch facts. No alternate target-fact path appears.",
+          "code": "comptime if build.os == {\n    .Linux -> linux_packages\n    else -> portable_packages\n}\n\nfn read(path: Path) #(Fs) -> [Byte#4096] { ... }\nversion :: pkg#1.2.3\ncaller :: #Caller()"
         },
         {
           "key": "C",
@@ -35903,7 +35903,7 @@
       ],
       "rec": "B",
       "recommendation": {
-        "why": "B gives each concept one shape: `#` marks scoped compiler directives, while build facts remain ordinary typed values. It preserves shipped syntax and serves package, build, and JetOS evaluation uniformly.",
+        "why": "B preserves one established concept: `#` signals compiler-owned or compile-time meaning, while D-OSTARGET2 remains the sole build-condition path. Packages, builds, receipts, and JetOS agree.",
         "whyNot": [
           {
             "key": "A",
@@ -35918,7 +35918,7 @@
             "reason": "D destroys a coherent shipped vocabulary without providing a better immediate job."
           }
         ],
-        "tradeoff": "Hash remains unavailable for compact handles. That is acceptable because declarations already have typed names and directives need the stronger visual boundary."
+        "tradeoff": "Hash remains unavailable for declaration handles. Declarations already have typed names, while the broader compiler and compile-time plane benefits from one strong visual boundary."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -36913,6 +36913,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T22:34:21.118Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-HASH1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:34:17.057Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-QUANTITY1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:34:13.580Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:34:09.800Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:34:05.964Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:34:02.605Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:33:01.764Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
     {
       "at": "2026-07-14T22:26:29.111Z",
       "by": "luna-capability-verifier",
@@ -40363,55 +40412,6 @@
       "action": "card.update",
       "ref": "c0kxxeb6",
       "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:19:44.123Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T17:19:44.027Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0zh74hs",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:19:43.907Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0c9vzub",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-14T17:19:43.789Z",
-      "by": "codex",
-      "action": "decision.add",
-      "ref": "D-SHAPE-CONTEXTFORM1",
-      "note": "How should code show the extent of a hash rule change? (draft)"
-    },
-    {
-      "at": "2026-07-14T17:19:43.691Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0c9vzub",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:19:43.569Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c07d1t1q",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-14T17:19:43.454Z",
-      "by": "codex",
-      "action": "decision.add",
-      "ref": "D-SHAPE-CONTEXT1",
-      "note": "What should a hash marker always tell the reader? (draft)"
     }
   ],
   "nextNum": 368,
