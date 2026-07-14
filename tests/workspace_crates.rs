@@ -162,6 +162,9 @@ fn workspace_crates_keep_declared_dependency_direction() {
         &["jet-foundation", "jet-repl"],
     );
     assert_deps("crates/jet-canvas/Cargo.toml", &["jet-foundation"]);
+    // Card #367 slice 5: `jetpack` removed from jet-devserver — Canvas
+    // WorkspaceFile/WorkspaceLock scans now route through `jet-env-model` (L2)
+    // and `jet-pkg-model` (L1) rather than the full engine crate.
     assert_deps(
         "crates/jet-devserver/Cargo.toml",
         &[
@@ -172,7 +175,6 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-impact",
             "jet-repl",
             "jet-semindex",
-            "jetpack",
         ],
     );
     assert_deps(
@@ -222,12 +224,10 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
     // (slice 2) is expected to depend on `jetpack` until a later card
     // physically relocates the JetOS realization engine out of it (open
     // scope gate, not this slice — see docs/plans/epoch-3/product-split-slice4.md).
-    // Canvas's pre-existing WorkspaceFile/WorkspaceLock engine calls moved
-    // with their implementation into jet-devserver; this is relocated debt,
-    // not a new package-engine consumer.
+    // Canvas's WorkspaceFile/WorkspaceLock calls moved off jetpack onto
+    // jet-env-model (slice 5), removing jet-devserver from this debt list.
     let allowed = [
         "Cargo.toml",
-        "crates/jet-devserver/Cargo.toml",
         "crates/jetos/Cargo.toml",
     ];
     let mut actual = Vec::new();
@@ -254,11 +254,11 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
 #[test]
 fn direct_jetpack_imports_stay_behind_known_boundaries() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Card #367 slice 5: Canvas WorkspaceFile/WorkspaceLock scans moved off
+    // jetpack onto jet-env-model — the three Canvas files are no longer
+    // direct jetpack consumers and are removed from this allowlist.
     let allowed = [
         "crates/jetos/src/main.rs",
-        "crates/jet-devserver/src/Canvas/project_scan.rs",
-        "crates/jet-devserver/src/Canvas/project_transactions.rs",
-        "crates/jet-devserver/src/Canvas/schema_api.rs",
         "Source/LSP/Completion.rs",
         "Source/LSP/Server.rs",
         "Source/lib.rs",

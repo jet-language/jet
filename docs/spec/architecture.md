@@ -95,18 +95,25 @@ model needs (`PackageManifest`, `Manifest`, `ScriptDeps`, `Lock`, `CBind`,
 `CFFI`, `FFI`, `EffectBudget`, `LintPolicy`, and the hangar-listing half of
 `Store` as `PkgStore`) come from `jet-driver`'s `jet-pkg-model` re-export, the
 same seam the compiler itself uses. Genuine `jetpack`-engine calls that
-haven't split out yet (`Overlay`, `WorkspaceFile`, `WorkspaceLock`,
-`Discovery`, `JetPin`, `ScriptLock`) stay direct `jetpack::…` references in a
-small, explicit set of files
-(`tests/workspace_crates.rs::direct_jetpack_imports_stay_behind_known_boundaries`
-pins exactly which). `ModuleEval` is no longer one of them: card #367 slice 4
-sank it into `jet-env-model` (L2, pure eval — three acyclic layers now: L1
-`jet-pkg-model` data, L2 `jet-env-model` plan model, L3 `jetpack` env-runtime
-+ JetOS realization, both depending down on L2 rather than sharing it by
-living in one engine crate). `jet-devserver::Canvas`'s package-manifest scans
-(`WorkspaceFile`) still route through the `jetpack` engine directly; its
-env-plan scans (`jet_env_model::ModuleEval::evaluate_env`) go straight to
-`jet-env-model`, the same crate both realizers depend on. The root binary
+haven't split out yet (`Overlay` engine side, `Discovery`, `JetPin`,
+`ScriptLock`) stay direct `jetpack::…` references in a small, explicit set of
+files (`tests/workspace_crates.rs::direct_jetpack_imports_stay_behind_known_boundaries`
+pins exactly which). `ModuleEval` is no longer one of them (card #367 slice 4:
+sank into `jet-env-model` L2). `WorkspaceFile` and `WorkspaceLock` are no
+longer one of them either: card #367 slice 5 sank the pure overlay-policy
+types and parse/strip into `jet-pkg-model::Overlay` (L1), the
+`WorkspacePlan`/`WorkspaceMember` types and lock read path into
+`jet-pkg-model::WorkspacePlan`/`WorkspaceLock` (L1), and the `workspace.jet`
+evaluator (`load`/`evaluate`) into `jet-env-model::WorkspaceFile` (L2). Both
+`jetpack::WorkspaceFile` and `jetpack::WorkspaceLock` are now re-export shims.
+`jet-devserver` dropped its `jetpack` dependency entirely; Canvas
+WorkspaceFile/WorkspaceLock scans (`jet_env_model::WorkspaceFile::load`,
+`jet_env_model::WorkspaceLock::load`) and env-plan scans
+(`jet_env_model::ModuleEval::evaluate_env`) all route through `jet-env-model`,
+the same L2 crate both realizers depend on. The three acyclic layers now own
+their full surface: L1 `jet-pkg-model` data, L2 `jet-env-model` plan model,
+L3 `jetpack` env-runtime + JetOS realization (both depending down on L2).
+The root binary
 still owns native build execution: `Source/CmdCompile.rs`
 invokes rustc, classifies linker/tool failures, renders the I2 ICE banner, and
 links any prepared FFI artifact. Do not move that responsibility into a seam

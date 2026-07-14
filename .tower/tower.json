@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 533,
-    "rev": 5834,
+    "rev": 5847,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1843,7 +1843,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-14",
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
@@ -7495,12 +7495,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "# Plan: Prepare clean jet / jetpack / jetos split\n\nRatified input:\n- D-PRODUCT-SPLIT1=C canonical ownership split with teaching/provenance shims.\n\nImplementation slices:\n1. Extract shared package/config model crate for read-only manifest/lock/store/ref/workspace/script data so jet-driver no longer depends on jetpack engine.\n2. Move jetpack binary ownership into crates/jetpack; create real crates/jetos binary/crate for OS workflows.\n3. Keep jet root focused on language/compiler/dev loop; route compatibility forms with clear owner/provenance messages.\n4. Split ModuleEval plan model from env runtime and JetOS realization.\n5. Move Canvas package/workspace scans behind shared model API.\n6. Split tests/jetpack.rs into package engine, dispatch, JetOS generation/proof, Studio, and fixture helpers.\n7. Update workspace dependency guards and docs paths.\n\nAcceptance:\n- Root package owns only jet; jetpack/jetos binaries come from owning crates.\n- jet-driver no longer depends on jetpack engine.\n- Existing public commands remain byte-compatible or emit ratified teaching/provenance messages.\n- Canvas project scan works through shared model.\n\nVerification:\n- nix develop -c cargo check --workspace\n- nix develop -c cargo test --test workspace_crates\n- nix develop -c cargo test --test engine_dispatch\n- nix develop -c cargo test --test jetpack\n- nix develop -c scripts/agent/verify-full.sh before done.",
       "blockedBy": [],
       "assignee": "cursor-main",
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "cursor-367-impl",
+          "text": "[handoff] cursor-367-impl: criteria 5+7 met. Files changed: crates/jet-pkg-model/src/Overlay.rs (new, pure overlay parse/strip/types), crates/jet-pkg-model/src/WorkspacePlan.rs (new, WorkspacePlan+WorkspaceMember), crates/jet-pkg-model/src/WorkspaceLock.rs (new, load read API), crates/jet-pkg-model/src/lib.rs (add 3 modules), crates/jet-env-model/src/WorkspaceFile.rs (new, full load/evaluate + 17 tests), crates/jet-env-model/src/lib.rs (add WorkspaceFile + re-exports), crates/jetpack/src/Overlay.rs (thin: re-export pure from jet-pkg-model + keep engine fns), crates/jetpack/src/WorkspaceFile.rs (shim: re-export from jet-env-model), crates/jetpack/src/WorkspaceLock.rs (keep write + re-export load), crates/jetpack/src/lib.rs (comment), crates/jet-devserver/Cargo.toml (remove jetpack dep), crates/jet-devserver/src/Canvas/project_scan.rs (jetpack:: -> jet_env_model::), crates/jet-devserver/src/Canvas/project_transactions.rs (jetpack:: -> jet_env_model::), crates/jet-devserver/src/Canvas/schema_api.rs (jetpack:: -> jet_env_model::), tests/workspace_crates.rs (update all 3 allowlists), docs/spec/architecture.md (update product-split section). Proof: cargo check -p jet-pkg-model -p jet-env-model -p jetpack -p jet-devserver: ok; cargo test --test workspace_crates: 3/3; cargo test --test canvas: 57/57; cargo test --test pkg: 136/136; cargo test -p jet-env-model --lib: 76/76 (incl 17 WorkspaceFile tests). Remaining risk: parent should run full suite verify-full.sh before marking done."
+        },
+        {
+          "at": "2026-07-14",
+          "by": "cursor-367-impl",
+          "text": "slice 5 impl complete"
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -7594,11 +7604,11 @@
         {
           "n": 5,
           "text": "Slice 5: Canvas package/workspace scans move behind the shared model API",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T18:10:11.624Z"
+          "status": "verified",
+          "metBy": "cursor-367-impl",
+          "verifiedBy": "cursor-367-verify",
+          "evidence": "Parent re-ran: workspace_crates 3/3; canvas 57/57. Confirmed jet-devserver Cargo.toml has no jetpack; Canvas project_scan/project_transactions/schema_api use jet_env_model::WorkspaceFile + jet_pkg_model::WorkspaceLock; jet-env-model owns WorkspaceFile; jet-pkg-model owns Overlay/WorkspacePlan/WorkspaceLock::load.",
+          "at": "2026-07-14T12:18:25.711Z"
         },
         {
           "n": 6,
@@ -7612,16 +7622,16 @@
         {
           "n": 7,
           "text": "Slice 7: workspace dependency guard tests (tests/workspace_crates.rs) and docs paths (architecture.md etc.) match the new crate boundaries",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T18:10:40.935Z"
+          "status": "verified",
+          "metBy": "cursor-367-impl",
+          "verifiedBy": "cursor-367-verify",
+          "evidence": "Parent re-ran workspace_crates 3/3. Allowlists: Canvas files gone from direct_jetpack_imports; jet-devserver gone from jetpack debt. architecture.md product-split documents Canvas via jet-env-model/jet-pkg-model. jetos→jetpack debt preserved per D-JOS-ENGINEHOME1=C.",
+          "at": "2026-07-14T12:18:25.810Z"
         }
       ],
       "needsAcceptance": false,
       "refs": [],
-      "claimedAt": "2026-07-14T11:54:48.952Z"
+      "claimedAt": "2026-07-14T12:16:57.578Z"
     },
     {
       "id": "c0fzoku6",
@@ -9957,7 +9967,7 @@
         "c0hxraci"
       ],
       "workOrder": 133,
-      "assignee": "cursor-scout",
+      "assignee": null,
       "log": [
         {
           "at": "2026-07-10",
@@ -9978,8 +9988,7 @@
       "updated": "2026-07-14",
       "criteria": [],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-14T11:58:17.233Z"
+      "refs": []
     },
     {
       "id": "c0hxraci",
@@ -10006,7 +10015,7 @@
         }
       ],
       "created": "2026-07-09T23:22:09.059Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-14",
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
@@ -32566,6 +32575,97 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T12:18:25.810Z",
+      "by": "cursor-367-verify",
+      "action": "card.criteria-verify",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-14T12:18:25.711Z",
+      "by": "cursor-367-verify",
+      "action": "card.criteria-verify",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-14T12:18:16.655Z",
+      "by": "cursor-scout",
+      "action": "card.release",
+      "ref": "c0frdmrx",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T12:18:16.555Z",
+      "by": "cursor-scout",
+      "action": "card.release",
+      "ref": "c0hxraci",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T12:18:16.461Z",
+      "by": "cursor-scout",
+      "action": "card.release",
+      "ref": "c2qj06uq",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T12:17:35.007Z",
+      "by": "cursor-scout",
+      "action": "card.claim",
+      "ref": "c0frdmrx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T12:17:34.895Z",
+      "by": "cursor-scout",
+      "action": "card.claim",
+      "ref": "c0hxraci",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T12:17:34.781Z",
+      "by": "cursor-scout",
+      "action": "card.claim",
+      "ref": "c2qj06uq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T12:16:57.578Z",
+      "by": "cursor-main",
+      "action": "card.claim",
+      "ref": "c_audit_367_q80zrm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T12:16:25.845Z",
+      "by": "cursor-367-impl",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T12:16:15.297Z",
+      "by": "cursor-367-impl",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T12:16:11.704Z",
+      "by": "cursor-367-impl",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-14T12:16:05.630Z",
+      "by": "cursor-367-impl",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#5"
+    },
+    {
       "at": "2026-07-14T12:11:51.993Z",
       "by": "claude-main",
       "action": "card.update",
@@ -35973,97 +36073,6 @@
       "action": "card.update",
       "ref": "c0u6kwwb",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T18:30:13.314Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T18:20:00.308Z",
-      "by": "grok-419-verify2",
-      "action": "card.release",
-      "ref": "c0yxdqju",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T18:20:00.216Z",
-      "by": "grok-419-verify2",
-      "action": "card.update",
-      "ref": "c0yxdqju",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T18:20:00.098Z",
-      "by": "grok-419-verify2",
-      "action": "card.criteria-verify",
-      "ref": "c0yxdqju",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-13T18:20:00.006Z",
-      "by": "grok-419-verify2",
-      "action": "card.criteria-verify",
-      "ref": "c0yxdqju",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-13T18:19:59.921Z",
-      "by": "grok-419-verify2",
-      "action": "card.criteria-verify",
-      "ref": "c0yxdqju",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-13T18:19:59.826Z",
-      "by": "grok-419-verify2",
-      "action": "card.criteria-verify",
-      "ref": "c0yxdqju",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-13T18:19:59.734Z",
-      "by": "grok-419-verify2",
-      "action": "card.claim",
-      "ref": "c0yxdqju",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T18:19:59.646Z",
-      "by": "grok-419-builder",
-      "action": "card.release",
-      "ref": "c0yxdqju",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T18:19:59.556Z",
-      "by": "grok-419-builder",
-      "action": "card.update",
-      "ref": "c0yxdqju",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T18:19:59.443Z",
-      "by": "grok-419-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0yxdqju",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-13T18:19:59.355Z",
-      "by": "grok-419-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0yxdqju",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-13T18:19:59.268Z",
-      "by": "grok-419-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0yxdqju",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
