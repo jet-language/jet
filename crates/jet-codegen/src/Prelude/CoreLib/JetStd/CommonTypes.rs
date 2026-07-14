@@ -206,6 +206,7 @@
         pub(crate) lookahead: Option<u8>,
         pub(crate) frames: Vec<super::JetCborReadFrame>,
         pub(crate) retained: usize,
+        pub(crate) workspace: usize,
     }
     pub struct CBORWriter {
         pub(crate) output: super::JetFileWriter,
@@ -216,6 +217,7 @@
         pub(crate) root_written: bool,
         pub(crate) finished: bool,
         pub(crate) retained: usize,
+        pub(crate) workspace: usize,
     }
 
     #[derive(Clone, Debug, PartialEq)]

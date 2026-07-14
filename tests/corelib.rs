@@ -1308,7 +1308,7 @@ fn run() {{
     float_writer.finish() ?? panic("float finish")
     whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
     expected_whole: [U8] :: [162, 97, 97, 1, 97, 98, 98, 120, 121]
-    print(cbor.encode(whole_tree) == expected_whole)
+    print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)
     if after == {{
         ok(_) -> print(false)
@@ -1658,6 +1658,67 @@ fn run() {{
     assert_eq!(fs::read(&object_ok).unwrap(), [0xa1, 0x61, b'a', 0xf6]);
     assert!(fs::read(&incomplete).unwrap().is_empty());
     assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cbor_stream_workspace_growth_is_prospective_and_terminal() {
+    let dir = std::env::temp_dir().join(format!("jet_cbor_workspace_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let success = dir.join("success.cbor").to_string_lossy().replace('\\', "\\\\");
+    let rejected = dir.join("rejected.cbor").to_string_lossy().replace('\\', "\\\\");
+    let source = format!(r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+    repeated :: writer.finish()
+    if repeated == {{
+        err(error) -> return error.reason == reason
+        ok(_) -> return false
+    }}
+    return false
+}}
+
+fn close_array(writer: &cbor.CBORWriter) {{
+    result :: writer.write(encoding.DataEvent.ArrayEnd)
+    if result == {{
+        err(error) -> panic("{{error.reason}}")
+        ok(_) -> return
+    }}
+}}
+
+fn run() {{
+    roomy := encoding.EncodingLimits.safe()
+    roomy.max_item_bytes = 9
+    output :: files.create("{success}") ?? panic("create")
+    writer := cbor.writer(^output, roomy) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("start")
+    loop _ in 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
+    close_array(&writer)
+    writer.finish() ?? panic("finish")
+
+    tight := encoding.EncodingLimits.safe()
+    tight.max_item_bytes = 7
+    rejected_output :: files.create("{rejected}") ?? panic("create rejected")
+    rejected_writer := cbor.writer(^rejected_output, tight) ?? panic("rejected writer")
+    rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
+    loop _ in 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
+    if rejected_writer.write(encoding.DataEvent.Null) == {{
+        err(first) -> {{
+            print(first.reason == "max_item_bytes 7 exceeded")
+            print(terminal(&rejected_writer, copy first.reason))
+        }}
+        ok(_) -> {{ print(false); print(false) }}
+    }}
+}}
+"#);
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_workspace", &source, &[], None);
+    assert_eq!(code, 0, "CBOR workspace program failed: {stderr}");
+    assert_eq!(stdout, "true\ntrue\n");
+    assert_eq!(fs::read(dir.join("success.cbor")).unwrap(), [0x88, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6]);
     let _ = fs::remove_dir_all(&dir);
 }
 
