@@ -692,6 +692,10 @@ fn compiler_code_has_no_include_splices() {
             }
             let text = fs::read_to_string(&path).unwrap_or_default();
             for (i, line) in text.lines().enumerate() {
+                // Durability guards that *mention* include!( in a string are fine.
+                if line.contains("contains(\"include!(") || line.contains("contains(\"include!\"") {
+                    continue;
+                }
                 if let Some(pos) = line.find("include!") {
                     let after = line[pos + "include!".len()..].trim_start();
                     if after.starts_with('(') {
