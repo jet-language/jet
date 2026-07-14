@@ -1,9 +1,89 @@
-# Package & environment ecosystem — three frameworks
+# Package and environment ecosystem research archive
 
-One decision: the shape of Jet's package/env system — the thing that replaces
-Nix flakes 1:1 today and every package manager eventually. Pick one framework
-by ballot. Everything below is driven by a single worked example: **this repo's
-own `flake.nix`**, ported in full, zero unmapped fields.
+> **Status, 2026-07-14:** the Deck/Roles/Fold mega-ballot is withdrawn. It
+> coupled file layout, role vocabulary, merge law, development environments,
+> outputs, aliases, and build lowering. The examples below remain prior-art and
+> parity research. They are not one live choice and do not authorize syntax.
+>
+> Live decisions are atomic: D-ECO1 chooses whether file placement changes
+> meaning; D-ECO-ROOT1 chooses workspace discovery; D-ECO-ENV1 chooses the
+> environment source of truth; D-ECO-OUTPUT1 chooses the output model;
+> D-ECO-MATRIX1 chooses target/profile representation; D-ECO-MATRIX-MERGE1
+> chooses overlap law; D-ECO-INPUT1 chooses input representation;
+> D-ECO-SHARE1 chooses shared selection; D-ECO-LOCK1 chooses receipt contents;
+> D-ECO-RECEIPT-SCOPE1 chooses receipt slicing; D-ECO-UPDATE1 chooses update
+> scope; D-SHAPE-MERGE1 separately chooses package contribution authority.
+
+## Archived three-framework comparison
+
+## Current architecture under decision
+
+The new ballots test one coherent model, not unrelated syntax samples:
+
+1. A package is one nominal, typed graph.
+2. Files are editing views. Moving text cannot change the graph.
+3. A workspace selects package sources. It never becomes a second resolver.
+4. Dependencies, tools, data, and toolchains may become one typed input graph.
+5. Libraries, commands, services, checks, and environments are typed outputs.
+6. Target and profile are tested as orthogonal selectors over those outputs.
+7. A separate ballot tests whether the lock is a semantic receipt containing
+   exact content, toolchain, selectors, patches, provenance, and selection reasons.
+
+The beginner lens is still small:
+
+```text
+jet run
+jet test
+jet dev
+```
+
+The exact lens reveals the same graph rather than a different configuration
+language:
+
+```text
+jet workspace members
+jet package inspect todo
+jet explain todo.cli@wasm,release
+jet lock why text_parser
+```
+
+The shared teaching example is a todo project with one core library, command,
+web page, test, and development environment. Each comparison uses that same
+example. A ballot may add a concept only when the example needs it.
+
+### Community evidence that shaped the atomic ballots
+
+- Cargo workspaces prove the value of one lock and shared metadata. Cargo's
+  feature-unification and mixed minimum-Rust-version discussions show why a
+  workspace must not become a hidden second resolver.
+- Nix flakes prove the value of explicit inputs, outputs, development shells,
+  checks, and locks. Nix issue discussions also document output-schema
+  restrictions, repeated system parameters, and duplicated input trees.
+- pnpm proves that checked workspace patterns and catalogs reduce repetition.
+  Catalog adoption and update issues show the cost of splitting one graph
+  across YAML, package JSON, protocols, and publishing rewrites.
+- Go workspaces provide simple local source selection. Go issues show how a
+  workspace can hide undeclared dependencies or differ from the published
+  module graph.
+- Bazel proves the value of stable target addresses, platforms, toolchains,
+  queries, and remote action identity. Its BUILD and Starlark ceremony argues
+  for typed Jet values rather than a second configuration language.
+
+Primary references:
+
+- [Cargo workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html)
+- [Cargo features 2.0 discussion](https://github.com/rust-lang/cargo/issues/8088)
+- [Cargo mixed workspace MSRV issue](https://github.com/rust-lang/cargo/issues/14414)
+- [Nix flake parameter repetition](https://github.com/NixOS/nix/issues/5663)
+- [Nix flake output-shape discussion](https://github.com/NixOS/nix/issues/3966)
+- [pnpm catalog update issue](https://github.com/pnpm/pnpm/issues/8641)
+- [Go workspace tutorial](https://go.dev/doc/tutorial/workspaces)
+- [Go workspace undeclared-dependency issue](https://github.com/golang/go/issues/60430)
+- [Go workspace vendoring issue](https://github.com/golang/go/issues/60056)
+
+The archived proposal asked for one decision covering the entire package and
+environment system. Everything below used this repo's `flake.nix` as one parity
+fixture. The current atomic ballots replace that decision structure.
 
 The three frameworks share one semantic mechanism — typed **role modules**
 (`module <role>.<name> { … }`, U3) merged into reserved namespaces. They differ
@@ -631,14 +711,16 @@ tooling.
 
 ---
 
-## Ballot rows
+## Archived parity inventory
 
-D-ECO1 selects the framework; D-ECO2–12 and 14–19 are shared parity spellings
-needed under *any* framework; D-ECO13 is Fold-only.
+This table records what the earlier comparison attempted to cover. It is not a
+ballot. Rows already ratified in Tower remain ratified records. Conflicting or
+missing spec entries require explicit reconciliation; this archive cannot
+silently settle them.
 
 | ID | Decision | Deck | Roles | Fold |
 |---|---|---|---|---|
-| **D-ECO1** | **File model archetype** | one `project.jet` | reserved role files (status quo) | folded→split; filenames are convention |
+| **D-ECO1** | **Archived file-model comparison; replaced by the atomic live ballot** | one `project.jet` | reserved role files | folded→split |
 | D-ECO2 | `build: Recipe.cargo(lock:)` as first-class package build field | yes | yes | yes |
 | D-ECO3 | `wrap: Wrap.{ path_prefix, env }` (replaces `wrapProgram`) | yes | yes | yes |
 | D-ECO4 | `alias(package, bin:)` (replaces `apps.*` second binary) | yes | yes | yes |

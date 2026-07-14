@@ -447,3 +447,52 @@ A ballot passes only when all of these are true:
 
 If the owner can like an option's main idea but reject one punctuation detail
 inside it, the ballot contains more than one decision and must be split.
+
+## 2026-07-14 ballot correction
+
+The first ballot pass used abstract product stories and treated prior art as a
+feature list. The replacement ballots use this stricter standard:
+
+- One small textbook program per ballot: `Stack`, `Task`, a text file, or a
+  distance/time calculation.
+- The Jet options and every language comparison perform the same task.
+- The lesson teaches the concept before introducing ecosystem or policy needs.
+- Community experience can veto attractive prior art. Popularity alone is not
+  evidence that a feature is well designed.
+
+Research that changed the options:
+
+- Swift accepted explicit `copy`, but later discussion shows that copying a
+  class reference may preserve identity rather than clone the object. Jet's
+  `^^` candidate therefore means an independent copy followed by transfer and
+  must reject types without that operation.
+- Scala's `CanThrow` documentation describes the inflexibility and propagation
+  burden inherited from Java checked exceptions. Jet keeps local effect
+  inference and asks only where an explicitly pinned row appears.
+- Python gives `_name` a weak internal-use convention and `__name` a separate
+  collision-avoidance behavior. Rust instead uses `_name` to suppress unused
+  warnings. Jet ballots separate bare `_`, `_name`, and `__name`.
+- Elixir's first-argument pipe is popular, yet `then` and `tap` exist because
+  ordinary value threading does not cover every shape. Jet's pipe ballot now
+  asks for a job dot calls cannot do: building a reusable typed flow.
+- Rust favors scope cleanup and an ordinary `drop(value)` for early release.
+  Go's function-scoped `defer` can retain loop resources too long. Jet's
+  resource ballot now separates lifetime end from fallible protocol finish.
+- C++ `string_view` and `span` are useful but do not prevent dangling storage.
+  Jet's view options all preserve checked owner and escape rules.
+- F# units compose with no runtime cost, but Microsoft warns that units erase
+  at some .NET boundaries. The quantity ballot therefore separates compile-time
+  algebra from runtime and wire representation.
+
+Primary community and design references:
+
+- [Swift explicit-copy acceptance](https://forums.swift.org/t/accepted-se-0377-revision-make-borrowing-and-consuming-parameters-require-explicit-copying-with-the-copy-operator/65293)
+- [Swift class-copy discussion](https://forums.swift.org/t/copy-operator-doesnt-clone-a-class-instance/84592)
+- [Scala `CanThrow`](https://docs.scala-lang.org/scala3/reference/experimental/canthrow.html)
+- [Python PEP 8 underscore guidance](https://peps.python.org/pep-0008/)
+- [Python C API underscore discussion](https://discuss.python.org/t/c-api-what-should-the-leading-underscore-py-mean/18486)
+- [Rust Clippy explicit-drop issue](https://github.com/rust-lang/rust-clippy/issues/6446)
+- [C++ Core Guidelines view lifetime discussion](https://github.com/isocpp/CppCoreGuidelines/issues/2276)
+- [F# units of measure](https://learn.microsoft.com/en-us/dotnet/fsharp/language-reference/units-of-measure)
+- [F# component guidance on unit erasure](https://learn.microsoft.com/en-us/dotnet/fsharp/style-guide/component-design-guidelines)
+- [mp-units points and quantities](https://mpusz.github.io/mp-units/latest/tutorials/affine_space/points_and_quantities/)

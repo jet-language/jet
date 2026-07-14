@@ -3579,26 +3579,32 @@ implementation milestone is pending.
 | ID | Question | Needed by |
 | --- | -------- | --------- |
 | S56 | typed reflection / user derives | **Epoch 3** — Tower #129 |
-| D-ECO1 | whether package meaning depends on its file | **Epoch 3** — Tower #532 |
-| D-SHAPE2 | how attached rules and scoped rules differ | **Epoch 3** — Tower #534 |
-| D-SHAPE-LIFECYCLE | how a caller keeps a value that a function takes | **Epoch 3** — Tower #535 |
-| D-SHAPE3a | how fresh hidden-state values are created | **Epoch 3** — Tower #536 |
+| D-ECO1 | whether file placement changes package meaning | **Epoch 3** — Tower #532 |
+| D-SHAPE2 | the user-visible boundary between `@` and `#` | **Epoch 3** — Tower #534 |
+| D-SHAPE-LIFECYCLE | whether a taking call has a copy shorthand | **Epoch 3** — Tower #535 |
+| D-SHAPE3a | whether expected type shortens `Type.new` to `.new` | **Epoch 3** — Tower #536 |
 | D-SHAPE5a | how one package role holds its fields | **Epoch 3** — Tower #539 |
 | D-SHAPE5b | how one package output is written | **Epoch 3** — Tower #540 |
 | D-SHAPE-CLI1 | what owns the root command's input types | **Epoch 3** — Tower #541 |
 | D-SHAPE8 | where effects appear in a function signature | **Epoch 3** — Tower #543 |
 | D-SHAPE-INTERNAL1 | what a leading underscore promises | **Epoch 3** — Tower #551 |
-| D-SHAPE-PIPE1 | whether Jet has a left-to-right flow lens | **Epoch 3** — Tower #552 |
-| D-SHAPE-RESOURCE1 | how a resource closes early | **Epoch 3** — Tower #557 |
+| D-SHAPE-PIPE1 | the one job owned by the pipe family | **Epoch 3** — Tower #552 |
+| D-SHAPE-RESOURCE1 | how a resource ends before its surrounding scope | **Epoch 3** — Tower #557 |
 | D-SHAPE-DURATION1 | how a runtime number becomes a duration | **Epoch 3** — Tower #558 |
-| D-SHAPE-MERGE1 | how repeated package fields combine | **Epoch 3** — Tower #559 |
+| D-SHAPE-MERGE1 | who states how package contributions combine | **Epoch 3** — Tower #559 |
 | D-SHAPE-CONVERT1 | which side names a conversion | **Epoch 3** — Tower #566 |
-| D-SHAPE-VIEW1 | how a non-owning view is requested | **Epoch 3** — Tower #567 |
+| D-SHAPE-VIEW1 | how source requests a non-owning view | **Epoch 3** — Tower #567 |
 | D-SHAPE-OPAQUE-INFER1 | when generic constructor arguments disappear | **Epoch 3** — Tower #568 |
 | D-SHAPE-DURATIONCONVERT1 | how code asks for whole duration units | **Epoch 3** — Tower #575 |
-| D-SHAPE-QUANTITY1 | whether units beyond time share one checked system | **Epoch 3** — Tower #576 |
+| D-SHAPE-QUANTITY1 | where dimension arithmetic is proved | **Epoch 3** — Tower #576 |
 | D-SHAPE-MERGEPROVENANCE1 | where complete package merge history is stored | **Epoch 3** — Tower #578 |
 | D-SHAPE-EXPOSE1 | what every interface lens must share | **Epoch 3** — Tower #582 |
+| D-SHAPE-DUNDER1 | what double underscore means | **Epoch 3** — Tower #584 |
+| D-ECO-ROOT1 | how a workspace finds package roots | **Epoch 3** — Tower #585 |
+| D-ECO-ENV1 | the source of truth for development environments | **Epoch 3** — Tower #586 |
+| D-ECO-OUTPUT1 | the common model for package outputs | **Epoch 3** — Tower #587 |
+| D-ECO-MATRIX1 | how outputs represent target and profile variation | **Epoch 3** — Tower #588 |
+| D-ECO-INPUT1 | how one package represents outside inputs | **Epoch 3** — Tower #589 |
 
 #### Queued behind a parent decision
 
@@ -3609,6 +3615,14 @@ independent choice.
 | ID | One later question | Tower |
 | --- | ------------------ | ----- |
 | D-SHAPE-ENTRY1 | how a package output points to its start function | #544 |
+| D-SHAPE-HASH1 | the one job for `#` if D-SHAPE2 frees it | #583 |
+| D-SHAPE-DUNDERACCESS1 | how experts deliberately access a type-owned `__` slot | #590 |
+| D-ECO-MATRIX-MERGE1 | how overlapping target/profile deltas conflict | #591 |
+| D-ECO-SHARE1 | when packages share one input selection | #592 |
+| D-ECO-LOCK1 | what the package lock proves | #593 |
+| D-ECO-UPDATE1 | what a selective input update may reconsider | #594 |
+| D-SHAPE-DUNDERREPLACE1 | how experts deliberately replace a type-owned `__` slot | #595 |
+| D-ECO-RECEIPT-SCOPE1 | how package receipt facts are divided and addressed | #596 |
 | D-SHAPE-CONTEXT1 | what a hash marker always tells the reader | #561 |
 | D-SHAPE-CONTEXTFORM1 | how code shows the extent of a hash rule | #562 |
 | D-SHAPE-INTERNALACCESS1 | how outside code reaches an underscore name | #563 |
