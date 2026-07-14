@@ -606,6 +606,17 @@ pub fn core_fixed_sig(
             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
         )),
         ("core.encoding.xml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
+        ("core.encoding.xml", "reader") => Some((
+            vec![
+                (moved, Type::Named("FileReader".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+                (read, Type::Named("XMLParseOptions".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("XMLReader".to_string()),
+                encoding_error_ty(),
+            )),
+        )),
         ("core.encoding.cbor", "reader") => Some((
             vec![(moved, Type::Named("FileReader".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
             Some(result_ty(Type::Named("CBORReader".to_string()), encoding_error_ty())),

@@ -150,6 +150,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("CSVWriter", "write", 1) => THandleOp::CSVWriterWrite,
         ("CSVWriter", "flush", 0) => THandleOp::CSVWriterFlush,
         ("CSVWriter", "finish", 0) => THandleOp::CSVWriterFinish,
+        ("XMLReader", "next", 0) => THandleOp::XMLReaderNext,
         ("CBORReader", "next", 0) => THandleOp::CBORReaderNext,
         ("CBORWriter", "write", 1) => THandleOp::CBORWriterWrite,
         ("CBORWriter", "flush", 0) => THandleOp::CBORWriterFlush,

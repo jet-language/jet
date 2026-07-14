@@ -140,15 +140,24 @@ impl<'a> Checker<'a> {
                     self.check_decodable(&t, span);
                     return Some(result_ty(t, Type::Named("CBORError".to_string())));
                 }
-                ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor", "reader" | "writer") => {
-                    let max = if module == "core.encoding.json" && name == "writer" { 3 } else { 2 };
+                ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor", "reader" | "writer")
+                | ("core.encoding.xml", "reader") => {
+                    let max = if (module == "core.encoding.json" && name == "writer")
+                        || (module == "core.encoding.xml" && name == "reader")
+                    {
+                        3
+                    } else {
+                        2
+                    };
                     let (min, max) = (1, max);
                     if !(min..=max).contains(&args.len()) {
                         self.diags.push(Diagnostic::error(
                             "E0104",
                             format!("`{}.{}` expects {} to {} arguments, got {}", module_short_name(module), name, min, max, args.len()),
-                            "the file handle is required; limits and canonical mode use safe defaults when omitted".to_string(),
-                            if name == "reader" { format!("write `{}.reader(^file)` or `{}.reader(^file, limits)`", module_short_name(module), module_short_name(module)) } else if module == "core.encoding.json" { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)`".to_string() } else { format!("write `{}.writer(^file)` or `{}.writer(^file, limits)`", module_short_name(module), module_short_name(module)) },
+                            "the file handle is required; limits, XML options, and canonical mode use safe defaults when omitted".to_string(),
+                            if module == "core.encoding.xml" {
+                                "write `xml.reader(^file)`, `xml.reader(^file, limits)`, or `xml.reader(^file, limits, options)`".to_string()
+                            } else if name == "reader" { format!("write `{}.reader(^file)` or `{}.reader(^file, limits)`", module_short_name(module), module_short_name(module)) } else if module == "core.encoding.json" { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)`".to_string() } else { format!("write `{}.writer(^file)` or `{}.writer(^file, limits)`", module_short_name(module), module_short_name(module)) },
                             Some(span),
                         ));
                     }

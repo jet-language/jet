@@ -2127,6 +2127,7 @@ pub enum THandleOp {
     JSONLWriterFlush,
     JSONLWriterFinish,
     CSVReaderNext,
+    XMLReaderNext,
     CSVWriterWrite,
     CSVWriterFlush,
     CSVWriterFinish,

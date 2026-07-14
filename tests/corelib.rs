@@ -4227,6 +4227,137 @@ fn run() {
 }
 
 #[test]
+fn xml_stream_reader_is_incremental_exact_and_terminal() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML stream test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_xml_stream_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let boundary_paths = (4078..=4110)
+        .map(|padding| {
+            let path = dir.join(format!("boundary-{padding}.xml"));
+            fs::write(
+                &path,
+                format!(
+                    "{}<r xmlns=\"urn:r\" a=\"x&amp;y\">é</r>",
+                    " ".repeat(padding)
+                ),
+            )
+            .unwrap();
+            format!("\"{}\"", path.to_string_lossy().replace('\\', "\\\\"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let malformed = dir.join("malformed.xml");
+    fs::write(&malformed, "<r>").unwrap();
+    let limited = dir.join("limited.xml");
+    fs::write(&limited, "<root>text</root>").unwrap();
+    let malformed = malformed.to_string_lossy().replace('\\', "\\\\");
+    let limited = limited.to_string_lossy().replace('\\', "\\\\");
+
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn run() {{
+    paths: [String] :: [{boundary_paths}]
+    passed := 0
+    loop path in paths {{
+        input :: files.open(path) ?? panic("open boundary")
+        reader :: xml.reader(^input) ?? panic("reader defaults")
+        document_start := false
+        root_start := false
+        document_end := false
+        loop true {{
+            maybe :: reader.next() ?? panic("boundary next")
+            if maybe == {{
+                Val(event) -> {{
+                    event_kind := (event.field("$xml_event") ?? panic("event tag")).text() ?? ""
+                    if event_kind == "document_start" {{
+                        wire_encoding := (event.field("encoding") ?? panic("encoding")).text() ?? ""
+                        document_start = wire_encoding == "UTF-8"
+                    }}
+                    if event_kind == "element_start" {{
+                        name := event.field("name") ?? panic("name")
+                        local := (name.field("local") ?? panic("local")).text() ?? ""
+                        namespace := (name.field("namespace_uri") ?? panic("namespace")).text() ?? ""
+                        root_start = local == "r" && namespace == "urn:r"
+                    }}
+                    if event_kind == "document_end" {{ document_end = true }}
+                }}
+                None -> {{ break }}
+            }}
+        }}
+        eof_again :: reader.next() ?? panic("fused eof")
+        if eof_again == {{
+            Val(_) -> {{}}
+            None -> {{ if document_start && root_start && document_end {{ passed++ }} }}
+        }}
+    }}
+    print(passed)
+
+    malformed_input :: files.open("{malformed}") ?? panic("open malformed")
+    malformed_reader :: xml.reader(^malformed_input) ?? panic("malformed reader")
+    loop true {{
+        result :: malformed_reader.next()
+        if result == {{
+            ok(maybe) -> {{
+                if maybe == {{
+                    Val(_) -> {{}}
+                    None -> {{ print("malformed-missed"); break }}
+                }}
+            }}
+            err(first) -> {{
+                again :: malformed_reader.next()
+                if again == {{
+                    ok(_) -> {{ print("terminal-missed") }}
+                    err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+                }}
+                break
+            }}
+        }}
+    }}
+
+    total_limits := encoding.EncodingLimits.safe()
+    total_limits.max_total_bytes = Val(6)
+    total_input :: files.open("{limited}") ?? panic("open total")
+    total_reader :: xml.reader(^total_input, total_limits, xml.XMLParseOptions.safe()) ?? panic("total reader")
+    loop true {{
+        result :: total_reader.next()
+        if result == {{
+            ok(maybe) -> {{
+                if maybe == {{
+                    Val(_) -> {{}}
+                    None -> {{ print("total-missed"); break }}
+                }}
+            }}
+            err(first) -> {{
+                again :: total_reader.next()
+                if again == {{
+                    ok(_) -> {{ print("total-terminal-missed") }}
+                    err(second) -> {{ print(first.byte_offset); print(first.reason == second.reason) }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_stream", &source, &[], None);
+    assert_eq!(code, 0, "XML stream test failed: {stderr}");
+    assert_eq!(stdout, "33\ntrue\n7\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn text_unicode_audit_surface_runs() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

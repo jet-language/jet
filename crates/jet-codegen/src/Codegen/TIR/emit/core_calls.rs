@@ -919,6 +919,25 @@ pub(crate) fn emit_tir_core_call(
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
             format!("{}({}, {})", helper("jet_enc_cbor_reader"), arg(0), limits)
         }
+        ("core.encoding.xml", "reader") => {
+            let limits = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix)
+            };
+            let xml = if args.len() > 2 {
+                arg(2)
+            } else {
+                format!("{}jet_std::XMLParseOptions::safe()", cx.root_prefix)
+            };
+            format!(
+                "{}({}, {}, {})",
+                helper("jet_enc_xml_reader"),
+                arg(0),
+                limits,
+                xml
+            )
+        }
         ("core.encoding.cbor", "writer") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
             format!("{}({}, {})", helper("jet_enc_cbor_writer"), arg(0), limits)

@@ -1510,6 +1510,157 @@ fn jet_cbor_stream_io(error: std::io::Error, offset: i64, path: String) -> jet_s
     out
 }
 
+fn jet_xml_stream_error(error: crate::jet_xml_pull::Error) -> jet_std::EncodingError {
+    use crate::jet_xml_pull::Reason;
+    let kind = match error.kind {
+        Reason::EntityCycle | Reason::Limit => jet_std::EncodingErrorKind::Limit,
+        Reason::Canonicalization | Reason::Unsupported => jet_std::EncodingErrorKind::Unsupported,
+        Reason::Malformed
+            if error.reason.contains("ended")
+                || error.reason.contains("unterminated")
+                || error.reason.contains("truncated") =>
+        {
+            jet_std::EncodingErrorKind::Truncated
+        }
+        _ => jet_std::EncodingErrorKind::Syntax,
+    };
+    jet_std::EncodingError {
+        format: jet_std::EncodingFormat::XML,
+        kind,
+        byte_offset: error.offset as i64,
+        line: error.line.map(|value| value as i64),
+        column: error.column.map(|value| value as i64),
+        path: error.path,
+        reason: error.reason,
+        cause: None,
+    }
+}
+fn jet_xml_io_error(offset: i64, error: std::io::Error) -> jet_std::EncodingError {
+    jet_std::EncodingError {
+        format: jet_std::EncodingFormat::XML,
+        kind: jet_std::EncodingErrorKind::IO,
+        byte_offset: offset,
+        line: None,
+        column: None,
+        path: String::new(),
+        reason: "file IO failed".to_string(),
+        cause: Some(jet_std::EncodingCause {
+            kind: format!("{:?}", error.kind()),
+            os_code: error.raw_os_error().map(i64::from),
+            message: error.to_string(),
+        }),
+    }
+}
+fn jet_enc_xml_reader(
+    input: JetFileReader,
+    limits: jet_std::EncodingLimits,
+    xml: jet_std::XMLParseOptions,
+) -> Result<jet_std::XMLReader, jet_std::EncodingError> {
+    jet_encoding_validate_limits(&limits).map_err(|mut error| {
+        error.format = jet_std::EncodingFormat::XML;
+        error.line = None;
+        error.column = None;
+        error
+    })?;
+    let mut options = jet_xml_options(&xml);
+    options.limits.validate().map_err(jet_xml_stream_error)?;
+    options.limits.max_depth = options.limits.max_depth.min(limits.max_depth as usize);
+    options.limits.max_entity_depth = options
+        .limits
+        .max_entity_depth
+        .min(limits.max_expansion_depth as usize)
+        .min(options.limits.max_depth);
+    options.limits.max_entity_replacement_bytes = options
+        .limits
+        .max_entity_replacement_bytes
+        .min(limits.max_expansion_bytes as usize)
+        .min(options.limits.max_text_bytes);
+    let scanner = crate::jet_xml_pull::StreamScanner::new(
+        limits.max_item_bytes as usize,
+        options,
+    )
+    .map_err(jet_xml_stream_error)?;
+    Ok(jet_std::XMLReader {
+        input,
+        limits,
+        scanner,
+        terminal: None,
+        total: 0,
+        eof: false,
+    })
+}
+fn jet_enc_xml_reader_next(
+    reader: &mut jet_std::XMLReader,
+) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+    if let Some(error) = &reader.terminal {
+        return Err(error.clone());
+    }
+    loop {
+        match reader.scanner.next() {
+            Ok(Some(event)) => {
+                return Ok(Some(jet_xml_to_data_tree(
+                    crate::jet_xml_pull::stream_event_value(event),
+                )))
+            }
+            Ok(None) if reader.eof => return Ok(None),
+            Ok(None) => {}
+            Err(error) => {
+                let error = jet_xml_stream_error(error);
+                reader.terminal = Some(error.clone());
+                return Err(error);
+            }
+        }
+        let read_bytes = match reader.limits.max_total_bytes {
+            Some(maximum) => reader
+                .limits
+                .buffer_bytes
+                .min(maximum.saturating_sub(reader.total).saturating_add(1)),
+            None => reader.limits.buffer_bytes,
+        };
+        let mut bytes = vec![0u8; read_bytes as usize];
+        let count = match std::io::Read::read(&mut reader.input.inner, &mut bytes) {
+            Ok(count) => count,
+            Err(error) => {
+                let error = jet_xml_io_error(reader.total, error);
+                reader.terminal = Some(error.clone());
+                return Err(error);
+            }
+        };
+        bytes.truncate(count);
+        if count == 0 {
+            reader.eof = true;
+            if let Err(error) = reader.scanner.finish_input() {
+                let error = jet_xml_stream_error(error);
+                reader.terminal = Some(error.clone());
+                return Err(error);
+            }
+        } else {
+            reader.total = reader.total.saturating_add(count as i64);
+            if let Some(maximum) = reader.limits.max_total_bytes {
+                if reader.total > maximum {
+                    let error = jet_std::EncodingError {
+                        format: jet_std::EncodingFormat::XML,
+                        kind: jet_std::EncodingErrorKind::Limit,
+                        byte_offset: reader.total,
+                        line: None,
+                        column: None,
+                        path: String::new(),
+                        reason: format!("max_total_bytes {maximum} exceeded"),
+                        cause: None,
+                    };
+                    reader.terminal = Some(error.clone());
+                    return Err(error);
+                }
+            }
+            if let Err(error) = reader.scanner.push(&bytes) {
+                let error = jet_xml_stream_error(error);
+                reader.terminal = Some(error.clone());
+                return Err(error);
+            }
+        }
+    }
+}
+
 fn jet_enc_cbor_reader(input: JetFileReader, limits: jet_std::EncodingLimits) -> Result<jet_std::CBORReader, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits).map_err(|mut e| { e.format = jet_std::EncodingFormat::CBOR; e.line = None; e.column = None; e })?;
     Ok(jet_std::CBORReader { input, limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: Vec::new(), retained: 0 })

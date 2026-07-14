@@ -2113,6 +2113,9 @@ impl LowerCtx<'_, '_> {
             | THandleOp::CSVWriterFinish => {
                 Err("jit CSV streaming falls back to the AOT executable TIR path".to_string())
             }
+            THandleOp::XMLReaderNext => {
+                Err("jit XML streaming falls back to the AOT executable TIR path".to_string())
+            }
             THandleOp::CBORReaderNext | THandleOp::CBORWriterWrite | THandleOp::CBORWriterFlush | THandleOp::CBORWriterFinish => Err("jit CBOR streaming falls back to the AOT executable TIR path".to_string()),
             THandleOp::StdinReadLine => Err("jit handle method unsupported".to_string()),
             THandleOp::StdoutWrite => Err("jit handle method unsupported".to_string()),

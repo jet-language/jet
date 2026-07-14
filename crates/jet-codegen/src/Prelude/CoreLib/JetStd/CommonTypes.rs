@@ -164,7 +164,15 @@
         pub(crate) record_index: i64,
         pub(crate) finished: bool,
     }
-    pub struct XMLReader { _private: () } pub struct XMLWriter { _private: () }
+    pub struct XMLReader {
+        pub(crate) input: super::JetFileReader,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) scanner: super::jet_xml_pull::StreamScanner,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) total: i64,
+        pub(crate) eof: bool,
+    }
+    pub struct XMLWriter { _private: () }
     pub struct CBORReader {
         pub(crate) input: super::JetFileReader,
         pub(crate) limits: EncodingLimits,

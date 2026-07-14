@@ -846,6 +846,7 @@ pub fn encoding_handle_method_return(
         ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
+        ("XMLReader", "next", 0) => Some(Some(result_ty(Type::Option(Box::new(Type::Named("DataTree".to_string()))),error))),
         ("CBORReader", "next", 0) => Some(Some(result_ty(Type::Option(Box::new(Type::Named("DataEvent".to_string()))), error))),
         ("CBORWriter", "write", 1) | ("CBORWriter", "flush" | "finish", 0) => Some(Some(result_ty(unit, error))),
         _ => None,
