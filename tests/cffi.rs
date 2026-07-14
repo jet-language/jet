@@ -17,6 +17,23 @@ mod common;
 use common::{have_rustc, FfiBridgeLock};
 
 #[test]
+fn forged_fortran_library_prefix_cannot_admit_list_abi() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_fortran_prefix_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let main = root.join("main.jet");
+    let source = "use c.jet_fortran_forged as raw\n#Extern module c.jet_fortran_forged { fn probe(a: [Float]) -> Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
+    fs::write(&main, source).unwrap();
+    let diagnostics = jet::compile_with_path(source, main.to_str().unwrap()).unwrap_err();
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3203"),
+        "forged prefix admitted a list ABI: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
     use jet::Foreign::{binder_for, BinderStatus, BinderSurface};
     use jet::AST::ForeignLanguage;

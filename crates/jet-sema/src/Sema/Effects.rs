@@ -65,6 +65,8 @@ pub enum Effect {
     Java,
     /// D-FFI-DOTNET1=A: an embedded CoreCLR invocation.
     DotNet,
+    /// D-FFI-FORTRAN1=A: an in-process ISO_C_BINDING call.
+    Fortran,
     /// D-FFI-TCL1=A: synchronous in-process Tcl evaluation.
     Tcl,
     /// D-FFI-ADA1=A: checked call into a GNAT C-ABI export.
@@ -103,6 +105,7 @@ impl Effect {
             Effect::Go => "Go",
             Effect::Java => "Java",
             Effect::DotNet => "DotNet",
+            Effect::Fortran => "Fortran",
             Effect::Tcl => "Tcl",
             Effect::Ada => "Ada",
             Effect::Pascal => "Pascal",
@@ -130,6 +133,7 @@ impl Effect {
             "Go" => Effect::Go,
             "Java" => Effect::Java,
             "DotNet" => Effect::DotNet,
+            "Fortran" => Effect::Fortran,
             "Tcl" => Effect::Tcl,
             "Ada" => Effect::Ada,
             "Pascal" => Effect::Pascal,
@@ -161,6 +165,7 @@ impl Effect {
             Effect::Go,
             Effect::Java,
             Effect::DotNet,
+            Effect::Fortran,
             Effect::Tcl,
             Effect::Ada,
             Effect::Pascal,

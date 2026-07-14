@@ -1588,7 +1588,7 @@ fn go_bind_error(source: &str, why: &str) -> ! {
     exit(ExitCodes::USER_ERROR);
 }
 
-/// D-FFI-FORTRAN1=A: discover scalar ISO_C_BINDING functions, compile them
+/// D-FFI-FORTRAN1=A: discover scalar and fixed-shape ISO_C_BINDING functions, compile them
 /// with the provisioned gfortran toolchain, and emit a typed `fortran.<lib>`
 /// Jet module backed by the shared C ABI linker.
 fn run_fortran_bind(args: &[&String]) {
@@ -1601,7 +1601,7 @@ fn run_fortran_bind(args: &[&String]) {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         usage();
         eprintln!();
-        eprintln!("Generate typed Jet bindings for scalar ISO_C_BINDING functions.");
+        eprintln!("Generate typed Jet bindings for scalar and fixed-shape input ISO_C_BINDING functions.");
         exit(if args.is_empty() { ExitCodes::USAGE } else { 0 });
     }
 
@@ -1679,12 +1679,26 @@ fn run_fortran_bind(args: &[&String]) {
         source_path,
         out_path
     );
+    for layout in &result.layouts {
+        println!(
+            "  layout: {}.{} {} {}",
+            layout.routine,
+            layout.parameter,
+            layout.order,
+            layout
+                .extents
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join("x")
+        );
+    }
 }
 
 fn fortran_bind_error(source: &str, why: &str) -> ! {
     eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");
     eprintln!(" Why: {why}.");
-    eprintln!(" Fix: use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar declarations and `value` inputs, then rerun `jet inspect bind fortran`.");
+    eprintln!(" Fix: use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.");
     exit(ExitCodes::USER_ERROR);
 }
 

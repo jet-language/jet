@@ -911,6 +911,19 @@ ordinary C externs remain maximally effectful. Unsupported signatures fail befor
 are laundered through **E3208** and never expose raw foreign source frames
 (I2/I4).
 
+## E3 — Fortran project binder (D-FFI-FORTRAN1=A, checked ISO_C_BINDING vertical)
+
+`jet inspect bind fortran <source.f90> --pkg <lib>` discovers explicit
+`bind(C, name="...")` functions and compiles them with the provisioned
+`gfortran` toolchain. Scalar `integer(c_int64_t)` and `real(c_double)` inputs
+must use `value`. Fixed-shape input arrays of those elements must use
+`intent(in)` and map to flat `[Int]` or `[Float]` values in Fortran
+column-major order. The generated public wrapper records every extent and
+rejects a list whose length does not exactly match the shape before passing its
+pointer across the private C ABI seam. Generated `fortran.*` calls contribute
+the `Fortran` effect root. Unsupported declarations and compiler failures are
+laundered through **E3208** rather than exposing `gfortran` diagnostics.
+
 ## E3 — JVM project binder (D-FFI-JVM1=A, embedded class vertical)
 
 `jet inspect bind java <source.java> --pkg <lib>` uses the provisioned OpenJDK

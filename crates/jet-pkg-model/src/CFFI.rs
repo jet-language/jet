@@ -76,15 +76,20 @@ fn synthetic_alias(lib: &str) -> String {
     format!("__c_{lib}")
 }
 
-/// True when a file path sits under the generated bindings cache
-/// `.jet/bindings/c/` (D-CBIND7). `#Bindgen` is legal only there (E3207).
-fn is_generated_cache_file(display: &str) -> bool {
-    let needle = format!(
-        "{}/{}/",
-        Syntax::SOURCE_ROOT_DIR,
-        ForeignLanguage::C.bindings_subdir()
-    );
-    display.replace('\\', "/").contains(&needle)
+/// Identify compiler-owned binding cache locations. `#Bindgen` is legal only
+/// in one of these generated directories (E3207).
+fn generated_cache_language(display: &str) -> Option<ForeignLanguage> {
+    let display = display.replace('\\', "/");
+    [ForeignLanguage::C, ForeignLanguage::Fortran]
+        .into_iter()
+        .find(|language| {
+            let needle = format!(
+                "{}/{}/",
+                Syntax::SOURCE_ROOT_DIR,
+                language.bindings_subdir()
+            );
+            display.contains(&needle)
+        })
 }
 
 /// Two `ExternFn`s have the same boundary signature (params by type + return).
@@ -216,8 +221,8 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
     let mut order: Vec<String> = Vec::new();
 
     for module in &mut bundle.modules {
-        let display = module.display.clone();
-        let generated = is_generated_cache_file(&display);
+        let generated_language = generated_cache_language(&module.path.to_string_lossy());
+        let generated = generated_language.is_some();
         let mut kept = Vec::new();
         for item in module.items.drain(..) {
             let Item::CModule(cm) = item else {
@@ -228,12 +233,19 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 kind,
                 lib,
                 path_span,
-                functions,
+                mut functions,
                 ..
             } = cm;
             if kind == CModuleKind::Bindgen && !generated {
                 diags.push(e3207(&lib, path_span));
                 continue;
+            }
+            if kind == CModuleKind::Bindgen
+                && generated_language == Some(ForeignLanguage::Fortran)
+            {
+                for function in &mut functions {
+                    function.effect_root = Some("Fortran".to_string());
+                }
             }
             let surf = match surfaces.entry(lib.clone()) {
                 Entry::Occupied(entry) => entry.into_mut(),
@@ -287,7 +299,9 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                     diags.push(e3205(lib, &ef.name, ef.name_span));
                     continue;
                 }
+                let effect_root = merged[i].effect_root.clone();
                 merged[i] = ef.clone();
+                merged[i].effect_root = effect_root;
             } else {
                 index.insert(ef.name.clone(), merged.len());
                 merged.push(ef.clone());

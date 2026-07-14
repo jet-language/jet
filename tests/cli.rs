@@ -1494,6 +1494,83 @@ end module scalar_math
 }
 
 #[test]
+fn fortran_bind_runs_checked_column_major_array() {
+    let dir = isolated_cwd("fortran_bind_array");
+    let source = dir.join("matrix.f90");
+    fs::write(
+        &source,
+        r#"module matrix_math
+  use iso_c_binding
+contains
+  function probe(a) result(value) bind(C, name="probe_column_major")
+    real(c_double), intent(in) :: a(2,3)
+    real(c_double) :: value
+    value = 100.0_c_double * a(1,2) + a(2,1)
+  end function probe
+end module matrix_math
+"#,
+    )
+    .unwrap();
+
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "fortran"])
+        .arg(&source)
+        .args(["--pkg", "matrix"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Fortran array bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let generated = fs::read_to_string(dir.join(".jet/bindings/fortran/matrix.jet")).unwrap();
+    assert!(generated.contains("fortran-layout probe.a: column-major 2x3"));
+    assert!(generated.contains("a.len() != 6"));
+    assert!(generated.contains("#(Fortran)"));
+    assert!(String::from_utf8_lossy(&bind.stdout).contains("layout: probe.a column-major 2x3"));
+
+    fs::write(
+        dir.join("main.jet"),
+        "use fortran.matrix as matrix\n\nfn run() { print(matrix.probe([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])) }\n",
+    )
+    .unwrap();
+    let run = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated Fortran array binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    // Fortran sees the flat input in column-major order: a(1,2)=3, a(2,1)=2.
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "302.0\n");
+
+    fs::write(
+        dir.join("bad.jet"),
+        "use fortran.matrix as matrix\n\nfn run() { print(matrix.probe([1.0, 2.0, 3.0, 4.0, 5.0])) }\n",
+    )
+    .unwrap();
+    let bad = Command::new(jet())
+        .args(["run", "bad.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+    assert!(
+        String::from_utf8_lossy(&bad.stderr)
+            .contains("a must contain exactly 6 column-major values"),
+        "missing checked array length failure:\n{}",
+        String::from_utf8_lossy(&bad.stderr)
+    );
+}
+
+#[test]
 fn go_bind_compiles_and_runs_c_archive_scalar() {
     let dir = isolated_cwd("go_bind_scalar");
     let source = dir.join("scalar.go");
