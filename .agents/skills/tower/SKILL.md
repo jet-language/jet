@@ -75,7 +75,7 @@ surfaces, don't silence it.
    the next card. A gate left as prose in a plan or log never reaches the
    owner; it MUST be a ballot. `decision add` refuses an incomplete ballot
    (`E_BALLOT` — missing gist/lesson/story/inWild/options[].code/rec or the
-   structured hybrid and recommendation); dense plain-language fields also fail. Save an
+   structured recommendation); dense plain-language fields also fail. Save an
    unfinished one with `--draft`, finish later with `decision update <id>
    --ready`.
 4. Do the work per AGENTS.md: failing test first → spec → parser → sema →
@@ -117,8 +117,8 @@ decision — the owner's answer on an unblocked decision IS the "go".
 ## Raising a decision — ballot-ready or it doesn't count
 
 Follow the **tower-ballot** skill for the standard (plain-language gist / lesson /
-story / worked options / comparisons / last-pass hybrid / rec + why / why-not /
-accepted tradeoff) and add via
+story / worked options / comparisons / rec + why / why-not / accepted tradeoff)
+and add via
 `tower decision add --file ballot.json --by claude-main`. Jet-specific rules:
 
 - ID must be Tower-parseable (`D-…` or `S<digits>-…`) and must not collide

@@ -144,9 +144,6 @@ and one tiny example), `story` (a named person, why this exists), `inWild`
 `options[]` each with plain `{key,name,detail,code}` worked examples and optional
 hidden `technical` law, `comparisons[]` when relevant, `rec`, and structured
 `recommendation:{why,whyNot,tradeoff}`. `whyNot` covers every losing option.
-`hybrid:{result,synthesis,harvest}` is written last, covers every option, and
-must produce the recommended option. It harvests each compatible strength or
-names the exact semantic conflict that prevents combining it.
 Plain prose uses one idea per sentence, defines jargon, expands acronyms, and
 leads with user impact. Write-time density limits are 32 words per sentence and
 90 per paragraph. The owner decides from the ballot

@@ -101,8 +101,7 @@ everything (bypass event-logged). Full table in Tower/AGENTS.md; headlines:
 
 - `decision add` needs a plain-language ballot with
   gist/lesson/story/inWild/options[].code/rec plus structured recommendation
-  reasons for the winner and every loser, plus a last-pass hybrid that harvests
-  the strongest compatible idea from every option
+  reasons for the winner and every loser
   or `E_BALLOT` — save unfinished work with `--draft`, finish later with
   `decision update <id> --ready`.
 - `decision ratify` is owner-only (`E_OWNER_ONLY`) unless

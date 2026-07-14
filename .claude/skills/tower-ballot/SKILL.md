@@ -73,8 +73,9 @@ own ballot with real, independently-decidable options.
 - **Beginner:** ceremony-free defaults; expert policy stays hidden until needed.
 - **Expert:** explicit control over graph, authority, generated code, toolchain,
   cache, scheduler, and audit behavior.
-- **Hybrid:** prefer one canonical semantic mechanism with ergonomic entrypoints
-  over siloed beginner/expert systems (I8).
+- **Cohesion:** make each option internally complete. When one canonical
+  mechanism serves beginners and experts, present it as a normal worked option,
+  not a required hybrid pass.
 - **Kill criteria:** reject any option that hollows out the useful default,
   dictates a file/project structure, or carves around a safety/invariant
   guarantee. Fix the option before it reaches the owner.

@@ -34,7 +34,7 @@ test('addDecision refuses an incomplete ballot with E_BALLOT naming the gaps', (
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one' })),
     (e) => e instanceof TowerError && e.code === 'E_BALLOT'
       && /gist/.test(e.message) && /lesson/.test(e.message) && /story/.test(e.message) && /inWild/.test(e.message)
-      && /options/.test(e.message) && /rec/.test(e.message) && /recommendation/.test(e.message) && /hybrid/.test(e.message));
+      && /options/.test(e.message) && /rec/.test(e.message) && /recommendation/.test(e.message) && !/hybrid/.test(e.message));
 });
 
 test('addDecision refuses options missing a code field', () => {
@@ -70,12 +70,13 @@ test('recommendation must explain every losing option', () => {
     (e) => e.code === 'E_BALLOT' && /recommendation\.whyNot\[B\]/.test(e.message));
 });
 
-test('hybrid pass must harvest every option into the recommendation', () => {
+test('hybrid metadata is optional and does not gate a ballot', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  assert.throws(
-    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ hybrid: { result: 'B', synthesis: 'B combines ideas.', harvest: [] } }) })),
-    (e) => e.code === 'E_BALLOT' && /hybrid\.result \(must match rec\)/.test(e.message) && /hybrid\.harvest\[A\]/.test(e.message));
+  const withoutHybrid = ballot();
+  delete withoutHybrid.hybrid;
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...withoutHybrid }));
+  assert.equal(result.hybrid, null);
 });
 
 test('--draft exempts validation and stays out of the decide lane + counts', () => {

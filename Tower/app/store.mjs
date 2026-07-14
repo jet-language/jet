@@ -779,12 +779,6 @@ export function plainLanguageGaps(p) {
   gaps.push(...proseDensityGaps('recommendation tradeoff', recommendation.tradeoff));
   for (const rejected of recommendation.whyNot || [])
     gaps.push(...proseDensityGaps(`recommendation why not ${rejected?.key || '?'}`, rejected?.reason));
-  const hybrid = p.hybrid || {};
-  gaps.push(...proseDensityGaps('hybrid synthesis', hybrid.synthesis));
-  for (const item of hybrid.harvest || []) {
-    gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} aspect`, item?.aspect));
-    gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} use`, item?.use));
-  }
   return gaps;
 }
 
@@ -819,20 +813,6 @@ export function ballotGaps(p) {
     for (const key of optionKeys.filter(key => key !== p.rec)) {
       const item = whyNot.find(x => x?.key === key);
       if (!item || !item.reason || !String(item.reason).trim()) missing.push(`recommendation.whyNot[${key}]`);
-    }
-  }
-  const hybrid = p.hybrid;
-  if (!hybrid || typeof hybrid !== 'object') {
-    missing.push('hybrid');
-  } else {
-    if (!hybrid.result || !optionKeys.includes(hybrid.result)) missing.push('hybrid.result (must match an option key)');
-    else if (p.rec && hybrid.result !== p.rec) missing.push('hybrid.result (must match rec)');
-    if (!hybrid.synthesis || !String(hybrid.synthesis).trim()) missing.push('hybrid.synthesis');
-    const harvest = Array.isArray(hybrid.harvest) ? hybrid.harvest : [];
-    for (const key of optionKeys) {
-      const item = harvest.find(x => x?.key === key);
-      if (!item || !item.aspect || !String(item.aspect).trim() || !item.use || !String(item.use).trim())
-        missing.push(`hybrid.harvest[${key}]`);
     }
   }
   const dense = plainLanguageGaps(p);

@@ -142,11 +142,11 @@ Before any plan or ballot reaches the owner, run the **two-facet pass**:
 - **Expert pass:** assume the reader knows exactly what they want and needs
   full control over targets, effects, generated code, toolchains, scheduling,
   caching, and audit output.
-- **Hybrid pass:** do not present artificially siloed options when a single
-  canonical mechanism can provide both surfaces. Prefer one semantic mechanism
-  with ergonomic entrypoints, defaults, and expert overrides over mutually
-  exclusive beginner-vs-expert designs. This is I8-compatible when the compiler
-  treats the entrypoints identically.
+
+After both passes, rewrite each viable option so it is internally cohesive.
+Do not require a separate hybrid option or harvest field. When one canonical
+mechanism can serve both audiences, make that mechanism a normal worked option
+with ergonomic defaults and explicit expert control.
 
 ## Communication — caveman default
 

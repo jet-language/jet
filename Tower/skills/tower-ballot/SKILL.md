@@ -40,10 +40,6 @@ owner **picks**; never pre-empt the pick.
   serves this decision, why every other option loses here, and which downside
   the recommendation accepts. `whyNot` contains one `{key, reason}` per losing
   option. Never use empty phrases such as “best balance.”
-- **`hybrid`** — `{result, synthesis, harvest}` written only after every option
-  is complete. `result` must equal `rec`. `harvest` contains one
-  `{key, aspect, use}` per option: identify its strongest idea, then explain how
-  the synthesis uses it or why a semantic conflict prevents that use.
 - **`group`** — one of the project's `decisionGroups` (see `.tower/config.json`)
   so the queue stays organized.
 
@@ -58,11 +54,9 @@ appear. Use one idea per sentence. Lead with user impact; move formal law into
 words, but those limits do not excuse unexplained jargon. Read the plain fields
 without code or technical appendices; rewrite anything a newcomer cannot retell.
 
-Run hybridization last. Let different ideas develop before combining them.
-Then harvest every compatible strength into one canonical mechanism with a
-simple beginner path and explicit expert control. Never average spellings or
-label an early compromise “hybrid.” If a strength cannot fit, state the exact
-semantic conflict. Rewrite the resulting option before recommending it.
+Make each option internally cohesive. When one canonical mechanism can serve
+beginners and experts, present that complete mechanism as a normal option. Do
+not require a separate hybrid option or harvest ritual.
 
 ## Mechanics
 
@@ -83,14 +77,6 @@ cat > /tmp/ballot.json <<'EOF'
   ],
   "comparisons": [ { "lang": "Rails", "note": "...", "code": "..." } ],
   "rec": "B",
-  "hybrid": {
-    "result": "B",
-    "synthesis": "B keeps immediate purge events and borrows A's fallback clock for missed events.",
-    "harvest": [
-      { "key": "A", "aspect": "A stale entry eventually expires without an event.", "use": "Use its clock only as a safety net." },
-      { "key": "B", "aspect": "Known updates purge immediately.", "use": "Keep this as the primary rule." }
-    ]
-  },
   "recommendation": {
     "why": "Updates become visible as soon as the source announces them, without serving known-stale prices.",
     "whyNot": [{ "key": "A", "reason": "A time limit still serves stale prices until its clock expires." }],

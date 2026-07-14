@@ -35,11 +35,6 @@ ballot is not ready. A plan-writer proposes; the owner picks.
   `{key, reason}` for every other option and explains why each loses here.
   `tradeoff` names the recommended option's real downside and why accepting it
   is still right. Never restate option names or say only “best balance.”
-- **`hybrid`** — `{result, synthesis, harvest}` written only after all options
-  are complete. `result` is the final synthesized option key and must equal
-  `rec`. `synthesis` explains the combined design. `harvest` contains one
-  `{key, aspect, use}` per option: name that option's strongest idea, then show
-  how the synthesis uses it or why it cannot fit without breaking semantics.
 - **`group`** — a configured `decisionGroups` value from
   `.tower/config.json`.
 
@@ -55,13 +50,9 @@ ballot is not ready. A plan-writer proposes; the owner picks.
 - **Beginner:** ceremony-free defaults; expert policy stays hidden until needed.
 - **Expert:** explicit control over graph, authority, generated code, toolchain,
   cache, scheduler, and audit behavior.
-- **Hybrid — always last:** first let genuinely different ideas develop on
-  their own. Then harvest the best compatible part of every option into one
-  canonical mechanism with a simple beginner path and explicit expert control.
-  Do not start with a compromise and call it hybrid. Do not average spellings.
-  If one strength cannot combine, name the exact semantic conflict in
-  `hybrid.harvest[].use`. Rewrite the chosen option so it actually contains the
-  harvested design before recommending it.
+- **Cohesion:** each option must stand on its own. When one canonical mechanism
+  can serve beginners and experts, present that complete mechanism as a normal
+  option. Do not require a separate hybrid option or harvest ritual.
 - **Kill criteria:** reject any option that hollows out the useful default,
   dictates a file/project structure, or carves around a safety/invariant
   guarantee. Fix the option before it reaches the owner.
@@ -114,14 +105,6 @@ ballot is not ready. A plan-writer proposes; the owner picks.
     { "lang": "Rails", "note": "...", "code": "..." }
   ],
   "rec": "B",
-  "hybrid": {
-    "result": "B",
-    "synthesis": "B keeps immediate purge events and borrows A's fallback clock for missed events.",
-    "harvest": [
-      { "key": "A", "aspect": "A stale entry eventually expires without an event.", "use": "Use its clock only as a safety net." },
-      { "key": "B", "aspect": "Known updates purge immediately.", "use": "Keep this as the primary rule." }
-    ]
-  },
   "recommendation": {
     "why": "Updates become visible as soon as the source announces them, without serving known-stale prices.",
     "whyNot": [{ "key": "A", "reason": "A time limit still serves stale prices until its clock expires." }],

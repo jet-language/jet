@@ -82,8 +82,7 @@ Work plan:
    - Use plain language. Include gist, zero-context mini lesson, story, concrete
      examples, and options. Recommendation must explain why it wins, why each
      alternative loses here, and which downside it accepts. Let independent
-     options develop first, then run hybridization last and harvest every
-     compatible strength into the final option.
+     options develop fully, then make each option internally cohesive.
 
 5. Verify:
    - Run targeted tests for touched areas.
