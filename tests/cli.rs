@@ -682,30 +682,44 @@ fn budget_unreadable_compiler_identity_rejects_before_artifact() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn budget_compiler_identity_survives_running_executable_unlink() {
+fn budget_parallel_child_builds_survive_running_compiler_unlink() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
-    let dir = budget_project("budget_unlinked_compiler_identity", 10);
-    let copied = dir.join("jet-running-unlinked");
+    let dirs = [
+        artifact_budget_project("budget_unlinked_compiler_identity_a", 100_000_000),
+        artifact_budget_project("budget_unlinked_compiler_identity_b", 100_000_000),
+    ];
+    let bin_dir = isolated_cwd("budget_unlinked_compiler_binary");
+    let copied = bin_dir.join("jet-running-unlinked");
     fs::copy(jet(), &copied).unwrap();
     let expected = jet::SHA256::sha256_file_hex(&copied).unwrap();
-    let child = Command::new(&copied)
-        .args(["budget", "check", "--json"])
-        .current_dir(&dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
+    let children = dirs.iter().map(|dir| {
+        Command::new(&copied)
+            .args(["budget", "check", "--json"])
+            .current_dir(dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    }).collect::<Vec<_>>();
     fs::remove_file(&copied).unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    assert!(out.stderr.is_empty());
-    let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
-    let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
-    let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
-    let CanonicalJson::Object(toolchain) = &content["toolchain"] else { panic!("toolchain object") };
-    assert_eq!(toolchain["compiler_build_id"], CanonicalJson::String(expected.clone()));
-    assert_eq!(toolchain["runner_id"], CanonicalJson::String(expected.clone()));
-    assert_eq!(toolchain["stdlib_id"], CanonicalJson::String(expected));
+    for (child, dir) in children.into_iter().zip(&dirs) {
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.stderr.is_empty());
+        let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
+        let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
+        jet_foundation::PerformanceBudget::verify_budget_report(&CanonicalJson::Object(report.clone()).bytes()).unwrap();
+        let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
+        let CanonicalJson::Object(toolchain) = &content["toolchain"] else { panic!("toolchain object") };
+        assert_eq!(toolchain["compiler_build_id"], CanonicalJson::String(expected.clone()));
+        assert_eq!(toolchain["runner_id"], CanonicalJson::String(expected.clone()));
+        assert_eq!(toolchain["stdlib_id"], CanonicalJson::String(expected.clone()));
+        let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject object") };
+        let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("artifact object") };
+        let artifact_path = dir.join("build/main");
+        assert_eq!(artifact["sha256"], CanonicalJson::String(jet::SHA256::sha256_file_hex(&artifact_path).unwrap()));
+        assert_eq!(artifact["bytes"], CanonicalJson::Integer(fs::metadata(artifact_path).unwrap().len().to_string()));
+    }
 }
 
 #[test]
