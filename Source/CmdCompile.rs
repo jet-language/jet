@@ -1664,6 +1664,23 @@ pub(crate) fn stem(file: &str) -> String {
         .replace('.', "_")
 }
 
+fn rustc_crate_name(file: &str) -> String {
+    let mut name: String = stem(file)
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        name.insert(0, '_');
+    }
+    name
+}
+
 fn bin_path(file: &str) -> PathBuf {
     PathBuf::from("build").join(stem(file))
 }
@@ -2511,7 +2528,7 @@ pub(crate) fn build(
     // Pin the crate name to the file stem — the name rustc used to infer from
     // `build/<stem>.rs` — so the private working-dir source name doesn't leak
     // into codegen.
-    cmd.arg("--crate-name").arg(stem(file));
+    cmd.arg("--crate-name").arg(rustc_crate_name(file));
     cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
     if let Some(link) = ffi {
         cmd.arg("--extern")
@@ -2701,7 +2718,7 @@ fn missing_linker(stderr: &str) -> Option<String> {
 
 #[cfg(test)]
 mod missing_c_lib_tests {
-    use super::{missing_c_lib, missing_linker, native_cache_key, native_cache_key_with_toolchain, native_cache_salt};
+    use super::{missing_c_lib, missing_linker, native_cache_key, native_cache_key_with_toolchain, native_cache_salt, rustc_crate_name};
 
     struct ScratchProject(std::path::PathBuf);
 
@@ -2733,6 +2750,12 @@ mod missing_c_lib_tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn rustc_crate_name_sanitizes_user_facing_file_stems() {
+        assert_eq!(rustc_crate_name("renderable-varargs.jet"), "renderable_varargs");
+        assert_eq!(rustc_crate_name("3d.demo.jet"), "_3d_demo");
     }
 
     #[test]

@@ -58,6 +58,11 @@ pub(crate) fn lower_variadic_bound_call(
 ) -> crate::Codegen::TIR::TExpr {
     use crate::Codegen::TIR::{call_return_type, lower_one_call_arg, TExpr, TExprKind};
     let sig = cx.sigs.get(&call.name).cloned();
+    let tail_convention = sig
+        .as_ref()
+        .and_then(|params| params.get(fixed))
+        .map(|(convention, _)| *convention)
+        .expect("trait-bounded variadic signature must retain its tail convention");
     let arity = call.args.len().saturating_sub(fixed);
     cx.needed_variadic_arities
         .borrow_mut()
@@ -69,16 +74,20 @@ pub(crate) fn lower_variadic_bound_call(
         .iter()
         .enumerate()
         .map(|(i, a)| {
-            // Only the fixed prefix has a real declared `(convention, type)` to
-            // borrow/clone/coerce against; the tail's target is a bare generic
-            // type param (by value, no coercion) — `None` makes
-            // `lower_one_call_arg` fall straight through to a plain `lower_expr`.
+            // The fixed prefix uses its declared signature. Each synthetic tail
+            // slot keeps the original variadic parameter's access convention and
+            // has a fresh generic type. The generated specialization renders a
+            // default-Read tail as `&JaiVarN`, so the call must borrow every tail
+            // argument, including scalar concrete instantiations.
             let conv = if i < fixed {
                 sig.as_ref()
                     .and_then(|ps| ps.get(i))
                     .map(|(c, t)| (*c, t.clone()))
             } else {
-                None
+                Some((
+                    tail_convention,
+                    Type::Named(format!("JaiVar{}", i - fixed)),
+                ))
             };
             lower_one_call_arg(a, conv, env, cx)
         })

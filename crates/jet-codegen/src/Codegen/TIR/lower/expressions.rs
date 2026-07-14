@@ -1195,7 +1195,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|(n, _, fe)| {
                     let boxed = cx.boxed_edges.contains(&(type_name.clone(), n.clone()));
-                    let value = lower_expr(fe, cx, env);
+                    let value = lower_owned_expr(fe, cx, env);
                     (mangle(n), value, boxed)
                 })
                 .collect();
@@ -2007,5 +2007,23 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
         }
         _ => unreachable!("expression not in TIR subset"),
+    }
+}
+
+/// Lower an expression whose result is stored or returned as an owned value.
+/// A `Read`/`Write` non-scalar parameter is represented by a dereferenced Rust
+/// borrow; moving that place would leak E0507 from rustc. Jet generic functions
+/// already carry the required `Clone` bound, so materialize the owned value at
+/// this semantic boundary just as assignment and enum-payload lowering do.
+pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    let lowered = lower_expr(e, cx, env);
+    if matches!(e, Expr::Ident(name, _) if env.is_borrowed(name)) && !lowered.ty.is_scalar() {
+        let ty = lowered.ty.clone();
+        TExpr {
+            ty,
+            kind: TExprKind::Clone(Box::new(lowered)),
+        }
+    } else {
+        lowered
     }
 }

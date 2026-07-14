@@ -11,6 +11,7 @@ use crate::Codegen::TIR::label_name;
 use crate::Codegen::TIR::lower::collect_txn_mut_roots;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_forin_collection;
 use crate::Codegen::TIR::lower_if;
 use crate::Codegen::TIR::lower::lower_string_view_init;
@@ -253,7 +254,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     track_origin: None,
                 };
             }
-            let mut init = lower_expr(&b.init, cx, env);
+            let mut init = lower_owned_expr(&b.init, cx, env);
             // D-FIXARR1: if the binding annotation is `[T#N]` and the init lowered as a
             // growable list (e.g. a plain list literal), re-tag the TExpr type so the emit
             // produces a Rust array literal `[e1, …]` instead of `vec![…]`.
@@ -519,7 +520,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 }
             }
         },
-        Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_expr(e, cx, env))),
+        Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_owned_expr(e, cx, env))),
         Stmt::Return(None, _) => TStmt::Return(None),
         // D-STREAMYIELD1: `yield e` inside a generator's spawned thread — send on
         // the channel the wrapping `Stream<T>` body opened (see `emit_generator_body`),

@@ -151,7 +151,13 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
-    let clone = a.flags.implicit_clone;
+    let clone = a.flags.implicit_clone
+        || matches!(
+            (&a.expr, conv.as_ref()),
+            (Expr::Ident(name, _), None | Some((AccessConvention::Move, _)))
+                if env.is_borrowed(name)
+                    && env.ty_of(name).is_some_and(|ty| !ty.is_scalar())
+        );
     let arc_clone = a.flags.shared_auto_clone;
     // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
     let fn_coerce = match &conv {

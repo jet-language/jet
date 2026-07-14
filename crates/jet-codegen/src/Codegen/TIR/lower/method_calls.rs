@@ -40,6 +40,7 @@ use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_expr_as_mut_place;
+use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::lower::lower_cursor_take_pattern;
@@ -75,6 +76,21 @@ use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::collections::HashSet;
+
+fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
+    match op {
+        TBuiltinOp::Push
+        | TBuiltinOp::Intersperse
+        | TBuiltinOp::SetInsert
+        | TBuiltinOp::SortedSetInsert
+        | TBuiltinOp::BagAdd
+        | TBuiltinOp::DequePushFront
+        | TBuiltinOp::DequePushBack => index == 0,
+        TBuiltinOp::InsertMap | TBuiltinOp::AddNewMap | TBuiltinOp::InsertList => index == 1,
+        TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => index < 2,
+        _ => false,
+    }
+}
 
 /// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
 /// or a user instance method on a covered type; resolve every dispatch fact here.
@@ -948,9 +964,21 @@ pub(crate) fn lower_method_call(
                 _ if resolved_ret.is_some() => resolved_ret.cloned().unwrap_or_else(unit_type),
                 _ => builtin_result_ty(method, args.len(), recv_ast_ty.as_ref()),
             };
-            // Args are emitted plainly (no clone/borrow wrappers), exactly as
-            // `emit_builtin_method`'s `arg(i)` = raw `emit_expr`.
-            let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            // Builtins that store an argument need an owned value. A borrowed
+            // generic parameter is a dereferenced Rust place, so materialize a
+            // clone here instead of leaking rustc E0507. Lookup/compare args stay
+            // borrowed and avoid needless copies.
+            let targs = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    if builtin_arg_takes_ownership(&op, i) {
+                        lower_owned_expr(&a.expr, cx, env)
+                    } else {
+                        lower_expr(&a.expr, cx, env)
+                    }
+                })
+                .collect();
             return TExpr {
                 ty: result_ty,
                 kind: TExprKind::BuiltinMethod {
