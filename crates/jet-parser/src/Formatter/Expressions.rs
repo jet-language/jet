@@ -570,9 +570,13 @@ impl<'a> Fmt<'a> {
                     self.write(if named { "}" } else { ")" });
                 }
             }
-            // D-TAINT1: `#Tainted expr` — prefix value-fact tag, space-separated.
-            Expr::Tainted(inner, _) => {
-                self.write(&format!("#{} ", Syntax::KW_TAINTED));
+            // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
+            Expr::Tainted(inner, kind, _) => {
+                if let Some(k) = kind {
+                    self.write(&format!("#{}({}) ", Syntax::KW_TAINTED, k));
+                } else {
+                    self.write(&format!("#{} ", Syntax::KW_TAINTED));
+                }
                 self.fmt_expr(inner, Prec::Unary);
             }
             Expr::Present(inner, _) => {

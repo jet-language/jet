@@ -968,7 +968,7 @@ impl<'a> Checker<'a> {
             // Its type is exactly the inner's type; taint propagation + the E0721
             // sink check run in the dedicated taint pass (Sema/Taint.rs), erased
             // in codegen (I3).
-            Expr::Tainted(inner, _span) => self.infer(inner),
+            Expr::Tainted(inner, _, _span) => self.infer(inner),
             Expr::Present(inner, _span) => {
                 let t = self.infer(inner)?;
                 Some(Type::Option(Box::new(t)))

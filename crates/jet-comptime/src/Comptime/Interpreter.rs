@@ -1114,7 +1114,7 @@ impl<'a> Interp<'a> {
                 }
             }
             // D-TAINT1: the value-fact tag is erased; evaluate the inner value.
-            Expr::Tainted(inner, _) => self.eval(inner, scope),
+            Expr::Tainted(inner, _, _) => self.eval(inner, scope),
             // `copy expr`: a value-semantics marker sema/codegen use to make
             // an explicit clone visible at the call site. The tree-walker
             // already hands every value around as an owned `CtValue` clone

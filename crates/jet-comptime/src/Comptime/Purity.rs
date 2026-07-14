@@ -112,7 +112,7 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
             walk_calls(r, f);
         }
         Expr::Unary(_, x, _)
-        | Expr::Tainted(x, _) // D-TAINT1: tag erased; recurse into the value.
+        | Expr::Tainted(x, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(x, _)
         | Expr::Try(x, _, _)
         | Expr::Deref(x, _)

@@ -1801,7 +1801,7 @@ fn walk_expr_children_for_multi_input(
         | Expr::Copy(expr, _)
         | Expr::Field(expr, _, _)
         | Expr::RawOf(expr, _)
-        | Expr::Tainted(expr, _) => find_multi_input_in_expr(expr, node_span, out),
+        | Expr::Tainted(expr, _, _) => find_multi_input_in_expr(expr, node_span, out),
         Expr::PatternTest { subject, .. } => find_multi_input_in_expr(subject, node_span, out),
         Expr::If {
             cond,

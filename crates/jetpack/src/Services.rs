@@ -356,6 +356,45 @@ pub fn wait_healthy(project_dir: &Path, plan: &DevServicePlan, timeout: Duration
     }
 }
 
+/// Measure service startup latency by cycling the service down → up →
+/// wait_healthy exactly `trials` times and returning the elapsed nanoseconds
+/// for each trial.
+///
+/// D-PERFBUDGET-PROVIDER1 / INTEGRATION1: this is the **only** measurement
+/// path for `ServiceProbe`; no proxy or facade fact is ever substituted.
+/// Each trial is fully isolated (process group torn down between trials) and
+/// measures from the moment the start command is issued until `ready:` (or
+/// TCP ports) passes.
+///
+/// Returns exactly `trials` nanosecond samples, or a `String` error if any
+/// trial fails to start or times out.
+pub fn measure_readiness(
+    project_dir: &Path,
+    env: &ShellEnv,
+    plan: &DevServicePlan,
+    trials: usize,
+) -> Result<Vec<u64>, String> {
+    // Bring any leftover instance down before the first trial.
+    down_one(project_dir, plan);
+    let timeout = Duration::from_secs(10);
+    let mut samples = Vec::with_capacity(trials);
+    for trial in 0..trials {
+        let t0 = Instant::now();
+        up_one(project_dir, env, plan)
+            .map_err(|e| format!("ServiceProbe trial {trial}: failed to start: {e}"))?;
+        if !wait_healthy(project_dir, plan, timeout) {
+            down_one(project_dir, plan);
+            return Err(format!(
+                "ServiceProbe trial {trial}: service did not become ready within {}s",
+                timeout.as_secs()
+            ));
+        }
+        samples.push(t0.elapsed().as_nanos() as u64);
+        down_one(project_dir, plan);
+    }
+    Ok(samples)
+}
+
 /// The captured stdout+stderr for `name`, concatenated and labeled — `jetpack
 /// services logs <name>`.
 pub fn logs(project_dir: &Path, name: &str) -> String {

@@ -328,7 +328,10 @@ pub enum Expr {
     /// sink effect (`Db`/`Exec`/`Net`) without passing through a `#Sanitizer fn`
     /// is E0721. The tag is static and **erased in codegen** (I3) — lowering
     /// emits the inner expression unchanged, like `Expr::Present` but unwrapped.
-    Tainted(Box<Expr>, Span),
+    ///
+    /// D-TAINT2 (ratified 2026-07-13): the kind is named in parens —
+    /// `#Tainted(Credential) value`. `None` means the default `.Input` kind.
+    Tainted(Box<Expr>, Option<String>, Span),
     /// S32: `value(expr)` — present optional.
     Present(Box<Expr>, Span),
     /// S32: bare `null` — absent optional.
@@ -460,7 +463,7 @@ impl Expr {
             | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }
             | Expr::EnumLit { span: s, .. }
-            | Expr::Tainted(_, s)
+            | Expr::Tainted(_, _, s)
             | Expr::Present(_, s)
             | Expr::Absent(s)
             | Expr::Todo { span: s, .. }

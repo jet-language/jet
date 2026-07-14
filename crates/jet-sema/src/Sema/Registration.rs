@@ -529,7 +529,7 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
-        | Expr::Tainted(inner, _)
+        | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)

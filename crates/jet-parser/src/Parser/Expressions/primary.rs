@@ -140,16 +140,40 @@ impl<'a> Parser<'a> {
                         Some(TokKind::Ident(n)) if n == Syntax::KW_TAINTED
                     ) =>
                 {
-                    // D-TAINT1: `#Tainted expr` — a value-fact tag marking the value
-                    // as untrusted at its source. The tag binds tightly to the
-                    // following primary expression. Taint propagation + the E0721
-                    // sink check run in the sema taint pass; codegen erases the tag
-                    // (I3), emitting the inner expression unchanged.
+                    // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
+                    // The kind is optional; bare `#Tainted` defaults to the `.Input`
+                    // kind (backward compatible). D-TAINT2=A ratified `#Tainted(Kind)`
+                    // form with `Credential` (and the full D-TAINT1 closed set).
+                    // Taint propagation + sink checks run in the sema taint pass;
+                    // codegen erases the tag (I3), emitting the inner expr unchanged.
                     let start = self.bump().span.start; // `#`
                     self.bump(); // `Tainted`
+                    // Optional `(Kind)` argument after the keyword.
+                    let kind: Option<String> =
+                        if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::LParen)) {
+                            self.bump(); // `(`
+                            let kind_name = if let Some(tok) = self.toks.get(self.pos) {
+                                if let TokKind::Ident(n) = &tok.kind {
+                                    let n = n.clone();
+                                    self.bump();
+                                    n
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            };
+                            // Consume the closing `)`.
+                            if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::RParen)) {
+                                self.bump();
+                            }
+                            if kind_name.is_empty() { None } else { Some(kind_name) }
+                        } else {
+                            None
+                        };
                     let inner = self.expr_primary(allow_struct_lit)?;
                     let span = Span::new(start, inner.span().end);
-                    return Ok(Expr::Tainted(Box::new(inner), span));
+                    return Ok(Expr::Tainted(Box::new(inner), kind, span));
                 }
                 TokKind::Hash
                     if matches!(

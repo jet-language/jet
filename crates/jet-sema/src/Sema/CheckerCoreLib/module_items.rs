@@ -689,6 +689,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
         "core.vault" => &["get", "rotting_new"],
+        // D-AUTH2=A (ratified 2026-07-13): standalone JWT token verification.
+        // verify_jwt checks signature, expiry, and audience; returns typed Claims.
+        // When app.auth (card #438) ships it calls these same functions.
+        "core.auth" => &["verify_jwt"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -703,5 +707,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         ("jet.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
             | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
+        // D-AUTH2=A: typed claims record returned by verify_jwt.
+        | ("core.auth", "Claims" | "AuthError")
     )
 }

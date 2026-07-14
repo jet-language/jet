@@ -492,7 +492,7 @@ fn check_pure_expr_with_path(
             }
             None
         }
-        Expr::Tainted(inner, _)
+        Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _) => rec!(inner),
@@ -1015,7 +1015,7 @@ fn walk_expr_for_calls(
                 }
             }
         }
-        Expr::Tainted(inner, _)
+        Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _) => {

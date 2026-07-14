@@ -1783,7 +1783,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // D-TAINT1: `#Tainted expr` — the value-fact tag is **erased in codegen**
         // (I3). Lower the inner expression unchanged; taint exists only as a
         // compile-time sema proof, never a runtime value.
-        Expr::Tainted(inner, _) => lower_expr(inner, cx, env),
+        Expr::Tainted(inner, _, _) => lower_expr(inner, cx, env),
         // c109 Phase 8: `value(x)` → `Some(x)`. The result type is `T?` where `T` is
         // the inner's resolved type (totality). Mirrors `Expr::Present`.
         Expr::Present(inner, _) => {

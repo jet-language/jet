@@ -1,4 +1,4 @@
-//! Taint tracking (D-TAINT1, option A).
+//! Taint tracking (D-TAINT1, option A; D-TAINT2, option A).
 //!
 //! An *untrusted* value carries a `#Tainted` value-fact tag (D-QUAL1), attached
 //! inline at its source. Taint **spreads** along intraprocedural dataflow:
@@ -8,6 +8,12 @@
 //! when its inputs were tainted (the audited cleaning step). A tainted value
 //! reaching a **sink effect** (`Db`/`Exec`/`Net` — a security-sensitive Core
 //! operation) without first passing through a sanitizer is **E0721**.
+//!
+//! **D-TAINT2 (option A)**: the kind is named in parens — `#Tainted(Credential)
+//! value`. Bare `#Tainted` defaults to `.Input`. The `Credential` kind extends
+//! D-TAINT1 with log/print/serialize **credential sinks** (E0722) alongside the
+//! existing injection sinks (E0721). Only `Credential` is gated on additional
+//! sinks; other kinds (`.Input`/`.PII`/`.Secret`) use the injection sink set.
 //!
 //! This rides D-EFF1's effect classification (a sink is just a Core call whose
 //! effect is in the sink set) and is **fully erased in codegen** (I3): the tag
@@ -29,12 +35,26 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// The sink effects (D-TAINT1): a tainted value reaching a Core call carrying one
-/// of these without a sanitizer is E0721. `Db` (query injection), `Exec`
-/// (command injection), `Net` (SSRF / request smuggling) are the injection-class
-/// sinks the card names (`#db`/`#exec`/`#net`).
+/// The injection sink effects (D-TAINT1): a tainted value reaching a Core call
+/// carrying one of these without a sanitizer is E0721. `Db` (query injection),
+/// `Exec` (command injection), `Net` (SSRF / request smuggling).
 fn is_sink_effect(e: Effect) -> bool {
     matches!(e, Effect::Db | Effect::Exec | Effect::Net)
+}
+
+/// D-TAINT2: the credential log/print/serialize sinks. A `#Tainted(Credential)`
+/// value reaching `core.io.print`, `core.io.eprint`, `jet.log.*`, or
+/// `core.encoding.*.to_string*` is E0722.
+fn is_credential_sink(module: &str, method: &str) -> bool {
+    match module {
+        "core.io" => matches!(method, "print" | "eprint"),
+        "jet.log" | "core.log" => true, // all log methods are credential sinks
+        "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
+        | "core.encoding.yaml" | "core.encoding.cbor" | "core.encoding.xml" => {
+            matches!(method, "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical")
+        }
+        _ => false,
+    }
 }
 
 /// Per-function taint analyzer. Carries the program-level facts (which functions
@@ -48,8 +68,11 @@ struct TaintCtx<'a> {
     /// (alias → resolved module path, e.g. `db` → `jet.db`). Used to classify a
     /// `MethodCall` on a Core alias as a sink.
     core_imports: &'a HashMap<String, String>,
-    /// Locals currently holding a tainted value, in this function body.
+    /// Locals currently holding a tainted value (any kind), in this function body.
     tainted: HashSet<String>,
+    /// D-TAINT2: locals whose taint kind is `Credential`. A strict subset of
+    /// `tainted` — every credential-tainted local is also in the general set.
+    credential_tainted: HashSet<String>,
     diags: Vec<Diagnostic>,
 }
 
@@ -59,6 +82,7 @@ impl<'a> TaintCtx<'a> {
             sanitizers,
             core_imports,
             tainted: HashSet::new(),
+            credential_tainted: HashSet::new(),
             diags: Vec::new(),
         }
     }
@@ -79,14 +103,65 @@ impl<'a> TaintCtx<'a> {
         }
     }
 
-    /// True when `e` evaluates to a tainted value, given the current tainted-local
-    /// set. Taint flows out of `#Tainted`, out of tainted locals, and through any
-    /// derivation (arithmetic, field/index read, interpolation, optional/result
-    /// wrappers, …). A `#Sanitizer fn` call is the cut point: its result is clean.
+    /// D-TAINT2: true when the Core call `receiver.method(…)` is a credential
+    /// sink (print/log/serialize). Used alongside `is_credential_tainted` to
+    /// emit E0722.
+    fn call_is_credential_sink(&self, receiver: &Expr, method: &str) -> bool {
+        let Expr::Ident(alias, _) = receiver else {
+            return false;
+        };
+        let Some(module) = self.core_imports.get(alias) else {
+            return false;
+        };
+        is_credential_sink(module, method)
+    }
+
+    /// D-TAINT2: true when `e` evaluates to a `#Tainted(Credential)` value.
+    fn is_credential_tainted(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Tainted(_, kind, _) => {
+                kind.as_deref() == Some(crate::Syntax::KW_CREDENTIAL)
+            }
+            Expr::Ident(name, _) => self.credential_tainted.contains(name),
+            // Derivations — credential taint flows through like general taint.
+            Expr::Binary(_, l, r, _) => {
+                self.is_credential_tainted(l) || self.is_credential_tainted(r)
+            }
+            Expr::Unary(_, inner, _)
+            | Expr::Deref(inner, _)
+            | Expr::Field(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Try(inner, _, _) => self.is_credential_tainted(inner),
+            Expr::Str(parts, _) => parts.iter().any(|p| match p {
+                StrPart::Interp(e, _) => self.is_credential_tainted(e),
+                _ => false,
+            }),
+            Expr::StructLit { fields, .. } => {
+                fields.iter().any(|(_, _, f)| self.is_credential_tainted(f))
+            }
+            Expr::MethodCall { receiver, args, recv_type, method, .. } => {
+                if let Some(ty) = recv_type {
+                    if self.sanitizers.contains(&format!("{ty}::{method}")) {
+                        return false;
+                    }
+                }
+                self.is_credential_tainted(receiver)
+                    || args.iter().any(|a| self.is_credential_tainted(&a.expr))
+            }
+            _ => false,
+        }
+    }
+
+    /// True when `e` evaluates to a tainted value (any kind), given the current
+    /// tainted-local set. Taint flows out of `#Tainted`, out of tainted locals,
+    /// and through any derivation (arithmetic, field/index read, interpolation,
+    /// optional/result wrappers, …). A `#Sanitizer fn` call is the cut point.
     fn is_tainted(&self, e: &Expr) -> bool {
         match e {
-            // The source of taint, and a tainted local reference.
-            Expr::Tainted(_, _) => true,
+            // The source of taint (any kind), and a tainted local reference.
+            Expr::Tainted(_, _, _) => true,
             Expr::Ident(name, _) => self.tainted.contains(name),
 
             // A free-function call's result is untainted: a `#Sanitizer fn`
@@ -185,9 +260,10 @@ impl<'a> TaintCtx<'a> {
         }
     }
 
-    /// Walk an expression for sink violations: a Core sink call whose argument is
-    /// tainted is E0721. Recurses into every sub-expression so a sink nested in a
-    /// larger expression is still checked.
+    /// Walk an expression for sink violations:
+    /// - E0721: a tainted (any kind) value reaches an injection sink (Db/Exec/Net).
+    /// - E0722: a `#Tainted(Credential)` value reaches a log/print/serialize sink.
+    /// Recurses into every sub-expression so a nested sink is still checked.
     fn check_expr(&mut self, e: &Expr) {
         match e {
             Expr::MethodCall {
@@ -197,6 +273,7 @@ impl<'a> TaintCtx<'a> {
                 args,
                 ..
             } => {
+                // E0721: injection sinks (any taint kind).
                 if let Some(effect) = self.call_sink_effect(receiver, method) {
                     for a in args {
                         if self.is_tainted(&a.expr) {
@@ -209,13 +286,40 @@ impl<'a> TaintCtx<'a> {
                         }
                     }
                 }
+                // D-TAINT2 / E0722: credential sinks (print/log/serialize).
+                if self.call_is_credential_sink(receiver, method) {
+                    for a in args {
+                        if self.is_credential_tainted(&a.expr) {
+                            let alias = match receiver.as_ref() {
+                                Expr::Ident(n, _) => n.clone(),
+                                _ => String::new(),
+                            };
+                            self.diags
+                                .push(e0722(&alias, method, *method_span));
+                            break;
+                        }
+                    }
+                    // Also check the format string argument itself for credential
+                    // interpolation (`print("password: {cred}")` → the string
+                    // literal is the first arg and is_credential_tainted catches it).
+                }
                 self.check_expr(receiver);
                 for a in args {
                     self.check_expr(&a.expr);
                 }
             }
-            Expr::Tainted(inner, _) => self.check_expr(inner),
+            Expr::Tainted(inner, _, _) => self.check_expr(inner),
             Expr::Call(c) => {
+                // D-TAINT2 / E0722: bare `print`/`eprint` are credential sinks too.
+                if matches!(c.name.as_str(), "print" | "eprint") {
+                    for a in &c.args {
+                        if self.is_credential_tainted(&a.expr) {
+                            self.diags
+                                .push(e0722("", &c.name, c.name_span));
+                            break;
+                        }
+                    }
+                }
                 for a in &c.args {
                     self.check_expr(&a.expr);
                 }
@@ -346,12 +450,15 @@ impl<'a> TaintCtx<'a> {
                 // A binding takes on its initializer's taint. A destructuring
                 // pattern spreads taint to every bound name (conservative).
                 let init_tainted = self.is_tainted(&b.init);
+                let init_cred = self.is_credential_tainted(&b.init);
                 if let Some(pat) = &b.pattern {
                     for name in pattern_names(pat) {
-                        self.set_taint(name, init_tainted);
+                        self.set_taint(name.clone(), init_tainted);
+                        self.set_credential_taint(name, init_cred);
                     }
                 } else if !b.name.is_empty() {
                     self.set_taint(b.name.clone(), init_tainted);
+                    self.set_credential_taint(b.name.clone(), init_cred);
                 }
             }
             Stmt::Assign {
@@ -362,12 +469,19 @@ impl<'a> TaintCtx<'a> {
                     // A plain `x = v` resets taint to v's; a compound `x += v`
                     // keeps x's taint if either side is tainted.
                     let v_tainted = self.is_tainted(value);
+                    let v_cred = self.is_credential_tainted(value);
                     let new = if op.is_some() {
                         self.tainted.contains(name) || v_tainted
                     } else {
                         v_tainted
                     };
+                    let new_cred = if op.is_some() {
+                        self.credential_tainted.contains(name) || v_cred
+                    } else {
+                        v_cred
+                    };
                     self.set_taint(name.clone(), new);
+                    self.set_credential_taint(name.clone(), new_cred);
                 } else {
                     // Field/index assign targets are also walked for nested sinks.
                     if let LValue::Index { base, index, .. } = target {
@@ -393,24 +507,25 @@ impl<'a> TaintCtx<'a> {
                 var2,
                 ..
             } => {
-                let coll_tainted = match kind {
+                let (coll_tainted, coll_cred) = match kind {
                     ForKind::Range { start, end, step } => {
                         self.check_expr(start);
                         self.check_expr(end);
                         if let Some(s) = step {
                             self.check_expr(s);
                         }
-                        false
+                        (false, false)
                     }
                     ForKind::In { collection } => {
                         self.check_expr(collection);
-                        // Iterating a tainted collection yields tainted elements.
-                        self.is_tainted(collection)
+                        (self.is_tainted(collection), self.is_credential_tainted(collection))
                     }
                 };
                 self.set_taint(var.clone(), coll_tainted);
+                self.set_credential_taint(var.clone(), coll_cred);
                 if let Some((v2, _)) = var2 {
                     self.set_taint(v2.clone(), coll_tainted);
+                    self.set_credential_taint(v2.clone(), coll_cred);
                 }
                 self.check_block(body);
             }
@@ -512,6 +627,16 @@ impl<'a> TaintCtx<'a> {
             self.tainted.remove(&name);
         }
     }
+
+    /// D-TAINT2: set or clear a local's credential taint. Mirrors `set_taint`.
+    fn set_credential_taint(&mut self, name: String, tainted: bool) {
+        if tainted {
+            self.tainted.insert(name.clone()); // credential → also general taint
+            self.credential_tainted.insert(name);
+        } else {
+            self.credential_tainted.remove(&name);
+        }
+    }
 }
 
 /// Names bound by a destructuring pattern (S74), flattened.
@@ -527,10 +652,8 @@ fn pattern_names(pat: &crate::AST::BindPattern) -> Vec<String> {
     }
 }
 
-/// D-TAINT1: run the taint pass over one function body. `params` taints any
-/// parameter declared `#Tainted` (reserved — params carry no tag today, so this
-/// starts empty), `core_imports` resolves Core aliases, `sanitizers` is the set
-/// of `#Sanitizer` function/method keys. Returns the E0721 diagnostics found.
+/// D-TAINT1/TAINT2: run the taint pass over one function body. Returns all
+/// taint diagnostics found (E0721 injection sinks and E0722 credential sinks).
 pub fn check_func_taint(
     body: &[Stmt],
     sanitizers: &HashSet<String>,
@@ -581,6 +704,31 @@ pub fn collect_sanitizers(items: &[Item], out: &mut HashSet<String>) {
             _ => {}
         }
     }
+}
+
+/// E0722 (D-TAINT2): a `#Tainted(Credential)` value reaches a log/print/serialize
+/// sink. Credentials must never appear in log files, stdout, or serialized output.
+pub fn e0722(alias: &str, method: &str, span: Span) -> Diagnostic {
+    let api = if alias.is_empty() {
+        method.to_string()
+    } else {
+        format!("{alias}.{method}")
+    };
+    Diagnostic::error(
+        "E0722",
+        format!(
+            "a credential value reaches `{}`, a logging sink",
+            api
+        ),
+        format!(
+            "`{}` writes to a log, terminal, or serialized output — a `#{}({})` value there leaks the secret",
+            api,
+            crate::Syntax::KW_TAINTED,
+            crate::Syntax::KW_CREDENTIAL,
+        ),
+        "log a non-secret field, or strip the credential with a `#Sanitizer fn` first".to_string(),
+        Some(span),
+    )
 }
 
 /// E0721 (D-TAINT1): a tainted (untrusted) value reaches a sink effect without

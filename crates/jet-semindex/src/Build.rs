@@ -1656,7 +1656,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 }
             });
         }
-        AST::Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
+        AST::Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | AST::Expr::Present(inner, _)
         | AST::Expr::Ok(inner, _)
         | AST::Expr::Err(inner, _)

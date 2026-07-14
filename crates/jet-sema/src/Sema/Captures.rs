@@ -186,7 +186,7 @@ pub(crate) fn walk_expr_for_const_refs(
                 }
             }
         }
-        Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
+        Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
         Expr::Absent(_) | Expr::ReduceMarker(_, _) | Expr::Todo { .. } | Expr::ComptimeSplice { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
@@ -322,7 +322,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
             expr_refs_name(callee, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
         }
         Expr::Field(inner, _, _)
-        | Expr::Tainted(inner, _)
+        | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Try(inner, _, _) => expr_refs_name(inner, name),
         Expr::OptField { base, .. } => expr_refs_name(base, name),
@@ -609,7 +609,7 @@ pub(crate) fn expr_collect_captures(
             }
         }
         Expr::Field(inner, _, _)
-        | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
+        | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Try(inner, _, _)
         | Expr::Ok(inner, _)

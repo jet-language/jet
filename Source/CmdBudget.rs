@@ -58,7 +58,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     };
     let active: Vec<_> = specs.into_iter().filter(|located| applicable(&located.spec, "native", "dev")).collect();
     let store = BudgetStore::new(&root);
-    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None) {
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None, None) {
         Ok(report) => report,
         Err(error) => return tool_failure(&options, &error),
     };
@@ -161,7 +161,7 @@ pub(crate) fn run_build_gates(entry:&str, artifact_path:&Path, target:&str, prof
         Err(error)=>return build_gate_tool_failure(&error),
     }
     let started=timestamp_now();
-    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact,None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
+    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact,None,None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
     let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();
     let path=format!(".jet/perf/reports/{report_id}.json");
     let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
@@ -226,7 +226,7 @@ pub(crate) fn run_bench_refresh(entry:&str,evidence:&[crate::CmdDevTools::BenchE
     if active.is_empty(){return 0}
     match compatible_report(&root,&bundle,&active,"native","bench",None){Ok(Some(stored))=>return emit_stored_build_gates(&stored),Ok(None)=>{},Err(error)=>return build_gate_tool_failure(&error)}
     let store=BudgetStore::new(&root);let started=timestamp_now();
-    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,"native","bench",None,Some(evidence)){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
+    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,"native","bench",None,Some(evidence),None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
     let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();let path=format!(".jet/perf/reports/{report_id}.json");
     let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
     let options=Options{command:"check",baseline:None,bootstrap:false,accept_regression:false,reason:None,yes:false,json:false,verbose:false,annotations:Annotations::None};emit_check(&options,&built,&report_id,&path,created);
@@ -291,8 +291,8 @@ struct ResultRow { id:String, name:String, source:String, line:usize, column:usi
 
 type ArtifactIdentity = (PathBuf, u64, String);
 
-fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, bench_evidence:Option<&[crate::CmdDevTools::BenchEvidence]>)->Result<BuiltReport,String>{
-    for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
+fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, bench_evidence:Option<&[crate::CmdDevTools::BenchEvidence]>, dev_evidence:Option<&DevEvidence>)->Result<BuiltReport,String>{
+    for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe"|"ServiceProbe"|"SceneProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
     let artifact=if needs_artifact{Some(match supplied_artifact{Some(artifact)=>artifact,None=>build_selected_artifact(root,&project_entry(root))?})}else{None};
@@ -305,6 +305,8 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     let mut registry=ProviderRegistry::with_builtins();
     registry.register_in_process("BenchMeasurement",bench_measurement_provider).map_err(|error|format!("cannot register BenchMeasurement: {error}"))?;
     registry.register_in_process("AllocationProbe",allocation_probe_provider).map_err(|error|format!("cannot register AllocationProbe: {error}"))?;
+    registry.register_in_process("ServiceProbe",service_probe_provider).map_err(|error|format!("cannot register ServiceProbe: {error}"))?;
+    registry.register_in_process("SceneProbe",scene_probe_provider).map_err(|error|format!("cannot register SceneProbe: {error}"))?;
     let mut samples=vec![Vec::new();ordered.len()];
     for (provider_name,indices) in groups {
         let kind=provider_kind(&provider_name);
@@ -329,10 +331,43 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
                 continue;
             }
         }
+        if kind=="ServiceProbe" {
+            if let Some(evidence)=dev_evidence {
+                let name=provider_identity(&provider_name);
+                let svc=evidence.service.iter().find(|s|s.name==name).ok_or_else(||format!("ServiceProbe `{name}` was not collected; run `jet dev <file>` to refresh service evidence"))?;
+                if svc.samples_ns.len()!=20{return Err(format!("ServiceProbe `{name}` returned {} samples; policy requires 20",svc.samples_ns.len()))}
+                for index in indices {
+                    if ordered[index].spec.metric!="ServiceReadiness"{return Err(format!("ServiceProbe does not support metric `{}`",ordered[index].spec.metric))}
+                    samples[index]=svc.samples_ns.iter().map(|ns|Rational::parse(&ns.to_string(),"1")).collect::<Result<Vec<_>,_>>()?;
+                }
+                continue;
+            }
+        }
+        if kind=="SceneProbe" {
+            if let Some(evidence)=dev_evidence {
+                let name=provider_identity(&provider_name);
+                let scene=evidence.scene.iter().find(|s|s.name==name).ok_or_else(||format!("SceneProbe `{name}` was not collected; run `jet dev <file>` to refresh scene evidence"))?;
+                for index in &indices {
+                    let metric=ordered[*index].spec.metric.split('(').next().unwrap_or(&ordered[*index].spec.metric);
+                    let values=match metric{
+                        "FrameTime"=>&scene.frame_ns,
+                        "DrawCalls"=>&scene.draw_calls,
+                        "SceneAssetBytes"=>&scene.asset_bytes,
+                        "MemoryHighWater"=>&scene.rss_hwm,
+                        other=>return Err(format!("SceneProbe does not support metric `{other}`")),
+                    };
+                    if values.len()!=20{return Err(format!("SceneProbe `{name}` returned {} samples for `{metric}`; policy requires 20",values.len()))}
+                    samples[*index]=values.iter().map(|v|Rational::parse(&v.to_string(),"1")).collect::<Result<Vec<_>,_>>()?;
+                }
+                continue;
+            }
+        }
         let provider=&providers[indices[0]];
         let workload=if kind=="BuildArtifact"{
             CanonicalJson::object([("path".into(),CanonicalJson::String(artifact.as_ref().expect("built artifact").0.to_string_lossy().into_owned()))])?
         }else if matches!(kind,"BenchMeasurement"|"AllocationProbe"){
+            CanonicalJson::object([("name".into(),CanonicalJson::String(provider_identity(&provider_name).into())),("path".into(),CanonicalJson::String(project_entry(root).to_string_lossy().into_owned()))])?
+        }else if matches!(kind,"ServiceProbe"|"SceneProbe"){
             CanonicalJson::object([("name".into(),CanonicalJson::String(provider_identity(&provider_name).into())),("path".into(),CanonicalJson::String(project_entry(root).to_string_lossy().into_owned()))])?
         }else{
             CanonicalJson::Array(indices.iter().map(|index|compiler_fact(bundle,effect_facts,&ordered[*index].spec).map(|value|CanonicalJson::Integer(value.to_string()))).collect::<Result<Vec<_>,_>>()?)
@@ -408,6 +443,93 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     let value=report_wrapper(&evidence_id,measurements,subject,tool,privacy,pass,warn,fail)?;let bytes=value.bytes();jet_foundation::PerformanceBudget::verify_budget_report(&bytes)?;Ok(BuiltReport{value,bytes,results,fail})
 }
 
+/// ServiceProbe evidence: 20 startup-latency samples (nanoseconds) for one
+/// named service. Produced by `jetpack::Services::measure_readiness`.
+#[derive(Clone, Debug)]
+pub(crate) struct ServiceEvidence {
+    pub(crate) name: String,
+    /// Exactly 20 nanosecond durations — one per down→up→ready trial.
+    pub(crate) samples_ns: Vec<u64>,
+}
+
+/// SceneEvidence: per-frame samples for a named game scene produced by
+/// `jet_game_run` in probe mode (`JET_SCENE_PROBE=<name>`).
+#[derive(Clone, Debug)]
+pub(crate) struct SceneEvidence {
+    pub(crate) name: String,
+    /// Exactly 20 frame-callback elapsed-nanosecond values.
+    pub(crate) frame_ns: Vec<u64>,
+    /// Exactly 20 draw-call counts (callbacks per frame).
+    pub(crate) draw_calls: Vec<u64>,
+    /// Exactly 20 SceneAssetBytes values (constant across frames; real file sizes).
+    pub(crate) asset_bytes: Vec<u64>,
+    /// Exactly 20 MemoryHighWater (VmHWM) values (bytes).
+    pub(crate) rss_hwm: Vec<u64>,
+}
+
+/// All dev-owned evidence: one ServiceEvidence per ServiceProbe + one
+/// SceneEvidence per SceneProbe.
+struct DevEvidence {
+    service: Vec<ServiceEvidence>,
+    scene: Vec<SceneEvidence>,
+}
+
+/// D-PERFBUDGET-INTEGRATION1: `jet dev` owns ServiceProbe + SceneProbe
+/// refresh. Mirrors `run_bench_refresh` exactly: reuses a compatible cached
+/// report when digests are unchanged; otherwise measures and writes a new one.
+pub(crate) fn run_dev_refresh(entry: &str, service_evidence: &[ServiceEvidence], scene_evidence: &[SceneEvidence]) -> i32 {
+    let entry = match std::path::Path::new(entry).canonicalize() {
+        Ok(path) => path,
+        Err(error) => return build_gate_tool_failure(&format!("cannot resolve dev entry: {error}")),
+    };
+    let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
+        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let entry_text = entry.to_string_lossy();
+    let (diagnostics, bundle, effect_facts) = jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
+    if diagnostics.iter().any(|d| d.severity == jet::Diagnostics::Severity::Error) {
+        eprint!("{}", jet::render_all_colored(&entry_text, &std::fs::read_to_string(&entry).unwrap_or_default(), &diagnostics, false));
+        return 1;
+    }
+    let Some(bundle) = bundle else { return build_gate_tool_failure("front-end produced no checked dev program") };
+    let specs = match jet::Sema::collect_located_budget_specs_bundle(&bundle) {
+        Ok(specs) => specs,
+        Err(diagnostics) => {
+            eprint!("{}", jet::render_all_colored(&entry_text, &std::fs::read_to_string(&entry).unwrap_or_default(), &diagnostics, false));
+            return 1;
+        }
+    };
+    let active = specs.into_iter()
+        .filter(|located| dev_owned(&located.spec) && applicable(&located.spec, "native", "dev"))
+        .collect::<Vec<_>>();
+    if active.is_empty() { return 0; }
+    match compatible_report(&root, &bundle, &active, "native", "dev", None) {
+        Ok(Some(stored)) => return emit_stored_build_gates(&stored),
+        Ok(None) => {}
+        Err(error) => return build_gate_tool_failure(&error),
+    }
+    let evidence = DevEvidence { service: service_evidence.to_vec(), scene: scene_evidence.to_vec() };
+    let store = BudgetStore::new(&root);
+    let started = timestamp_now();
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &started, "native", "dev", None, None, Some(&evidence)) {
+        Ok(report) => report,
+        Err(error) => return build_gate_tool_failure(&error),
+    };
+    let report_id = text_field(&built.value, "report_id").expect("verified report id").to_string();
+    let path = format!(".jet/perf/reports/{report_id}.json");
+    let created = match store.write_report(&built.bytes) {
+        Ok((_, created)) => created,
+        Err(error) => return build_gate_tool_failure(&format!("report write refused: {error}")),
+    };
+    let options = Options { command: "check", baseline: None, bootstrap: false, accept_regression: false, reason: None, yes: false, json: false, verbose: false, annotations: Annotations::None };
+    emit_check(&options, &built, &report_id, &path, created);
+    if built.fail > 0 { 1 } else { 0 }
+}
+
+fn dev_owned(spec: &BudgetSpec) -> bool {
+    matches!(provider_kind(&spec.provider), "ServiceProbe" | "SceneProbe")
+        && (spec.scope.starts_with("Service(") || spec.scope.starts_with("Scene("))
+}
+
 fn bench_measurement_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{
     let CanonicalJson::Object(workload)=&request.workload else{return Err(ProviderFailure::malformed("BenchMeasurement workload is not an object"))};
     let Some(CanonicalJson::String(path))=workload.get("path") else{return Err(ProviderFailure::malformed("BenchMeasurement workload has no source path"))};
@@ -440,6 +562,31 @@ fn allocation_probe_provider(request:&ProviderRequest,_:&ProviderCancellation)->
         }
     }
     let samples=events.len()as u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
+}
+
+fn service_probe_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{
+    // ServiceProbe evidence is injected via run_dev_refresh → build_report's
+    // dev_evidence path; this in-process stub is reached only when no evidence
+    // was injected (bare `jet budget check` with a ServiceProbe budget).
+    // In that case we surface E2906 (unavailable) for every spec.
+    let mut events=Vec::new();
+    for(index,spec)in request.specs.iter().enumerate(){
+        if spec.metric!="ServiceReadiness"{return Err(ProviderFailure::malformed(format!("ServiceProbe does not support metric `{}`",spec.metric)))}
+             events.push(ProviderEvent::Unavailable{spec:index as u32,reason:"ServiceProbe requires `jet dev` to collect readiness evidence; run `jet dev <file>` to refresh".into(),details:Vec::new()});
+    }
+    let samples=0u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
+}
+
+fn scene_probe_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{
+    // SceneProbe evidence is injected via run_dev_refresh → build_report's
+    // dev_evidence path; this in-process stub is reached only when no evidence
+    // was injected (bare `jet budget check` with a SceneProbe budget).
+    let mut events=Vec::new();
+    for(index,spec)in request.specs.iter().enumerate(){
+        if !matches!(spec.metric.split('(').next().unwrap_or(&spec.metric),"FrameTime"|"DrawCalls"|"SceneAssetBytes"|"MemoryHighWater"){return Err(ProviderFailure::malformed(format!("SceneProbe does not support metric `{}`",spec.metric)))}
+             events.push(ProviderEvent::Unavailable{spec:index as u32,reason:"SceneProbe requires `jet dev` to collect scene evidence; run `jet dev <file>` to refresh".into(),details:Vec::new()});
+    }
+    let samples=0u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
 }
 
 fn measurement_base(root:&Path,bundle:&jet::AST::ProgramBundle,spec:&BudgetSpec,_subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson,target:&str,profile:&str)->Result<(CanonicalJson,String,String),String>{let metric_name=spec.metric.split('(').next().unwrap_or(&spec.metric);let percentile=metric_percentile(&spec.metric).map(|value|CanonicalJson::String(value.into())).unwrap_or(CanonicalJson::Null);let metric=CanonicalJson::object([("name".into(),CanonicalJson::String(metric_name.into())),("percentile".into(),percentile.clone())])?;let comparison=comparison_json(spec)?;let direction=if metric_name=="Throughput"{"higher_is_better"}else{"lower_is_better"};let applies=CanonicalJson::object([("profiles".into(),CanonicalJson::Array(axis(&spec.applicability.profiles,profile))), ("targets".into(),CanonicalJson::Array(axis(&spec.applicability.targets,target)))])?;let kind=provider_kind(&spec.provider);let identity=provider_identity(&spec.provider);let budget_spec=CanonicalJson::object([("applies".into(),applies),("comparison".into(),comparison.clone()),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("metric".into(),metric.clone()),("name".into(),CanonicalJson::String(spec.name.clone())),("package_id".into(),CanonicalJson::String(package_name(root))),("perf_role".into(),CanonicalJson::String(spec.role.clone())),("provider".into(),CanonicalJson::object([("identity".into(),CanonicalJson::String(identity.into())),("kind".into(),CanonicalJson::String(kind.into()))])?),("scope".into(),CanonicalJson::String(spec.scope.clone()))])?;let hash=stable_id(&budget_spec);let fingerprint=text_field(provider,"hardware_fingerprint")?;let mut framed=b"jet-budget-context-v1\0".to_vec();for value in ["package",metric_name,metric_percentile(&spec.metric).unwrap_or(""),target,std::env::consts::ARCH,profile,env!("CARGO_PKG_VERSION"),text_field(tool,"compiler_build_id")?,text_field(tool,"stdlib_id")?,text_field(tool,"runner_id")?,text_field(tool,"digest")?,kind,identity,text_field(provider,"version")?,text_field(provider,"isolation")?,text_field(provider,"cpu_arch")?,text_field(provider,"cpu_model")?,wire_map(as_object(provider)?,"logical_cpus")?,wire_map(as_object(provider)?,"memory_bytes")?,text_field(provider,"os")?,text_field(provider,"kernel")?,text_field(provider,"power_governor")?,fingerprint]{frame(&mut framed,value)}let context=sha256_hex(&framed);let(source,line,_)=source_location(root,bundle,spec);Ok((CanonicalJson::object([("baseline".into(),CanonicalJson::Null),("budget_id".into(),CanonicalJson::String(format!("{}:{}",spec.role,spec.name))),("budget_spec".into(),budget_spec),("budget_spec_sha256".into(),CanonicalJson::String(hash.clone())),("comparison".into(),comparison),("context_key".into(),CanonicalJson::String(context.clone())),("decision".into(),CanonicalJson::Null),("direction".into(),CanonicalJson::String(direction.into())),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("history".into(),CanonicalJson::Null),("metric".into(),metric),("policy".into(),if spec.comparison_fact.kind=="Absolute"{CanonicalJson::Null}else{policy_json()}),("provider".into(),provider.clone()),("samples".into(),CanonicalJson::Array(vec![CanonicalJson::Integer("0".into())])),("source".into(),CanonicalJson::String(format!("{source}:{line}"))),("statistics".into(),CanonicalJson::Null),("target_class".into(),CanonicalJson::String(target.into())),("unit".into(),CanonicalJson::String(metric_unit(&spec.metric).into()))])?,hash,context))}
@@ -513,7 +660,7 @@ impl<T: BudgetSource + ?Sized> BudgetSource for &T {
 fn source_location<T:BudgetSource+?Sized>(root:&Path,bundle:&jet::AST::ProgramBundle,located:&T)->(String,usize,usize){let spec=located.spec();let module=&bundle.modules[located.module_index(bundle)];let(line,column)=jet::Diagnostics::span_line_col(&module.source,spec.span.start.min(module.source.len()));let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");(path,line,column)}
 fn subject(root:&Path,bundle:&jet::AST::ProgramBundle,start:&str,end:&str,target:&str,profile:&str,artifact:Option<&(PathBuf,u64,String)>)->Result<CanonicalJson,String>{let mut sources=Vec::new();for module in &bundle.modules{let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");sources.push((path,sha256_hex(module.source.as_bytes())))}sources.sort();let artifact=artifact.map(|(_,bytes,sha256)|CanonicalJson::object([("bytes".into(),CanonicalJson::Integer(bytes.to_string())),("sha256".into(),CanonicalJson::String(sha256.clone()))]).unwrap()).unwrap_or(CanonicalJson::Null);CanonicalJson::object([("artifact".into(),artifact),("measured_end".into(),CanonicalJson::String(end.into())),("measured_start".into(),CanonicalJson::String(start.into())),("member_sources".into(),CanonicalJson::Array(sources.into_iter().map(|(path,hash)|CanonicalJson::object([("path".into(),CanonicalJson::String(path)),("sha256".into(),CanonicalJson::String(hash))]).unwrap()).collect())),("profile".into(),CanonicalJson::String(profile.into())),("target_class".into(),CanonicalJson::String(target.into())),("target_id".into(),CanonicalJson::String(package_name(root))),("target_triple".into(),CanonicalJson::String(host_triple()?))])}
 fn toolchain()->Result<CanonicalJson,String>{let executable=std::env::current_exe().map_err(|e|format!("cannot identify running compiler executable: {e}"))?;let build=executable_digest(&executable)?;let body=CanonicalJson::object([("compiler_build_id".into(),CanonicalJson::String(build.clone())),("jet_version".into(),CanonicalJson::String(env!("CARGO_PKG_VERSION").into())),("runner_id".into(),CanonicalJson::String(build.clone())),("stdlib_id".into(),CanonicalJson::String(build))])?;let mut map=as_object(&body)?.clone();map.insert("digest".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
-fn provider(kind:&str,identity:&str)->Result<CanonicalJson,String>{let triple=host_triple()?;let cpu_arch=triple.split('-').next().filter(|v|!v.is_empty()).ok_or("host triple has no architecture")?;let cpuinfo=std::fs::read_to_string("/proc/cpuinfo").map_err(|e|format!("cannot read CPU identity: {e}"))?;let cpu_model=proc_value(&cpuinfo,"model name").or_else(||proc_value(&cpuinfo,"Hardware")).ok_or("CPU model is unavailable")?;let meminfo=std::fs::read_to_string("/proc/meminfo").map_err(|e|format!("cannot read memory identity: {e}"))?;let memory_kib=proc_value(&meminfo,"MemTotal").and_then(|v|v.split_whitespace().next()).ok_or("memory total is unavailable")?.parse::<u128>().map_err(|_|"memory total is malformed")?;let memory_bytes=memory_kib.checked_mul(1024).ok_or("memory total overflow")?;let kernel=read_trimmed("/proc/sys/kernel/osrelease","kernel identity")?;let power_governor=read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor","CPU power governor")?;let logical_cpus=std::thread::available_parallelism().map_err(|e|format!("logical CPU count unavailable: {e}"))?.get();let(version,isolation)=if kind=="AllocationProbe"{("jet-arena-events-v1-warmup-auto-trials-20","benchmark-process-counter-reset-per-trial")}else{("1","process")};let body=CanonicalJson::object([("cpu_arch".into(),CanonicalJson::String(cpu_arch.into())),("cpu_model".into(),CanonicalJson::String(cpu_model.into())),("identity".into(),CanonicalJson::String(identity.into())),("isolation".into(),CanonicalJson::String(isolation.into())),("kernel".into(),CanonicalJson::String(kernel)),("kind".into(),CanonicalJson::String(kind.into())),("logical_cpus".into(),CanonicalJson::Integer(logical_cpus.to_string())),("memory_bytes".into(),CanonicalJson::Integer(memory_bytes.to_string())),("os".into(),CanonicalJson::String(std::env::consts::OS.into())),("power_governor".into(),CanonicalJson::String(power_governor)),("version".into(),CanonicalJson::String(version.into()))])?;let mut map=as_object(&body)?.clone();map.insert("hardware_fingerprint".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
+fn provider(kind:&str,identity:&str)->Result<CanonicalJson,String>{let triple=host_triple()?;let cpu_arch=triple.split('-').next().filter(|v|!v.is_empty()).ok_or("host triple has no architecture")?;let cpuinfo=std::fs::read_to_string("/proc/cpuinfo").map_err(|e|format!("cannot read CPU identity: {e}"))?;let cpu_model=proc_value(&cpuinfo,"model name").or_else(||proc_value(&cpuinfo,"Hardware")).ok_or("CPU model is unavailable")?;let meminfo=std::fs::read_to_string("/proc/meminfo").map_err(|e|format!("cannot read memory identity: {e}"))?;let memory_kib=proc_value(&meminfo,"MemTotal").and_then(|v|v.split_whitespace().next()).ok_or("memory total is unavailable")?.parse::<u128>().map_err(|_|"memory total is malformed")?;let memory_bytes=memory_kib.checked_mul(1024).ok_or("memory total overflow")?;let kernel=read_trimmed("/proc/sys/kernel/osrelease","kernel identity")?;let power_governor=read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor","CPU power governor")?;let logical_cpus=std::thread::available_parallelism().map_err(|e|format!("logical CPU count unavailable: {e}"))?.get();let(version,isolation)=if kind=="AllocationProbe"{("jet-arena-events-v1-warmup-auto-trials-20","benchmark-process-counter-reset-per-trial")}else if kind=="ServiceProbe"{("jet-service-readiness-v1-trials-20","service-process-group-down-up-per-trial")}else if kind=="SceneProbe"{("jet-scene-headless-v1-warmup-5-measure-20","scene-in-process-frame-loop")}else{("1","process")};let body=CanonicalJson::object([("cpu_arch".into(),CanonicalJson::String(cpu_arch.into())),("cpu_model".into(),CanonicalJson::String(cpu_model.into())),("identity".into(),CanonicalJson::String(identity.into())),("isolation".into(),CanonicalJson::String(isolation.into())),("kernel".into(),CanonicalJson::String(kernel)),("kind".into(),CanonicalJson::String(kind.into())),("logical_cpus".into(),CanonicalJson::Integer(logical_cpus.to_string())),("memory_bytes".into(),CanonicalJson::Integer(memory_bytes.to_string())),("os".into(),CanonicalJson::String(std::env::consts::OS.into())),("power_governor".into(),CanonicalJson::String(power_governor)),("version".into(),CanonicalJson::String(version.into()))])?;let mut map=as_object(&body)?.clone();map.insert("hardware_fingerprint".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
 fn executable_digest(path:&Path)->Result<String,String>{jet::SHA256::sha256_file_hex(path).map_err(|e|format!("cannot hash running compiler executable: {e}"))}
 fn host_triple()->Result<String,String>{let target=env!("JET_BUILD_TARGET");if target.split('-').count()<3{return Err("compiler build omitted canonical target triple".into())}Ok(target.into())}
 fn proc_value<'a>(text:&'a str,key:&str)->Option<&'a str>{text.lines().find_map(|line|{let(left,right)=line.split_once(':')?;(left.trim()==key).then(||right.trim())})}

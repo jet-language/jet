@@ -24,7 +24,18 @@ pub const KW_PURE: &str = "Pure";
 /// declaration: it rides the value (D-QUAL1). PascalCase per D-CASING1 (the
 /// ratified card's lowercase `#tainted` is normalized to the tag convention).
 /// Static, erased in codegen (I3).
+///
+/// D-TAINT2 (ratified 2026-07-13, option A): the taint kind is named in parens —
+/// `#Tainted(Credential) value`. Without parens the kind defaults to `.Input`
+/// (backward compatible). The closed kind set from D-TAINT1 is `.Input` /
+/// `.PII` / `.Secret` / `.Credential`; Credential adds log/print/serialize sinks.
 pub const KW_TAINTED: &str = "Tainted";
+
+/// D-TAINT2 (ratified 2026-07-13, option A): the `Credential` taint kind —
+/// `#Tainted(Credential) value`. A credential value reaching `print`, `log`, or
+/// `serialize` sinks is E0722. Part of the closed kind set already ratified in
+/// D-TAINT1 (`.Input`/`.PII`/`.Secret`/`.Credential`). PascalCase per D-CASING1.
+pub const KW_CREDENTIAL: &str = "Credential";
 
 /// D-TAINT1: the `#Sanitizer fn name(…)` modifier — the one blessed way to strip
 /// taint. A sanitizer's return value is untainted by contract, regardless of

@@ -358,12 +358,58 @@ fn render_dev_iteration(
     // Load the checked bundle once more as the swap baseline — only when the
     // program actually ran (a broken file has no running version to diff).
     if ran_ok {
-        jet::Loader::load_entry(file).ok().map(|mut b| {
+        let bundle = jet::Loader::load_entry(file).ok().map(|mut b| {
             let _ = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
             b
-        })
+        });
+        if let Some(ref b) = bundle {
+            run_dev_budget_refresh(file, b, mode);
+        }
+        bundle
     } else {
         None
+    }
+}
+
+/// After a successful dev iteration, collect ServiceProbe/SceneProbe evidence
+/// for any active dev-owned budgets and trigger a report refresh.
+fn run_dev_budget_refresh(file: &str, bundle: &jet::AST::ProgramBundle, mode: OutputMode) {
+    let specs = match jet::Sema::collect_located_budget_specs_bundle(bundle) {
+        Ok(specs) => specs,
+        Err(_) => return,
+    };
+    let has_service = specs.iter().any(|s| {
+        s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider) == "ServiceProbe"
+    });
+    let has_scene = specs.iter().any(|s| {
+        s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider) == "SceneProbe"
+    });
+    if !has_service && !has_scene {
+        return;
+    }
+    let root = Path::new(file)
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .and_then(|d| jet::Loader::find_manifest_root(&d).or_else(|| Some(d)))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let service_evidence = if has_service {
+        collect_service_evidence(&root, &specs)
+    } else {
+        Vec::new()
+    };
+    let scene_evidence = if has_scene {
+        collect_scene_evidence(file, &src, mode, &specs)
+    } else {
+        Vec::new()
+    };
+    let status = crate::CmdBudget::run_dev_refresh(file, &service_evidence, &scene_evidence);
+    if status != 0 {
+        eprintln!("budget: dev refresh failed with status {status}");
     }
 }
 
@@ -446,6 +492,7 @@ pub(crate) fn run_devtools(args: &[&String]) {
         Some("new-ui") => run_devtools_new_ui(&args[1..]),
         Some("check-fixture-paths") => run_devtools_check_fixture_paths(),
         Some("bless") => run_devtools_bless(&args[1..]),
+        Some("probe") => run_devtools_probe(&args[1..]),
         Some(other) => {
             eprintln!("error: unknown `devtools` subcommand `{}`", other);
             eprintln!("usage: {} devtools <{}>", jet::Syntax::BINARY_NAME, DEVTOOLS_SUBCOMMANDS);
@@ -2253,6 +2300,241 @@ pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, re
         evidence.push(BenchEvidence { name, samples, allocation_samples: Vec::new() });
     }
     evidence
+}
+
+/// Collect `ServiceProbe` evidence by cycling each named service down→up→ready
+/// 20 times. Reads `env.jet` from the project root to resolve `DevServicePlan`.
+/// Returns one `ServiceEvidence` entry per service name present in `specs`.
+pub(crate) fn collect_service_evidence(
+    root: &std::path::Path,
+    specs: &[jet::Sema::LocatedBudgetSpec],
+) -> Vec<crate::CmdBudget::ServiceEvidence> {
+    use jet_env_model::ModuleEval;
+
+    // Names of services that have a ServiceProbe budget.
+    let service_names: std::collections::BTreeSet<String> = specs
+        .iter()
+        .filter(|s| {
+            let kind = s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider);
+            kind == "ServiceProbe"
+        })
+        .map(|s| {
+            s.spec.provider
+                .split_once('(')
+                .and_then(|(_, rest)| rest.strip_suffix(')'))
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+
+    if service_names.is_empty() {
+        return Vec::new();
+    }
+
+    // Evaluate env.jet to get DevServicePlan for each named service.
+    let env_path = root.join(jet::Syntax::ENV_FILE);
+    let src = match std::fs::read_to_string(&env_path) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let plan = match ModuleEval::evaluate_env(&src, root) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+
+    // Use a minimal ShellEnv (no realized packages) — the service's init
+    // command must be available on the host PATH already when measuring.
+    let shell_env = jetpack::Shell::Env {
+        bin_dirs: Vec::new(),
+        vars: std::collections::BTreeMap::new(),
+        refs: Vec::new(),
+        label: "jetpack".to_string(),
+        prompt_path: jet_env_model::ModuleEval::PromptPathMode::Short,
+        prompt_strip: jet_env_model::ModuleEval::PromptStripMode::Off,
+        cache_leases: Vec::new(),
+    };
+
+    let mut result = Vec::new();
+    for name in &service_names {
+        let Some(svc_plan) = plan.dev_services.iter().find(|s| &s.name == name) else {
+            eprintln!("budget: ServiceProbe `{name}` not found in env.jet services");
+            continue;
+        };
+        if !svc_plan.enable {
+            eprintln!("budget: ServiceProbe `{name}` is disabled in env.jet; skipping");
+            continue;
+        }
+        match jetpack::Services::measure_readiness(root, &shell_env, svc_plan, 20) {
+            Ok(samples_ns) => result.push(crate::CmdBudget::ServiceEvidence {
+                name: name.clone(),
+                samples_ns,
+            }),
+            Err(e) => eprintln!("budget: ServiceProbe `{name}` measurement failed: {e}"),
+        }
+    }
+    result
+}
+
+/// Collect `SceneProbe` evidence by compiling the entry file, running it with
+/// `JET_SCENE_PROBE=<name>` for each named scene, and parsing JETSCENE1 rows.
+/// Returns one `SceneEvidence` per scene present in `specs`.
+pub(crate) fn collect_scene_evidence(
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    specs: &[jet::Sema::LocatedBudgetSpec],
+) -> Vec<crate::CmdBudget::SceneEvidence> {
+    // Names of scenes that have a SceneProbe budget.
+    let scene_names: std::collections::BTreeSet<String> = specs
+        .iter()
+        .filter(|s| {
+            let kind = s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider);
+            kind == "SceneProbe"
+        })
+        .map(|s| {
+            s.spec.provider
+                .split_once('(')
+                .and_then(|(_, rest)| rest.strip_suffix(')'))
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+
+    if scene_names.is_empty() {
+        return Vec::new();
+    }
+
+    // Compile the program once.
+    let compiled = match jet::compile_with_path(src, file) {
+        Ok(out) => out,
+        Err(diags) => {
+            report_problems(mode, file, src, &diags);
+            return Vec::new();
+        }
+    };
+    let bin = PathBuf::from("build").join(format!("scene_probe_{}", stem(file)));
+    build(
+        file,
+        &compiled.rust,
+        bin.clone(),
+        BuildProfile::Default,
+        compiled.ffi.as_ref(),
+        &[],
+        false,
+        None,
+        None,
+        None,
+        mode,
+        None,
+    );
+
+    let mut result = Vec::new();
+    for scene_name in &scene_names {
+        let out = match std::process::Command::new(&bin)
+            .env("JET_SCENE_PROBE", scene_name)
+            .output()
+        {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("budget: SceneProbe `{scene_name}` run failed: {e}");
+                continue;
+            }
+        };
+        if !out.status.success() {
+            eprintln!("budget: SceneProbe `{scene_name}` exited with non-zero status");
+            continue;
+        }
+        let stdout = String::from_utf8(out.stdout).unwrap_or_default();
+        let mut frame_ns = Vec::new();
+        let mut draw_calls = Vec::new();
+        let mut asset_bytes = Vec::new();
+        let mut rss_hwm = Vec::new();
+        let expected_hex: String = scene_name.bytes().map(|b| format!("{:02x}", b)).collect();
+        for line in stdout.lines() {
+            let Some(wire) = line.strip_prefix("JETSCENE1\t") else { continue };
+            let mut fields = wire.splitn(4, '\t');
+            let hex = fields.next().unwrap_or("");
+            let metric = fields.next().unwrap_or("");
+            let value_str = fields.next().unwrap_or("");
+            if hex != expected_hex { continue; }
+            let value: u64 = match value_str.parse() {
+                Ok(v) => v,
+                Err(_) => { eprintln!("budget: SceneProbe `{scene_name}` malformed value `{value_str}`"); continue; }
+            };
+            match metric {
+                "FrameTime" => frame_ns.push(value),
+                "DrawCalls" => draw_calls.push(value),
+                "SceneAssetBytes" => asset_bytes.push(value),
+                "MemoryHighWater" => rss_hwm.push(value),
+                _ => {}
+            }
+        }
+        // Require exactly 20 samples per metric.
+        if frame_ns.len() != 20 || draw_calls.len() != 20 || asset_bytes.len() != 20 || rss_hwm.len() != 20 {
+            eprintln!(
+                "budget: SceneProbe `{scene_name}` emitted {}/{}/{}/{} samples; need 20 for each metric",
+                frame_ns.len(), draw_calls.len(), asset_bytes.len(), rss_hwm.len()
+            );
+            continue;
+        }
+        result.push(crate::CmdBudget::SceneEvidence {
+            name: scene_name.clone(),
+            frame_ns,
+            draw_calls,
+            asset_bytes,
+            rss_hwm,
+        });
+    }
+    result
+}
+
+/// `jet devtools probe <file>` — internal test-only single-shot dev probe.
+/// Collects SceneProbe/ServiceProbe evidence for the given file and triggers
+/// a budget report refresh. Exits 0 if the report is built and all gates pass,
+/// 1 otherwise. Not user-documented; used by CI tests.
+pub(crate) fn run_devtools_probe(args: &[&String]) {
+    use std::process::exit;
+    let file = match args.first() {
+        Some(f) => f.as_str(),
+        None => {
+            eprintln!("usage: jet devtools probe <file.jet>");
+            exit(jet::ExitCodes::USAGE);
+        }
+    };
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("probe: cannot read `{file}`: {e}");
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+    };
+    let mode = OutputMode { json: false, color: jet::Diagnostics::ColorChoice::Never };
+    let bundle = match jet::Loader::load_entry(file) {
+        Ok(mut b) => {
+            let _ = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+            b
+        }
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+    };
+    let specs = match jet::Sema::collect_located_budget_specs_bundle(&bundle) {
+        Ok(s) => s,
+        Err(_) => {
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+    };
+    let root = Path::new(file)
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .and_then(|d| jet::Loader::find_manifest_root(&d).or_else(|| Some(d)))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let service_evidence = collect_service_evidence(&root, &specs);
+    let scene_evidence = collect_scene_evidence(file, &src, mode, &specs);
+    let status = crate::CmdBudget::run_dev_refresh(file, &service_evidence, &scene_evidence);
+    exit(status);
 }
 
 fn decode_hex(value: &str) -> Option<String> {

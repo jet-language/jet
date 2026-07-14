@@ -4,6 +4,8 @@ struct GameState {
     assets: Vec<(String, String)>,
     bindings: Vec<(String, String)>,
     components: Vec<String>,
+    /// Accumulated real file sizes of all registered assets (bytes).
+    asset_bytes: u64,
 }
 
 #[derive(Clone)]
@@ -177,11 +179,10 @@ fn jet_game_assets_image(assets: &GameAssets, path: &String) -> Result<GameImage
     if path.contains("missing") {
         return Err(format!("asset not found: {}", path));
     }
-    assets
-        .state
-        .borrow_mut()
-        .assets
-        .push(("image".to_string(), path.clone()));
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let mut state = assets.state.borrow_mut();
+    state.assets.push(("image".to_string(), path.clone()));
+    state.asset_bytes = state.asset_bytes.saturating_add(size);
     Ok(GameImage { path: path.clone() })
 }
 
@@ -189,11 +190,10 @@ fn jet_game_assets_sound(assets: &GameAssets, path: &String) -> Result<GameSound
     if path.contains("missing") {
         return Err(format!("asset not found: {}", path));
     }
-    assets
-        .state
-        .borrow_mut()
-        .assets
-        .push(("sound".to_string(), path.clone()));
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let mut state = assets.state.borrow_mut();
+    state.assets.push(("sound".to_string(), path.clone()));
+    state.asset_bytes = state.asset_bytes.saturating_add(size);
     Ok(GameSound { path: path.clone() })
 }
 
@@ -208,6 +208,21 @@ fn jet_game_input_pressed(input: &GameInputSnapshot, action: &String) -> bool {
     input.pressed.iter().any(|a| a == action)
 }
 
+/// Read peak RSS (VmHWM) from /proc/self/status in bytes.
+/// Returns 0 if unavailable (non-Linux or parse failure).
+fn read_vmhwm_bytes() -> u64 {
+    let Ok(text) = std::fs::read_to_string("/proc/self/status") else { return 0 };
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("VmHWM:") {
+            // Value is in kibibytes: "VmHWM:    1234 kB"
+            if let Some(kib) = rest.split_whitespace().next().and_then(|v| v.parse::<u64>().ok()) {
+                return kib.saturating_mul(1024);
+            }
+        }
+    }
+    0
+}
+
 fn jet_game_run(
     scene: &mut GameScene,
     replay: Option<&GameReplay>,
@@ -217,54 +232,61 @@ fn jet_game_run(
     let replay_path = replay
         .map(|r| r.path.clone())
         .unwrap_or_else(|| "<none>".to_string());
+
+    // D-PERFBUDGET-PROVIDER1 / INTEGRATION1: when JET_SCENE_PROBE=<name>
+    // matches this scene, run 5 warmup + 20 measured frames and emit
+    // JETSCENE1 wire rows to stdout. Normal output is suppressed; the
+    // caller (scene_probe_provider) parses only JETSCENE1 lines.
+    let probe_name = std::env::var("JET_SCENE_PROBE").ok();
+    let measuring = probe_name.as_deref() == Some(scene.name.as_str());
+
+    let asset_bytes = scene.assets.state.borrow().asset_bytes;
+    let warmup_frames: i64 = 5;
+    let measure_frames: i64 = 20;
+    let total_frames = if measuring { warmup_frames + measure_frames } else { 3 };
+
     let mut out = Vec::new();
-    out.push(format!("scene:{}", scene.name));
-    out.push(format!(
-        "backend:{}/{}/{}",
-        backend.renderer, backend.audio, backend.editor
-    ));
-    out.push(format!("replay:{}", replay_path));
-    {
-        let state = scene.assets.state.borrow();
-        let assets = state
-            .assets
-            .iter()
-            .map(|(kind, path)| format!("{}:{}", kind, path))
-            .collect::<Vec<_>>()
-            .join(",");
+    if !measuring {
+        out.push(format!("scene:{}", scene.name));
         out.push(format!(
-            "assets:{}",
-            if assets.is_empty() {
-                "none".to_string()
-            } else {
-                assets
-            }
+            "backend:{}/{}/{}",
+            backend.renderer, backend.audio, backend.editor
         ));
-        let bindings = state
-            .bindings
-            .iter()
-            .map(|(action, key)| format!("{}={}", action, key))
-            .collect::<Vec<_>>()
-            .join(",");
-        out.push(format!(
-            "input:{}",
-            if bindings.is_empty() {
-                "none".to_string()
-            } else {
-                bindings
-            }
-        ));
-        let components = state.components.join(",");
-        out.push(format!(
-            "components:{}",
-            if components.is_empty() {
-                "none".to_string()
-            } else {
-                components
-            }
-        ));
+        out.push(format!("replay:{}", replay_path));
+        {
+            let state = scene.assets.state.borrow();
+            let assets = state
+                .assets
+                .iter()
+                .map(|(kind, path)| format!("{}:{}", kind, path))
+                .collect::<Vec<_>>()
+                .join(",");
+            out.push(format!(
+                "assets:{}",
+                if assets.is_empty() { "none".to_string() } else { assets }
+            ));
+            let bindings = state
+                .bindings
+                .iter()
+                .map(|(action, key)| format!("{}={}", action, key))
+                .collect::<Vec<_>>()
+                .join(",");
+            out.push(format!(
+                "input:{}",
+                if bindings.is_empty() { "none".to_string() } else { bindings }
+            ));
+            let components = state.components.join(",");
+            out.push(format!(
+                "components:{}",
+                if components.is_empty() { "none".to_string() } else { components }
+            ));
+        }
     }
-    for frame_idx in 0..3 {
+
+    // Hex-encode scene name for the wire protocol (avoids tab/newline issues).
+    let scene_hex: String = scene.name.bytes().map(|b| format!("{:02x}", b)).collect();
+
+    for frame_idx in 0..total_frames {
         let pressed = if frame_idx == 1 {
             scene
                 .assets
@@ -280,22 +302,35 @@ fn jet_game_run(
         let frame = GameFrame {
             index: frame_idx,
             user_index: frame_idx,
-            input: GameInputSnapshot {
-                pressed: pressed.clone(),
-            },
-            user_input: GameInputSnapshot {
-                pressed: pressed.clone(),
-            },
+            input: GameInputSnapshot { pressed: pressed.clone() },
+            user_input: GameInputSnapshot { pressed: pressed.clone() },
         };
-        for cb in scene.callbacks.borrow_mut().iter_mut() {
-            cb(frame.clone());
-        }
-        let input = if pressed.is_empty() {
-            "none".to_string()
+        let callbacks_count = scene.callbacks.borrow().len() as u64;
+        if measuring {
+            let t0 = std::time::Instant::now();
+            for cb in scene.callbacks.borrow_mut().iter_mut() {
+                cb(frame.clone());
+            }
+            let elapsed_ns = t0.elapsed().as_nanos() as u64;
+            // Only emit measured frames (skip warmup).
+            if frame_idx >= warmup_frames {
+                let rss = read_vmhwm_bytes();
+                println!("JETSCENE1\t{scene_hex}\tFrameTime\t{elapsed_ns}");
+                println!("JETSCENE1\t{scene_hex}\tDrawCalls\t{callbacks_count}");
+                println!("JETSCENE1\t{scene_hex}\tSceneAssetBytes\t{asset_bytes}");
+                println!("JETSCENE1\t{scene_hex}\tMemoryHighWater\t{rss}");
+            }
         } else {
-            pressed.join("+")
-        };
-        out.push(format!("frame:{} input:{}", frame_idx, input));
+            for cb in scene.callbacks.borrow_mut().iter_mut() {
+                cb(frame.clone());
+            }
+            let input = if pressed.is_empty() {
+                "none".to_string()
+            } else {
+                pressed.join("+")
+            };
+            out.push(format!("frame:{} input:{}", frame_idx, input));
+        }
     }
     out.join("\n")
 }

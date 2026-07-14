@@ -3306,3 +3306,149 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
         "outside-package bare error text must stay the current usage error:\n{stderr}"
     );
 }
+
+fn scene_probe_project(tag: &str) -> PathBuf {
+    let dir = isolated_cwd(tag);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("src/main.jet"), r#"use core.game as game
+
+module perf.game {
+    budgets: [
+        Budget.{
+            name: "frame",
+            scope: .Scene("main"),
+            metric: .FrameTime(.P99),
+            provider: .SceneProbe("main"),
+            comparison: .AbsoluteFrom("local/main"),
+            limit: .AtMost(16ms),
+            enforcement: .Warn,
+        },
+        Budget.{
+            name: "memory",
+            scope: .Scene("main"),
+            metric: .MemoryHighWater,
+            provider: .SceneProbe("main"),
+            comparison: .AbsoluteFrom("local/main"),
+            limit: .AtMost(256MiB),
+            enforcement: .Warn,
+        },
+        Budget.{
+            name: "assets",
+            scope: .Scene("main"),
+            metric: .SceneAssetBytes,
+            provider: .SceneProbe("main"),
+            comparison: .AbsoluteFrom("local/main"),
+            limit: .AtMost(1MiB),
+            enforcement: .Warn,
+        },
+        Budget.{
+            name: "draws",
+            scope: .Scene("main"),
+            metric: .DrawCalls(.P99),
+            provider: .SceneProbe("main"),
+            comparison: .AbsoluteFrom("local/main"),
+            limit: .AtMost(10),
+            enforcement: .Warn,
+        },
+    ]
+}
+
+fn run() {
+    scene := game.Scene.new("main")
+    counter := 0
+    scene.on_frame((frame) => {
+        counter = counter + 1
+    })
+    transcript :: game.run(scene)
+    print(transcript)
+}
+"#).unwrap();
+    dir
+}
+
+#[test]
+fn scene_probe_produces_real_frame_time_samples_and_rejects_forged_cache() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = scene_probe_project("scene_probe_runtime");
+    let run = || Command::new(jet())
+        .args(["devtools", "probe", "src/main.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let first = run();
+    assert_eq!(
+        first.status.code(), Some(0),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let reports = dir.join(".jet/perf/reports");
+    let paths = || fs::read_dir(&reports).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+    let initial = paths();
+    assert_eq!(initial.len(), 1, "expected exactly one report; got {:?}", initial);
+    let bytes = fs::read(&initial[0]).unwrap();
+    jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+    let CanonicalJson::Object(report) = CanonicalJson::parse_canonical(&bytes).unwrap() else { panic!("report") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+    let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+    assert_eq!(measurements.len(), 4, "expected 4 SceneProbe measurements");
+    for measurement in measurements {
+        let CanonicalJson::Object(m) = measurement else { panic!("measurement") };
+        let CanonicalJson::Object(provider) = &m["provider"] else { panic!("provider") };
+        assert_eq!(provider["kind"], CanonicalJson::String("SceneProbe".into()));
+        assert_eq!(provider["identity"], CanonicalJson::String("main".into()));
+        let CanonicalJson::Array(samples) = &m["samples"] else { panic!("samples") };
+        assert_eq!(samples.len(), 20, "SceneProbe must produce exactly 20 samples");
+    }
+
+    // Second run should reuse cached report (compatible identity → no new report).
+    let second = run();
+    assert_eq!(second.status.code(), Some(0));
+    assert_eq!(paths(), initial, "compatible report should be reused");
+
+    // Forge the report — third run must produce a new one.
+    fs::OpenOptions::new().append(true).open(&initial[0]).unwrap().write_all(b"forged").unwrap();
+    let third = run();
+    assert_eq!(third.status.code(), Some(0), "{}", String::from_utf8_lossy(&third.stderr));
+    assert_eq!(paths().len(), 2, "forged report must not satisfy compatible cache identity");
+}
+
+#[test]
+fn service_probe_unavailable_without_dev_reports_diagnostic() {
+    let dir = isolated_cwd("service_probe_no_env");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("src/main.jet"), r#"module perf.package {
+    budgets: [Budget.{
+        name: "readiness",
+        scope: .Service("mydb"),
+        metric: .ServiceReadiness,
+        provider: .ServiceProbe("mydb"),
+        comparison: .Absolute,
+        limit: .AtMost(500ms),
+        enforcement: .Warn,
+    }],
+}
+fn run() {}
+"#).unwrap();
+    // jet budget check: ServiceProbe stub should report "unavailable", not 101.
+    let out = Command::new(jet())
+        .args(["budget", "check"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    // Exit code must not be 101 (I2 — rustc never speaks to user).
+    assert_ne!(out.status.code(), Some(101), "rustc must never speak to user (I2)");
+    assert_ne!(out.status.code(), Some(2), "usage error unexpected");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("ServiceProbe") || combined.contains("unavailable") || combined.contains("jet dev"),
+        "expected unavailability message; got:\n{combined}"
+    );
+}

@@ -70,7 +70,7 @@ fn substitute_expr(
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
         | Expr::Field(inner, _, _)
-        | Expr::Tainted(inner, _)
+        | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)

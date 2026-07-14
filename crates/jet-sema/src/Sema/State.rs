@@ -522,7 +522,7 @@ impl<'a> StateCtx<'a> {
                     self.states.insert(local, to.clone());
                 }
             }
-            Expr::Tainted(inner, _)
+            Expr::Tainted(inner, _, _)
             | Expr::Unary(_, inner, _)
             | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)

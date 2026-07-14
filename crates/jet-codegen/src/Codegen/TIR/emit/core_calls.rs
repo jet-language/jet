@@ -1351,6 +1351,18 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto.expert", "signing_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_signing_key_bytes_impl"), arg(0)),
         ("core.crypto.expert", "x25519_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_x25519_secret_bytes_impl"), arg(0)),
         ("core.crypto.expert", "shared_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_shared_secret_bytes_impl"), arg(0)),
+        // D-AUTH2=A (ratified 2026-07-13): `auth.verify_jwt(token, key)` —
+        // HMAC-SHA256 JWT verification. Checks signature, expiry, and audience;
+        // returns `Result<Claims, AuthError>`. No new deps (I6): uses the
+        // HMAC-SHA256 and base64url primitives already in the prelude.
+        ("core.auth", "verify_jwt") => {
+            format!(
+                "{}(&({}), &({}))",
+                helper("jet_auth_verify_jwt_impl"),
+                arg(0),
+                arg(1),
+            )
+        }
         // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — reads `.jet/secrets.age`
         // (project-relative) and decrypts with the local identity, via the
         // age-style crypto FFI bridge. Already the exact `Option<String>` shape

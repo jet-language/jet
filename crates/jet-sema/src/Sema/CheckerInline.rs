@@ -367,7 +367,7 @@ impl<'a> InlineAlwaysScan<'a> {
                     }
                 }
             }
-            Expr::Tainted(inner, _) | Expr::Present(inner, _) => self.scan_expr(inner),
+            Expr::Tainted(inner, _, _) | Expr::Present(inner, _) => self.scan_expr(inner),
             Expr::Absent(_) => {}
             Expr::Todo { .. } => {}
             Expr::ReduceMarker(_, _) => {}

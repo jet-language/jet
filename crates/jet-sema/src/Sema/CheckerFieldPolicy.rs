@@ -227,7 +227,7 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
             }
         }
         Expr::Field(inner, _, _)
-        | Expr::Tainted(inner, _)
+        | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Try(inner, _, _) => rewrite_field_refs(inner, names, receiver),
         Expr::OptField { base, .. } => rewrite_field_refs(base, names, receiver),
