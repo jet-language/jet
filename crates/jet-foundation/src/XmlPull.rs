@@ -637,7 +637,7 @@ pub fn render_document(value: &Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use super::{field, parse_document, parse_document_with, render_document, ByteLexer, EntityPolicy, Event, Limits, ParseOptions, Part, Reason, Scanner, TokenKind, Value, WireEncoding};
+    use super::{field, parse_document, parse_document_with, render_document, ByteLexer, EntityPolicy, Event, Limits, ParseOptions, Part, Reason, Scanner, StreamScanner, TokenKind, Value, WireEncoding};
 
     fn scan(source: &str) -> Result<Vec<Event>, String> {
         let mut scanner = Scanner::new(source);
@@ -916,6 +916,24 @@ mod tests {
         assert_eq!(first.kind, Reason::Limit);
         assert_eq!(limited.finish_input().expect_err("fused"), first);
     }
+
+    fn stream_events(bytes: &[u8], split: usize) -> Vec<Event> {
+        let mut scanner=StreamScanner::new(4096,ParseOptions::safe()).expect("scanner");
+        scanner.push(&bytes[..split]).expect("first");
+        let mut events=Vec::new();while let Some(event)=scanner.next().expect("events"){events.push(event.event)}
+        scanner.push(&bytes[split..]).expect("second");scanner.finish_input().expect("finish");
+        while let Some(event)=scanner.next().expect("events"){events.push(event.event)}events
+    }
+
+    #[test]
+    fn stream_scanner_preserves_semantics_across_every_byte_split() {
+        let bytes=b"\xef\xbb\xbf<?xml version='1.0'?><r xmlns:p='u'>x&amp;<p:c/></r>\n";
+        let expected=stream_events(bytes,bytes.len());
+        for split in 0..=bytes.len(){assert_eq!(stream_events(bytes,split),expected,"split {split}")}
+        assert!(matches!(&expected[2],Event::ElementStart{name,..} if name.local=="r"));
+        assert!(matches!(&expected[5],Event::ElementStart{name,..} if name.namespace_uri.as_deref()==Some("u")));
+        assert!(matches!(expected.last(),Some(Event::DocumentEnd)));
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
@@ -1061,6 +1079,7 @@ pub struct ByteToken {
     pub kind: TokenKind,
     pub text: String,
     pub raw_bytes: Vec<u8>,
+    pub scalar_bytes: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -1201,7 +1220,76 @@ impl ByteLexer {
         };
         if count == 0 { return Ok(None); }
         let drained: Vec<_> = self.units.drain(..count).collect();
-        Ok(Some(ByteToken { kind, text: drained.iter().map(|unit| unit.scalar).collect(), raw_bytes: drained.into_iter().flat_map(|unit| unit.raw).collect() }))
+        let scalar_bytes = drained.iter().map(|unit| unit.raw.len()).collect();
+        Ok(Some(ByteToken { kind, text: drained.iter().map(|unit| unit.scalar).collect(), raw_bytes: drained.into_iter().flat_map(|unit| unit.raw).collect(), scalar_bytes }))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamEvent {
+    pub event: Event,
+    pub raw_bytes: Vec<u8>,
+    pub encoding: WireEncoding,
+    pub bom: Vec<u8>,
+}
+
+/// Persistent semantic projection over ByteLexer. Scanner remains the sole XML
+/// grammar/namespace/limit engine; this adapter supplies one complete lexical
+/// token at a time and transfers its owned semantic state between calls.
+pub struct StreamScanner {
+    lexer: ByteLexer,
+    options: ParseOptions,
+    started: bool,
+    ended: bool,
+    root_seen: bool,
+    root_closed: bool,
+    declaration_seen: bool,
+    doctype_seen: bool,
+    declared_entities: BTreeSet<String>,
+    stack: Vec<Frame>,
+    nodes: usize,
+    text_bytes: usize,
+    entity_replacement_bytes: usize,
+    wire_consumed: usize,
+    line: usize,
+    column: usize,
+    terminal: Option<Error>,
+}
+
+impl StreamScanner {
+    pub fn new(max_item_bytes: usize, options: ParseOptions) -> Result<Self, Error> {
+        options.limits.validate()?;
+        Ok(Self { lexer: ByteLexer::new(max_item_bytes), options, started: false, ended: false, root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false, declared_entities: BTreeSet::new(), stack: Vec::new(), nodes: 0, text_bytes: 0, entity_replacement_bytes: 0, wire_consumed: 0, line: 1, column: 1, terminal: None })
+    }
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> { if let Some(error)=&self.terminal{return Err(error.clone())} self.lexer.push(bytes).map_err(|error|{self.terminal=Some(error.clone());error}) }
+    pub fn finish_input(&mut self) -> Result<(), Error> { if let Some(error)=&self.terminal{return Err(error.clone())} self.lexer.finish_input().map_err(|error|{self.terminal=Some(error.clone());error}) }
+    fn fail<T>(&mut self, mut error: Error) -> Result<T, Error> { if error.line.is_none(){error.line=Some(self.line);error.column=Some(self.column)} self.terminal=Some(error.clone());Err(error) }
+    pub fn next(&mut self) -> Result<Option<StreamEvent>, Error> {
+        if let Some(error)=&self.terminal{return Err(error.clone())}
+        let Some(encoding)=self.lexer.encoding() else{return Ok(None)};
+        if !self.started { self.started=true; self.nodes=1; self.wire_consumed=self.lexer.bom().len(); return Ok(Some(StreamEvent{event:Event::DocumentStart,raw_bytes:Vec::new(),encoding,bom:self.lexer.bom().to_vec()})); }
+        let Some(token)=self.lexer.next_token().map_err(|error|{self.terminal=Some(error.clone());error})? else {
+            if !self.lexer.eof{return Ok(None)}
+            if self.ended{return Ok(None)}
+            if !self.stack.is_empty(){return self.fail(Error::at_kind(self.wire_consumed,Reason::Malformed,"XML document ended before closing element"))}
+            if !self.root_seen{return self.fail(Error::at_kind(self.wire_consumed,Reason::Malformed,"empty XML document"))}
+            self.ended=true;
+            return Ok(Some(StreamEvent{event:Event::DocumentEnd,raw_bytes:Vec::new(),encoding,bom:self.lexer.bom().to_vec()}));
+        };
+        if token.text.starts_with("<?xml") && self.wire_consumed != self.lexer.bom().len() { return self.fail(Error::at_kind(self.wire_consumed,Reason::Malformed,"XML declaration is out of order")); }
+        let mut scanner=Scanner{source:&token.text,offset:0,started:true,ended:false,root_seen:self.root_seen,root_closed:self.root_closed,declaration_seen:self.declaration_seen,doctype_seen:self.doctype_seen,declared_entities:self.declared_entities.clone(),stack:self.stack.clone(),options:self.options.clone(),nodes:self.nodes,text_bytes:self.text_bytes,entity_replacement_bytes:self.entity_replacement_bytes};
+        let event=match scanner.next(){Ok(Some(event))=>event,Ok(None)=>return self.fail(Error::at_kind(self.wire_consumed,Reason::Malformed,"XML token produced no event")),Err(mut error)=>{
+            let scalar_count=token.text[..error.offset.min(token.text.len())].chars().count();
+            error.offset=self.wire_consumed+token.scalar_bytes.iter().take(scalar_count).sum::<usize>();
+            let local_line=error.line.unwrap_or(1);let local_column=error.column.unwrap_or(1);
+            error.line=Some(self.line+local_line-1);
+            error.column=Some(if local_line==1{self.column+local_column-1}else{local_column});
+            return self.fail(error)
+        }};
+        self.root_seen=scanner.root_seen;self.root_closed=scanner.root_closed;self.declaration_seen=scanner.declaration_seen;self.doctype_seen=scanner.doctype_seen;self.declared_entities=scanner.declared_entities;self.stack=scanner.stack;self.nodes=scanner.nodes;self.text_bytes=scanner.text_bytes;self.entity_replacement_bytes=scanner.entity_replacement_bytes;
+        self.wire_consumed+=token.raw_bytes.len();
+        for scalar in token.text.chars(){if scalar=='\n'{self.line+=1;self.column=1}else{self.column+=1}}
+        Ok(Some(StreamEvent{event,raw_bytes:token.raw_bytes,encoding,bom:self.lexer.bom().to_vec()}))
     }
 }
 
