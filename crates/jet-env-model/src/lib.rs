@@ -37,4 +37,13 @@ pub use jet_codegen::{Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST};
 // without a text rewrite.
 pub use jet_pkg_model::{Merge, PackageManifest, Recipe, RefSpec};
 
+// Card #367 slice 5: `WorkspaceFile` (load/evaluate) now lives here — L2
+// eval layer on top of L1 plan types (`WorkspacePlan`/`WorkspaceMember` in
+// `jet-pkg-model::WorkspacePlan`, overlay parse in `jet-pkg-model::Overlay`).
+// Re-export the L1 Overlay module and WorkspacePlan types under `crate::`
+// paths so `WorkspaceFile.rs` (one level down) can reference them as
+// `crate::Overlay::…` / `crate::WorkspacePlan::…` unchanged.
+pub use jet_pkg_model::{Overlay, WorkspaceLock, WorkspacePlan};
+
 pub mod ModuleEval;
+pub mod WorkspaceFile;

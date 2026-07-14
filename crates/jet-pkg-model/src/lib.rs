@@ -75,3 +75,11 @@ pub mod Recipe;
 pub mod RefSpec;
 pub mod ScriptDeps;
 pub mod Store;
+// Card #367 slice 5: pure overlay policy data + parse/strip, workspace plan
+// types, and lock read API — moved here from `jetpack` so Canvas / devserver
+// can scan workspaces via `jet-env-model` / `jet-pkg-model` without pulling in
+// the full engine crate.  `jetpack` re-exports all three under their historical
+// paths so its own internal call sites are unchanged.
+pub mod Overlay;
+pub mod WorkspacePlan;
+pub mod WorkspaceLock;

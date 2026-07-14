@@ -340,7 +340,7 @@ pub(super) fn apply_project_add_workspace_member(
             member_path
         )
     };
-    jetpack::WorkspaceFile::evaluate(&after, &ctx.project_root)
+    jet_env_model::WorkspaceFile::evaluate(&after, &ctx.project_root)
         .map_err(|d| project_edit_error("diagnostic", &d.what))?;
     let change = ProjectChange {
         path: workspace_path,
@@ -796,7 +796,7 @@ fn normalize_and_validate_project_changes(
         } else if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::WORKSPACE_FILE))
             || change.rel == jet_driver::Syntax::WORKSPACE_FILE
         {
-            jetpack::WorkspaceFile::evaluate(&change.after, &ctx.project_root)
+            jet_env_model::WorkspaceFile::evaluate(&change.after, &ctx.project_root)
                 .map_err(|d| project_edit_error("diagnostic", &d.what))?;
         } else if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::ENV_FILE))
             || change.rel == jet_driver::Syntax::ENV_FILE

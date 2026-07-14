@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 533,
-    "rev": 5811,
+    "rev": 5834,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13120,6 +13120,11 @@
       "log": [
         {
           "at": "2026-07-14",
+          "by": "cursor-506-verify",
+          "text": "Verified C5+C7 independently (cursor-506-verify). C5 PASS: golden 1/1, effects 48, rollback 4, ownership 12, E0746 snapshot green; uses_stm + jet_stm in codegen confirmed; JIT gap honest in jit_gaps.txt:208. C7 PASS: EnvHook 6 unit + env_hook 7 CLI + env_dev_trust 14 all green; syntax_reconciliation 10/11 — 1 pre-existing unrelated failure (marker census doc stale from #505/#518 adds, not C7). Both I4+I5 satisfied."
+        },
+        {
+          "at": "2026-07-14",
           "by": "terra-506-observe",
           "text": "[handoff] Integrated complete D-OBSERVE-LIVE1 at 14c1c59fd; parent live attach/security 2/2 + devserver 24/24 green. Remaining blocked/verification legs already exact in card log."
         },
@@ -13239,11 +13244,11 @@
         {
           "n": 5,
           "text": "D-STM1 STM end-to-end: #Transact over Shared<T> commits multi-handle .edit atomically via canonical-order lock-fold; example+golden green; local-only #Transact byte-identical; E0746 preserved; JIT falls to tier-0",
-          "status": "met",
+          "status": "verified",
           "metBy": "fable-impl-506stm",
-          "verifiedBy": null,
-          "evidence": "9c7cf099/eaa656bf/58f9f63b: jet_stm txn stack + canonical-order lock-fold commit, edit_txn routing, uses_stm TIR flag; example memory/shared_transact (8 concurrent transfers, total conserved) golden green; transact/rollback goldens byte-identical; effects 48, rollback 4, tir 147, ownership 12 green; JIT gap registered. Conformance note: commit realized via hybrid-sanctioned canonical-order locking (identical observable guarantee, no lost updates) rather than literal optimistic retry — flagged on card log for owner visibility.",
-          "at": "2026-07-13T11:28:10.265Z"
+          "verifiedBy": "cursor-506-verify",
+          "evidence": "golden green (shared_transact 1/1), effects 48/48, rollback 4/4, ownership 12/12, E0746 UI snapshot green; uses_stm flag in codegen verified in TIR/emit/statements.rs:773-821; jet_stm::begin()/commit() in RuntimeControl.rs:138+; JIT gap memory/shared_transact registered in jit_gaps.txt:208 (honest tier-0 not invented retry); D-STM1=A in syntax-decisions.md:1031, spec.md:313; E0746 in diagnostics.md:369,1148; I4+I5 satisfied.",
+          "at": "2026-07-14T12:09:18.534Z"
         },
         {
           "n": 6,
@@ -13257,11 +13262,11 @@
         {
           "n": 7,
           "text": "D-ENVHOOK1=A end-to-end: `jet env hook bash|zsh|fish` prints an opt-in per-prompt hook; the hook activates the nearest env.jet (PATH + JETPACK_ENV markers + JETPACK_ENV_DIR anchor) on cd-in, stays active in subdirs (ancestor walk), and unloads/restores PATH on cd-out; first activation of an untrusted trust-sensitive env prompts via D-JPK-GRANTCMD1; JET_ENV_DISABLE suppresses+unloads; example+tests green; live bash round-trip proven. No new Jet-language syntax (grammars/formatter/golden/R12 N/A for this tooling verb).",
-          "status": "met",
+          "status": "verified",
           "metBy": "fable-impl-506env",
-          "verifiedBy": null,
-          "evidence": "commit 6eb7997e. jetpack::EnvHook 6 unit + tests/env_hook.rs 7 CLI green; env_dev_trust 14 green (enter regression); syntax_reconciliation 9 + decisions 2 green (incl every_syntax_const_has_adjacent_decision_comment). Live bash: source hook, cd proj->JETPACK_ENV_DIR set + JETPACK_ENV=1, cd src->stable, cd out->cleared+PATH restored. Files: crates/jetpack/src/EnvHook.rs (render+ancestor-walk), CLI/run_enter_dev.rs cmd_env_hook/cmd_env_export (reuse compose_env+Trust::gate), Shell.rs, jet-foundation Syntax consts, docs/spec/spec.md + docs/reference/environment.md.",
-          "at": "2026-07-13T12:16:47.279Z"
+          "verifiedBy": "cursor-506-verify",
+          "evidence": "jetpack::EnvHook 6 unit tests green; tests/env_hook.rs 7 CLI tests green; env_dev_trust 14/14 green; syntax_reconciliation 10/11 (1 pre-existing failure proposal_marker_census from prior cards #505/#518 adding #Task/#Every/#[allow] — not caused by C7 commits, confirmed git show 6eb7997e4 did not touch markers.rs); D-ENVHOOK1=A in syntax-decisions.md:2076 and spec.md:1803; crates/jetpack/src/EnvHook.rs confirmed present.",
+          "at": "2026-07-14T12:09:25.009Z"
         }
       ],
       "refs": [
@@ -15012,7 +15017,13 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-14",
+          "by": "claude-main",
+          "text": "Proposal doc committed (docs/proposals/package-ecosystem-frameworks.md, e06203591): Deck/Roles/Fold frameworks, full flake.nix parity table, adversarial review folded in. D-ECO1-19 minted ballot-ready; D-ECO1 picks the framework (rec: Fold), D-ECO13 Fold-only, D-ECO15/16 un-freeze jetos fleet/system surface per owner equal-depth ruling 2026-07-14. Card sits in deciding on D-ECO1."
+        }
+      ],
       "criteria": [],
       "refs": [
         "docs/proposals/package-ecosystem-frameworks.md",
@@ -30526,6 +30537,1252 @@
       "comment": "Delete web push (VAPID keys, subscribe UI, service-worker push handler, /api/push/*). Keep SSE. Auth secrets stay. Exposed historic keys still scrubbed per D-TOWER-HISTORY1=A when history rewrite runs — no rotation/resubscribe needed because feature is gone.",
       "created": "2026-07-14T11:44:27.913Z",
       "ratifiedAt": "2026-07-14"
+    },
+    {
+      "id": "D-ECO10",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "platform.<os>: sugar for OS-conditional lists",
+      "gist": "How a dev shell adds Linux-only packages: a platform.linux sugar block, or always the explicit comptime if target.os guard.",
+      "lesson": "Platform-conditional lists get an ergonomic sugar that desugars to the ratified comptime if. The expert can still write the if directly, so one mechanism serves both.",
+      "explainer": "",
+      "story": "The flake used lib.optionals stdenv.isLinux to add chromium, gtk4, and bubblewrap only on Linux. Nate wants that common case short, without hand-writing a comptime guard around every OS-specific list.",
+      "inWild": "module env.dev {\n    packages: [ pkgs.[cargo, rustc, gcc, lld] ]\n    platform.linux: [ pkgs.[chromium, gtk4, bubblewrap] ]   // (new -- D-ECO10)\n}\n// desugars to: if target.os == .Linux { packages += pkgs.[chromium, gtk4, bubblewrap] }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "platform.<os> sugar",
+          "detail": "platform.linux (and .macos, .windows) is a sugar block that desugars to the ratified comptime if target.os guard. The common OS-list case reads in one line, and an expert who needs a richer condition writes the if directly.",
+          "code": "platform.linux: [ pkgs.[chromium, gtk4, bubblewrap] ]\n\n$ jet env dev            # on macOS: chromium/gtk4/bubblewrap absent, no guard written by hand\n// expert path stays open:\nif target.os == .Linux { packages += ... }"
+        },
+        {
+          "key": "B",
+          "name": "Always the explicit comptime if",
+          "detail": "No sugar; every OS-specific list is wrapped in a comptime if by hand. The most common conditional in a dev shell, an OS package list, pays full ceremony every time it appears.",
+          "code": "if target.os == .Linux {\n    packages += pkgs.[chromium, gtk4, bubblewrap]\n}\n// repeated verbatim for every OS-specific list"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "lib.optionals stdenv.isLinux is the flake's idiom for the same job. platform.linux is the one-line Jet sugar over the ratified comptime guard.",
+          "code": "packages = base ++ lib.optionals stdenv.isLinux [ chromium gtk4 bubblewrap ];"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "platform.<os> gives the most common conditional, an OS package list, a one-line spelling while desugaring to the ratified comptime if the expert can still write directly.",
+        "tradeoff": "Sugar adds a second way to write an OS guard. It desugars to the exact if, so there is one semantics and the formatter can show either form.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Forcing an explicit comptime if on every OS list charges full ceremony for the single most common dev-shell conditional."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The sugar and the comptime if are one mechanism: platform.linux desugars to the if. Beginners get the short form, experts the explicit guard, with identical behavior.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One-line OS list",
+            "use": "The default sugar for the common conditional."
+          },
+          {
+            "key": "B",
+            "aspect": "Explicit comptime guard",
+            "use": "Kept as the desugaring target and the expert form for richer conditions."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:17.663Z"
+    },
+    {
+      "id": "D-ECO11",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "runtime: package field for runtime PATH deps",
+      "gist": "How a package declares the tools it shells out to at runtime, distinct from build-time deps, and referencable by other tiers.",
+      "lesson": "Runtime PATH deps are a distinct kind from build deps. Naming them their own field lets wrap and dev tools reference packages.<n>.runtime instead of restating the list.",
+      "explainer": "",
+      "story": "jet build and jet run shell out to rustc, cc, lld, ruby, php, and R at runtime. The flake called this jetRuntimePath. Nate wants one named list the binary wrapper and the dev shell both point at.",
+      "inWild": "packages.jet: executable {\n    runtime: [ pkgs.[rustc, stdenv.cc, lld],                 // (new -- D-ECO11)\n               pkgs.ruby, pkgs.php, pkgs.R.with([cran.jsonlite]) ],\n    wrap:    Wrap.{ path_prefix: self.runtime },             // points at the same list\n}\n// dev shell also references it: Tool.wrap(path_prefix: packages.jet.runtime)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Distinct runtime field",
+          "detail": "runtime is its own package field for tools needed on PATH at run time, separate from build deps. It is referencable as packages.jet.runtime, so wrap and the dev-shell tools point at one list instead of copying it.",
+          "code": "runtime: [ pkgs.[rustc, stdenv.cc, lld], pkgs.ruby, pkgs.php ]\nwrap: Wrap.{ path_prefix: self.runtime }\ntools: { jet: Tool.wrap(path_prefix: packages.jet.runtime) }  // one source of truth"
+        },
+        {
+          "key": "B",
+          "name": "Fold runtime into a generic deps list",
+          "detail": "There is one deps list mixing build-time and runtime tools. Nothing distinguishes what must be on PATH at run time, so wrap cannot select just the runtime set and the two intents blur into one bag.",
+          "code": "deps: [ rustc, stdenv.cc, lld, ruby, php, R ]  // build-time? runtime? both?\nwrap: Wrap.{ path_prefix: deps }  // over-wraps: build-only tools leak onto PATH"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "jetRuntimePath is a named list the flake reuses for the wrapper prefix and the dev shell. runtime is the direct field for that intent.",
+          "code": "jetRuntimePath = [ rustc stdenv.cc lld ruby php R ]; # reused in wrapProgram and devShell"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A distinct runtime field names exactly the tools needed on PATH at run time and is referencable, so wrap and the dev shell share one list instead of copying it.",
+        "tradeoff": "Packages now distinguish runtime from build deps, one more field to think about. That distinction is what lets wrap select the right set and avoid leaking build-only tools.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A single deps bag cannot say what belongs on the runtime PATH, so wrap over-wraps and build-only tools leak into the shipped binary."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "runtime is the named, referencable list; build deps stay separate in the build recipe. One intent per field, and cross-tier refs replace copying.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Named runtime list",
+            "use": "The referencable source wrap and dev tools both point at."
+          },
+          {
+            "key": "B",
+            "aspect": "Single-list simplicity",
+            "use": "Kept only for build deps inside the recipe, not for runtime PATH."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:17.776Z"
+    },
+    {
+      "id": "D-ECO12",
+      "cardId": "c002osb3",
+      "group": "tooling",
+      "title": "formatter: passthrough for non-.jet files",
+      "gist": "Whether jet fmt can format non-.jet files by delegating to an external formatter named in the manifest, or only formats .jet.",
+      "lesson": "jet fmt is native for .jet. A formatter passthrough lets one command also format the project's non-Jet files, so contributors run one tool, not several.",
+      "explainer": "",
+      "story": "The flake set formatter to nixfmt so nix fmt formatted the .nix files. Jet has native jet fmt for .jet. Nate wants jet fmt to also format the remaining .nix files without a second tool.",
+      "inWild": "module env.dev {\n    formatter: pkgs.nixfmt    // (new -- D-ECO12) passthrough for non-Jet files\n}\n\n$ jet fmt              # formats .jet natively\n$ jet fmt --lang nix   # delegates .nix files to nixfmt",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "formatter passthrough",
+          "detail": "formatter names an external formatter for non-Jet files. jet fmt formats .jet natively and delegates other languages to the named tool, so one command formats the whole tree, matching the flake's formatter attribute.",
+          "code": "formatter: pkgs.nixfmt\n\n$ jet fmt --lang nix\n  formatted flake.nix, shell.nix via nixfmt\n$ jet fmt              # .jet files handled natively, no external tool"
+        },
+        {
+          "key": "B",
+          "name": "jet fmt formats .jet only",
+          "detail": "jet fmt never touches non-Jet files. A project with .nix or other files invokes each external formatter separately, so contributors must know and run several tools, and CI wires each one by hand.",
+          "code": "$ jet fmt          # .jet only\n$ nixfmt flake.nix # separate tool, separate CI step, separate to remember"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "A flake's formatter attribute is what nix fmt runs. The passthrough gives jet fmt the same single-command reach over mixed-language repos.",
+          "code": "formatter.${system} = pkgs.nixfmt; # `nix fmt` runs it"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A passthrough lets jet fmt format the whole tree in one command, delegating non-Jet files to a named tool exactly as the flake's formatter attribute does.",
+        "tradeoff": "jet fmt gains a delegation path to external binaries. Native .jet formatting is unaffected, and the external tool runs only when its language is requested.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Limiting jet fmt to .jet forces contributors to run and remember a separate formatter per non-Jet language, splitting a single job across tools."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "jet fmt stays native and authoritative for .jet; the passthrough adds delegation for other languages under the same command. One entrypoint, native core, delegated edges.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One-command whole-tree format",
+            "use": "The default: native .jet plus delegated non-Jet files."
+          },
+          {
+            "key": "B",
+            "aspect": "Native-only clarity",
+            "use": "Kept for .jet, which jet fmt always formats itself, never delegating."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:17.892Z"
+    },
+    {
+      "id": "D-ECO13",
+      "cardId": "c002osb3",
+      "group": "tooling",
+      "title": "jet split/fold law (Fold-only)",
+      "gist": "If D-ECO1 selects Fold: the exact law for jet split and jet fold — what moves, what round-trips, and when split refuses.",
+      "lesson": "This ballot applies only if D-ECO1 is Fold; otherwise it does not ship. Split moves whole modules byte-identically and refuses when top-level bindings are shared across a boundary.",
+      "explainer": "",
+      "story": "Under Fold, Nate runs jet split env to lift module env.dev into env.jet, then jet fold env to reverse it. He needs a guarantee the round-trip is byte-identical and a clear error when it cannot be.",
+      "inWild": "$ jet split env      # module env.dev (with leading comments) -> env.jet, byte-identical\n$ jet fold env       # reverses; STABILITY test pins split -> fold -> original\n\n$ jet split system\nE13xx: cannot split -- top-level `let toolset` is used by system.build-box and env.dev\n  fix: route the value through its namespace field (packages.jet.runtime), or inline it",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Adopt the law as written",
+          "detail": "Split moves whole modules plus attached comments into the conventional file, computed fields verbatim. A STABILITY test pins byte-identical round-trip. If a top-level binding is shared across the split boundary, split refuses with E13xx naming both referents and the fix. Reversibility is guaranteed for whole modules.",
+          "code": "$ jet split env      # clean: env.dev shares nothing top-level\n$ jet split system   # refuses if a `let` straddles the boundary (E13xx), else clean\n// the ported repo splits clean: shared values already flow via packages.jet.runtime"
+        },
+        {
+          "key": "B",
+          "name": "Require unconditional reversibility",
+          "detail": "Split must always succeed, auto-rewriting shared top-level bindings to make the move fit. But byte-identical round-trip cannot survive an automatic rewrite, so this either corrupts manifests or silently restructures the user's code. It removes the honest refusal and, with it, Fold as designed.",
+          "code": "$ jet split system   # never refuses; silently rewrites `let toolset` into two copies\n// round-trip is no longer byte-identical -> the STABILITY guarantee is gone"
+        },
+        {
+          "key": "C",
+          "name": "Reject split tooling",
+          "detail": "No jet split or jet fold exists. Files never move under tooling, which means Fold has no mechanism. Choosing this is equivalent to selecting Roles in D-ECO1, where files are fixed and reserved.",
+          "code": "// no `jet split` / `jet fold`; layout is fixed at authoring time\n// -> this is just Roles; pick Roles in D-ECO1 instead"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "jet fmt",
+          "note": "jet fmt silently corrupted serde markers for months when its round-trip was not pinned. Split is the same class of tool and needs the same STABILITY pin.",
+          "code": "// STABILITY test: split(x) then fold gives back byte-identical x, comments included"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The written law makes whole-module moves byte-identical and pinned, and turns the one unsafe case, shared top-level bindings, into an honest error with a fix rather than a silent rewrite.",
+        "tradeoff": "Reversibility is conditional: a file whose modules share a top-level binding must be restructured before it splits. The ported repo already avoids this by routing values through namespace refs.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Auto-rewriting shared bindings destroys the byte-identical round-trip and silently restructures user code, the exact corruption the STABILITY pin exists to prevent."
+          },
+          {
+            "key": "C",
+            "reason": "Removing split leaves Fold with no mechanism; it is Roles under another name and should be chosen as Roles in D-ECO1."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The law keeps split total for the safe case (whole modules) and honest for the unsafe case (shared bindings refuse with a fix). Neither corruption nor a hard block on the common path.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Pinned whole-module moves",
+            "use": "The shipping law: byte-identical round-trip plus E13xx refusal."
+          },
+          {
+            "key": "B",
+            "aspect": "Always-succeeds ambition",
+            "use": "Rejected as a rewrite, but its goal is met for whole modules, which always round-trip."
+          },
+          {
+            "key": "C",
+            "aspect": "No-tooling simplicity",
+            "use": "Available as choosing Roles in D-ECO1, not as a Fold variant."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.005Z"
+    },
+    {
+      "id": "D-ECO14",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "Reaffirm U7: a lone script needs no project file",
+      "gist": "Whether to reaffirm that a lone script never needs a project file, in every file model.",
+      "lesson": "U7 stands: jet run script.jet works with zero manifest. Every framework in this wave preserves the zero-ceremony path; this ballot just pins it against erosion.",
+      "explainer": "",
+      "story": "A beginner writes hello.jet and runs it with no pkg.jet, project.jet, or anything else. Nate wants that guarantee reaffirmed so no framework in this wave quietly makes a manifest mandatory.",
+      "inWild": "$ cat hello.jet\nfn main() { print(\"hello\") }\n\n$ jet run hello.jet     # no pkg.jet, no project.jet, nothing else on disk\nhello",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reaffirm U7",
+          "detail": "A single script runs with no manifest of any kind, under Deck, Roles, or Fold alike. A project file appears only when the user wants a name, dependencies, or an env. The zero-ceremony beginner path is guaranteed.",
+          "code": "$ jet run hello.jet\nhello\n// a project file is optional, added only when you want deps, a name, or an env"
+        },
+        {
+          "key": "B",
+          "name": "Revisit U7 (require a minimal manifest)",
+          "detail": "Running any script requires at least a minimal project file. This adds ceremony to the very first thing a beginner does and breaks the magic-out-of-the-box path. Listed for completeness; not recommended.",
+          "code": "$ jet run hello.jet\nerror: no project file found; run `jet init` first\n// every first script now needs a manifest -> ceremony before hello world"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "cargo",
+          "note": "cargo run needs a Cargo.toml and a package layout; there is no zero-file path. U7 is deliberately the opposite for beginners.",
+          "code": "$ cargo run\nerror: could not find `Cargo.toml`"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Reaffirming U7 keeps the zero-ceremony first run intact across all three file models, protecting the magic-out-of-the-box path this wave must not erode.",
+        "tradeoff": "None of substance: the manifest stays optional and appears the moment a real project needs a name, deps, or an env.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Requiring a manifest for a lone script adds ceremony to the first thing a beginner does and breaks the zero-file path."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The zero-file run and the optional manifest are one continuum: nothing for a script, a project file when the project earns one. U7 is that continuum, reaffirmed.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Zero-ceremony first run",
+            "use": "The guaranteed beginner path, reaffirmed in every framework."
+          },
+          {
+            "key": "B",
+            "aspect": "Manifest-present clarity",
+            "use": "Kept as an opt-in the moment a project wants a name, deps, or an env."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.113Z"
+    },
+    {
+      "id": "D-ECO15",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "module fleet.<name> spelling (un-freezes fleet surface)",
+      "gist": "Whether to define module fleet.<name> now, with hosts, rollout, health, and proof, which un-freezes fleet surface that D-JETOS-FREEZE1 froze.",
+      "lesson": "Giving fleet equal depth in this wave re-opens surface D-JETOS-FREEZE1 froze. This is a real ballot, not a silent inclusion. Fleet has no flake anchor, so its fixture is the owner's halcyon host.",
+      "explainer": "",
+      "story": "Nate deploys build-box and halcyon together with a rolling policy and a health gate before each batch. No flake construct describes a fleet. He must decide whether to spell fleet now or leave it frozen.",
+      "inWild": "module fleet.prod {\n    hosts:   [ build-box: system.build-box, halcyon: system.halcyon ]\n    rollout: Rollout.{ strategy: .Rolling, batch: 1 }\n    health:  \"curl -sf http://127.0.0.1:8080/health\"   // gate before next batch\n    proof:   .Vm                                        // D-WD8 risk-class proof\n}\n// acceptance fixture: the owner's ~/nixos halcyon host (card #337 parity matrix)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Adopt module fleet.<name> now",
+          "detail": "Fleet gets its spelling at equal depth in this wave: hosts, rollout, health, and proof. This un-freezes the fleet surface D-JETOS-FREEZE1 deferred, per the owner's equal-depth scope ruling. The acceptance fixture is the halcyon host.",
+          "code": "$ jet fleet prod --plan\n  batch 1/2: build-box  -> health `curl -sf .../health` must pass before batch 2\n  proof: .Vm required before rollout (D-WD8)\n// spelling lands now; realization follows the risk-class proof law"
+        },
+        {
+          "key": "B",
+          "name": "Keep frozen, drop fleet from this wave",
+          "detail": "Fleet stays deferred under D-JETOS-FREEZE1 until its planned epoch. This wave ships with no fleet spelling, so multi-host rollout has no manifest surface yet and the halcyon fixture waits.",
+          "code": "// no module fleet.<name> in this wave\n// multi-host rollout remains a frozen surface (D-JETOS-FREEZE1)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "A flake has no fleet primitive; multi-host rollout is bolted on with deploy-rs or colmena. Fleet would make host sets and rollout first-class.",
+          "code": "# deploy-rs: nodes.build-box.hostname = ...; nodes.halcyon.hostname = ...; # external tool"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The owner's equal-depth scope ruling puts fleet alongside the other tiers in this wave, and the halcyon host gives it a concrete acceptance fixture despite no flake anchor.",
+        "tradeoff": "Adopting fleet re-opens surface D-JETOS-FREEZE1 froze; this ballot exists so that un-freeze is an explicit owner decision, not a silent inclusion.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeping fleet frozen leaves multi-host rollout with no manifest surface in a wave that gives every other tier equal depth."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Fleet is a role module like env and system: one mechanism, placed by the chosen file model. Adopting it now keeps the tier set complete under the equal-depth ruling.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "First-class fleet tier",
+            "use": "The adopted spelling: hosts, rollout, health, proof."
+          },
+          {
+            "key": "B",
+            "aspect": "Freeze discipline",
+            "use": "Honored by making this un-freeze an explicit ballot rather than a quiet add."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.229Z"
+    },
+    {
+      "id": "D-ECO16",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "module system.<name> at equal depth (un-freezes system surface)",
+      "gist": "Whether to spell module system.<name> at equal depth in this wave, which un-freezes system surface frozen by D-JETOS-FREEZE1.",
+      "lesson": "System is the jetos host tier. Placing it at equal depth now re-opens surface D-JETOS-FREEZE1 froze; this ballot names that trade rather than smuggling it in.",
+      "explainer": "",
+      "story": "Nate's build-box is a jetos host with a target, packages, services, and ordered options. The ported flake and the owner's ~/nixos both define such hosts. He must decide whether system gets a spelling now or stays frozen.",
+      "inWild": "module system.build-box {\n    target: linux.x64\n    packages: [ pkgs.[git, ripgrep, ccache] ]\n    services: { openssh: { enable: true, ports: [22] } }\n    options: [                                   // ordered dotted list (ratified U13)\n        network.hostName:    build-box,\n        filesystem.timeZone: \"Europe/London\",\n        boot.loader:         limine,\n    ]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Adopt module system.<name> now",
+          "detail": "System gets its spelling at equal depth with the other tiers: target, packages, services, and the ordered options list. This un-freezes the system surface D-JETOS-FREEZE1 deferred, per the owner's equal-depth scope ruling, with ~/nixos halcyon as the fixture.",
+          "code": "$ jet os switch build-box\n  applying system.build-box: hostName=build-box, tz=Europe/London, loader=limine\n// spelling lands now; acceptance is the ~/nixos halcyon round-trip (card #337)"
+        },
+        {
+          "key": "B",
+          "name": "Keep frozen, drop system from this wave",
+          "detail": "System stays deferred under D-JETOS-FREEZE1. This wave ships with no host spelling, so jetos hosts have no manifest surface yet and the ~/nixos parity fixture waits for a later epoch.",
+          "code": "// no module system.<name> in this wave\n// jetos hosts remain a frozen surface (D-JETOS-FREEZE1)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "A NixOS host is nixosConfigurations.<name> with options set across modules. system.<name> is the direct Jet spelling, with an ordered options list.",
+          "code": "nixosConfigurations.build-box = nixpkgs.lib.nixosSystem { modules = [ { networking.hostName = \"build-box\"; } ]; };"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The equal-depth ruling puts system alongside env, image, and fleet in this wave, and ~/nixos gives it a concrete parity fixture the other tiers reference.",
+        "tradeoff": "Adopting system re-opens surface D-JETOS-FREEZE1 froze; this ballot makes that un-freeze an explicit owner decision instead of a quiet inclusion.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeping system frozen leaves jetos hosts with no manifest surface while every other tier in the wave gets equal depth."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "System is a role module like env and fleet: one mechanism, placed by the chosen file model. Adopting it now completes the tier set under the equal-depth ruling.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "First-class host tier",
+            "use": "The adopted spelling: target, packages, services, options."
+          },
+          {
+            "key": "B",
+            "aspect": "Freeze discipline",
+            "use": "Honored by making this un-freeze an explicit ballot, not a silent add."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.344Z"
+    },
+    {
+      "id": "D-ECO17",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "check: true package field (doCheck parity)",
+      "gist": "Whether a package's test targets run during realize via a check field, matching Nix doCheck, or only through a separate jet test.",
+      "lesson": "check: true runs the package's declared test targets during realize, mapping doCheck. Standalone jet test needs no field; this ballot covers the build-time gate.",
+      "explainer": "",
+      "story": "The flake set doCheck so tests ran as part of building jet. Nate wants building the package to fail if its tests fail, without separate CI wiring, while jet test still works on its own.",
+      "inWild": "packages.jet: executable {\n    build: Recipe.cargo(lock: \"Cargo.lock\"),\n    check: true,      // (new -- D-ECO17) doCheck: run this package's test targets during realize\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "check: true field",
+          "detail": "check: true makes the package's declared test targets run during realize, so a failing test fails the build. It maps doCheck exactly. A standalone jet test still runs tests on demand and needs no field.",
+          "code": "check: true\n\n$ jet build jet\n  built target/release/jet\n  check: ran 3 test targets ... FAILED tir::codegen\n  build failed: check tests did not pass"
+        },
+        {
+          "key": "B",
+          "name": "No field, standalone jet test only",
+          "detail": "Building never runs tests; tests run only when someone invokes jet test. A package with failing tests can build and publish clean unless CI separately remembers to run jet test, losing the flake's doCheck gate.",
+          "code": "$ jet build jet     # succeeds even if tests would fail; no realize-time gate\n$ jet test          # separate step someone must wire and remember"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "doCheck = true runs the check phase inside the build, so a failing test fails the derivation. check: true is the direct parity.",
+          "code": "buildRustPackage { doCheck = true; }; # tests gate the build"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "check: true reproduces doCheck exactly, gating realize on the package's own tests so a broken build cannot be published, while jet test stays available standalone.",
+        "tradeoff": "Realize now runs the package's test targets when check is set, adding that step to a build. It is opt-in per package and off by default.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Without the field, building never runs tests, so a failing package can publish clean unless CI separately remembers jet test, dropping doCheck parity."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "check: true is the build-time gate; jet test is the on-demand run. One test surface, two triggers, so realize can gate without removing the standalone command.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Realize-time gate",
+            "use": "The adopted field that fails a build on failing tests."
+          },
+          {
+            "key": "B",
+            "aspect": "On-demand testing",
+            "use": "Kept as jet test, which needs no field and runs anytime."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.463Z"
+    },
+    {
+      "id": "D-ECO18",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "git.root comptime builtin",
+      "gist": "How a manifest gets the git top-level path: a git.root comptime builtin, or a hand-wired env var and path.",
+      "lesson": "git.root is a comptime builtin resolving the git top level, replacing the flake's git rev-parse dance. JET_ROOT still overrides it at runtime for the expert.",
+      "explainer": "",
+      "story": "The flake ran git rev-parse in its shellHook to set JET_ROOT and locate the debug binary. Nate wants that path as a comptime value, not a shell subprocess embedded in every manifest.",
+      "inWild": "env_vars: [ \"JET_ROOT\": git.root ]            // (new -- D-ECO18)\ntools:    { jet: Tool.wrap(root: git.root, ...) }\n// JET_ROOT env var still overrides git.root at runtime for the expert",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "git.root comptime builtin",
+          "detail": "git.root is a comptime builtin that resolves the git top-level directory during evaluation. It replaces the shellHook git rev-parse, reads as a plain value, and the JET_ROOT env var still overrides it at runtime for anyone who needs to.",
+          "code": "env_vars: [ \"JET_ROOT\": git.root ]\n\n// evaluates at comptime to the repo top level; no subprocess in the manifest\n// runtime override still honored:\n$ JET_ROOT=/work/jet jet env dev"
+        },
+        {
+          "key": "B",
+          "name": "Hand-wired path or env var",
+          "detail": "No builtin; the manifest names an explicit path or reads an env var the user sets. Every project re-derives the git-root logic, and a wrong or unset value produces a broken root with no comptime check.",
+          "code": "env_vars: [ \"JET_ROOT\": env(\"JET_ROOT\") ?? \"../..\" ]  // guess the depth\n// each project re-invents root-finding; unset -> wrong path, no error"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "The flake shells out with git rev-parse --show-toplevel in a hook. git.root makes that a comptime value with a clean runtime override.",
+          "code": "shellHook = ''export JET_ROOT=$(git rev-parse --show-toplevel)'';"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "git.root turns the flake's git rev-parse subprocess into a plain comptime value, while the JET_ROOT env override preserves the expert's runtime control.",
+        "tradeoff": "git.root assumes a git checkout at comptime; outside a repo it is unset and the manifest must handle that. The runtime override covers relocated checkouts.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Hand-wiring the path makes every project re-derive root-finding, and a wrong or unset value yields a broken root with no comptime check."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "git.root is the comptime default; the JET_ROOT env var is the runtime override. One value, resolved automatically, still overridable, so beginners write nothing and experts keep control.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Comptime root value",
+            "use": "The default: git top level with no subprocess."
+          },
+          {
+            "key": "B",
+            "aspect": "Explicit override",
+            "use": "Kept as the JET_ROOT env var, not a hand-wired guess in every manifest."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.580Z"
+    },
+    {
+      "id": "D-ECO19",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "Typed package output accessors (pkgs.tzdata.zoneinfo)",
+      "gist": "How a manifest references a sub-output of a package, like tzdata's zoneinfo directory: a typed accessor, or raw string path interpolation.",
+      "lesson": "A typed output accessor names a package's sub-output, replacing string path interpolation. A wrong output name is a build error, not a dangling path discovered at runtime.",
+      "explainer": "",
+      "story": "The flake set TZDIR to tzdata's share/zoneinfo via string interpolation. Nate wants to name that output directly, so a typo fails the build instead of producing a broken path inside the wrapped binary.",
+      "inWild": "wrap: Wrap.{ env: [ \"TZDIR\": pkgs.tzdata.zoneinfo ] }   // (new -- D-ECO19)\n// accessor names the zoneinfo output; wrong name -> build error, not a dead path",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed output accessors",
+          "detail": "A package exposes named outputs as accessors, so pkgs.tzdata.zoneinfo resolves the zoneinfo output. A misnamed output fails at build with a suggestion, and the resolved path is never a hand-spliced string.",
+          "code": "\"TZDIR\": pkgs.tzdata.zoneinfoo    // typo\n\n$ jet build jet\nE05xx: package `tzdata` has no output `zoneinfoo`\n  fix: available outputs are `zoneinfo`, `bin`; did you mean `zoneinfo`?"
+        },
+        {
+          "key": "B",
+          "name": "Raw string path interpolation",
+          "detail": "The manifest splices a path by hand, like tzdata plus /share/zoneinfo. Nothing checks the sub-path exists, so a typo or a layout change produces a dangling path that only surfaces when the wrapped binary runs.",
+          "code": "\"TZDIR\": \"${pkgs.tzdata}/share/zoneinfoo\"   // typo builds clean\n// -> TZDIR points nowhere; only fails when jet runs and can't read zoneinfo"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "Nix interpolates ${pkgs.tzdata}/share/zoneinfo as an unchecked string. Typed accessors turn the sub-output into a checked name.",
+          "code": "--set-default TZDIR ${pkgs.tzdata}/share/zoneinfo # string path, unchecked"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Typed accessors name a package's outputs, so a wrong output fails at build with a suggestion instead of producing a dangling path that only breaks when the binary runs.",
+        "tradeoff": "Packages must declare their named outputs for accessors to resolve. That declaration is what turns a runtime path failure into a build-time error.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "String interpolation checks nothing, so a typo or a layout change yields a dangling path that surfaces only at runtime."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Accessors are the checked default for known outputs; a raw string stays possible for a truly ad-hoc path, but never for outputs a package already names. Checked where it can be, escapable where it must be.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Checked named outputs",
+            "use": "The default accessor for any declared package output."
+          },
+          {
+            "key": "B",
+            "aspect": "Raw path escape",
+            "use": "Allowed only for genuinely undeclared paths, not named outputs."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.689Z"
+    },
+    {
+      "id": "D-ECO1",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "Package/env file model archetype",
+      "gist": "Whether a Jet project lives in one file, a fixed set of reserved files, or one file that splits on demand.",
+      "lesson": "One choice sets the file model. The parity spellings D-ECO2 through D-ECO19 are identical under every option, so nothing else in this wave depends on structure.",
+      "explainer": "",
+      "story": "Nate ports this repo's flake.nix to Jet. It is about ninety lines: one Rust package build, a dev shell, and jetos hosts. He must decide where those tiers live before typing them.",
+      "inWild": "The same ported repo, three layouts:\n\nDeck  -> project.jet          (payload + packages + env.dev + system.* all in one)\nRoles -> pkg.jet env.jet workspace.jet config.jet  (one tier per reserved file)\nFold  -> project.jet, then `jet split env` lifts module env.dev into env.jet on demand\n\nAll three use the identical field spellings from D-ECO2..D-ECO19; only placement differs.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Deck — one file",
+          "detail": "One project.jet holds payload, packages, the dev shell, and every jetos host. The beginner file is two lines. But the file layout becomes the framework, which trips the dictate-file-structure kill criterion.",
+          "code": "// project.jet — one file, every tier\npayload:  { name: \"jet\", version: \"1.0.0\", edition: \"2026\", jet: 1.0 }\nsources:  { pkgs: github@NixOS/nixpkgs/nixos-unstable }\npackages: { jet: executable { /* build, wrap, meta ... */ },\n            jetpack: alias(packages.jet, bin: \"jetpack\") }\nmodule env.dev        { /* dev shell */ }\nmodule system.build-box { /* jetos host — same file */ }\n\n$ jet build jet          # verbs address blocks by name; one file to open\n// kill-criteria: the single file IS the structure -> dictates layout"
+        },
+        {
+          "key": "B",
+          "name": "Roles — reserved files (status quo)",
+          "detail": "Each tier has a reserved home: pkg.jet, env.jet, workspace.jet, config.jet. This is today's ratified status quo and overturns nothing. Ceremony arrives early, and placement follows two different rules.",
+          "code": "// pkg.jet\npayload: { name: \"jet\", ... }\npackages: { jet: executable { ... } }\n\n// env.jet\nmodule env.dev { ... }\n\n// workspace.jet\nmodule workspace { members: find(\"./packages\"), catalog: { textkit: \"1.4.0\" } }\n\n// config.jet\nmodule system.build-box { ... }\n\n$ jet env      # each verb knows its file\n// overturns nothing; image/fleet modules live in any discovered .jet"
+        },
+        {
+          "key": "C",
+          "name": "Fold — one file that splits on demand",
+          "detail": "Start with one project.jet, identical to Deck. When a tier earns its own file, jet split lifts it into the conventional name; jet fold reverses it. Layout is the user's choice, not the framework's.",
+          "code": "// folded: project.jet is byte-identical to Deck's file\n$ jet split env       # module env.dev -> env.jet\n$ jet split system    # module system.build-box -> config.jet\n$ jet fold env        # reverses; STABILITY test pins byte-identical round-trip\n\n// reserved filenames become the convention `jet split` prefers, never a rule\n// find() resolves a module wherever it lives; U3 still holds (no cross-file refs)\n$ jet info env.dev    # reports tier + current file, since file is mutable"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "A flake is one flake.nix by fiat: no split, no growth path, and a large monorepo bloats a single file. Jet can make placement a choice instead.",
+          "code": "# flake.nix — everything in one file, always\n{ inputs = {...}; outputs = { self, nixpkgs }: { packages = {...}; devShells = {...}; }; }"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "Fold subsumes the other two as states: folded is Deck, split is Roles. The philosophy's own words, code layout and file structure are the user's choice, read as Fold's thesis.",
+        "tradeoff": "Fold needs jet split tooling and accepts conditional reversibility, decided separately in D-ECO13. Whole modules always round-trip; a file sharing top-level bindings must be restructured first.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Deck makes file layout the framework's decision, the one thing the philosophy explicitly forbids. It also becomes a merge-conflict magnet at monorepo scale."
+          },
+          {
+            "key": "B",
+            "reason": "Roles forbids the folded state, forcing four reserved filenames on a three-package repo. It is the steepest teach-in-one-page cost of the three."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "C",
+        "synthesis": "Fold is the hybrid itself: one mechanism (role modules plus find), two surfaces (folded and split), converted by one reversible command. Deck and Roles are its endpoints.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Single-file simplicity",
+            "use": "Kept as Fold's folded state; a solo dev never has to split."
+          },
+          {
+            "key": "B",
+            "aspect": "Reserved-file skimmability",
+            "use": "Kept as Fold's split state and the convention jet split prefers."
+          },
+          {
+            "key": "C",
+            "aspect": "Reversible split/fold tooling",
+            "use": "The mechanism that makes the file model the user's own choice."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.808Z"
+    },
+    {
+      "id": "D-ECO2",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "First-class cargo build field: Recipe.cargo(lock:)",
+      "gist": "How a package declares its build, and whether cargo builds get a typed first-class field or only an imperative recipe function.",
+      "lesson": "Common build systems deserve a typed one-liner. The escape to imperative build code stays available, but a plain cargo build should not require ceremony.",
+      "explainer": "",
+      "story": "A contributor builds jet from Cargo.lock. The flake used buildRustPackage with cargoLock.lockFile and a check pass. She wants the same in one legible line, not a hand-written build script.",
+      "inWild": "// inside packages.jet, verbatim from the ported flake\npackages: {\n    jet: executable {\n        build: Recipe.cargo(lock: \"Cargo.lock\"),   // (new -- D-ECO2)\n        check: true,                                 // doCheck parity (D-ECO17)\n        ...\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed Recipe.cargo field",
+          "detail": "build takes a typed recipe. Recipe.cargo(lock:) maps buildRustPackage and cargoLock.lockFile in one line. Recipe stays open for other build systems, and an imperative fn build stays available when a recipe cannot express a build.",
+          "code": "build: Recipe.cargo(lock: \"Cargo.lock\")\n\n// realize:\n$ jet build jet\n  resolved lock Cargo.lock -> 214 crates\n  built target/release/jet   (check: true -> test targets ran)"
+        },
+        {
+          "key": "B",
+          "name": "Imperative build fn only",
+          "detail": "No typed sugar; every package writes a build function that invokes cargo by hand. This repeats the same lockfile-and-invoke boilerplate in every Rust package and hides the common case behind a function body.",
+          "code": "build: fn build(b) {\n    b.cargo(lock: \"Cargo.lock\")\n    // every Rust package restates this; no one-line common case\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "buildRustPackage with cargoLock.lockFile is the flake's typed helper. Recipe.cargo is the direct one-line equivalent, keeping the imperative path for the rare build.",
+          "code": "buildRustPackage { pname = \"jet\"; cargoLock.lockFile = ./Cargo.lock; doCheck = true; }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Recipe.cargo gives the common cargo build a legible one-line spelling with the lockfile pinned, matching the flake exactly while leaving imperative builds reachable.",
+        "tradeoff": "Recipe is a named surface that must grow one variant per supported build system. The imperative fn build remains for anything a recipe cannot yet express.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Forcing every build through a function repeats lockfile-and-invoke boilerplate and hides the common case, against the anti-repetition principle."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "One build field accepts both: a typed Recipe for common systems and an imperative fn for the rest. Recipe.cargo is the ergonomic default, fn build the expert escape.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Typed one-line cargo build",
+            "use": "The default spelling for the common Rust package."
+          },
+          {
+            "key": "B",
+            "aspect": "Imperative build body",
+            "use": "Kept as the escape hatch under the same build field."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:18.920Z"
+    },
+    {
+      "id": "D-ECO3",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "wrap: Wrap.{ path_prefix, env } binary wrapping",
+      "gist": "How a built binary gets a runtime PATH prefix and default env vars baked in, replacing Nix wrapProgram.",
+      "lesson": "Wrapping a binary with runtime PATH and default env is a declarative fact about the package, not a post-build shell step to hand-write.",
+      "explainer": "",
+      "story": "jet shells out to rustc, cc, and lld at runtime. The flake wrapped the binary with a PATH prefix and a default TZDIR. Nate wants those baked in without writing wrapProgram.",
+      "inWild": "// packages.jet, verbatim\nwrap: Wrap.{ path_prefix: self.runtime,              // (new -- D-ECO3)\n             env: [\"TZDIR\": pkgs.tzdata.zoneinfo] }  // --set-default parity\n// self.runtime is the D-ECO11 runtime list: [rustc, stdenv.cc, lld, ruby, php, R.with(...)]",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed Wrap record",
+          "detail": "wrap takes a Wrap value with path_prefix and env. It maps wrapProgram's --prefix PATH and --set-default in one place, distinguishing a PATH prefix from a defaulted env var, both as typed data.",
+          "code": "wrap: Wrap.{ path_prefix: self.runtime,\n             env: [\"TZDIR\": pkgs.tzdata.zoneinfo] }\n\n$ jet build jet\n  wrapped target/release/jet: PATH+= rustc,cc,lld  TZDIR?=/nix/store/.../zoneinfo"
+        },
+        {
+          "key": "B",
+          "name": "Implicit auto-wrap from runtime",
+          "detail": "No explicit Wrap; the compiler auto-prefixes PATH from the runtime list. This is hidden magic with no place to express a defaulted env var like TZDIR, and no way to distinguish a hard prefix from a default.",
+          "code": "// runtime deps silently become a PATH prefix; no surface for env defaults\nruntime: [ pkgs.[rustc, stdenv.cc, lld] ]\n// where does --set-default TZDIR go? nowhere -- parity gap"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "wrapProgram --prefix PATH --set-default TZDIR is two distinct operations. Wrap keeps that distinction as two typed fields instead of positional shell flags.",
+          "code": "wrapProgram $out/bin/jet --prefix PATH : ${lib.makeBinPath runtime} --set-default TZDIR ${tzdata}/share/zoneinfo"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A typed Wrap keeps the flake's two distinct operations, a PATH prefix and a defaulted env var, as legible data the compiler and audit tools can read.",
+        "tradeoff": "Wrap is one more named record in the package surface. It earns its place by covering both wrapProgram operations that an implicit rule cannot express.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Implicit auto-wrap is hidden magic with no surface for default env vars, leaving --set-default TZDIR unmappable and losing parity."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Wrap's path_prefix defaults to the package runtime list, so the common case is nearly free while the env field still expresses defaults the implicit rule could not.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Typed prefix + env distinction",
+            "use": "The declarative spelling that covers both wrapProgram operations."
+          },
+          {
+            "key": "B",
+            "aspect": "Zero-ceremony default from runtime",
+            "use": "Adopted as Wrap's default for path_prefix so the common case stays short."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:19.035Z"
+    },
+    {
+      "id": "D-ECO4",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "alias(package, bin:) second entrypoint",
+      "gist": "How a second command name is exposed from one built binary, replacing a Nix apps.* second entry.",
+      "lesson": "A second entrypoint on the same binary is one line of alias, never a duplicated package. Repetition is the thing to cut.",
+      "explainer": "",
+      "story": "The flake exposed apps.default as jet and apps.jetpack on the same binary. Nate wants a jetpack command without declaring a whole second package that repeats the build.",
+      "inWild": "packages: {\n    jet:     executable { build: Recipe.cargo(lock: \"Cargo.lock\"), ... },\n    jetpack: alias(packages.jet, bin: \"jetpack\"),   // (new -- D-ECO4) == apps.jetpack\n}\n\n$ jet build          # produces both `jet` and `jetpack`, same binary",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "alias(package, bin:)",
+          "detail": "A one-line alias names a second command on the same built binary. It maps apps.jetpack directly, shares one build, and reads as exactly what it is: a second name, not a second program.",
+          "code": "jetpack: alias(packages.jet, bin: \"jetpack\")\n\n$ jetpack help    # dispatches into the jet binary under the jetpack name"
+        },
+        {
+          "key": "B",
+          "name": "Declare a full second package",
+          "detail": "The second command is its own package with its own build block, duplicating build, wrap, and meta. The two blocks drift out of sync, and the user restates a build they already wrote.",
+          "code": "packages: {\n    jet:     executable { build: Recipe.cargo(lock: \"Cargo.lock\"), wrap: ... },\n    jetpack: executable { build: Recipe.cargo(lock: \"Cargo.lock\"), wrap: ... }, // repeat!\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "apps.jetpack points a second app at the same derivation. alias is the direct Jet spelling for one binary under two names.",
+          "code": "apps.jetpack = { type = \"app\"; program = \"${self.packages.jet}/bin/jetpack\"; };"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "alias states one binary under a second name in a single line, matching apps.jetpack and cutting the duplicated build a second package would force.",
+        "tradeoff": "alias adds one keyword to the package surface. It exists precisely to avoid restating a build, which is the higher cost.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A full second package duplicates build, wrap, and meta, which drift apart and make the user repeat work already done."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "alias is the single canonical way to give one binary a second name; a genuinely different second binary still declares its own package. Two jobs, two spellings, no overlap.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One-line second name",
+            "use": "The spelling for a second command on the same binary."
+          },
+          {
+            "key": "B",
+            "aspect": "Full package declaration",
+            "use": "Kept for a genuinely distinct second binary, not an alias."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:19.145Z"
+    },
+    {
+      "id": "D-ECO5",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "meta: Meta.{…} typed package metadata",
+      "gist": "How package metadata like description, homepage, main program, and platforms is declared: a typed record or a freeform map.",
+      "lesson": "Metadata that tools read, like the main program and supported platforms, should be typed so a typo is an error, not a silent registry entry.",
+      "explainer": "",
+      "story": "The flake set meta.description, homepage, mainProgram, and platforms. Nate wants the CLI and registry to trust those fields, and a typo in platforms to fail the build rather than ship.",
+      "inWild": "meta: Meta.{ description:  \"Compiler for the Jet programming language\",\n             homepage:     \"https://github.com/jet-language/jet\",\n             main_program: \"jet\",       // must name a real declared bin\n             platforms:    .Unix }       // enum, not a free string",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed Meta record",
+          "detail": "meta takes a Meta value. main_program is checked against the package's declared binaries and platforms is an enum, so a wrong name or misspelled platform fails at build, not in the published registry entry.",
+          "code": "meta: Meta.{ main_program: \"jett\", platforms: .Unix }\n\n$ jet build jet\nE05xx: meta.main_program \"jett\" names no binary in this package\n  fix: declared bins are `jet`; did you mean \"jet\"?"
+        },
+        {
+          "key": "B",
+          "name": "Freeform metadata map",
+          "detail": "meta is an untyped map of strings. Nothing checks that main_program names a real binary or that platforms is a known value; mistakes surface only after publish, if ever.",
+          "code": "meta: { main_program: \"jett\", platforms: \"unix-ish\" }\n// builds clean; ships a broken main_program and a nonsense platform"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "flake meta is a free attrset; mainProgram and platforms are unchecked strings. A typed Meta catches what Nix leaves silent.",
+          "code": "meta = { description = \"...\"; homepage = \"...\"; mainProgram = \"jet\"; platforms = platforms.unix; };"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A typed Meta validates main_program against real binaries and platforms against an enum, turning a class of silent registry mistakes into build errors.",
+        "tradeoff": "Meta fixes the set of known metadata keys; a novel key needs a Meta extension rather than an ad-hoc string. That constraint is what makes the checks possible.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A freeform map validates nothing, so a wrong main_program or bogus platform ships to the registry unnoticed."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Meta covers the known metadata keys with types and checks, while an explicit extra map can carry rare custom keys without weakening the checked core.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Checked known keys",
+            "use": "The typed core: main_program and platforms are validated."
+          },
+          {
+            "key": "B",
+            "aspect": "Open key set",
+            "use": "Allowed only in an explicit extras map, never for the checked fields."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:19.255Z"
+    },
+    {
+      "id": "D-ECO6",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "Typed dev-shell fields: env_vars, library_path, git_hooks_path, banner",
+      "gist": "How a dev shell sets env vars, library path, git-hooks path, and its banner: typed fields with a stderr guarantee, or one freeform shell hook.",
+      "lesson": "The common dev-shell knobs deserve typed fields. The banner must render to stderr so stdout stays grep-clean, a promise a raw echo in a shell hook cannot make.",
+      "explainer": "",
+      "story": "The flake shellHook exported JET_ROOT and TZDIR, set a library path for raylib, pointed git at scripts/githooks, and printed a ten-line banner. A raw banner leaks into piped stdout and breaks scripts.",
+      "inWild": "module env.dev {\n    env_vars:       [ \"TZDIR\": pkgs.tzdata.zoneinfo, \"JET_ROOT\": git.root ]\n    library_path:   [ pkgs.raylib ]        // LD_LIBRARY_PATH\n    git_hooks_path: \"scripts/githooks\"     // git config core.hooksPath\n    banner: Banner.lines([                 // typed: renders to stderr, stdout stays clean\n        \"Jet dev shell\",\n        \"  build:  cargo build\",\n    ])\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed fields with stderr banner",
+          "detail": "Each knob is its own typed field. Banner.lines carries a guarantee that it renders to stderr, so a piped command sees clean stdout. env_vars, library_path, and git_hooks_path map the shellHook exports directly.",
+          "code": "$ jet env dev | head -1        # stdout is clean data, banner went to stderr\n$ jet env dev 2>/dev/null       # banner suppressed; pipeline unaffected\n// banner on stderr is a typed guarantee, not a convention"
+        },
+        {
+          "key": "B",
+          "name": "One freeform shell hook",
+          "detail": "All four knobs live inside a single hook body of shell-style statements. The banner is a raw print with no stderr guarantee, so it pollutes piped stdout, and every project reinvents the same exports by hand.",
+          "code": "hook: fn(sh) {\n    sh.env.set(\"JET_ROOT\", ...)\n    print(\"Jet dev shell\")   // goes to stdout -> `jet env dev | jq` now sees banner text\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "A flake shellHook is one shell blob; its echo banner routinely leaks into stdout. Typed fields give each export a name and the banner an stderr guarantee.",
+          "code": "shellHook = ''export JET_ROOT=$(git rev-parse --show-toplevel); echo \"Jet dev shell\"'';"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Typed fields name each dev-shell knob and give the banner an enforced stderr rendering, so a piped jet env never returns banner text as data.",
+        "tradeoff": "The set of typed fields is fixed; anything outside them needs the D-ECO7 hook. That boundary is deliberate and keeps the common knobs guaranteed.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A freeform hook makes the banner a raw print that pollutes stdout and forces every project to re-derive the same exports."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Typed fields cover the named knobs with guarantees; the trust-gated D-ECO7 hook remains the single escape for anything they cannot express. One mechanism, common case typed.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Named, guaranteed knobs",
+            "use": "The default surface for env, library path, hooks path, and banner."
+          },
+          {
+            "key": "B",
+            "aspect": "Freeform escape",
+            "use": "Preserved only as the D-ECO7 trust-gated hook, not the default."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:19.370Z"
+    },
+    {
+      "id": "D-ECO7",
+      "cardId": "c002osb3",
+      "group": "safety",
+      "title": "Expert trust-gated dev-shell hook: fn(sh: Shell)",
+      "gist": "Whether the dev shell has an expert escape for arbitrary Jet code at activation, and whether that code is trust-gated.",
+      "lesson": "Typed fields cover the common case; a trust-gated hook is the one escape for what they cannot say. Arbitrary activation code without a trust gate is a supply-chain hole.",
+      "explainer": "",
+      "story": "The flake ran clean-nix-tmp.sh once per shell so /tmp did not fill. No typed field says run-this-script-once. Nate needs an escape, but not one that lets any cloned repo run code silently on entry.",
+      "inWild": "hook: fn(sh: Shell) {                       // (new -- D-ECO7) expert escape\n    if !sh.env.has(\"JET_NIX_TMP_CLEANED\") {\n        run(\"scripts/agent/clean-nix-tmp.sh\")\n        sh.env.set(\"JET_NIX_TMP_CLEANED\", \"1\")\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Trust-gated hook",
+          "detail": "The hook is Jet code that runs at activation, but only after the repo's grant is approved under the trust law. A first entry prompts; a denied or unseen grant means the hook does not run. The escape exists without opening the supply-chain hole.",
+          "code": "$ jet env dev\n  This shell wants to run a hook (scripts/agent/clean-nix-tmp.sh). [grant once / deny]: \n// denied or in CI-with-deny: hook is skipped, shell still opens\n// grant recorded per-role-module (D-WD1); re-entry is silent thereafter"
+        },
+        {
+          "key": "B",
+          "name": "Typed fields only, no hook",
+          "detail": "There is no escape hatch; only the typed D-ECO6 fields exist. The clean-nix-tmp guard cannot be expressed, so users drop back to a shell wrapper outside Jet, losing the trust boundary entirely for that step.",
+          "code": "// no way to say \"run this once on entry\"\n// users re-add a raw shell wrapper around `jet env`, outside any trust gate"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "A flake shellHook runs unconditionally on entry with no consent. The Jet hook keeps the capability but gates it behind an approved grant.",
+          "code": "shellHook = ''bash scripts/agent/clean-nix-tmp.sh''; # runs on every entry, no prompt"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A trust-gated hook keeps the one genuine escape the typed fields cannot cover, while the grant law ensures no cloned repo runs activation code without consent.",
+        "tradeoff": "Users meet a grant prompt the first time a repo defines a hook. That one prompt is the price of not shipping silent on-entry code execution.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Removing the escape pushes the clean-nix-tmp guard back into an ungated shell wrapper, losing the trust boundary the hook provides."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The typed D-ECO6 fields handle the common knobs; the trust-gated hook is the single, consent-checked escape beneath them. One escape, gated, no second unsafe path.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Gated arbitrary code",
+            "use": "The one escape hatch, allowed only after an approved grant."
+          },
+          {
+            "key": "B",
+            "aspect": "No-escape strictness",
+            "use": "Kept as the default when a repo defines no hook: nothing runs on entry."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:19.480Z"
+    },
+    {
+      "id": "D-ECO8",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": ".with([…]) package customization combinator",
+      "gist": "How a package is customized, such as R with an extra CRAN package: one .with combinator used inline or in an overlay, or two different override syntaxes.",
+      "lesson": "There is one way to customize a package, the .with combinator. Inline and overlay are placements of the same spelling, not two mechanisms.",
+      "explainer": "",
+      "story": "The flake used rWrapper.override with a jsonlite package. The current env.jet stopgap lists R and jsonlite as two loose entries, which never wires jsonlite into R. Nate wants a spelling that actually composes.",
+      "inWild": "pkgs.R.with([cran.jsonlite])                          // inline, one-off\n\noverlay dev { package(\"R\").with += [cran.jsonlite] }   // reviewed, reusable -- same combinator\n// the stopgap `R` + `cran.jsonlite` as two entries is NOT parity: jsonlite never reaches R",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One .with combinator, two placements",
+          "detail": "package.with([...]) is the single customization spelling. Inline handles a one-off; the workspace overlay uses the identical combinator via package(\"...\").with for a reviewed, reusable override. Same mechanism, different home.",
+          "code": "// inline\nruntime: [ pkgs.R.with([cran.jsonlite]) ]\n\n// reviewed, in workspace overlay -- identical combinator\noverlay dev { package(\"R\").with += [cran.jsonlite] }"
+        },
+        {
+          "key": "B",
+          "name": "Separate inline vs overlay syntaxes",
+          "detail": "Inline customization and overlay customization get different spellings. Users learn two ways to do one job, and moving an override from inline to a reviewed overlay means rewriting it, not relocating it.",
+          "code": "// inline uses one form ...\npkgs.R.override({ packages: [cran.jsonlite] })\n// ... overlay uses another -> two mechanisms for one job (I8 violation)\noverlay dev { R += cran.jsonlite }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "rWrapper.override is a per-package function with bespoke argument shapes. .with is one combinator that reads the same inline or in an overlay.",
+          "code": "rWrapper.override { packages = [ rPackages.jsonlite ]; };"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One .with combinator means a customization reads identically inline and in an overlay, so promoting a one-off to a reviewed override is a move, not a rewrite.",
+        "tradeoff": "Every customization must fit the .with shape; a package needing something .with cannot express extends the combinator rather than inventing a new syntax. That constraint is the point.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two override syntaxes for one job violates one-way-to-mean-it and forces a rewrite when moving inline to a reviewed overlay."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The overlay is not a competing mechanism; it is where .with lives when an override should be reviewed and reused. Inline and overlay are the beginner and expert surfaces of one combinator.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Single combinator",
+            "use": "The one customization spelling, inline or in overlay."
+          },
+          {
+            "key": "B",
+            "aspect": "Reviewed placement need",
+            "use": "Satisfied by the overlay home of the same .with, not a separate syntax."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:19.588Z"
+    },
+    {
+      "id": "D-ECO9",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "Tool.wrap dev-loop wrappers with typed root and missing-error",
+      "gist": "How the dev-loop wrappers pointing at target/debug carry their root-walk fallback and missing-binary error: typed data or a raw shell script.",
+      "lesson": "A dev wrapper's root fallback and missing-binary message are typed data, so the error stays consistent and the formatter can round-trip it, unlike a hand-written shell script.",
+      "explainer": "",
+      "story": "The flake mkJetDevBin wrapped target/debug/jet, walked up to the git root, honored JET_ROOT, and printed a fixed error when the binary was absent. Nate wants that behavior as data, not a shell heredoc.",
+      "inWild": "tools: {\n    jet:     Tool.wrap(bin: \"target/debug/jet\",     path_prefix: packages.jet.runtime,\n                       root: git.root, missing: \"cargo build\"),\n    jetpack: Tool.wrap(bin: \"target/debug/jetpack\", path_prefix: packages.jet.runtime,\n                       root: git.root, missing: \"cargo build\"),\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed Tool.wrap",
+          "detail": "Tool.wrap takes bin, path_prefix, root, and missing as typed fields. root carries the git-root fallback (JET_ROOT overrides it), and missing carries the fix line printed when the binary is absent, as data the tooling renders identically.",
+          "code": "$ jet run hello.jet\njet: no debug binary at target/debug/jet\n  fix: cargo build\n// error text comes from the `missing:` field, identical for jet and jetpack"
+        },
+        {
+          "key": "B",
+          "name": "Raw shell script string",
+          "detail": "Each wrapper is a shell script literal, like writeShellScriptBin. The missing-binary error is hand-written per wrapper and drifts, the formatter cannot round-trip the embedded shell, and the root-walk is re-implemented each time.",
+          "code": "jet: script(''\n  root=$(git rev-parse --show-toplevel)\n  [ -x \"$root/target/debug/jet\" ] || { echo \"jet: no debug binary\"; exit 1; }\n'')  // per-wrapper drift, no formatter round-trip"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "mkJetDevBin and writeShellScriptBin embed shell text per wrapper. Tool.wrap lifts the root fallback and error into typed fields shared by both wrappers.",
+          "code": "writeShellScriptBin \"jet\" ''exec ${root}/target/debug/jet \"$@\"''; # error text hand-written"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Typed fields make the root fallback and missing-binary error shared data, so both wrappers print the same message and the formatter round-trips the manifest.",
+        "tradeoff": "Tool.wrap fixes the wrapper's shape to bin, path_prefix, root, and missing. A wrapper needing more extends Tool.wrap rather than dropping to shell.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Shell-string wrappers hand-write the error per wrapper, drift apart, and cannot be round-tripped by the formatter."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Tool.wrap turns the flake's shell wrapper into typed fields; the JET_ROOT env override still works at runtime, so the expert keeps the override without hand-writing shell.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Typed wrapper fields",
+            "use": "The default spelling: shared root and missing-error data."
+          },
+          {
+            "key": "B",
+            "aspect": "Runtime override",
+            "use": "Kept as the JET_ROOT env override, not a shell reimplementation."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T12:11:19.701Z"
     }
   ],
   "questions": [
@@ -31308,6 +32565,167 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T12:11:51.993Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c002osb3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T12:11:19.701Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO9",
+      "note": "Tool.wrap dev-loop wrappers with typed root and missing-error"
+    },
+    {
+      "at": "2026-07-14T12:11:19.588Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO8",
+      "note": ".with([…]) package customization combinator"
+    },
+    {
+      "at": "2026-07-14T12:11:19.481Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO7",
+      "note": "Expert trust-gated dev-shell hook: fn(sh: Shell)"
+    },
+    {
+      "at": "2026-07-14T12:11:19.370Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO6",
+      "note": "Typed dev-shell fields: env_vars, library_path, git_hooks_path, banner"
+    },
+    {
+      "at": "2026-07-14T12:11:19.255Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO5",
+      "note": "meta: Meta.{…} typed package metadata"
+    },
+    {
+      "at": "2026-07-14T12:11:19.146Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO4",
+      "note": "alias(package, bin:) second entrypoint"
+    },
+    {
+      "at": "2026-07-14T12:11:19.035Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO3",
+      "note": "wrap: Wrap.{ path_prefix, env } binary wrapping"
+    },
+    {
+      "at": "2026-07-14T12:11:18.920Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO2",
+      "note": "First-class cargo build field: Recipe.cargo(lock:)"
+    },
+    {
+      "at": "2026-07-14T12:11:18.808Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO1",
+      "note": "Package/env file model archetype"
+    },
+    {
+      "at": "2026-07-14T12:11:18.690Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO19",
+      "note": "Typed package output accessors (pkgs.tzdata.zoneinfo)"
+    },
+    {
+      "at": "2026-07-14T12:11:18.580Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO18",
+      "note": "git.root comptime builtin"
+    },
+    {
+      "at": "2026-07-14T12:11:18.464Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO17",
+      "note": "check: true package field (doCheck parity)"
+    },
+    {
+      "at": "2026-07-14T12:11:18.344Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO16",
+      "note": "module system.<name> at equal depth (un-freezes system surface)"
+    },
+    {
+      "at": "2026-07-14T12:11:18.229Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO15",
+      "note": "module fleet.<name> spelling (un-freezes fleet surface)"
+    },
+    {
+      "at": "2026-07-14T12:11:18.113Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO14",
+      "note": "Reaffirm U7: a lone script needs no project file"
+    },
+    {
+      "at": "2026-07-14T12:11:18.005Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO13",
+      "note": "jet split/fold law (Fold-only)"
+    },
+    {
+      "at": "2026-07-14T12:11:17.892Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO12",
+      "note": "formatter: passthrough for non-.jet files"
+    },
+    {
+      "at": "2026-07-14T12:11:17.776Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO11",
+      "note": "runtime: package field for runtime PATH deps"
+    },
+    {
+      "at": "2026-07-14T12:11:17.663Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ECO10",
+      "note": "platform.<os>: sugar for OS-conditional lists"
+    },
+    {
+      "at": "2026-07-14T12:09:30.925Z",
+      "by": "cursor-506-verify",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T12:09:25.009Z",
+      "by": "cursor-506-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0n6vj96",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-14T12:09:18.534Z",
+      "by": "cursor-506-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0n6vj96",
+      "note": "#5"
+    },
     {
       "at": "2026-07-14T11:58:17.233Z",
       "by": "cursor-scout",
@@ -34646,167 +36064,6 @@
       "action": "card.criteria-meet",
       "ref": "c0yxdqju",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-13T18:19:59.179Z",
-      "by": "grok-419-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0yxdqju",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-13T18:19:49.019Z",
-      "by": "grok-419-builder",
-      "action": "card.claim",
-      "ref": "c0yxdqju",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T18:19:48.924Z",
-      "by": "grok-419-builder",
-      "action": "card.release",
-      "ref": "c0yxdqju",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T18:18:36.354Z",
-      "by": "terra-503-sh",
-      "action": "card.release",
-      "ref": "c0vt1qwz",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T18:18:24.117Z",
-      "by": "terra-503-sh",
-      "action": "card.criteria-meet",
-      "ref": "c0vt1qwz",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-13T18:18:16.334Z",
-      "by": "terra-503-sh",
-      "action": "card.criteria-meet",
-      "ref": "c0vt1qwz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-13T18:18:03.684Z",
-      "by": "terra-503-sh",
-      "action": "card.criteria-meet",
-      "ref": "c0vt1qwz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-13T18:17:53.140Z",
-      "by": "terra-503-sh",
-      "action": "card.criteria-meet",
-      "ref": "c0vt1qwz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-13T18:17:46.448Z",
-      "by": "terra-503-sh",
-      "action": "card.criteria-meet",
-      "ref": "c0vt1qwz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-13T18:17:41.543Z",
-      "by": "terra-503-sh",
-      "action": "card.update",
-      "ref": "c0vt1qwz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T18:15:39.119Z",
-      "by": "terra-502-fortran",
-      "action": "card.release",
-      "ref": "c0u6kwwb",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T18:15:22.671Z",
-      "by": "terra-502-fortran",
-      "action": "card.update",
-      "ref": "c0u6kwwb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T18:14:12.192Z",
-      "by": "terra-241-eval",
-      "action": "card.release",
-      "ref": "ccq07pav",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T18:14:02.067Z",
-      "by": "terra-241-eval",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T18:08:32.077Z",
-      "by": "terra-241-eval",
-      "action": "card.claim",
-      "ref": "ccq07pav",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T18:06:04.437Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0aadf2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T17:59:56.205Z",
-      "by": "codex-card-530",
-      "action": "card.release",
-      "ref": "c0aadf2p",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T17:59:54.870Z",
-      "by": "terra-503-sh",
-      "action": "card.claim",
-      "ref": "c0vt1qwz",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T17:59:49.935Z",
-      "by": "codex-card-530",
-      "action": "card.update",
-      "ref": "c0aadf2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T17:59:21.572Z",
-      "by": "terra-503-sh",
-      "action": "card.claim",
-      "ref": "c0vt1qwz",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T17:57:59.457Z",
-      "by": "codex-root",
-      "action": "card.release",
-      "ref": "c0fiunwy",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T17:56:55.923Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0fiunwy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T17:46:29.024Z",
-      "by": "terra-502-fortran",
-      "action": "card.claim",
-      "ref": "c0u6kwwb",
-      "note": ""
     }
   ],
   "nextNum": 368,

@@ -84,8 +84,8 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
 fn find_workspace_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if jetpack::WorkspaceFile::load(&dir).is_some()
-            || jetpack::WorkspaceLock::load(&dir).is_some()
+        if jet_env_model::WorkspaceFile::load(&dir).is_some()
+            || jet_env_model::WorkspaceLock::load(&dir).is_some()
         {
             return Some(dir);
         }
@@ -111,7 +111,7 @@ fn collect_project_files(
     if let Some(root) = workspace_root {
         push_existing(&mut paths, &root.join(jet_driver::Syntax::WORKSPACE_FILE));
         push_existing(&mut paths, &root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE));
-        if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(root) {
+        if let Some(Ok(plan)) = jet_env_model::WorkspaceFile::load(root) {
             for member in plan.members {
                 let member_dir = root.join(member.path);
                 push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PAYLOAD_FILE));
@@ -202,7 +202,7 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
     let Some(root) = workspace_root else {
         return "null".to_string();
     };
-    let members = match jetpack::WorkspaceFile::load(root) {
+    let members = match jet_env_model::WorkspaceFile::load(root) {
         Some(Ok(plan)) => plan
             .members
             .iter()
@@ -249,7 +249,7 @@ fn package_dirs(manifest_root: Option<&Path>, workspace_root: Option<&Path>) -> 
         dirs.push(root.to_path_buf());
     }
     if let Some(root) = workspace_root {
-        if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(root) {
+        if let Some(Ok(plan)) = jet_env_model::WorkspaceFile::load(root) {
             for member in plan.members {
                 dirs.push(root.join(member.path));
             }

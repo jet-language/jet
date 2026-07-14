@@ -1,31 +1,17 @@
 //! Workspace entries inside the unified `.jet/lock` file (D-WORKSPACELOCK1=A).
 //!
-//! External tools that need a static workspace index (IDEs, CI scripts) can
-//! read the `[[workspace_member]]` entries without evaluating Jet.
-//!
-//! Format:
-//! ```toml
-//! version = 1
-//!
-//! [[workspace_member]]
-//! name = "hello"
-//! path = "packages/hello"
-//!
-//! [[workspace_member]]
-//! name = "ranker"
-//! path = "packages/ranker"
-//! ```
+//! The read path (`load`) now lives in `jet-pkg-model::WorkspaceLock` and is
+//! re-exported here for call sites that use `jetpack::WorkspaceLock::load`.
+//! The write path stays here because it needs `RuntimePolicy` for file locking.
+
+pub use jet_pkg_model::WorkspaceLock::{load, WORKSPACE_LOCK};
+use jet_pkg_model::WorkspacePlan::{WorkspacePlan};
 
 use crate::{
     Lock::{self, LockFile, LockedWorkspaceMember},
     Syntax,
 };
 use std::path::Path;
-
-use super::WorkspaceFile::{WorkspaceMember, WorkspacePlan};
-
-/// The lock file path within the workspace root.
-pub const WORKSPACE_LOCK: &str = Syntax::UNIFIED_LOCK_FILE;
 
 /// Write workspace members into `.jet/lock` from a freshly evaluated
 /// `WorkspacePlan`.
@@ -62,25 +48,6 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
     });
 }
 
-/// Load workspace members from `.jet/lock` in `workspace_root`. Returns `None`
-/// when the file is absent. Returns an empty plan on parse failure (the lock is
-/// best-effort; callers should fall back to evaluating `workspace.jet`).
-pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
-    let lock = Lock::load(workspace_root)?;
-    Some(WorkspacePlan {
-        comptime_inputs: lock.comptime_inputs.clone(),
-        overlay_policy: Default::default(),
-        members: lock
-            .workspace_members
-            .into_iter()
-            .map(|m| WorkspaceMember {
-                name: m.name,
-                path: m.path,
-            })
-            .collect(),
-    })
-}
-
 fn empty_lock() -> LockFile {
     LockFile {
         version: Lock::LOCK_VERSION,
@@ -98,7 +65,7 @@ const _: &str = Syntax::WORKSPACE_FILE;
 
 #[cfg(test)]
 mod tests {
-    use super::super::WorkspaceFile::WorkspaceMember;
+    use jet_pkg_model::WorkspacePlan::{WorkspaceMember, WorkspacePlan};
     use super::*;
 
     fn member(name: &str, path: &str) -> WorkspaceMember {
@@ -184,8 +151,6 @@ mod tests {
 
     #[test]
     fn comptime_inputs_round_trip_through_lock() {
-        // Slice A (D-CTEFFECT1): a Tier-1 input a `members:` expression recorded
-        // is written into `.jet/lock` and read back by `load`.
         use crate::AST::ComptimeInput;
         let tmp = std::env::temp_dir().join(format!(
             "wlock-ct-{}",
