@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 533,
-    "rev": 5897,
+    "nextNum": 550,
+    "rev": 5922,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3070,7 +3070,7 @@
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
-      "assignee": null,
+      "assignee": "codex-main",
       "log": [
         {
           "at": "2026-07-14",
@@ -3465,7 +3465,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-14T14:08:00.068Z"
     },
     {
       "id": "c008rjua",
@@ -7517,6 +7518,11 @@
       "log": [
         {
           "at": "2026-07-14",
+          "by": "codex-main",
+          "text": "[verify 2026-07-14] Independent C3/C6 verification now recorded after owner accepted: workspace guard 3/3; split targets dispatch 6/6, engine 67/67, JetOS 39/39, Studio 4/4. Repair commit 00d8c17b keeps ServiceProbe behind version-checked Jetpack engine transport and restores retired bare-verb teaching. Parent verify-full ran with pipefail and 27G /tmp free; stopped on unrelated active-lane I2 failures: bare panic! in crates/jet-foundation/src/XmlPull.rs (3) and crates/jet-codegen/src/scheduler/io.rs (1). No ENOSPC/collect2 recurrence. Card owner-accepted done, but full-suite proof remains red until those lanes fix their invariant failures and parent reruns."
+        },
+        {
+          "at": "2026-07-14",
           "by": "owner",
           "text": "Accepted — closed (no formal ballot)."
         },
@@ -7610,11 +7616,11 @@
         {
           "n": 3,
           "text": "Slice 3: jet root package no longer references jetpack directly outside Bin shims/CLI dispatch; compatibility forms route with teaching/provenance messages",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-367b-builder",
-          "verifiedBy": null,
-          "evidence": "Removed Source/lib.rs's blanket 'pub use jetpack as Jetpack' re-export (D-PRODUCT-SPLIT1=C). Read-only model needs (PackageManifest, Manifest, ScriptDeps, Lock, CBind, CFFI, FFI) plus pure policy computation (EffectBudget, LintPolicy -- verified zero network/provider/shell code, only depend on AST/Sema/Diagnostics/PackageManifest/Lock, all already in jet-pkg-model) moved crates/jetpack/src/{EffectBudget,LintPolicy}.rs -> crates/jet-pkg-model/src/, re-exported jetpack-side under historical paths, threaded through jet-driver's existing jet_pkg_model re-export into Source/lib.rs's jet_driver re-export list (Store renamed to PkgStore to avoid clash with Source's own build-cache crate::Store). Source/CmdCompile.rs and Source/main.rs (bin crate) now reference jet::PackageManifest/Manifest/ScriptDeps/EffectBudget/LintPolicy/PkgStore instead of jet::Jetpack::X. CmdCompile.rs is now 100% clear of jetpack:: references. Genuine engine calls that don't have a model home yet stay direct jetpack::X (Overlay in lib.rs; WorkspaceFile/JetPin/ScriptLock in main.rs; Discovery in LSP/Completion.rs+Server.rs) -- tracked exactly by tests/workspace_crates.rs::direct_jetpack_imports_stay_behind_known_boundaries, which now also catches main.rs (a pre-existing jet::Jetpack:: coupling the old regex blind-spotted) while Canvas/query_actions.rs dropped off the list entirely (fully clean). All ~90 test-file call sites across tests/*.rs that used jet::Jetpack::X were fixed to jetpack::X (mechanical, same target functions, tests already depend on the jetpack crate directly).\nEvidence: cargo build --workspace clean. cargo test --test workspace_crates: 3/3 ok. cargo test --test pkg: 136/136 ok. cargo test -p jetpack --lib: 319 ok/1 known-pre-existing-fail (Shell::tests::fish_prompt_pty_reports_real_command_receipts_when_available, matches told collision list). cargo test -p jet-pkg-model --lib: 123/123 ok (incl. LintPolicy::tests::* in new location). cargo test --test cli: 65/67 ok (2 known external fails: completions_generate_for_every_shell, man_page_golden -- matches told collision). cargo test --test canvas: 56/56 ok. cargo test --test lsp: 40/40 ok. Fresh-binary smoke after rm -rf ~/.cache/jet/build: jet run hello.jet -> \"hello, world\"; jetpack help -> prints; jetos (no args) -> usage line. docs/spec/architecture.md updated with jetos crate row + slice-3 routing description.",
-          "at": "2026-07-12T18:56:54.150Z"
+          "verifiedBy": "codex-367-review",
+          "evidence": "Independent post-fix review: workspace_crates 3/3; CmdDevTools has no direct jetpack refs; ServiceProbe uses shared version-checked EngineDispatch capture into hidden Jetpack handler, real composed env, strict one-row JETSERVICE1/matching hex name/exactly 20 u64 samples. Compatibility teaching route verified by jetpack_dispatch 6/6.",
+          "at": "2026-07-14T14:04:23.971Z"
         },
         {
           "n": 4,
@@ -7637,11 +7643,11 @@
         {
           "n": 6,
           "text": "Slice 6: tests/jetpack.rs splits into package engine, dispatch, JetOS generation/proof, Studio, and fixture-helper files",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-367c-builder",
-          "verifiedBy": null,
-          "evidence": "tests/jetpack.rs (7036 lines, 111 #[test] fns incl. common:: bonus / 111 real jetpack tests, 40 helper fns) split via a Rust-aware tokenizer (string/char/raw-string/comment-state + brace-depth machine, not naive brace/line counting) into byte-verified top-level item ranges. Full-file reconstruction check (concat of all 161 item ranges == original bytes) passed. New targets: tests/jetpack_engine.rs (66 tests, package engine), tests/jetpack_dispatch.rs (4, jet->jetpack CLI dispatch), tests/jetpack_jetos.rs (38, JetOS generation/VM proof), tests/jetpack_studio.rs (3, Studio) = 111 tests, sum matches. Shared 41-item fixture-helper set (40 fns + Scratch/StudioTestOwner structs + 1 const) moved to tests/support/jetpack_fixtures.rs, pub-qualified, included per-binary via #[path=\"support/jetpack_fixtures.rs\"] mod (mirrors tests/support/fmt_lossless.rs and tests/common/mod.rs per-binary-copy convention); each target keeps its own mod common; use jetpack_fixtures::*;. Test-body bytes were never transformed (zero edits beyond mod/use header plumbing + pub on helper signatures/fields). Baseline captured on old tests/jetpack.rs BEFORE delete: 111 real tests, 110 pass + 1 pre-existing fail (top_level_jet_outdated_dispatches_to_jetpack, E2101 'outdated moved under jet inspect' drift, unrelated to split). After split (--no-fail-fast across all 4 targets): identical 110 pass + 1 fail (same test, same file:line-relative panic), 0 other deltas — diff of baseline vs after pass/fail-by-name is empty except the expected 1x->4x duplication of the common:: bonus test that every mod-common binary carries (existing repo pattern). cargo check --test jetpack_engine --test jetpack_dispatch --test jetpack_jetos --test jetpack_studio compiles clean, 0 warnings. Old tests/jetpack.rs deleted. Updated 2 stale doc-comment file-pointers (crates/jetpack/src/Trust.rs, crates/jetpack/src/JetOS/nixos_backend.rs) and docs/spec/diagnostics.md's E1214/E1215/E1225 snapshot-location pointer to the new file names.",
-          "at": "2026-07-12T21:00:29.515Z"
+          "verifiedBy": "codex-367-review",
+          "evidence": "Independent post-fix review: old tests/jetpack.rs absent; 112 explicit tests classified engine 66, dispatch 5, JetOS 38, Studio 3 with no duplicate names and shared fixtures. Split-target run green: dispatch 6/6, engine 67/67, JetOS 39/39, Studio 4/4 including each common safety test. 111->112 explained by replacing stale outdated test with bare-teaching + canonical grouped dispatch proofs.",
+          "at": "2026-07-14T14:04:37.985Z"
         },
         {
           "n": 7,
@@ -15057,9 +15063,16 @@
       "phase": "deciding",
       "priority": "P1",
       "plan": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "#533"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "claude-main",
+          "text": "Held D-ECO wave now BLOCKED on the shape law #533/D-SHAPE1: manifest spellings (executable{}, alias(), Wrap.{}, Recipe.cargo, overlay) are re-derived under the ratified law via D-SHAPE5a/5b, not decided as-proposed. File-model choice (D-ECO1) re-surfaces cleanly once shapes are consistent."
+        },
         {
           "at": "2026-07-14",
           "by": "claude-main",
@@ -15116,6 +15129,440 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T11:56:28.357Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0ymmqal",
+      "num": 533,
+      "title": "Shape law (I9) — language-wide uniformity paradigm",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-14",
+          "by": "claude-main",
+          "text": "Shape-law paradigm doc committed (docs/proposals/uniformity-paradigm.md, 41b686ec9). 3-part shape audit (737 lines) → 4 candidate laws → adversarial review → revision. D-SHAPE1 ballot ready (rec: plane-total + invariant I9). Wave cards #534-#545 blocked on ratification; SHAPE-HYGIENE1 #545 ungated/ready. copy keyword: S4 reopen on #535, consume stays gated."
+        }
+      ],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T13:57:56.137Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c083ne8x",
+      "num": 534,
+      "title": "D-SHAPE2 — marker-plane repair (#Sanitizer/#Replayable→@, one handle slot, one derive)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:01:49.625Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0we378g",
+      "num": 535,
+      "title": "D-SHAPE-LIFECYCLE — reopen S4/D-CAP2 for `copy` (keep/method/other); consume stays #Unsafe-gated",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:02:47.690Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0cztb5h",
+      "num": 536,
+      "title": "D-SHAPE3a — construction shape law (product .{} / sum .Variant / new·from·over; retire bare T() + module factories)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:03:12.639Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c00lmm2k",
+      "num": 537,
+      "title": "D-SHAPE3b — Option/Result variant casing (touches every program; decide independently)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:04:01.956Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0t1re9o",
+      "num": 538,
+      "title": "D-SHAPE4 — stdlib naming/resource law (eq/equal, watcher verb-first, RAII vs .close(), durations)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:04:36.327Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0vvxein",
+      "num": 539,
+      "title": "D-SHAPE5a — manifest structure under the law (overlay→module, executable{}, fix U8-vs-U10 nesting)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:04:58.267Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0xqkis5",
+      "num": 540,
+      "title": "D-SHAPE5b — rework HELD D-ECO wave per cluster under the law (Recipe/Wrap/Meta/Banner/Tool/alias)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:05:26.677Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0bo7bp5",
+      "num": 541,
+      "title": "D-SHAPE6 — CLI grammar law + fix spec/impl drift (jet inspect/registry vs shipped flat verbs)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:05:57.994Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0xbtyir",
+      "num": 542,
+      "title": "D-SHAPE7 — external-ref sigil unification (guard: must not disturb [T#N]/#(E)/dot family)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [
+        "#533"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:06:21.072Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c03teoty",
+      "num": 543,
+      "title": "D-SHAPE8 — effects-plane consolidation (@Pure vs #(…) into one signature spelling)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [
+        "#533",
+        "#534"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:06:51.939Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c04x8do3",
+      "num": 544,
+      "title": "D-SHAPE9 — invokable-entry law (reserved fn run/dev/build vs #Task fn — pick one)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [
+        "#533",
+        "#534"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:07:57.309Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c06qx0rz",
+      "num": 545,
+      "title": "SHAPE-HYGIENE1 — registry casing, U11/U13/U18 citation drift, W-prefix note (no owner gate)",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/uniformity-paradigm.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:07:57.420Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c038fme7",
+      "num": 546,
+      "title": "Parser correctness policy: contracts, adversarial corpus, and dependency gates",
+      "body": "Audit every hand-rolled protocol/config parser: LSP JSON, manifest TOML subset, SemVer/ranges, C prototypes, and registry/advisory formats. For each, publish its accepted grammar, reject unsupported cases deliberately, add hostile-input coverage, and fix correctness holes. Jet owns every diagnostic. If a protocol cannot be made correct within I6, stop that slice and raise a separate dependency-exception ballot before adding any crate.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Inventory parser entrypoints and current documented promises. Build a parser-by-parser contract table. Add adversarial tests for escapes, Unicode, nesting, malformed input, recovery, overflow, and ambiguous versions/prototypes. Tighten contracts or implementations until behavior and docs agree. Any external parser remains owner-gated under I6.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/spec/spec.md",
+        "docs/spec/diagnostics.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:09:00.334Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c06h4p4q",
+      "num": 547,
+      "title": "Durability W2: machine-enforce compiler invariants and ratchets",
+      "body": "Retire remaining agent-memory enforcement holes from the durability audit. Pin I3, I4, I6, I7, formatter losslessness, diagnostic-registry quality, and acknowledged-gap counts so drift fails loudly instead of relying on reviewer memory.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "First reconcile each proposed ratchet against live tests to avoid duplicates. Add only missing structural checks: no Diagnostic construction in codegen; compiler-seam crate enumeration with decision-backed dependency exceptions; every keyword/sigil constant adjacent to a ratified decision; scoped snapshot blessing; formatter token-preservation corpus; diagnostic body validation; monotonic acknowledged-gap counts.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "AGENTS.md",
+        "docs/spec/architecture.md",
+        "docs/spec/diagnostics.md",
+        "docs/spec/syntax-decisions.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:09:00.530Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c09re2dk",
+      "num": 548,
+      "title": "Durability W6: canonical runbooks and stale-guidance eradication",
+      "body": "Finish moving operational knowledge from stale plans and harness-specific memory into canonical repo guidance. Repair remaining contradictions, keep one current command/path per workflow, and embed short runbooks where maintainers naturally look.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Audit live AGENTS.md, shared skills, spec architecture/diagnostics/roadmap, and docs indexes against repository truth. Remove stale paths, retired commands, fixed-epoch assumptions, and duplicated protocols. Add concise canonical runbooks for blessing, diagnostics, syntax changes, ICE triage, and FFI bridges. Move durable design/acceptance rules into shared repo guidance visible to every harness.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "AGENTS.md",
+        ".agents/skills/tower/SKILL.md",
+        ".agents/skills/tower-ballot/SKILL.md",
+        ".claude/skills/verify/SKILL.md",
+        "docs/spec/architecture.md",
+        "docs/spec/diagnostics.md",
+        "docs/spec/roadmap.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:09:00.729Z",
+      "updated": "2026-07-14"
+    },
+    {
+      "id": "c0d1a7ds",
+      "num": 549,
+      "title": "E3 formal compiler-extension plugin API (D-DX5-B)",
+      "body": "Implement the owner-ratified optional formal plugin API for tools needing compiler integration, while keeping PATH-discovered jet-* helpers and application target: plugin distinct. First settle the v1 compiler boundary: initial hook stage plus isolation/authority model. Front end retains semantics and diagnostics; plugins cannot make rustc user-visible or mutate unchecked compiler state.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Blocked on D-DX5-HOOK1. After ratification, specify one versioned capability-negotiated contract, host lifecycle, deterministic inputs/outputs, resource limits, compatibility diagnostics, registry trust policy, and rollback/versioning. Build test-first across host, SDK, one custom-lint example, failure isolation, and JIT/AOT parity where applicable. Do not reuse application-plugin semantics unless the ballot chooses that substrate explicitly.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/spec/architecture.md",
+        "docs/spec/spec.md",
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-driver/src/Prelude/Plugin.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T14:09:00.927Z",
       "updated": "2026-07-14"
     }
   ],
@@ -31866,6 +32313,100 @@
       "created": "2026-07-14T12:11:19.701Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-14"
+    },
+    {
+      "id": "D-SHAPE1",
+      "cardId": "c0ymmqal",
+      "group": "syntax",
+      "title": "The shape law — one rule that assigns a syntax shape to every construct",
+      "gist": "Pick the single law that decides what syntactic shape every construct in Jet takes, so an expert can guess a sibling's shape and be right most of the time.",
+      "lesson": "This decision picks a law, not a spelling. Ratifying it commits the direction of every follow-on wave (operations become methods, values become literals, promises move to @); the waves then decide exact spellings within that direction.",
+      "explainer": "",
+      "story": "The owner read the package-ecosystem ballots and rejected them: one manifest mixed loose fields, modules, bare keywords, function calls, and type constructors for what is essentially one job. He asked for a comprehensive streamlining across the whole language, measured by whether an expert can predict a construct's shape from experience.",
+      "inWild": "A three-part audit of the shipped language found one semantic job wearing 4-6 shapes, and it is ratified law, not just the new proposal:\n\n- named typed block = 6 shapes (module / overlay / executable{} / payload: / build{} / Wrap.{})\n- construct a value = 5+ verbs (.new / .from / time.clock / .generate / bare BigInt())\n- fn property = 4 planes (@Pure / #Sanitizer / pub / #(Net))\n- external ref = 4 punctuations (@ / # / : / dotted)\n- CLI subcommand = 6 shapes, and the shipped binary drifts from its own spec\n- value lifecycle = 3 shapes (copy x / consume(x) / .drop())\n- manifest nesting rule U8 contradicts U10\n\nFull worked analysis: docs/proposals/uniformity-paradigm.md.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Value-uniform (everything is a typed value)",
+          "detail": "Every named thing with fields is a value of a named type, built by one literal shape. The manifest, a package, a dev shell become typed values. This is the owner's brainstorm seed, developed honestly.",
+          "code": "Manifest.{\n  packages: [ Package.{ name: \"jet\", target: .Executable,\n                        build: .Cargo(lock: \"Cargo.lock\") } ],\n  envs:     [ Env.{ name: \"dev\", packages: [...] } ],\n}\n\n// wins construction: Deque.{}  Set.{items:[..]}  Clock.{seed:42}\n// but a literal cannot dedup a Set or hold a Deque invariant -> encapsulation lie\n// and @Pure -> Contract.{ pure: true } is longer, worse for markers"
+        },
+        {
+          "key": "B",
+          "name": "Plane-total (fix the planes; make the rule gap-free)",
+          "detail": "Keep the small set of shape planes but make the job-to-plane rule total: every exception is deleted or re-ruled. Repairs the two-plane @/# law instead of replacing it; keeps keywords for control flow.",
+          "code": "// name into scope -> kw block ; value -> Type.{} / .Variant ; op -> .verb()\n// promise -> @ ; instruction -> # ; data -> field:value ; ref -> one sigil\n\n@Pure @MustUse @Replayable @Sanitizer   // #Sanitizer/#Replayable move to @\nfn parse(input) -> Record ? Error #(Net, !Fs) { ... }\n\nmodule overlay.dev { ... }               // was `overlay dev {}`\nDeque.new()  Set.from([1,2,3])  Clock.new(42)   // one ctor-verb rule\nops.transform(pool, input.copy(), 5000)  // copy respelled (reopens S4)"
+        },
+        {
+          "key": "C",
+          "name": "Declaration-uniform (every named block is `kw name {}`)",
+          "detail": "Every named block reads keyword-name-body: package, env, overlay, system, target all identical. Unifies the named-block class hard, but kills the beginner one-liner and leaves construction and markers untouched.",
+          "code": "package jet {\n  target executable\n  build  Recipe.cargo(lock: \"Cargo.lock\")\n}\nenv dev { packages [...] }\noverlay dev { package R { with [cran.jsonlite] } }\n\n// kills the magic `packages: { hello: executable }` one-liner\n// alias/distinct shoved into blocks: `alias Pair { = (T,T) }` is noise"
+        },
+        {
+          "key": "D",
+          "name": "Register-split (manifests pure data; code keeps expressions)",
+          "detail": "Two registers: a manifest is pure data (field:value + Type.{} + enum-dot only), code keeps full expression syntax. Fixes only manifests; forbids the ratified hook escape and computed modules; regresses the beginner manifest.",
+          "code": "// manifest = data only, no fn calls / no bare keywords / no module decls\npackages: [ Package.{ name: \"jet\", target: .Executable } ]\n\n// but code/stdlib (most of what an expert types) keeps ALL its drift\n// and `hook: fn(sh){}` (ratified escape) is code in a manifest -> banned"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust never unified its shapes: attributes, macros, derive, keywords, and builder methods all do overlapping jobs. The result is exactly the guess-and-miss surface this decision exists to avoid.",
+          "code": "#[derive(Clone)]  #[tokio::main]  vec![1,2]  Struct { .. }  T::new()  |x| x  // six shapes, one crate"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "Plane-total is the only candidate that addresses all four highest-blast inconsistency classes while keeping every already-guessable bright spot. It repairs the two-plane law rather than replacing it, and states the ctor rules the surface only implies.",
+        "tradeoff": "Two marker glyphs survive and a small closed list of stdlib DSL islands remains, so gap-free carries an asterisk. Invariant I9's island test bounds that exception so it cannot re-admit ordinary drift.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Value-uniform fixes construction but breaks value encapsulation: a literal cannot maintain a Set or Deque invariant. It regresses markers into field bags and leaves declarations and control flow untouched."
+          },
+          {
+            "key": "C",
+            "reason": "Declaration-uniform kills the beginner one-line manifest, mangles alias and distinct into blocks, and leaves the construction and marker classes entirely unsolved. It fixes one class of four."
+          },
+          {
+            "key": "D",
+            "reason": "Register-split fixes only manifests, which is a fraction of what an expert types. It forbids the ratified hook escape and the computed-module direction, and makes the beginner manifest more verbose."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "B",
+        "synthesis": "Plane-total absorbs value-uniform's good instinct as its value-literal plane (one Type.{} shape) without paying its encapsulation cost, and applies one law to manifests and code alike rather than splitting registers.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One construction shape",
+            "use": "Kept as the value-literal plane: products are Type.{}, sums are .Variant."
+          },
+          {
+            "key": "D",
+            "aspect": "Manifests read as data",
+            "use": "Achieved by the same plane law in a manifest context, not a separate data-only register."
+          },
+          {
+            "key": "B",
+            "aspect": "Total job-to-plane rule",
+            "use": "The law itself, plus invariant I9 and its island test to keep it from regressing."
+          },
+          {
+            "key": "C",
+            "aspect": "Uniform named blocks",
+            "use": "Kept where a keyword block is the honest shape (module, struct, state); not forced onto values or operations."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T13:59:29.289Z"
     }
   ],
   "questions": [
@@ -32648,6 +33189,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T14:09:00.927Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0d1a7ds",
+      "note": "E3 formal compiler-extension plugin API (D-DX5-B)"
+    },
+    {
+      "at": "2026-07-14T14:09:00.729Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c09re2dk",
+      "note": "Durability W6: canonical runbooks and stale-guidance eradication"
+    },
+    {
+      "at": "2026-07-14T14:09:00.530Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c06h4p4q",
+      "note": "Durability W2: machine-enforce compiler invariants and ratchets"
+    },
+    {
+      "at": "2026-07-14T14:09:00.334Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c038fme7",
+      "note": "Parser correctness policy: contracts, adversarial corpus, and dependency gates"
+    },
+    {
+      "at": "2026-07-14T14:08:52.493Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0ymmqal",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T14:08:52.352Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c002osb3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T14:08:52.209Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c002osb3",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-14T14:08:00.068Z",
+      "by": "codex-main",
+      "action": "card.claim",
+      "ref": "ccq07pav",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T14:07:57.420Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c06qx0rz",
+      "note": "SHAPE-HYGIENE1 — registry casing, U11/U13/U18 citation drift, W-prefix note (no owner gate)"
+    },
+    {
+      "at": "2026-07-14T14:07:57.310Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c04x8do3",
+      "note": "D-SHAPE9 — invokable-entry law (reserved fn run/dev/build vs #Task fn — pick one)"
+    },
+    {
+      "at": "2026-07-14T14:07:50.044Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-14T14:06:51.939Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c03teoty",
+      "note": "D-SHAPE8 — effects-plane consolidation (@Pure vs #(…) into one signature spelling)"
+    },
+    {
+      "at": "2026-07-14T14:06:21.072Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0xbtyir",
+      "note": "D-SHAPE7 — external-ref sigil unification (guard: must not disturb [T#N]/#(E)/dot family)"
+    },
+    {
+      "at": "2026-07-14T14:05:57.995Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0bo7bp5",
+      "note": "D-SHAPE6 — CLI grammar law + fix spec/impl drift (jet inspect/registry vs shipped flat verbs)"
+    },
+    {
+      "at": "2026-07-14T14:05:26.677Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0xqkis5",
+      "note": "D-SHAPE5b — rework HELD D-ECO wave per cluster under the law (Recipe/Wrap/Meta/Banner/Tool/alias)"
+    },
+    {
+      "at": "2026-07-14T14:04:58.267Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0vvxein",
+      "note": "D-SHAPE5a — manifest structure under the law (overlay→module, executable{}, fix U8-vs-U10 nesting)"
+    },
+    {
+      "at": "2026-07-14T14:04:37.985Z",
+      "by": "codex-367-review",
+      "action": "card.criteria-verify",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-14T14:04:36.328Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0t1re9o",
+      "note": "D-SHAPE4 — stdlib naming/resource law (eq/equal, watcher verb-first, RAII vs .close(), durations)"
+    },
+    {
+      "at": "2026-07-14T14:04:23.971Z",
+      "by": "codex-367-review",
+      "action": "card.criteria-verify",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-14T14:04:01.956Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c00lmm2k",
+      "note": "D-SHAPE3b — Option/Result variant casing (touches every program; decide independently)"
+    },
+    {
+      "at": "2026-07-14T14:03:12.639Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0cztb5h",
+      "note": "D-SHAPE3a — construction shape law (product .{} / sum .Variant / new·from·over; retire bare T() + module factories)"
+    },
+    {
+      "at": "2026-07-14T14:02:47.691Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0we378g",
+      "note": "D-SHAPE-LIFECYCLE — reopen S4/D-CAP2 for `copy` (keep/method/other); consume stays #Unsafe-gated"
+    },
+    {
+      "at": "2026-07-14T14:01:49.626Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c083ne8x",
+      "note": "D-SHAPE2 — marker-plane repair (#Sanitizer/#Replayable→@, one handle slot, one derive)"
+    },
+    {
+      "at": "2026-07-14T13:59:29.289Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-SHAPE1",
+      "note": "The shape law — one rule that assigns a syntax shape to every construct"
+    },
+    {
+      "at": "2026-07-14T13:57:56.137Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0ymmqal",
+      "note": "Shape law (I9) — language-wide uniformity paradigm"
+    },
     {
       "at": "2026-07-14T13:35:15.549Z",
       "by": "owner",
@@ -35972,181 +36688,6 @@
       "action": "card.release",
       "ref": "c0uxsyns",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T20:57:57.995Z",
-      "by": "terra-241-refresh",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:57:50.600Z",
-      "by": "terra-530-transaction",
-      "action": "card.update",
-      "ref": "c0aadf2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:45:13.023Z",
-      "by": "terra-296-allocator",
-      "action": "card.claim",
-      "ref": "c0uxsyns",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T20:45:07.996Z",
-      "by": "terra-530-transaction",
-      "action": "card.claim",
-      "ref": "c0aadf2p",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T20:45:00.568Z",
-      "by": "terra-241-refresh",
-      "action": "card.claim",
-      "ref": "ccq07pav",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T20:44:25.786Z",
-      "by": "terra-530-transport",
-      "action": "card.release",
-      "ref": "c0aadf2p",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T20:44:19.904Z",
-      "by": "terra-241-consumers",
-      "action": "card.release",
-      "ref": "ccq07pav",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T20:44:10.570Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0u6kwwb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:44:02.301Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0aadf2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:43:48.623Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:39:10.916Z",
-      "by": "terra-502-jvm",
-      "action": "card.release",
-      "ref": "c0u6kwwb",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T20:38:27.507Z",
-      "by": "terra-530-transport",
-      "action": "card.update",
-      "ref": "c0aadf2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:37:41.630Z",
-      "by": "terra-241-consumers",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:27:26.330Z",
-      "by": "terra-502-jvm",
-      "action": "card.claim",
-      "ref": "c0u6kwwb",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T20:27:18.986Z",
-      "by": "terra-530-transport",
-      "action": "card.claim",
-      "ref": "c0aadf2p",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T20:27:09.501Z",
-      "by": "terra-241-consumers",
-      "action": "card.claim",
-      "ref": "ccq07pav",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T20:26:52.122Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c00ukytt",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T20:26:22.802Z",
-      "by": "terra-530-smtp",
-      "action": "card.release",
-      "ref": "c0aadf2p",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T20:26:17.043Z",
-      "by": "terra-296-parity",
-      "action": "card.release",
-      "ref": "c0uxsyns",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T20:26:12.497Z",
-      "by": "terra-241-converge",
-      "action": "card.release",
-      "ref": "ccq07pav",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T20:25:47.587Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "ccq07pav",
-      "note": "#11"
-    },
-    {
-      "at": "2026-07-13T20:25:19.190Z",
-      "by": "terra-241-converge",
-      "action": "card.criteria-meet",
-      "ref": "ccq07pav",
-      "note": "#11"
-    },
-    {
-      "at": "2026-07-13T20:22:09.533Z",
-      "by": "terra-241-converge",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:19:47.402Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0aadf2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:19:41.759Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
