@@ -4202,9 +4202,9 @@ fn run() {
     print((comment.field("$xml") ?? panic("comment tag")).text() ?? "bad")
     print((cdata.field("$xml") ?? panic("cdata tag")).text() ?? "bad")
     print((pi.field("$xml") ?? panic("pi tag")).text() ?? "bad")
-    encoded := cbor.encode(data)
+    encoded := cbor.to_bytes(data) ?? panic("cbor encode")
     print(encoded.len() > 0)
-    decoded := cbor.decode(encoded) ?? panic("cbor")
+    decoded := cbor.parse(encoded) ?? panic("cbor parse")
     print(json.canonical(decoded))
     bytes: [U8] :: [104, 105]
     u := base64.encode_url(bytes)
