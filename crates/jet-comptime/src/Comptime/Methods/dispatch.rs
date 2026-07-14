@@ -1164,36 +1164,24 @@ impl<'a> Interp<'a> {
                 // this ahead of the compatibility `cbor.decode(DataTree)` arm
                 // below: the type argument is the semantic distinction.
                 if module == "core.encoding.cbor" && method == "decode" && !type_args.is_empty() {
-                    if argv.len() > 1 {
-                        // Never pretend the old lightweight interpreter enforces
-                        // CBOROptions. Default-dev transparently takes executable
-                        // TIR; pure comptime stays rejected until its parser owns
-                        // identical depth/item/byte/canonical accounting.
-                        return Err(unsupported(
-                            "`core.encoding.cbor.decode<T>(bytes, options)` at comptime",
-                            span,
-                        ));
-                    }
                     let bytes = match argv.first() {
                         Some(value) => as_bytes(value, span)?,
                         None => return Err(unsupported("core.encoding.cbor.decode(): missing arg 0", span)),
                     };
-                    let tree = match super::super::EncodingLite::cbor_decode(&bytes) {
+                    let options = match super::super::EncodingLite::cbor_options(argv.get(1)) {
+                        Ok(options) => options,
+                        Err(error) => {
+                            return Ok(CtValue::ResErr(Box::new(
+                                super::super::EncodingLite::cbor_error_value(error),
+                            )))
+                        }
+                    };
+                    let tree = match super::super::EncodingLite::cbor_decode(&bytes, &options, true) {
                         Ok(tree) => tree,
-                        Err(reason) => {
-                            return Ok(CtValue::ResErr(Box::new(CtValue::Struct {
-                                type_name: "CBORError".to_string(),
-                                fields: vec![
-                                    ("kind".to_string(), CtValue::Enum {
-                                        type_name: "CBORErrorKind".to_string(),
-                                        variant: "Syntax".to_string(),
-                                        args: Vec::new(),
-                                    }),
-                                    ("byte_offset".to_string(), CtValue::Int(0)),
-                                    ("path".to_string(), CtValue::Str("$".to_string())),
-                                    ("reason".to_string(), CtValue::Str(reason)),
-                                ],
-                            })));
+                        Err(error) => {
+                            return Ok(CtValue::ResErr(Box::new(
+                                super::super::EncodingLite::cbor_error_value(error),
+                            )))
                         }
                     };
                     return match self.typed_decode_top(&type_args[0], &tree, span) {
@@ -1209,6 +1197,11 @@ impl<'a> Interp<'a> {
                                         ("reason", CtValue::Str(value)) => Some(value.clone()),
                                         _ => None,
                                     }).unwrap_or_else(|| "CBOR value does not match requested type".to_string());
+                                    let path = if path.is_empty() {
+                                        "$".to_string()
+                                    } else {
+                                        format!("${path}")
+                                    };
                                     (path, reason)
                                 }
                                 _ => (String::new(), "CBOR value does not match requested type".to_string()),

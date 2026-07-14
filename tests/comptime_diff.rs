@@ -310,6 +310,103 @@ fn run() {
 }
 
 #[test]
+fn cbor_options_and_hostile_errors_match_comptime_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping CBOR option/error differential");
+        return;
+    }
+    let src = r#"use core.encoding.cbor as cbor
+
+fn safe() -> cbor.CBOROptions {
+    return cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
+}
+
+fn show(bytes: [U8]) -> String {
+    if cbor.parse(bytes, safe()) == {
+        ok(_) -> return "ok"
+        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+
+fn show_strict(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
+        ok(_) -> return "ok"
+        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_depth(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
+        ok(_) -> return "ok"
+        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_items(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
+        ok(_) -> return "ok"
+        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_bytes(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
+        ok(_) -> return "ok"
+        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_alloc(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
+        ok(_) -> return "ok"
+        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+
+fn show_ints(bytes: [U8]) -> String {
+    if cbor.decode<[Int]>(bytes, safe()) == {
+        ok(_) -> return "ok"
+        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+
+comptime MALFORMED = show([255])
+comptime TRUNCATED = show([129])
+comptime NONCANONICAL = show_strict([24, 1])
+comptime UNSUPPORTED = show([192, 1])
+comptime MISMATCH = show_ints([129, 97, 120])
+comptime DEPTH = show_depth([129, 129, 1])
+comptime ITEMS = show_items([130, 1, 2])
+comptime BYTES = show_bytes([130, 1, 2])
+comptime ALLOC = show_alloc([130, 1, 2])
+
+fn run() {
+    malformed_wire: [U8] := [255]
+    truncated_wire: [U8] := [129]
+    noncanonical_wire: [U8] := [24, 1]
+    unsupported_wire: [U8] := [192, 1]
+    mismatch_wire: [U8] := [129, 97, 120]
+    depth_wire: [U8] := [129, 129, 1]
+    items_wire: [U8] := [130, 1, 2]
+    malformed := show(malformed_wire)
+    truncated := show(truncated_wire)
+    noncanonical := show_strict(noncanonical_wire)
+    unsupported := show(unsupported_wire)
+    mismatch := show_ints(mismatch_wire)
+    depth := show_depth(depth_wire)
+    items := show_items(items_wire)
+    bytes := show_bytes(items_wire)
+    alloc := show_alloc(items_wire)
+    print("{MALFORMED}~{TRUNCATED}~{NONCANONICAL}~{UNSUPPORTED}~{MISMATCH}~{DEPTH}~{ITEMS}~{BYTES}~{ALLOC}")
+    print("{malformed}~{truncated}~{noncanonical}~{unsupported}~{mismatch}~{depth}~{items}~{bytes}~{alloc}")
+}
+"#;
+    check_comptime_src(2003, "CBOR options and hostile error projection", src);
+}
+#[test]
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"

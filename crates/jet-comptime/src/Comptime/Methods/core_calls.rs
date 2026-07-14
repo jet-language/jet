@@ -1159,21 +1159,19 @@ pub(super) fn apply_core_call(
         ))),
         ("core.encoding.cbor", "parse") => {
             let bytes = as_bytes(one(0)?, span)?;
-            match super::super::EncodingLite::cbor_decode(&bytes) {
+            let options = match super::super::EncodingLite::cbor_options(args.get(1)) {
+                Ok(options) => options,
+                Err(error) => {
+                    return Ok(CtValue::ResErr(Box::new(
+                        super::super::EncodingLite::cbor_error_value(error),
+                    )))
+                }
+            };
+            match super::super::EncodingLite::cbor_decode(&bytes, &options, false) {
                 Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(reason) => Ok(CtValue::ResErr(Box::new(CtValue::Struct {
-                    type_name: "CBORError".to_string(),
-                    fields: vec![
-                        ("kind".to_string(), CtValue::Enum {
-                            type_name: "CBORErrorKind".to_string(),
-                            variant: "Syntax".to_string(),
-                            args: Vec::new(),
-                        }),
-                        ("byte_offset".to_string(), CtValue::Int(0)),
-                        ("path".to_string(), CtValue::Str("$".to_string())),
-                        ("reason".to_string(), CtValue::Str(reason)),
-                    ],
-                }))),
+                Err(error) => Ok(CtValue::ResErr(Box::new(
+                    super::super::EncodingLite::cbor_error_value(error),
+                ))),
             }
         }
         ("core.encoding.cbor", "encode") => {
@@ -1181,9 +1179,10 @@ pub(super) fn apply_core_call(
         }
         ("core.encoding.cbor", "decode") => {
             let bytes = as_bytes(one(0)?, span)?;
-            match super::super::EncodingLite::cbor_decode(&bytes) {
+            let options = super::super::EncodingLite::cbor_safe_options();
+            match super::super::EncodingLite::cbor_decode(&bytes, &options, false) {
                 Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e)))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e.reason)))),
             }
         }
         // --- core.time pure constructors ---

@@ -2083,22 +2083,152 @@ pub(super) fn cbor_encode_typed(
         cbor_encode(&value)
     })
 }
-fn cbor_read_len(input: &[u8], i: &mut usize, add: u8) -> Result<u64, String> {
+#[derive(Clone)]
+pub(super) struct CborOptions {
+    max_depth: i64,
+    max_items: i64,
+    max_bytes: i64,
+    require_canonical: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct CborError {
+    kind: &'static str,
+    byte_offset: usize,
+    path: String,
+    pub(super) reason: String,
+}
+
+impl CborError {
+    fn new(kind: &'static str, byte_offset: usize, path: &str, reason: impl Into<String>) -> Self {
+        Self {
+            kind,
+            byte_offset,
+            path: path.to_string(),
+            reason: reason.into(),
+        }
+    }
+}
+
+pub(super) fn cbor_error_value(error: CborError) -> CtValue {
+    CtValue::Struct {
+        type_name: "CBORError".to_string(),
+        fields: vec![
+            (
+                "kind".to_string(),
+                CtValue::Enum {
+                    type_name: "CBORErrorKind".to_string(),
+                    variant: error.kind.to_string(),
+                    args: Vec::new(),
+                },
+            ),
+            (
+                "byte_offset".to_string(),
+                CtValue::Int(error.byte_offset as i64),
+            ),
+            ("path".to_string(), CtValue::Str(error.path)),
+            ("reason".to_string(), CtValue::Str(error.reason)),
+        ],
+    }
+}
+
+pub(super) fn cbor_safe_options() -> CborOptions {
+    CborOptions {
+        max_depth: 256,
+        max_items: 1_000_000,
+        max_bytes: 1_073_741_824,
+        require_canonical: false,
+    }
+}
+
+pub(super) fn cbor_options(value: Option<&CtValue>) -> Result<CborOptions, CborError> {
+    let mut options = cbor_safe_options();
+    if let Some(CtValue::Struct { fields, .. }) = value {
+        for (name, value) in fields {
+            match (name.as_str(), value) {
+                ("max_depth", CtValue::Int(n)) => options.max_depth = *n,
+                ("max_items", CtValue::Int(n)) => options.max_items = *n,
+                ("max_bytes", CtValue::Int(n)) => options.max_bytes = *n,
+                ("require_canonical", CtValue::Bool(v)) => options.require_canonical = *v,
+                _ => {}
+            }
+        }
+    }
+    if !(1..=4096).contains(&options.max_depth) {
+        return Err(CborError::new(
+            "Limit",
+            0,
+            "$",
+            "max_depth must be in 1..4096",
+        ));
+    }
+    if !(1..=1_000_000_000).contains(&options.max_items) {
+        return Err(CborError::new(
+            "Limit",
+            0,
+            "$",
+            "max_items must be in 1..1000000000",
+        ));
+    }
+    if !(0..=1_073_741_824).contains(&options.max_bytes) {
+        return Err(CborError::new(
+            "Limit",
+            0,
+            "$",
+            "max_bytes must be in 0..1073741824",
+        ));
+    }
+    Ok(options)
+}
+
+fn cbor_read_len(
+    input: &[u8],
+    i: &mut usize,
+    add: u8,
+    start: usize,
+    canonical: bool,
+    path: &str,
+) -> Result<u64, CborError> {
     let need = match add {
         n @ 0..=23 => return Ok(n as u64),
         24 => 1,
         25 => 2,
         26 => 4,
         27 => 8,
-        _ => return Err("unsupported CBOR indefinite/simple length".to_string()),
+        _ => {
+            return Err(CborError::new(
+                "Unsupported",
+                start,
+                path,
+                "indefinite/reserved CBOR length is unsupported by whole-value decoding",
+            ))
+        }
     };
     if *i + need > input.len() {
-        return Err("truncated CBOR length".to_string());
+        return Err(CborError::new(
+            "Truncated",
+            input.len(),
+            path,
+            "CBOR length argument is truncated",
+        ));
     }
     let mut n = 0u64;
     for _ in 0..need {
         n = (n << 8) | input[*i] as u64;
         *i += 1;
+    }
+    if canonical
+        && ((add == 24 && n < 24)
+            || (add == 25 && n <= u8::MAX as u64)
+            || (add == 26 && n <= u16::MAX as u64)
+            || (add == 27 && n <= u32::MAX as u64))
+    {
+        return Err(CborError::new(
+            "NonCanonical",
+            start,
+            path,
+            "CBOR argument does not use its shortest form",
+        ));
     }
     Ok(n)
 }
@@ -2124,132 +2254,637 @@ fn cbor_half_to_f64(bits: u16) -> f64 {
         f64::from_bits(sign | (((exp as i32 - 15 + 1023) as u64) << 52) | ((frac as u64) << 42))
     }
 }
-fn cbor_decode_val(input: &[u8], i: &mut usize) -> Result<CtValue, String> {
-    if *i >= input.len() {
-        return Err("truncated CBOR value".to_string());
+struct CborBudget {
+    limit: usize,
+    live: usize,
+}
+
+// Charge the generated AOT DataTree model, not CtValue's interpreter-only
+// layout. These are the 64-bit slots used by the generated decoder.
+const CBOR_DATA_TREE_SLOT_BYTES: usize = 32;
+const CBOR_MAP_ENTRY_SLOT_BYTES: usize = 56;
+
+impl CborBudget {
+    fn new(limit: i64) -> Self {
+        Self {
+            limit: limit as usize,
+            live: 0,
+        }
     }
+    fn reserve(
+        &mut self,
+        count: usize,
+        unit: usize,
+        offset: usize,
+        path: &str,
+        what: &str,
+    ) -> Result<usize, CborError> {
+        let available = self.limit - self.live;
+        if unit != 0 && count > available / unit {
+            return Err(CborError::new(
+                "Limit",
+                offset,
+                path,
+                format!("{what} allocation exceeds max_bytes {}", self.limit),
+            ));
+        }
+        let requested = count * unit;
+        self.live += requested;
+        Ok(requested)
+    }
+    fn release(&mut self, requested: usize) {
+        self.live -= requested;
+    }
+}
+
+fn cbor_index_path(
+    path: &str,
+    index: usize,
+    budget: &mut CborBudget,
+    offset: usize,
+) -> Result<(String, usize), CborError> {
+    let digits = index.to_string();
+    let capacity = path.len() + digits.len() + 2;
+    let charged = budget.reserve(capacity, 1, offset, path, "CBOR path")?;
+    let mut out = String::with_capacity(capacity);
+    out.push_str(path);
+    out.push('[');
+    out.push_str(&digits);
+    out.push(']');
+    Ok((out, charged))
+}
+
+fn cbor_key_path(
+    path: &str,
+    key: &str,
+    budget: &mut CborBudget,
+    offset: usize,
+) -> Result<(String, usize), CborError> {
+    let escaped = key
+        .chars()
+        .map(|c| c.escape_debug().map(|x| x.len_utf8()).sum::<usize>())
+        .sum::<usize>();
+    let capacity = path
+        .len()
+        .checked_add(escaped)
+        .and_then(|n| n.checked_add(4))
+        .ok_or_else(|| {
+            CborError::new(
+                "Limit",
+                offset,
+                path,
+                "CBOR path allocation exceeds target capacity",
+            )
+        })?;
+    let charged = budget.reserve(capacity, 1, offset, path, "CBOR path")?;
+    let mut out = String::with_capacity(capacity);
+    out.push_str(path);
+    out.push('[');
+    out.push('"');
+    for c in key.chars() {
+        out.extend(c.escape_debug());
+    }
+    out.push('"');
+    out.push(']');
+    Ok((out, charged))
+}
+
+fn cbor_count_item(
+    items: &mut i64,
+    options: &CborOptions,
+    offset: usize,
+    path: &str,
+) -> Result<(), CborError> {
+    *items = items
+        .checked_add(1)
+        .ok_or_else(|| CborError::new("Limit", offset, path, "max_items counter overflow"))?;
+    if *items > options.max_items {
+        return Err(CborError::new(
+            "Limit",
+            offset,
+            path,
+            format!("max_items {} exceeded", options.max_items),
+        ));
+    }
+    Ok(())
+}
+
+fn cbor_indefinite(options: &CborOptions, offset: usize, path: &str) -> Result<(), CborError> {
+    if options.require_canonical {
+        Err(CborError::new(
+            "NonCanonical",
+            offset,
+            path,
+            "indefinite-length CBOR is not Core deterministic",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cbor_indefinite_string(
+    input: &[u8],
+    i: &mut usize,
+    options: &CborOptions,
+    budget: &mut CborBudget,
+    depth: i64,
+    items: &mut i64,
+    path: &str,
+    major: u8,
+    start: usize,
+    allow_bytes: bool,
+) -> Result<CtValue, CborError> {
+    cbor_indefinite(options, start, path)?;
+    if depth + 1 > options.max_depth {
+        return Err(CborError::new(
+            "Limit",
+            start,
+            path,
+            format!("max_depth {} exceeded", options.max_depth),
+        ));
+    }
+    if major == 2 && !allow_bytes {
+        return Err(CborError::new(
+            "Unsupported",
+            start,
+            path,
+            "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>",
+        ));
+    }
+    let mut bytes = Vec::new();
+    loop {
+        if *i >= input.len() {
+            return Err(CborError::new(
+                "Truncated",
+                input.len(),
+                path,
+                "indefinite CBOR string ended before its break",
+            ));
+        }
+        if input[*i] == 0xff {
+            *i += 1;
+            break;
+        }
+        let chunk_start = *i;
+        let head = input[*i];
+        *i += 1;
+        let chunk_major = head >> 5;
+        let chunk_add = head & 31;
+        cbor_count_item(items, options, chunk_start, path)?;
+        if chunk_major != major || chunk_add == 31 {
+            return Err(CborError::new(
+                "Syntax",
+                chunk_start,
+                path,
+                "indefinite CBOR string contains a wrong or indefinite chunk",
+            ));
+        }
+        let n = usize::try_from(cbor_read_len(
+            input,
+            i,
+            chunk_add,
+            chunk_start,
+            false,
+            path,
+        )?)
+        .map_err(|_| {
+            CborError::new(
+                "Limit",
+                chunk_start,
+                path,
+                "CBOR string chunk length exceeds target capacity",
+            )
+        })?;
+        if n > input.len() - *i {
+            return Err(CborError::new(
+                "Truncated",
+                input.len(),
+                path,
+                "CBOR byte/text string chunk is truncated",
+            ));
+        }
+        if major == 3 && std::str::from_utf8(&input[*i..*i + n]).is_err() {
+            return Err(CborError::new(
+                "Syntax",
+                chunk_start,
+                path,
+                "CBOR text chunk is not UTF-8",
+            ));
+        }
+        budget.reserve(
+            n,
+            1,
+            chunk_start,
+            path,
+            if major == 2 {
+                "CBOR byte string"
+            } else {
+                "CBOR text string"
+            },
+        )?;
+        bytes.extend_from_slice(&input[*i..*i + n]);
+        *i += n;
+    }
+    if major == 2 {
+        Ok(CtValue::Bytes(bytes))
+    } else {
+        String::from_utf8(bytes)
+            .map(|s| json_variant("Text", Some(CtValue::Str(s))))
+            .map_err(|_| CborError::new("Syntax", start, path, "CBOR text is not UTF-8"))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cbor_decode_val(
+    input: &[u8],
+    i: &mut usize,
+    options: &CborOptions,
+    budget: &mut CborBudget,
+    depth: i64,
+    items: &mut i64,
+    path: &str,
+    allow_bytes: bool,
+) -> Result<CtValue, CborError> {
+    if *i >= input.len() {
+        return Err(CborError::new(
+            "Truncated",
+            input.len(),
+            path,
+            "CBOR value is missing",
+        ));
+    }
+    let start = *i;
     let b = input[*i];
     *i += 1;
+    cbor_count_item(items, options, start, path)?;
     let major = b >> 5;
     let add = b & 31;
     match major {
-        0 => Ok(json_variant(
-            "Int",
-            Some(CtValue::Int(cbor_read_len(input, i, add)? as i64)),
-        )),
-        1 => Ok(json_variant(
-            "Int",
-            Some(CtValue::Int(-1 - cbor_read_len(input, i, add)? as i64)),
-        )),
+        0 => i64::try_from(cbor_read_len(
+            input,
+            i,
+            add,
+            start,
+            options.require_canonical,
+            path,
+        )?)
+        .map(|n| json_variant("Int", Some(CtValue::Int(n))))
+        .map_err(|_| {
+            CborError::new(
+                "Unsupported",
+                start,
+                path,
+                "CBOR integer is outside Jet Int",
+            )
+        }),
+        1 => i64::try_from(cbor_read_len(
+            input,
+            i,
+            add,
+            start,
+            options.require_canonical,
+            path,
+        )?)
+        .ok()
+        .and_then(|n| n.checked_neg()?.checked_sub(1))
+        .map(|n| json_variant("Int", Some(CtValue::Int(n))))
+        .ok_or_else(|| {
+            CborError::new(
+                "Unsupported",
+                start,
+                path,
+                "CBOR integer is outside Jet Int",
+            )
+        }),
         2 | 3 => {
             if add == 31 {
-                let mut bytes = Vec::new();
-                loop {
-                    if *i >= input.len() {
-                        return Err("indefinite CBOR string ended before its break".to_string());
-                    }
-                    if input[*i] == 0xff {
-                        *i += 1;
-                        break;
-                    }
-                    let head = input[*i];
-                    *i += 1;
-                    if head >> 5 != major || head & 31 == 31 {
-                        return Err("indefinite CBOR string contains a wrong or indefinite chunk".to_string());
-                    }
-                    let n = cbor_read_len(input, i, head & 31)? as usize;
-                    if n > input.len().saturating_sub(*i) {
-                        return Err("CBOR byte/text string chunk is truncated".to_string());
-                    }
-                    bytes.extend_from_slice(&input[*i..*i + n]);
-                    *i += n;
-                }
-                return String::from_utf8(bytes)
-                    .map(|s| json_variant("Text", Some(CtValue::Str(s))))
-                    .map_err(|_| "CBOR text is not UTF-8".to_string());
+                return cbor_indefinite_string(
+                    input,
+                    i,
+                    options,
+                    budget,
+                    depth,
+                    items,
+                    path,
+                    major,
+                    start,
+                    allow_bytes,
+                );
             }
-            let n = cbor_read_len(input, i, add)? as usize;
-            if *i + n > input.len() {
-                return Err("truncated CBOR bytes/text".to_string());
+            let n = usize::try_from(cbor_read_len(
+                input,
+                i,
+                add,
+                start,
+                options.require_canonical,
+                path,
+            )?)
+            .map_err(|_| {
+                CborError::new(
+                    "Limit",
+                    start,
+                    path,
+                    "CBOR string length exceeds target capacity",
+                )
+            })?;
+            if n > input.len() - *i {
+                return Err(CborError::new(
+                    "Truncated",
+                    input.len(),
+                    path,
+                    "CBOR byte/text string is truncated",
+                ));
             }
+            if major == 2 && !allow_bytes {
+                return Err(CborError::new(
+                    "Unsupported",
+                    start,
+                    path,
+                    "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>",
+                ));
+            }
+            budget.reserve(
+                n,
+                1,
+                start,
+                path,
+                if major == 2 {
+                    "CBOR byte string"
+                } else {
+                    "CBOR text string"
+                },
+            )?;
             let bytes = input[*i..*i + n].to_vec();
             *i += n;
             if major == 2 {
-                // D-SERDE2 `DataTree::Bytes` has no `Json` counterpart (the
-                // dynamic `Json`/`Data` tagged enum only carries the
-                // JSON-native leaf shapes) — AOT's CBOR decode never actually
-                // produces this arm either except via an explicit `Bytes`
-                // construction, which nothing in `core.encoding.cbor`'s own
-                // encode path emits (`jet_cbor_encode_val` only ever writes
-                // major type 2 for `DataTree::Bytes`, never for a `Text`).
-                // Round-tripping arbitrary externally-produced CBOR bytes
-                // strings is therefore represented as `Text` here, matching
-                // every other leaf.
-                String::from_utf8(bytes.clone())
-                    .map(|s| json_variant("Text", Some(CtValue::Str(s))))
-                    .or_else(|_| Ok(json_variant("Text", Some(CtValue::Str(String::from_utf8_lossy(&bytes).into_owned())))))
+                Ok(CtValue::Bytes(bytes))
             } else {
                 String::from_utf8(bytes)
                     .map(|s| json_variant("Text", Some(CtValue::Str(s))))
-                    .map_err(|_| "CBOR text is not UTF-8".to_string())
+                    .map_err(|_| CborError::new("Syntax", start, path, "CBOR text is not UTF-8"))
             }
         }
         4 => {
             if add == 31 {
+                cbor_indefinite(options, start, path)?;
+                if depth + 1 > options.max_depth {
+                    return Err(CborError::new(
+                        "Limit",
+                        start,
+                        path,
+                        format!("max_depth {} exceeded", options.max_depth),
+                    ));
+                }
                 let mut xs = Vec::new();
+                let mut index = 0;
                 loop {
                     if *i >= input.len() {
-                        return Err("indefinite CBOR array ended before its break".to_string());
+                        return Err(CborError::new(
+                            "Truncated",
+                            input.len(),
+                            path,
+                            "indefinite CBOR array ended before its break",
+                        ));
                     }
                     if input[*i] == 0xff {
                         *i += 1;
                         break;
                     }
-                    xs.push(cbor_decode_val(input, i)?);
+                    let (child_path, charged) = cbor_index_path(path, index, budget, *i)?;
+                    if *items >= options.max_items {
+                        let e = CborError::new(
+                            "Limit",
+                            *i,
+                            &child_path,
+                            format!("max_items {} exceeded", options.max_items),
+                        );
+                        budget.release(charged);
+                        return Err(e);
+                    }
+                    budget.reserve(
+                        1,
+                        CBOR_DATA_TREE_SLOT_BYTES,
+                        *i,
+                        &child_path,
+                        "CBOR array",
+                    )?;
+                    let child = cbor_decode_val(
+                        input,
+                        i,
+                        options,
+                        budget,
+                        depth + 1,
+                        items,
+                        &child_path,
+                        allow_bytes,
+                    );
+                    budget.release(charged);
+                    xs.push(child?);
+                    index += 1;
                 }
                 return Ok(json_array(xs));
             }
-            let n = cbor_read_len(input, i, add)? as usize;
+            if depth + 1 > options.max_depth {
+                return Err(CborError::new(
+                    "Limit",
+                    start,
+                    path,
+                    format!("max_depth {} exceeded", options.max_depth),
+                ));
+            }
+            let n = usize::try_from(cbor_read_len(
+                input,
+                i,
+                add,
+                start,
+                options.require_canonical,
+                path,
+            )?)
+            .map_err(|_| {
+                CborError::new(
+                    "Limit",
+                    start,
+                    path,
+                    "CBOR array length exceeds target capacity",
+                )
+            })?;
+            budget.reserve(n, CBOR_DATA_TREE_SLOT_BYTES, start, path, "CBOR array")?;
             let mut xs = Vec::with_capacity(n);
-            for _ in 0..n {
-                xs.push(cbor_decode_val(input, i)?);
+            for index in 0..n {
+                let (child_path, charged) = cbor_index_path(path, index, budget, start)?;
+                let child = cbor_decode_val(
+                    input,
+                    i,
+                    options,
+                    budget,
+                    depth + 1,
+                    items,
+                    &child_path,
+                    allow_bytes,
+                );
+                budget.release(charged);
+                xs.push(child?);
             }
             Ok(json_array(xs))
         }
         5 => {
             if add == 31 {
+                cbor_indefinite(options, start, path)?;
+                if depth + 1 > options.max_depth {
+                    return Err(CborError::new(
+                        "Limit",
+                        start,
+                        path,
+                        format!("max_depth {} exceeded", options.max_depth),
+                    ));
+                }
                 let mut es = Vec::new();
                 loop {
                     if *i >= input.len() {
-                        return Err("indefinite CBOR map ended before its break".to_string());
+                        return Err(CborError::new(
+                            "Truncated",
+                            input.len(),
+                            path,
+                            "indefinite CBOR map ended before its break",
+                        ));
                     }
                     if input[*i] == 0xff {
                         *i += 1;
                         break;
                     }
-                    let k = match cbor_decode_val(input, i)? {
-                        v => match json_payload(&v, "Text") {
-                            Some(CtValue::Str(s)) => s.clone(),
-                            _ => return Err("CBOR map key must be text".to_string()),
-                        },
+                    let key_start = *i;
+                    budget.reserve(1, CBOR_MAP_ENTRY_SLOT_BYTES, key_start, path, "CBOR map")?;
+                    let key_value =
+                        cbor_decode_val(input, i, options, budget, depth + 1, items, path, false)?;
+                    let k = match json_payload(&key_value, "Text") {
+                        Some(CtValue::Str(s)) => s.clone(),
+                        _ => {
+                            return Err(CborError::new(
+                                "Unsupported",
+                                key_start,
+                                path,
+                                "CBOR map key must be text",
+                            ))
+                        }
                     };
-                    if *i >= input.len() || input[*i] == 0xff {
-                        return Err("indefinite CBOR map break appears where a value is required".to_string());
+                    if es.iter().any(|(old, _)| old == &k) {
+                        return Err(CborError::new(
+                            "Unsupported",
+                            key_start,
+                            path,
+                            "duplicate CBOR text map key",
+                        ));
                     }
-                    es.push((k, cbor_decode_val(input, i)?));
+                    if *i >= input.len() {
+                        return Err(CborError::new(
+                            "Truncated",
+                            input.len(),
+                            path,
+                            "indefinite CBOR map ended before its value",
+                        ));
+                    }
+                    if input[*i] == 0xff {
+                        return Err(CborError::new(
+                            "Syntax",
+                            *i,
+                            path,
+                            "indefinite CBOR map break appears where a value is required",
+                        ));
+                    }
+                    let (key_path, charged) = cbor_key_path(path, &k, budget, key_start)?;
+                    let value = cbor_decode_val(
+                        input,
+                        i,
+                        options,
+                        budget,
+                        depth + 1,
+                        items,
+                        &key_path,
+                        allow_bytes,
+                    );
+                    budget.release(charged);
+                    es.push((k, value?));
                 }
                 return Ok(json_object(es));
             }
-            let n = cbor_read_len(input, i, add)? as usize;
+            if depth + 1 > options.max_depth {
+                return Err(CborError::new(
+                    "Limit",
+                    start,
+                    path,
+                    format!("max_depth {} exceeded", options.max_depth),
+                ));
+            }
+            let n = usize::try_from(cbor_read_len(
+                input,
+                i,
+                add,
+                start,
+                options.require_canonical,
+                path,
+            )?)
+            .map_err(|_| {
+                CborError::new(
+                    "Limit",
+                    start,
+                    path,
+                    "CBOR map length exceeds target capacity",
+                )
+            })?;
+            budget.reserve(n, CBOR_MAP_ENTRY_SLOT_BYTES, start, path, "CBOR map")?;
             let mut es = Vec::with_capacity(n);
+            let mut prior_key = None;
             for _ in 0..n {
-                let k = match cbor_decode_val(input, i)? {
-                    v => match json_payload(&v, "Text") {
-                        Some(CtValue::Str(s)) => s.clone(),
-                        _ => return Err("CBOR map key must be text".to_string()),
-                    },
+                let key_start = *i;
+                let key_value =
+                    cbor_decode_val(input, i, options, budget, depth + 1, items, path, false)?;
+                let k = match json_payload(&key_value, "Text") {
+                    Some(CtValue::Str(s)) => s.clone(),
+                    _ => {
+                        return Err(CborError::new(
+                            "Unsupported",
+                            key_start,
+                            path,
+                            "CBOR map key must be text",
+                        ))
+                    }
                 };
-                es.push((k, cbor_decode_val(input, i)?));
+                let key_end = *i;
+                if options.require_canonical
+                    && prior_key.is_some_and(|(a, b): (usize, usize)| {
+                        input[a..b] >= input[key_start..key_end]
+                    })
+                {
+                    return Err(CborError::new(
+                        "NonCanonical",
+                        key_start,
+                        path,
+                        "CBOR map keys are not in Core deterministic bytewise order",
+                    ));
+                }
+                if es.iter().any(|(old, _)| old == &k) {
+                    return Err(CborError::new(
+                        "Unsupported",
+                        key_start,
+                        path,
+                        "duplicate CBOR text map key",
+                    ));
+                }
+                prior_key = Some((key_start, key_end));
+                let (key_path, charged) = cbor_key_path(path, &k, budget, key_start)?;
+                let value = cbor_decode_val(
+                    input,
+                    i,
+                    options,
+                    budget,
+                    depth + 1,
+                    items,
+                    &key_path,
+                    allow_bytes,
+                );
+                budget.release(charged);
+                es.push((k, value?));
             }
             Ok(json_object(es))
         }
@@ -2259,42 +2894,219 @@ fn cbor_decode_val(input: &[u8], i: &mut usize) -> Result<CtValue, String> {
             22 => Ok(json_variant("Null", None)),
             25 => {
                 if *i + 2 > input.len() {
-                    return Err("truncated CBOR float".to_string());
+                    return Err(CborError::new(
+                        "Truncated",
+                        input.len(),
+                        path,
+                        "CBOR Float16 is truncated",
+                    ));
                 }
                 let bits = u16::from_be_bytes([input[*i], input[*i + 1]]);
                 *i += 2;
-                Ok(json_variant("Float", Some(CtValue::Float(cbor_half_to_f64(bits)))))
+                if options.require_canonical && cbor_half_to_f64(bits).is_nan() && bits != 0x7e00 {
+                    return Err(CborError::new(
+                        "NonCanonical",
+                        start,
+                        path,
+                        "CBOR NaN is not the canonical 0xf97e00 encoding",
+                    ));
+                }
+                Ok(json_variant(
+                    "Float",
+                    Some(CtValue::Float(cbor_half_to_f64(bits))),
+                ))
             }
             26 => {
                 if *i + 4 > input.len() {
-                    return Err("truncated CBOR float".to_string());
+                    return Err(CborError::new(
+                        "Truncated",
+                        input.len(),
+                        path,
+                        "CBOR Float32 is truncated",
+                    ));
                 }
                 let mut buf = [0u8; 4];
                 buf.copy_from_slice(&input[*i..*i + 4]);
                 *i += 4;
-                Ok(json_variant("Float", Some(CtValue::Float(f32::from_be_bytes(buf) as f64))))
+                let value = f32::from_be_bytes(buf) as f64;
+                if options.require_canonical && (value.is_nan() || cbor_half_exact(value).is_some())
+                {
+                    return Err(CborError::new(
+                        "NonCanonical",
+                        start,
+                        path,
+                        "CBOR Float does not use its preferred shortest encoding",
+                    ));
+                }
+                Ok(json_variant("Float", Some(CtValue::Float(value))))
             }
             27 => {
                 if *i + 8 > input.len() {
-                    return Err("truncated CBOR float".to_string());
+                    return Err(CborError::new(
+                        "Truncated",
+                        input.len(),
+                        path,
+                        "CBOR Float64 is truncated",
+                    ));
                 }
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(&input[*i..*i + 8]);
                 *i += 8;
-                Ok(json_variant("Float", Some(CtValue::Float(f64::from_be_bytes(buf)))))
+                let value = f64::from_be_bytes(buf);
+                if options.require_canonical
+                    && (value.is_nan()
+                        || cbor_half_exact(value).is_some()
+                        || ((value as f32) as f64).to_bits() == value.to_bits())
+                {
+                    return Err(CborError::new(
+                        "NonCanonical",
+                        start,
+                        path,
+                        "CBOR Float does not use its preferred shortest encoding",
+                    ));
+                }
+                Ok(json_variant("Float", Some(CtValue::Float(value))))
             }
-            _ => Err("unsupported CBOR simple value".to_string()),
+            31 => Err(CborError::new(
+                "Syntax",
+                start,
+                path,
+                "CBOR break outside an indefinite container",
+            )),
+            _ => Err(CborError::new(
+                "Unsupported",
+                start,
+                path,
+                format!("unsupported CBOR simple value {add}"),
+            )),
         },
-        _ => Err("unsupported CBOR major type".to_string()),
+        6 => Err(CborError::new(
+            "Unsupported",
+            start,
+            path,
+            "CBOR tags are unsupported",
+        )),
+        _ => Err(CborError::new(
+            "Unsupported",
+            start,
+            path,
+            format!("unsupported CBOR major type {major}"),
+        )),
     }
 }
-pub(super) fn cbor_decode(bytes: &[u8]) -> Result<CtValue, String> {
+pub(super) fn cbor_decode(
+    bytes: &[u8],
+    options: &CborOptions,
+    allow_bytes: bool,
+) -> Result<CtValue, CborError> {
+    if bytes.len() as i64 > options.max_bytes {
+        return Err(CborError::new(
+            "Limit",
+            0,
+            "$",
+            format!("input exceeds max_bytes {}", options.max_bytes),
+        ));
+    }
     let mut i = 0usize;
-    let v = cbor_decode_val(bytes, &mut i)?;
+    let mut items = 0i64;
+    let mut budget = CborBudget::new(options.max_bytes);
+    let v = cbor_decode_val(
+        bytes,
+        &mut i,
+        options,
+        &mut budget,
+        0,
+        &mut items,
+        "$",
+        allow_bytes,
+    )?;
     if i != bytes.len() {
-        return Err("trailing CBOR bytes".to_string());
+        return Err(CborError::new(
+            "TrailingData",
+            i,
+            "$",
+            "trailing CBOR data after root value",
+        ));
     }
     Ok(v)
+}
+
+#[cfg(test)]
+mod cbor_tests {
+    use super::*;
+
+    fn safe() -> CborOptions {
+        cbor_options(None).unwrap()
+    }
+
+    #[test]
+    fn hostile_errors_keep_owned_kind_offset_path_and_reason() {
+        let cases = [
+            (
+                &[0xff][..],
+                false,
+                "Syntax",
+                0,
+                "$",
+                "CBOR break outside an indefinite container",
+            ),
+            (
+                &[0x81][..],
+                false,
+                "Truncated",
+                1,
+                "$[0]",
+                "CBOR value is missing",
+            ),
+            (
+                &[0xc0, 1][..],
+                false,
+                "Unsupported",
+                0,
+                "$",
+                "CBOR tags are unsupported",
+            ),
+            (
+                &[1, 2][..],
+                false,
+                "TrailingData",
+                1,
+                "$",
+                "trailing CBOR data after root value",
+            ),
+        ];
+        for (wire, allow_bytes, kind, offset, path, reason) in cases {
+            let error = cbor_decode(wire, &safe(), allow_bytes).unwrap_err();
+            assert_eq!(
+                (
+                    error.kind,
+                    error.byte_offset,
+                    error.path.as_str(),
+                    error.reason.as_str()
+                ),
+                (kind, offset, path, reason)
+            );
+        }
+        let strict = CborOptions {
+            require_canonical: true,
+            ..safe()
+        };
+        let error = cbor_decode(&[0x18, 1], &strict, false).unwrap_err();
+        assert_eq!(
+            (
+                error.kind,
+                error.byte_offset,
+                error.path.as_str(),
+                error.reason.as_str()
+            ),
+            (
+                "NonCanonical",
+                0,
+                "$",
+                "CBOR argument does not use its shortest form"
+            )
+        );
+    }
 }
 
 // ── core.encoding.jsonl ─────────────────────────────────────────────────────
