@@ -319,6 +319,9 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         if lib.starts_with("jet_pwsh_") {
             for function in &mut merged { function.effect_root=Some("PowerShell".to_string()); }
         }
+        if lib.starts_with("jet_com_") {
+            for function in &mut merged { function.effect_root=Some("Com".to_string()); }
+        }
 
         let alias = synthetic_alias(lib);
         let synth_idx = bundle.modules.len();
@@ -685,6 +688,12 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
         let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::PowerShell.bindings_subdir());
         let archive=dir.join(format!("libjet_pwsh_{actual}.a"));
         if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_pwsh_{actual}"),"pthread".into()],..Default::default()})}
+        return Err(e3201(lib));
+    }
+    if let Some(actual)=lib.strip_prefix("jet_com_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Com.bindings_subdir());
+        let archive=dir.join(format!("libjet_com_{actual}.a"));
+        if cfg!(target_os="windows")&&archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_com_{actual}"),"ole32".into(),"oleaut32".into()],..Default::default()})}
         return Err(e3201(lib));
     }
     if let Some(actual) = lib.strip_prefix("jet_fortran_") {

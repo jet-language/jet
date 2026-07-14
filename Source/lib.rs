@@ -18,6 +18,7 @@ pub use jet_driver::{
     bundle_uses_unsafe,
     AdaBind,
     CBind,
+    ComBind,
     DartBind,
     PowerShellBind,
     FortranBind,

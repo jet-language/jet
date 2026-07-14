@@ -1922,6 +1922,12 @@ fn powershell_bind_launders_parse_failure_as_e3208() {
     let output=Command::new(jet()).args(["inspect","bind","pwsh"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("Unexpected token"));assert!(!stderr.contains("broken.ps1:"));check_snapshot("bind_powershell_invalid_e3208.txt",&scrub(&stderr,&script));
 }
 
+#[cfg(not(target_os="windows"))]
+#[test]
+fn com_bind_rejects_non_windows_before_reading_input() {
+    let output=Command::new(jet()).args(["inspect","bind","com","missing.tlb","--pkg","excel"]).env("NO_COLOR","1").output().unwrap();assert_eq!(output.status.code(),Some(1));assert!(output.stdout.is_empty());check_snapshot("bind_com_non_windows_e3260.txt",&String::from_utf8_lossy(&output.stderr));
+}
+
 #[test]
 fn ada_bind_launders_gnat_failure_as_e3208() {
     let dir=isolated_cwd("ada_bind_failure");let spec=dir.join("broken.ads");

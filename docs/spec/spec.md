@@ -1064,6 +1064,31 @@ have a 60-second deadline and 64-KiB output capture. Failures use laundered
 **E3208** copy. Provenance hashes the script, canonical script and PowerShell
 identities, worker protocol, and binder schema.
 
+## E3 — Windows COM automation (D-FFI-COM1=A)
+
+`com.*` exists only on a Windows host. Elsewhere, importing it or running
+`jet inspect bind com` emits **E3260** before reading a type library or looking
+for a generated cache. Jet does not route COM through PowerShell or scripts.
+
+`jet inspect bind com <library.tlb> --pkg <lib>` reads a file-backed type
+library. `--registered <guid> --major <n> --minor <n> [--lcid <n>]` reads the
+Windows type-library registry through `LoadRegTypeLib`. The inspector uses
+`ITypeLib` and `ITypeInfo`, rejects hidden, restricted, out-parameter, and
+unrepresentable members, and emits committable typed stubs. Primitive VARIANT
+types become Jet scalars, BSTR becomes `String`, dispatch interfaces become a
+move-only `Object`, and VARIANT/SAFEARRAY values become `DataTree` through a
+bounded JSON boundary. Dynamic name-based IDispatch remains available only in
+an explicit `#Unsafe` region; the safe generated surface carries fixed DISPIDs.
+
+The Windows bridge initializes a single-threaded COM apartment per live
+object, pins each generation-tagged handle to its creating thread, invokes
+members through `IDispatch::Invoke`, and launders HRESULT/EXCEPINFO into
+`ComError` variants without exposing vendor text. `close(^object)` consumes the
+handle, calls `Release`, and balances `CoUninitialize`; stale, cross-thread,
+and double-close handles fail before invocation. Frames and DataTree recursion
+are capped at 1 MiB and depth 64. Provenance hashes the extracted type-library
+schema and generated surface.
+
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and

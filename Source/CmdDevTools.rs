@@ -1294,6 +1294,7 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::COM_MODULE_ROOT){run_com_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PWSH_MODULE_ROOT){run_powershell_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::DART_MODULE_ROOT){run_dart_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PASCAL_MODULE_ROOT){run_pascal_bind(&args[1..]);return;}
@@ -1497,6 +1498,18 @@ fn run_powershell_bind(args:&[&String]){
     println!("bound {} persistent PowerShell function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
 fn powershell_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define named PowerShell functions with Jet-compatible identifiers and rerun `jet inspect bind pwsh` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+
+/// D-FFI-COM1=A: inspect a Windows type library and generate typed IDispatch
+/// automation stubs. Non-Windows hosts reject before touching the input.
+fn run_com_bind(args:&[&String]){
+    let usage=||eprintln!("usage: {} inspect bind com <library.tlb> --pkg <lib>\n       {} inspect bind com --registered <guid> --major <n> --minor <n> [--lcid <n>] --pkg <lib>",jet::Syntax::BINARY_NAME,jet::Syntax::BINARY_NAME);
+    if !cfg!(target_os="windows"){eprintln!("Error [E3260]: `com.*` needs a Windows host.");eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");exit(ExitCodes::USER_ERROR)}
+    if args.is_empty()||args[0]=="--help"||args[0]=="-h"{usage();exit(if args.is_empty(){ExitCodes::USAGE}else{0})}
+    let mut file=None;let mut guid=None;let mut major=None;let mut minor=None;let mut lcid=0u32;let mut pkg=None;let mut out=None;let mut i=0;while i<args.len(){match args[i].as_str(){"--registered"=>{guid=args.get(i+1).map(|v|v.to_string());i+=2},"--major"=>{major=args.get(i+1).and_then(|v|v.parse::<u16>().ok());i+=2},"--minor"=>{minor=args.get(i+1).and_then(|v|v.parse::<u16>().ok());i+=2},"--lcid"=>{lcid=args.get(i+1).and_then(|v|v.parse::<u32>().ok()).unwrap_or(u32::MAX);i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());i+=2},value if !value.starts_with('-')&&file.is_none()=>{file=Some(value.to_string());i+=1},_=>{usage();exit(ExitCodes::USAGE)}}}
+    let Some(lib)=pkg else{usage();exit(ExitCodes::USAGE)};let input=if let Some(path)=file{if guid.is_some(){usage();exit(ExitCodes::USAGE)}jet::ComBind::TypeLibraryInput::File(path.into())}else{let(Some(guid),Some(major),Some(minor))=(guid,major,minor)else{usage();exit(ExitCodes::USAGE)};if lcid==u32::MAX{usage();exit(ExitCodes::USAGE)}jet::ComBind::TypeLibraryInput::Registered{guid,major,minor,lcid}};
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::COM_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::ComBind::bind(&input,&lib,cache).unwrap_or_else(|e|com_bind_error(&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){com_bind_error(&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){com_bind_error(&format!("the provenance could not be written ({e})"))}println!("bound {} typed COM member{} → {out_path}",result.methods.len(),if result.methods.len()==1{""}else{"s"});
+}
+fn com_bind_error(why:&str)->!{eprintln!("Error [E3208]: Could not generate COM bindings.");eprintln!(" Why: {why}.");eprintln!(" Fix: select a registered or file-backed type library with IDispatch metadata and rerun on Windows.");exit(ExitCodes::USER_ERROR)}
 
 /// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
 /// then build an in-process JNI invocation bridge.

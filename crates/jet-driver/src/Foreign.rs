@@ -39,6 +39,7 @@ pub enum BinderRuntime {
     FreePascalCdecl,
     DartApiDl,
     SupervisedPowerShell,
+    WindowsComAutomation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +57,7 @@ pub enum BindingStubKind {
     PascalSource,
     DartContract,
     PowerShellScript,
+    ComTypeLibrary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +90,7 @@ pub enum ForeignHost {
     FreePascalCdecl,
     DartHostFfi,
     SupervisedPowerShell,
+    WindowsComAutomation,
     LegacyRustExtern,
 }
 
@@ -193,6 +196,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         runtime: BinderRuntime::SupervisedPowerShell,
         stub_kind: BindingStubKind::PowerShellScript,
     },
+    BinderDescriptor {
+        language: ForeignLanguage::Com,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::WindowsComAutomation,
+        stub_kind: BindingStubKind::ComTypeLibrary,
+    },
 ];
 
 pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
@@ -246,6 +256,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Pascal => ForeignHost::FreePascalCdecl,
         ForeignLanguage::Dart => ForeignHost::DartHostFfi,
         ForeignLanguage::PowerShell => ForeignHost::SupervisedPowerShell,
+        ForeignLanguage::Com => ForeignHost::WindowsComAutomation,
     }
 }
 
@@ -303,6 +314,17 @@ pub fn assemble_active_namespaces(bundle: &mut ProgramBundle) -> Result<(), Vec<
                 || descriptor.status != BinderStatus::Active
             {
                 continue;
+            }
+            if ns.language == ForeignLanguage::Com && !cfg!(target_os = "windows") {
+                return Err(vec![Diagnostic::error(
+                    "E3260",
+                    "`com.*` needs a Windows host".to_string(),
+                    "COM automation depends on Windows apartments, the registry, and IDispatch"
+                        .to_string(),
+                    "build and run this module on a Windows host; use a non-COM boundary for other targets"
+                        .to_string(),
+                    Some(imp.span),
+                )]);
             }
 
             let key = (ns.language, ns.lib.clone());

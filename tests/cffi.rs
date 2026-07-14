@@ -106,6 +106,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderSurface::Namespace,
             BinderStatus::Active,
         ),
+        (
+            ForeignLanguage::Com,
+            "com",
+            "bindings/com",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
     ];
 
     for (lang, root, bindings, surface, status) in expected {
@@ -145,6 +152,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
     assert_eq!(ForeignNamespace::from_module_path("pascal.inventory").unwrap().language, ForeignLanguage::Pascal);
     assert_eq!(ForeignNamespace::from_module_path("dart.callbacks").unwrap().language, ForeignLanguage::Dart);
     assert_eq!(ForeignNamespace::from_module_path("pwsh.inventory").unwrap().language, ForeignLanguage::PowerShell);
+    assert_eq!(ForeignNamespace::from_module_path("com.excel").unwrap().language, ForeignLanguage::Com);
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
     assert!(ForeignNamespace::from_module_path("lua.socket").is_none());
@@ -172,6 +180,12 @@ fn foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved() {
     assert_eq!(diags[0].code, "E1002");
     let rendered = jet::render_diagnostics(main.to_str().unwrap(), src, &diags);
     assert!(rendered.contains("`swift` is reserved for first-party or foreign packages"));
+}
+
+#[cfg(not(target_os="windows"))]
+#[test]
+fn foreign_com_import_is_honestly_windows_gated() {
+    let dir=common::unique_tmp("jet_foreign_com_gate");fs::create_dir_all(&dir).unwrap();let main=dir.join("main.jet");let src="use com.excel as excel\nfn run() { }\n";fs::write(&main,src).unwrap();let diags=jet::compile_with_path(src,main.to_str().unwrap()).expect_err("COM import must reject a non-Windows host");assert_eq!(diags[0].code,"E3260");let rendered=jet::render_diagnostics(main.to_str().unwrap(),src,&diags);assert!(rendered.contains("`com.*` needs a Windows host"));
 }
 
 #[test]
@@ -295,6 +309,18 @@ fn foreign_interop_routes_powershell_as_active_supervised_worker() {
     assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPowerShell);
     assert_eq!(route.descriptor.stub_kind,BindingStubKind::PowerShellScript);
     assert_eq!(route.host,ForeignHost::SupervisedPowerShell);
+}
+
+#[test]
+fn foreign_interop_routes_com_as_active_windows_automation() {
+    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
+    use jet::AST::{ForeignLanguage,ForeignNamespace};
+    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("com.excel").unwrap(),ForeignTarget::Native).unwrap();
+    assert_eq!(route.descriptor.language,ForeignLanguage::Com);
+    assert_eq!(route.descriptor.status,BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime,BinderRuntime::WindowsComAutomation);
+    assert_eq!(route.descriptor.stub_kind,BindingStubKind::ComTypeLibrary);
+    assert_eq!(route.host,ForeignHost::WindowsComAutomation);
 }
 
 /// Build a tiny C static library `libjetc.a` in `dir`, returning its directory
