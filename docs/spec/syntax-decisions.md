@@ -2346,6 +2346,26 @@ packages, never compiler deps.
 
 ### Manifest, packages & jetpack
 
+**D-SHAPE5b=A — One package output is an `Output` variant**: an executable,
+library, service, image, or bundle is one case of the closed `Output` sum. Each
+case carries a checked named record payload. An expected `Output` type may
+supply the omitted qualifier, so the compact and explicit forms have the same
+meaning:
+
+```jet
+command: Output :: .Executable.{ name: "greeter", entry: run }
+library: Output :: .Library.{ name: "greeter_core", modules: [Greeter] }
+service: Output :: .Service.{ name: "greeter_api", entry: serve }
+```
+
+This decision reuses the existing named-payload enum construction
+`.Variant.{ field: value }`. It adds no token, keyword, parser production,
+formatter form, or editor grammar, so it requires no parser, grammar, or
+snapshot change of its own. The package output collection and capability
+inventory are implemented by #587; language-wide shape enforcement is owned by
+#560. Aliases, default selection, and callable entry linking remain separate
+choices and are not implied by D-SHAPE5b.
+
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
 is **`pkg.jet`** (`payload: { name, version }` identity + `packages:` +
 `deps:` + `targets:` + `effects:`); dev shell is **`env.jet`**; monorepo

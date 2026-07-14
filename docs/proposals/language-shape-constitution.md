@@ -150,6 +150,20 @@ This does not decide the source spelling. Separate ballots choose:
 The same `Greeter` package appears in every option. A package ballot may not
 quietly choose effect syntax, entry conventions, or record construction.
 
+D-SHAPE5b has now fixed the representation of one output: it is a case of the
+closed `Output` sum, with a checked named record payload. Beginners may rely on
+an expected `Output` type and write the existing inferred variant form;
+experts may reveal and pin the same type without changing the graph value:
+
+```jet
+command: Output :: .Executable.{ name: "greeter", entry: run }
+```
+
+This law does not select the output collection, its capability inventory,
+aliases, defaults, or entry-link rules. Those remain independently owned. It
+also introduces no package-only constructor: `.Executable.{ ... }` is the
+existing named-payload enum form.
+
 ## Internal names
 
 The useful part of Python's leading underscore is discoverability, not privacy.
