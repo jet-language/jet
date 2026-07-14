@@ -17,277 +17,80 @@ fn read(rel: &str) -> String {
     fs::read_to_string(root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum JetByteKind {
-    Code,
-    Comment,
-    String,
-    StringDelimiter,
+fn lex_probe(source: &str) -> Vec<jet::Lexer::Token> {
+    let (tokens, diagnostics) = jet::Lexer::lex(source);
+    assert!(
+        diagnostics.is_empty(),
+        "capability probe source must lex cleanly: {diagnostics:#?}\n{source}"
+    );
+    tokens
 }
 
-/// Classify every original UTF-8 byte without decoding it. The one-to-one mask
-/// keeps byte offsets, token-separating comment space, and newlines intact.
-fn jet_lexical_mask(source: &str) -> Vec<JetByteKind> {
-    let bytes = source.as_bytes();
-    let mut mask = vec![JetByteKind::Code; bytes.len()];
-    mask_jet_code_range(bytes, &mut mask, 0, bytes.len());
-    mask
-}
-
-fn mask_jet_code_range(
-    bytes: &[u8],
-    mask: &mut [JetByteKind],
-    mut i: usize,
-    end: usize,
-) {
-    while i < end {
-        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
-            while i < end && bytes[i] != b'\n' {
-                mask[i] = JetByteKind::Comment;
-                i += 1;
-            }
-        } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-            let mut depth = 0usize;
-            while i < end {
-                if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-                    mask[i] = JetByteKind::Comment;
-                    mask[i + 1] = JetByteKind::Comment;
-                    depth += 1;
-                    i += 2;
-                } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
-                    mask[i] = JetByteKind::Comment;
-                    mask[i + 1] = JetByteKind::Comment;
-                    depth -= 1;
-                    i += 2;
-                    if depth == 0 {
-                        break;
-                    }
-                } else {
-                    mask[i] = JetByteKind::Comment;
-                    i += 1;
-                }
-            }
-        } else if bytes.get(i..i + 3) == Some(b"\"\"\"") {
-            i = mask_jet_triple_string(bytes, mask, i, end);
-        } else if bytes[i] == b'"' {
-            mask[i] = JetByteKind::StringDelimiter;
-            i += 1;
-            while i < end {
-                if bytes[i] == b'\\' {
-                    mask[i] = JetByteKind::String;
-                    i += 1;
-                    if i < end {
-                        let escaped_end = next_utf8_char(bytes, i, end);
-                        mask[i..escaped_end].fill(JetByteKind::String);
-                        i = escaped_end;
-                    }
-                } else if bytes[i] == b'"' {
-                    mask[i] = JetByteKind::StringDelimiter;
-                    i += 1;
-                    break;
-                } else {
-                    mask[i] = JetByteKind::String;
-                    i += 1;
-                }
-            }
-        } else {
-            i += 1;
-        }
-    }
-}
-
-fn next_utf8_char(bytes: &[u8], at: usize, end: usize) -> usize {
-    let width = match bytes[at] {
-        0x00..=0x7f => 1,
-        0xc0..=0xdf => 2,
-        0xe0..=0xef => 3,
-        _ => 4,
-    };
-    (at + width).min(end)
-}
-
-/// Locate `}` exactly like S70's lexer pass: nested braces count, quoted text
-/// suppresses braces, and a backslash skips one Unicode scalar.
-fn triple_interpolation_end(bytes: &[u8], mut i: usize, end: usize) -> Option<usize> {
-    let mut depth = 1usize;
-    while i < end {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                i += 1;
-            }
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-                i += 1;
-            }
-            b'"' => {
-                i += 1;
-                while i < end && bytes[i] != b'"' {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                        if i < end {
-                            i = next_utf8_char(bytes, i, end);
-                        }
-                    } else {
-                        i = next_utf8_char(bytes, i, end);
-                    }
-                }
-                if i < end {
-                    i += 1;
-                }
-            }
-            _ => i = next_utf8_char(bytes, i, end),
-        }
-    }
-    None
-}
-
-fn mask_jet_triple_string(
-    bytes: &[u8],
-    mask: &mut [JetByteKind],
-    open: usize,
-    end: usize,
-) -> usize {
-    mask[open..open + 3].fill(JetByteKind::StringDelimiter);
-    let mut i = open + 3;
-    while i < end {
-        if bytes[i] == b'\\' {
-            mask[i] = JetByteKind::String;
-            i += 1;
-            if i < end {
-                let escaped_end = next_utf8_char(bytes, i, end);
-                mask[i..escaped_end].fill(JetByteKind::String);
-                i = escaped_end;
-            }
-        } else if bytes[i] == b'{' && bytes.get(i + 1) == Some(&b'{') {
-            mask[i..i + 2].fill(JetByteKind::String);
-            i += 2;
-        } else if bytes[i] == b'{' {
-            mask[i] = JetByteKind::String;
-            let Some(close) = triple_interpolation_end(bytes, i + 1, end) else {
-                mask[i + 1..end].fill(JetByteKind::String);
-                return end;
-            };
-            mask_jet_code_range(bytes, mask, i + 1, close);
-            mask[close] = JetByteKind::String;
-            i = close + 1;
-        } else if bytes.get(i..i + 3) == Some(b"\"\"\"") {
-            mask[i..i + 3].fill(JetByteKind::StringDelimiter);
-            return i + 3;
-        } else {
-            mask[i] = JetByteKind::String;
-            i += 1;
-        }
-    }
-    end
-}
-
-fn code_starts_with(bytes: &[u8], mask: &[JetByteKind], at: usize, needle: &[u8]) -> bool {
-    bytes.get(at..at + needle.len()) == Some(needle)
-        && mask
-            .get(at..at + needle.len())
-            .is_some_and(|kinds| kinds.iter().all(|kind| *kind == JetByteKind::Code))
-}
-
-fn skip_jet_trivia(bytes: &[u8], mask: &[JetByteKind], mut at: usize) -> usize {
-    while at < bytes.len()
-        && (mask[at] == JetByteKind::Comment
-            || (mask[at] == JetByteKind::Code && bytes[at].is_ascii_whitespace()))
-    {
-        at += 1;
-    }
-    at
-}
-
-fn code_identifier_continues(bytes: &[u8], mask: &[JetByteKind], at: usize) -> bool {
-    mask.get(at) == Some(&JetByteKind::Code)
-        && bytes
-            .get(at)
-            .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+fn token_stream_has_executable_drop(tokens: &[jet::Lexer::Token]) -> bool {
+    let code: Vec<_> = tokens
+        .iter()
+        .filter(|token| !jet::Lexer::is_comment(&token.kind))
+        .collect();
+    let here = code.windows(5).any(|window| {
+        matches!(
+            (
+                &window[0].kind,
+                &window[1].kind,
+                &window[2].kind,
+                &window[3].kind,
+                &window[4].kind,
+            ),
+            (
+                jet::Lexer::TokKind::Dot,
+                jet::Lexer::TokKind::Ident(method),
+                jet::Lexer::TokKind::LParen,
+                jet::Lexer::TokKind::Str(parts),
+                jet::Lexer::TokKind::RParen,
+            ) if method == "drop"
+                && matches!(
+                    parts.as_slice(),
+                    [jet::Lexer::StrTokPart::Lit(reason)] if !reason.is_empty()
+                )
+        )
+    });
+    here || tokens.iter().any(|token| match &token.kind {
+        jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| match part {
+            jet::Lexer::StrTokPart::Interp(inner) => token_stream_has_executable_drop(inner),
+            jet::Lexer::StrTokPart::Lit(_) => false,
+        }),
+        _ => false,
+    })
 }
 
 fn has_executable_drop_with_reason(source: &str) -> bool {
-    let bytes = source.as_bytes();
-    let mask = jet_lexical_mask(source);
-    let mut i = 0;
-    while i < bytes.len() {
-        if code_starts_with(bytes, &mask, i, b".drop") {
-            let mut cursor = i + ".drop".len();
-            if code_identifier_continues(bytes, &mask, cursor) {
-                i += 1;
-                continue;
-            }
-            cursor = skip_jet_trivia(bytes, &mask, cursor);
-            if !code_starts_with(bytes, &mask, cursor, b"(") {
-                i += 1;
-                continue;
-            }
-            cursor = skip_jet_trivia(bytes, &mask, cursor + 1);
-            if bytes.get(cursor) != Some(&b'"')
-                || mask.get(cursor) != Some(&JetByteKind::StringDelimiter)
-            {
-                i += 1;
-                continue;
-            }
-            let reason_start = cursor + 1;
-            let Some(reason_end) = mask[reason_start..]
-                .iter()
-                .position(|kind| *kind == JetByteKind::StringDelimiter)
-                .map(|offset| reason_start + offset)
-            else {
-                i += 1;
-                continue;
-            };
-            if reason_end == reason_start {
-                i += 1;
-                continue;
-            }
-            cursor = skip_jet_trivia(bytes, &mask, reason_end + 1);
-            if code_starts_with(bytes, &mask, cursor, b")") {
-                return true;
-            }
-        }
-        i += 1;
-    }
-    false
+    token_stream_has_executable_drop(&lex_probe(source))
 }
 
-fn has_active_suppress_must_use_block(source: &str) -> bool {
-    let bytes = source.as_bytes();
-    let mask = jet_lexical_mask(source);
-    for i in 0..bytes.len() {
-        if !code_starts_with(bytes, &mask, i, b"#") {
-            continue;
-        }
-        let mut cursor = skip_jet_trivia(bytes, &mask, i + 1);
-        if !code_starts_with(bytes, &mask, cursor, b"Suppress")
-            || code_identifier_continues(bytes, &mask, cursor + "Suppress".len())
-        {
-            continue;
-        }
-        cursor = skip_jet_trivia(bytes, &mask, cursor + "Suppress".len());
-        if !code_starts_with(bytes, &mask, cursor, b"(") {
-            continue;
-        }
-        cursor = skip_jet_trivia(bytes, &mask, cursor + 1);
-        if !code_starts_with(bytes, &mask, cursor, b"MustUse")
-            || code_identifier_continues(bytes, &mask, cursor + "MustUse".len())
-        {
-            continue;
-        }
-        cursor = skip_jet_trivia(bytes, &mask, cursor + "MustUse".len());
-        if !code_starts_with(bytes, &mask, cursor, b")") {
-            continue;
-        }
-        cursor = skip_jet_trivia(bytes, &mask, cursor + 1);
-        if code_starts_with(bytes, &mask, cursor, b"{") {
-            return true;
-        }
-    }
-    false
+fn token_stream_has_active_suppress(tokens: &[jet::Lexer::Token]) -> bool {
+    let code: Vec<_> = tokens
+        .iter()
+        .filter(|token| !jet::Lexer::is_comment(&token.kind))
+        .collect();
+    let here = code.windows(2).any(|window| {
+        matches!(
+            (&window[0].kind, &window[1].kind),
+            (
+                jet::Lexer::TokKind::Hash,
+                jet::Lexer::TokKind::Ident(marker),
+            ) if marker == "Suppress"
+        )
+    });
+    here || tokens.iter().any(|token| match &token.kind {
+        jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| match part {
+            jet::Lexer::StrTokPart::Interp(inner) => token_stream_has_active_suppress(inner),
+            jet::Lexer::StrTokPart::Lit(_) => false,
+        }),
+        _ => false,
+    })
+}
+
+fn has_active_suppress(source: &str) -> bool {
+    token_stream_has_active_suppress(&lex_probe(source))
 }
 
 fn jet_bin() -> PathBuf {
@@ -411,7 +214,7 @@ fn audited_discard() {
         "/* value.drop(\"block comment\") */",
         "/* outer /* value.drop(\"nested comment\") */ still comment */",
         "print(\"value.drop(\\\"string contents\\\")\")",
-        "\"\"\"ordinary \"quotes\" and value.drop(\"triple contents\")\"\"\"",
+        "\"\"\"\nordinary \"quotes\" and value.drop(\"triple contents\")\n\"\"\"",
         "value.drop(\"\")",
         "value.drop(reason)",
         "value.dropper(\"not the method\")",
@@ -427,30 +230,36 @@ fn audited_discard() {
     );
     assert!(
         has_executable_drop_with_reason(
-            "\"\"\"discarded: {value.drop(\"interpolated reason\")}\"\"\""
+            "\"\"\"\ndiscarded: {value.drop(\"interpolated reason\")}\n\"\"\""
         ),
         "discard probe must inspect active triple-string interpolations"
     );
     assert!(
-        has_active_suppress_must_use_block(
+        has_active_suppress(
             "#Suppress /* outer /* nested */ comment */ (\n MustUse /* gap */ ) { }"
         ),
         "discard probe must detect active retired blocks across trivia"
     );
+    assert!(
+        has_active_suppress(
+            "\"\"\"\nretired: {#Suppress(MustUse) { value }}\n\"\"\""
+        ),
+        "discard probe must inspect active marker syntax in string interpolations"
+    );
     for fake in [
         "// #Suppress(MustUse) { }",
         "/* outer /* #Suppress(MustUse) { } */ still comment */",
-        "print(\"#Suppress(MustUse) { }\")",
-        "\"\"\"ordinary \"quotes\" and #Suppress(MustUse) { }\"\"\"",
+        "print(\"#Suppress(MustUse) {{ }}\")",
+        "\"\"\"\nordinary \"quotes\" and #Suppress(MustUse) {{ }}\n\"\"\"",
     ] {
         assert!(
-            !has_active_suppress_must_use_block(fake),
+            !has_active_suppress(fake),
             "discard probe treated comments or string contents as active: {fake}"
         );
     }
     assert!(
         has_executable_drop_with_reason(&example)
-            && !has_active_suppress_must_use_block(&example),
+            && !has_active_suppress(&example),
         "I5 example must exercise the sole discard channel"
     );
     let expected = read("examples/features/expected/errors/discard_fallible.out");
