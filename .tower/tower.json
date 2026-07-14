@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 597,
-    "rev": 6503,
+    "rev": 6508,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2419,7 +2419,7 @@
       "priority": "P1",
       "plan": "LSP v2 under D-LSP1=C (one incremental compiler service) + D-LSP2=A (full LSP 3.17 parity, beginner-first order). Implement on master (this plan was authored from the stale tower-platform worktree; all paths verified against master). Invariants: I2 front end owns every message, I3 checking lives in sema, I6 zero external crates in the compiler — the query engine is std-only.\n\nArchitecture (D-LSP1=C): a demand-driven incremental query engine — inputs (file text, module graph roots) and derived queries (tokens-of-file, ast-of-file, module-graph, types-of-item, diagnostics-of-file, symbols-of-file, callers-of-item), each memoized with precise dependency tracking and a global revision counter. jet check, jet dev, the REPL, and jet lsp become clients of the same engine, so editor answers can never disagree with the compiler. jet-semindex's ratified query API (D-SEMINDEX1) is the persistence/format layer, fed by the engine instead of batch runs.\n\nBuild order:\n1. Engine core: new crate crates/jet-queries (std-only). Query trait + memo table + dependency edges + revision invalidation. Wrap existing lexer/parser/sema entry points as queries without changing their internals (I3). Unit tests: edit one file of a 3-file project, prove only dependent queries recompute (counter assertions).\n2. LSP on the engine: rewrite Source/LSP/Check.rs request paths to engine queries; keep the JSON/protocol layer. Differential gate: LSP publishDiagnostics byte-identical to `jet check --json` for every tests/ui fixture (new tests/lsp differential test — this is the no-two-brains exit).\n3. Incremental sync: textDocumentSync 2 (range edits) in Server.rs + rope-or-line-table doc storage in Position.rs. Latency test: single-keystroke edit on a 2,000-line fixture re-checks in <10ms warm (test with counters, not wall-clock flake; a wall-clock smoke stays #[ignore] for local runs).\n4. Wave 1 — beginner-critical (ships before anything else user-visible): signatureHelp (trigger '(' and ','; params + doc comment from AST), documentSymbol (nested outline: fns, structs+methods, enums, traits, modules), completion quality pass (labels get type signatures; keyword completions context-filtered).\n5. Wave 2 — navigation: workspaceSymbol (engine project view), foldingRange (blocks, comments, use-groups), documentHighlight (occurrences via resolution, read vs write kinds — v5 & writes light differently), selectionRange (AST-walk expand).\n6. Wave 3 — power: completion auto-import (insert `use` on commit) + snippet support (fn call parens, .{ } constructor), prepareRename (reject keywords/foreign symbols with Jet-voiced message), semanticTokens range + delta (keep full as fallback), inlayHint refinements (param names at call sites, off-by-default toggle).\n7. Wave 4 — hierarchy + long tail: callHierarchy (incoming/outgoing via callers-of-item query), typeHierarchy (impl/trait relations), documentLink (use-paths + doc URLs), codeLens (run/test lens over #Test fns, off by default). Advertise only what ships: initialize_response in Server.rs grows per wave, never ahead of tests.\n8. Engine serves the CLI: `jet check` and `jet dev` reuse the warm engine in watch/daemon mode (D-DEV4 loop); differential battery from E2-M4 must stay green (interpreter parity untouched).\n\nExit criteria (all must hold — no partial done):\n- Every capability advertised in initialize_response has a passing test in tests/lsp.rs (capability-coverage meta-test enumerates the JSON and fails on untested ones).\n- Differential gate (stage 2) green across all ui fixtures.\n- Incremental-recompute unit proofs green; keystroke path does not re-run whole-file sema when edit is local to one item.\n- tests/lsp/, tests/dev.rs, tests/repl.rs, full suite green.\n- docs: editors/vscode/README.md + editors/zed/README.md feature tables updated; architecture.md gains the query-engine section (R-rules untouched).\n\nGates: none open — D-LSP1/D-LSP2 ratified 2026-07-05. Log both in docs/spec/syntax-decisions.md tooling section during stage 1 commit.\n\nDelegation: stages 1–3 sequential (one agent, non-isolated — worktree agents branch stale bases); waves 4–7 parallelizable per-feature after stage 3 lands. sonnet for feature waves, opus for stage 1 engine design review before code.",
       "blockedBy": [],
-      "assignee": "codex-lsp",
+      "assignee": null,
       "log": [
         {
           "at": "2026-07-09",
@@ -2508,8 +2508,7 @@
         }
       ],
       "created": "2026-07-05T11:30:08.292Z",
-      "updated": "2026-07-10",
-      "claimedAt": "2026-07-06T11:22:32.650Z",
+      "updated": "2026-07-14",
       "workOrder": 95,
       "criteria": [],
       "needsAcceptance": false,
@@ -4533,8 +4532,13 @@
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TEXTUNICODE1=A: Hybrid: core.text algorithms with String-aware tooling. core.text owns Unicode algorithms: normalization, case folding, segmentation, width, classification, and UTF-8/scalar helpers. String stays small. LSP/docs expose common text helpers from String contexts but insert core.text calls, preserving one callable surface.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.text — Unicode completeness (case folding, segmentation, width)\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": "fable-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "codex-main",
+          "text": "[handoff] Stale fable-main claim released. Resume existing Unicode UAX conformance handoff; preserve partial Text.rs/TextLite.rs and corpus work; inspect current diff/commits before edits."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -4586,7 +4590,7 @@
         }
       ],
       "created": "2026-07-07T17:23:33.081Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-14",
       "workOrder": 26,
       "criteria": [
         {
@@ -4645,8 +4649,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T03:11:23.384Z"
+      "refs": []
     },
     {
       "id": "c0z3l25j",
@@ -8241,8 +8244,13 @@
       "priority": "P0",
       "plan": "No owner gate: D-BIGINT1=A already fixes syntax/semantics. Failing tests first: add exact REPL BigInt constructor/operator/to_string transcripts and AOT-vs-interpreter differential coverage. Add a canonical machine-checked AOT surface inventory consumed by sema/interpreter classification; every direct builtin, static/value method, and Core call must be Supported or a named effect/native boundary, with zero unclassified pure operations. Implement a std-only foundation BigInt value (base-1e9 limbs) in CtValue and wire comptime arithmetic, comparison, display, REPL binding/render paths. Audit every inventory mismatch, not only BigInt; fix all effect-free gaps with transcript proof. E0956 remains only for genuinely impossible comptime constructs. Resolve the existing JIT bigint gap honestly before claiming R12. Focused foundation/comptime/codegen, repl, parity, dev differential, golden and UI tests; parent full suite. Collision: serialize against active #358 REPL and #125 JIT work.",
       "blockedBy": [],
-      "assignee": "fable-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "codex-main",
+          "text": "[handoff] Stale fable-main claim released. Resume pass-5 typed decode/data pipeline. First fix known EncodingLite RenameAll interpreter mismatch; inspect committed partial files and existing parity evidence before edits."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-medium",
@@ -8305,7 +8313,7 @@
         }
       ],
       "created": "2026-07-09T18:04:14.604Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-14",
       "workOrder": 22,
       "criteria": [
         {
@@ -8364,8 +8372,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T00:36:33.998Z"
+      "refs": []
     },
     {
       "id": "c0to4gms",
@@ -12986,13 +12993,18 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [
-        "#444",
-        "#438",
-        "#134"
+        "c0todzv8",
+        "c0frdmrx",
+        "c2qj06uq"
       ],
       "workOrder": 26,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "codex-main",
+          "text": "Repaired dangling blocker refs to live card IDs: #444 service runtime, #438 app graph, #134 reactive UI."
+        },
         {
           "at": "2026-07-13",
           "by": "fable-main",
@@ -15428,44 +15440,50 @@
       "plan": "Wait for the related shape law. Build a public API name matrix, apply the law mechanically, test prediction with the shared Greeter example, and raise only word-level choices that still need the owner.",
       "blockedBy": [
         "D-SHAPE2",
-        "D-SHAPE-CONTEXT1",
-        "D-SHAPE-CONTEXTFORM1",
+        "c07d1t1q",
+        "c0c9vzub",
         "D-SHAPE-INTERNAL1",
-        "D-SHAPE-INTERNALACCESS1",
-        "D-SHAPE-INTERNALOVERRIDE1",
-        "D-SHAPE-MODULEDISABLE1",
+        "c0kxxeb6",
+        "c0pyhjgi",
+        "c0v3vs1n",
         "D-SHAPE3a",
         "D-SHAPE-CONVERT1",
         "D-SHAPE-VIEW1",
         "D-SHAPE-OPAQUE-INFER1",
         "D-SHAPE-PIPE1",
-        "D-SHAPE-PIPESLOT1",
+        "c0guzpt7",
         "D-SHAPE-LIFECYCLE",
         "D-SHAPE8",
-        "D-SHAPE-EFFECTOMIT1",
-        "D-SHAPE-EFFECTDENY1",
-        "D-SHAPE-EFFECTROW1",
+        "c0t32dtn",
+        "c0w5vgms",
+        "c014fl27",
         "D-SHAPE-RESOURCE1",
-        "D-SHAPE-RESOURCEERROR1",
-        "D-SHAPE-RESOURCEASYNC1",
+        "c09vsuap",
+        "c0f2gh6q",
         "D-SHAPE-DURATION1",
         "D-SHAPE-DURATIONCONVERT1",
         "D-SHAPE-QUANTITY1",
         "D-SHAPE5a",
         "D-ECO1",
         "D-SHAPE-MERGE1",
-        "D-SHAPE-MERGEOVERRIDE1",
+        "c04ka1qx",
         "D-SHAPE-MERGEPROVENANCE1",
         "D-SHAPE5b",
-        "D-SHAPE-OUTPUT-ALIAS1",
-        "D-SHAPE-ENTRY1",
+        "c0g2m4qi",
+        "c04x8do3",
         "D-SHAPE-CLI1",
-        "D-SHAPE-CLIINPUT1",
-        "D-SHAPE-CLINEST1",
+        "c0u71s8l",
+        "c0za7t6n",
         "D-SHAPE-EXPOSE1"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-14",
+          "by": "codex-main",
+          "text": "Repaired queued-child blocker refs: unresolved future decision IDs now point to their live planning cards."
+        }
+      ],
       "criteria": [],
       "refs": [
         "docs/proposals/language-shape-constitution.md",
@@ -38658,6 +38676,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T20:26:22.008Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0t1re9o",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-14T20:26:06.618Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0qdl0gg",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-14T20:24:58.496Z",
+      "by": "codex-main",
+      "action": "card.release",
+      "ref": "c0rb4k1d",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T20:24:51.797Z",
+      "by": "codex-main",
+      "action": "card.release",
+      "ref": "c0wx96s2",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T20:24:46.729Z",
+      "by": "codex-main",
+      "action": "card.release",
+      "ref": "c0cevzhr",
+      "note": ""
+    },
+    {
       "at": "2026-07-14T19:51:11.729Z",
       "by": "owner",
       "action": "decision.ratify",
@@ -42120,41 +42173,6 @@
       "by": "codex-main",
       "action": "card.update",
       "ref": "c0zh74hs",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:35:00.547Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0vkynby",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:35:00.336Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0bo7bp5",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:35:00.127Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0xqkis5",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:34:59.920Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0vvxein",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:34:59.707Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0t1re9o",
       "note": "blockedBy"
     }
   ],
