@@ -17,6 +17,7 @@ commands=(
         'dev:watch a file and re-run it on every save'
         'debug:step through a program at the Jet source level (D-DBG3)'
         'repl:interactive REPL — try Jet expressions without a file'
+        'import:translate foreign source into editable canonical Jet'
         'new:create a new project folder'
         'fmt:rewrite a file to canonical style'
         'fix:apply all auto-fixable diagnostics in place'
@@ -41,6 +42,9 @@ commands=(
         'help:print the help text'
     )
 flags=(
+        '--attach[with inspect live\: process id to observe]'
+        '--once[with inspect live\: print one snapshot and exit]'
+        '--observe[with run\: expose bounded live runtime facts for attachment]'
         '--structural[with diff/merge\: compare checked definitions by semantic identity]'
         '--out[with structural merge\: write the checked result to this path]'
         '--report[with structural diff/merge\: text, json, or editor report]'
@@ -120,7 +124,7 @@ _describe -t commands 'command' commands
 elif (( CURRENT == 3 )); then
 case $words[2] in
             registry) _values 'action' 'publish:publish the current package to the registry' 'yank:mark a published version as yanked' 'keygen:create the key that signs published packages' 'key:manage the package signing key' 'vendor:copy all dependencies into vendor/' ;;
-            inspect) _values 'action' 'graph:print the typed programmable-build graph' 'query:query typed semantic and build facts' 'explain-build:explain one build target, action, or file' 'impact:report a symbol'\''s blast radius' 'dossier:explain a file or symbol through semantic facts' 'semindex:query the stable semantic index' 'expand:print sema facts for one or every lens' 'schema:inspect or re-baseline published schema snapshots' 'codemod:run replayable semantic codemods' 'audit:check dependencies against the advisory database' 'sbom:emit a software bill of materials' 'bind:generate a C binding cache from a header' 'logs:show latest Jetpack build logs' 'search:search the local offline Jetpack package index' 'info:show local offline Jetpack package metadata' 'outdated:report Jetpack channel refs with newer locks available' ;;
+            inspect) _values 'action' 'live:attach to a running observable Jet process' 'graph:print the typed programmable-build graph' 'query:query typed semantic and build facts' 'explain-build:explain one build target, action, or file' 'impact:report a symbol'\''s blast radius' 'dossier:explain a file or symbol through semantic facts' 'semindex:query the stable semantic index' 'expand:print sema facts for one or every lens' 'schema:inspect or re-baseline published schema snapshots' 'codemod:run replayable semantic codemods' 'audit:check dependencies against the advisory database' 'sbom:emit a software bill of materials' 'bind:generate a C binding cache from a header' 'logs:show latest Jetpack build logs' 'search:search the local offline Jetpack package index' 'info:show local offline Jetpack package metadata' 'outdated:report Jetpack channel refs with newer locks available' ;;
             hangar) _values 'action' 'verify:verify store objects and references' 'repair:repair a corrupted store object (not yet built)' 'copy:copy a store object to or from another store (not yet built)' 'import:import a store object from an archive (not yet built)' 'export:export a store object to an archive (not yet built)' 'dump:dump a store object to a portable archive (not yet built)' 'restore:restore a store object from a dump (not yet built)' 'sign:sign a store object (not yet built)' 'rollback:roll back a store generation' 'generations:list store generations' 'du:honest per-object hangar disk usage' ;;
             self) _values 'action' 'toolchain:show the project'\''s pinned Jet toolchain' 'upgrade:show how to download a newer release' 'doctor:diagnose the toolchain and offer fixes' 'completions:print shell completions' 'man:print the Jet manual page' 'devtools:run checked developer generators' 'lsp:run the language server' ;;
             os) _values 'action' 'push:deploy a fleet through Jetpack' 'bridge:translate a foreign environment description into Jetpack form' 'services:manage project-local dev services' 'config:manage jet configuration (`config trust add/list/remove`, U19)' ;;

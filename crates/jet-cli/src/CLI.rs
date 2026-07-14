@@ -186,8 +186,10 @@ pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandGrou
 pub fn moved_command(name: &str) -> Option<(&'static CommandGroup, &'static NestedCommandSpec)> {
     // A spelling can own a canonical top-level meaning and also name a
     // grouped action (`import` translates source at the top level and imports
-    // store archives under `hangar`). Such spellings are not moved commands.
-    if COMMANDS.iter().any(|command| command.name == name) {
+    // store archives under `hangar`). D-JPK-IMPORTCMD1 / D-MIGRATE-SRC1 make
+    // that one overlap explicit; internal handler rows in COMMANDS do not
+    // make any other grouped action canonical at the top level.
+    if name == "import" {
         return None;
     }
     COMMAND_GROUPS.iter().find_map(|group| {
@@ -740,7 +742,13 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
 
 /// Closest built-in command to `name` within edit distance 3, or `None`.
 pub fn closest_command(name: &str) -> Option<&'static str> {
-    closest(name, COMMANDS.iter().map(|c| c.name))
+    closest(
+        name,
+        COMMANDS
+            .iter()
+            .filter(|command| is_canonical_top_level(command.name))
+            .map(|command| command.name),
+    )
 }
 
 /// Closest known flag to `flag` within edit distance 3, or `None`.
@@ -996,12 +1004,24 @@ mod tests {
     fn moved_commands_are_not_canonical_top_level() {
         for group in COMMAND_GROUPS {
             for action in group.actions {
-                if COMMANDS.iter().any(|command| command.name == action.name) {
+                if action.name == "import" {
+                    assert!(is_canonical_top_level(action.name));
                     assert!(moved_command(action.name).is_none());
                     continue;
                 }
                 assert!(!is_canonical_top_level(action.name), "moved bare command leaked: {}", action.name);
                 assert_eq!(moved_command_group(action.name), Some(group.name));
+            }
+        }
+    }
+
+    #[test]
+    fn typo_suggestions_never_advertise_moved_bare_actions() {
+        for group in COMMAND_GROUPS {
+            for action in group.actions {
+                if action.name != "import" {
+                    assert_ne!(closest_command(action.name), Some(action.name));
+                }
             }
         }
     }
