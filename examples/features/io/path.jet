@@ -16,7 +16,8 @@ fn run() {
         child :: d.join("output.txt")
         print("child: {child.to_string()}")
     }
-    // walk the crate root to verify the API returns a list
-    paths :: Path.from(".").walk()
+    // Walk a bounded source directory. Walking the workspace root also scans
+    // build outputs and agent worktrees, so runtime depends on ambient state.
+    paths :: Path.from("examples/features/io").walk()
     print("walk non-empty: {paths.len() > 0}")
 }
