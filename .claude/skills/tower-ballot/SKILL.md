@@ -9,6 +9,51 @@ Any owner-facing choice becomes a `decision` on its card. The owner decides
 from the ballot alone in focus mode; if he must ask what an option does, the
 ballot is not ready. A plan-writer proposes; the owner picks.
 
+## Plain language — mandatory, not optional
+
+Ballots are read by the owner to make a decision. Write them the way you would
+explain the choice to a colleague at a whiteboard: plain, direct, concrete. Do
+not write them the way a model "polishes" prose.
+
+**Banned outright** — these read as clever/creative filler and hide the actual
+choice:
+- Invented framing words and metaphors: "the disease", "bright spots", "blast
+  radius", "poisons", "coats of paint", "the win", "footgun" as decoration,
+  "surface" as a noun for code, "the arc", "north star".
+- Dramatized verbs and stakes: "beautifully", "ruthlessly", "hard", "brutal",
+  "sharpest edge", "load-bearing", "at the worst moment".
+- Rhetorical devices: rhetorical questions, alliteration, tricolons ("X, Y, and
+  Z" for rhythm), em-dash pile-ups used for effect, one-word sentences for drama.
+- Abbreviated arrow-chains as prose ("A → B → fails"), and "sibling test" style
+  invented jargon.
+
+**Required instead:**
+- Name the actual construct, file, and decision ID. State the choice as a fact:
+  "Today `executable` is written as a bare keyword. `Wrap` is written as
+  `Wrap.{ … }`. This decides whether they use the same shape."
+- Let the real before/after code carry the weight. Every option shows the exact
+  thing the user types today and what they would type after — real snippets from
+  the tree, not illustrations.
+- Everyday words. Short declarative sentences. If a sentence has a metaphor or an
+  adjective doing persuasion, cut it.
+- The recommendation gives the concrete reason (what breaks, what gets simpler),
+  never an abstract virtue ("cleaner", "more elegant", "coherent").
+
+Before saving a ballot, reread every field and delete any word that is there for
+tone rather than information. If you cannot say it plainly, you do not yet
+understand the choice well enough to put it in front of the owner.
+
+## One decision per ballot — the owner controls each resolution
+
+Every distinct owner-facing choice is its own ballot with its own options,
+including a "leave as-is" option whenever the status quo is viable. Do **not**
+bundle several resolutions under one umbrella ballot such that ratifying it
+silently pre-decides the others. If a "law" or "principle" ballot would commit
+the direction of downstream choices, that is a hidden prescription the owner
+cannot see or adjust — split it so each real choice is a ballot he picks. An
+umbrella ballot may set a default lean, but each downstream area still gets its
+own ballot with real, independently-decidable options.
+
 ## Required fields
 
 - **`gist`** — one short plain-language sentence naming the choice.

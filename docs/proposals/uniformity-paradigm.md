@@ -748,15 +748,12 @@ Law first; then one application ballot per area. Every ballot that changes
 user-typeable syntax is owner-gated; the impl card follows each ratification
 (parser → sema → codegen → teaching error → snapshot → example, per I4/I5).
 
-**Honest sequencing note:** ratifying **D-SHAPE1 commits the *direction* of
-every wave below** — the job→plane function already decides that operations
-become methods, values become `.{}`/`.Variant`, promises move to `@`, etc. The
-application ballots are therefore *not* open-ended; each decides the exact
-spelling and migration *within* that committed direction, and surfaces the
-specific ratified decisions it overturns. If the owner wants any wave's
-direction left genuinely open, that construct must be carved out of D-SHAPE1
-explicitly. This is stated so ratifying the law is an informed act, not a
-blank check the waves quietly cash.
+**Each area is its own ballot the owner decides — D-SHAPE1 does not pre-decide
+them.** D-SHAPE1 records which uniformity principle the owner prefers as a
+default lean, but it does not settle any spelling. Every wave below is a
+separate ballot with its own options, including "leave as-is," so the owner
+picks each resolution and can pick against the D-SHAPE1 lean on any given area.
+The principle guides; it does not prescribe.
 
 | Card | Scope (one line) | Depends on | Closes |
 |---|---|---|---|
