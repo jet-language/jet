@@ -637,7 +637,7 @@ pub fn render_document(value: &Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use super::{field, parse_document, parse_document_with, render_document, EntityPolicy, Event, Limits, ParseOptions, Part, Reason, Scanner, Value};
+    use super::{field, parse_document, parse_document_with, render_document, ByteLexer, EntityPolicy, Event, Limits, ParseOptions, Part, Reason, Scanner, TokenKind, Value, WireEncoding};
 
     fn scan(source: &str) -> Result<Vec<Event>, String> {
         let mut scanner = Scanner::new(source);
@@ -859,6 +859,63 @@ mod tests {
         assert_eq!(limited.kind, Reason::Limit);
         assert!(limited.reason.contains("max_entity_depth (0)"));
     }
+
+    fn lex_chunks(bytes: &[u8], split: usize) -> Vec<(TokenKind, String, Vec<u8>)> {
+        let mut lexer = ByteLexer::new(1024);
+        lexer.push(&bytes[..split]).expect("first chunk");
+        let mut tokens = Vec::new();
+        while let Some(token) = lexer.next_token().expect("first tokens") {
+            tokens.push((token.kind, token.text, token.raw_bytes));
+        }
+        lexer.push(&bytes[split..]).expect("second chunk");
+        lexer.finish_input().expect("finish input");
+        while let Some(token) = lexer.next_token().expect("remaining tokens") {
+            tokens.push((token.kind, token.text, token.raw_bytes));
+        }
+        tokens
+    }
+
+    #[test]
+    fn byte_lexer_is_chunk_invariant_and_preserves_utf8_bytes() {
+        let bytes = b"\xef\xbb\xbf<r a='>'>h\xc3\xa9&amp;<!--x>y--><![CDATA[z>]]></r>";
+        let expected = lex_chunks(bytes, bytes.len());
+        for split in 0..=bytes.len() {
+            assert_eq!(lex_chunks(bytes, split), expected, "split {split}");
+        }
+        let raw: Vec<u8> = expected.iter().flat_map(|(_, _, raw)| raw.clone()).collect();
+        assert_eq!(raw, bytes[3..]);
+    }
+
+    #[test]
+    fn byte_lexer_decodes_utf16_at_every_byte_boundary() {
+        let source = "<?xml version='1.0'?><r>\u{1f642}&amp;</r>";
+        for (encoding, bom, bytes) in [
+            (WireEncoding::Utf16Le, vec![0xff, 0xfe], source.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>()),
+            (WireEncoding::Utf16Be, vec![0xfe, 0xff], source.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<_>>()),
+        ] {
+            let mut wire = bom.clone(); wire.extend(bytes);
+            let expected = lex_chunks(&wire, wire.len());
+            for split in 0..=wire.len() { assert_eq!(lex_chunks(&wire, split), expected, "{encoding:?} split {split}"); }
+            assert_eq!(expected.iter().map(|(_, text, _)| text.as_str()).collect::<String>(), source);
+        }
+    }
+
+    #[test]
+    fn byte_lexer_fuses_encoding_and_item_limit_errors() {
+        let mut invalid = ByteLexer::new(32);
+        invalid.push(&[0xef, 0xbb, 0xbf, 0xff]).expect_err("invalid UTF-8");
+        let first = invalid.next_token().expect_err("terminal error");
+        assert_eq!(invalid.push(b"<r/>").expect_err("fused"), first);
+
+        let mut continuation = ByteLexer::new(32);
+        let first = continuation.push(&[0xc2, 0x20, b'<']).expect_err("invalid continuation");
+        assert_eq!(continuation.finish_input().expect_err("fused"), first);
+
+        let mut limited = ByteLexer::new(3);
+        let first = limited.push(b"<root>").expect_err("item limit");
+        assert_eq!(first.kind, Reason::Limit);
+        assert_eq!(limited.finish_input().expect_err("fused"), first);
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
@@ -987,6 +1044,164 @@ impl ParseOptions {
             entities: EntityPolicy::Preserve,
             limits: Limits::safe(),
         }
+    }
+}
+
+/// Wire encoding selected once from BOM/signature bytes. The incremental
+/// lexer keeps each decoded scalar paired with its original bytes so stream
+/// lexical evidence never requires retaining a document-sized source buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WireEncoding { Utf8, Utf16Le, Utf16Be }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenKind { Text, Entity, Markup }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ByteToken {
+    pub kind: TokenKind,
+    pub text: String,
+    pub raw_bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+struct DecodedUnit { scalar: char, raw: Vec<u8> }
+
+/// Owned, bounded, chunk-invariant XML byte lexer. It performs encoding/BOM
+/// selection and XML-aware token framing (quotes, comments, CDATA, PI, and
+/// DOCTYPE subsets) before the semantic Scanner consumes a token. No token is
+/// split because an IO chunk ended; retained memory is one token plus at most
+/// four undecoded bytes.
+pub struct ByteLexer {
+    encoding: Option<WireEncoding>,
+    bom: Vec<u8>,
+    undecided: Vec<u8>,
+    pending: Vec<u8>,
+    units: Vec<DecodedUnit>,
+    max_item_bytes: usize,
+    wire_offset: usize,
+    eof: bool,
+    terminal: Option<Error>,
+}
+
+impl ByteLexer {
+    pub fn new(max_item_bytes: usize) -> Self {
+        Self { encoding: None, bom: Vec::new(), undecided: Vec::new(), pending: Vec::new(), units: Vec::new(), max_item_bytes, wire_offset: 0, eof: false, terminal: None }
+    }
+    pub fn encoding(&self) -> Option<WireEncoding> { self.encoding }
+    pub fn bom(&self) -> &[u8] { &self.bom }
+    fn fail<T>(&mut self, kind: Reason, reason: impl Into<String>) -> Result<T, Error> {
+        let error = Error::at_kind(self.wire_offset, kind, reason);
+        self.terminal = Some(error.clone());
+        Err(error)
+    }
+    fn choose_encoding(&mut self, final_input: bool) -> Result<(), Error> {
+        if self.encoding.is_some() { return Ok(()); }
+        if self.undecided.starts_with(&[0xef, 0xbb, 0xbf]) {
+            self.encoding = Some(WireEncoding::Utf8); self.bom = self.undecided.drain(..3).collect(); self.wire_offset = 3;
+        } else if self.undecided.starts_with(&[0xff, 0xfe]) {
+            self.encoding = Some(WireEncoding::Utf16Le); self.bom = self.undecided.drain(..2).collect(); self.wire_offset = 2;
+        } else if self.undecided.starts_with(&[0xfe, 0xff]) {
+            self.encoding = Some(WireEncoding::Utf16Be); self.bom = self.undecided.drain(..2).collect(); self.wire_offset = 2;
+        } else if self.undecided.len() >= 4 {
+            self.encoding = Some(if self.undecided[..4] == [0, b'<', 0, b'?'] { WireEncoding::Utf16Be } else if self.undecided[..4] == [b'<', 0, b'?', 0] { WireEncoding::Utf16Le } else { WireEncoding::Utf8 });
+        } else if final_input || self.undecided.len() >= 3 {
+            self.encoding = Some(WireEncoding::Utf8);
+        }
+        if self.encoding.is_some() { self.pending.append(&mut self.undecided); }
+        Ok(())
+    }
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        if let Some(error) = &self.terminal { return Err(error.clone()); }
+        if self.eof { return self.fail(Reason::Malformed, "XML bytes arrived after end of input"); }
+        if self.encoding.is_none() { self.undecided.extend_from_slice(bytes); self.choose_encoding(false)?; } else { self.pending.extend_from_slice(bytes); }
+        self.decode(false)
+    }
+    pub fn finish_input(&mut self) -> Result<(), Error> {
+        if let Some(error) = &self.terminal { return Err(error.clone()); }
+        self.eof = true;
+        self.choose_encoding(true)?;
+        self.decode(true)
+    }
+    fn retain(&mut self, scalar: char, raw: Vec<u8>) -> Result<(), Error> {
+        let retained: usize = self.units.iter().map(|unit| unit.raw.len()).sum();
+        if retained.saturating_add(raw.len()) > self.max_item_bytes { return self.fail(Reason::Limit, format!("XML token exceeds max_item_bytes ({})", self.max_item_bytes)); }
+        self.wire_offset = self.wire_offset.saturating_add(raw.len());
+        self.units.push(DecodedUnit { scalar, raw });
+        Ok(())
+    }
+    fn decode(&mut self, final_input: bool) -> Result<(), Error> {
+        let Some(encoding) = self.encoding else { return Ok(()); };
+        loop {
+            match encoding {
+                WireEncoding::Utf8 => {
+                    let Some(&first) = self.pending.first() else { break };
+                    let width = if first < 0x80 { 1 } else if first & 0xe0 == 0xc0 { 2 } else if first & 0xf0 == 0xe0 { 3 } else if first & 0xf8 == 0xf0 { 4 } else { return self.fail(Reason::InvalidEncoding, "invalid UTF-8 leading byte"); };
+                    if self.pending.len() < width { break; }
+                    let raw: Vec<u8> = self.pending.drain(..width).collect();
+                    let text = match std::str::from_utf8(&raw) {
+                        Ok(text) => text,
+                        Err(_) => return self.fail(Reason::InvalidEncoding, "invalid UTF-8 sequence"),
+                    };
+                    let Some(scalar) = text.chars().next() else {
+                        return self.fail(Reason::InvalidEncoding, "empty UTF-8 sequence");
+                    };
+                    self.retain(scalar, raw)?;
+                }
+                WireEncoding::Utf16Le | WireEncoding::Utf16Be => {
+                    if self.pending.len() < 2 { break; }
+                    let unit = if encoding == WireEncoding::Utf16Le { u16::from_le_bytes([self.pending[0], self.pending[1]]) } else { u16::from_be_bytes([self.pending[0], self.pending[1]]) };
+                    let width = if (0xd800..=0xdbff).contains(&unit) { 4 } else { 2 };
+                    if self.pending.len() < width { break; }
+                    let raw: Vec<u8> = self.pending.drain(..width).collect();
+                    let scalar = if width == 2 {
+                        if (0xdc00..=0xdfff).contains(&unit) { return self.fail(Reason::InvalidEncoding, "unpaired UTF-16 low surrogate"); }
+                        let Some(scalar) = char::from_u32(unit as u32) else { return self.fail(Reason::InvalidEncoding, "invalid UTF-16 scalar"); };
+                        scalar
+                    } else {
+                        let low = if encoding == WireEncoding::Utf16Le { u16::from_le_bytes([raw[2], raw[3]]) } else { u16::from_be_bytes([raw[2], raw[3]]) };
+                        if !(0xdc00..=0xdfff).contains(&low) { return self.fail(Reason::InvalidEncoding, "unpaired UTF-16 high surrogate"); }
+                        let Some(scalar) = char::from_u32(0x10000 + (((unit - 0xd800) as u32) << 10) + (low - 0xdc00) as u32) else { return self.fail(Reason::InvalidEncoding, "invalid UTF-16 scalar"); };
+                        scalar
+                    };
+                    self.retain(scalar, raw)?;
+                }
+            }
+            if self.boundary().is_some() { break; }
+        }
+        if final_input && self.boundary().is_none() && !self.pending.is_empty() { return self.fail(Reason::InvalidEncoding, "truncated encoded XML scalar"); }
+        Ok(())
+    }
+    fn boundary(&self) -> Option<(usize, TokenKind)> {
+        if self.units.is_empty() { return None; }
+        let chars: Vec<char> = self.units.iter().map(|unit| unit.scalar).collect();
+        if chars[0] == '&' { return chars.iter().position(|c| *c == ';').map(|i| (i + 1, TokenKind::Entity)); }
+        if chars[0] != '<' {
+            return chars.iter().position(|c| *c == '<' || *c == '&').map(|i| (i, TokenKind::Text)).or_else(|| self.eof.then_some((chars.len(), TokenKind::Text)));
+        }
+        let text: String = chars.iter().collect();
+        for (lead, end) in [("<!--", "-->"), ("<![CDATA[", "]]>") , ("<?", "?>")] {
+            if text.starts_with(lead) { return text.find(end).map(|i| (text[..i + end.len()].chars().count(), TokenKind::Markup)); }
+        }
+        let mut quote = None; let mut bracket = 0i32;
+        for (index, scalar) in chars.iter().enumerate().skip(1) {
+            if let Some(expected) = quote { if *scalar == expected { quote = None; } continue; }
+            if *scalar == '\'' || *scalar == '"' { quote = Some(*scalar); }
+            else if text.starts_with("<!DOCTYPE") && *scalar == '[' { bracket += 1; }
+            else if text.starts_with("<!DOCTYPE") && *scalar == ']' { bracket -= 1; }
+            else if *scalar == '>' && bracket == 0 { return Some((index + 1, TokenKind::Markup)); }
+        }
+        None
+    }
+    pub fn next_token(&mut self) -> Result<Option<ByteToken>, Error> {
+        if let Some(error) = &self.terminal { return Err(error.clone()); }
+        self.decode(self.eof)?;
+        let Some((count, kind)) = self.boundary() else {
+            if self.eof && !self.units.is_empty() { return self.fail(Reason::Malformed, "unterminated XML token at end of input"); }
+            return Ok(None);
+        };
+        if count == 0 { return Ok(None); }
+        let drained: Vec<_> = self.units.drain(..count).collect();
+        Ok(Some(ByteToken { kind, text: drained.iter().map(|unit| unit.scalar).collect(), raw_bytes: drained.into_iter().flat_map(|unit| unit.raw).collect() }))
     }
 }
 
