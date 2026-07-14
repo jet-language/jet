@@ -236,6 +236,41 @@ fn attribute_value(attribute: Attribute) -> Value {
     )
 }
 
+fn wire_bytes(text: &str, encoding: WireEncoding) -> Vec<u8> {
+    match encoding {
+        WireEncoding::Utf8 => text.as_bytes().to_vec(),
+        WireEncoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+        WireEncoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+    }
+}
+
+fn byte_lexical(raw: Vec<u8>, semantic: Value) -> Value {
+    object(vec![("raw_text", Value::Null), ("raw_bytes", Value::Array(raw.into_iter().map(|b| Value::Int(i64::from(b))).collect())), ("semantic", semantic)])
+}
+fn lexical_value_to_wire(mut value:Value,encoding:WireEncoding)->Value{if let Value::Object(entries)=&mut value{if let Some((_,Value::Object(lex)))=entries.iter_mut().find(|(k,_)|k=="lexical"){if let Some(index)=lex.iter().position(|(k,_)|k=="raw_text"){if let Value::Text(raw)=&lex[index].1{let bytes=wire_bytes(raw,encoding);lex[index].1=Value::Null;if let Some((_,slot))=lex.iter_mut().find(|(k,_)|k=="raw_bytes"){*slot=Value::Array(bytes.into_iter().map(|b|Value::Int(i64::from(b))).collect())}}}}}value}
+
+/// Exact public `$xml_event` DataTree projection for a byte-backed stream item.
+pub fn stream_event_value(item: StreamEvent) -> Value {
+    let encoding = item.encoding;
+    let lex = |raw: Vec<u8>, semantic: Value| byte_lexical(raw, semantic);
+    match item.event {
+        Event::DocumentStart => object(vec![("$xml_event", text("document_start")), ("encoding", text(match encoding { WireEncoding::Utf8=>"UTF-8", WireEncoding::Utf16Le=>"UTF-16LE", WireEncoding::Utf16Be=>"UTF-16BE" })), ("bom", Value::Array(item.bom.into_iter().map(|b|Value::Int(i64::from(b))).collect()))]),
+        Event::DocumentEnd => object(vec![("$xml_event",text("document_end"))]),
+        Event::Declaration{version,encoding:declared,standalone,raw:_} => { let fields=vec![("version",text(version)),("encoding",optional_text(declared)),("standalone",standalone.map(Value::Bool).unwrap_or(Value::Null))]; let mut out=vec![("$xml_event",text("declaration"))];out.extend(fields.clone());out.push(("lexical",lex(item.raw_bytes,strip_lexical(&object(fields)))));object(out) }
+        Event::DocumentWhitespace{value,raw:_} => leaf_event("document_whitespace",vec![("value",text(value))],item.raw_bytes),
+        Event::Text{value,raw:_} => leaf_event("text",vec![("value",text(value))],item.raw_bytes),
+        Event::Cdata{value,raw:_} => leaf_event("cdata",vec![("value",text(value))],item.raw_bytes),
+        Event::Comment{value,raw:_} => leaf_event("comment",vec![("value",text(value))],item.raw_bytes),
+        Event::EntityRef{name,resolved,raw:_} => leaf_event("entity_ref",vec![("name",text(name)),("resolved_value",optional_text(resolved))],item.raw_bytes),
+        Event::ProcessingInstruction{target,value,raw:_} => leaf_event("processing_instruction",vec![("target",text(target)),("value",text(value))],item.raw_bytes),
+        Event::Doctype{name,public_id,system_id,internal_subset,raw:_} => leaf_event("doctype",vec![("name",text(name)),("public_id",optional_text(public_id)),("system_id",optional_text(system_id)),("internal_subset",optional_text(internal_subset))],item.raw_bytes),
+        Event::ElementEnd{name,raw:_} => { let semantic=object(vec![("name",name_value(name.clone()))]);object(vec![("$xml_event",text("element_end")),("name",name_value(name)),("close_lexical",lex(item.raw_bytes,semantic))]) }
+        Event::ElementStart{name,namespaces,attributes,empty,raw:_} => { let ns=Value::Array(namespaces.into_iter().map(|n|lexical_value_to_wire(namespace_value(n),encoding)).collect());let attrs=Value::Array(attributes.into_iter().map(|a|lexical_value_to_wire(attribute_value(a),encoding)).collect());let style=text(if empty{"empty"}else{"explicit"});let semantic=strip_lexical(&object(vec![("name",name_value(name.clone())),("namespaces",ns.clone()),("attributes",attrs.clone()),("empty_style",style.clone())]));object(vec![("$xml_event",text("element_start")),("name",name_value(name)),("namespaces",ns),("attributes",attrs),("empty_style",style),("open_lexical",lex(item.raw_bytes,semantic))]) }
+    }
+}
+
+fn leaf_event(tag:&str,fields:Vec<(&str,Value)>,raw:Vec<u8>)->Value{let semantic=strip_lexical(&object(fields.clone()));let mut out=vec![("$xml_event",text(tag))];out.extend(fields);out.push(("lexical",byte_lexical(raw,semantic)));object(out)}
+
 struct ElementFrame {
     name: Name,
     namespaces: Vec<Value>,
