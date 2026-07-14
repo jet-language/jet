@@ -742,6 +742,12 @@
         }
     }
 
+    impl super::JetDebug for JetDecimal {
+        fn jet_debug(&self) -> String {
+            self.to_string_rep()
+        }
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct JsonError {
         pub line: i64,

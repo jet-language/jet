@@ -88,9 +88,6 @@ impl JetDebug for String {
         format!("{self:?}")
     }
 }
-impl JetDebug for jet_std::JetDecimal {
-    fn jet_debug(&self) -> String { self.to_string_rep() }
-}
 // D-MEM1 stage S5: a string view (`s.trim()`/`.after()`/`.before()` bound to a
 // local, see `jet_string_*_view` below) is a genuine `&str` in generated Rust —
 // `String` stays the one Jet-level type, so anything that already works on a
