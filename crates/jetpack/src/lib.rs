@@ -69,6 +69,7 @@ pub mod Store;
 pub mod TOML;
 pub mod Toolchain;
 pub mod Trust;
+pub mod TrustRoot;
 pub mod WorkspaceFile;
 pub mod WorkspaceLock;
 
