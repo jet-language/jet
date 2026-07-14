@@ -587,6 +587,10 @@ fn runtime_user_error_codes_use_jet_panic_voice() {
     let mut failures = Vec::new();
     let mut paths = vec![root().join("crates/jet-codegen/src/Prelude/Core.rs")];
     collect_rs_paths(
+        &root().join("crates/jet-codegen/src/Prelude/Core"),
+        &mut paths,
+    );
+    collect_rs_paths(
         &root().join("crates/jet-codegen/src/Prelude/CoreLib"),
         &mut paths,
     );
