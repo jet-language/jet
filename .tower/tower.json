@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 533,
-    "rev": 5889,
+    "rev": 5895,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3070,8 +3070,18 @@
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
-      "assignee": "cursor-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "cursor-main",
+          "text": "[handoff] C10 met unverified; C12 open; independent verify + verify-full; see last log"
+        },
+        {
+          "at": "2026-07-14",
+          "by": "cursor-main",
+          "text": "[handoff] C10 met by cursor-241-impl: ServiceProbe (Services::measure_readiness 20-trial) + SceneProbe (JET_SCENE_PROBE / JETSCENE1 wire in Game.rs) + run_dev_budget_refresh. Focused tests claimed green: scene_probe_*, service_probe_unavailable_*, allocation_probe, modules perf_budget 8/8. C12 OPEN — needs DIFFERENT agent than cursor-241-impl: legal matrix + hostile cases + parent verify-full + then --verify 10 and --verify 12. WARN: prior session /tmp ENOSPC broke full suite; clean tmp first. Do not trust C10 met without independent re-run."
+        },
         {
           "at": "2026-07-14",
           "by": "cursor-241-impl",
@@ -3455,8 +3465,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-14T11:54:56.265Z"
+      "refs": []
     },
     {
       "id": "c008rjua",
@@ -7504,8 +7513,13 @@
       "priority": "P0",
       "plan": "# Plan: Prepare clean jet / jetpack / jetos split\n\nRatified input:\n- D-PRODUCT-SPLIT1=C canonical ownership split with teaching/provenance shims.\n\nImplementation slices:\n1. Extract shared package/config model crate for read-only manifest/lock/store/ref/workspace/script data so jet-driver no longer depends on jetpack engine.\n2. Move jetpack binary ownership into crates/jetpack; create real crates/jetos binary/crate for OS workflows.\n3. Keep jet root focused on language/compiler/dev loop; route compatibility forms with clear owner/provenance messages.\n4. Split ModuleEval plan model from env runtime and JetOS realization.\n5. Move Canvas package/workspace scans behind shared model API.\n6. Split tests/jetpack.rs into package engine, dispatch, JetOS generation/proof, Studio, and fixture helpers.\n7. Update workspace dependency guards and docs paths.\n\nAcceptance:\n- Root package owns only jet; jetpack/jetos binaries come from owning crates.\n- jet-driver no longer depends on jetpack engine.\n- Existing public commands remain byte-compatible or emit ratified teaching/provenance messages.\n- Canvas project scan works through shared model.\n\nVerification:\n- nix develop -c cargo check --workspace\n- nix develop -c cargo test --test workspace_crates\n- nix develop -c cargo test --test engine_dispatch\n- nix develop -c cargo test --test jetpack\n- nix develop -c scripts/agent/verify-full.sh before done.",
       "blockedBy": [],
-      "assignee": "cursor-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "cursor-main",
+          "text": "[handoff] Product-split impl complete. Verified: C1,C2,C4,C5,C7. Still unmet-verify: C3 (root jetpack boundaries / workspace_crates allowlist), C6 (tests/jetpack_* split). verify-full NOT green — died on ENOSPC (/tmp full) + linker collect2 on layout/cli tests; pipe exit 0 was false (tail succeeded). NEXT: (1) rm -rf /tmp/nix-shell.* and clear /tmp/cursor-sandbox-cache if present; df -h /tmp must have headroom (2) independent agent ≠ terra-367b-builder / terra-367c-builder verifies C3+C6 (3) nix develop -c scripts/agent/verify-full.sh with set -o pipefail (4) --phase done. Canvas already on jet_env_model; jet-devserver has no jetpack dep."
+        },
         {
           "at": "2026-07-14",
           "by": "cursor-367-impl",
@@ -7635,8 +7649,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-14T12:16:57.578Z"
+      "refs": []
     },
     {
       "id": "c0fzoku6",
@@ -13130,8 +13143,18 @@
       "plan": null,
       "blockedBy": [],
       "workOrder": 27,
-      "assignee": "cursor-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "cursor-main",
+          "text": "[handoff] C6 blocked on #438; TAINT2 partial; see last log"
+        },
+        {
+          "at": "2026-07-14",
+          "by": "cursor-main",
+          "text": "[handoff] Verified: C1–C5, C7 (STM+ENVHOOK parent-verified). C6 AUTH still OPEN — full app.auth/OAuth/magic-link/sessions BLOCKED on #438 (D-WEBAPP1). D-AUTH2 + D-TAINT2 are ratified; D-TAINT2=#Tainted(Credential)→E0722 has tests/taint.rs + diagnostics.md rows landed — do NOT mark C6 met until JWT/PASETO verify fns + full batteries per criterion text also green OR criterion is split by owner. SYNC/DBPOLICY remain body-only, substrate-gated (#505/#438). OBSERVE-LIVE shipped earlier (no criterion). NEXT ungated: finish any missing D-AUTH2 verify_jwt/verify_paseto e2e if incomplete; else park C6 and burn #438 blockers. Side: architecture-infra.md marker census 62→66 drift breaks syntax_reconciliation one test."
+        },
         {
           "at": "2026-07-14",
           "by": "cursor-506-verify",
@@ -13288,8 +13311,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T02:44:52.267Z",
-      "updated": "2026-07-14",
-      "claimedAt": "2026-07-14T11:55:05.577Z"
+      "updated": "2026-07-14"
     },
     {
       "id": "c0oqtn3i",
@@ -32658,6 +32680,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T13:27:02.188Z",
+      "by": "cursor-main",
+      "action": "card.release",
+      "ref": "c0n6vj96",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T13:27:02.083Z",
+      "by": "cursor-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T13:27:01.962Z",
+      "by": "cursor-main",
+      "action": "card.release",
+      "ref": "ccq07pav",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T13:27:01.859Z",
+      "by": "cursor-main",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T13:27:01.739Z",
+      "by": "cursor-main",
+      "action": "card.release",
+      "ref": "c_audit_367_q80zrm",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-14T13:27:01.631Z",
+      "by": "cursor-main",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-14T12:57:29.652Z",
       "by": "cursor-241-impl",
       "action": "card.update",
@@ -36114,48 +36178,6 @@
       "action": "card.claim",
       "ref": "c0uxsyns",
       "note": ""
-    },
-    {
-      "at": "2026-07-13T19:58:33.759Z",
-      "by": "terra-241-converge",
-      "action": "card.claim",
-      "ref": "ccq07pav",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T19:58:30.513Z",
-      "by": "cursor-e4-burn",
-      "action": "card.update",
-      "ref": "c0hgr4pk",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-13T19:58:30.403Z",
-      "by": "terra-530-smtp",
-      "action": "card.claim",
-      "ref": "c0aadf2p",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T19:58:22.832Z",
-      "by": "terra-502-managed",
-      "action": "card.release",
-      "ref": "c0u6kwwb",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T19:58:18.225Z",
-      "by": "terra-296-indefinite",
-      "action": "card.release",
-      "ref": "c0uxsyns",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T19:58:13.417Z",
-      "by": "terra-241-history",
-      "action": "card.release",
-      "ref": "ccq07pav",
-      "note": "[handoff] logged"
     }
   ],
   "nextNum": 368,
