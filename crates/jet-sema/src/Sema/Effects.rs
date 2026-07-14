@@ -81,6 +81,8 @@ pub enum Effect {
     PowerShell,
     /// D-FFI-PERL1=A: request through a supervised Perl worker.
     Perl,
+    /// D-FFI-RUBY1=A: request through a supervised Ruby worker.
+    Ruby,
     /// D-FFI-COM1=A: Windows COM apartment automation call.
     Com,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
@@ -117,6 +119,7 @@ impl Effect {
             Effect::Dart => "Dart",
             Effect::PowerShell => "PowerShell",
             Effect::Perl => "Perl",
+            Effect::Ruby => "Ruby",
             Effect::Com => "Com",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
@@ -147,6 +150,7 @@ impl Effect {
             "Dart" => Effect::Dart,
             "PowerShell" => Effect::PowerShell,
             "Perl" => Effect::Perl,
+            "Ruby" => Effect::Ruby,
             "Com" => Effect::Com,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
@@ -181,6 +185,7 @@ impl Effect {
             Effect::Dart,
             Effect::PowerShell,
             Effect::Perl,
+            Effect::Ruby,
             Effect::Com,
             Effect::Browser,
             Effect::Secret,

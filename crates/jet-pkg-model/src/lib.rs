@@ -38,6 +38,7 @@ pub mod GoBind;
 pub mod JavaBind;
 pub mod PascalBind;
 pub mod PerlBind;
+pub mod RubyBind;
 pub mod DartBind;
 pub mod PowerShellBind;
 pub mod TclBind;

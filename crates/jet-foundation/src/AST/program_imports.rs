@@ -132,11 +132,12 @@ pub enum ForeignLanguage {
     Dart,
     PowerShell,
     Perl,
+    Ruby,
     Com,
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 17] = [
+    pub const ALL: [ForeignLanguage; 18] = [
         ForeignLanguage::C,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
@@ -153,6 +154,7 @@ impl ForeignLanguage {
         ForeignLanguage::Dart,
         ForeignLanguage::PowerShell,
         ForeignLanguage::Perl,
+        ForeignLanguage::Ruby,
         ForeignLanguage::Com,
     ];
 
@@ -174,6 +176,7 @@ impl ForeignLanguage {
             Syntax::DART_MODULE_ROOT => Some(ForeignLanguage::Dart),
             Syntax::PWSH_MODULE_ROOT => Some(ForeignLanguage::PowerShell),
             Syntax::PERL_MODULE_ROOT => Some(ForeignLanguage::Perl),
+            Syntax::RUBY_MODULE_ROOT => Some(ForeignLanguage::Ruby),
             Syntax::COM_MODULE_ROOT => Some(ForeignLanguage::Com),
             _ => None,
         }
@@ -197,6 +200,7 @@ impl ForeignLanguage {
             ForeignLanguage::Dart => Syntax::DART_MODULE_ROOT,
             ForeignLanguage::PowerShell => Syntax::PWSH_MODULE_ROOT,
             ForeignLanguage::Perl => Syntax::PERL_MODULE_ROOT,
+            ForeignLanguage::Ruby => Syntax::RUBY_MODULE_ROOT,
             ForeignLanguage::Com => Syntax::COM_MODULE_ROOT,
         }
     }

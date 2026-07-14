@@ -22,6 +22,8 @@
           pkgs.rustc
           pkgs.stdenv.cc
           pkgs.lld
+          # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
+          pkgs.ruby
         ];
         jetTzdb = "${pkgs.tzdata}/share/zoneinfo";
 
@@ -122,6 +124,8 @@
             # D-FFI-TCL1=A: provision embeddable Tcl headers, runtime, and shell.
             pkgs.tcl
             pkgs.lld
+            # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
+            pkgs.ruby
             # Compiler freestanding smoke tests execute aarch64 output under
             # qemu-aarch64. OS image and VM tooling does not belong here.
             pkgs.qemu

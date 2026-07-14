@@ -1152,6 +1152,31 @@ script and Perl identities, worker protocol, and binder schema. CPAN package
 realization remains the Jetpack provider's responsibility; the binder consumes
 the Perl executable and installed modules exposed by that realized environment.
 
+## E3 — Persistent Ruby worker (D-FFI-RUBY1=A)
+
+`jet inspect bind ruby <script.rb> --pkg <lib>` uses the provisioned Ruby
+runtime's `Ripper` parser to discover direct top-level method declarations
+without executing the script. Bindable methods have one required positional
+argument and a Jet-compatible name. Generated entrypoints are a fixed allowlist;
+runtime source, method names, and arbitrary commands never cross the API.
+
+`open()` starts one supervised Ruby process and loads the script once, retaining
+global and object state across calls. Each method accepts and returns `DataTree`
+through Ruby's standard `JSON` library. The binary protocol length-frames every
+request and response, verifies response identities, limits frames to 1 MiB, and
+never treats stdout text as a result. Ruby exceptions become
+`RubyError.CommandFailed`; exception text, stack traces, stderr, and paths stay
+inside the worker. Calls carry the `Ruby` effect.
+
+Calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
+reaps the worker process group and invalidates the generation-tagged handle.
+`close(^session)` consumes the session. At most 32 workers exist per process;
+process teardown reaps survivors. Binding-time Ruby, C compiler, and archiver
+processes have 60-second deadlines and 64-KiB output capture. Failures use
+laundered **E3208** copy. Provenance hashes source, canonical script and Ruby
+identities, worker protocol, and binder schema. RubyGems resolution and install
+are not implemented by this binder and remain unclaimed Jetpack provider work.
+
 ## E3 — Windows COM automation (D-FFI-COM1=A)
 
 `com.*` exists only on a Windows host. Elsewhere, importing it or running

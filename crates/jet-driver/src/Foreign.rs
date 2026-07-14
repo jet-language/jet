@@ -42,6 +42,7 @@ pub enum BinderRuntime {
     DartApiDl,
     SupervisedPowerShell,
     SupervisedPerl,
+    SupervisedRuby,
     WindowsComAutomation,
 }
 
@@ -63,6 +64,7 @@ pub enum BindingStubKind {
     DartContract,
     PowerShellScript,
     PerlScript,
+    RubyScript,
     ComTypeLibrary,
 }
 
@@ -99,6 +101,7 @@ pub enum ForeignHost {
     DartHostFfi,
     SupervisedPowerShell,
     SupervisedPerl,
+    SupervisedRuby,
     WindowsComAutomation,
     LegacyRustExtern,
 }
@@ -227,6 +230,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         stub_kind: BindingStubKind::PerlScript,
     },
     BinderDescriptor {
+        language: ForeignLanguage::Ruby,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::SupervisedRuby,
+        stub_kind: BindingStubKind::RubyScript,
+    },
+    BinderDescriptor {
         language: ForeignLanguage::Com,
         surface: BinderSurface::Namespace,
         status: BinderStatus::Active,
@@ -289,6 +299,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Dart => ForeignHost::DartHostFfi,
         ForeignLanguage::PowerShell => ForeignHost::SupervisedPowerShell,
         ForeignLanguage::Perl => ForeignHost::SupervisedPerl,
+        ForeignLanguage::Ruby => ForeignHost::SupervisedRuby,
         ForeignLanguage::Com => ForeignHost::WindowsComAutomation,
     }
 }

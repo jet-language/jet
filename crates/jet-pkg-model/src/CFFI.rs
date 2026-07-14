@@ -339,6 +339,9 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         if lib.starts_with("jet_perl_") {
             for function in &mut merged { function.effect_root=Some("Perl".to_string()); }
         }
+        if lib.starts_with("jet_ruby_") {
+            for function in &mut merged { function.effect_root=Some("Ruby".to_string()); }
+        }
         if lib.starts_with("jet_com_") {
             for function in &mut merged { function.effect_root=Some("Com".to_string()); }
         }
@@ -720,6 +723,12 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
         let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Perl.bindings_subdir());
         let archive=dir.join(format!("libjet_perl_{actual}.a"));
         if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_perl_{actual}"),"pthread".into()],..Default::default()})}
+        return Err(e3201(lib));
+    }
+    if let Some(actual)=lib.strip_prefix("jet_ruby_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Ruby.bindings_subdir());
+        let archive=dir.join(format!("libjet_ruby_{actual}.a"));
+        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_ruby_{actual}"),"pthread".into()],..Default::default()})}
         return Err(e3201(lib));
     }
     if let Some(actual)=lib.strip_prefix("jet_com_") {
