@@ -212,41 +212,47 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
 }
 
 #[test]
-fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
+fn unified_foreign_namespace_model_recognizes_every_registered_root() {
     use jet::AST::{ForeignLanguage, ForeignNamespace};
 
-    let c = ForeignNamespace::from_module_path("c.raylib").expect("c namespace");
-    assert_eq!(c.language, ForeignLanguage::C);
-    assert_eq!(c.lib, "raylib");
-    assert_eq!(c.display(), "c.raylib");
+    let roots = [
+        ("c", ForeignLanguage::C),
+        ("rust", ForeignLanguage::Rust),
+        ("py", ForeignLanguage::Py),
+        ("js", ForeignLanguage::Js),
+        ("swift", ForeignLanguage::Swift),
+        ("go", ForeignLanguage::Go),
+        ("java", ForeignLanguage::Java),
+        ("cs", ForeignLanguage::DotNet),
+        ("tcl", ForeignLanguage::Tcl),
+        ("lua", ForeignLanguage::Lua),
+        ("fortran", ForeignLanguage::Fortran),
+        ("cobol", ForeignLanguage::Cobol),
+        ("ada", ForeignLanguage::Ada),
+        ("pascal", ForeignLanguage::Pascal),
+        ("dart", ForeignLanguage::Dart),
+        ("pwsh", ForeignLanguage::PowerShell),
+        ("perl", ForeignLanguage::Perl),
+        ("ruby", ForeignLanguage::Ruby),
+        ("php", ForeignLanguage::Php),
+        ("r", ForeignLanguage::R),
+        ("com", ForeignLanguage::Com),
+    ];
 
-    assert_eq!(
-        ForeignNamespace::from_module_path("js.plotly")
-            .expect("js namespace")
-            .language,
-        ForeignLanguage::Js
-    );
-    assert_eq!(
-        ForeignNamespace::from_module_path("fortran.blas")
-            .expect("fortran namespace")
-            .language,
-        ForeignLanguage::Fortran
-    );
-    assert_eq!(ForeignNamespace::from_module_path("java.counter").unwrap().language, ForeignLanguage::Java);
-    assert_eq!(ForeignNamespace::from_module_path("cs.counter").unwrap().language, ForeignLanguage::DotNet);
-    assert_eq!(ForeignNamespace::from_module_path("tcl.eda").unwrap().language, ForeignLanguage::Tcl);
-    assert_eq!(ForeignNamespace::from_module_path("ada.geodesy").unwrap().language, ForeignLanguage::Ada);
-    assert_eq!(ForeignNamespace::from_module_path("pascal.inventory").unwrap().language, ForeignLanguage::Pascal);
-    assert_eq!(ForeignNamespace::from_module_path("dart.callbacks").unwrap().language, ForeignLanguage::Dart);
-    assert_eq!(ForeignNamespace::from_module_path("pwsh.inventory").unwrap().language, ForeignLanguage::PowerShell);
-    assert_eq!(ForeignNamespace::from_module_path("perl.text").unwrap().language, ForeignLanguage::Perl);
-    assert_eq!(ForeignNamespace::from_module_path("ruby.text").unwrap().language, ForeignLanguage::Ruby);
-    assert_eq!(ForeignNamespace::from_module_path("php.pricing").unwrap().language, ForeignLanguage::Php);
-    assert_eq!(ForeignNamespace::from_module_path("r.stats").unwrap().language, ForeignLanguage::R);
-    assert_eq!(ForeignNamespace::from_module_path("com.excel").unwrap().language, ForeignLanguage::Com);
-    assert!(ForeignNamespace::from_module_path("c").is_none());
-    assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
-    assert!(ForeignNamespace::from_module_path("lua.socket").is_none());
+    assert_eq!(roots.map(|(_, language)| language), ForeignLanguage::ALL);
+    for (root, language) in roots {
+        let path = format!("{root}.lib");
+        let namespace = ForeignNamespace::from_module_path(&path)
+            .unwrap_or_else(|| panic!("{root} namespace"));
+        assert_eq!(namespace.language, language);
+        assert_eq!(namespace.lib, "lib");
+        assert_eq!(namespace.display(), path);
+
+        assert!(ForeignNamespace::from_module_path(root).is_none());
+        assert!(ForeignNamespace::from_module_path(&format!("{root}.")).is_none());
+        assert!(ForeignNamespace::from_module_path(&format!("{root}.lib.extra")).is_none());
+    }
+    assert!(ForeignNamespace::from_module_path("unknown.lib").is_none());
 }
 
 #[test]
