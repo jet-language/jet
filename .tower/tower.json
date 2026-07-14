@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 599,
-    "rev": 6556,
+    "nextNum": 600,
+    "rev": 6562,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17863,6 +17863,71 @@
       "created": "2026-07-14T21:14:29.838Z",
       "updated": "2026-07-14",
       "claimedAt": "2026-07-14T21:14:30.354Z"
+    },
+    {
+      "id": "c0ckmp1o",
+      "num": 599,
+      "title": "Full suite red: capability acceptance probes drifted from source",
+      "body": "Full verification reaches capability_acceptance and fails two structural probes: serde source re-entry moved into Registration/Serde.rs while the test still reads Registration.rs, and the audited-discard probe mistakes a documentation comment naming retired syntax for active syntax.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Repair the acceptance probes to inspect the actual serde source-reentry module and distinguish active Jet lines from comments. Keep the capability claims non-vacuous: prove generated impl text is parsed through Parser, prove an executable .drop(reason) call exists, and prove no active #Suppress block exists. Run capability acceptance; parent full verification.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "terra-capability-probes",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Serde source-reentry acceptance reads the canonical Registration/Serde.rs implementation and proves generated Encode/Decode impl source reaches Parser::parse; retired AST/Rust synthesis paths remain absent.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T21:45:27.092Z"
+        },
+        {
+          "n": 2,
+          "text": "Audited-discard acceptance ignores comments when checking active syntax, proves at least one executable .drop(reason) call, and rejects any active #Suppress(MustUse) block.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T21:45:27.186Z"
+        },
+        {
+          "n": 3,
+          "text": "All capability_acceptance tests pass without product, protocol, diagnostic, dependency, unsafe, or user-syntax changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T21:45:27.283Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T21:45:27.385Z"
+        }
+      ],
+      "refs": [
+        "tests/capability_acceptance.rs",
+        "crates/jet-sema/src/Sema/Registration/Serde.rs",
+        "examples/features/errors/discard_fallible.jet",
+        "docs/spec/capability-claim-manifest.json"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T21:45:26.997Z",
+      "updated": "2026-07-14",
+      "claimedAt": "2026-07-14T21:45:27.496Z"
     }
   ],
   "decisions": [
@@ -38880,6 +38945,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T21:45:27.496Z",
+      "by": "terra-capability-probes",
+      "action": "card.claim",
+      "ref": "c0ckmp1o",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T21:45:27.386Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ckmp1o",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-14T21:45:27.284Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ckmp1o",
+      "note": "#3 All capability_acceptance tests pass without product, protoc"
+    },
+    {
+      "at": "2026-07-14T21:45:27.187Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ckmp1o",
+      "note": "#2 Audited-discard acceptance ignores comments when checking ac"
+    },
+    {
+      "at": "2026-07-14T21:45:27.092Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ckmp1o",
+      "note": "#1 Serde source-reentry acceptance reads the canonical Registra"
+    },
+    {
+      "at": "2026-07-14T21:45:26.997Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c0ckmp1o",
+      "note": "Full suite red: capability acceptance probes drifted from source"
+    },
+    {
       "at": "2026-07-14T21:38:33.262Z",
       "by": "luna-canvas-verifier",
       "action": "card.criteria-verify",
@@ -42336,48 +42443,6 @@
       "action": "card.update",
       "ref": "c083ne8x",
       "note": "title,body,kind,track,epoch,priority,plan,refs,phase,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:00:56.036Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T17:00:55.936Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0ymmqal",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:00:55.819Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-ENTRY1",
-      "note": "How a callable becomes a runnable entrypoint"
-    },
-    {
-      "at": "2026-07-14T17:00:55.722Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE7",
-      "note": "Canonical external package reference slots"
-    },
-    {
-      "at": "2026-07-14T17:00:55.624Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-DECL1",
-      "note": "Which concepts deserve declarations instead of values, calls, or markers"
-    },
-    {
-      "at": "2026-07-14T17:00:55.526Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-DELIMS1",
-      "note": "A constitutional meaning for each delimiter family"
     }
   ],
   "nextNum": 368,
