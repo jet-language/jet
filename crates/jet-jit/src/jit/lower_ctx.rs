@@ -2113,7 +2113,10 @@ impl LowerCtx<'_, '_> {
             | THandleOp::CSVWriterFinish => {
                 Err("jit CSV streaming falls back to the AOT executable TIR path".to_string())
             }
-            THandleOp::XMLReaderNext => {
+            THandleOp::XMLReaderNext
+            | THandleOp::XMLWriterWrite
+            | THandleOp::XMLWriterFlush
+            | THandleOp::XMLWriterFinish => {
                 Err("jit XML streaming falls back to the AOT executable TIR path".to_string())
             }
             THandleOp::CBORReaderNext | THandleOp::CBORWriterWrite | THandleOp::CBORWriterFlush | THandleOp::CBORWriterFinish => Err("jit CBOR streaming falls back to the AOT executable TIR path".to_string()),

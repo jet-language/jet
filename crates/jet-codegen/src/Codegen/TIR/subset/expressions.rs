@@ -283,7 +283,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             });
             let core_xml_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
-                    && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLError")
+                    && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
                     && type_args.is_empty()
             });
             // c109 Phase 30: a TRAIT-OBJECT coercion (S48 — `Circle {…}` in a `[Shape]`
@@ -517,6 +517,15 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             }
             if type_name == "NetReadyInterest" {
                 return matches!(variant.as_str(), "Read" | "Write" | "ReadWrite");
+            }
+            if resolved_type == "XMLCanonicalMode" {
+                return args.is_empty() && matches!(variant.as_str(), "Inclusive11" | "Exclusive10");
+            }
+            if resolved_type == "XMLEncoding" {
+                return args.is_empty() && matches!(variant.as_str(), "UTF8" | "UTF8BOM" | "UTF16LE" | "UTF16BE");
+            }
+            if resolved_type == "XMLLexicalPolicy" {
+                return args.is_empty() && matches!(variant.as_str(), "PreserveValid" | "Deterministic");
             }
             if !enum_is_covered(resolved_type, cx)
                 && !(crate::Codegen::core_rust_type_name(resolved_type).is_some()

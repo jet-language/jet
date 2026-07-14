@@ -1947,7 +1947,7 @@ pub(crate) fn lower_method_call(
                     },
                 };
             }
-            if (leaf == "XMLLimits" || leaf == "XMLParseOptions")
+            if matches!(leaf.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions")
                 && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding.xml")
             {
                 return TExpr {

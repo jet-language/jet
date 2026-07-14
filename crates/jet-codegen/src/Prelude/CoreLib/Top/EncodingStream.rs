@@ -1661,6 +1661,139 @@ fn jet_enc_xml_reader_next(
     }
 }
 
+fn jet_xml_render_encoding(value: &jet_std::XMLEncoding) -> crate::jet_xml_pull::RenderEncoding {
+    match value {
+        jet_std::XMLEncoding::UTF8 => crate::jet_xml_pull::RenderEncoding::Utf8,
+        jet_std::XMLEncoding::UTF8BOM => crate::jet_xml_pull::RenderEncoding::Utf8Bom,
+        jet_std::XMLEncoding::UTF16LE => crate::jet_xml_pull::RenderEncoding::Utf16Le,
+        jet_std::XMLEncoding::UTF16BE => crate::jet_xml_pull::RenderEncoding::Utf16Be,
+    }
+}
+
+fn jet_xml_lexical_policy(value: &jet_std::XMLLexicalPolicy) -> crate::jet_xml_pull::LexicalPolicy {
+    match value {
+        jet_std::XMLLexicalPolicy::PreserveValid => crate::jet_xml_pull::LexicalPolicy::PreserveValid,
+        jet_std::XMLLexicalPolicy::Deterministic => crate::jet_xml_pull::LexicalPolicy::Deterministic,
+    }
+}
+
+fn jet_enc_xml_writer(
+    output: JetFileWriter,
+    limits: jet_std::EncodingLimits,
+    xml: jet_std::XMLRenderOptions,
+) -> Result<jet_std::XMLWriter, jet_std::EncodingError> {
+    jet_encoding_validate_limits(&limits).map_err(|mut error| {
+        error.format = jet_std::EncodingFormat::XML;
+        error.line = None;
+        error.column = None;
+        error
+    })?;
+    let renderer = crate::jet_xml_pull::StreamWriter::new(
+        jet_xml_render_encoding(&xml.encoding),
+        jet_xml_lexical_policy(&xml.lexical),
+    );
+    Ok(jet_std::XMLWriter {
+        output,
+        limits,
+        renderer,
+        buffer: Vec::new(),
+        terminal: None,
+        total: 0,
+        finished: false,
+    })
+}
+
+impl jet_std::XMLWriter {
+    fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> {
+        self.terminal = Some(error.clone());
+        Err(error)
+    }
+
+    fn io_error(&self, error: std::io::Error) -> jet_std::EncodingError {
+        jet_xml_io_error(self.total, error)
+    }
+
+    fn flush_buffer(&mut self) -> Result<(), jet_std::EncodingError> {
+        if self.buffer.is_empty() { return Ok(()); }
+        if let Err(error) = std::io::Write::write_all(&mut self.output.inner, &self.buffer) {
+            let error = self.io_error(error);
+            return self.fail(error);
+        }
+        self.buffer.clear();
+        Ok(())
+    }
+
+    fn write_event(&mut self, event: jet_std::DataTree) -> Result<(), jet_std::EncodingError> {
+        if let Some(error) = &self.terminal { return Err(error.clone()); }
+        if self.finished {
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::State, byte_offset: self.total, line: None, column: None, path: String::new(), reason: "write called after finish".to_string(), cause: None });
+        }
+        let value = match jet_xml_from_data_tree(&event) {
+            Ok(value) => value,
+            Err(reason) => {
+                let error = jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Syntax, byte_offset: self.total, line: None, column: None, path: String::new(), reason, cause: None };
+                return self.fail(error);
+            }
+        };
+        let bytes = match self.renderer.write(&value) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let mut error = jet_xml_stream_error(error);
+                error.byte_offset = self.total;
+                if let Some(reason) = error.reason.strip_prefix("[state] ") {
+                    error.kind = jet_std::EncodingErrorKind::State;
+                    error.reason = reason.to_string();
+                }
+                return self.fail(error);
+            }
+        };
+        if bytes.len() > self.limits.max_item_bytes as usize {
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Limit, byte_offset: self.total, line: None, column: None, path: String::new(), reason: format!("max_item_bytes {} exceeded", self.limits.max_item_bytes), cause: None });
+        }
+        let next_total = self.total.saturating_add(bytes.len() as i64);
+        if self.limits.max_total_bytes.is_some_and(|maximum| next_total > maximum) {
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Limit, byte_offset: self.total, line: None, column: None, path: String::new(), reason: format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap_or(0)), cause: None });
+        }
+        let capacity = self.limits.buffer_bytes as usize;
+        if self.buffer.len().saturating_add(bytes.len()) > capacity { self.flush_buffer()?; }
+        if bytes.len() > capacity {
+            if let Err(error) = std::io::Write::write_all(&mut self.output.inner, &bytes) {
+                let error = self.io_error(error);
+                return self.fail(error);
+            }
+        } else {
+            self.buffer.extend_from_slice(&bytes);
+        }
+        self.total = next_total;
+        Ok(())
+    }
+
+    fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> {
+        if let Some(error) = &self.terminal { return Err(error.clone()); }
+        self.flush_buffer()?;
+        if let Err(error) = std::io::Write::flush(&mut self.output.inner) {
+            let error = self.io_error(error);
+            return self.fail(error);
+        }
+        Ok(())
+    }
+
+    fn finish_output(&mut self) -> Result<(), jet_std::EncodingError> {
+        if let Some(error) = &self.terminal { return Err(error.clone()); }
+        if self.finished { return Ok(()); }
+        if !self.renderer.is_finished() {
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::State, byte_offset: self.total, line: None, column: None, path: String::new(), reason: "finish requires document_end".to_string(), cause: None });
+        }
+        self.flush_output()?;
+        self.finished = true;
+        Ok(())
+    }
+}
+
+fn jet_enc_xml_writer_write(writer: &mut jet_std::XMLWriter, event: jet_std::DataTree) -> Result<(), jet_std::EncodingError> { writer.write_event(event) }
+fn jet_enc_xml_writer_flush(writer: &mut jet_std::XMLWriter) -> Result<(), jet_std::EncodingError> { writer.flush_output() }
+fn jet_enc_xml_writer_finish(writer: &mut jet_std::XMLWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
+
 fn jet_enc_cbor_reader(input: JetFileReader, limits: jet_std::EncodingLimits) -> Result<jet_std::CBORReader, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits).map_err(|mut e| { e.format = jet_std::EncodingFormat::CBOR; e.line = None; e.column = None; e })?;
     Ok(jet_std::CBORReader { input, limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: Vec::new(), retained: 0 })

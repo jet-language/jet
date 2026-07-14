@@ -153,6 +153,8 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "CBORError" => matches!(member, "kind" | "byte_offset" | "path" | "reason"),
         "XMLLimits" => matches!(member, "max_depth" | "max_nodes" | "max_attributes_per_element" | "max_name_bytes" | "max_text_bytes" | "max_entity_declarations" | "max_entity_depth" | "max_entity_replacement_bytes"),
         "XMLParseOptions" => matches!(member, "entities" | "limits"),
+        "XMLRenderOptions" => matches!(member, "encoding" | "lexical"),
+        "XMLCanonical" => matches!(member, "mode" | "comments" | "inclusive_prefixes"),
         "XMLError" => matches!(member, "kind" | "byte_offset" | "line" | "column" | "path" | "reason"),
         "Envelope" => matches!(member, "from" | "recipients"),
         "RecipientReport" => matches!(member, "address" | "accepted" | "code" | "message"),
@@ -275,6 +277,21 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
         return match field {
             "entities" => Some(Type::Named("XMLEntityPolicy".to_string())),
             "limits" => Some(Type::Named("XMLLimits".to_string())),
+            _ => None,
+        };
+    }
+    if name == "XMLRenderOptions" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "encoding" => Some(Type::Named("XMLEncoding".to_string())),
+            "lexical" => Some(Type::Named("XMLLexicalPolicy".to_string())),
+            _ => None,
+        };
+    }
+    if name == "XMLCanonical" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "mode" => Some(Type::Named("XMLCanonicalMode".to_string())),
+            "comments" => Some(Type::Bool),
+            "inclusive_prefixes" => Some(Type::List(Box::new(Type::String))),
             _ => None,
         };
     }

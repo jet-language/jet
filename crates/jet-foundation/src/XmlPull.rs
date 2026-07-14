@@ -669,10 +669,374 @@ pub fn render_document(value: &Value) -> Result<String, String> {
     Ok(output)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderEncoding { Utf8, Utf8Bom, Utf16Le, Utf16Be }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LexicalPolicy { PreserveValid, Deterministic }
+
+#[derive(Clone)]
+pub struct StreamWriter {
+    encoding: RenderEncoding,
+    lexical: LexicalPolicy,
+    started: bool,
+    declaration: bool,
+    doctype: bool,
+    root_seen: bool,
+    root_closed: bool,
+    ended: bool,
+    source_matches: bool,
+    stack: Vec<Name>,
+    namespaces: Vec<BTreeMap<Option<String>, String>>,
+}
+
+impl StreamWriter {
+    pub fn new(encoding: RenderEncoding, lexical: LexicalPolicy) -> Self {
+        Self { encoding, lexical, started: false, declaration: false, doctype: false, root_seen: false, root_closed: false, ended: false, source_matches: false, stack: Vec::new(), namespaces: Vec::new() }
+    }
+
+    pub fn is_finished(&self) -> bool { self.ended }
+
+    pub fn write(&mut self, event: &Value) -> Result<Vec<u8>, Error> {
+        if self.ended { return Err(Error::state("XML writer received an event after document_end")); }
+        let mut next = self.clone();
+        let bytes = next.write_inner(event)?;
+        *self = next;
+        Ok(bytes)
+    }
+
+    fn write_inner(&mut self, event: &Value) -> Result<Vec<u8>, Error> {
+        let tag = required_text(event, "$xml_event").map_err(Error::shape)?;
+        let deterministic = match tag {
+            "document_start" => {
+                exact_keys(event, &["$xml_event", "encoding", "bom"])?;
+                if self.started { return Err(Error::state("duplicate XML document_start")); }
+                let source = optional_text_field(event, "encoding").map_err(Error::shape)?;
+                let bom = byte_array(field(event, "bom").ok_or_else(|| Error::shape("document_start lacks bom"))?)?;
+                self.source_matches = source_encoding_matches(source, &bom, self.encoding);
+                self.started = true;
+                return Ok(target_bom(self.encoding));
+            }
+            _ if !self.started => return Err(Error::state("XML writer expects document_start first")),
+            "declaration" => {
+                exact_keys(event, &["$xml_event", "version", "encoding", "standalone", "lexical"])?;
+                if self.declaration || self.doctype || self.root_seen { return Err(Error::state("XML declaration is out of order")); }
+                let version = required_text(event, "version").map_err(Error::shape)?;
+                if version != "1.0" { return Err(Error::at_kind(0, Reason::Unsupported, "only XML version 1.0 is supported")); }
+                let declared = optional_text_field(event, "encoding").map_err(Error::shape)?;
+                if let Some(name) = declared { validate_declared_encoding(name, self.encoding)?; }
+                let standalone = match field(event, "standalone") { Some(Value::Null) => None, Some(Value::Bool(value)) => Some(*value), _ => return Err(Error::shape("declaration standalone must be Bool or Null")) };
+                self.declaration = true;
+                let mut text = format!("<?xml version=\"{version}\"");
+                if declared.is_some() { text.push_str(&format!(" encoding=\"{}\"", encoding_declaration(self.encoding))); }
+                if let Some(value) = standalone { text.push_str(if value { " standalone=\"yes\"" } else { " standalone=\"no\"" }); }
+                text.push_str("?>");
+                text
+            }
+            "document_whitespace" => {
+                exact_keys(event, &["$xml_event", "value", "lexical"])?;
+                if self.root_seen && !self.root_closed { return Err(Error::state("document_whitespace is not legal inside an element")); }
+                let value = required_text(event, "value").map_err(Error::shape)?;
+                if value.is_empty() || !value.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n')) { return Err(Error::shape("document_whitespace contains a non-XML-S character")); }
+                value.to_string()
+            }
+            "doctype" => {
+                exact_keys(event, &["$xml_event", "name", "public_id", "system_id", "internal_subset", "lexical"])?;
+                if self.doctype || self.root_seen { return Err(Error::state("XML DOCTYPE is out of order")); }
+                self.doctype = true;
+                deterministic_event_node(event, "doctype")?
+            }
+            "element_start" => {
+                exact_keys(event, &["$xml_event", "name", "namespaces", "attributes", "empty_style", "open_lexical"])?;
+                if self.root_closed { return Err(Error::state("XML document already has its root element")); }
+                let name = parse_name(field(event, "name").ok_or_else(|| Error::shape("element_start lacks name"))?)?;
+                let empty = match required_text(event, "empty_style").map_err(Error::shape)? { "empty" => true, "explicit" => false, _ => return Err(Error::shape("empty_style must be empty or explicit")) };
+                let parent = self.namespaces.last().cloned().unwrap_or_else(base_namespaces);
+                let context = validate_start(event, &name, parent)?;
+                if self.stack.is_empty() { self.root_seen = true; }
+                let node = event_element_node(event)?;
+                let mut text = String::new();
+                render_element_open(&node, &mut text).map_err(Error::shape)?;
+                if empty {
+                    if self.stack.is_empty() { self.root_closed = true; }
+                } else {
+                    self.stack.push(name);
+                    self.namespaces.push(context);
+                }
+                text
+            }
+            "element_end" => {
+                exact_keys(event, &["$xml_event", "name", "close_lexical"])?;
+                let name = parse_name(field(event, "name").ok_or_else(|| Error::shape("element_end lacks name"))?)?;
+                let Some(open) = self.stack.last() else { return Err(Error::state("element_end has no open element")); };
+                if open.local != name.local || open.namespace_uri != name.namespace_uri { return Err(Error::at_kind(0, Reason::MismatchedTag, "element_end does not match the open expanded name")); }
+                self.stack.pop(); self.namespaces.pop();
+                if self.stack.is_empty() { self.root_closed = true; }
+                format!("</{}>", name.raw)
+            }
+            "document_end" => {
+                exact_keys(event, &["$xml_event"])?;
+                if !self.root_seen || !self.root_closed || !self.stack.is_empty() { return Err(Error::state("document_end requires one closed root element")); }
+                self.ended = true;
+                String::new()
+            }
+            "text" | "cdata" | "entity_ref" | "comment" | "processing_instruction" => {
+                if self.stack.is_empty() { return Err(Error::state("XML child event requires an open element")); }
+                exact_leaf_keys(event, tag)?;
+                deterministic_event_node(event, tag)?
+            }
+            _ => return Err(Error::shape(format!("unknown XML event `{tag}`"))),
+        };
+        if self.lexical == LexicalPolicy::PreserveValid && self.source_matches {
+            if let Some(raw) = valid_event_raw_bytes(event, tag) { return Ok(raw); }
+        }
+        Ok(encode_text(&deterministic, self.encoding))
+    }
+}
+
+impl Error {
+    fn shape(reason: impl Into<String>) -> Self { Self::at_kind(0, Reason::Shape, reason) }
+    fn state(reason: impl Into<String>) -> Self { Self::at_kind(0, Reason::Shape, format!("[state] {}", reason.into())) }
+}
+
+fn exact_keys(value: &Value, expected: &[&str]) -> Result<(), Error> {
+    let Value::Object(entries) = value else { return Err(Error::shape("XML event must be an Object")); };
+    if entries.len() != expected.len() || expected.iter().any(|key| entries.iter().filter(|(candidate, _)| candidate == key).count() != 1) {
+        return Err(Error::shape("XML event has missing, duplicate, or unknown keys"));
+    }
+    Ok(())
+}
+
+fn exact_leaf_keys(value: &Value, tag: &str) -> Result<(), Error> {
+    match tag {
+        "text" | "cdata" | "comment" => exact_keys(value, &["$xml_event", "value", "lexical"]),
+        "entity_ref" => exact_keys(value, &["$xml_event", "name", "resolved_value", "lexical"]),
+        "processing_instruction" => exact_keys(value, &["$xml_event", "target", "value", "lexical"]),
+        _ => Err(Error::shape("unknown XML leaf event")),
+    }
+}
+
+fn byte_array(value: &Value) -> Result<Vec<u8>, Error> {
+    let Value::Array(values) = value else { return Err(Error::shape("XML byte value must be an Array<Int>")); };
+    values.iter().map(|value| match value { Value::Int(byte) => u8::try_from(*byte).map_err(|_| Error::shape("XML byte is outside 0..255")), _ => Err(Error::shape("XML byte value must contain only Int")) }).collect()
+}
+
+fn base_namespaces() -> BTreeMap<Option<String>, String> {
+    BTreeMap::from([(Some("xml".to_string()), "http://www.w3.org/XML/1998/namespace".to_string())])
+}
+
+fn parse_name(value: &Value) -> Result<Name, Error> {
+    exact_keys(value, &["raw", "prefix", "local", "namespace_uri"])?;
+    let raw = required_text(value, "raw").map_err(Error::shape)?.to_string();
+    let prefix = optional_text_field(value, "prefix").map_err(Error::shape)?.map(str::to_string);
+    let local = required_text(value, "local").map_err(Error::shape)?.to_string();
+    let namespace_uri = optional_text_field(value, "namespace_uri").map_err(Error::shape)?.map(str::to_string);
+    if !valid_name(&raw) || !valid_name(&local) || prefix.as_deref().is_some_and(|p| !valid_name(p)) { return Err(Error::at_kind(0, Reason::InvalidName, "invalid XML expanded name")); }
+    let expected = prefix.as_ref().map(|p| format!("{p}:{local}")).unwrap_or_else(|| local.clone());
+    if raw != expected { return Err(Error::at_kind(0, Reason::InvalidName, "XML name raw/prefix/local fields disagree")); }
+    Ok(Name { raw, prefix, local, namespace_uri })
+}
+
+fn validate_start(event: &Value, name: &Name, mut context: BTreeMap<Option<String>, String>) -> Result<BTreeMap<Option<String>, String>, Error> {
+    let Some(Value::Array(namespaces)) = field(event, "namespaces") else { return Err(Error::shape("element namespaces must be an Array")); };
+    for namespace in namespaces {
+        exact_keys(namespace, &["$xml", "prefix", "namespace_uri", "quote", "lexical"])?;
+        if required_text(namespace, "$xml").map_err(Error::shape)? != "namespace" { return Err(Error::shape("namespaces contains a non-namespace node")); }
+        let prefix = optional_text_field(namespace, "prefix").map_err(Error::shape)?.map(str::to_string);
+        let uri = required_text(namespace, "namespace_uri").map_err(Error::shape)?.to_string();
+        let quote = required_text(namespace, "quote").map_err(Error::shape)?;
+        if !matches!(quote, "single" | "double") { return Err(Error::shape("namespace quote must be single or double")); }
+        if context.insert(prefix.clone(), uri.clone()).is_some() && namespaces.iter().filter(|item| optional_text_field(item, "prefix").ok().flatten() == prefix.as_deref()).count() > 1 { return Err(Error::at_kind(0, Reason::Namespace, "duplicate namespace prefix declaration")); }
+        if prefix.as_deref() == Some("xmlns") || (prefix.as_deref() == Some("xml") && uri != "http://www.w3.org/XML/1998/namespace") { return Err(Error::at_kind(0, Reason::Namespace, "reserved XML namespace binding")); }
+    }
+    let resolved = name.prefix.as_ref().and_then(|prefix| context.get(&Some(prefix.clone()))).cloned().or_else(|| if name.prefix.is_none() { context.get(&None).cloned() } else { None });
+    if resolved != name.namespace_uri { return Err(Error::at_kind(0, Reason::Namespace, "element expanded name disagrees with namespace bindings")); }
+    let Some(Value::Array(attributes)) = field(event, "attributes") else { return Err(Error::shape("element attributes must be an Array")); };
+    let mut expanded = BTreeSet::new();
+    for attribute in attributes {
+        exact_keys(attribute, &["$xml", "name", "parts", "normalized_value", "quote", "lexical"])?;
+        if required_text(attribute, "$xml").map_err(Error::shape)? != "attribute" { return Err(Error::shape("attributes contains a non-attribute node")); }
+        let attr = parse_name(field(attribute, "name").ok_or_else(|| Error::shape("attribute lacks name"))?)?;
+        let resolved = attr.prefix.as_ref().and_then(|prefix| context.get(&Some(prefix.clone()))).cloned();
+        if resolved != attr.namespace_uri { return Err(Error::at_kind(0, Reason::Namespace, "attribute expanded name disagrees with namespace bindings")); }
+        if !expanded.insert((attr.namespace_uri.clone(), attr.local.clone())) { return Err(Error::at_kind(0, Reason::DuplicateAttribute, "duplicate expanded attribute name")); }
+        let quote = required_text(attribute, "quote").map_err(Error::shape)?;
+        if !matches!(quote, "single" | "double") { return Err(Error::shape("attribute quote must be single or double")); }
+        let Some(Value::Array(parts)) = field(attribute, "parts") else { return Err(Error::shape("attribute parts must be an Array")); };
+        for part in parts { let tag = required_text(part, "$xml").map_err(Error::shape)?; if !matches!(tag, "text" | "entity_ref") { return Err(Error::shape("attribute parts contains an illegal node")); } }
+    }
+    Ok(context)
+}
+
+fn event_element_node(event: &Value) -> Result<Value, Error> {
+    Ok(object(vec![("$xml", text("element")), ("name", field(event, "name").cloned().ok_or_else(|| Error::shape("element lacks name"))?), ("namespaces", field(event, "namespaces").cloned().ok_or_else(|| Error::shape("element lacks namespaces"))?), ("attributes", field(event, "attributes").cloned().ok_or_else(|| Error::shape("element lacks attributes"))?), ("empty_style", field(event, "empty_style").cloned().ok_or_else(|| Error::shape("element lacks empty_style"))?)]))
+}
+
+fn deterministic_event_node(event: &Value, tag: &str) -> Result<String, Error> {
+    let Value::Object(entries) = event else { return Err(Error::shape("XML event must be an Object")); };
+    let mut fields = vec![("$xml".to_string(), text(tag))];
+    fields.extend(entries.iter().filter(|(key, _)| key != "$xml_event" && key != "lexical" && key != "open_lexical" && key != "close_lexical").cloned());
+    deterministic_leaf(&Value::Object(fields), tag).map_err(Error::shape)
+}
+
+fn valid_event_raw_bytes(event: &Value, tag: &str) -> Option<Vec<u8>> {
+    let key = match tag { "element_start" => "open_lexical", "element_end" => "close_lexical", "document_start" | "document_end" => return None, _ => "lexical" };
+    let Value::Object(lexical) = field(event, key)? else { return None; };
+    let (_, raw_value) = lexical.iter().find(|(name, _)| name == "raw_bytes")?;
+    let raw = byte_array(raw_value).ok()?;
+    let semantic = &lexical.iter().find(|(name, _)| name == "semantic")?.1;
+    let Value::Object(entries) = event else { return None; };
+    let expected = Value::Object(entries.iter().filter(|(name, _)| name != "$xml_event" && name != "lexical" && name != "open_lexical" && name != "close_lexical").map(|(name, value)| (name.clone(), strip_lexical(value))).collect());
+    (*semantic == expected).then_some(raw)
+}
+
+fn source_encoding_matches(source: Option<&str>, bom: &[u8], target: RenderEncoding) -> bool {
+    matches!((source, bom, target), (Some("UTF-8"), [], RenderEncoding::Utf8) | (Some("UTF-8"), [0xef,0xbb,0xbf], RenderEncoding::Utf8Bom) | (Some("UTF-16LE"), [0xff,0xfe], RenderEncoding::Utf16Le) | (Some("UTF-16BE"), [0xfe,0xff], RenderEncoding::Utf16Be))
+}
+fn target_bom(target: RenderEncoding) -> Vec<u8> { match target { RenderEncoding::Utf8 => vec![], RenderEncoding::Utf8Bom => vec![0xef,0xbb,0xbf], RenderEncoding::Utf16Le => vec![0xff,0xfe], RenderEncoding::Utf16Be => vec![0xfe,0xff] } }
+fn encoding_declaration(target: RenderEncoding) -> &'static str { match target { RenderEncoding::Utf8 | RenderEncoding::Utf8Bom => "UTF-8", RenderEncoding::Utf16Le | RenderEncoding::Utf16Be => "UTF-16" } }
+fn validate_declared_encoding(name: &str, target: RenderEncoding) -> Result<(), Error> { let ok = match target { RenderEncoding::Utf8 | RenderEncoding::Utf8Bom => name.eq_ignore_ascii_case("UTF-8"), RenderEncoding::Utf16Le | RenderEncoding::Utf16Be => name.eq_ignore_ascii_case("UTF-16") || name.eq_ignore_ascii_case("UTF-16LE") || name.eq_ignore_ascii_case("UTF-16BE") }; if ok { Ok(()) } else { Err(Error::at_kind(0, Reason::InvalidEncoding, "XML declaration conflicts with selected output encoding")) } }
+fn encode_text(text: &str, target: RenderEncoding) -> Vec<u8> { match target { RenderEncoding::Utf8 | RenderEncoding::Utf8Bom => text.as_bytes().to_vec(), RenderEncoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(), RenderEncoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect() } }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CanonicalMode { Inclusive11, Exclusive10 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CanonicalOptions {
+    pub mode: CanonicalMode,
+    pub comments: bool,
+    pub inclusive_prefixes: Vec<String>,
+}
+
+/// Canonicalize the resolved XML infoset. Lexical evidence is deliberately
+/// ignored: canonical output is a semantic operation, never a byte replay.
+pub fn canonical_document(value: &Value, options: &CanonicalOptions) -> Result<String, Error> {
+    if options.mode == CanonicalMode::Inclusive11 && !options.inclusive_prefixes.is_empty() {
+        return Err(Error::shape("inclusive_prefixes is legal only for Exclusive10"));
+    }
+    if required_text(value, "$xml").map_err(Error::shape)? != "document" {
+        return Err(Error::shape("XML canonical input must be a document"));
+    }
+    let Some(Value::Array(children)) = field(value, "children") else {
+        return Err(Error::shape("XML document children must be an array"));
+    };
+    if children.iter().filter(|node| required_text(node, "$xml").ok() == Some("element")).count() != 1 {
+        return Err(Error::shape("XML canonical input must contain exactly one root element"));
+    }
+    let mut output = String::new();
+    let mut root_seen = false;
+    let base = base_namespaces();
+    let rendered = BTreeMap::new();
+    for child in children {
+        let tag = required_text(child, "$xml").map_err(Error::shape)?;
+        match tag {
+            "declaration" | "doctype" | "document_whitespace" => {}
+            "element" => {
+                root_seen = true;
+                canonical_node(child, options, &base, &rendered, &mut output)?;
+            }
+            "comment" if options.comments => {
+                if root_seen { output.push('\n'); }
+                canonical_leaf(child, tag, &mut output)?;
+                if !root_seen { output.push('\n'); }
+            }
+            "processing_instruction" => {
+                if root_seen { output.push('\n'); }
+                canonical_leaf(child, tag, &mut output)?;
+                if !root_seen { output.push('\n'); }
+            }
+            "comment" => {}
+            _ => return Err(Error::shape("illegal node outside XML root element")),
+        }
+    }
+    Ok(output)
+}
+
+fn canonical_node(value: &Value, options: &CanonicalOptions, parent_scope: &BTreeMap<Option<String>, String>, parent_rendered: &BTreeMap<Option<String>, String>, output: &mut String) -> Result<(), Error> {
+    let tag = required_text(value, "$xml").map_err(Error::shape)?;
+    if tag != "element" { return canonical_leaf(value, tag, output); }
+    let name = parse_name(field(value, "name").ok_or_else(|| Error::shape("element lacks name"))?)?;
+    let mut scope = parent_scope.clone();
+    let Some(Value::Array(namespaces)) = field(value, "namespaces") else { return Err(Error::shape("element namespaces must be an array")); };
+    for namespace in namespaces {
+        let prefix = optional_text_field(namespace, "prefix").map_err(Error::shape)?.map(str::to_string);
+        let uri = required_text(namespace, "namespace_uri").map_err(Error::shape)?.to_string();
+        if !uri.is_empty() && !uri.contains(':') { return Err(Error::at_kind(0, Reason::Namespace, "relative namespace URI cannot be canonicalized")); }
+        scope.insert(prefix, uri);
+    }
+    let resolved = name.prefix.as_ref().and_then(|p| scope.get(&Some(p.clone()))).cloned().or_else(|| name.prefix.is_none().then(|| scope.get(&None).cloned()).flatten());
+    if resolved != name.namespace_uri { return Err(Error::at_kind(0, Reason::Namespace, "element expanded name disagrees with namespace bindings")); }
+    let Some(Value::Array(attributes)) = field(value, "attributes") else { return Err(Error::shape("element attributes must be an array")); };
+    let mut attrs = Vec::new();
+    let mut visible = BTreeSet::new();
+    if let Some(prefix) = &name.prefix { visible.insert(Some(prefix.clone())); } else if name.namespace_uri.is_some() { visible.insert(None); }
+    for attribute in attributes {
+        let attr_name = parse_name(field(attribute, "name").ok_or_else(|| Error::shape("attribute lacks name"))?)?;
+        if let Some(prefix) = &attr_name.prefix { visible.insert(Some(prefix.clone())); }
+        let resolved = attr_name.prefix.as_ref().and_then(|p| scope.get(&Some(p.clone()))).cloned();
+        if resolved != attr_name.namespace_uri { return Err(Error::at_kind(0, Reason::Namespace, "attribute expanded name disagrees with namespace bindings")); }
+        let value = canonical_attribute_value(attribute)?;
+        attrs.push((attr_name.namespace_uri.clone().unwrap_or_default(), attr_name.local.clone(), attr_name.raw, value));
+    }
+    for prefix in &options.inclusive_prefixes { visible.insert(if prefix == "#default" { None } else { Some(prefix.clone()) }); }
+    let mut declarations: Vec<_> = scope.iter().filter(|(prefix, uri)| {
+        if prefix.as_deref() == Some("xml") { return false; }
+        let selected = options.mode == CanonicalMode::Inclusive11 || visible.contains(*prefix);
+        selected && parent_rendered.get(*prefix) != Some(*uri)
+    }).map(|(prefix, uri)| (prefix.clone(), uri.clone())).collect();
+    declarations.sort_by(|a, b| match (&a.0, &b.0) { (None, None) => std::cmp::Ordering::Equal, (None, _) => std::cmp::Ordering::Less, (_, None) => std::cmp::Ordering::Greater, (Some(a), Some(b)) => a.cmp(b) });
+    attrs.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+    output.push('<'); output.push_str(&name.raw);
+    let mut rendered = parent_rendered.clone();
+    for (prefix, uri) in declarations {
+        output.push_str(" xmlns"); if let Some(prefix) = &prefix { output.push(':'); output.push_str(prefix); }
+        output.push_str("=\""); output.push_str(&canonical_attr_escape(&uri)); output.push('"');
+        rendered.insert(prefix, uri);
+    }
+    for (_, _, raw, value) in attrs { output.push(' '); output.push_str(&raw); output.push_str("=\""); output.push_str(&canonical_attr_escape(&value)); output.push('"'); }
+    output.push('>');
+    let Some(Value::Array(children)) = field(value, "children") else { return Err(Error::shape("element children must be an array")); };
+    for child in children {
+        if required_text(child, "$xml").map_err(Error::shape)? == "comment" && !options.comments { continue; }
+        canonical_node(child, options, &scope, &rendered, output)?;
+    }
+    output.push_str("</"); output.push_str(&name.raw); output.push('>');
+    Ok(())
+}
+
+fn canonical_attribute_value(attribute: &Value) -> Result<String, Error> {
+    if let Some(value) = optional_text_field(attribute, "normalized_value").map_err(Error::shape)? { return Ok(value.to_string()); }
+    let Some(Value::Array(parts)) = field(attribute, "parts") else { return Err(Error::shape("attribute parts must be an array")); };
+    let mut output = String::new();
+    for part in parts {
+        match required_text(part, "$xml").map_err(Error::shape)? {
+            "text" => output.push_str(required_text(part, "value").map_err(Error::shape)?),
+            "entity_ref" => output.push_str(optional_text_field(part, "resolved_value").map_err(Error::shape)?.ok_or_else(|| Error::at_kind(0, Reason::Canonicalization, "unresolved entity cannot be canonicalized"))?),
+            _ => return Err(Error::shape("illegal XML attribute part")),
+        }
+    }
+    Ok(output)
+}
+
+fn canonical_leaf(value: &Value, tag: &str, output: &mut String) -> Result<(), Error> {
+    match tag {
+        "text" | "cdata" => output.push_str(&canonical_text_escape(required_text(value, "value").map_err(Error::shape)?)),
+        "entity_ref" => output.push_str(&canonical_text_escape(optional_text_field(value, "resolved_value").map_err(Error::shape)?.ok_or_else(|| Error::at_kind(0, Reason::Canonicalization, "unresolved entity cannot be canonicalized"))?)),
+        "comment" => { output.push_str("<!--"); output.push_str(&normalize_lines(required_text(value, "value").map_err(Error::shape)?)); output.push_str("-->"); }
+        "processing_instruction" => { output.push_str("<?"); output.push_str(required_text(value, "target").map_err(Error::shape)?); let body = normalize_lines(required_text(value, "value").map_err(Error::shape)?); if !body.is_empty() { output.push(' '); output.push_str(&body); } output.push_str("?>"); }
+        _ => return Err(Error::shape(format!("unsupported canonical XML node {tag}"))),
+    }
+    Ok(())
+}
+
+fn normalize_lines(value: &str) -> String { value.replace("\r\n", "\n").replace('\r', "\n") }
+fn canonical_text_escape(value: &str) -> String { normalize_lines(value).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") }
+fn canonical_attr_escape(value: &str) -> String { value.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;").replace('\t', "&#x9;").replace('\n', "&#xA;").replace('\r', "&#xD;") }
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use super::{field, parse_document, parse_document_with, render_document, ByteLexer, EntityPolicy, Event, Limits, ParseOptions, Part, Reason, Scanner, StreamScanner, TokenKind, Value, WireEncoding};
+    use super::{canonical_document, field, parse_document, parse_document_with, render_document, stream_event_value, ByteLexer, CanonicalMode, CanonicalOptions, EntityPolicy, Event, LexicalPolicy, Limits, ParseOptions, Part, Reason, RenderEncoding, Scanner, StreamScanner, StreamWriter, TokenKind, Value, WireEncoding};
 
     fn scan(source: &str) -> Result<Vec<Event>, String> {
         let mut scanner = Scanner::new(source);
@@ -968,6 +1332,61 @@ mod tests {
         assert!(matches!(&expected[2],Event::ElementStart{name,..} if name.local=="r"));
         assert!(matches!(&expected[5],Event::ElementStart{name,..} if name.namespace_uri.as_deref()==Some("u")));
         assert!(matches!(expected.last(),Some(Event::DocumentEnd)));
+    }
+
+    fn stream_values(bytes: &[u8], split: usize) -> Vec<Value> {
+        let mut scanner = StreamScanner::new(4096, ParseOptions::safe()).expect("scanner");
+        let mut values = Vec::new();
+        scanner.push(&bytes[..split]).expect("first chunk");
+        while let Some(event) = scanner.next().expect("first events") { values.push(stream_event_value(event)); }
+        scanner.push(&bytes[split..]).expect("second chunk");
+        scanner.finish_input().expect("finish input");
+        while let Some(event) = scanner.next().expect("last events") { values.push(stream_event_value(event)); }
+        values
+    }
+
+    #[test]
+    fn stream_writer_preserves_every_event_across_every_input_split() {
+        let source = b"\xef\xbb\xbf<?xml version='1.0' encoding='UTF-8'?><r xmlns:p='urn:p' p:z='1'>x&amp;<![CDATA[<y>]]><!--c--><?go now?><p:e/></r>";
+        for split in 0..=source.len() {
+            let mut writer = StreamWriter::new(RenderEncoding::Utf8Bom, LexicalPolicy::PreserveValid);
+            let mut output = Vec::new();
+            for event in stream_values(source, split) { output.extend(writer.write(&event).expect("write event")); }
+            assert!(writer.is_finished());
+            assert_eq!(output, source, "split {split}");
+        }
+    }
+
+    #[test]
+    fn stream_writer_emits_selected_encoding_and_rejects_state_without_output() {
+        let source = b"<r a='x'>z</r>";
+        let events = stream_values(source, source.len());
+        for (encoding, bom, body) in [
+            (RenderEncoding::Utf8, Vec::new(), source.to_vec()),
+            (RenderEncoding::Utf16Le, vec![0xff, 0xfe], String::from_utf8(source.to_vec()).unwrap().encode_utf16().flat_map(u16::to_le_bytes).collect()),
+            (RenderEncoding::Utf16Be, vec![0xfe, 0xff], String::from_utf8(source.to_vec()).unwrap().encode_utf16().flat_map(u16::to_be_bytes).collect()),
+        ] {
+            let mut writer = StreamWriter::new(encoding, LexicalPolicy::Deterministic);
+            let mut output = Vec::new();
+            for event in &events { output.extend(writer.write(event).expect("encoded event")); }
+            let mut expected = bom; expected.extend(body);
+            assert_eq!(output, expected);
+        }
+        let mut writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::Deterministic);
+        let before = writer.clone();
+        let error = writer.write(&events[1]).expect_err("missing document start");
+        assert!(error.reason.contains("document_start"));
+        assert_eq!(writer.started, before.started);
+        assert_eq!(writer.stack, before.stack);
+    }
+
+    #[test]
+    fn canonical_xml_sorts_and_normalizes_semantic_infoset() {
+        let tree = parse_document("<?xml version='1.0'?><r xmlns:q='urn:q' xmlns:p='urn:p' q:z='2' a='x&#xA;y' p:a='1'><e/><!--c--><![CDATA[<&]]></r>").expect("tree");
+        let without = canonical_document(&tree, &CanonicalOptions { mode: CanonicalMode::Inclusive11, comments: false, inclusive_prefixes: vec![] }).expect("canonical");
+        assert_eq!(without, "<r xmlns:p=\"urn:p\" xmlns:q=\"urn:q\" a=\"x&#xA;y\" p:a=\"1\" q:z=\"2\"><e></e>&lt;&amp;</r>");
+        let with = canonical_document(&tree, &CanonicalOptions { mode: CanonicalMode::Exclusive10, comments: true, inclusive_prefixes: vec!["p".to_string()] }).expect("exclusive");
+        assert_eq!(with, "<r xmlns:p=\"urn:p\" xmlns:q=\"urn:q\" a=\"x&#xA;y\" p:a=\"1\" q:z=\"2\"><e></e><!--c-->&lt;&amp;</r>");
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

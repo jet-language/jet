@@ -585,6 +585,9 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == "DataEvent" {
         return format!("{}jet_std::DataEvent::{}", cx.root_prefix, variant);
     }
+    if matches!(type_name, "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonicalMode") {
+        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+    }
     // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`/
     // `.Inherit`/`.Capture`) — its Rust type lives in `jet_std`, plain variant names.
     if type_name == "ProcessStreamMode" {

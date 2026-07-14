@@ -108,6 +108,19 @@
     impl XMLParseOptions {
         pub fn safe() -> Self { Self { entities: XMLEntityPolicy::Preserve, limits: XMLLimits::safe() } }
     }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum XMLEncoding { UTF8, UTF8BOM, UTF16LE, UTF16BE }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum XMLLexicalPolicy { PreserveValid, Deterministic }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct XMLRenderOptions { pub encoding: XMLEncoding, pub lexical: XMLLexicalPolicy }
+    impl XMLRenderOptions {
+        pub fn safe() -> Self { Self { encoding: XMLEncoding::UTF8, lexical: XMLLexicalPolicy::PreserveValid } }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum XMLCanonicalMode { Inclusive11, Exclusive10 }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct XMLCanonical { pub mode: XMLCanonicalMode, pub comments: bool, pub inclusive_prefixes: Vec<String> }
     pub struct JSONReader {
         pub(crate) input: super::JetFileReader,
         pub(crate) limits: EncodingLimits,
@@ -172,7 +185,15 @@
         pub(crate) total: i64,
         pub(crate) eof: bool,
     }
-    pub struct XMLWriter { _private: () }
+    pub struct XMLWriter {
+        pub(crate) output: super::JetFileWriter,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) renderer: super::jet_xml_pull::StreamWriter,
+        pub(crate) buffer: Vec<u8>,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) total: i64,
+        pub(crate) finished: bool,
+    }
     pub struct CBORReader {
         pub(crate) input: super::JetFileReader,
         pub(crate) limits: EncodingLimits,

@@ -960,7 +960,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
-                    && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLError")
+                    && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
                     && type_args.is_empty()
                 {
                     let tfields = fields

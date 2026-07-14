@@ -4366,6 +4366,70 @@ fn run() {{
 }
 
 #[test]
+fn xml_stream_writer_and_canonical_surface_run_end_to_end() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML writer test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_xml_writer_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("input.xml");
+    let output = dir.join("output.xml");
+    let utf16 = dir.join("output-utf16.xml");
+    let source = "<?xml version='1.0'?><r xmlns:p='urn:p' p:a='x&amp;y'>z<p:e/></r>";
+    fs::write(&input, source).unwrap();
+    let source_code = format!(r#"
+use core.encoding.xml as xml
+use core.encoding as encoding
+use core.files as files
+
+fn run() {{
+    input :: files.open("{}") ?? panic("open")
+    output :: files.create("{}") ?? panic("create")
+    reader :: xml.reader(^input) ?? panic("reader")
+    writer :: xml.writer(^output) ?? panic("writer")
+    loop true {{
+        maybe :: reader.next() ?? panic("next")
+        if maybe == {{
+            Val(event) -> {{ writer.write(event) ?? panic("write") }}
+            None -> {{ break }}
+        }}
+    }}
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("idempotent finish")
+    input16 :: files.open("{}") ?? panic("open utf16 source")
+    output16 :: files.create("{}") ?? panic("create utf16")
+    reader16 :: xml.reader(^input16) ?? panic("reader utf16")
+    render16 := xml.XMLRenderOptions.{{ encoding: .UTF16LE, lexical: .Deterministic }}
+    writer16 :: xml.writer(^output16, encoding.EncodingLimits.safe(), render16) ?? panic("writer utf16")
+    loop true {{
+        maybe :: reader16.next() ?? panic("next utf16")
+        if maybe == {{
+            Val(event) -> {{ writer16.write(event) ?? panic("write utf16") }}
+            None -> {{ break }}
+        }}
+    }}
+    writer16.finish() ?? panic("finish utf16")
+    tree :: xml.parse("<r xmlns:q='urn:q' q:z='2' a='1'><e/></r>") ?? panic("parse")
+    options := xml.XMLCanonical.{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["q"] }}
+    print(xml.canonical(tree, options) ?? panic("canonical"))
+}}
+"#, input.to_string_lossy().replace('\\', "\\\\"), output.to_string_lossy().replace('\\', "\\\\"), input.to_string_lossy().replace('\\', "\\\\"), utf16.to_string_lossy().replace('\\', "\\\\"));
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_writer", &source_code, &[], None);
+    assert_eq!(code, 0, "XML writer test failed: {stderr}");
+    assert_eq!(stdout, "<r xmlns:q=\"urn:q\" a=\"1\" q:z=\"2\"><e></e></r>\n");
+    assert_eq!(fs::read(&output).unwrap(), source.as_bytes());
+    let deterministic =
+        "<?xml version=\"1.0\"?><r xmlns:p='urn:p' p:a='x&amp;y'>z<p:e/></r>";
+    let mut expected16 = vec![0xff, 0xfe];
+    expected16.extend(deterministic.encode_utf16().flat_map(u16::to_le_bytes));
+    assert_eq!(fs::read(&utf16).unwrap(), expected16);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn text_unicode_audit_surface_runs() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

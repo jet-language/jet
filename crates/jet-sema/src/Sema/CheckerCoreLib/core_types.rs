@@ -186,7 +186,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "EncodingLimits" | "EncodingError" | "EncodingCause"
         | "EncodingFormat" | "EncodingErrorKind" | "DataEvent"
         | "CBOROptions" | "CBORError" | "CBORErrorKind"
-        | "XMLLimits" | "XMLParseOptions" | "XMLError" | "XMLReason" | "XMLEntityPolicy"
+        | "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLEncoding"
+        | "XMLLexicalPolicy" | "XMLCanonical" | "XMLCanonicalMode" | "XMLError" | "XMLReason" | "XMLEntityPolicy"
         | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter"
         | "CSVReader" | "CSVWriter" | "XMLReader" | "XMLWriter"
         | "CBORReader" | "CBORWriter"
@@ -847,6 +848,9 @@ pub fn encoding_handle_method_return(
             Some(Some(result_ty(unit, error)))
         }
         ("XMLReader", "next", 0) => Some(Some(result_ty(Type::Option(Box::new(Type::Named("DataTree".to_string()))),error))),
+        ("XMLWriter", "write", 1) | ("XMLWriter", "flush" | "finish", 0) => {
+            Some(Some(result_ty(unit, error)))
+        }
         ("CBORReader", "next", 0) => Some(Some(result_ty(Type::Option(Box::new(Type::Named("DataEvent".to_string()))), error))),
         ("CBORWriter", "write", 1) | ("CBORWriter", "flush" | "finish", 0) => Some(Some(result_ty(unit, error))),
         _ => None,
@@ -980,6 +984,15 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("entities".to_string(), Type::Named("XMLEntityPolicy".to_string())),
             ("limits".to_string(), Type::Named("XMLLimits".to_string())),
         ]),
+        "XMLRenderOptions" => Some(vec![
+            ("encoding".to_string(), Type::Named("XMLEncoding".to_string())),
+            ("lexical".to_string(), Type::Named("XMLLexicalPolicy".to_string())),
+        ]),
+        "XMLCanonical" => Some(vec![
+            ("mode".to_string(), Type::Named("XMLCanonicalMode".to_string())),
+            ("comments".to_string(), Type::Bool),
+            ("inclusive_prefixes".to_string(), Type::List(Box::new(Type::String))),
+        ]),
         "XMLError" => Some(vec![
             ("kind".to_string(), Type::Named("XMLReason".to_string())),
             ("byte_offset".to_string(), Type::Option(Box::new(Type::Int))),
@@ -1067,6 +1080,9 @@ pub(crate) fn core_encoding_variants(
         "CBORErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "TypeMismatch", "TrailingData", "NonCanonical"],
         "XMLReason" => &["InvalidEncoding", "Malformed", "MismatchedTag", "InvalidName", "Namespace", "DuplicateAttribute", "Entity", "EntityCycle", "Limit", "Canonicalization", "Shape", "Unsupported"],
         "XMLEntityPolicy" => &["Preserve", "Reject"],
+        "XMLEncoding" => &["UTF8", "UTF8BOM", "UTF16LE", "UTF16BE"],
+        "XMLLexicalPolicy" => &["PreserveValid", "Deterministic"],
+        "XMLCanonicalMode" => &["Inclusive11", "Exclusive10"],
         _ => return None,
     };
     for name in units {

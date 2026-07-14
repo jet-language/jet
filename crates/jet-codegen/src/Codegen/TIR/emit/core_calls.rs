@@ -907,6 +907,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.xml", "to_string") => {
             format!("{}(&({}))", helper("jet_std_xml_render"), arg(0))
         }
+        ("core.encoding.xml", "canonical") => {
+            format!("{}(&({}), &({}))", helper("jet_std_xml_canonical"), arg(0), arg(1))
+        }
         ("core.encoding.cbor", "parse") => {
             let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
             format!("{}(&({}), {})", helper("jet_enc_cbor_parse"), arg(0), options)
@@ -935,6 +938,25 @@ pub(crate) fn emit_tir_core_call(
             format!(
                 "{}({}, {}, {})",
                 helper("jet_enc_xml_reader"),
+                arg(0),
+                limits,
+                xml
+            )
+        }
+        ("core.encoding.xml", "writer") => {
+            let limits = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix)
+            };
+            let xml = if args.len() > 2 {
+                arg(2)
+            } else {
+                format!("{}jet_std::XMLRenderOptions::safe()", cx.root_prefix)
+            };
+            format!(
+                "{}({}, {}, {})",
+                helper("jet_enc_xml_writer"),
                 arg(0),
                 limits,
                 xml

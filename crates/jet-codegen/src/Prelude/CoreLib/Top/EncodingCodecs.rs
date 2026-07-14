@@ -284,6 +284,26 @@ fn jet_std_xml_render(d: &jet_std::DataTree) -> String {
         .unwrap_or_default()
 }
 
+fn jet_std_xml_canonical(d: &jet_std::DataTree, options: &jet_std::XMLCanonical) -> Result<String, jet_std::XMLError> {
+    let value = jet_xml_from_data_tree(d).map_err(|reason| jet_std::XMLError {
+        kind: jet_std::XMLReason::Shape,
+        byte_offset: None,
+        line: None,
+        column: None,
+        path: String::new(),
+        reason,
+    })?;
+    let mode = match options.mode {
+        jet_std::XMLCanonicalMode::Inclusive11 => crate::jet_xml_pull::CanonicalMode::Inclusive11,
+        jet_std::XMLCanonicalMode::Exclusive10 => crate::jet_xml_pull::CanonicalMode::Exclusive10,
+    };
+    crate::jet_xml_pull::canonical_document(&value, &crate::jet_xml_pull::CanonicalOptions {
+        mode,
+        comments: options.comments,
+        inclusive_prefixes: options.inclusive_prefixes.clone(),
+    }).map_err(jet_xml_error)
+}
+
 fn jet_cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
     if n < 24 { out.push((major << 5) | n as u8); }
     else if n <= u8::MAX as u64 { out.extend_from_slice(&[(major << 5) | 24, n as u8]); }

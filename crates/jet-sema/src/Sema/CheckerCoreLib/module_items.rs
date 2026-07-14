@@ -172,8 +172,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.yaml" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.xml" => &[
-            "XMLLimits", "XMLParseOptions", "XMLError", "XMLReason", "XMLEntityPolicy",
-            "parse", "parse_with", "to_string", "reader", "XMLReader",
+            "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding",
+            "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy",
+            "parse", "parse_with", "to_string", "canonical", "reader", "writer", "XMLReader", "XMLWriter",
         ],
         "core.encoding.cbor" => &[
             "CBOROptions", "CBORError", "CBORErrorKind", "parse", "decode",
