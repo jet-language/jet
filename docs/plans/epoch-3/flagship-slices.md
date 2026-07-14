@@ -1,5 +1,11 @@
 # Flagship vertical slices — Epoch 3 exit criterion (c123 / card #9)
 
+**Removed 2026-07-14:** the `examples/apps/` tree and `tests/slices.rs`
+harness are gone. This plan stays as historical product intent for CLI /
+server / freestanding / web / game flagships; do not recreate those paths
+unless the owner re-opens a living location. Capstone work continues via
+Tower cards (JetLab / JetPlay), not under `examples/apps/`.
+
 **Owner conversion (2026-07-02):** each pillar ships its flagship slice as an
 Epoch 3 exit criterion — "a slice epoch scheduled after everything is a slice
 that never happens." Pillars per the card body: **CLI, server,
@@ -26,7 +32,7 @@ meets all seven proofs before its pillar counts:
 |---|---|
 | **Docs** | `README.md` in the slice dir (build / run / test / deploy walkthrough); `///` on every public fn; doctests green via `jet test` |
 | **Tests** | `#Test` blocks on the core logic; property tests where the domain has invariants; all in the suite |
-| **Golden (I5)** | a deterministic mode with committed expected output, enforced by `tests/slices.rs` |
+| **Golden (I5)** | a deterministic mode with committed expected output (was `tests/slices.rs`; harness removed 2026-07-14 — use a living golden/UI test when re-homing) |
 | **Packaging** | `pkg.jet` manifest; `jet registry publish` pre-publish gate green (build + tests + API diff); SBOM/`jet registry vendor` where deps exist |
 | **Diagnostics** | ≥1 new `tests/ui` fixture per slice: a realistic mistake from that domain, with the code/what/why/fix voice (I4) |
 | **Performance** | a `jet bench` target with a pinned regression budget, plus a binary/bundle size budget in `tests/release_gates.rs` style |
@@ -35,18 +41,20 @@ meets all seven proofs before its pillar counts:
 No partial slices (philosophy: do it right the first time). A slice blocked on
 an unratified upstream decision names the gate and stops; it does not stub.
 
-## Location and harness (decided here — engineering, not owner-taste)
+## Location and harness (historical — engineering, not owner-taste)
 
-- Slices live at **`examples/apps/<name>/`**: `main.jet` (+ modules),
-  `pkg.jet`, `README.md`, `expected/` outputs, fixtures. `examples/features/`
+**Status 2026-07-14:** the chosen paths below were deleted. Keep the proof bar;
+pick a new living location when a flagship card is active again.
+
+- ~~Slices lived at `examples/apps/<name>/`~~ (removed). `examples/features/`
   stays single-feature examples; `canon.jet` stays the syntax showcase.
-- New **`tests/slices.rs`** harness. `tests/golden.rs` stays pinned to
-  `examples/features/`; slices need domain drivers golden.rs can't express:
-  stdout-golden (CLI), HTTP probe loop (server), QEMU serial capture
-  (freestanding), web artifact + bundle check (web), headless replay (game).
-- The raylib plan's `examples/showcase/` reference
-  (`../../sidequests/raylib-graphics.md` step 5) lands under
-  `examples/apps/` instead.
+- ~~`tests/slices.rs` harness~~ (removed). `tests/golden.rs` stays pinned to
+  `examples/features/`. Domain drivers still needed when re-homed: stdout-golden
+  (CLI), HTTP probe loop (server), QEMU serial capture (freestanding), web
+  artifact + bundle check (web), headless replay (game).
+- The raylib plan's retired `examples/showcase/` reference
+  (`../../sidequests/raylib-graphics.md` step 5) must not be revived under
+  `examples/apps/`.
 - Nondeterminism is engineered out for goldens: fixed RNG seeds, `--replay`
   input files, injectable clocks (D-MOTIONTIME1 pattern), ephemeral ports.
 
@@ -107,7 +115,7 @@ ui fixture = sending a non-`Serialize` type as a JSON response.
 
 ## Slice 3 — Low-level / freestanding: `metal` (decided; no ballot)
 
-**App:** `examples/apps/metal/` — a bare-metal QEMU image: boots without OS
+**App (historical path):** ~~`examples/apps/metal/`~~ — a bare-metal QEMU image: boots without OS
 or stdlib, prints a banner over UART via volatile MMIO, then streams a fixed
 number of Game-of-Life generations as serial frames and halts. Deterministic
 end to end.
@@ -194,7 +202,8 @@ Gate order, not preference order. Unblocked slices proceed in parallel where
 they don't contend.
 
 1. **CLI** — no platform gates; starts at D-FLAGSHIP1 ratification. Ships
-   first and sets the proof-matrix template + `tests/slices.rs` harness.
+   first and sets the proof-matrix template (the old `tests/slices.rs` harness
+   is gone as of 2026-07-14).
 2. **Freestanding `metal`** — no owner gate; starts immediately, parallel
    with CLI. Feeds concrete API needs into the open D-LL3 ballot.
 3. **Server** — starts at D-FLAGSHIP2 ratification; core slice needs only

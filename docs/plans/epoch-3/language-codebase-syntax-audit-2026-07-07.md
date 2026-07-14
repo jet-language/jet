@@ -1,7 +1,8 @@
 # Language/codebase syntax audit — 2026-07-07
 
 Scope: docs/spec, syntax registry, lexer/parser, formatter, sema, codegen/TIR,
-diagnostics snapshots, core-library docs, examples/apps, and live Tower cards.
+diagnostics snapshots, core-library docs, then-current examples/apps (removed
+2026-07-14), and live Tower cards.
 
 This pass excludes the earlier jetos/canvas/core-lib batch except where those
 surfaces expose general language law drift.
@@ -99,20 +100,19 @@ and generated-runtime errors, not every source comment.
 Action: add a diagnostics voice lint/test and convert raw runtime panics that
 represent Jet user errors into Jet-owned diagnostics or fallible API errors.
 
-### 7. Current examples/apps are slices, not capstones
+### 7. examples/apps were slices, not capstones (removed 2026-07-14)
 
-`examples/apps/*/README.md` describes `jetgrep`, `jetpaste`, `jettasks`,
-`jetfighter`, and `metal` as implementation slices. They are useful proof
-fixtures, but they are not enough for the original capstone goal: standalone,
-functional, testable apps that can be compared against mature equivalents in
-other ecosystems.
+At audit time, `examples/apps/*/README.md` described `jetgrep`, `jetpaste`,
+`jettasks`, `jetfighter`, and `metal` as implementation slices — useful proof
+fixtures, not product capstones. That tree and `tests/slices.rs` were deleted
+on 2026-07-14; do not treat those paths as living fixtures.
 
-Devil pass: slices are valuable because they keep proof cheap and deterministic.
-The problem is labeling and acceptance, not their existence. Keep slices as CI
-fixtures; build separate capstones with product-grade proof.
+Devil pass: cheap deterministic slices were valuable. The failure mode was
+labeling them as capstones. Capstone proof belongs on JetLab / JetPlay cards,
+not under `examples/apps/`.
 
-Action: add a capstone proof ratchet and two product capstones: JetLab and
-JetPlay.
+Action (then): capstone proof ratchet + JetLab / JetPlay. Action (now): keep
+those cards; do not recreate `examples/apps/` unless the owner re-homes them.
 
 ## Capstone candidates
 
@@ -160,6 +160,6 @@ one editor workflow that changes the shipped game and is tested.
 - Dispatch/pattern naming and doc reconciliation.
 - Marker-plane discoverability matrix.
 - Diagnostics voice/runtime-error audit.
-- Capstone proof ratchet for existing examples/apps.
+- Capstone proof ratchet (examples/apps removed 2026-07-14; ratchet is historical).
 - JetLab capstone.
 - JetPlay capstone.
