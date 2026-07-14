@@ -343,6 +343,8 @@ pub const REF_SEPARATOR: &str = ":";
 pub const REF_SOURCE_NIXPKGS: &str = "nixpkgs";
 pub const REF_SOURCE_GITHUB: &str = "github";
 pub const REF_SOURCE_PATH: &str = "path";
+/// D-FFI-R1 / D-JPK-PROVIDERS2: direct CRAN ecosystem root.
+pub const REF_SOURCE_CRAN: &str = "cran";
 
 /// D-JPK2/9: the Phase 1 verb set.
 pub const JETPACK_VERBS: &[&str] = &[

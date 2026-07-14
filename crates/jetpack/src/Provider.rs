@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod remote;
+mod cran;
+use cran::CranProvider;
 
 use remote::{
     copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, source_cache_dir,
@@ -185,6 +187,21 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
+        ProviderKind::Cran => {
+            let project = ctx.project_dir?;
+            let (output, source_hash, _repository, env) =
+                super::Lock::cran_realization(project, &spec.raw)?;
+            Some(super::Store::CacheExpectation {
+                identity: super::Store::CacheIdentity {
+                    source_fingerprint: source_hash,
+                    recipe_fingerprint: SHA256::sha256_hex(cran::RECIPE_ID.as_bytes()),
+                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
+                    platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
+                },
+                owned_output: Some(PathBuf::from(output)),
+                allow_unsigned_local: true,
+            })
+        }
         // An inferred source realized offline defaults to nix with no lock-backed
         // identity to match; no early cache path.
         ProviderKind::Infer => None,
@@ -266,6 +283,8 @@ pub enum ProviderError {
     Unsupported(String),
     /// The first-party `core` builder could not realize the package.
     CoreBuild(String),
+    /// Native CRAN metadata, integrity, dependency, or R installation failure.
+    Cran(String),
     /// E1232 (D-MONOREF1): a monorepo source could not be fetched — the sparse
     /// subtree checkout and the full-clone fallback both failed.
     MonorepoFetch(String),
@@ -300,6 +319,7 @@ impl ProviderError {
             ProviderError::Channel(_) => Some("E1271"),
             ProviderError::BuildDebug(_) => Some("E1273"),
             ProviderError::Offline(_) => Some("E1276"),
+            ProviderError::Cran(_) => None,
             _ => None,
         }
     }
@@ -333,6 +353,7 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
         Source::Nixpkgs => format!("nixpkgs#{}", spec.package),
         Source::Github => format!("github:{}", spec.package),
         Source::Path => format!("path:{}", spec.package),
+        Source::Cran => format!("cran:{}", spec.package),
         Source::Named(name) => {
             let upstream = table.upstream(name).unwrap_or(name);
             format!("{upstream}#{}", spec.package)
@@ -711,6 +732,7 @@ fn find_rlib_in(pkg_dir: &Path) -> Option<String> {
 pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
     match kind {
         ProviderKind::Core => Box::new(CoreProvider),
+        ProviderKind::Cran => Box::new(CranProvider),
         _ => Box::new(NixProvider),
     }
 }
@@ -729,11 +751,13 @@ pub fn resolve_kind(
     offline: bool,
     cache_dir: &Path,
 ) -> ProviderKind {
-    let Source::Named(name) = &spec.source else {
-        return ProviderKind::Nix;
-    };
+    if matches!(spec.source, Source::Cran) {
+        return ProviderKind::Cran;
+    }
+    let Source::Named(name) = &spec.source else { return ProviderKind::Nix; };
     match table.provider(name) {
         ProviderKind::Core => ProviderKind::Core,
+        ProviderKind::Cran => ProviderKind::Cran,
         ProviderKind::Nix => ProviderKind::Nix,
         // U9: peek the remote's `pkg.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
@@ -751,7 +775,7 @@ pub fn uses_nix_provider(
     offline: bool,
     cache_dir: &Path,
 ) -> bool {
-    resolve_kind(spec, table, offline, cache_dir) != ProviderKind::Core
+    matches!(resolve_kind(spec, table, offline, cache_dir), ProviderKind::Nix | ProviderKind::Infer)
 }
 
 /// U23 / D-JPK-NONIX1=A: package refs that resolve through the Nix
@@ -923,6 +947,9 @@ fn stage_adapter_source(
         }
         Source::Nixpkgs => Err(ProviderError::Adapter(
             "`nixpkgs@...` is an index source, not source bytes; use `jetpack add <ref> --adapt` to draft a concrete adapter.".to_string(),
+        )),
+        Source::Cran => Err(ProviderError::Adapter(
+            "CRAN packages must be realized before they can be adapter source bytes.".to_string(),
         )),
         Source::Named(_) => Err(ProviderError::Adapter(
             "adapter source must be a built-in provider ref like `path@vendor/tool`.".to_string(),

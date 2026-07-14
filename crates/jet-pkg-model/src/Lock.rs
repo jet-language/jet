@@ -101,6 +101,13 @@ pub enum LockSource {
     /// [`LockEnvelope`] `output_hash`. The ref spelling is a label only — trust
     /// comes from the re-hashed closure, never the text.
     Nix { reference: String, output: String },
+    /// D-FFI-R1: exact CRAN closure pinned by SHA-256 and realized output.
+    Cran {
+        reference: String,
+        output: String,
+        source_hash: String,
+        repository: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +168,10 @@ pub fn write(lock: &LockFile) -> String {
                 "{{ nix = \"{}\", output = \"{}\" }}",
                 escape_str(reference),
                 escape_str(output)
+            ),
+            LockSource::Cran { reference, output, source_hash, repository } => format!(
+                "{{ cran = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\" }}",
+                escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository)
             ),
         };
         out.push_str(&format!("source = {}\n", source_str));
@@ -613,6 +624,14 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
         let output = kv_field(s, "output").unwrap_or_default();
         return Ok(LockSource::Nix { reference, output });
     }
+    if let Some(reference) = kv_field(s, "cran") {
+        return Ok(LockSource::Cran {
+            reference,
+            output: kv_field(s, "output").unwrap_or_default(),
+            source_hash: kv_field(s, "source-hash").unwrap_or_default(),
+            repository: kv_field(s, "repository").unwrap_or_default(),
+        });
+    }
     if let Some(url) = kv_field(s, "git") {
         let selector = if let Some(t) = kv_field(s, "tag") {
             format!("tag = \"{}\"", t)
@@ -787,6 +806,80 @@ pub fn nix_realization(project_root: &Path, reference: &str) -> Option<(String, 
                 if let Some(env) = pkg.envelope {
                     return Some((output, env));
                 }
+            }
+        }
+    }
+    None
+}
+
+/// Record an exact CRAN source closure and realized R library for offline replay.
+pub fn record_cran_realization(
+    project_root: &Path,
+    name: &str,
+    version: &str,
+    reference: &str,
+    output: &str,
+    source_hash: &str,
+    repository: &str,
+    dependencies: Vec<String>,
+    envelope: LockEnvelope,
+) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            source_channels: Vec::new(),
+        });
+    lock.version = LOCK_VERSION;
+    let entry = LockedPackage {
+        name: name.to_string(),
+        version: version.to_string(),
+        source: LockSource::Cran {
+            reference: reference.to_string(),
+            output: output.to_string(),
+            source_hash: source_hash.to_string(),
+            repository: repository.to_string(),
+        },
+        locked: None,
+        fingerprint: source_hash.to_string(),
+        content_hash: None,
+        dependencies,
+        layer: None,
+        inferred_layer: None,
+        effects: Vec::new(),
+        effect_grants: Vec::new(),
+        envelope: Some(envelope),
+    };
+    if let Some(existing) = lock.packages.iter_mut().find(|p| {
+        p.name == name && matches!(&p.source, LockSource::Cran { .. })
+    }) {
+        *existing = entry;
+    } else {
+        lock.packages.push(entry);
+    }
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// Exact CRAN realization trust root for online integrity and offline replay.
+pub fn cran_realization(
+    project_root: &Path,
+    reference: &str,
+) -> Option<(String, String, String, LockEnvelope)> {
+    let lock = load(project_root)?;
+    for pkg in lock.packages {
+        if let LockSource::Cran { reference: r, output, source_hash, repository } = pkg.source {
+            if r == reference {
+                return Some((output, source_hash, repository, pkg.envelope?));
             }
         }
     }

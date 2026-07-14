@@ -432,6 +432,11 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             reason,
             "check the package name and that its source repo has an env.jet.",
         ),
+        ProviderError::Cran(reason) => theme.error(
+            "couldn't realize that CRAN package",
+            reason,
+            "check the exact CRAN package ref and the configured CRAN authority.",
+        ),
         // E1232: sparse subtree fetch + full-clone fallback both failed.
         ProviderError::MonorepoFetch(reason) => theme.error_coded(
             "E1232",

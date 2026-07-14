@@ -21,6 +21,8 @@ pub enum Source {
     Github,
     /// A local directory holding a pack file or used as a flake fallback.
     Path,
+    /// A package from the CRAN R package registry (D-FFI-R1).
+    Cran,
     /// A pack-declared named source, e.g. `stable` → a pinned nixpkgs (D-JPK17).
     Named(String),
 }
@@ -32,6 +34,7 @@ impl Source {
             Source::Nixpkgs => Syntax::REF_SOURCE_NIXPKGS,
             Source::Github => Syntax::REF_SOURCE_GITHUB,
             Source::Path => Syntax::REF_SOURCE_PATH,
+            Source::Cran => Syntax::REF_SOURCE_CRAN,
             Source::Named(name) => name,
         }
     }
@@ -41,6 +44,7 @@ impl Source {
         name == Syntax::REF_SOURCE_NIXPKGS
             || name == Syntax::REF_SOURCE_GITHUB
             || name == Syntax::REF_SOURCE_PATH
+            || name == Syntax::REF_SOURCE_CRAN
     }
 
     fn builtin(name: &str) -> Option<Source> {
@@ -48,6 +52,7 @@ impl Source {
             n if n == Syntax::REF_SOURCE_NIXPKGS => Some(Source::Nixpkgs),
             n if n == Syntax::REF_SOURCE_GITHUB => Some(Source::Github),
             n if n == Syntax::REF_SOURCE_PATH => Some(Source::Path),
+            n if n == Syntax::REF_SOURCE_CRAN => Some(Source::Cran),
             _ => None,
         }
     }
@@ -67,6 +72,7 @@ pub enum ProviderKind {
     #[default]
     Nix,
     Core,
+    Cran,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
     /// `pkg.jet` (U9). Only the typed `github@…` surface produces this.
     Infer,
@@ -78,6 +84,7 @@ impl ProviderKind {
     pub fn parse(s: &str) -> ProviderKind {
         match s {
             "core" => ProviderKind::Core,
+            "cran" => ProviderKind::Cran,
             _ => ProviderKind::Nix,
         }
     }
@@ -86,6 +93,7 @@ impl ProviderKind {
         match self {
             ProviderKind::Nix => "nix",
             ProviderKind::Core => "core",
+            ProviderKind::Cran => "cran",
             // Never user-shown: resolved before any listing/diagnostic.
             ProviderKind::Infer => "infer",
         }
@@ -604,6 +612,13 @@ mod tests {
         let r = classify("path:./my-env").unwrap();
         assert_eq!(r.source, Source::Path);
         assert_eq!(r.package, "./my-env");
+    }
+
+    #[test]
+    fn classifies_direct_cran_root_with_exact_version() {
+        let r = classify("cran:jsonlite#version=1.9.0").unwrap();
+        assert_eq!(r.source, Source::Cran);
+        assert_eq!(r.package, "jsonlite#version=1.9.0");
     }
 
     #[test]
