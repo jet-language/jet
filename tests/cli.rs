@@ -2087,6 +2087,41 @@ fn ruby_bind_launders_parse_failure_as_e3208() {
     let output=Command::new(jet()).args(["inspect","bind","ruby"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("syntax error"));assert!(!stderr.contains("broken.rb:"));check_snapshot("bind_ruby_invalid_e3208.txt",&scrub(&stderr,&script));
 }
 
+#[test]
+fn php_bind_runs_a_persistent_bounded_worker_pool() {
+    if Command::new("php").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("php_bind_pool");let script=dir.join("ops.php");
+    let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/php");fs::copy(example.join("ops.php"),&script).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","php"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"PHP bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/php");assert!(cache.join("libjet_php_ops.a").is_file());assert!(cache.join("ops_worker.php").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("pool_workers=4"));
+    fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PHP binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    fs::write(dir.join("pool.c"),r#"#include <pthread.h>
+#include <stdint.h>
+#include <time.h>
+#include <unistd.h>
+extern int64_t jet_php_ops_open(void);
+extern const char* jet_php_ops_invoke_pooled_sleep(int64_t,const char*,int64_t);
+extern const char* jet_php_ops_invoke_sleep_call(int64_t,const char*,int64_t);
+extern const char* jet_php_ops_invoke_transform(int64_t,const char*,int64_t);
+extern void jet_php_ops_cancel(int64_t);
+extern void jet_php_ops_close(int64_t);
+extern int64_t jet_php_ops_take_error(void);
+static int64_t pool;static int64_t codes[4];
+static void* parallel_call(void*arg){intptr_t i=(intptr_t)arg;jet_php_ops_invoke_pooled_sleep(pool,"null",5000);codes[i]=jet_php_ops_take_error();return 0;}
+static void* cancel_call(void*unused){(void)unused;jet_php_ops_invoke_sleep_call(pool,"null",60000);codes[0]=jet_php_ops_take_error();return 0;}
+static int64_t millis(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (int64_t)t.tv_sec*1000+t.tv_nsec/1000000;}
+int main(void){const char*valid="{\"nested\":{},\"list\":[],\"scalar\":1,\"nothing\":null}";pool=jet_php_ops_open();if(!pool)return 1;pthread_t threads[4];int64_t start=millis();for(intptr_t i=0;i<4;i++)if(pthread_create(&threads[i],0,parallel_call,(void*)i))return 2;for(int i=0;i<4;i++)pthread_join(threads[i],0);if(millis()-start>2500)return 3;for(int i=0;i<4;i++)if(codes[i])return 4;jet_php_ops_invoke_sleep_call(pool,"null",100);if(jet_php_ops_take_error()!=2)return 5;jet_php_ops_invoke_transform(pool,valid,5000);int64_t recovery=jet_php_ops_take_error();if(recovery)return 20+(int)recovery;pthread_t cancelled;if(pthread_create(&cancelled,0,cancel_call,0))return 7;usleep(100000);jet_php_ops_cancel(pool);pthread_join(cancelled,0);if(codes[0]!=3)return 8;for(int i=0;i<4;i++){jet_php_ops_invoke_transform(pool,valid,5000);int64_t code=jet_php_ops_take_error();if(code)return 30+(int)code;}jet_php_ops_close(pool);int64_t pools[8];for(int i=0;i<8;i++)if(!(pools[i]=jet_php_ops_open()))return 40+i;if(jet_php_ops_open()!=0||jet_php_ops_take_error()!=1)return 49;for(int i=0;i<8;i++)jet_php_ops_close(pools[i]);return 0;}
+"#).unwrap();
+    let cc=Command::new("cc").arg("pool.c").args(["-L.jet/bindings/php","-l:libjet_php_ops.a","-lpthread","-o","pool"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"PHP pool probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let pool=Command::new(dir.join("pool")).current_dir(&dir).output().unwrap();assert!(pool.status.success(),"PHP worker-pool probe failed: {:?}",pool.status.code());
+}
+
+#[test]
+fn php_bind_launders_parse_failure_as_e3208() {
+    if Command::new("php").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("php_bind_invalid");let script=dir.join("broken.php");fs::write(&script,"<?php function broken($input) { if ( }\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","php"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("Parse error"));assert!(!stderr.contains("broken.php on line"));check_snapshot("bind_php_invalid_e3208.txt",&scrub(&stderr,&script));
+}
+
 #[cfg(not(target_os="windows"))]
 #[test]
 fn com_bind_rejects_non_windows_before_reading_input() {

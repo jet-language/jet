@@ -24,6 +24,8 @@
           pkgs.lld
           # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
           pkgs.ruby
+          # D-FFI-PHP1=A: provision the supervised PHP worker pool.
+          pkgs.php
         ];
         jetTzdb = "${pkgs.tzdata}/share/zoneinfo";
 
@@ -126,6 +128,8 @@
             pkgs.lld
             # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
             pkgs.ruby
+            # D-FFI-PHP1=A: provision the supervised PHP worker pool.
+            pkgs.php
             # Compiler freestanding smoke tests execute aarch64 output under
             # qemu-aarch64. OS image and VM tooling does not belong here.
             pkgs.qemu

@@ -377,6 +377,7 @@ pub const FOREIGN_ROOTS: &[&str] = &[
     PWSH_MODULE_ROOT,
     PERL_MODULE_ROOT,
     RUBY_MODULE_ROOT,
+    PHP_MODULE_ROOT,
     COM_MODULE_ROOT,
 ];
 pub const PY_MODULE_ROOT: &str = "py"; // D-FFI-PY1 / D-FFI-UNIFY1
@@ -394,6 +395,7 @@ pub const DART_MODULE_ROOT: &str = "dart"; // D-FFI-DART1 / D-FFI-UNIFY1
 pub const PWSH_MODULE_ROOT: &str = "pwsh"; // D-FFI-PWSH1 / D-FFI-UNIFY1
 pub const PERL_MODULE_ROOT: &str = "perl"; // D-FFI-PERL1 / D-FFI-UNIFY1
 pub const RUBY_MODULE_ROOT: &str = "ruby"; // D-FFI-RUBY1 / D-FFI-UNIFY1
+pub const PHP_MODULE_ROOT: &str = "php"; // D-FFI-PHP1 / D-FFI-UNIFY1
 pub const COM_MODULE_ROOT: &str = "com"; // D-FFI-COM1 / D-FFI-UNIFY1
 
 /// S59 (ratified E2-M14): C FFI module path root — `c.<lib>`, `c.<lib>.__bindgen__`.

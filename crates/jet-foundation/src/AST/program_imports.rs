@@ -133,11 +133,12 @@ pub enum ForeignLanguage {
     PowerShell,
     Perl,
     Ruby,
+    Php,
     Com,
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 18] = [
+    pub const ALL: [ForeignLanguage; 19] = [
         ForeignLanguage::C,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
@@ -155,6 +156,7 @@ impl ForeignLanguage {
         ForeignLanguage::PowerShell,
         ForeignLanguage::Perl,
         ForeignLanguage::Ruby,
+        ForeignLanguage::Php,
         ForeignLanguage::Com,
     ];
 
@@ -177,6 +179,7 @@ impl ForeignLanguage {
             Syntax::PWSH_MODULE_ROOT => Some(ForeignLanguage::PowerShell),
             Syntax::PERL_MODULE_ROOT => Some(ForeignLanguage::Perl),
             Syntax::RUBY_MODULE_ROOT => Some(ForeignLanguage::Ruby),
+            Syntax::PHP_MODULE_ROOT => Some(ForeignLanguage::Php),
             Syntax::COM_MODULE_ROOT => Some(ForeignLanguage::Com),
             _ => None,
         }
@@ -201,6 +204,7 @@ impl ForeignLanguage {
             ForeignLanguage::PowerShell => Syntax::PWSH_MODULE_ROOT,
             ForeignLanguage::Perl => Syntax::PERL_MODULE_ROOT,
             ForeignLanguage::Ruby => Syntax::RUBY_MODULE_ROOT,
+            ForeignLanguage::Php => Syntax::PHP_MODULE_ROOT,
             ForeignLanguage::Com => Syntax::COM_MODULE_ROOT,
         }
     }
