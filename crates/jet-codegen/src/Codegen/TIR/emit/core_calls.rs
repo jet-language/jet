@@ -1291,7 +1291,10 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto.expert", "aes256gcm_open") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_aes256gcm_open_impl"), arg(0), arg(1), arg(2), arg(3)),
         ("core.crypto.expert", "ed25519_sign") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_expert_ed25519_sign_impl"), arg(0), arg(1)),
         ("core.crypto.expert", "ed25519_verify_strict") => format!("{}(&({}), &({}), &({}))", regex_fn("jet_crypto_expert_ed25519_verify_strict_impl"), arg(0), arg(1), arg(2)),
-        ("core.crypto.expert", "x25519") => format!("{}(&({}), &({}), {})", regex_fn("jet_crypto_expert_x25519_impl"), arg(0), arg(1), arg(2)),
+        ("core.crypto.expert", "x25519") => {
+            let reject_all_zero = if args.len() == 3 { arg(2) } else { "true".to_string() };
+            format!("{}(&({}), &({}), {})", regex_fn("jet_crypto_expert_x25519_impl"), arg(0), arg(1), reject_all_zero)
+        }
         ("core.crypto.expert", "hkdf_sha256") => format!("{}(&({}), &({}), &({}), {})", regex_fn("jet_crypto_expert_hkdf_sha256_impl"), arg(0), arg(1), arg(2), arg(3)),
         ("core.crypto.expert", "argon2id") => format!("{}(&({}), &({}), {}, {}, {}, {})", regex_fn("jet_crypto_expert_argon2id_impl"), arg(0), arg(1), arg(2), arg(3), arg(4), arg(5)),
         ("core.crypto.expert", "secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_secret_bytes_impl"), arg(0)),

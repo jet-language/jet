@@ -2602,6 +2602,22 @@ impl<'a> Checker<'a> {
                 let _ = alias_span;
                 return None;
             };
+            if module == "core.crypto.expert" && name == "x25519" {
+                if !(2..=3).contains(&args.len()) {
+                    self.diags
+                        .push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                for (i, ((conv, param_ty), arg)) in
+                    params.iter().zip(args.iter_mut()).enumerate()
+                {
+                    debug_assert_eq!(*conv, AccessConvention::Read);
+                    self.expect_core_arg(name, i, param_ty, arg);
+                }
+                for arg in args.iter_mut().skip(params.len()) {
+                    self.infer(&mut arg.expr);
+                }
+                return ret;
+            }
             if args.len() != params.len() {
                 self.diags
                     .push(wrong_core_arity(name, params.len(), args.len(), span));

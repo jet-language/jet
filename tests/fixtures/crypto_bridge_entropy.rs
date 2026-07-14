@@ -240,4 +240,22 @@ mod tests {
             assert!(jet_crypto_x25519_public_from_text_impl(hostile).is_err());
         }
     }
+
+    #[test]
+    fn every_secret_bearing_nominal_zeroizes_on_drop() {
+        let observed = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let snapshots = Rc::clone(&observed);
+        jet_crypto_set_zeroize_test_observer(move |bytes| {
+            snapshots.borrow_mut().push(bytes.to_vec());
+        });
+        drop(Secret(vec![1; 17]));
+        drop(JetSigningKey(vec![2; 18]));
+        drop(JetX25519SecretKey(vec![3; 19]));
+        drop(JetSharedSecret(vec![4; 20]));
+        jet_crypto_clear_zeroize_test_observer();
+        assert_eq!(
+            *observed.borrow(),
+            vec![vec![0; 17], vec![0; 18], vec![0; 19], vec![0; 20]]
+        );
+    }
 }

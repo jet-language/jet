@@ -2015,6 +2015,26 @@ A call to an `extern rust`/C foreign function, whose body the compiler can't
 inspect, contributes the **maximal** set (every effect) — it is assumed to do
 anything. This keeps inference sound without reading foreign code.
 
+### Cryptography (D-CRYPTO-API1)
+
+`core.crypto` owns opaque, move-only `Secret`, `SigningKey`,
+`X25519SecretKey`, and `SharedSecret` values. They do not support ordinary
+equality, cloning, hashing, printing, Display/Debug interpolation, reflection,
+or serialization. Compare with constant-time operations. Raw bytes leave an
+opaque value only through the explicitly named expert exposure functions.
+
+The complete expert surface is `xchacha20poly1305_seal/open` (32-byte key,
+24-byte nonce), `aes256gcm_seal/open` (32-byte key, 12-byte nonce),
+`ed25519_sign`, `ed25519_verify_strict`, `x25519`, `hkdf_sha256`, `argon2id`,
+`secret_bytes`, `signing_key_bytes`, `x25519_secret_bytes`, and
+`shared_secret_bytes`. Every call is lexical `#Unsafe`; importing the module
+does not weaken the gate. AEAD authentication failures collapse to
+`CryptoError.OpenFailed`. X25519 rejects all-zero shared secrets by default.
+HKDF-SHA256 output is at most 8160 bytes. Expert Argon2id accepts 8192–262144
+KiB, 1–10 iterations, 1–8 lanes, `memory >= 8 * lanes`, and
+`memory * iterations <= 1048576`; salts are 8–64 bytes and outputs 16–64
+bytes. These failures use the same `CryptoError` family as the safe API.
+
 ### HTTPS client default (D-TLS1)
 
 `core.net.fetch` and `core.http.client` support `https://` in the default build

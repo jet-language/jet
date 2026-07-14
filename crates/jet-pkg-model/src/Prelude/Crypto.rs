@@ -22,8 +22,26 @@ const JET_TYPED_VERSION: u8 = 1;
 const JET_TYPED_SUITE: u8 = 1;
 
 fn zeroize(bytes: &mut [u8]) {
-    for byte in bytes { unsafe { std::ptr::write_volatile(byte, 0) } }
+    for byte in &mut *bytes { unsafe { std::ptr::write_volatile(byte, 0) } }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    #[cfg(test)]
+    CRYPTO_ZEROIZE_TEST_OBSERVER.with(|observer| {
+        if let Some(callback) = observer.borrow_mut().as_mut() { callback(bytes); }
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    static CRYPTO_ZEROIZE_TEST_OBSERVER: std::cell::RefCell<Option<Box<dyn FnMut(&[u8])>>> =
+        std::cell::RefCell::new(None);
+}
+#[cfg(test)]
+pub fn jet_crypto_set_zeroize_test_observer(callback: impl FnMut(&[u8]) + 'static) {
+    CRYPTO_ZEROIZE_TEST_OBSERVER.with(|observer| *observer.borrow_mut() = Some(Box::new(callback)));
+}
+#[cfg(test)]
+pub fn jet_crypto_clear_zeroize_test_observer() {
+    CRYPTO_ZEROIZE_TEST_OBSERVER.with(|observer| *observer.borrow_mut() = None);
 }
 
 macro_rules! secret_type {
@@ -336,7 +354,7 @@ pub fn jet_crypto_expert_ed25519_sign_impl(seed:&Vec<u8>,message:&Vec<u8>)->Resu
     if seed.len()!=32{return Err(invalid_length("expert.ed25519_sign","seed","exactly 32",seed.len()))}if message.len()>1_073_741_824{return Err(invalid_length("expert.ed25519_sign","message","at most 1073741824",message.len()))}let mut raw=[0;32];raw.copy_from_slice(seed);let signature=SigningKey::from_bytes(&raw).sign(message).to_bytes();zeroize(&mut raw);Ok(JetSignature(signature))
 }
 pub fn jet_crypto_expert_ed25519_verify_strict_impl(public:&Vec<u8>,message:&Vec<u8>,signature:&Vec<u8>)->Result<bool,JetCryptoError>{
-    if public.len()!=32{return Err(invalid_length("expert.ed25519_verify_strict","public","exactly 32",public.len()))}if signature.len()!=64{return Err(invalid_length("expert.ed25519_verify_strict","signature","exactly 64",signature.len()))}if message.len()>1_073_741_824{return Err(invalid_length("expert.ed25519_verify_strict","message","at most 1073741824",message.len()))}let public:[u8;32]=public.as_slice().try_into().unwrap();let signature:[u8;64]=signature.as_slice().try_into().unwrap();let key=VerifyingKey::from_bytes(&public).map_err(|_|JetCryptoError::InvalidEncoding{operation:"expert.ed25519_verify_strict",value_kind:"Ed25519 public key"})?;Ok(key.verify_strict(message,&ed25519_dalek::Signature::from_bytes(&signature)).is_ok())
+    if signature.len()!=64{return Err(invalid_length("expert.ed25519_verify_strict","signature","exactly 64",signature.len()))}if message.len()>1_073_741_824{return Err(invalid_length("expert.ed25519_verify_strict","message","at most 1073741824",message.len()))}let public=array32(public,"expert.ed25519_verify_strict","public")?;let mut signature_bytes=[0;64];signature_bytes.copy_from_slice(signature);let key=VerifyingKey::from_bytes(&public).map_err(|_|JetCryptoError::InvalidEncoding{operation:"expert.ed25519_verify_strict",value_kind:"Ed25519 public key"})?;Ok(key.verify_strict(message,&ed25519_dalek::Signature::from_bytes(&signature_bytes)).is_ok())
 }
 pub fn jet_crypto_expert_x25519_impl(secret:&Vec<u8>,public:&Vec<u8>,reject_all_zero:bool)->Result<Secret,JetCryptoError>{
     let mut secret=array32(secret,"expert.x25519","secret")?;let public=array32(public,"expert.x25519","public")?;let shared=x25519_dalek::x25519(secret,public);zeroize(&mut secret);if reject_all_zero&&bool::from(shared.ct_eq(&[0;32])){return Err(JetCryptoError::NonContributoryKey)}Ok(Secret(shared.to_vec()))

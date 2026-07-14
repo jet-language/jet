@@ -2088,11 +2088,18 @@ D-TIME-CALENDAR1; #295). PRNG
 `core.random` (SplitMix64, seedable) vs CSPRNG `core.crypto.random`
 (D-RANDSPLIT1); both carry `Rand`.
 
-**Crypto**: misuse-resistant `seal`/`open` + `sign`/`verify` defaults; raw
-primitives require `core.crypto.expert` behind `#Unsafe` (D-CRYPTOENV1,
-E0510/E0511). Versioned `JETC` envelope header gives algorithm agility;
-PQ algorithms later (D-PQCRYPTO1). `core.encoding` hex/base64 + `core.uuid`
-v4/v7 (D-UUIDENC1).
+**Crypto**: misuse-resistant `seal`/`open` + `sign`/`verify` defaults. The
+ratified raw surface is `core.crypto.expert.{xchacha20poly1305_seal,
+xchacha20poly1305_open,aes256gcm_seal,aes256gcm_open,ed25519_sign,
+ed25519_verify_strict,x25519,hkdf_sha256,argon2id}` plus the explicit
+`secret_bytes`, `signing_key_bytes`, `x25519_secret_bytes`, and
+`shared_secret_bytes` exposure functions (D-CRYPTO-API1). Every call requires
+an audited `#Unsafe` region (D-CRYPTOENV1, E0510/E0511). Secret-bearing values
+are move-only and cannot use ordinary equality, printing, interpolation,
+reflection, hashing, or serialization; use constant-time operations or an
+explicit expert exposure instead. Versioned `JETC` envelope headers give
+algorithm agility; PQ algorithms later (D-PQCRYPTO1). `core.encoding`
+hex/base64 + `core.uuid` v4/v7 (D-UUIDENC1).
 
 **D-CORE-NUMERIC1=A — one math home** *(ratified by owner 2026-07-12, card #512)*: `BigInt` and `Decimal` move into `core.math`; `core.numeric` leaves the registry (ordinary unknown-module error). Construction spellings, the no-auto-promotion law (E0130–E0133), and lint L0504 are unchanged.
 
