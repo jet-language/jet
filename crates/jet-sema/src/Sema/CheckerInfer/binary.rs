@@ -389,7 +389,15 @@ impl<'a> Checker<'a> {
             BinOp::Eq | BinOp::Ne => {
                 if lt == rt {
                     if !types_comparable(&lt, self.registry) {
-                        if let Some(field) = incomparable_field(&lt, self.registry) {
+                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt) {
+                            self.diags.push(Diagnostic::error(
+                                "E0312",
+                                format!("secret-bearing `{}` values cannot use `{}`", lt.name(), op.spell()),
+                                "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison".to_string(),
+                                "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values".to_string(),
+                                Some(span),
+                            ));
+                        } else if let Some(field) = incomparable_field(&lt, self.registry) {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
                                 format!("`{}` can't be compared with `{}` because field `{}` doesn't support `{}`", lt.name(), rt.name(), field, op.spell()),

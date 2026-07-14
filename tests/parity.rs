@@ -123,10 +123,19 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
     // quick approximation that could silently diverge from the audited AOT
     // implementation.
-    ("core.crypto.expert", "aes256_gcm_open"),
-    ("core.crypto.expert", "aes256_gcm_seal"),
-    ("core.crypto.expert", "chacha20_open"),
-    ("core.crypto.expert", "chacha20_seal"),
+    ("core.crypto.expert", "aes256gcm_open"),
+    ("core.crypto.expert", "aes256gcm_seal"),
+    ("core.crypto.expert", "argon2id"),
+    ("core.crypto.expert", "ed25519_sign"),
+    ("core.crypto.expert", "ed25519_verify_strict"),
+    ("core.crypto.expert", "hkdf_sha256"),
+    ("core.crypto.expert", "secret_bytes"),
+    ("core.crypto.expert", "shared_secret_bytes"),
+    ("core.crypto.expert", "signing_key_bytes"),
+    ("core.crypto.expert", "x25519"),
+    ("core.crypto.expert", "x25519_secret_bytes"),
+    ("core.crypto.expert", "xchacha20poly1305_open"),
+    ("core.crypto.expert", "xchacha20poly1305_seal"),
     ("core.crypto.random", "bytes"),
     // core.encoding.*: card #392 pass 4 ported csv/toml/yaml/xml/cbor/jsonl
     // parse+to_string (or encode/decode) plus json.canonical/events verbatim

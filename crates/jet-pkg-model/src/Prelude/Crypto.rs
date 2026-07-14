@@ -109,7 +109,20 @@ fn convert_bits(data: &[u8], from: u32, to: u32, pad: bool) -> Option<Vec<u8>> {
     let mut acc=0u32;let mut bits=0u32;let maxv=(1u32<<to)-1;let mut out=Vec::new();for value in data{if(*value as u32)>>from!=0{return None}acc=(acc<<from)|*value as u32;bits+=from;while bits>=to{bits-=to;out.push(((acc>>bits)&maxv)as u8)}}if pad{if bits!=0{out.push(((acc<<(to-bits))&maxv)as u8)}}else if bits>=from||((acc<<(to-bits))&maxv)!=0{return None}Some(out)
 }
 pub fn jet_crypto_x25519_public_text_impl(key:&JetX25519PublicKey)->String{let hrp="jetx25519";let data=convert_bits(&key.0,8,5,true).expect("fixed conversion");let mut input=bech32_hrp_expand(hrp);input.extend_from_slice(&data);input.extend_from_slice(&[0;6]);let polymod=bech32_polymod(input)^0x2bc830a3;let mut out=format!("{hrp}1");for value in data{out.push(BECH32_CHARSET[value as usize]as char)}for shift in(0..6).rev(){out.push(BECH32_CHARSET[((polymod>>(shift*5))&31)as usize]as char)}out}
-pub fn jet_crypto_x25519_public_from_text_impl(text:String)->Result<JetX25519PublicKey,JetCryptoError>{if text.bytes().any(|b|b.is_ascii_uppercase())||!text.starts_with("jetx255191"){return Err(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})}let pos=text.rfind('1').ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?;let encoded=text.as_bytes().get(pos+1..).filter(|s|s.len()>=6).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?;let mut values=Vec::with_capacity(encoded.len());for byte in encoded{values.push(BECH32_CHARSET.iter().position(|c|c==byte).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?as u8)}let mut check=bech32_hrp_expand(&text[..pos]);check.extend_from_slice(&values);if bech32_polymod(check)!=0x2bc830a3{return Err(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m checksum"})}let decoded=convert_bits(&values[..values.len()-6],5,8,false).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?;Ok(JetX25519PublicKey(array32(&decoded,"X25519PublicKey.from_text","decoded key")?))}
+pub fn jet_crypto_x25519_public_from_text_impl(text:String)->Result<JetX25519PublicKey,JetCryptoError>{
+    // HRP (9) + separator + 32-byte 5-bit payload (52) + checksum (6).
+    // Exact size rejects extension/truncation and keeps parsing allocation-bounded.
+    if text.len()!=68||!text.is_ascii()||text.bytes().any(|b|b.is_ascii_uppercase())||text.as_bytes().get(9)!=Some(&b'1')||!text.starts_with("jetx255191"){
+        return Err(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})
+    }
+    let encoded=&text.as_bytes()[10..];
+    let mut values=Vec::with_capacity(58);
+    for byte in encoded{values.push(BECH32_CHARSET.iter().position(|c|c==byte).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?as u8)}
+    let mut check=bech32_hrp_expand("jetx25519");check.extend_from_slice(&values);
+    if bech32_polymod(check)!=0x2bc830a3{return Err(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m checksum"})}
+    let decoded=convert_bits(&values[..52],5,8,false).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?;
+    Ok(JetX25519PublicKey(array32(&decoded,"X25519PublicKey.from_text","decoded key")?))
+}
 pub fn jet_crypto_signing_generate_impl() -> Result<JetSigningKey, JetCryptoError> {
     let mut bytes = vec![0; 32];
     jet_crypto_entropy_fill(&mut bytes).map_err(|_| JetCryptoError::EntropyUnavailable)?;
@@ -282,6 +295,62 @@ pub fn jet_crypto_password_hash_typed_impl(password:&Secret)->Result<JetPassword
 pub fn jet_crypto_password_parse_impl(text:String)->Result<JetPasswordHash,JetCryptoError>{argon2::PasswordHash::new(&text).map_err(|_|JetCryptoError::InvalidEncoding{operation:"PasswordHash.parse",value_kind:"PHC string"})?;Ok(JetPasswordHash(text))}
 pub fn jet_crypto_password_text_impl(hash:&JetPasswordHash)->String{hash.0.clone()}
 pub fn jet_crypto_password_verify_typed_impl(password:&Secret,stored:&JetPasswordHash)->Result<bool,JetCryptoError>{let parsed=argon2::PasswordHash::new(&stored.0).map_err(|_|JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC string"})?;Ok(argon2::PasswordVerifier::verify_password(&argon2::Argon2::default(),&password.0,&parsed).is_ok())}
+
+fn expert_aead_lengths(
+    operation: &'static str,
+    key: &[u8],
+    nonce: &[u8],
+    nonce_length: usize,
+    input: &[u8],
+    aad: &[u8],
+    opening: bool,
+) -> Result<(), JetCryptoError> {
+    if key.len() != 32 { return Err(invalid_length(operation, "key", "exactly 32", key.len())); }
+    if nonce.len() != nonce_length { return Err(invalid_length(operation, "nonce", if nonce_length == 24 { "exactly 24" } else { "exactly 12" }, nonce.len())); }
+    let maximum = if opening { 1_073_741_840 } else { 1_073_741_824 };
+    let minimum = if opening { 16 } else { 0 };
+    if input.len() < minimum || input.len() > maximum {
+        return Err(invalid_length(operation, if opening { "ciphertext" } else { "plaintext" }, if opening { "16..=1073741840" } else { "at most 1073741824" }, input.len()));
+    }
+    if aad.len() > 16_777_216 { return Err(invalid_length(operation, "aad", "at most 16777216", aad.len())); }
+    Ok(())
+}
+
+pub fn jet_crypto_expert_xchacha20poly1305_seal_impl(key:&Vec<u8>,nonce:&Vec<u8>,plaintext:&Vec<u8>,aad:&Vec<u8>)->Result<Vec<u8>,JetCryptoError>{
+    expert_aead_lengths("expert.xchacha20poly1305_seal",key,nonce,24,plaintext,aad,false)?;
+    XChaCha20Poly1305::new_from_slice(key).map_err(|_|JetCryptoError::Internal{incident_id:"expert-xchacha-key"})?.encrypt(XNonce::from_slice(nonce),Payload{msg:plaintext,aad}).map_err(|_|JetCryptoError::Internal{incident_id:"expert-xchacha-seal"})
+}
+pub fn jet_crypto_expert_xchacha20poly1305_open_impl(key:&Vec<u8>,nonce:&Vec<u8>,ciphertext:&Vec<u8>,aad:&Vec<u8>)->Result<Vec<u8>,JetCryptoError>{
+    expert_aead_lengths("expert.xchacha20poly1305_open",key,nonce,24,ciphertext,aad,true)?;
+    XChaCha20Poly1305::new_from_slice(key).map_err(|_|JetCryptoError::Internal{incident_id:"expert-xchacha-key"})?.decrypt(XNonce::from_slice(nonce),Payload{msg:ciphertext,aad}).map_err(|_|JetCryptoError::OpenFailed)
+}
+pub fn jet_crypto_expert_aes256gcm_seal_impl(key:&Vec<u8>,nonce:&Vec<u8>,plaintext:&Vec<u8>,aad:&Vec<u8>)->Result<Vec<u8>,JetCryptoError>{
+    expert_aead_lengths("expert.aes256gcm_seal",key,nonce,12,plaintext,aad,false)?;
+    Aes256Gcm::new_from_slice(key).map_err(|_|JetCryptoError::Internal{incident_id:"expert-aes-key"})?.encrypt(AesNonce::from_slice(nonce),Payload{msg:plaintext,aad}).map_err(|_|JetCryptoError::Internal{incident_id:"expert-aes-seal"})
+}
+pub fn jet_crypto_expert_aes256gcm_open_impl(key:&Vec<u8>,nonce:&Vec<u8>,ciphertext:&Vec<u8>,aad:&Vec<u8>)->Result<Vec<u8>,JetCryptoError>{
+    expert_aead_lengths("expert.aes256gcm_open",key,nonce,12,ciphertext,aad,true)?;
+    Aes256Gcm::new_from_slice(key).map_err(|_|JetCryptoError::Internal{incident_id:"expert-aes-key"})?.decrypt(AesNonce::from_slice(nonce),Payload{msg:ciphertext,aad}).map_err(|_|JetCryptoError::OpenFailed)
+}
+pub fn jet_crypto_expert_ed25519_sign_impl(seed:&Vec<u8>,message:&Vec<u8>)->Result<JetSignature,JetCryptoError>{
+    if seed.len()!=32{return Err(invalid_length("expert.ed25519_sign","seed","exactly 32",seed.len()))}if message.len()>1_073_741_824{return Err(invalid_length("expert.ed25519_sign","message","at most 1073741824",message.len()))}let mut raw=[0;32];raw.copy_from_slice(seed);let signature=SigningKey::from_bytes(&raw).sign(message).to_bytes();zeroize(&mut raw);Ok(JetSignature(signature))
+}
+pub fn jet_crypto_expert_ed25519_verify_strict_impl(public:&Vec<u8>,message:&Vec<u8>,signature:&Vec<u8>)->Result<bool,JetCryptoError>{
+    if public.len()!=32{return Err(invalid_length("expert.ed25519_verify_strict","public","exactly 32",public.len()))}if signature.len()!=64{return Err(invalid_length("expert.ed25519_verify_strict","signature","exactly 64",signature.len()))}if message.len()>1_073_741_824{return Err(invalid_length("expert.ed25519_verify_strict","message","at most 1073741824",message.len()))}let public:[u8;32]=public.as_slice().try_into().unwrap();let signature:[u8;64]=signature.as_slice().try_into().unwrap();let key=VerifyingKey::from_bytes(&public).map_err(|_|JetCryptoError::InvalidEncoding{operation:"expert.ed25519_verify_strict",value_kind:"Ed25519 public key"})?;Ok(key.verify_strict(message,&ed25519_dalek::Signature::from_bytes(&signature)).is_ok())
+}
+pub fn jet_crypto_expert_x25519_impl(secret:&Vec<u8>,public:&Vec<u8>,reject_all_zero:bool)->Result<Secret,JetCryptoError>{
+    let mut secret=array32(secret,"expert.x25519","secret")?;let public=array32(public,"expert.x25519","public")?;let shared=x25519_dalek::x25519(secret,public);zeroize(&mut secret);if reject_all_zero&&bool::from(shared.ct_eq(&[0;32])){return Err(JetCryptoError::NonContributoryKey)}Ok(Secret(shared.to_vec()))
+}
+pub fn jet_crypto_expert_hkdf_sha256_impl(ikm:&Vec<u8>,salt:&Vec<u8>,info:&Vec<u8>,length:i64)->Result<Secret,JetCryptoError>{
+    if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"expert.hkdf_sha256",minimum:0,maximum:8160,actual:length.unsigned_abs() as usize})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),ikm).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"expert-hkdf-expand"})?;Ok(Secret(out))
+}
+pub fn jet_crypto_expert_argon2id_impl(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64)->Result<Secret,JetCryptoError>{
+    if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}if !(8..=64).contains(&salt.len()){return Err(invalid_length("expert.argon2id","salt","8..=64",salt.len()))}if !(8_192..=262_144).contains(&memory_kib)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory_kib<8*lanes||memory_kib.checked_mul(iterations).is_none_or(|v|v>1_048_576){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}if !(16..=64).contains(&output_length){return Err(JetCryptoError::OutputLength{operation:"expert.argon2id",minimum:16,maximum:64,actual:output_length.unsigned_abs() as usize})}let params=argon2::Params::new(memory_kib as u32,iterations as u32,lanes as u32,Some(output_length as usize)).map_err(|_|JetCryptoError::PasswordPolicy{reason:"invalid Argon2id parameters"})?;let engine=argon2::Argon2::new(argon2::Algorithm::Argon2id,argon2::Version::V0x13,params);let mut out=vec![0;output_length as usize];engine.hash_password_into(&password.0,salt,&mut out).map_err(|_|JetCryptoError::ResourceUnavailable{resource:"password hashing"})?;Ok(Secret(out))
+}
+pub fn jet_crypto_expert_secret_bytes_impl(secret:&Secret)->Vec<u8>{secret.0.clone()}
+pub fn jet_crypto_expert_signing_key_bytes_impl(key:&JetSigningKey)->Vec<u8>{key.0.clone()}
+pub fn jet_crypto_expert_x25519_secret_bytes_impl(key:&JetX25519SecretKey)->Vec<u8>{key.0.clone()}
+pub fn jet_crypto_expert_shared_secret_bytes_impl(secret:&JetSharedSecret)->Vec<u8>{secret.0.clone()}
 
 const MAGIC: &[u8; 4] = b"JETC";
 const VERSION: u8 = 1;

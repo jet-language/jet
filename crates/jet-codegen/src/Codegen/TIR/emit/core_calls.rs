@@ -1284,31 +1284,20 @@ pub(crate) fn emit_tir_core_call(
         ("jet.crypto", "__digest256_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_hex_impl"), arg(0)),
         ("jet.crypto", "__digest512_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_hex_impl"), arg(0)),
         ("jet.crypto", "__password_text") => format!("{}(&({}))", regex_fn("jet_crypto_password_text_impl"), arg(0)),
-        // D-CRYPTOENV1=A: expert-only raw AEAD (same bridge, explicit algorithm id).
-        ("core.crypto.expert", "aes256_gcm_seal") => format!(
-            "{}(&({}), &({}), 2i64)",
-            regex_fn("jet_crypto_seal_algo_impl"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.crypto.expert", "chacha20_seal") => format!(
-            "{}(&({}), &({}), 1i64)",
-            regex_fn("jet_crypto_seal_algo_impl"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.crypto.expert", "aes256_gcm_open") => format!(
-            "{}(&({}), &({}))",
-            regex_fn("jet_crypto_open_impl"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.crypto.expert", "chacha20_open") => format!(
-            "{}(&({}), &({}))",
-            regex_fn("jet_crypto_open_impl"),
-            arg(0),
-            arg(1)
-        ),
+        // D-CRYPTO-API1=A: exact expert primitives, all checked in one bridge.
+        ("core.crypto.expert", "xchacha20poly1305_seal") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_xchacha20poly1305_seal_impl"), arg(0), arg(1), arg(2), arg(3)),
+        ("core.crypto.expert", "xchacha20poly1305_open") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_xchacha20poly1305_open_impl"), arg(0), arg(1), arg(2), arg(3)),
+        ("core.crypto.expert", "aes256gcm_seal") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_aes256gcm_seal_impl"), arg(0), arg(1), arg(2), arg(3)),
+        ("core.crypto.expert", "aes256gcm_open") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_aes256gcm_open_impl"), arg(0), arg(1), arg(2), arg(3)),
+        ("core.crypto.expert", "ed25519_sign") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_expert_ed25519_sign_impl"), arg(0), arg(1)),
+        ("core.crypto.expert", "ed25519_verify_strict") => format!("{}(&({}), &({}), &({}))", regex_fn("jet_crypto_expert_ed25519_verify_strict_impl"), arg(0), arg(1), arg(2)),
+        ("core.crypto.expert", "x25519") => format!("{}(&({}), &({}), {})", regex_fn("jet_crypto_expert_x25519_impl"), arg(0), arg(1), arg(2)),
+        ("core.crypto.expert", "hkdf_sha256") => format!("{}(&({}), &({}), &({}), {})", regex_fn("jet_crypto_expert_hkdf_sha256_impl"), arg(0), arg(1), arg(2), arg(3)),
+        ("core.crypto.expert", "argon2id") => format!("{}(&({}), &({}), {}, {}, {}, {})", regex_fn("jet_crypto_expert_argon2id_impl"), arg(0), arg(1), arg(2), arg(3), arg(4), arg(5)),
+        ("core.crypto.expert", "secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_secret_bytes_impl"), arg(0)),
+        ("core.crypto.expert", "signing_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_signing_key_bytes_impl"), arg(0)),
+        ("core.crypto.expert", "x25519_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_x25519_secret_bytes_impl"), arg(0)),
+        ("core.crypto.expert", "shared_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_shared_secret_bytes_impl"), arg(0)),
         // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — reads `.jet/secrets.age`
         // (project-relative) and decrypts with the local identity, via the
         // age-style crypto FFI bridge. Already the exact `Option<String>` shape

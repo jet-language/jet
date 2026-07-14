@@ -924,21 +924,40 @@ pub fn core_fixed_sig(
         )),
         ("jet.crypto", "blake3") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
         ("jet.crypto", "sha512") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest512".into())))),
-        // D-CRYPTOENV1=A: expert-only raw AEAD (requires #Unsafe + expert import).
-        ("core.crypto.expert", "aes256_gcm_seal" | "chacha20_seal") => Some((
-            vec![
-                (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::List(Box::new(u8_ty()))),
-            ],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        // D-CRYPTO-API1=A: exact #Unsafe expert API. Bounds remain runtime
+        // checked; lexical gating never waives memory safety or cleanup.
+        ("core.crypto.expert", "xchacha20poly1305_seal" | "aes256gcm_seal") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
         )),
-        ("core.crypto.expert", "aes256_gcm_open" | "chacha20_open") => Some((
-            vec![
-                (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::List(Box::new(u8_ty()))),
-            ],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        ("core.crypto.expert", "xchacha20poly1305_open" | "aes256gcm_open") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
         )),
+        ("core.crypto.expert", "ed25519_sign") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::Named("Signature".into()), Type::Named("CryptoError".into()))),
+        )),
+        ("core.crypto.expert", "ed25519_verify_strict") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
+        )),
+        ("core.crypto.expert", "x25519") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::Bool)],
+            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+        )),
+        ("core.crypto.expert", "hkdf_sha256") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::Int)],
+            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+        )),
+        ("core.crypto.expert", "argon2id") => Some((
+            vec![(read, Type::Named("Secret".into())), (read, Type::List(Box::new(u8_ty()))), (read, Type::Int), (read, Type::Int), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+        )),
+        ("core.crypto.expert", "secret_bytes") => Some((vec![(read, Type::Named("Secret".into()))], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.crypto.expert", "signing_key_bytes") => Some((vec![(read, Type::Named("SigningKey".into()))], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.crypto.expert", "x25519_secret_bytes") => Some((vec![(read, Type::Named("X25519SecretKey".into()))], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.crypto.expert", "shared_secret_bytes") => Some((vec![(read, Type::Named("SharedSecret".into()))], Some(Type::List(Box::new(u8_ty()))))),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
         ("core.net", "tcp_listen") => Some((
             vec![(read, Type::String)],

@@ -555,6 +555,10 @@ pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String>
     best.map(|(s, _)| s)
 }
 
+pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
+    matches!(ty, Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret"))
+}
+
 pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
@@ -563,6 +567,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
         Type::List(inner) => is_printable(inner, registry),
         Type::Map { value, .. } => is_printable(value, registry),
+        Type::Named(_) if is_secret_bearing_crypto_type(ty) => false,
         Type::Named(n) => registry.contains(n) || core_type_known(n),
         Type::Apply { args, .. } => args.iter().all(|a| is_printable(a, registry)),
         Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
@@ -581,6 +586,7 @@ pub(crate) fn is_displayable(ty: &Type, trait_reg: &crate::Traits::TraitRegistry
         Type::Result { ok, err } => is_displayable(ok, trait_reg) && is_displayable(err, trait_reg),
         Type::List(inner) => is_displayable(inner, trait_reg),
         Type::Map { value, .. } => is_displayable(value, trait_reg),
+        Type::Named(_) if is_secret_bearing_crypto_type(ty) => false,
         Type::Named(n) => {
             trait_reg.implements_trait(n, Generics::DISPLAY)
                 || matches!(
@@ -671,6 +677,7 @@ pub(crate) fn is_debuggable(
         }
         Type::List(inner) => is_debuggable(inner, type_reg, trait_reg),
         Type::Map { value, .. } => is_debuggable(value, type_reg, trait_reg),
+        Type::Named(_) if is_secret_bearing_crypto_type(ty) => false,
         Type::Named(n) => {
             type_reg.contains(n)
                 || core_type_known(n)

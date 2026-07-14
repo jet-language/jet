@@ -219,17 +219,27 @@ impl<'a> Checker<'a> {
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
                     if !is_printable(&t, self.registry) {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!(
-                                "`{}` doesn't know how to show {}",
-                                Syntax::BUILTIN_PRINT,
-                                t.show()
-                            ),
-                            "print shows values that have a display".to_string(),
-                            "print one of its parts instead".to_string(),
-                            Some(arg.expr.span()),
-                        ));
+                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("secret-bearing `{}` cannot be printed", t.name()),
+                                "printing could copy cryptographic secret material into terminal output or logs".to_string(),
+                                "print a public operation label or key identifier instead".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`{}` doesn't know how to show {}",
+                                    Syntax::BUILTIN_PRINT,
+                                    t.show()
+                                ),
+                                "print shows values that have a display".to_string(),
+                                "print one of its parts instead".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                        }
                     }
                 }
                 return Some(None);

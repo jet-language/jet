@@ -309,6 +309,16 @@ impl<'a> Checker<'a> {
                             match fmt {
                                 crate::AST::StrFormat::Display => {
                                     if !is_displayable(&t, self.trait_reg) {
+                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                            self.diags.push(Diagnostic::error(
+                                                "E0915",
+                                                format!("secret-bearing `{}` has no `Display` implementation", t.name()),
+                                                "cryptographic secrets cannot enter logs or strings through interpolation".to_string(),
+                                                "remove the interpolation; log a public operation label or key identifier instead".to_string(),
+                                                Some(inner.span()),
+                                            ));
+                                            continue;
+                                        }
                                         // Migration: auto-printable structs without Display get a lint
                                         // and still compile via jet_show fallback in codegen.
                                         if let Type::Named(n) = &t {
@@ -357,6 +367,16 @@ impl<'a> Checker<'a> {
                                 }
                                 crate::AST::StrFormat::Debug => {
                                     if !is_debuggable(&t, self.registry, self.trait_reg) {
+                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                            self.diags.push(Diagnostic::error(
+                                                "E0112",
+                                                format!("secret-bearing `{}` cannot use `@Debug`", t.name()),
+                                                "Debug output could copy cryptographic secret material into logs or diagnostics".to_string(),
+                                                "remove the interpolation; log a public operation label or key identifier instead".to_string(),
+                                                Some(inner.span()),
+                                            ));
+                                            continue;
+                                        }
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!("{} can't be shown with @Debug yet", t.show()),
@@ -1301,7 +1321,15 @@ impl<'a> Checker<'a> {
                 for item in items.iter_mut() {
                     if let Some(t) = self.infer(item) {
                         if !is_printable(&t, self.registry) {
-                            self.diags.push(Diagnostic::error(
+                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("secret-bearing `{}` cannot be printed", t.name()),
+                                    "printing could copy cryptographic secret material into terminal output or logs".to_string(),
+                                    "print a public operation label or key identifier instead".to_string(),
+                                    Some(item.span()),
+                                ));
+                            } else { self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(
                                     "`{}` doesn't know how to show {}",
@@ -1311,7 +1339,7 @@ impl<'a> Checker<'a> {
                                 "print shows values that have a display".to_string(),
                                 "print one of its parts instead".to_string(),
                                 Some(item.span()),
-                            ));
+                            )); }
                         }
                     }
                 }

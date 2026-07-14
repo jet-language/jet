@@ -439,12 +439,21 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "sha512",
             "constant_time_equal",
         ],
-        // D-CRYPTOENV1=A: expert-only raw primitives — misuse lint at call site.
+        // D-CRYPTO-API1=A: exact expert surface — every call is #Unsafe-gated.
         "core.crypto.expert" => &[
-            "aes256_gcm_seal",
-            "aes256_gcm_open",
-            "chacha20_seal",
-            "chacha20_open",
+            "xchacha20poly1305_seal",
+            "xchacha20poly1305_open",
+            "aes256gcm_seal",
+            "aes256gcm_open",
+            "ed25519_sign",
+            "ed25519_verify_strict",
+            "x25519",
+            "hkdf_sha256",
+            "argon2id",
+            "secret_bytes",
+            "signing_key_bytes",
+            "x25519_secret_bytes",
+            "shared_secret_bytes",
         ],
         // D-TTLVAL1=A: TTL-wrapped values and rotting secrets.
         "core.time.expiring" => &["new"],

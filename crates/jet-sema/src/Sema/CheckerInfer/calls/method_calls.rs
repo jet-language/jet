@@ -752,6 +752,22 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
+            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&recv_ty)
+                && matches!(method, "clone" | "encode" | "hash" | "debug" | "display")
+            {
+                let shown = recv_ty.show().trim_matches('`').to_string();
+                self.diags.push(Diagnostic::error(
+                    "E0311",
+                    format!("`{method}` is forbidden on secret-bearing `{shown}`"),
+                    "secret-bearing cryptographic values are move-only and expose no clone, hash, serialization, Debug, or Display capability".to_string(),
+                    "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `#Unsafe` region when raw bytes are required".to_string(),
+                    Some(span),
+                ));
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            }
             // D-SERDE2=A: Encode is one public protocol for hand and generated impls.
             if method == "encode" {
                 if args.is_empty() && type_args.is_empty() && self.is_encodable(&recv_ty) {

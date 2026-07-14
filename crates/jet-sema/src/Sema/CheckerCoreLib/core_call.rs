@@ -861,7 +861,15 @@ impl<'a> Checker<'a> {
                     let arg = &mut args[0];
                     if let Some(ty) = self.infer(&mut arg.expr) {
                         if !is_displayable(&ty, self.trait_reg) {
-                            self.diags.push(Diagnostic::error(
+                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&ty) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("secret-bearing `{}` cannot be reflected", ty.name()),
+                                    "reflection would expose a cryptographic secret through generic inspection or display".to_string(),
+                                    "keep the value opaque; inspect only public keys, signatures, digests, or envelope metadata".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            } else { self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!("{} can't be reflected yet", ty.show()),
                                 "`reflect.of` inspects the same values `\"{x}\"` interpolation can show"
@@ -869,7 +877,7 @@ impl<'a> Checker<'a> {
                                 "implement `Display` for its type, or pass one of its fields instead"
                                     .to_string(),
                                 Some(arg.expr.span()),
-                            ));
+                            )); }
                         }
                     }
                     return Some(Type::Named("Value".to_string()));
@@ -2131,10 +2139,8 @@ impl<'a> Checker<'a> {
                             Some(span),
                         ));
                     }
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+                    // Continue into shared fixed-signature checking below. The
+                    // unsafe gate is additional policy, never a type/arity bypass.
                 }
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
                 ("core.http.client", "get") => {
