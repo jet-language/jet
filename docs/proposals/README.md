@@ -7,9 +7,6 @@ need to make. Each report ends at the decision seam: its "open decisions" are
 the future ballot rows. Approve a direction and a report converts cleanly into
 a sidequest plan.
 
-Only genuinely-unexplored ideas remain here. Anything already carded or
-ratified has been extracted out (the proposal files note where).
-
-Dated `*-review-*` and `*-audit-*` files are preserved evidence for the cards
-they created, not a second source of current status. Tower and the governing
-specs remain authoritative after those snapshots.
+Only genuinely unexplored ideas remain here. Once work is carded or ratified,
+delete its proposal after durable law and implementation tracking exist.
+Tower and governing specs remain authoritative.

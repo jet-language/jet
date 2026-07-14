@@ -1,9 +1,9 @@
 # Epoch 6 — Canvas: the Blueprint-class editor, for real
 
-Companion to [canvas-blueprint-parity-audit.md](canvas-blueprint-parity-audit.md)
-(feature inventory, hybrid model, devil's advocate — still accurate) and
-[canvas-blueprint-parity-matrix.md](canvas-blueprint-parity-matrix.md) (the
-ratchet). This document adds what four failed attempts were missing: an honest
+Companion to [canvas-blueprint-parity-matrix.md](canvas-blueprint-parity-matrix.md)
+(the ratchet), [canvas-design-spec.md](canvas-design-spec.md), and
+[canvas-workspace-architecture.md](canvas-workspace-architecture.md). This
+document adds what four failed attempts were missing: an honest
 definition of "shipped", the ecosystem scope beyond the single graph, and a
 milestone plan whose exit criteria a human can watch happen on screen.
 

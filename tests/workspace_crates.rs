@@ -222,8 +222,8 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
     // `ModuleEval` left this list in slice 4: it now lives in `jet-env-model`
     // (a direct root-package dep), not reached through `jetpack`. `jetos`
     // (slice 2) is expected to depend on `jetpack` until a later card
-    // physically relocates the JetOS realization engine out of it (open
-    // scope gate, not this slice — see docs/plans/epoch-3/product-split-slice4.md).
+    // physically relocates the JetOS realization engine out of it (an open
+    // scope gate, not part of the completed product-split slice).
     // Canvas's WorkspaceFile/WorkspaceLock calls moved off jetpack onto
     // jet-env-model (slice 5), removing jet-devserver from this debt list.
     let allowed = [

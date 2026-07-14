@@ -27,7 +27,7 @@ executable spec: a milestone ships with new `examples/` programs and new
 |---|---|
 | Ratified syntax & owner decisions | [`syntax-decisions.md`](syntax-decisions.md) |
 | Language behavior today | [`spec.md`](spec.md) |
-| Open owner ballots | [`decision-ballots.md`](../../docs/ballots/decision-ballots.md) |
+| Open owner decisions | Tower (`node Tower/tower.mjs decision list --open`) |
 | Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
 | Epoch 5 metaprogramming plan | [`docs/plans/epoch-5/`](../../docs/plans/epoch-5/) → [`metaprogramming.md`](../../docs/plans/epoch-5/metaprogramming.md) |
@@ -35,8 +35,8 @@ executable spec: a milestone ships with new `examples/` programs and new
 | jetos + visual configuration | Epoch 7; first runtime slice ratified in `syntax-decisions.md` (`jet os`, host selection, generations, init/image proof) |
 | Implementing-agent protocol | [`docs/plans/README.md`](../../docs/plans/README.md) |
 
-Plans are gated on ratified decisions in `syntax-decisions.md` (see
-`decision-ballots.md` for what is still open).
+Plans are gated on ratified decisions in `syntax-decisions.md`; Tower owns the
+live open-decision queue.
 
 ---
 
@@ -97,8 +97,8 @@ source-level step debugger over the existing tree-walking interpreter (the same
 engine as `jet dev`/`jet repl`) — `(jet)` prompt, lldb-familiar
 `step`/`next`/`continue`/`finish`, `break`/`print`/`locals`/`backtrace`, `<- here`
 caret, all in Jet terms (I2). It declines unsteppable native features with E2203,
-pointing at the real build. Step 2 — the native DAP/lldb backend for the full
-native feature set + editor wiring — remains (see `docs/sidequests/dap-debugger.md`).
+pointing at the real build. Step 2's native DAP/lldb backend shipped; remaining
+full-feature stepping and editor work is tracked by Tower #12.
 
 **E2-M18 — REPL** verified 2026-06-17. `jet repl` interactive
 session; 16 transcript tests green.

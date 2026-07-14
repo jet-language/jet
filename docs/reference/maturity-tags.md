@@ -24,8 +24,7 @@ Current contract (D-MARK-META1=B):
 
 Use the field in API docs, examples, package READMEs, and generated
 documentation. Do not rely on it for access control, effect ceilings,
-dependency policy, or release gating. Standalone `@Experimental`/`@Tested`/
-`@Hardened` and `#Experimental`/`#Tested`/`#Hardened` are not grammar.
+dependency policy, or release gating. Standalone `@Experimental`/`@Tested`/`@Hardened` and `#Experimental`/`#Tested`/`#Hardened` are not grammar.
 
 See also: [Core library](core-library.md),
 `examples/features/syntax/maturity_tags.jet`.

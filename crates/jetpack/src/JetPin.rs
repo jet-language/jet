@@ -11,7 +11,7 @@
 //! is an honest `E1251`, never a from-scratch compile and never a silent use of
 //! the wrong `jet`.
 //!
-//! Slices (see `docs/plans/epoch-4/toolchain-as-dependency.md`):
+//! Shipped slices (card #179):
 //!   T1  frozen-forward identity pre-parse ([`identity_preparse`]) + `E1249`.
 //!   T2  channel resolution + `[[toolchain]]` lock record + `E1250`.
 //!   T3  version-mismatch detect → realize → re-exec ([`decide`]) + `E1251`.

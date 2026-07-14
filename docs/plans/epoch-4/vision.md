@@ -1,8 +1,8 @@
 # Epoch 4 Vision — one language from script to datacenter
 
 **Status:** product target, refreshed 2026-07-02. This document says what the
-experience should feel like. [`implementation.md`](implementation.md) says how
-agents build it.
+experience should feel like. [`world-class-package-manager.md`](world-class-package-manager.md)
+defines binding implementation and acceptance.
 
 ## The Sentence
 

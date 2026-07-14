@@ -2959,8 +2959,8 @@ Model module instead of a native binary. A host program loads and calls it —
 safe by default, **no `#Unsafe` gate anywhere in the story** (I1): the
 sandbox is the safety boundary, by construction. This is a general
 application-plugin substrate, distinct from the deferred Epoch-3
-compiler-extension plugin API (custom lints/sema hooks,
-`docs/plans/epoch-3/plugin-api.md`) — don't conflate them (I8).
+compiler-extension plugin API (custom lints/sema hooks, Tower #549 and
+D-DX5-HOOK1) — don't conflate them (I8).
 
 ```jet
 // pkg.jet

@@ -13,6 +13,8 @@ field/container attributes need list syntax. `derive T.Trait` is a body form,
 not a marker. `comptime` and `$name` are metaprogramming syntax, not `#` or `@`
 markers.
 
+Current registry census: 66 registered markers (20 `@` / 46 `#`).
+
 | Row | Plane | Canonical spellings | Law | Parser/formatter anchors | Status |
 |-----|-------|---------------------|-----|--------------------------|--------|
 | `file-target-directives` | `#` directive | `#PubFile`, `#NoPrelude`, `#Target(Web)`, `#Target(Os.Linux)`, `#Target(Wasm)`, `#Target(Js)`, `#Html("path.html")`, `#WasmExport` | S18, D-VISDEFAULT2, D-PRELUDEX1, D-WEBDEFAULT1, D-HTMLPAIR1, D-OSTARGET1, D-WASM1, D-MARK-TARGET1 | `MARKER_PUB_FILE`, `MARKER_NO_PRELUDE`, `ATTR_TARGET`, `ATTR_HTML`, `ATTR_WASM_EXPORT`; parser fixed-position/file and item markers; fmt web/OS marker tests | Shipped; bare `#Wasm`/`#Js` retired |

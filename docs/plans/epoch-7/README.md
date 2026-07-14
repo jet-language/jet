@@ -6,12 +6,9 @@ full-word option namespaces, generation names, installer proof artifacts, and
 proof-before-switch checks. Remaining Epoch 7 work here is Studio, deeper visual
 proof tooling, and public GUI/proof protocols.
 
-This folder holds durable plans for the two GUI/proof cards:
-
-- [`blueprint-editor.md`](blueprint-editor.md) — #182, Blueprint-class visual
-  editor for Jet source.
-- [`jetos-studio.md`](jetos-studio.md) — #235, jetos Studio over canonical Jet
-  modules, with plan/diff/proof before activation.
+This folder holds the durable plan for [`jetos-studio.md`](jetos-studio.md) —
+#235, jetos Studio over canonical Jet modules, with plan/diff/proof before
+activation. Blueprint-class visual editing is tracked directly in Tower.
 
 ## Law inherited
 

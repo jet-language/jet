@@ -4,7 +4,7 @@
 //! realized** Rust toolchain — a hangar object that carries the `cargo`/`rustc`
 //! it builds with (and, per D-JPK-RINGSHIP1=C, the prebuilt ring artifacts, see
 //! `is_ring_module_staged`). The toolchain object itself is realized by
-//! `toolchain-as-dependency.md` (card #179) via the D-JPK-CACHE1 substitution
+//! card #179 via the D-JPK-CACHE1 substitution
 //! path; here we only *resolve and use* it.
 //!
 //! Resolution order (BUILDTOOL1=A):

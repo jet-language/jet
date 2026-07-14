@@ -12,24 +12,16 @@ the Nix parity matrix, best cross-ecosystem transplants, ordered card program,
 owner ballots, and binding live/hostile acceptance lanes. It supersedes stale
 sequencing or “later protocol” claims below while preserving ratified law.
 
-Historical tracking remains in three files:
+Durable tracking remains in four files:
 
-- [`README.md`](README.md) — current decisions, status, and sequencing.
+- [`README.md`](README.md) — current canon and navigation.
 - [`vision.md`](vision.md) — product / UX target.
-- [`implementation.md`](implementation.md) — executable agent plan.
+- [`truth-matrix.md`](truth-matrix.md) — acceptance truth.
+- [`world-class-package-manager.md`](world-class-package-manager.md) —
+  executable master plan.
 
-Older split files were folded into these three: `unified-ecosystem.md`,
-`jetos-design.md` (now frozen research), `IMPLEMENTATION-STATUS.md`,
-`payload-env-separation.md`, and `ad-hoc-adapters.md`.
-
-World-domination follow-up slices live beside the main plan:
-
-- [`universal-trust-grants.md`](universal-trust-grants.md) — #229, D-WD1.
-- [`strict-package-graph-catalogs.md`](strict-package-graph-catalogs.md) — #231, D-WD3.
-- [`explainable-lockfiles.md`](explainable-lockfiles.md) — #232, D-WD4.
-- [`migration-importers.md`](migration-importers.md) — #233, D-WD5.
-- [`federated-providers.md`](federated-providers.md) — #234, D-WD6.
-- [`native-replacement-overlays.md`](native-replacement-overlays.md) — #242, D-WD15.
+Older split plans and world-domination follow-up slices were implemented or
+folded into Tower's active replacement program (#395, #421-#434).
 
 ---
 
@@ -196,36 +188,16 @@ unless the owner explicitly grants an exception.
 
 ---
 
-## Card lane (2026-07-03 prep pass)
+## Live work
 
-Every e4 card has a vetted plan; ballots below are the only owner input left.
-Sequence (workOrder; jetpack first per owner directive, then FFI program):
+Tower owns Jetpack card sequencing, decisions, blockers, and proof state:
 
-| # | Card | Plan | State |
-|---|------|------|-------|
-| 99 | build-from-source + ring shipping | package-build-from-source.md | deciding — D-JPK-RINGSHIP1, D-JPK-BUILDTOOL1; slices T0/T1 buildable now |
-| 176 | vision gates U11–U19(+U20–29) | implementation.md | deciding — D-JPK-ADAPTNAME1 only; rest buildable |
-| 90 | workspace continuation | workspace-continuation.md | ready — slices A–D, zero ballots |
-| 3 | signed package cache | signed-package-cache.md | ready — zero ballots |
-| 13 | package signing (Ed25519) | package-signing.md | ready, after #3 (index dep); crypto already approved (D-DEP-CRYPTO1) |
-| 179 | toolchain as dependency (U30) | toolchain-as-dependency.md | ready — zero ballots |
-| 85 | CAS build cache contract | cas-build-cache.md | ready — includes cache-poisoning race fix |
-| 180 | FFI program frame | ffi-interop-program.md | ready — D-FFI-PY1, D-DEP-PY1, D-JPK-EXTPROV1 ratified; Phase 0 binder seam buildable now |
-| 124 | JS/npm + Swift interop (P0) | ffi-interop-program.md | ready — D-FFI-JS1, D-FFI-SWIFT1 ratified |
-| 5 | plugin target | ../sidequests/plugin-target.md | ready — D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1 ratified; substrate buildable now |
-| 2 | jetos generations | jetos-generations.md | frozen — gated on Phase A/D prereqs |
-| 9 | flagship slices (Tower-in-Jet web app) | — | frozen — owner deferred to e4 end |
+```sh
+nix develop -c node Tower/tower.mjs status
+```
 
-Cross-cuts: #13 shares one signature field with #3's index schema; #5 and
-#124 share one wasmtime wrapper; D-JPK-BUILDTOOL1 underpins #85's
-reproducibility contract; D-JPK-RINGSHIP1=C would ride #179's toolchain object.
-
-## Open / Proposed
-
-No open E4 ballots remain from the 2026-07-03 prep pass. The listed gates are
-ratified in Tower and recorded in `docs/spec/syntax-decisions.md`; any new
-user-typeable syntax, command, manifest field, provider prefix, or diagnostic
-family still needs its own ballot before implementation.
+This directory retains only durable master plans and acceptance matrices. Per-card
+plans are deleted once their work is shipped or fully represented in Tower.
 
 ## Jetpack health
 

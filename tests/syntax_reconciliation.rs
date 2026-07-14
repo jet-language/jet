@@ -79,15 +79,9 @@ const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
     "examples/features/serde/datatree_accessors.jet",
     "examples/features/serde/encoding_breadth.jet",
 ];
-const ACTIVE_MATURITY_DOCS: &[&str] = &[
-    "docs/plans/epoch-3/marker-family.md",
-    "docs/sidequests/beginner-expert-mode-audit.md",
-    "docs/proposals/surface-condensation.md",
-];
-const MARKER_CENSUS_DOCS: &[&str] = &[
-    "docs/proposals/architecture-infra.md",
-    "docs/proposals/surface-condensation.md",
-];
+const ACTIVE_MATURITY_DOCS: &[&str] = &["docs/reference/maturity-tags.md"];
+const MARKER_CENSUS_DOCS: &[&str] =
+    &["docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md"];
 const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "S74-D-DESTRUCT1-ARM",
     "D-IGNORERET1",
@@ -290,9 +284,11 @@ fn active_maturity_docs_use_meta_field_only() {
                 failures.push(format!("{relative} does not teach `{required}`"));
             }
         }
-        for spelling in retired {
-            if text.contains(spelling) {
-                failures.push(format!("{relative} teaches standalone `{spelling}`"));
+        for line in text.lines() {
+            for spelling in retired {
+                if line.contains(spelling) && !line.contains("not grammar") {
+                    failures.push(format!("{relative} teaches standalone `{spelling}`"));
+                }
             }
         }
     }
@@ -502,8 +498,8 @@ fn card_511_census_matches_current_law() {
         .expect("read package surface registry");
     let markers = fs::read_to_string("crates/jet-foundation/src/Syntax/markers.rs")
         .expect("read marker registry");
-    let proposal = fs::read_to_string("docs/proposals/architecture-infra.md")
-        .expect("read architecture audit");
+    let decisions = fs::read_to_string("docs/spec/syntax-decisions.md")
+        .expect("read syntax decisions");
 
     assert!(
         !core.contains("pub const KW_VIEW"),
@@ -525,13 +521,8 @@ fn card_511_census_matches_current_law() {
             "maturity value `{value}` must remain a #Meta value, not a standalone marker"
         );
     }
-    for law in [
-        "synthetic dispatch subject `it`",
-        "`Clock` is the",
-        "D-DET1 injectable type",
-        "`taskgroup` is D-TASKSCOPE1=A",
-    ] {
-        assert!(proposal.contains(law), "census audit omits `{law}`");
+    for law in ["D-MARKER-FAMILY1", "D-DET1", "D-REPLAY1", "D-MARK-META1"] {
+        assert!(decisions.contains(law), "current syntax law omits `{law}`");
     }
 }
 

@@ -12,8 +12,7 @@
 //! and run the interactive `(jet)` prompt. Because it reuses the dev
 //! interpreter, it covers the same deterministic subset and declines the same
 //! boundary (FFI / tasks / `#Unsafe` / native std) with **E2203**, pointing at
-//! the real build (D-DBG3 step 2 — a native lldb-backed adapter for the full
-//! feature set — is the follow-on; see `docs/sidequests/dap-debugger.md`).
+//! the native lldb-backed adapter shipped by D-DBG3 step 2.
 //!
 //! Command surface (D-DBG3, ratified A): the prompt is `(jet)`; the step verbs
 //! are lldb-familiar `step` / `next` / `continue` / `finish` with single-letter
