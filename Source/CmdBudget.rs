@@ -298,8 +298,9 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe"|"ServiceProbe"|"SceneProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
+    let tool=toolchain()?;
     let artifact=if needs_artifact{Some(match supplied_artifact{Some(artifact)=>artifact,None=>build_selected_artifact(root,&project_entry(root))?})}else{None};
-    let context_subject=subject(root,bundle,at,at,target,profile,artifact.as_ref())?;let tool=toolchain()?;
+    let context_subject=subject(root,bundle,at,at,target,profile,artifact.as_ref())?;
     let providers=ordered.iter().map(|located|provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider))).collect::<Result<Vec<_>,_>>()?;
     let mut bases=Vec::new();
     for (located,provider) in ordered.iter().zip(&providers) { bases.push(measurement_base_truthful(root,bundle,located,&context_subject,&tool,provider,target,profile)?); }
@@ -629,7 +630,7 @@ fn build_selected_artifact(root:&Path,entry:&Path)->Result<(PathBuf,u64,String),
     // a real native build its own bounded deadline while BuildArtifact
     // collection below keeps the tighter production 30-second deadline.
     let deadline=Instant::now()+SELECTED_BUILD_DEADLINE;
-    loop{match child.try_wait(){Ok(Some(status))if status.success()=>break,Ok(Some(status))=>return Err(format!("selected artifact build exited with {status}")),Ok(None)if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(5)),Ok(None)=>{terminate_group(&mut child);return Err("selected artifact build exceeded 120 second build deadline".into())},Err(e)=>{terminate_group(&mut child);return Err(format!("cannot supervise selected artifact build: {e}"))}}}
+    loop{match child.try_wait(){Ok(Some(status))if status.success()=>break,Ok(Some(status))=>{terminate_group(&mut child);return Err(format!("selected artifact build exited with {status}"))},Ok(None)if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(5)),Ok(None)=>{terminate_group(&mut child);return Err("selected artifact build exceeded 120 second build deadline".into())},Err(e)=>{terminate_group(&mut child);return Err(format!("cannot supervise selected artifact build: {e}"))}}}
     let stem=entry.file_stem().and_then(|v|v.to_str()).ok_or("selected artifact entry has no UTF-8 stem")?;let artifact=root.join("build").join(if cfg!(windows){format!("{stem}.exe")}else{stem.into()});let metadata=std::fs::symlink_metadata(&artifact).map_err(|e|format!("selected artifact was not produced: {e}"))?;if metadata.file_type().is_symlink()||!metadata.is_file(){return Err("selected artifact is not a regular file".into())}let digest=jet::SHA256::sha256_file_hex(&artifact).map_err(|e|format!("cannot hash selected artifact: {e}"))?;Ok((artifact,metadata.len(),digest))
 }
 fn quantity(value:&BudgetQuantity)->Result<Rational,String>{match value{BudgetQuantity::Count(v)|BudgetQuantity::Bytes(v)|BudgetQuantity::DurationNs(v)=>Rational::parse(&v.to_string(),"1"),BudgetQuantity::Rate{numerator,denominator_ns}=>Rational::parse(&numerator.to_string(),&denominator_ns.to_string()),BudgetQuantity::PercentBasisPoints(_)=>Err("absolute budget cannot use a relative percent limit".into())}}
@@ -677,17 +678,21 @@ fn running_executable()->std::io::Result<PathBuf>{
     #[cfg(target_os="linux")]
     {
         let current=std::env::current_exe()?;
-        // Preserve fail-closed behavior for an executable whose source path
-        // exists but cannot be read; only a readable or concurrently unlinked
-        // path may use the kernel's stable executing-inode handle.
-        match std::fs::File::open(&current){
-            Ok(_)=>Ok(PathBuf::from("/proc/self/exe")),
-            Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Ok(PathBuf::from("/proc/self/exe")),
-            Err(_)=>Ok(current),
-        }
+        let proc=PathBuf::from("/proc/self/exe");
+        select_running_executable(&current,&proc)
     }
     #[cfg(not(target_os="linux"))]
     {std::env::current_exe()}
+}
+#[cfg(target_os="linux")]
+fn select_running_executable(current:&Path,stable:&Path)->std::io::Result<PathBuf>{
+    // An unreadable canonical path must remain fail-closed. A missing path is
+    // the concurrent relink case and requires a readable executing-inode path.
+    match std::fs::File::open(current){
+        Ok(_)=>if std::fs::File::open(stable).is_ok(){Ok(stable.into())}else{Ok(current.into())},
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound=>{std::fs::File::open(stable)?;Ok(stable.into())},
+        Err(_)=>Ok(current.into()),
+    }
 }
 fn host_triple()->Result<String,String>{let target=env!("JET_BUILD_TARGET");if target.split('-').count()<3{return Err("compiler build omitted canonical target triple".into())}Ok(target.into())}
 fn proc_value<'a>(text:&'a str,key:&str)->Option<&'a str>{text.lines().find_map(|line|{let(left,right)=line.split_once(':')?;(left.trim()==key).then(||right.trim())})}
@@ -777,5 +782,35 @@ mod tests {
     fn provider_deadline_stays_stricter_than_artifact_build_prep() {
         assert_eq!(PROVIDER_DEADLINE, Duration::from_secs(30));
         assert_eq!(SELECTED_BUILD_DEADLINE, Duration::from_secs(120));
+    }
+
+    #[cfg(target_os="linux")]
+    #[test]
+    fn running_executable_selection_is_stable_and_fail_closed() {
+        use super::{executable_digest, select_running_executable};
+        use std::os::unix::fs::PermissionsExt;
+
+        let root=std::env::temp_dir().join(format!("jet-budget-executable-selection-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let current=root.join("current");
+        let stable=root.join("stable");
+
+        std::fs::write(&current,b"current").unwrap();
+        assert_eq!(select_running_executable(&current,&stable).unwrap(),current);
+
+        std::fs::remove_file(&current).unwrap();
+        std::fs::write(&stable,b"stable").unwrap();
+        assert_eq!(select_running_executable(&current,&stable).unwrap(),stable);
+
+        std::fs::remove_file(&stable).unwrap();
+        assert!(select_running_executable(&current,&stable).is_err());
+
+        std::fs::write(&current,b"unreadable").unwrap();
+        std::fs::write(&stable,b"stable").unwrap();
+        std::fs::set_permissions(&current,std::fs::Permissions::from_mode(0o111)).unwrap();
+        assert_eq!(select_running_executable(&current,&stable).unwrap(),current);
+        assert!(executable_digest(&current).is_err());
+        let _=std::fs::remove_dir_all(root);
     }
 }
