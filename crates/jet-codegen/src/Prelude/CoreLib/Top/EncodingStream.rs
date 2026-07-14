@@ -55,6 +55,16 @@ enum JetJsonWriteFrame {
     ObjectValue,
 }
 
+enum JetJsonCanonicalFrame {
+    Array { first: bool },
+    Object {
+        entries: Vec<(String, Vec<u8>)>,
+        key: Option<String>,
+        value: Vec<u8>,
+        retained: usize,
+    },
+}
+
 fn jet_encoding_error(
     kind: jet_std::EncodingErrorKind,
     offset: i64,
@@ -158,15 +168,6 @@ fn jet_enc_json_writer(
     canonical: bool,
 ) -> Result<jet_std::JSONWriter, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits)?;
-    if canonical {
-        return Err(jet_encoding_error(
-            jet_std::EncodingErrorKind::Unsupported,
-            0,
-            1,
-            1,
-            "canonical streaming JSON is not available until object buffering can preserve max_item_bytes",
-        ));
-    }
     Ok(jet_std::JSONWriter {
         output,
         limits,
@@ -176,6 +177,8 @@ fn jet_enc_json_writer(
         terminal: None,
         total: 0,
         canonical,
+        canonical_frames: Vec::new(),
+        canonical_retained: 0,
     })
 }
 
@@ -643,9 +646,274 @@ impl jet_std::JSONWriter {
     }
     fn write_event(&mut self, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
-        match self.write_event_inner(event) {
+        let result = if self.canonical {
+            self.write_canonical_event_inner(event)
+        } else {
+            self.write_event_inner(event)
+        };
+        match result {
             Ok(()) => Ok(()),
             Err(error) => self.fail(error),
+        }
+    }
+
+    fn canonical_workspace_limit(&self) -> usize {
+        (self.limits.max_item_bytes as usize)
+            .saturating_mul(2)
+            .saturating_add(self.limits.buffer_bytes as usize)
+            .saturating_add((self.limits.max_depth as usize).saturating_mul(128))
+    }
+
+    fn canonical_charge(&mut self, frame: usize, bytes: usize) -> Result<(), jet_std::EncodingError> {
+        let Some(next) = self.canonical_retained.checked_add(bytes) else {
+            return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON workspace size overflow"));
+        };
+        if next > self.canonical_workspace_limit() {
+            return Err(jet_encoding_error(
+                jet_std::EncodingErrorKind::Limit,
+                self.total,
+                1,
+                self.total + 1,
+                format!("canonical JSON workspace exceeded bounded max_item_bytes {}", self.limits.max_item_bytes),
+            ));
+        }
+        let JetJsonCanonicalFrame::Object { retained, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+        *retained = retained.saturating_add(bytes);
+        self.canonical_retained = next;
+        Ok(())
+    }
+
+    fn canonical_object_sink(&self) -> Option<usize> {
+        self.canonical_frames.iter().rposition(|frame| matches!(frame, JetJsonCanonicalFrame::Object { .. }))
+    }
+
+    fn canonical_emit(&mut self, bytes: &[u8]) -> Result<(), jet_std::EncodingError> {
+        if let Some(frame) = self.canonical_object_sink() {
+            let current_len = match &self.canonical_frames[frame] {
+                JetJsonCanonicalFrame::Object { value, .. } => value.len(),
+                _ => unreachable!(),
+            };
+            let Some(next_len) = current_len.checked_add(bytes.len()) else {
+                return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object size overflow"));
+            };
+            if next_len > self.limits.max_item_bytes as usize {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Limit,
+                    self.total,
+                    1,
+                    self.total + 1,
+                    format!("max_item_bytes {} exceeded by canonical object", self.limits.max_item_bytes),
+                ));
+            }
+            let growth = match &self.canonical_frames[frame] {
+                JetJsonCanonicalFrame::Object { value, .. } if next_len > value.capacity() => next_len - value.capacity(),
+                _ => 0,
+            };
+            self.canonical_charge(frame, growth)?;
+            let JetJsonCanonicalFrame::Object { value, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+            if growth > 0 && value.try_reserve_exact(growth).is_err() {
+                return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object allocation failed within configured bounds"));
+            }
+            value.extend_from_slice(bytes);
+            Ok(())
+        } else {
+            self.write_bytes(bytes)
+        }
+    }
+
+    fn canonical_quote(&self, text: &str) -> Result<Vec<u8>, jet_std::EncodingError> {
+        let inner = self.quoted_len(text)?;
+        let total = inner.checked_add(2).ok_or_else(|| jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1,
+            format!("max_item_bytes {} exceeded", self.limits.max_item_bytes),
+        ))?;
+        let mut out = Vec::new();
+        if out.try_reserve_exact(total).is_err() {
+            return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON string allocation failed within configured bounds"));
+        }
+        out.push(b'"');
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        for ch in text.chars() {
+            match ch {
+                '"' => out.extend_from_slice(b"\\\""),
+                '\\' => out.extend_from_slice(b"\\\\"),
+                '\n' => out.extend_from_slice(b"\\n"),
+                '\r' => out.extend_from_slice(b"\\r"),
+                '\t' => out.extend_from_slice(b"\\t"),
+                '\u{08}' => out.extend_from_slice(b"\\b"),
+                '\u{0c}' => out.extend_from_slice(b"\\f"),
+                c if c <= '\u{1f}' => {
+                    let value = c as usize;
+                    out.extend_from_slice(&[b'\\', b'u', HEX[(value >> 12) & 15], HEX[(value >> 8) & 15], HEX[(value >> 4) & 15], HEX[value & 15]]);
+                }
+                c => {
+                    let mut encoded = [0u8; 4];
+                    out.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
+                }
+            }
+        }
+        out.push(b'"');
+        Ok(out)
+    }
+
+    fn canonical_before_value(&mut self) -> Result<(), jet_std::EncodingError> {
+        match self.canonical_frames.last() {
+            Some(JetJsonCanonicalFrame::Array { first }) => {
+                let first = *first;
+                if !first { self.canonical_emit(b",")?; }
+                let Some(JetJsonCanonicalFrame::Array { first }) = self.canonical_frames.last_mut() else { unreachable!() };
+                *first = false;
+            }
+            Some(JetJsonCanonicalFrame::Object { key: Some(_), value, .. }) if value.is_empty() => {}
+            Some(JetJsonCanonicalFrame::Object { key: None, .. }) => return Err(self.state_error("canonical JSON object expects Key before a value")),
+            Some(JetJsonCanonicalFrame::Object { .. }) => return Err(self.state_error("canonical JSON object value is already active")),
+            None if self.root_written => return Err(self.state_error("JSON writer accepts exactly one root")),
+            None => self.root_written = true,
+        }
+        Ok(())
+    }
+
+    fn canonical_complete_value(&mut self) -> Result<(), jet_std::EncodingError> {
+        let Some(frame) = self.canonical_frames.len().checked_sub(1) else { return Ok(()) };
+        let (key, value) = match &mut self.canonical_frames[frame] {
+            JetJsonCanonicalFrame::Object { key, value, .. } => {
+                let Some(key) = key.take() else { return Ok(()) };
+                (key, std::mem::take(value))
+            }
+            JetJsonCanonicalFrame::Array { .. } => return Ok(()),
+        };
+        let old_capacity = value.capacity();
+        let entry_size = std::mem::size_of::<(String, Vec<u8>)>();
+        let growth = match &self.canonical_frames[frame] {
+            JetJsonCanonicalFrame::Object { entries, .. } if entries.len() == entries.capacity() => {
+                entries.capacity().max(1).saturating_mul(2).saturating_sub(entries.capacity()).saturating_mul(entry_size)
+            }
+            _ => 0,
+        };
+        self.canonical_charge(frame, growth)?;
+        let JetJsonCanonicalFrame::Object { entries, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+        if growth > 0 && entries.try_reserve_exact(growth / entry_size).is_err() {
+            return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON entry allocation failed within configured bounds"));
+        }
+        entries.push((key, value));
+        debug_assert!(old_capacity > 0 || entries.last().is_some_and(|(_, value)| value.is_empty()));
+        Ok(())
+    }
+
+    fn canonical_render_object(&mut self) -> Result<Vec<u8>, jet_std::EncodingError> {
+        let Some(JetJsonCanonicalFrame::Object { mut entries, key: None, value, retained }) = self.canonical_frames.pop() else {
+            return Err(self.state_error("ObjectEnd does not match a complete canonical object"));
+        };
+        if !value.is_empty() {
+            return Err(self.state_error("canonical JSON object value was not completed"));
+        }
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        for pair in entries.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+                return Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, format!("canonical JSON rejects duplicate object key {:?}", pair[0].0)));
+            }
+        }
+        let mut total = 2usize;
+        let mut quoted = Vec::with_capacity(entries.len());
+        for (index, (key, value)) in entries.iter().enumerate() {
+            let key = self.canonical_quote(key)?;
+            total = total.checked_add(usize::from(index > 0)).and_then(|n| n.checked_add(key.len())).and_then(|n| n.checked_add(1)).and_then(|n| n.checked_add(value.len()))
+                .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object size overflow"))?;
+            quoted.push(key);
+        }
+        if total > self.limits.max_item_bytes as usize {
+            self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+            return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded by canonical object", self.limits.max_item_bytes)));
+        }
+        let mut out = Vec::new();
+        if out.try_reserve_exact(total).is_err() {
+            self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+            return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object allocation failed within configured bounds"));
+        }
+        out.push(b'{');
+        for (index, ((_, value), key)) in entries.into_iter().zip(quoted).enumerate() {
+            if index > 0 { out.push(b','); }
+            out.extend_from_slice(&key);
+            out.push(b':');
+            out.extend_from_slice(&value);
+        }
+        out.push(b'}');
+        self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+        Ok(out)
+    }
+
+    fn write_canonical_event_inner(&mut self, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> {
+        if self.finished { return Err(self.state_error("write called after finish")); }
+        match event {
+            jet_std::DataEvent::Key(key) => {
+                let Some(JetJsonCanonicalFrame::Object { entries, key: current, .. }) = self.canonical_frames.last() else {
+                    return Err(self.state_error("Key is only valid while an object expects a key"));
+                };
+                if current.is_some() { return Err(self.state_error("canonical JSON object key has no value")); }
+                if entries.iter().any(|(old, _)| old == &key) {
+                    return Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, format!("canonical JSON rejects duplicate object key {:?}", key)));
+                }
+                let frame = self.canonical_frames.len() - 1;
+                self.canonical_charge(frame, key.capacity())?;
+                let JetJsonCanonicalFrame::Object { key: current, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+                *current = Some(key);
+                Ok(())
+            }
+            jet_std::DataEvent::ArrayEnd => {
+                if !matches!(self.canonical_frames.last(), Some(JetJsonCanonicalFrame::Array { .. })) {
+                    return Err(self.state_error("ArrayEnd does not match an open array"));
+                }
+                self.canonical_emit(b"]")?;
+                self.canonical_frames.pop();
+                self.canonical_complete_value()
+            }
+            jet_std::DataEvent::ObjectEnd => {
+                if matches!(self.canonical_frames.last(), Some(JetJsonCanonicalFrame::Object { key: Some(_), .. })) {
+                    return Err(self.state_error("object key has no value"));
+                }
+                if !matches!(self.canonical_frames.last(), Some(JetJsonCanonicalFrame::Object { .. })) {
+                    return Err(self.state_error("ObjectEnd does not match an open object"));
+                }
+                let object = self.canonical_render_object()?;
+                self.canonical_emit(&object)?;
+                self.canonical_complete_value()
+            }
+            jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "canonical JSON cannot encode Bytes; encode bytes as Text explicitly")),
+            jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "canonical JSON cannot encode a non-finite Float")),
+            value => {
+                if matches!(value, jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart)
+                    && self.canonical_frames.len() as i64 >= self.limits.max_depth
+                {
+                    return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_depth {} exceeded", self.limits.max_depth)));
+                }
+                let encoded = match &value {
+                    jet_std::DataEvent::Null => Some(b"null".to_vec()),
+                    jet_std::DataEvent::Bool(true) => Some(b"true".to_vec()),
+                    jet_std::DataEvent::Bool(false) => Some(b"false".to_vec()),
+                    jet_std::DataEvent::Int(value) => Some(value.to_string().into_bytes()),
+                    jet_std::DataEvent::Float(value) => Some(format!("{:?}", value).into_bytes()),
+                    jet_std::DataEvent::Text(value) => Some(self.canonical_quote(value)?),
+                    jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart => None,
+                    _ => unreachable!(),
+                };
+                self.canonical_before_value()?;
+                match value {
+                    jet_std::DataEvent::ArrayStart => {
+                        self.canonical_emit(b"[")?;
+                        self.canonical_frames.push(JetJsonCanonicalFrame::Array { first: true });
+                        Ok(())
+                    }
+                    jet_std::DataEvent::ObjectStart => {
+                        self.canonical_frames.push(JetJsonCanonicalFrame::Object { entries: Vec::new(), key: None, value: Vec::new(), retained: 0 });
+                        Ok(())
+                    }
+                    _ => {
+                        self.canonical_emit(encoded.as_deref().unwrap())?;
+                        self.canonical_complete_value()
+                    }
+                }
+            }
         }
     }
     fn write_event_inner(&mut self, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> {
@@ -706,7 +974,8 @@ impl jet_std::JSONWriter {
     fn finish_output(&mut self) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
         if self.finished { return Ok(()); }
-        if !self.root_written || !self.frames.is_empty() { return self.fail(self.state_error("finish requires one structurally complete JSON root")); }
+        let open = if self.canonical { !self.canonical_frames.is_empty() } else { !self.frames.is_empty() };
+        if !self.root_written || open { return self.fail(self.state_error("finish requires one structurally complete JSON root")); }
         self.flush_output()?; self.finished = true; Ok(())
     }
 }

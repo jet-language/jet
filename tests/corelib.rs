@@ -775,6 +775,108 @@ fn run() {{
 }
 
 #[test]
+fn json_canonical_stream_sorts_nested_objects_and_latches_rejections() {
+    let dir = std::env::temp_dir().join(format!("jet_json_canonical_stream_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let output_path = dir.join("canonical.json");
+    let duplicate_path = dir.join("duplicate.json");
+    let limited_path = dir.join("limited.json");
+    let output = output_path.to_string_lossy().replace('\\', "\\\\");
+    let duplicate = duplicate_path.to_string_lossy().replace('\\', "\\\\");
+    let limited = limited_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {{
+    output :: files.create("{output}") ?? panic("create")
+    writer :: json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+    writer.write(encoding.DataEvent.Key("z")) ?? panic("key")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("nested object")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("int")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+    writer.write(encoding.DataEvent.Text("x")) ?? panic("text")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("nested end")
+    writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+    writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish twice")
+
+    data := DataTree.Object([
+        "z": DataTree.Array([DataTree.Int(1), DataTree.Object(["b": DataTree.Int(2), "a": DataTree.Text("x")])]),
+        "a": DataTree.Bool(true),
+    ])
+    print(json.canonical(data))
+
+    duplicate_output :: files.create("{duplicate}") ?? panic("duplicate create")
+    duplicate_writer :: json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
+    duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
+    duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")
+    duplicate_writer.write(encoding.DataEvent.Int(1)) ?? panic("first value")
+    duplicate_result :: duplicate_writer.write(encoding.DataEvent.Key("same"))
+    if duplicate_result == {{
+        ok(_) -> {{ print("duplicate-missed") }}
+        err(first) -> {{
+            again :: duplicate_writer.finish()
+            if again == {{
+                ok(_) -> {{ print("terminal-missed") }}
+                err(second) -> {{ print(first.reason == second.reason) }}
+            }}
+        }}
+    }}
+
+    limits := encoding.EncodingLimits.safe()
+    limits.max_item_bytes = 8
+    limited_output :: files.create("{limited}") ?? panic("limited create")
+    limited_writer :: json.writer(^limited_output, limits, true) ?? panic("limited writer")
+    limited_writer.write(encoding.DataEvent.ObjectStart) ?? panic("limited object")
+    limited_writer.write(encoding.DataEvent.Key("long")) ?? panic("limited key")
+    limited_writer.write(encoding.DataEvent.Text("value")) ?? panic("limited value")
+    limited_result :: limited_writer.write(encoding.DataEvent.ObjectEnd)
+    if limited_result == {{
+        ok(_) -> {{ print("limit-missed") }}
+        err(first) -> {{
+            again :: limited_writer.flush()
+            if again == {{
+                ok(_) -> {{ print("limit-terminal-missed") }}
+                err(second) -> {{ print(first.reason == second.reason) }}
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_canonical_stream", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let expected = r#"{"a":true,"z":[1,{"a":"x","b":2}]}"#;
+    assert_eq!(stdout, format!("{expected}\ntrue\ntrue\n"));
+    assert_eq!(fs::read_to_string(&output_path).unwrap(), expected);
+    assert_eq!(fs::read_to_string(&duplicate_path).unwrap(), "");
+    assert_eq!(fs::read_to_string(&limited_path).unwrap(), "");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("json_canonical_stream.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("canonical JSON default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&output_path).unwrap(), expected);
+    assert_eq!(fs::read_to_string(&duplicate_path).unwrap(), "");
+    assert_eq!(fs::read_to_string(&limited_path).unwrap(), "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn jsonl_stream_records_are_incremental_bounded_and_terminal() {
     let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

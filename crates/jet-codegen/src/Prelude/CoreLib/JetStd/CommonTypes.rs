@@ -146,6 +146,8 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) total: i64,
         pub(crate) canonical: bool,
+        pub(crate) canonical_frames: Vec<super::JetJsonCanonicalFrame>,
+        pub(crate) canonical_retained: usize,
     }
     pub struct JSONLReader {
         pub(crate) json: JSONReader,
