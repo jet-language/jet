@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 533,
-    "rev": 5896,
+    "rev": 5897,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7509,12 +7509,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P0",
       "plan": "# Plan: Prepare clean jet / jetpack / jetos split\n\nRatified input:\n- D-PRODUCT-SPLIT1=C canonical ownership split with teaching/provenance shims.\n\nImplementation slices:\n1. Extract shared package/config model crate for read-only manifest/lock/store/ref/workspace/script data so jet-driver no longer depends on jetpack engine.\n2. Move jetpack binary ownership into crates/jetpack; create real crates/jetos binary/crate for OS workflows.\n3. Keep jet root focused on language/compiler/dev loop; route compatibility forms with clear owner/provenance messages.\n4. Split ModuleEval plan model from env runtime and JetOS realization.\n5. Move Canvas package/workspace scans behind shared model API.\n6. Split tests/jetpack.rs into package engine, dispatch, JetOS generation/proof, Studio, and fixture helpers.\n7. Update workspace dependency guards and docs paths.\n\nAcceptance:\n- Root package owns only jet; jetpack/jetos binaries come from owning crates.\n- jet-driver no longer depends on jetpack engine.\n- Existing public commands remain byte-compatible or emit ratified teaching/provenance messages.\n- Canvas project scan works through shared model.\n\nVerification:\n- nix develop -c cargo check --workspace\n- nix develop -c cargo test --test workspace_crates\n- nix develop -c cargo test --test engine_dispatch\n- nix develop -c cargo test --test jetpack\n- nix develop -c scripts/agent/verify-full.sh before done.",
       "blockedBy": [],
       "assignee": "codex-main",
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "owner",
+          "text": "Accepted — closed (no formal ballot)."
+        },
         {
           "at": "2026-07-14",
           "by": "cursor-main",
@@ -18675,43 +18680,6 @@
       "created": "2026-07-08T13:10:17.169Z",
       "outcome": "D",
       "comment": "Hybrid help, but default is categorized command palette; no separate task search/home. Task phrases become fuzzy keywords on command entries.",
-      "ratifiedAt": "2026-07-08",
-      "draft": false
-    },
-    {
-      "id": "D-PRODUCT-SPLIT1",
-      "cardId": "c_audit_367_q80zrm",
-      "group": "tooling",
-      "title": "jet / jetpack / jetos public ownership boundary",
-      "gist": "How public commands and binaries are owned after the code split.",
-      "explainer": "Recommend C: clean architecture, low user disruption, one canonical ownership story.",
-      "story": "Rita installs Jet and expects `jet run` to stay tiny, `jetpack` to own packages/envs, and `jetos` to own OS workflows without confusing aliases.",
-      "inWild": "jet run app.jet\njetpack env enter\njetos switch halcyon\njet os switch halcyon  # compatibility?",
-      "detail": "Recommend C: clean architecture, low user disruption, one canonical ownership story.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Keep all aliases",
-          "detail": "`jet`, `jetpack`, and `jetos` all keep broad overlapping command aliases.",
-          "code": "jet os switch; jetos switch; jetpack os switch"
-        },
-        {
-          "key": "B",
-          "name": "Hard product split",
-          "detail": "Each binary owns one domain; old cross-product forms error immediately.",
-          "code": "jet os -> error: use jetos"
-        },
-        {
-          "key": "C",
-          "name": "Canonical split with teaching shims (recommended)",
-          "detail": "Canonical ownership is split; existing `jet os` and legacy jetpack forms route with clear provenance until deprecation policy says otherwise.",
-          "code": "jet os switch halcyon\n# note: jetos owns this command; running jetos switch halcyon"
-        }
-      ],
-      "comparisons": [],
-      "rec": "C",
-      "status": "ratified",
-      "outcome": "C",
       "ratifiedAt": "2026-07-08",
       "draft": false
     },
@@ -32681,6 +32649,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T13:35:15.549Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T13:35:15.549Z",
+      "by": "owner",
+      "action": "card.criteria-bypass",
+      "ref": "c_audit_367_q80zrm",
+      "note": "owner bypass"
+    },
+    {
       "at": "2026-07-14T13:33:15.720Z",
       "by": "codex-main",
       "action": "card.claim",
@@ -36165,20 +36147,6 @@
       "action": "card.update",
       "ref": "c0uxsyns",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T20:14:25.923Z",
-      "by": "terra-530-smtp",
-      "action": "card.update",
-      "ref": "c0aadf2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T19:59:49.774Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c1jixkit",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
