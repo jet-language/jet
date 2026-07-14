@@ -186,6 +186,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderStatus::Active,
         ),
         (
+            ForeignLanguage::R,
+            "r",
+            "bindings/r",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
+        (
             ForeignLanguage::Com,
             "com",
             "bindings/com",
@@ -235,6 +242,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
     assert_eq!(ForeignNamespace::from_module_path("perl.text").unwrap().language, ForeignLanguage::Perl);
     assert_eq!(ForeignNamespace::from_module_path("ruby.text").unwrap().language, ForeignLanguage::Ruby);
     assert_eq!(ForeignNamespace::from_module_path("php.pricing").unwrap().language, ForeignLanguage::Php);
+    assert_eq!(ForeignNamespace::from_module_path("r.stats").unwrap().language, ForeignLanguage::R);
     assert_eq!(ForeignNamespace::from_module_path("com.excel").unwrap().language, ForeignLanguage::Com);
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
@@ -428,6 +436,18 @@ fn foreign_interop_routes_php_as_active_supervised_pool() {
     assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPhpPool);
     assert_eq!(route.descriptor.stub_kind,BindingStubKind::PhpScript);
     assert_eq!(route.host,ForeignHost::SupervisedPhpPool);
+}
+
+#[test]
+fn foreign_interop_routes_r_as_active_supervised_worker() {
+    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
+    use jet::AST::{ForeignLanguage,ForeignNamespace};
+    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("r.stats").unwrap(),ForeignTarget::Native).unwrap();
+    assert_eq!(route.descriptor.language,ForeignLanguage::R);
+    assert_eq!(route.descriptor.status,BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedR);
+    assert_eq!(route.descriptor.stub_kind,BindingStubKind::RScript);
+    assert_eq!(route.host,ForeignHost::SupervisedR);
 }
 
 #[test]

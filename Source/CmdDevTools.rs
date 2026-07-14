@@ -1299,6 +1299,7 @@ pub(crate) fn run_bind(args: &[&String]) {
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PERL_MODULE_ROOT){run_perl_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::RUBY_MODULE_ROOT){run_ruby_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PHP_MODULE_ROOT){run_php_bind(&args[1..]);return;}
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::R_MODULE_ROOT){run_r_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PWSH_MODULE_ROOT){run_powershell_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::DART_MODULE_ROOT){run_dart_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PASCAL_MODULE_ROOT){run_pascal_bind(&args[1..]);return;}
@@ -1544,6 +1545,19 @@ fn run_php_bind(args:&[&String]){
     println!("bound {} PHP function{} into a four-worker pool from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
 fn php_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind php` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
+
+/// D-FFI-R1=A: parse top-level function metadata without evaluating source,
+/// then generate a persistent supervised R worker.
+fn run_r_bind(args:&[&String]){
+    let usage=||eprintln!("usage: {} inspect bind r <script.R> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    if args.is_empty()||args[0]=="--help"||args[0]=="-h"{usage();exit(if args.is_empty(){ExitCodes::USAGE}else{0})}
+    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{eprintln!("error: unknown `bind r` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|r_bind_error(path,&format!("the R script could not be read ({e})")));
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::R_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::RBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|r_bind_error(path,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){r_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){r_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
+    println!("bound {} R function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+}
+fn r_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
 
 /// D-FFI-COM1=A: inspect a Windows type library and generate typed IDispatch
 /// automation stubs. Non-Windows hosts reject before touching the input.

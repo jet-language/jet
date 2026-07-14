@@ -345,6 +345,9 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         if lib.starts_with("jet_php_") {
             for function in &mut merged { function.effect_root=Some("Php".to_string()); }
         }
+        if lib.starts_with("jet_r_") {
+            for function in &mut merged { function.effect_root=Some("R".to_string()); }
+        }
         if lib.starts_with("jet_com_") {
             for function in &mut merged { function.effect_root=Some("Com".to_string()); }
         }
@@ -738,6 +741,12 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
         let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Php.bindings_subdir());
         let archive=dir.join(format!("libjet_php_{actual}.a"));
         if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_php_{actual}"),"pthread".into()],..Default::default()})}
+        return Err(e3201(lib));
+    }
+    if let Some(actual)=lib.strip_prefix("jet_r_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::R.bindings_subdir());
+        let archive=dir.join(format!("libjet_r_{actual}.a"));
+        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_r_{actual}"),"pthread".into()],..Default::default()})}
         return Err(e3201(lib));
     }
     if let Some(actual)=lib.strip_prefix("jet_com_") {

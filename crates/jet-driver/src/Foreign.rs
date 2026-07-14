@@ -44,6 +44,7 @@ pub enum BinderRuntime {
     SupervisedPerl,
     SupervisedRuby,
     SupervisedPhpPool,
+    SupervisedR,
     WindowsComAutomation,
 }
 
@@ -67,6 +68,7 @@ pub enum BindingStubKind {
     PerlScript,
     RubyScript,
     PhpScript,
+    RScript,
     ComTypeLibrary,
 }
 
@@ -105,6 +107,7 @@ pub enum ForeignHost {
     SupervisedPerl,
     SupervisedRuby,
     SupervisedPhpPool,
+    SupervisedR,
     WindowsComAutomation,
     LegacyRustExtern,
 }
@@ -247,6 +250,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         stub_kind: BindingStubKind::PhpScript,
     },
     BinderDescriptor {
+        language: ForeignLanguage::R,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::SupervisedR,
+        stub_kind: BindingStubKind::RScript,
+    },
+    BinderDescriptor {
         language: ForeignLanguage::Com,
         surface: BinderSurface::Namespace,
         status: BinderStatus::Active,
@@ -311,6 +321,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Perl => ForeignHost::SupervisedPerl,
         ForeignLanguage::Ruby => ForeignHost::SupervisedRuby,
         ForeignLanguage::Php => ForeignHost::SupervisedPhpPool,
+        ForeignLanguage::R => ForeignHost::SupervisedR,
         ForeignLanguage::Com => ForeignHost::WindowsComAutomation,
     }
 }

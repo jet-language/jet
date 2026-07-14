@@ -85,6 +85,8 @@ pub enum Effect {
     Ruby,
     /// D-FFI-PHP1=A: request through a supervised PHP worker pool.
     Php,
+    /// D-FFI-R1=A: request through a supervised R worker.
+    R,
     /// D-FFI-COM1=A: Windows COM apartment automation call.
     Com,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
@@ -123,6 +125,7 @@ impl Effect {
             Effect::Perl => "Perl",
             Effect::Ruby => "Ruby",
             Effect::Php => "Php",
+            Effect::R => "R",
             Effect::Com => "Com",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
@@ -155,6 +158,7 @@ impl Effect {
             "Perl" => Effect::Perl,
             "Ruby" => Effect::Ruby,
             "Php" => Effect::Php,
+            "R" => Effect::R,
             "Com" => Effect::Com,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
@@ -191,6 +195,7 @@ impl Effect {
             Effect::Perl,
             Effect::Ruby,
             Effect::Php,
+            Effect::R,
             Effect::Com,
             Effect::Browser,
             Effect::Secret,

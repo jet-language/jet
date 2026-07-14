@@ -2122,6 +2122,52 @@ fn php_bind_launders_parse_failure_as_e3208() {
     let output=Command::new(jet()).args(["inspect","bind","php"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("Parse error"));assert!(!stderr.contains("broken.php on line"));check_snapshot("bind_php_invalid_e3208.txt",&scrub(&stderr,&script));
 }
 
+#[test]
+fn r_bind_round_trips_datatree_state_and_worker_lifecycle() {
+    if Command::new("Rscript").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("r_bind_round_trip");let script=dir.join("ops.R");
+    let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/r");fs::copy(example.join("ops.R"),&script).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"R bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/r");assert!(cache.join("libjet_r_ops.a").is_file());assert!(cache.join("ops_worker.R").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"));assert!(!provenance.to_ascii_lowercase().contains("cran"));
+    fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated R binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    fs::write(dir.join("lifecycle.c"),r#"#include <pthread.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+extern int64_t jet_r_ops_open(void);
+extern const char* jet_r_ops_invoke_sleep_call(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_transform(int64_t,const char*,int64_t);
+extern void jet_r_ops_cancel(int64_t);
+extern void jet_r_ops_close(int64_t);
+extern int64_t jet_r_ops_take_error(void);
+static int64_t handle;static int64_t code;
+static void* call(void*unused){(void)unused;jet_r_ops_invoke_sleep_call(handle,"1",60000);code=jet_r_ops_take_error();return 0;}
+int main(void){handle=jet_r_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_r_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;jet_r_ops_close(handle);int64_t fresh=jet_r_ops_open();if(!fresh)return 4;const char*response=jet_r_ops_invoke_transform(fresh,"{\"nested\":{},\"vector\":[1,2],\"scalar\":1,\"nothing\":null}",5000);if(jet_r_ops_take_error()!=0||!response||!strstr(response,"\"ok\":true"))return 5;jet_r_ops_close(fresh);int64_t sessions[32];for(int i=0;i<32;i++)if(!(sessions[i]=jet_r_ops_open()))return 10+i;if(jet_r_ops_open()!=0||jet_r_ops_take_error()!=1)return 42;for(int i=0;i<32;i++)jet_r_ops_close(sessions[i]);return 0;}
+"#).unwrap();
+    let cc=Command::new("cc").arg("lifecycle.c").args(["-L.jet/bindings/r","-l:libjet_r_ops.a","-lpthread","-o","lifecycle"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"R lifecycle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let lifecycle=Command::new(dir.join("lifecycle")).current_dir(&dir).output().unwrap();assert!(lifecycle.status.success(),"R lifecycle probe failed: {:?}",lifecycle.status.code());
+}
+
+#[test]
+fn r_bind_discovers_functions_without_executing_source() {
+    if Command::new("Rscript").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("r_bind_static_discovery");let script=dir.join("static.R");fs::write(&script,r#"stop("discovery executed source")
+# fake <- function(input) input
+text <- "also_fake <- function(input) input"
+outer <- function(input) {
+  nested <- function(input) input
+  input
+}
+"#).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","static_ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"static R discovery failed:\n{}",String::from_utf8_lossy(&bind.stderr));let generated=fs::read_to_string(dir.join(".jet/bindings/r/static_ops.jet")).unwrap();assert!(generated.contains("pub fn outer("));assert!(!generated.contains("pub fn fake("));assert!(!generated.contains("pub fn also_fake("));assert!(!generated.contains("pub fn nested("));
+}
+
+#[test]
+fn r_bind_launders_parse_failure_as_e3208() {
+    if Command::new("Rscript").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("r_bind_invalid");let script=dir.join("broken.R");fs::write(&script,"broken <- function(input) { if ( }\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("unexpected '}'"));assert!(!stderr.contains("broken.R:"));check_snapshot("bind_r_invalid_e3208.txt",&scrub(&stderr,&script));
+}
+
 #[cfg(not(target_os="windows"))]
 #[test]
 fn com_bind_rejects_non_windows_before_reading_input() {

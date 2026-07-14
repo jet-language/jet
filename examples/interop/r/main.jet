@@ -1,0 +1,15 @@
+use r.ops as ops
+use core.encoding.json as json
+
+fn run() #(R, Io) {
+    session :: ops.open() ?? panic("R open failed")
+    input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "vector": DataTree.Array([DataTree.Int(1), DataTree.Int(2)]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
+    print(json.canonical(ops.transform(session, copy input, 5000) ?? panic("first call failed")))
+    print(json.canonical(ops.transform(session, copy input, 5000) ?? panic("second call failed")))
+    print(json.canonical(ops.double_values(session, DataTree.Array([DataTree.Int(2), DataTree.Int(4)]), 5000) ?? panic("vector call failed")))
+    failed :: ops.fail_call(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
+    print(json.canonical(failed))
+    timed :: ops.sleep_call(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
+    print(json.canonical(timed))
+    ops.close(^session)
+}

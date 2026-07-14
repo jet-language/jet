@@ -16,6 +16,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        jetR = pkgs.rWrapper.override { packages = [ pkgs.rPackages.jsonlite ]; };
 
         # jet build/run shells out to rustc; keep this path in one place.
         jetRuntimePath = pkgs.lib.makeBinPath [
@@ -26,6 +27,8 @@
           pkgs.ruby
           # D-FFI-PHP1=A: provision the supervised PHP worker pool.
           pkgs.php
+          # D-FFI-R1=A: provision R plus the framed worker's JSON transport.
+          jetR
         ];
         jetTzdb = "${pkgs.tzdata}/share/zoneinfo";
 
@@ -130,6 +133,8 @@
             pkgs.ruby
             # D-FFI-PHP1=A: provision the supervised PHP worker pool.
             pkgs.php
+            # D-FFI-R1=A: provision R plus the framed worker's JSON transport.
+            jetR
             # Compiler freestanding smoke tests execute aarch64 output under
             # qemu-aarch64. OS image and VM tooling does not belong here.
             pkgs.qemu

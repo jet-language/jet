@@ -25,7 +25,7 @@ pub mod PluginExport;
 // summary and lint-policy enforcement without depending on the full
 // `jetpack` engine for that.
 pub use jet_pkg_model::{
-    AdaBind, CBind, CFFI, CobolBind, ComBind, DartBind, DotNetBind, EffectBudget, FFI, FortranBind, GoBind, JavaBind, PascalBind, PerlBind, PhpBind, RubyBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, PackageManifest, ScriptDeps,
+    AdaBind, CBind, CFFI, CobolBind, ComBind, DartBind, DotNetBind, EffectBudget, FFI, FortranBind, GoBind, JavaBind, PascalBind, PerlBind, PhpBind, RBind, RubyBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, PackageManifest, ScriptDeps,
     Store,
 };
 pub use Compile::{bundle_uses_unsafe, Capabilities, CompileOutput};

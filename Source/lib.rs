@@ -30,6 +30,7 @@ pub use jet_driver::{
     PerlBind,
     RubyBind,
     PhpBind,
+    RBind,
     TclBind,
     CanonicalAST,
     Capabilities,
