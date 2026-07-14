@@ -99,6 +99,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderSurface::Namespace,
             BinderStatus::Active,
         ),
+        (
+            ForeignLanguage::PowerShell,
+            "pwsh",
+            "bindings/pwsh",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
     ];
 
     for (lang, root, bindings, surface, status) in expected {
@@ -137,6 +144,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
     assert_eq!(ForeignNamespace::from_module_path("ada.geodesy").unwrap().language, ForeignLanguage::Ada);
     assert_eq!(ForeignNamespace::from_module_path("pascal.inventory").unwrap().language, ForeignLanguage::Pascal);
     assert_eq!(ForeignNamespace::from_module_path("dart.callbacks").unwrap().language, ForeignLanguage::Dart);
+    assert_eq!(ForeignNamespace::from_module_path("pwsh.inventory").unwrap().language, ForeignLanguage::PowerShell);
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
     assert!(ForeignNamespace::from_module_path("lua.socket").is_none());
@@ -275,6 +283,18 @@ fn foreign_interop_routes_dart_as_active_api_dl_host() {
     assert_eq!(route.descriptor.stub_kind,BindingStubKind::DartContract);
     assert_eq!(route.host,ForeignHost::DartHostFfi);
     assert_eq!(route.type_stub,Some(root.join(".jet/bindings/dart/callbacks_host.dart")));
+}
+
+#[test]
+fn foreign_interop_routes_powershell_as_active_supervised_worker() {
+    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
+    use jet::AST::{ForeignLanguage,ForeignNamespace};
+    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("pwsh.inventory").unwrap(),ForeignTarget::Native).unwrap();
+    assert_eq!(route.descriptor.language,ForeignLanguage::PowerShell);
+    assert_eq!(route.descriptor.status,BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPowerShell);
+    assert_eq!(route.descriptor.stub_kind,BindingStubKind::PowerShellScript);
+    assert_eq!(route.host,ForeignHost::SupervisedPowerShell);
 }
 
 /// Build a tiny C static library `libjetc.a` in `dir`, returning its directory

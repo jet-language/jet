@@ -1031,6 +1031,39 @@ seconds and 64 KiB of captured output. Tool failures are laundered behind
 **E3208**. Provenance hashes the contract, Jet compute source, both canonical
 source paths, canonical Dart SDK tool identity, and binder schema.
 
+## E3 — Persistent PowerShell object pipeline (D-FFI-PWSH1=A)
+
+`jet inspect bind pwsh <script.ps1> --pkg <lib>` validates the script with
+PowerShell 7, binds its named `function` declarations, projects the conventional
+PowerShell `-` separator to `_` in Jet names, and writes a typed
+`pwsh.<lib>` cache. `open()` starts one supervised `pwsh` worker, waits at most
+five seconds for its fixed startup handshake, and loads the
+script once. Calls on that session retain script/module state and run the
+named function's pipeline. Jet never accepts runtime PowerShell source or a
+command string: generated entrypoints carry a binder-approved function
+identity, and the worker checks the same allowlist before invocation.
+The shipped process supervisor is POSIX-only; other hosts reject binding
+generation instead of emitting a bridge they cannot supervise truthfully.
+
+Every function accepts one canonical `DataTree` input and returns one
+`DataTree`. Nested objects, lists, integers, floats, booleans, text, and null
+cross through a length-framed structured JSON protocol; stdout text is not the
+result channel. Requests and responses are capped at 1 MiB and JSON depth 64.
+The bridge validates frame lengths and response envelopes before the generated
+Jet wrapper exposes a value. PowerShell exceptions become
+`PowerShellError.CommandFailed`; raw error records, script paths, stderr, and
+stack traces never cross the boundary. Calls carry the `PowerShell` effect.
+
+Each call declares a 1–300000 ms deadline. Expiry kills and reaps the whole
+worker process group and invalidates its session. `cancel(session)` performs
+the same group cancellation for an in-flight call; `close(^session)` consumes
+the handle, and process teardown reaps remaining workers. Handles contain a
+generation so stale identities cannot address a reused slot. At most 32
+workers exist per process. Binding-time `pwsh`, C compiler, and archiver runs
+have a 60-second deadline and 64-KiB output capture. Failures use laundered
+**E3208** copy. Provenance hashes the script, canonical script and PowerShell
+identities, worker protocol, and binder schema.
+
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and

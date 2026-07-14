@@ -71,6 +71,8 @@ pub enum Effect {
     Pascal,
     /// D-FFI-DART1=A: synchronous callback into a Dart-owned isolate.
     Dart,
+    /// D-FFI-PWSH1=A: request through a supervised PowerShell worker.
+    PowerShell,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
@@ -100,6 +102,7 @@ impl Effect {
             Effect::Ada => "Ada",
             Effect::Pascal => "Pascal",
             Effect::Dart => "Dart",
+            Effect::PowerShell => "PowerShell",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
         }
@@ -124,6 +127,7 @@ impl Effect {
             "Ada" => Effect::Ada,
             "Pascal" => Effect::Pascal,
             "Dart" => Effect::Dart,
+            "PowerShell" => Effect::PowerShell,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
             _ => return None,
@@ -152,6 +156,7 @@ impl Effect {
             Effect::Ada,
             Effect::Pascal,
             Effect::Dart,
+            Effect::PowerShell,
             Effect::Browser,
             Effect::Secret,
         ]

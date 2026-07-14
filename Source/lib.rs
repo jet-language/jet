@@ -19,6 +19,7 @@ pub use jet_driver::{
     AdaBind,
     CBind,
     DartBind,
+    PowerShellBind,
     FortranBind,
     GoBind,
     JavaBind,

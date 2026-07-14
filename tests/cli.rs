@@ -1863,6 +1863,66 @@ fn dart_bind_rejects_untyped_contract_as_e3208() {
 }
 
 #[test]
+fn powershell_bind_round_trips_datatree_state_and_cleans_workers() {
+    if Command::new("pwsh").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("powershell_bind_round_trip");let script=dir.join("ops.ps1");
+    fs::write(&script,r#"$script:Counter = 0
+function Get-Stateful {
+  param($InputObject)
+  $script:Counter += 1
+  [ordered]@{
+    count = $script:Counter
+    nested = $InputObject.nested
+    list = @($InputObject.list)
+    scalar = $InputObject.scalar
+    nothing = $null
+  }
+}
+function Fail { param($InputObject) throw 'raw secret failure detail' }
+function Sleep { param($InputObject) Start-Sleep -Seconds 30; return $InputObject }
+"#).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","pwsh"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"PowerShell bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/pwsh");assert!(cache.join("libjet_pwsh_ops.a").is_file());assert!(cache.join("ops_worker.ps1").is_file());assert!(cache.join("ops.provenance").is_file());
+    fs::write(dir.join("main.jet"),r#"use pwsh.ops as ops
+use core.encoding.json as json
+
+fn run() #(PowerShell, Io) {
+    session :: ops.open() ?? panic("PowerShell open failed")
+    input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
+    first :: ops.Get_Stateful(session, copy input, 5000) ?? panic("first call failed")
+    second :: ops.Get_Stateful(session, copy input, 5000) ?? panic("second call failed")
+    print(json.canonical(first))
+    print(json.canonical(second))
+    failed :: ops.Fail(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
+    print(json.canonical(failed))
+    timed :: ops.Sleep(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
+    print(json.canonical(timed))
+    ops.close(^session)
+}
+"#).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PowerShell binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"{\"count\":1,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n{\"count\":2,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n\"failed\"\n\"timeout\"\n");
+    fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
+#include <stdint.h>
+#include <unistd.h>
+extern int64_t jet_pwsh_ops_open(void);
+extern const char* jet_pwsh_ops_invoke_Sleep(int64_t,const char*,int64_t);
+extern void jet_pwsh_ops_cancel(int64_t);
+extern void jet_pwsh_ops_close(int64_t);
+extern int64_t jet_pwsh_ops_take_error(void);
+static int64_t handle;static int64_t code;
+static void* call(void*unused){(void)unused;jet_pwsh_ops_invoke_Sleep(handle,"null",60000);code=jet_pwsh_ops_take_error();return 0;}
+int main(void){handle=jet_pwsh_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_pwsh_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;int64_t fresh=jet_pwsh_ops_open();if(!fresh)return 4;jet_pwsh_ops_close(fresh);return 0;}
+"#).unwrap();
+    let cc=Command::new("cc").arg("cancel.c").args(["-L.jet/bindings/pwsh","-l:libjet_pwsh_ops.a","-lpthread","-o","cancel"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"PowerShell cancellation probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let cancel=Command::new(dir.join("cancel")).current_dir(&dir).output().unwrap();assert!(cancel.status.success(),"PowerShell cancellation did not clean the worker: {:?}",cancel.status.code());
+}
+
+#[test]
+fn powershell_bind_launders_parse_failure_as_e3208() {
+    if Command::new("pwsh").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("powershell_bind_invalid");let script=dir.join("broken.ps1");fs::write(&script,"function Broken { param($InputObject) if ( }\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","pwsh"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("Unexpected token"));assert!(!stderr.contains("broken.ps1:"));check_snapshot("bind_powershell_invalid_e3208.txt",&scrub(&stderr,&script));
+}
+
+#[test]
 fn ada_bind_launders_gnat_failure_as_e3208() {
     let dir=isolated_cwd("ada_bind_failure");let spec=dir.join("broken.ads");
     fs::write(&spec,"package Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"broken_value\"; end Broken;\n").unwrap();

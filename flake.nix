@@ -107,6 +107,8 @@
             pkgs.fpc
             # D-FFI-DART1=A: provision Dart native FFI and AOT tooling.
             pkgs.dart
+            # D-FFI-PWSH1=A: provision the persistent PowerShell 7 worker.
+            pkgs.powershell
             # D-FFI-FORTRAN1=A: provision the ISO_C_BINDING bridge compiler.
             pkgs.gfortran
             # D-FFI-GO1=A: provision the in-process c-archive bridge compiler.

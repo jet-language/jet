@@ -38,6 +38,7 @@ pub enum BinderRuntime {
     AdaGnatCAbi,
     FreePascalCdecl,
     DartApiDl,
+    SupervisedPowerShell,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +55,7 @@ pub enum BindingStubKind {
     AdaSpec,
     PascalSource,
     DartContract,
+    PowerShellScript,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +87,7 @@ pub enum ForeignHost {
     AdaGnatCAbi,
     FreePascalCdecl,
     DartHostFfi,
+    SupervisedPowerShell,
     LegacyRustExtern,
 }
 
@@ -183,6 +186,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         runtime: BinderRuntime::DartApiDl,
         stub_kind: BindingStubKind::DartContract,
     },
+    BinderDescriptor {
+        language: ForeignLanguage::PowerShell,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::SupervisedPowerShell,
+        stub_kind: BindingStubKind::PowerShellScript,
+    },
 ];
 
 pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
@@ -235,6 +245,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Ada => ForeignHost::AdaGnatCAbi,
         ForeignLanguage::Pascal => ForeignHost::FreePascalCdecl,
         ForeignLanguage::Dart => ForeignHost::DartHostFfi,
+        ForeignLanguage::PowerShell => ForeignHost::SupervisedPowerShell,
     }
 }
 
