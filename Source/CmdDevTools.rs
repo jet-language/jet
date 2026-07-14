@@ -11,36 +11,9 @@ use jet::ExitCodes;
 
 use crate::CmdCompile::{build, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
+pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
+use jet_devserver::file_mtime;
 
-/// c77 (D-DEVMODE1=A): how the watch loop reacts to a save. The default is
-/// auto-detection (`detect_dev_mode`); the three expert overrides force a mode.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WatchPolicy {
-    /// Auto-detect run-to-completion vs resident on each save (the default).
-    Auto,
-    /// `--restart`: always rerun from scratch (force run-to-completion).
-    Restart,
-    /// `--swap` (D-CLI-DEVSERVE1=A: was `jet serve`): always take the
-    /// swap-or-announced-restart path.
-    Swap,
-    /// `--watch=off`: run once and exit, no loop.
-    Once,
-}
-
-/// Parse the c77 dev/serve flags out of the raw argv. Unknown flags are left
-/// for the caller; this only recognizes `--restart`, `--swap`, `--watch=off`.
-pub(crate) fn watch_policy_from(raw: &[String], default: WatchPolicy) -> WatchPolicy {
-    let mut policy = default;
-    for a in raw {
-        match a.as_str() {
-            "--restart" => policy = WatchPolicy::Restart,
-            "--swap" => policy = WatchPolicy::Swap,
-            "--watch=off" => policy = WatchPolicy::Once,
-            _ => {}
-        }
-    }
-    policy
-}
 
 /// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
 /// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
@@ -371,10 +344,6 @@ pub(crate) fn run_repl(project_dir: Option<&str>, allow: &[String], deny: &[Stri
 /// distinct state so a transient unlink/rewrite still triggers a re-run).
 /// `pub(crate)`: also reused verbatim by `CmdDevWeb::run_dev_web` (c134
 /// Phase 7) — same mtime-poll pattern, no `notify` crate (I6).
-pub(crate) fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
-    fs::metadata(path).and_then(|m| m.modified()).ok()
-}
-
 /// Run one dev iteration and render its outcome to the terminal in the active
 /// output mode. Diagnostics use the SAME renderer as batch compilation
 /// (D-DEV), so a problem looks identical whether seen via `jet check` or

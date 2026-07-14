@@ -72,6 +72,7 @@ pub use jet_debug as Debug;
 // and hybrid help UI live in the inward jet-cli seam. Public paths remain
 // `jet::CLI`, `jet::Explain`, and `jet::Help` without root wrapper modules.
 pub use jet_cli::{CLI, Explain, Help};
+pub use jet_devserver as DevServer;
 pub use jet_foundation::ExitCodes;
 // D-ARCH-SOURCE1=A: real REPL seam ownership. Compatibility paths remain
 // `jet::REPL`, `jet::Term`, and `jet::SemanticSymbols`; implementation lives

@@ -452,7 +452,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // D-ARCH-SOURCE1=A: CLI/interactive seams are not optional aliases hidden in
     // the root crate. Their manifests must exist and therefore pass this same
     // path-only dependency audit.
-    for required in ["jet-repl", "jet-debug", "jet-cli"] {
+    for required in ["jet-repl", "jet-debug", "jet-cli", "jet-devserver"] {
         assert!(
             crate_manifests.iter().any(|(name, _)| name == required),
             "D-ARCH-SOURCE1 requires the {required} workspace seam"
@@ -470,6 +470,10 @@ fn compiler_seam_crates_have_only_path_dependencies() {
             && !root.join("Source/Explain.rs").exists()
             && !root.join("Source/Help").exists(),
         "D-ARCH-SOURCE1 requires jet-cli ownership, not root CLI/help wrappers"
+    );
+    assert!(
+        root_lib.contains("pub use jet_devserver as DevServer;"),
+        "D-ARCH-SOURCE1 requires direct jet-devserver ownership exposure"
     );
     assert!(
         root_lib.contains("pub use jet_foundation::ExitCodes;")

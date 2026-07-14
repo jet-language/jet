@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, IsTerminal, Read, Write};
+use std::io::{BufReader, IsTerminal, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -24,8 +24,8 @@ use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
 
 use crate::CmdCompile::write_web_artifacts;
-use crate::CmdDevTools::file_mtime;
 use crate::{report_problems, OutputMode};
+use jet_devserver::{content_type_for, file_mtime, query_param, static_path, write_response, Request};
 
 /// Ports tried, in order, before giving up. 8080 is the conventional static-
 /// dev-server port; a small bounded scan upward covers "something else is
@@ -893,30 +893,14 @@ fn handle_connection(
     canvas_file: &str,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
-    let mut request_line = String::new();
-    if reader.read_line(&mut request_line)? == 0 {
+    let Some(request) = Request::read(&mut reader)? else {
         return Ok(());
-    }
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 || line == "\r\n" || line == "\n" {
-            break;
-        }
-        let lower = line.to_ascii_lowercase();
-        if let Some(v) = lower.strip_prefix("content-length:") {
-            content_length = v.trim().parse().unwrap_or(0);
-        }
-    }
-    let mut body = vec![0u8; content_length];
-    if content_length > 0 {
-        reader.read_exact(&mut body)?;
-    }
+    };
 
     let mut stream = stream;
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("");
-    let target = parts.next().unwrap_or("/");
+    let method = request.method.as_str();
+    let target = request.target.as_str();
+    let body = request.body;
 
     if method != "GET" && method != "POST" {
         return write_response(
@@ -1296,44 +1280,6 @@ fn handle_connection(
     Ok(())
 }
 
-fn query_param(target: &str, key: &str) -> Option<String> {
-    let (_, query) = target.split_once('?')?;
-    for part in query.split('&') {
-        let (name, value) = part.split_once('=').unwrap_or((part, ""));
-        if name == key {
-            return Some(percent_decode(value));
-        }
-    }
-    None
-}
-
-fn percent_decode(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(a), Some(b)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
-                out.push(a * 16 + b);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).to_string()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
 fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
     write_response(
         stream,
@@ -1348,7 +1294,9 @@ fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
 /// requests, no compression — a dev tool serving a few small files needs
 /// none of that.
 fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<u16> {
-    if path.contains("..") {
+    let file_path = match static_path(Path::new("build"), path) {
+        Ok(path) => path,
+        Err(()) => {
         write_response(
             stream,
             "400 Bad Request",
@@ -1356,13 +1304,8 @@ fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<u16> {
             b"bad path",
         )?;
         return Ok(400);
-    }
-    let rel = if path == "/" {
-        "index.html"
-    } else {
-        path.trim_start_matches('/')
+        }
     };
-    let file_path = Path::new("build").join(rel);
     let bytes = match fs::read(&file_path) {
         Ok(b) => b,
         Err(_) => {
@@ -1386,17 +1329,6 @@ fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<u16> {
     }
     write_response(stream, "200 OK", content_type, &bytes)?;
     Ok(200)
-}
-
-fn content_type_for(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "application/javascript; charset=utf-8",
-        Some("wasm") => "application/wasm",
-        Some("json") => "application/json; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        _ => "application/octet-stream",
-    }
 }
 
 /// Plain polling live-reload (no WebSocket/SSE — I6 + correct scoping for a
@@ -1546,23 +1478,6 @@ fn inject_live_reload(html: &str) -> String {
         out.push_str(&script);
         out
     }
-}
-
-fn write_response(
-    stream: &mut TcpStream,
-    status: &str,
-    content_type: &str,
-    body: &[u8],
-) -> std::io::Result<()> {
-    let header = format!(
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-        status,
-        content_type,
-        body.len()
-    );
-    stream.write_all(header.as_bytes())?;
-    stream.write_all(body)?;
-    stream.flush()
 }
 
 #[cfg(test)]
