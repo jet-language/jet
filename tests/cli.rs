@@ -2216,22 +2216,48 @@ fn r_bind_round_trips_datatree_state_and_worker_lifecycle() {
     if Command::new("Rscript").arg("--version").output().is_err(){return}
     let dir=isolated_cwd("r_bind_round_trip");let script=dir.join("ops.R");
     let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/r");fs::copy(example.join("ops.R"),&script).unwrap();
+    fs::OpenOptions::new().append(true).open(&script).unwrap().write_all(br#"
+replace_plot <- function(value) {
+  device <- dev.cur()
+  dev.off(device)
+  writeChar(value, file.path(Sys.getenv("JET_BIND_TEMP"), "plot.svg"), eos = NULL, useBytes = TRUE)
+}
+hostile_plot <- function(input) {
+  kind <- input$kind
+  value <- switch(kind,
+    script = '<svg xmlns="http://www.w3.org/2000/svg"><script>raw secret script</script></svg>',
+    event = '<svg xmlns="http://www.w3.org/2000/svg" onload="raw secret event"><path d="M0 0"/></svg>',
+    foreign = '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject>raw secret foreign</foreignObject></svg>',
+    external = '<svg xmlns="http://www.w3.org/2000/svg"><use href="https://evil.invalid/raw-secret"/></svg>',
+    css = '<svg xmlns="http://www.w3.org/2000/svg"><path style="fill:url(https://evil.invalid/raw-secret)"/></svg>',
+    doctype = '<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///raw-secret">]><svg xmlns="http://www.w3.org/2000/svg">&xxe;</svg>',
+    malformed = '<svg xmlns="http://www.w3.org/2000/svg"><path></svg>',
+    oversize = paste0('<svg xmlns="http://www.w3.org/2000/svg"><desc>', strrep('x', 524288), '</desc></svg>'),
+    stop('unknown hostile plot'))
+  replace_plot(value)
+}
+"#).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"R bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/r");assert!(cache.join("libjet_r_ops.a").is_file());assert!(cache.join("ops_worker.R").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"));assert!(!provenance.to_ascii_lowercase().contains("cran"));
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
     let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated R binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("lifecycle.c"),r#"#include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 extern int64_t jet_r_ops_open(void);
 extern const char* jet_r_ops_invoke_sleep_call(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_sleep_call_plot(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_plot_scores_plot(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_hostile_plot_plot(int64_t,const char*,int64_t);
 extern const char* jet_r_ops_invoke_transform(int64_t,const char*,int64_t);
 extern void jet_r_ops_cancel(int64_t);
 extern void jet_r_ops_close(int64_t);
 extern int64_t jet_r_ops_take_error(void);
 static int64_t handle;static int64_t code;
-static void* call(void*unused){(void)unused;jet_r_ops_invoke_sleep_call(handle,"1",60000);code=jet_r_ops_take_error();return 0;}
-int main(void){handle=jet_r_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_r_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;jet_r_ops_close(handle);int64_t fresh=jet_r_ops_open();if(!fresh)return 4;const char*response=jet_r_ops_invoke_transform(fresh,"{\"nested\":{},\"vector\":[1,2],\"scalar\":1,\"nothing\":null}",5000);if(jet_r_ops_take_error()!=0||!response||!strstr(response,"\"ok\":true"))return 5;jet_r_ops_close(fresh);int64_t sessions[32];for(int i=0;i<32;i++)if(!(sessions[i]=jet_r_ops_open()))return 10+i;if(jet_r_ops_open()!=0||jet_r_ops_take_error()!=1)return 42;for(int i=0;i<32;i++)jet_r_ops_close(sessions[i]);return 0;}
+static void* call(void*unused){(void)unused;jet_r_ops_invoke_sleep_call_plot(handle,"1",60000);code=jet_r_ops_take_error();return 0;}
+static int hostile(int64_t h,const char*kind){char input[64];snprintf(input,sizeof(input),"{\"kind\":\"%s\"}",kind);const char*response=jet_r_ops_invoke_hostile_plot_plot(h,input,5000);if(jet_r_ops_take_error()!=0||!response||!strstr(response,"\"ok\":false")||strstr(response,"secret"))return 1;return 0;}
+int main(void){handle=jet_r_ops_open();if(!handle)return 1;const char*svg=jet_r_ops_invoke_plot_scores_plot(handle,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true")||!strstr(svg,"<svg height=\\\"")||strstr(svg,"<?xml")||strstr(svg,"<script"))return 2;const char*kinds[]={"script","event","foreign","external","css","doctype","malformed","oversize"};for(int i=0;i<8;i++)if(hostile(handle,kinds[i]))return 10+i;const char*recovered=jet_r_ops_invoke_transform(handle,"{\"nested\":{},\"vector\":[1,2],\"scalar\":1,\"nothing\":null}",5000);if(jet_r_ops_take_error()!=0||!recovered||!strstr(recovered,"\"ok\":true"))return 20;jet_r_ops_invoke_sleep_call_plot(handle,"1",100);if(jet_r_ops_take_error()!=2)return 21;int64_t timed=jet_r_ops_open();if(!timed)return 22;svg=jet_r_ops_invoke_plot_scores_plot(timed,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true"))return 23;jet_r_ops_close(timed);handle=jet_r_ops_open();if(!handle)return 24;pthread_t thread;if(pthread_create(&thread,0,call,0))return 25;usleep(100000);jet_r_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 26;int64_t fresh=jet_r_ops_open();if(!fresh)return 27;svg=jet_r_ops_invoke_plot_scores_plot(fresh,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true"))return 28;jet_r_ops_close(fresh);int64_t sessions[32];for(int i=0;i<32;i++)if(!(sessions[i]=jet_r_ops_open()))return 40+i;if(jet_r_ops_open()!=0||jet_r_ops_take_error()!=1)return 72;for(int i=0;i<32;i++)jet_r_ops_close(sessions[i]);return 0;}
 "#).unwrap();
     let cc=Command::new("cc").arg("lifecycle.c").args(["-L.jet/bindings/r","-l:libjet_r_ops.a","-lpthread","-o","lifecycle"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"R lifecycle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let lifecycle=Command::new(dir.join("lifecycle")).current_dir(&dir).output().unwrap();assert!(lifecycle.status.success(),"R lifecycle probe failed: {:?}",lifecycle.status.code());
 }

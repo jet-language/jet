@@ -13,5 +13,10 @@ scale_table <- function(input) {
   input
 }
 
+plot_scores <- function(input) {
+  values <- unlist(input$values, use.names = FALSE)
+  plot(values, type = "b", main = "Jet and R", xlab = "sample", ylab = "score")
+}
+
 fail_call <- function(input) stop("raw secret failure detail")
 sleep_call <- function(input) { Sys.sleep(30); input }

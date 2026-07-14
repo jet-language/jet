@@ -1177,6 +1177,31 @@ laundered **E3208** copy. Provenance hashes source, canonical script and Ruby
 identities, worker protocol, and binder schema. RubyGems resolution and install
 are not implemented by this binder and remain unclaimed Jetpack provider work.
 
+## E3 — Persistent R worker (D-FFI-R1=A)
+
+`jet inspect bind r <script.R> --pkg <lib>` parses the script without running
+its top-level body and binds direct named functions with one required argument.
+`open()` starts one supervised R worker, loads the script once, and retains its
+state. A normal `<name>` adapter round-trips `DataTree`; `<name>_table<T>` maps
+`Table<T>` to `data.frame` and back through the same framed JSON channel.
+
+`<name>_plot` runs the function on an isolated SVG graphics device and returns
+the plot as `String`. The worker parses resulting XML structurally, permits only
+an inert SVG element, attribute, local-fragment, and presentation-style
+vocabulary, and emits deterministic canonical XML. It rejects scripts, event
+handlers, `foreignObject`, external references, active CSS, declarations,
+entities, malformed XML, and input or canonical output above 512 KiB. Plot
+failures become `RError.CommandFailed`; R errors and rejected SVG content never
+cross the boundary. Each worker gets a supervisor-created private temporary
+directory. Success, error, deadline, cancellation, close, and process teardown
+all remove its SVG and directory.
+
+All calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
+reaps the process group and invalidates that handle; a new session starts a
+clean worker. Frames remain capped at 1 MiB, handles are generation-tagged, and
+at most 32 workers exist per process. CRAN realization belongs to Jetpack; the
+binder consumes the provisioned R runtime and installed modules.
+
 ## E3 — Windows COM automation (D-FFI-COM1=A)
 
 `com.*` exists only on a Windows host. Elsewhere, importing it or running
