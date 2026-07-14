@@ -675,6 +675,106 @@ fn run() {{
 }
 
 #[test]
+fn json_stream_rejects_whole_events_and_records_before_partial_output() {
+    let dir = std::env::temp_dir().join(format!("jet_json_stream_atomic_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let text_path = dir.join("text.json");
+    let key_path = dir.join("key.json");
+    let depth_path = dir.join("depth.json");
+    let jsonl_path = dir.join("record.jsonl");
+    let nonfinite_path = dir.join("nonfinite.jsonl");
+    let text = text_path.to_string_lossy().replace('\\', "\\\\");
+    let key = key_path.to_string_lossy().replace('\\', "\\\\");
+    let depth = depth_path.to_string_lossy().replace('\\', "\\\\");
+    let jsonl = jsonl_path.to_string_lossy().replace('\\', "\\\\");
+    let nonfinite = nonfinite_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn run() {{
+    text_limits := encoding.EncodingLimits.safe()
+    text_limits.max_total_bytes = Val(5)
+    text_output :: files.create("{text}") ?? panic("create text")
+    text_writer :: json.writer(^text_output, text_limits) ?? panic("text writer")
+    text_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    text_error :: text_writer.write(encoding.DataEvent.Text("abcd"))
+    if text_error == {{
+        ok(_) -> {{ print("text-limit-missed") }}
+        err(first) -> {{
+            again :: text_writer.finish()
+            if again == {{
+                ok(_) -> {{ print("text-terminal-missed") }}
+                err(second) -> {{ print(first.reason == second.reason) }}
+            }}
+        }}
+    }}
+
+    key_limits := encoding.EncodingLimits.safe()
+    key_limits.max_total_bytes = Val(5)
+    key_output :: files.create("{key}") ?? panic("create key")
+    key_writer :: json.writer(^key_output, key_limits) ?? panic("key writer")
+    key_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+    key_result :: key_writer.write(encoding.DataEvent.Key("abc"))
+    if key_result == {{ ok(_) -> {{ print("key-limit-missed") }} err(_) -> {{ print(true) }} }}
+
+    depth_limits := encoding.EncodingLimits.safe()
+    depth_limits.max_depth = 1
+    depth_output :: files.create("{depth}") ?? panic("create depth")
+    depth_writer :: json.writer(^depth_output, depth_limits) ?? panic("depth writer")
+    depth_writer.write(encoding.DataEvent.ArrayStart) ?? panic("outer")
+    depth_result :: depth_writer.write(encoding.DataEvent.ArrayStart)
+    if depth_result == {{ ok(_) -> {{ print("depth-limit-missed") }} err(_) -> {{ print(true) }} }}
+
+    record_limits := encoding.EncodingLimits.safe()
+    record_limits.max_total_bytes = Val(5)
+    record_output :: files.create("{jsonl}") ?? panic("create record")
+    record_writer :: jsonl.writer(^record_output, record_limits) ?? panic("record writer")
+    record_result :: record_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("abcd")]))
+    if record_result == {{
+        ok(_) -> {{ print("record-limit-missed") }}
+        err(first) -> {{
+            again :: record_writer.flush()
+            if again == {{ ok(_) -> {{ print("record-terminal-missed") }} err(second) -> {{ print(first.reason == second.reason) }} }}
+        }}
+    }}
+
+    nonfinite_output :: files.create("{nonfinite}") ?? panic("create nonfinite")
+    nonfinite_writer :: jsonl.writer(^nonfinite_output) ?? panic("nonfinite writer")
+    nonfinite_result :: nonfinite_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Float(0.0 / 0.0)]))
+    if nonfinite_result == {{ ok(_) -> {{ print("nonfinite-missed") }} err(_) -> {{ print(true) }} }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_stream_atomic", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "true\ntrue\ntrue\ntrue\ntrue\n");
+    assert_eq!(fs::read_to_string(&text_path).unwrap(), "[");
+    assert_eq!(fs::read_to_string(&key_path).unwrap(), "{");
+    assert_eq!(fs::read_to_string(&depth_path).unwrap(), "[");
+    assert_eq!(fs::read_to_string(&jsonl_path).unwrap(), "");
+    assert_eq!(fs::read_to_string(&nonfinite_path).unwrap(), "");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("json_stream_atomic.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("JSON stream atomic default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&text_path).unwrap(), "[");
+    assert_eq!(fs::read_to_string(&key_path).unwrap(), "{");
+    assert_eq!(fs::read_to_string(&depth_path).unwrap(), "[");
+    assert_eq!(fs::read_to_string(&jsonl_path).unwrap(), "");
+    assert_eq!(fs::read_to_string(&nonfinite_path).unwrap(), "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn jsonl_stream_records_are_incremental_bounded_and_terminal() {
     let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

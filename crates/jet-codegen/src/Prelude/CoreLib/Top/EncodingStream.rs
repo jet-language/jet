@@ -568,10 +568,15 @@ fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<Option<j
 impl jet_std::JSONWriter {
     fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> { self.terminal = Some(error.clone()); Err(error) }
     fn state_error(&self, reason: &str) -> jet_std::EncodingError { jet_encoding_error(jet_std::EncodingErrorKind::State, self.total, 1, self.total + 1, reason) }
-    fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), jet_std::EncodingError> {
-        if self.limits.max_total_bytes.is_some_and(|max| self.total.saturating_add(bytes.len() as i64) > max) {
+    fn ensure_total(&self, additional: usize) -> Result<(), jet_std::EncodingError> {
+        let additional = i64::try_from(additional).unwrap_or(i64::MAX);
+        if self.limits.max_total_bytes.is_some_and(|max| self.total.saturating_add(additional) > max) {
             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap_or(0))));
         }
+        Ok(())
+    }
+    fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), jet_std::EncodingError> {
+        self.ensure_total(bytes.len())?;
         use std::io::Write;
         self.output.inner.write_all(bytes).map_err(|e| jet_encoding_io_error(self.total, 1, self.total + 1, e))?;
         self.total += bytes.len() as i64;
@@ -627,6 +632,15 @@ impl jet_std::JSONWriter {
         }
         Ok(())
     }
+    fn value_prefix_len(&self) -> Result<usize, jet_std::EncodingError> {
+        match self.frames.last().copied() {
+            Some(JetJsonWriteFrame::Array { first }) => Ok(usize::from(!first)),
+            Some(JetJsonWriteFrame::ObjectValue) => Ok(0),
+            Some(JetJsonWriteFrame::ObjectKey { .. }) => Err(self.state_error("JSON object expects Key before a value")),
+            None if self.root_written => Err(self.state_error("JSON writer accepts exactly one root")),
+            None => Ok(0),
+        }
+    }
     fn write_event(&mut self, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
         match self.write_event_inner(event) {
@@ -639,15 +653,36 @@ impl jet_std::JSONWriter {
         let result = match event {
             jet_std::DataEvent::Key(key) => {
                 let first = match self.frames.last().copied() { Some(JetJsonWriteFrame::ObjectKey { first }) => first, _ => return self.fail(self.state_error("Key is only valid while an object expects a key")) };
+                let key_len = self.quoted_len(&key)?.checked_add(2).and_then(|n| n.checked_add(1 + usize::from(!first)))
+                    .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)))?;
+                self.ensure_total(key_len)?;
                 if !first { self.write_bytes(b",")?; }
                 self.write_quoted(&key)?; self.write_bytes(b":")?;
                 *self.frames.last_mut().unwrap() = JetJsonWriteFrame::ObjectValue; Ok(())
             }
-            jet_std::DataEvent::ArrayEnd => match self.frames.last().copied() { Some(JetJsonWriteFrame::Array { .. }) => { self.write_bytes(b"]")?; self.frames.pop(); Ok(()) }, _ => Err(self.state_error("ArrayEnd does not match an open array")) },
-            jet_std::DataEvent::ObjectEnd => match self.frames.last().copied() { Some(JetJsonWriteFrame::ObjectKey { .. }) => { self.write_bytes(b"}")?; self.frames.pop(); Ok(()) }, Some(JetJsonWriteFrame::ObjectValue) => Err(self.state_error("object key has no value")), _ => Err(self.state_error("ObjectEnd does not match an open object")) },
+            jet_std::DataEvent::ArrayEnd => match self.frames.last().copied() { Some(JetJsonWriteFrame::Array { .. }) => { self.ensure_total(1)?; self.write_bytes(b"]")?; self.frames.pop(); Ok(()) }, _ => Err(self.state_error("ArrayEnd does not match an open array")) },
+            jet_std::DataEvent::ObjectEnd => match self.frames.last().copied() { Some(JetJsonWriteFrame::ObjectKey { .. }) => { self.ensure_total(1)?; self.write_bytes(b"}")?; self.frames.pop(); Ok(()) }, Some(JetJsonWriteFrame::ObjectValue) => Err(self.state_error("object key has no value")), _ => Err(self.state_error("ObjectEnd does not match an open object")) },
             jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JSON cannot encode Bytes; encode bytes as Text explicitly")),
             jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JSON cannot encode a non-finite Float")),
             value => {
+                if matches!(value, jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart)
+                    && self.frames.len() as i64 >= self.limits.max_depth
+                {
+                    return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_depth {} exceeded", self.limits.max_depth)));
+                }
+                let payload_len = match &value {
+                    jet_std::DataEvent::Null => 4,
+                    jet_std::DataEvent::Bool(true) => 4,
+                    jet_std::DataEvent::Bool(false) => 5,
+                    jet_std::DataEvent::Int(v) => v.to_string().len(),
+                    jet_std::DataEvent::Float(v) => v.to_string().len(),
+                    jet_std::DataEvent::Text(v) => self.quoted_len(v)?.checked_add(2).ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)))?,
+                    jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart => 1,
+                    _ => return Err(self.state_error("unsupported JSON writer event")),
+                };
+                let event_len = self.value_prefix_len()?.checked_add(payload_len)
+                    .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "JSON event wire size overflow"))?;
+                self.ensure_total(event_len)?;
                 self.before_value()?;
                 match value {
                     jet_std::DataEvent::Null => self.write_bytes(b"null"),
@@ -655,8 +690,8 @@ impl jet_std::JSONWriter {
                     jet_std::DataEvent::Int(v) => self.write_bytes(v.to_string().as_bytes()),
                     jet_std::DataEvent::Float(v) => self.write_bytes(v.to_string().as_bytes()),
                     jet_std::DataEvent::Text(v) => self.write_quoted(&v),
-                    jet_std::DataEvent::ArrayStart => { if self.frames.len() as i64 >= self.limits.max_depth { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_depth {} exceeded", self.limits.max_depth))); } self.write_bytes(b"[")?; self.frames.push(JetJsonWriteFrame::Array { first: true }); Ok(()) },
-                    jet_std::DataEvent::ObjectStart => { if self.frames.len() as i64 >= self.limits.max_depth { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_depth {} exceeded", self.limits.max_depth))); } self.write_bytes(b"{")?; self.frames.push(JetJsonWriteFrame::ObjectKey { first: true }); Ok(()) },
+                    jet_std::DataEvent::ArrayStart => { self.write_bytes(b"[")?; self.frames.push(JetJsonWriteFrame::Array { first: true }); Ok(()) },
+                    jet_std::DataEvent::ObjectStart => { self.write_bytes(b"{")?; self.frames.push(JetJsonWriteFrame::ObjectKey { first: true }); Ok(()) },
                     _ => unreachable!(),
                 }
             }
@@ -1054,7 +1089,19 @@ fn jet_jsonl_tree_size(
     }
     let size = match value {
         jet_std::DataTree::Null | jet_std::DataTree::Bool(_) => 1,
-        jet_std::DataTree::Int(_) | jet_std::DataTree::Float(_) => 8,
+        jet_std::DataTree::Int(_) => 8,
+        jet_std::DataTree::Float(value) if value.is_finite() => 8,
+        jet_std::DataTree::Float(_) => {
+            let mut error = jet_encoding_error(
+                jet_std::EncodingErrorKind::Unsupported,
+                0,
+                1,
+                1,
+                "JSON cannot encode a non-finite Float",
+            );
+            error.path = path.to_string();
+            return Err(error);
+        }
         jet_std::DataTree::Text(text) => text.len(),
         jet_std::DataTree::Bytes(_) => {
             let mut error = jet_encoding_error(
@@ -1110,6 +1157,51 @@ fn jet_jsonl_tree_size(
     Ok(size)
 }
 
+fn jet_jsonl_wire_size(
+    writer: &jet_std::JSONWriter,
+    value: &jet_std::DataTree,
+) -> Result<usize, jet_std::EncodingError> {
+    let checked_sum = |parts: &[usize]| {
+        parts.iter().try_fold(0usize, |sum, part| sum.checked_add(*part))
+            .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, writer.total, 1, writer.total + 1, "JSONL record wire size overflow"))
+    };
+    match value {
+        jet_std::DataTree::Null => Ok(4),
+        jet_std::DataTree::Bool(true) => Ok(4),
+        jet_std::DataTree::Bool(false) => Ok(5),
+        jet_std::DataTree::Int(value) => Ok(value.to_string().len()),
+        jet_std::DataTree::Float(value) => Ok(value.to_string().len()),
+        jet_std::DataTree::Text(value) => checked_sum(&[writer.quoted_len(value)?, 2]),
+        jet_std::DataTree::Bytes(_) => Err(jet_encoding_error(
+            jet_std::EncodingErrorKind::Unsupported,
+            writer.total,
+            1,
+            writer.total + 1,
+            "JSON cannot encode Bytes; encode bytes as Text explicitly",
+        )),
+        jet_std::DataTree::Array(items) => {
+            let mut size = 2usize;
+            for (index, item) in items.iter().enumerate() {
+                size = checked_sum(&[size, usize::from(index > 0), jet_jsonl_wire_size(writer, item)?])?;
+            }
+            Ok(size)
+        }
+        jet_std::DataTree::Object(entries) => {
+            let mut size = 2usize;
+            for (index, (key, item)) in entries.iter().enumerate() {
+                size = checked_sum(&[
+                    size,
+                    usize::from(index > 0),
+                    writer.quoted_len(key)?,
+                    3,
+                    jet_jsonl_wire_size(writer, item)?,
+                ])?;
+            }
+            Ok(size)
+        }
+    }
+}
+
 fn jet_jsonl_write_tree(
     writer: &mut jet_std::JSONWriter,
     value: &jet_std::DataTree,
@@ -1157,6 +1249,21 @@ impl jet_std::JSONLWriter {
             error.byte_offset = self.json.total;
             error.line = Some(self.record_index + 1);
             error.column = Some(1);
+            return self.fail(error);
+        }
+        let wire = match jet_jsonl_wire_size(&self.json, &value).and_then(|size| {
+            size.checked_add(1).ok_or_else(|| jet_encoding_error(
+                jet_std::EncodingErrorKind::Limit,
+                self.json.total,
+                self.record_index + 1,
+                1,
+                "JSONL record wire size overflow",
+            ))
+        }) {
+            Ok(wire) => wire,
+            Err(error) => return self.fail(error),
+        };
+        if let Err(error) = self.json.ensure_total(wire) {
             return self.fail(error);
         }
         if let Err(error) = jet_jsonl_write_tree(&mut self.json, &value) {
