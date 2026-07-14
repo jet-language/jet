@@ -235,26 +235,6 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
     })
 }
 
-/// Exercise the real Cranelift tier while deliberately making the next rung
-/// the interpreter. This keeps authority-boundary tests independent of whether
-/// a host `rustc` subprocess happens to be available, while still detecting
-/// when the JIT itself learns the construct.
-fn jit_with_interpreter_fallback(file: &str) -> RunOutcome {
-    let mut bundle = match jet::Loader::load_entry(file) {
-        Ok(bundle) => bundle,
-        Err(diags) => return RunOutcome::Problems(diags),
-    };
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect::<Vec<_>>();
-    if !errors.is_empty() {
-        return RunOutcome::Problems(errors);
-    }
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
-    backend.run(&bundle, false)
-}
-
 /// All `.jet` files directly under a topic directory of `examples/features/`
 /// (one level: `examples/features/<topic>/<name>.jet`). Skips `expected/`
 /// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
@@ -497,29 +477,7 @@ const BOUNDARY_CODES: &[&str] = &[
     "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265",
 ];
 
-const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
-    // AOT-backed core.db checked-SQL surface; default dev stops in the current
-    // core-item model instead of running it.
-    "io/db_checked_sql",
-    // AOT core.data pipeline currently reaches a codegen-only construct in the
-    // default dev path; skip before spawning the worker thread so the harness
-    // does not wait for a panic that cannot send a RunOutcome.
-    "tooling/data_pipeline",
-    // Native path walking touches host filesystem traversal that the default
-    // dev interpreter/JIT tier does not own today.
-    "io/path",
-    // Native GTK backend is intentionally outside default dev's source-level
-    // interpreter/JIT surface on this host.
-    "ui/ui_native_linux",
-];
-
-const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
-    "io/db_checked_sql",
-    "io/path",
-    "io/stdin_filter",
-    "tooling/data_pipeline",
-    "ui/ui_native_linux",
-];
+const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &["ui/ui_native_linux"];
 
 #[derive(Default, Clone)]
 struct DevBatteryStats {
@@ -554,22 +512,7 @@ fn check_dev_default_stem(
     let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
     let file = example_path(stem);
     eprintln!("dev-default checking {stem}");
-    if DEFAULT_BACKEND_BOUNDARIES.contains(&stem) {
-        eprintln!("manifested default-backend boundary: {stem}");
-        return DevBatteryStats {
-            boundary: 1,
-            boundary_stems: vec![stem.to_string()],
-            ..DevBatteryStats::default()
-        };
-    }
-
-    let outcome = if stem == "io/stdin_filter" {
-        // Pin the JIT -> interpreter authority boundary. The ordinary default
-        // ladder includes AOT, whose successful spawn would hide this JIT gap.
-        jit_with_interpreter_fallback(&file)
-    } else {
-        dev_iteration_with_timeout(stem, &file, false)
-    };
+    let outcome = dev_iteration_with_timeout(stem, &file, false);
     let interpreted = match outcome {
         RunOutcome::Ran {
             stdout,
@@ -577,13 +520,6 @@ fn check_dev_default_stem(
             exit_code,
         } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(diags) => {
-            if stem == "io/stdin_filter" {
-                assert_eq!(
-                    diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-                    vec!["E3410"],
-                    "stdin_filter must stop at the deterministic ambient-stdin boundary"
-                );
-            }
             eprintln!(
                 "default boundary: {stem}: {}",
                 diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>().join(",")
@@ -873,15 +809,39 @@ fn dev_default_matches_compiled_binary() {
 }
 
 #[test]
-fn stdin_filter_exercises_jit_then_exact_interpreter_boundary() {
+fn stdin_filter_uses_transparent_aot_fallback() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_stdin_boundary_{}",
         std::process::id()
     ));
     let stats = check_dev_default_stem(0, "io/stdin_filter", &dir, &[]);
-    assert_eq!(stats.ran, 0);
-    assert_eq!(stats.boundary, 1);
-    assert_eq!(stats.boundary_stems, ["io/stdin_filter"]);
+    assert_eq!(stats.ran, 1);
+    assert_eq!(stats.boundary, 0);
+    assert_eq!(stats.manifested, 0);
+}
+
+#[test]
+fn previously_manifested_execution_skips_use_transparent_fallback() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_unmasked_fallbacks_{}",
+        std::process::id()
+    ));
+    for (i, stem) in [
+        "io/db_checked_sql",
+        "io/path",
+        "tooling/data_pipeline",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let stats = check_dev_default_stem(i, stem, &dir, &[]);
+        assert_eq!(
+            stats.ran, 1,
+            "{stem} must execute through the fallback ladder"
+        );
+        assert_eq!(stats.boundary, 0, "{stem} must not be a dev boundary");
+        assert_eq!(stats.manifested, 0, "{stem} must not diverge from AOT");
+    }
 }
 
 #[test]

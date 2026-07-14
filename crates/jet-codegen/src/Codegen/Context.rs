@@ -665,7 +665,7 @@ impl Cx {
             Type::Named(name) if matches!(name.as_str(),
                 "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
                 | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
-            ) => {
+            ) && !self.type_names.contains(name) => {
                 let rust = match name.as_str() {
                     "Address" => "Address", "Message" => "Message", "Attachment" => "Attachment",
                     "Envelope" => "Envelope", "SmtpSecurity" => "SmtpSecurity",
@@ -674,15 +674,19 @@ impl Cx {
                 };
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
-            Type::Named(name) if name == "SmtpAuth" => {
+            Type::Named(name) if name == "SmtpAuth" && !self.type_names.contains(name) => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 format!("{}jet_email::SmtpAuth<{}::Secret>", self.root_prefix, ffi)
             }
-            Type::Named(name) if matches!(name.as_str(), "DkimConfig" | "SmtpConfig") => {
+            Type::Named(name)
+                if matches!(name.as_str(), "DkimConfig" | "SmtpConfig")
+                    && !self.type_names.contains(name) => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
             }
-            Type::Named(name) if matches!(name.as_str(), "TlsTrust" | "Mailer") => {
+            Type::Named(name)
+                if matches!(name.as_str(), "TlsTrust" | "Mailer")
+                    && !self.type_names.contains(name) => {
                 format!("{}jet_email::{}", self.root_prefix, name)
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
