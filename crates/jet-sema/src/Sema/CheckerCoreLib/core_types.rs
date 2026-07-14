@@ -186,6 +186,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "EncodingLimits" | "EncodingError" | "EncodingCause"
         | "EncodingFormat" | "EncodingErrorKind" | "DataEvent"
         | "CBOROptions" | "CBORError" | "CBORErrorKind"
+        | "XMLLimits" | "XMLParseOptions" | "XMLError" | "XMLReason" | "XMLEntityPolicy"
         | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter"
         | "CSVReader" | "CSVWriter" | "XMLReader" | "XMLWriter"
         | "CBORReader" | "CBORWriter"
@@ -264,7 +265,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -964,6 +965,28 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("path".to_string(), Type::String),
             ("reason".to_string(), Type::String),
         ]),
+        "XMLLimits" => Some(vec![
+            ("max_depth".to_string(), Type::Int),
+            ("max_nodes".to_string(), Type::Int),
+            ("max_attributes_per_element".to_string(), Type::Int),
+            ("max_name_bytes".to_string(), Type::Int),
+            ("max_text_bytes".to_string(), Type::Int),
+            ("max_entity_declarations".to_string(), Type::Int),
+            ("max_entity_depth".to_string(), Type::Int),
+            ("max_entity_replacement_bytes".to_string(), Type::Int),
+        ]),
+        "XMLParseOptions" => Some(vec![
+            ("entities".to_string(), Type::Named("XMLEntityPolicy".to_string())),
+            ("limits".to_string(), Type::Named("XMLLimits".to_string())),
+        ]),
+        "XMLError" => Some(vec![
+            ("kind".to_string(), Type::Named("XMLReason".to_string())),
+            ("byte_offset".to_string(), Type::Option(Box::new(Type::Int))),
+            ("line".to_string(), Type::Option(Box::new(Type::Int))),
+            ("column".to_string(), Type::Option(Box::new(Type::Int))),
+            ("path".to_string(), Type::String),
+            ("reason".to_string(), Type::String),
+        ]),
         "RecipientReport" => Some(vec![
             ("address".to_string(), Type::Named("Address".to_string())),
             ("accepted".to_string(), Type::Bool),
@@ -1041,6 +1064,8 @@ pub(crate) fn core_encoding_variants(
         "EncodingErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"],
         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
         "CBORErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "TypeMismatch", "TrailingData", "NonCanonical"],
+        "XMLReason" => &["InvalidEncoding", "Malformed", "MismatchedTag", "InvalidName", "Namespace", "DuplicateAttribute", "Entity", "EntityCycle", "Limit", "Canonicalization", "Shape", "Unsupported"],
+        "XMLEntityPolicy" => &["Preserve", "Reject"],
         _ => return None,
     };
     for name in units {
@@ -1054,6 +1079,11 @@ pub(crate) fn core_encoding_variants(
         ] {
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
         }
+    }
+    if enum_name == "XMLEntityPolicy" {
+        variants.insert("Resolve".to_string(), (zero, VariantPayload::Single(Type::Map {
+            key: Box::new(Type::String), key_span: None, value: Box::new(Type::String),
+        }, zero)));
     }
     Some(variants)
 }

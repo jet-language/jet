@@ -63,6 +63,51 @@
         pub path: String,
         pub reason: String,
     }
+    // D-ENC-XML-SURFACE1=A: whole-value XML policy, limits, and stable errors.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum XMLReason {
+        InvalidEncoding, Malformed, MismatchedTag, InvalidName, Namespace,
+        DuplicateAttribute, Entity, EntityCycle, Limit, Canonicalization,
+        Shape, Unsupported,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct XMLError {
+        pub kind: XMLReason,
+        pub byte_offset: Option<i64>,
+        pub line: Option<i64>,
+        pub column: Option<i64>,
+        pub path: String,
+        pub reason: String,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct XMLLimits {
+        pub max_depth: i64,
+        pub max_nodes: i64,
+        pub max_attributes_per_element: i64,
+        pub max_name_bytes: i64,
+        pub max_text_bytes: i64,
+        pub max_entity_declarations: i64,
+        pub max_entity_depth: i64,
+        pub max_entity_replacement_bytes: i64,
+    }
+    impl XMLLimits {
+        pub fn safe() -> Self {
+            Self { max_depth: 256, max_nodes: 1_000_000, max_attributes_per_element: 1024,
+                max_name_bytes: 4096, max_text_bytes: 16_777_216, max_entity_declarations: 1024,
+                max_entity_depth: 32, max_entity_replacement_bytes: 8_388_608 }
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum XMLEntityPolicy {
+        Preserve,
+        Reject,
+        Resolve(std::collections::BTreeMap<String, String>),
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct XMLParseOptions { pub entities: XMLEntityPolicy, pub limits: XMLLimits }
+    impl XMLParseOptions {
+        pub fn safe() -> Self { Self { entities: XMLEntityPolicy::Preserve, limits: XMLLimits::safe() } }
+    }
     pub struct JSONReader {
         pub(crate) input: super::JetFileReader,
         pub(crate) limits: EncodingLimits,

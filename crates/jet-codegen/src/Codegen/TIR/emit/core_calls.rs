@@ -899,6 +899,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.xml", "parse") => {
             format!("{}(&({}))", helper("jet_std_xml_parse"), arg(0))
         }
+        ("core.encoding.xml", "parse_with") => {
+            format!("{}(&({}), &({}))", helper("jet_std_xml_parse_with"), arg(0), arg(1))
+        }
         ("core.encoding.xml", "to_string") => {
             format!("{}(&({}))", helper("jet_std_xml_render"), arg(0))
         }

@@ -1947,6 +1947,18 @@ pub(crate) fn lower_method_call(
                     },
                 };
             }
+            if (leaf == "XMLLimits" || leaf == "XMLParseOptions")
+                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding.xml")
+            {
+                return TExpr {
+                    ty: Type::Named(leaf.clone()),
+                    kind: TExprKind::StaticCall {
+                        type_prefix: format!("{}jet_std::{leaf}", cx.root_prefix),
+                        method_rust: "safe".to_string(),
+                        args: vec![],
+                    },
+                };
+            }
             if leaf == "Limits"
                 && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.email")
             {

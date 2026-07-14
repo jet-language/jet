@@ -1003,6 +1003,21 @@ impl<'a> Interp<'a> {
         args: &[crate::AST::CallArg],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.
+        if method == "safe" && args.is_empty() {
+            if let Expr::Field(base, type_name, _) = receiver {
+                if let Expr::Ident(alias, _) = base.as_ref() {
+                    if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml") {
+                        if type_name == "XMLLimits" {
+                            return Ok(super::super::EncodingLite::xml_safe_limits_value());
+                        }
+                        if type_name == "XMLParseOptions" {
+                            return Ok(super::super::EncodingLite::xml_safe_options_value());
+                        }
+                    }
+                }
+            }
+        }
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
         if let Expr::Ident(type_name, _) = receiver {

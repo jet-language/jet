@@ -281,6 +281,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
                     && type_args.is_empty()
             });
+            let core_xml_struct = import_ns.as_deref().is_some_and(|alias| {
+                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
+                    && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLError")
+                    && type_args.is_empty()
+            });
             // c109 Phase 30: a TRAIT-OBJECT coercion (S48 — `Circle {…}` in a `[Shape]`
             // list). The AST wraps the rendered literal `Box::new(<lit>) as Box<dyn
             // user_<Trait>>` (`emit_struct_lit`'s `as_trait` branch). Covered when the trait
@@ -304,7 +309,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // namespace head (`{root}{mod}::{user_<Name>}[::<args>]`, mangled fields).
             // Covered when the named foreign type is a covered foreign struct and the
             // import alias resolves; the head is resolved at lowering (`lower_expr`).
-            if import_ns.is_some() && !core_email_struct && !core_cbor_struct {
+            if import_ns.is_some() && !core_email_struct && !core_cbor_struct && !core_xml_struct {
                 return foreign_struct_lit_in_subset(
                     type_name,
                     type_args,

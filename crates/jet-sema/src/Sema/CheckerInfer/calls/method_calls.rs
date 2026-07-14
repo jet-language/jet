@@ -205,6 +205,9 @@ impl<'a> Checker<'a> {
                         if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
                             return self.check_static_method("CBOROptions", method, span, args);
                         }
+                        if ns == "core.encoding.xml" && (leaf == "XMLLimits" || leaf == "XMLParseOptions") && method == "safe" {
+                            return self.check_static_method(leaf, method, span, args);
+                        }
                         if ns == "core.email" && leaf == "Limits" && method == "safe" {
                             return self.check_static_method("Limits", method, span, args);
                         }
@@ -388,7 +391,7 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
-                if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "Limits") && method == "safe")
+                if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "Limits") && method == "safe")
                     || self.registry.method(type_name, method).is_some() {
                     return self.check_static_method(type_name, method, span, args);
                 }

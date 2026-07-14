@@ -43,6 +43,12 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named("CBOROptions".to_string()));
         }
+        if (type_name == "XMLLimits" || type_name == "XMLParseOptions") && method == "safe" {
+            if !args.is_empty() {
+                self.diags.push(Diagnostic::error("E0101", format!("`{type_name}.safe` takes 0 arguments, got {}", args.len()), "safe XML limits and entity defaults are fixed".to_string(), "remove the arguments".to_string(), Some(span)));
+            }
+            return Some(Type::Named(type_name.to_string()));
+        }
         if type_name == "Limits" && method == "safe" {
             if !args.is_empty() {
                 self.diags.push(Diagnostic::error("E0101", format!("`Limits.safe` takes 0 arguments, got {}", args.len()), "safe SMTP limits are fixed defaults".to_string(), "remove the arguments".to_string(), Some(span)));

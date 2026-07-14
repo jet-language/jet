@@ -217,10 +217,65 @@ fn jet_xml_from_data_tree(value: &jet_std::DataTree) -> Result<crate::jet_xml_pu
     }
 }
 
-fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, String> {
-    crate::jet_xml_pull::parse_document(text)
+fn jet_xml_reason(reason: crate::jet_xml_pull::Reason) -> jet_std::XMLReason {
+    use crate::jet_xml_pull::Reason as Source;
+    match reason {
+        Source::InvalidEncoding => jet_std::XMLReason::InvalidEncoding,
+        Source::Malformed => jet_std::XMLReason::Malformed,
+        Source::MismatchedTag => jet_std::XMLReason::MismatchedTag,
+        Source::InvalidName => jet_std::XMLReason::InvalidName,
+        Source::Namespace => jet_std::XMLReason::Namespace,
+        Source::DuplicateAttribute => jet_std::XMLReason::DuplicateAttribute,
+        Source::Entity => jet_std::XMLReason::Entity,
+        Source::EntityCycle => jet_std::XMLReason::EntityCycle,
+        Source::Limit => jet_std::XMLReason::Limit,
+        Source::Canonicalization => jet_std::XMLReason::Canonicalization,
+        Source::Shape => jet_std::XMLReason::Shape,
+        Source::Unsupported => jet_std::XMLReason::Unsupported,
+    }
+}
+
+fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
+    jet_std::XMLError {
+        kind: jet_xml_reason(error.kind),
+        byte_offset: error.line.map(|_| error.offset as i64),
+        line: error.line.map(|value| value as i64),
+        column: error.column.map(|value| value as i64),
+        path: error.path,
+        reason: error.reason,
+    }
+}
+
+fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::ParseOptions {
+    let number = |value: i64| usize::try_from(value).unwrap_or(usize::MAX);
+    let entities = match &options.entities {
+        jet_std::XMLEntityPolicy::Preserve => crate::jet_xml_pull::EntityPolicy::Preserve,
+        jet_std::XMLEntityPolicy::Reject => crate::jet_xml_pull::EntityPolicy::Reject,
+        jet_std::XMLEntityPolicy::Resolve(values) => crate::jet_xml_pull::EntityPolicy::Resolve(values.clone()),
+    };
+    crate::jet_xml_pull::ParseOptions {
+        entities,
+        limits: crate::jet_xml_pull::Limits {
+            max_depth: number(options.limits.max_depth),
+            max_nodes: number(options.limits.max_nodes),
+            max_attributes_per_element: number(options.limits.max_attributes_per_element),
+            max_name_bytes: number(options.limits.max_name_bytes),
+            max_text_bytes: number(options.limits.max_text_bytes),
+            max_entity_declarations: number(options.limits.max_entity_declarations),
+            max_entity_depth: number(options.limits.max_entity_depth),
+            max_entity_replacement_bytes: number(options.limits.max_entity_replacement_bytes),
+        },
+    }
+}
+
+fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::XMLError> {
+    crate::jet_xml_pull::parse_document(text).map(jet_xml_to_data_tree).map_err(jet_xml_error)
+}
+
+fn jet_std_xml_parse_with(text: &String, options: &jet_std::XMLParseOptions) -> Result<jet_std::DataTree, jet_std::XMLError> {
+    crate::jet_xml_pull::parse_document_with(text, &jet_xml_options(options))
         .map(jet_xml_to_data_tree)
-        .map_err(|error| format!("XML at byte {}: {}", error.offset, error.reason))
+        .map_err(jet_xml_error)
 }
 
 fn jet_std_xml_render(d: &jet_std::DataTree) -> String {

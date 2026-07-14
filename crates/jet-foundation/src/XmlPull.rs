@@ -1,7 +1,7 @@
 //! Shared XML 1.0 pull tokenizer. Kept std-only so generated and comptime
 //! adapters consume identical token, namespace, and error behavior.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Name {
@@ -270,7 +270,13 @@ fn finish_element(frame: ElementFrame, close_raw: Option<String>) -> Value {
 
 /// Parse and fold the pull stream into the ratified ordered tagged XML tree.
 pub fn parse_document(source: &str) -> Result<Value, Error> {
-    let mut scanner = Scanner::new(source);
+    parse_document_with(source, &ParseOptions::safe())
+}
+
+/// Parse a complete XML value with the ratified whole-value policy and limits.
+pub fn parse_document_with(source: &str, options: &ParseOptions) -> Result<Value, Error> {
+    options.limits.validate()?;
+    let mut scanner = Scanner::with_options(source, options.clone())?;
     let mut document_children = Vec::new();
     let mut stack: Vec<ElementFrame> = Vec::new();
     while let Some(event) = scanner.next()? {
@@ -630,7 +636,8 @@ pub fn render_document(value: &Value) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{field, parse_document, render_document, Event, Part, Scanner, Value};
+    use std::collections::BTreeMap;
+    use super::{field, parse_document, parse_document_with, render_document, EntityPolicy, Event, Limits, ParseOptions, Part, Reason, Scanner, Value};
 
     fn scan(source: &str) -> Result<Vec<Event>, String> {
         let mut scanner = Scanner::new(source);
@@ -744,17 +751,241 @@ mod tests {
         );
         assert_eq!(render_document(&tree), Ok(source.to_string()));
     }
+
+    #[test]
+    fn reports_stable_kind_coordinates_and_path() {
+        let error = parse_document("<r>\n <a></b></r>").expect_err("mismatch");
+        assert_eq!(error.kind, Reason::MismatchedTag);
+        assert_eq!(error.offset, 8);
+        assert_eq!(error.line, Some(2));
+        assert_eq!(error.column, Some(5));
+        assert_eq!(error.path, "$/r/a");
+        assert_eq!(error.reason, "mismatched XML closing tag");
+    }
+
+    #[test]
+    fn enforces_whole_value_limits_prospectively() {
+        let mut limits = Limits::safe();
+        limits.max_depth = 2;
+        limits.max_entity_depth = 2;
+        let error = parse_document_with(
+            "<a><b><c/></b></a>",
+            &ParseOptions { entities: EntityPolicy::Preserve, limits: limits.clone() },
+        ).expect_err("depth budget");
+        assert_eq!(error.kind, Reason::Limit);
+        assert_eq!((error.offset, error.line, error.column, error.path.as_str()), (10, Some(1), Some(11), "$/a/b"));
+        assert!(error.reason.contains("max_depth (2)"));
+
+        limits = Limits::safe();
+        limits.max_nodes = 2;
+        let error = parse_document_with(
+            "<a>x</a>",
+            &ParseOptions { entities: EntityPolicy::Preserve, limits: limits.clone() },
+        ).expect_err("node budget");
+        assert_eq!(error.kind, Reason::Limit);
+        assert!(error.reason.contains("max_nodes (2)"));
+
+        limits = Limits::safe();
+        limits.max_attributes_per_element = 1;
+        let error = parse_document_with(
+            "<a x='1' y='2'/>",
+            &ParseOptions { entities: EntityPolicy::Preserve, limits },
+        ).expect_err("attribute budget");
+        assert_eq!(error.kind, Reason::Limit);
+        assert!(error.reason.contains("max_attributes_per_element (1)"));
+
+        limits = Limits::safe();
+        limits.max_name_bytes = 1;
+        let error = parse_document_with(
+            "<ab/>",
+            &ParseOptions { entities: EntityPolicy::Preserve, limits },
+        ).expect_err("name budget");
+        assert_eq!(error.kind, Reason::Limit);
+        assert!(error.reason.contains("max_name_bytes (1)"));
+
+        limits = Limits::safe();
+        limits.max_text_bytes = 1;
+        limits.max_entity_replacement_bytes = 1;
+        let error = parse_document_with(
+            "<a>xx</a>",
+            &ParseOptions { entities: EntityPolicy::Preserve, limits },
+        ).expect_err("text budget");
+        assert_eq!(error.kind, Reason::Limit);
+        assert!(error.reason.contains("max_text_bytes (1)"));
+
+        limits = Limits::safe();
+        limits.max_entity_declarations = 1;
+        let error = parse_document_with(
+            "<!DOCTYPE r [<!ENTITY a 'a'><!ENTITY b 'b'>]><r/>",
+            &ParseOptions { entities: EntityPolicy::Preserve, limits },
+        ).expect_err("entity declaration budget");
+        assert_eq!(error.kind, Reason::Limit);
+        assert!(error.reason.contains("max_entity_declarations (1)"));
+    }
+
+    #[test]
+    fn applies_entity_policy_and_replacement_budget() {
+        let source = "<!DOCTYPE r [<!ENTITY e 'ignored'>]><r>&e;</r>";
+        let mut values = BTreeMap::new();
+        values.insert("e".to_string(), "value".to_string());
+        let resolved = parse_document_with(source, &ParseOptions {
+            entities: EntityPolicy::Resolve(values.clone()),
+            limits: Limits::safe(),
+        }).expect("explicit inert replacement");
+        let rendered = render_document(&resolved).expect("render");
+        assert_eq!(rendered, source);
+
+        let rejected = parse_document_with(source, &ParseOptions {
+            entities: EntityPolicy::Reject,
+            limits: Limits::safe(),
+        }).expect_err("reject policy");
+        assert_eq!(rejected.kind, Reason::Entity);
+
+        let mut limits = Limits::safe();
+        limits.max_entity_replacement_bytes = 4;
+        let limited = parse_document_with(source, &ParseOptions {
+            entities: EntityPolicy::Resolve(values.clone()),
+            limits,
+        }).expect_err("replacement budget");
+        assert_eq!(limited.kind, Reason::Limit);
+        assert!(limited.reason.contains("max_entity_replacement_bytes (4)"));
+
+        let mut limits = Limits::safe();
+        limits.max_entity_depth = 0;
+        let limited = parse_document_with(source, &ParseOptions {
+            entities: EntityPolicy::Resolve(values),
+            limits,
+        }).expect_err("entity depth budget");
+        assert_eq!(limited.kind, Reason::Limit);
+        assert!(limited.reason.contains("max_entity_depth (0)"));
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
+    pub kind: Reason,
     pub offset: usize,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+    pub path: String,
     pub reason: String,
 }
 impl Error {
     fn at(offset: usize, reason: impl Into<String>) -> Self {
+        Self::at_kind(offset, Reason::Malformed, reason)
+    }
+    fn at_kind(offset: usize, kind: Reason, reason: impl Into<String>) -> Self {
         Self {
+            kind,
             offset,
+            line: None,
+            column: None,
+            path: "$".to_string(),
             reason: reason.into(),
+        }
+    }
+    fn limit(reason: impl Into<String>) -> Self {
+        Self::at_kind(0, Reason::Limit, reason)
+    }
+    fn located(mut self, source: &str, path: String) -> Self {
+        let offset = self.offset.min(source.len());
+        let prefix = &source[..offset];
+        self.line = Some(prefix.chars().filter(|character| *character == '\n').count() + 1);
+        self.column = Some(prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1);
+        self.path = path;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reason {
+    InvalidEncoding,
+    Malformed,
+    MismatchedTag,
+    InvalidName,
+    Namespace,
+    DuplicateAttribute,
+    Entity,
+    EntityCycle,
+    Limit,
+    Canonicalization,
+    Shape,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Limits {
+    pub max_depth: usize,
+    pub max_nodes: usize,
+    pub max_attributes_per_element: usize,
+    pub max_name_bytes: usize,
+    pub max_text_bytes: usize,
+    pub max_entity_declarations: usize,
+    pub max_entity_depth: usize,
+    pub max_entity_replacement_bytes: usize,
+}
+
+impl Limits {
+    pub fn safe() -> Self {
+        Self {
+            max_depth: 256,
+            max_nodes: 1_000_000,
+            max_attributes_per_element: 1024,
+            max_name_bytes: 4096,
+            max_text_bytes: 16_777_216,
+            max_entity_declarations: 1024,
+            max_entity_depth: 32,
+            max_entity_replacement_bytes: 8_388_608,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        let checks = [
+            ("max_depth", self.max_depth, 1, 4096),
+            ("max_nodes", self.max_nodes, 1, 1_000_000_000),
+            ("max_attributes_per_element", self.max_attributes_per_element, 0, 1_000_000),
+            ("max_name_bytes", self.max_name_bytes, 1, 1_048_576),
+            ("max_text_bytes", self.max_text_bytes, 0, 1_073_741_824),
+            ("max_entity_declarations", self.max_entity_declarations, 0, 1_000_000),
+            ("max_entity_depth", self.max_entity_depth, 0, 256),
+            ("max_entity_replacement_bytes", self.max_entity_replacement_bytes, 0, 1_073_741_824),
+        ];
+        for (name, value, minimum, maximum) in checks {
+            if !(minimum..=maximum).contains(&value) {
+                return Err(Error::limit(format!(
+                    "XML limit `{name}` must be between {minimum} and {maximum}"
+                )));
+            }
+        }
+        if self.max_entity_depth > self.max_depth {
+            return Err(Error::limit("XML limit `max_entity_depth` exceeds `max_depth`"));
+        }
+        if self.max_entity_replacement_bytes > self.max_text_bytes {
+            return Err(Error::limit(
+                "XML limit `max_entity_replacement_bytes` exceeds `max_text_bytes`",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EntityPolicy {
+    Preserve,
+    Reject,
+    Resolve(BTreeMap<String, String>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParseOptions {
+    pub entities: EntityPolicy,
+    pub limits: Limits,
+}
+
+impl ParseOptions {
+    pub fn safe() -> Self {
+        Self {
+            entities: EntityPolicy::Preserve,
+            limits: Limits::safe(),
         }
     }
 }
@@ -775,6 +1006,10 @@ pub struct Scanner<'a> {
     doctype_seen: bool,
     declared_entities: BTreeSet<String>,
     stack: Vec<Frame>,
+    options: ParseOptions,
+    nodes: usize,
+    text_bytes: usize,
+    entity_replacement_bytes: usize,
 }
 
 fn name_start(c: char) -> bool {
@@ -909,12 +1144,14 @@ fn doctype_fields(
     Ok((name, public, system, internal_subset))
 }
 
-fn declared_entity_names(subset: Option<&str>) -> Result<BTreeSet<String>, Error> {
+fn declared_entity_names(subset: Option<&str>) -> Result<(BTreeSet<String>, usize), Error> {
     let mut names = BTreeSet::new();
+    let mut count = 0usize;
     let Some(mut remaining) = subset else {
-        return Ok(names);
+        return Ok((names, count));
     };
     while let Some(start) = remaining.find("<!ENTITY") {
+        count = count.saturating_add(1);
         remaining = &remaining[start + "<!ENTITY".len()..];
         let declaration = remaining.trim_start();
         if declaration.starts_with('%') {
@@ -933,7 +1170,7 @@ fn declared_entity_names(subset: Option<&str>) -> Result<BTreeSet<String>, Error
         }
         remaining = &declaration[end..];
     }
-    Ok(names)
+    Ok((names, count))
 }
 
 fn declaration_fields(data: &str) -> Result<(String, Option<String>, Option<bool>), Error> {
@@ -1008,6 +1245,114 @@ impl<'a> Scanner<'a> {
             doctype_seen: false,
             declared_entities: BTreeSet::new(),
             stack: Vec::new(),
+            options: ParseOptions::safe(),
+            nodes: 0,
+            text_bytes: 0,
+            entity_replacement_bytes: 0,
+        }
+    }
+    pub fn with_options(source: &'a str, options: ParseOptions) -> Result<Self, Error> {
+        options.limits.validate()?;
+        Ok(Self {
+            options,
+            ..Self::new(source)
+        })
+    }
+    fn path(&self) -> String {
+        let mut path = String::from("$");
+        for frame in &self.stack {
+            path.push('/');
+            if let Some(uri) = &frame.name.namespace_uri {
+                path.push('{');
+                path.push_str(uri);
+                path.push('}');
+            }
+            path.push_str(&frame.name.local);
+        }
+        path
+    }
+    fn classify(error: &mut Error) {
+        if error.kind != Reason::Malformed {
+            return;
+        }
+        let reason = error.reason.as_str();
+        error.kind = if reason.contains("encoding") || reason.contains("version 1.0") {
+            Reason::InvalidEncoding
+        } else if reason.contains("mismatched") {
+            Reason::MismatchedTag
+        } else if reason.contains("name") || reason.contains("instruction target") {
+            Reason::InvalidName
+        } else if reason.contains("namespace") || reason.contains("prefix") {
+            Reason::Namespace
+        } else if reason.contains("duplicate expanded XML attribute") {
+            Reason::DuplicateAttribute
+        } else if reason.contains("entity") || reason.contains("character reference") {
+            Reason::Entity
+        } else {
+            error.kind
+        };
+    }
+    fn limit<T>(&self, reason: impl Into<String>) -> Result<T, Error> {
+        Err(Error::at_kind(self.offset, Reason::Limit, reason))
+    }
+    fn check_name(&self, value: &str, label: &str) -> Result<(), Error> {
+        if value.len() > self.options.limits.max_name_bytes {
+            return self.limit(format!(
+                "XML {label} exceeds max_name_bytes ({})",
+                self.options.limits.max_name_bytes
+            ));
+        }
+        Ok(())
+    }
+    fn charge_text(&mut self, bytes: usize, label: &str) -> Result<(), Error> {
+        if bytes > self.options.limits.max_text_bytes
+            || self.text_bytes.saturating_add(bytes) > self.options.limits.max_text_bytes
+        {
+            return self.limit(format!(
+                "XML {label} exceeds max_text_bytes ({})",
+                self.options.limits.max_text_bytes
+            ));
+        }
+        self.text_bytes += bytes;
+        Ok(())
+    }
+    fn resolve_entity(&mut self, name: &str) -> Result<Option<String>, Error> {
+        if let Some(value) = predefined(name) {
+            return Ok(Some(value));
+        }
+        if name.starts_with('#') {
+            return self.fail("invalid numeric character reference");
+        }
+        if !self.declared_entities.contains(name) {
+            return self.fail(format!("undeclared entity reference `&{name};`"));
+        }
+        match &self.options.entities {
+            EntityPolicy::Preserve => Ok(None),
+            EntityPolicy::Reject => Err(Error::at_kind(
+                self.offset,
+                Reason::Entity,
+                format!("entity reference `&{name};` rejected by XML entity policy"),
+            )),
+            EntityPolicy::Resolve(values) => {
+                let Some(value) = values.get(name).cloned() else {
+                    return Ok(None);
+                };
+                if self.options.limits.max_entity_depth < 1 {
+                    return self.limit("XML entity replacement exceeds max_entity_depth (0)");
+                }
+                let total = self.entity_replacement_bytes.saturating_add(value.len());
+                if value.len() > self.options.limits.max_entity_replacement_bytes
+                    || total > self.options.limits.max_entity_replacement_bytes
+                {
+                    return self.limit(format!(
+                        "XML entity replacement exceeds max_entity_replacement_bytes ({})",
+                        self.options.limits.max_entity_replacement_bytes
+                    ));
+                }
+                self.entity_replacement_bytes = total;
+                self.charge_text(value.len(), "entity replacement")?;
+                Ok(Some(value))
+            }
         }
     }
     fn fail<T>(&self, reason: impl Into<String>) -> Result<T, Error> {
@@ -1054,6 +1399,7 @@ impl<'a> Scanner<'a> {
         local: &[(Option<String>, String)],
         attribute: bool,
     ) -> Result<Name, Error> {
+        self.check_name(raw, "name")?;
         if !valid_name(raw) {
             return self.fail(format!("invalid XML name `{raw}`"));
         }
@@ -1082,13 +1428,7 @@ impl<'a> Scanner<'a> {
         if name.is_empty() {
             return self.fail("empty entity reference");
         }
-        let resolved = predefined(name);
-        if resolved.is_none() && name.starts_with('#') {
-            return self.fail("invalid numeric character reference");
-        }
-        if resolved.is_none() && !self.declared_entities.contains(name) {
-            return self.fail(format!("undeclared entity reference `&{name};`"));
-        }
+        let resolved = self.resolve_entity(name)?;
         self.offset = start + end + 1;
         Ok((
             self.source[start..self.offset].into(),
@@ -1096,7 +1436,7 @@ impl<'a> Scanner<'a> {
             resolved,
         ))
     }
-    fn parse_parts(&self, raw: &str) -> Result<(Vec<Part>, Option<String>), Error> {
+    fn parse_parts(&mut self, raw: &str) -> Result<(Vec<Part>, Option<String>), Error> {
         let mut parts = Vec::new();
         let mut normalized = String::new();
         let mut at = 0;
@@ -1115,16 +1455,10 @@ impl<'a> Scanner<'a> {
                     return Err(Error::at(start, "unterminated entity reference"));
                 };
                 let name = &raw[start + 1..start + end];
-                let resolved = predefined(name);
-                if resolved.is_none() && name.starts_with('#') {
-                    return Err(Error::at(start, "invalid numeric character reference"));
-                }
-                if resolved.is_none() && !self.declared_entities.contains(name) {
-                    return Err(Error::at(
-                        start,
-                        format!("undeclared entity reference `&{name};`"),
-                    ));
-                }
+                let resolved = self.resolve_entity(name).map_err(|mut error| {
+                    error.offset = start;
+                    error
+                })?;
                 if let Some(v) = &resolved {
                     normalized.push_str(v)
                 }
@@ -1328,7 +1662,110 @@ impl<'a> Scanner<'a> {
             raw,
         })
     }
-    pub fn next(&mut self) -> Result<Option<Event>, Error> {
+    fn charge_nodes(&mut self, amount: usize) -> Result<(), Error> {
+        if self.nodes.saturating_add(amount) > self.options.limits.max_nodes {
+            return self.limit(format!(
+                "XML document exceeds max_nodes ({})",
+                self.options.limits.max_nodes
+            ));
+        }
+        self.nodes += amount;
+        Ok(())
+    }
+    fn charge_event(&mut self, event: &Event) -> Result<(), Error> {
+        match event {
+            Event::DocumentStart => self.charge_nodes(1)?,
+            Event::DocumentEnd | Event::ElementEnd { .. } => {}
+            Event::ElementStart {
+                name,
+                namespaces,
+                attributes,
+                empty,
+                ..
+            } => {
+                let depth = if *empty { self.stack.len() + 1 } else { self.stack.len() };
+                if depth > self.options.limits.max_depth {
+                    return self.limit(format!(
+                        "XML element nesting exceeds max_depth ({})",
+                        self.options.limits.max_depth
+                    ));
+                }
+                if attributes.len() > self.options.limits.max_attributes_per_element {
+                    return self.limit(format!(
+                        "XML element exceeds max_attributes_per_element ({})",
+                        self.options.limits.max_attributes_per_element
+                    ));
+                }
+                self.check_name(&name.local, "local name")?;
+                if let Some(prefix) = &name.prefix {
+                    self.check_name(prefix, "name prefix")?;
+                }
+                if let Some(uri) = &name.namespace_uri {
+                    self.check_name(uri, "namespace URI")?;
+                }
+                for namespace in namespaces {
+                    if let Some(prefix) = &namespace.prefix {
+                        self.check_name(prefix, "namespace prefix")?;
+                    }
+                    self.check_name(&namespace.namespace_uri, "namespace URI")?;
+                }
+                for attribute in attributes {
+                    self.check_name(&attribute.name.raw, "attribute name")?;
+                    self.check_name(&attribute.name.local, "attribute local name")?;
+                    if let Some(prefix) = &attribute.name.prefix {
+                        self.check_name(prefix, "attribute prefix")?;
+                    }
+                    for part in &attribute.parts {
+                        if let Part::Text { value, .. } = part {
+                            self.charge_text(value.len(), "attribute text")?;
+                        }
+                    }
+                }
+                self.charge_nodes(1 + namespaces.len() + attributes.len())?;
+            }
+            Event::Declaration { version, encoding, .. } => {
+                self.check_name(version, "XML version")?;
+                if let Some(encoding) = encoding {
+                    self.check_name(encoding, "XML encoding")?;
+                }
+                self.charge_nodes(1)?;
+            }
+            Event::Doctype {
+                name,
+                public_id,
+                system_id,
+                internal_subset,
+                ..
+            } => {
+                self.check_name(name, "DOCTYPE name")?;
+                for value in [public_id, system_id].into_iter().flatten() {
+                    self.check_name(value, "DOCTYPE identifier")?;
+                }
+                if let Some(value) = internal_subset {
+                    self.charge_text(value.len(), "DOCTYPE internal subset")?;
+                }
+                self.charge_nodes(1)?;
+            }
+            Event::ProcessingInstruction { target, value, .. } => {
+                self.check_name(target, "processing instruction target")?;
+                self.charge_text(value.len(), "processing instruction text")?;
+                self.charge_nodes(1)?;
+            }
+            Event::DocumentWhitespace { value, .. }
+            | Event::Text { value, .. }
+            | Event::Cdata { value, .. }
+            | Event::Comment { value, .. } => {
+                self.charge_text(value.len(), "text")?;
+                self.charge_nodes(1)?;
+            }
+            Event::EntityRef { name, .. } => {
+                self.check_name(name, "entity name")?;
+                self.charge_nodes(1)?;
+            }
+        }
+        Ok(())
+    }
+    fn next_inner(&mut self) -> Result<Option<Event>, Error> {
         if self.ended {
             return Ok(None);
         }
@@ -1427,8 +1864,18 @@ impl<'a> Scanner<'a> {
             let inside = self.source[start + 9..i].trim();
             let (name, public_id, system_id, internal_subset) = doctype_fields(inside)
                 .map_err(|error| Error::at(start + 9 + error.offset, error.reason))?;
-            self.declared_entities = declared_entity_names(internal_subset.as_deref())
+            let (declared_entities, declaration_count) = declared_entity_names(internal_subset.as_deref())
                 .map_err(|error| Error::at(start + 9 + error.offset, error.reason))?;
+            if declaration_count > self.options.limits.max_entity_declarations {
+                return self.limit(format!(
+                    "XML document exceeds max_entity_declarations ({})",
+                    self.options.limits.max_entity_declarations
+                ));
+            }
+            for name in &declared_entities {
+                self.check_name(name, "entity name")?;
+            }
+            self.declared_entities = declared_entities;
             self.doctype_seen = true;
             return Ok(Some(Event::Doctype {
                 name,
@@ -1502,6 +1949,23 @@ impl<'a> Scanner<'a> {
                 value: raw.clone(),
                 raw,
             }))
+        }
+    }
+
+    pub fn next(&mut self) -> Result<Option<Event>, Error> {
+        match self.next_inner() {
+            Ok(Some(event)) => {
+                if let Err(mut error) = self.charge_event(&event) {
+                    Self::classify(&mut error);
+                    return Err(error.located(self.source, self.path()));
+                }
+                Ok(Some(event))
+            }
+            Ok(None) => Ok(None),
+            Err(mut error) => {
+                Self::classify(&mut error);
+                Err(error.located(self.source, self.path()))
+            }
         }
     }
 }

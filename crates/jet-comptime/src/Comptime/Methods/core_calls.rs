@@ -1142,7 +1142,14 @@ pub(super) fn apply_core_call(
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse(text) {
                 Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e)))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(super::super::EncodingLite::xml_error_value(e)))),
+            }
+        }
+        ("core.encoding.xml", "parse_with") => {
+            let text = as_string(one(0)?, span)?;
+            match super::super::EncodingLite::xml_parse_with(text, one(1)?) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(super::super::EncodingLite::xml_error_value(e)))),
             }
         }
         ("core.encoding.xml", "to_string") => {

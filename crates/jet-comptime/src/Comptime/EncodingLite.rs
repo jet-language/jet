@@ -1624,10 +1624,111 @@ fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String
     Err("XML tree contains a non-DataTree value".to_string())
 }
 
-pub(super) fn xml_parse(text: &str) -> Result<CtValue, String> {
-    jet_foundation::XmlPull::parse_document(text)
-        .map(xml_to_ct)
-        .map_err(|error| format!("XML at byte {}: {}", error.offset, error.reason))
+pub(super) fn xml_parse(text: &str) -> Result<CtValue, jet_foundation::XmlPull::Error> {
+    jet_foundation::XmlPull::parse_document(text).map(xml_to_ct)
+}
+
+pub(super) fn xml_safe_limits_value() -> CtValue {
+    let limits = jet_foundation::XmlPull::Limits::safe();
+    CtValue::Struct {
+        type_name: "XMLLimits".to_string(),
+        fields: vec![
+            ("max_depth".to_string(), CtValue::Int(limits.max_depth as i64)),
+            ("max_nodes".to_string(), CtValue::Int(limits.max_nodes as i64)),
+            ("max_attributes_per_element".to_string(), CtValue::Int(limits.max_attributes_per_element as i64)),
+            ("max_name_bytes".to_string(), CtValue::Int(limits.max_name_bytes as i64)),
+            ("max_text_bytes".to_string(), CtValue::Int(limits.max_text_bytes as i64)),
+            ("max_entity_declarations".to_string(), CtValue::Int(limits.max_entity_declarations as i64)),
+            ("max_entity_depth".to_string(), CtValue::Int(limits.max_entity_depth as i64)),
+            ("max_entity_replacement_bytes".to_string(), CtValue::Int(limits.max_entity_replacement_bytes as i64)),
+        ],
+    }
+}
+
+pub(super) fn xml_safe_options_value() -> CtValue {
+    CtValue::Struct {
+        type_name: "XMLParseOptions".to_string(),
+        fields: vec![
+            ("entities".to_string(), CtValue::Enum {
+                type_name: "XMLEntityPolicy".to_string(), variant: "Preserve".to_string(), args: Vec::new(),
+            }),
+            ("limits".to_string(), xml_safe_limits_value()),
+        ],
+    }
+}
+
+pub(super) fn xml_parse_with(
+    text: &str,
+    options: &CtValue,
+) -> Result<CtValue, jet_foundation::XmlPull::Error> {
+    let options = xml_options(options)?;
+    jet_foundation::XmlPull::parse_document_with(text, &options).map(xml_to_ct)
+}
+
+fn xml_int(fields: &[(String, CtValue)], name: &str) -> i64 {
+    fields.iter().find_map(|(field, value)| {
+        (field == name).then_some(value).and_then(|value| match value {
+            CtValue::Int(value) => Some(*value),
+            _ => None,
+        })
+    }).unwrap_or(-1)
+}
+
+fn xml_options(value: &CtValue) -> Result<jet_foundation::XmlPull::ParseOptions, jet_foundation::XmlPull::Error> {
+    let CtValue::Struct { fields, .. } = value else {
+        return Ok(jet_foundation::XmlPull::ParseOptions::safe());
+    };
+    let entities = fields.iter().find_map(|(name, value)| (name == "entities").then_some(value));
+    let entities = match entities {
+        Some(CtValue::Enum { variant, .. }) if variant == "Reject" => jet_foundation::XmlPull::EntityPolicy::Reject,
+        Some(CtValue::Enum { variant, args, .. }) if variant == "Resolve" => {
+            let mut resolved = BTreeMap::new();
+            if let Some((_, CtValue::Map(entries))) = args.first() {
+                for (key, value) in entries {
+                    if let (CtKey::Str(key), CtValue::Str(value)) = (key, value) {
+                        resolved.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            jet_foundation::XmlPull::EntityPolicy::Resolve(resolved)
+        }
+        _ => jet_foundation::XmlPull::EntityPolicy::Preserve,
+    };
+    let limits_fields = fields.iter().find_map(|(name, value)| {
+        if name == "limits" { if let CtValue::Struct { fields, .. } = value { Some(fields.as_slice()) } else { None } } else { None }
+    });
+    let safe = jet_foundation::XmlPull::Limits::safe();
+    let to_usize = |value: i64| usize::try_from(value).unwrap_or(usize::MAX);
+    let limits = if let Some(fields) = limits_fields {
+        jet_foundation::XmlPull::Limits {
+            max_depth: to_usize(xml_int(fields, "max_depth")),
+            max_nodes: to_usize(xml_int(fields, "max_nodes")),
+            max_attributes_per_element: to_usize(xml_int(fields, "max_attributes_per_element")),
+            max_name_bytes: to_usize(xml_int(fields, "max_name_bytes")),
+            max_text_bytes: to_usize(xml_int(fields, "max_text_bytes")),
+            max_entity_declarations: to_usize(xml_int(fields, "max_entity_declarations")),
+            max_entity_depth: to_usize(xml_int(fields, "max_entity_depth")),
+            max_entity_replacement_bytes: to_usize(xml_int(fields, "max_entity_replacement_bytes")),
+        }
+    } else { safe };
+    let options = jet_foundation::XmlPull::ParseOptions { entities, limits };
+    options.limits.validate()?;
+    Ok(options)
+}
+
+pub(super) fn xml_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
+    let kind = format!("{:?}", error.kind);
+    CtValue::Struct {
+        type_name: "XMLError".to_string(),
+        fields: vec![
+            ("kind".to_string(), CtValue::Enum { type_name: "XMLReason".to_string(), variant: kind, args: Vec::new() }),
+            ("byte_offset".to_string(), error.line.map(|_| CtValue::Some(Box::new(CtValue::Int(error.offset as i64)))).unwrap_or(CtValue::None(Type::Int))),
+            ("line".to_string(), error.line.map(|value| CtValue::Some(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::None(Type::Int))),
+            ("column".to_string(), error.column.map(|value| CtValue::Some(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::None(Type::Int))),
+            ("path".to_string(), CtValue::Str(error.path)),
+            ("reason".to_string(), CtValue::Str(error.reason)),
+        ],
+    }
 }
 
 pub(super) fn xml_render(value: &CtValue) -> String {

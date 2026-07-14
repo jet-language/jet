@@ -151,6 +151,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "EncodingError" => matches!(member, "format" | "kind" | "byte_offset" | "line" | "column" | "path" | "reason" | "cause"),
         "CBOROptions" => matches!(member, "max_depth" | "max_items" | "max_bytes" | "require_canonical"),
         "CBORError" => matches!(member, "kind" | "byte_offset" | "path" | "reason"),
+        "XMLLimits" => matches!(member, "max_depth" | "max_nodes" | "max_attributes_per_element" | "max_name_bytes" | "max_text_bytes" | "max_entity_declarations" | "max_entity_depth" | "max_entity_replacement_bytes"),
+        "XMLParseOptions" => matches!(member, "entities" | "limits"),
+        "XMLError" => matches!(member, "kind" | "byte_offset" | "line" | "column" | "path" | "reason"),
         "Envelope" => matches!(member, "from" | "recipients"),
         "RecipientReport" => matches!(member, "address" | "accepted" | "code" | "message"),
         "Limits" => matches!(member,
@@ -261,6 +264,24 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
         return match field {
             "kind" => Some(Type::Named("CBORErrorKind".to_string())),
             "byte_offset" => Some(Type::Int),
+            "path" | "reason" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if name == "XMLLimits" && !cx.struct_fields.contains_key(name) {
+        return matches!(field, "max_depth" | "max_nodes" | "max_attributes_per_element" | "max_name_bytes" | "max_text_bytes" | "max_entity_declarations" | "max_entity_depth" | "max_entity_replacement_bytes").then_some(Type::Int);
+    }
+    if name == "XMLParseOptions" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "entities" => Some(Type::Named("XMLEntityPolicy".to_string())),
+            "limits" => Some(Type::Named("XMLLimits".to_string())),
+            _ => None,
+        };
+    }
+    if name == "XMLError" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "kind" => Some(Type::Named("XMLReason".to_string())),
+            "byte_offset" | "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
             "path" | "reason" => Some(Type::String),
             _ => None,
         };

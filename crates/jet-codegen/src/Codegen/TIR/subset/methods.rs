@@ -756,6 +756,13 @@ pub(crate) fn method_call_in_subset(
                     }
                 }
             }
+            if leaf == "XMLLimits" || leaf == "XMLParseOptions" {
+                if let Expr::Ident(alias, _) = base.as_ref() {
+                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml") {
+                        return true;
+                    }
+                }
+            }
             if leaf == "Limits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
                     if cx.core_imports.get(alias).map(String::as_str) == Some("core.email") {

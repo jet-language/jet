@@ -262,6 +262,45 @@ fn xml_rich_whole_value_matches_comptime_and_runtime() {
 }
 
 #[test]
+fn xml_parse_options_match_comptime_and_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping XML options comptime differential");
+        return;
+    }
+    let src = "use core.encoding.xml as xml\ncomptime C = xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n";
+    check_comptime_src(2005, "typed XML options", src);
+}
+
+#[test]
+fn xml_hostile_error_matches_comptime_and_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping hostile XML comptime differential");
+        return;
+    }
+    let src = r#"use core.encoding.xml as xml
+
+fn show(result: DataTree ? XMLError) -> String {
+    if result == {
+        ok(_) -> return "ok"
+        err(e) -> {
+            return "{e.byte_offset}|{e.line}|{e.column}|{e.path}|{e.reason}"
+        }
+    }
+    return "unreachable"
+}
+
+comptime MISMATCH = show(xml.parse("<root>\n<a></root>"))
+
+fn run() {
+    mismatch :: show(xml.parse("<root>\n<a></root>"))
+    print("{MISMATCH}")
+    print("{mismatch}")
+}
+"#;
+    check_comptime_src(2006, "typed hostile XML mismatch error", src);
+}
+
+#[test]
 fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping CBOR whole-value differential");
