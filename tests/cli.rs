@@ -182,6 +182,43 @@ fn run() {}
     dir
 }
 
+fn allocation_budget_project(tag: &str) -> PathBuf {
+    let dir = isolated_cwd(tag);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("src/main.jet"), r#"use core.mem
+module perf.package {
+    budgets: [
+        Budget.{
+            name: "arena-count",
+            scope: .Bench("arena"),
+            metric: .AllocationCount,
+            provider: .AllocationProbe("arena"),
+            comparison: .AbsoluteFrom("local/arena"),
+            limit: .AtMost(2),
+            enforcement: .Warn,
+        },
+        Budget.{
+            name: "arena-bytes",
+            scope: .Bench("arena"),
+            metric: .AllocationBytes,
+            provider: .AllocationProbe("arena"),
+            comparison: .AbsoluteFrom("local/arena"),
+            limit: .AtMost(16B),
+            enforcement: .Warn,
+        },
+    ],
+}
+#Bench("arena") {
+    arena :: mem.Arena.new()
+    value :: arena.alloc(42)
+    require_eq(value, 42)
+}
+fn run() {}
+"#).unwrap();
+    dir
+}
+
 #[test]
 fn budget_usage_and_preflight_fail_without_artifacts() {
     let dir = budget_project("budget_no_artifact", 10);
@@ -409,6 +446,58 @@ fn bench_owns_canonical_refresh_and_dossier_only_projects_it() {
     let third = run();
     assert_eq!(third.status.code(), Some(0), "{}", String::from_utf8_lossy(&third.stderr));
     assert_eq!(report_paths().len(), 2, "source digest change must refresh canonical report");
+}
+
+#[test]
+fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = allocation_budget_project("allocation_probe_runtime");
+    let run = || Command::new(jet()).args(["bench", "src/main.jet"]).current_dir(&dir).output().unwrap();
+
+    let first = run();
+    assert_eq!(first.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&first.stdout), String::from_utf8_lossy(&first.stderr));
+    let reports = dir.join(".jet/perf/reports");
+    let paths = || fs::read_dir(&reports).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+    let initial = paths();
+    assert_eq!(initial.len(), 1);
+    let bytes = fs::read(&initial[0]).unwrap();
+    jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+    let CanonicalJson::Object(report) = CanonicalJson::parse_canonical(&bytes).unwrap() else { panic!("report") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+    let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+    assert_eq!(measurements.len(), 2);
+    for measurement in measurements {
+        let CanonicalJson::Object(measurement) = measurement else { panic!("measurement") };
+        let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+        assert_eq!(provider["kind"], CanonicalJson::String("AllocationProbe".into()));
+        assert_eq!(provider["identity"], CanonicalJson::String("arena".into()));
+        assert_eq!(provider["isolation"], CanonicalJson::String("benchmark-process-counter-reset-per-trial".into()));
+        assert_eq!(provider["version"], CanonicalJson::String("jet-arena-events-v1-warmup-auto-trials-20".into()));
+        let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+        assert_eq!(samples.len(), 20);
+        assert!(samples.windows(2).all(|pair| pair[0] == pair[1]), "reset boundary leaked calibration or a prior trial");
+        let CanonicalJson::Object(metric) = &measurement["metric"] else { panic!("metric") };
+        let expected = match &metric["name"] {
+            CanonicalJson::String(name) if name == "AllocationCount" => "1",
+            CanonicalJson::String(name) if name == "AllocationBytes" => "8",
+            other => panic!("unexpected metric: {other:?}"),
+        };
+        for sample in samples {
+            let CanonicalJson::Object(sample) = sample else { panic!("sample") };
+            assert_eq!(sample["den"], CanonicalJson::Integer("1".into()));
+            assert_eq!(sample["num"], CanonicalJson::Integer(expected.into()));
+        }
+    }
+
+    let second = run();
+    assert_eq!(second.status.code(), Some(0));
+    assert!(!String::from_utf8_lossy(&second.stdout).contains("ns/iter"), "compatible report reran allocation workload");
+    assert_eq!(paths(), initial);
+
+    fs::OpenOptions::new().append(true).open(&initial[0]).unwrap().write_all(b"forged").unwrap();
+    let third = run();
+    assert_eq!(third.status.code(), Some(0), "{}", String::from_utf8_lossy(&third.stderr));
+    assert_eq!(paths().len(), 2, "forged report must not satisfy compatible cache identity");
 }
 
 fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {

@@ -2197,7 +2197,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
 
-        out.push_str(&format!("fn jet_bench_{}() -> (Vec<u128>, u64) {{\n", i));
+        out.push_str(&format!("fn jet_bench_{}() -> (Vec<u128>, Vec<(usize, usize)>, u64) {{\n", i));
         out.push_str("    let mut iters: u64 = 1;\n");
         out.push_str("    while iters < (1u64 << 30) {\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
@@ -2209,15 +2209,18 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("        iters = iters.saturating_mul(2);\n");
         out.push_str("    }\n");
         out.push_str("    let mut samples: Vec<u128> = Vec::new();\n");
+        out.push_str("    let mut allocations: Vec<(usize, usize)> = Vec::new();\n");
         out.push_str("    for _ in 0..20 {\n");
+        out.push_str("        jet_allocation_probe_reset();\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
         out.push_str(&format!(
             "        for _ in 0..iters {{ let _ = std::hint::black_box(jet_bench_body_{}()); }}\n",
             i
         ));
         out.push_str("        samples.push(t0.elapsed().as_nanos());\n");
+        out.push_str("        allocations.push(jet_allocation_probe_take());\n");
         out.push_str("    }\n");
-        out.push_str("    (samples, iters)\n");
+        out.push_str("    (samples, allocations, iters)\n");
         out.push_str("}\n\n");
     }
 
@@ -2227,11 +2230,13 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     for (i, bench) in benches.iter().enumerate() {
         let name = escape_rust_str(&bench.name);
         out.push_str(&format!(
-            "    {{\n        let (samples, iters) = jet_bench_{}();\n",
+            "    {{\n        let (samples, allocations, iters) = jet_bench_{}();\n",
             i
         ));
         out.push_str(&format!("        print!(\"JETBENCH1\\t{{}}\\t{{}}\", hex({}.as_bytes()), iters);\n", name));
         out.push_str("        for sample in samples { print!(\"\\t{}\", sample); }\n        println!();\n");
+        out.push_str(&format!("        print!(\"JETALLOC1\\t{{}}\\t{{}}\", hex({}.as_bytes()), iters);\n", name));
+        out.push_str("        for (count, bytes) in allocations { print!(\"\\t{}:{}\", count, bytes); }\n        println!();\n");
         out.push_str("    }\n");
     }
     out.push_str("}\n");

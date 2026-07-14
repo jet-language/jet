@@ -39,6 +39,12 @@ static JET_OBSERVE_WORKERS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static JET_OBSERVE_QUEUED: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+// AllocationProbe uses a separate resettable window. Live-inspector counters
+// remain outstanding-resource facts; probe reset/take cannot corrupt them.
+static JET_PROBE_ARENA_ALLOCS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+static JET_PROBE_ARENA_BYTES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 thread_local! {
     static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
@@ -189,6 +195,8 @@ fn jet_observe_arena_open() {
 fn jet_observe_arena_alloc(bytes: usize) {
     JET_OBSERVE_ARENA_ALLOCS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     JET_OBSERVE_ARENA_BYTES.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+    JET_PROBE_ARENA_ALLOCS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    JET_PROBE_ARENA_BYTES.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
 }
 fn jet_observe_arena_reset(allocations: usize, bytes: usize) {
     JET_OBSERVE_ARENA_ALLOCS.fetch_sub(allocations, std::sync::atomic::Ordering::Relaxed);
@@ -196,4 +204,16 @@ fn jet_observe_arena_reset(allocations: usize, bytes: usize) {
 }
 fn jet_observe_arena_close() {
     JET_OBSERVE_ARENAS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn jet_allocation_probe_reset() {
+    JET_PROBE_ARENA_ALLOCS.store(0, std::sync::atomic::Ordering::SeqCst);
+    JET_PROBE_ARENA_BYTES.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn jet_allocation_probe_take() -> (usize, usize) {
+    (
+        JET_PROBE_ARENA_ALLOCS.swap(0, std::sync::atomic::Ordering::SeqCst),
+        JET_PROBE_ARENA_BYTES.swap(0, std::sync::atomic::Ordering::SeqCst),
+    )
 }

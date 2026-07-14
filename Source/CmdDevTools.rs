@@ -2131,6 +2131,10 @@ fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
 pub(crate) struct BenchEvidence {
     pub(crate) name: String,
     pub(crate) samples: Vec<(u128, u64)>,
+    /// One exact `(jet_mem allocation events, requested bytes, iterations)`
+    /// row per measured trial. Calibration/warmup runs are outside the reset
+    /// boundary and never enter these facts.
+    pub(crate) allocation_samples: Vec<(u128, u128, u64)>,
 }
 
 /// Shared `#Bench` executor for human bench output and BenchMeasurement.
@@ -2173,8 +2177,40 @@ pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, re
         eprintln!("bench: harness emitted non-UTF-8 evidence");
         exit(ExitCodes::USER_ERROR);
     });
-    let mut evidence = Vec::new();
+    let mut evidence: Vec<BenchEvidence> = Vec::new();
     for line in stdout.lines() {
+        if let Some(wire) = line.strip_prefix("JETALLOC1\t") {
+            let mut fields = wire.split('\t');
+            let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
+                eprintln!("bench: harness emitted malformed allocation workload identity");
+                exit(ExitCodes::USER_ERROR);
+            });
+            let iters = fields.next().and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).unwrap_or_else(|| {
+                eprintln!("bench: harness emitted invalid allocation iteration count");
+                exit(ExitCodes::USER_ERROR);
+            });
+            let samples = fields.map(|value| {
+                let (count, bytes) = value.split_once(':').ok_or(())?;
+                Ok((count.parse::<u128>().map_err(|_| ())?, bytes.parse::<u128>().map_err(|_| ())?, iters))
+            }).collect::<Result<Vec<_>, ()>>().unwrap_or_else(|_| {
+                eprintln!("bench: harness emitted malformed allocation evidence");
+                exit(ExitCodes::USER_ERROR);
+            });
+            if samples.len() != 20 {
+                eprintln!("bench: harness emitted {} allocation samples; policy requires 20", samples.len());
+                exit(ExitCodes::USER_ERROR);
+            }
+            let bench = evidence.iter_mut().find(|bench| bench.name == name).unwrap_or_else(|| {
+                eprintln!("bench: allocation evidence preceded its named timing workload");
+                exit(ExitCodes::USER_ERROR);
+            });
+            if !bench.allocation_samples.is_empty() {
+                eprintln!("bench: harness emitted duplicate allocation evidence for `{name}`");
+                exit(ExitCodes::USER_ERROR);
+            }
+            bench.allocation_samples = samples;
+            continue;
+        }
         let Some(wire) = line.strip_prefix("JETBENCH1\t") else {
             if relay_output { println!("{line}"); }
             continue;
@@ -2196,7 +2232,7 @@ pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, re
             eprintln!("bench: harness emitted {} samples; policy requires 20", samples.len());
             exit(ExitCodes::USER_ERROR);
         }
-        evidence.push(BenchEvidence { name, samples });
+        evidence.push(BenchEvidence { name, samples, allocation_samples: Vec::new() });
     }
     evidence
 }

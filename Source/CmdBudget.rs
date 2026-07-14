@@ -199,8 +199,8 @@ fn compatible_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedB
 fn emit_stored_build_gates(stored:&StoredBuildReport)->i32{let mut failed=0;for fact in &stored.facts{if fact.outcome=="fail"{failed+=1;let code=if fact.evidence=="unavailable"{"E2906"}else{"E2907"};let state=if fact.evidence=="unavailable"{"has no usable evidence"}else if fact.evidence=="inconclusive"{"is inconclusive"}else{"regressed"};eprintln!("Error [{code}]: performance budget {} {state}\n --> {}\n Why: {}\n Fix: {}",fact.name,fact.source,fact.reason,if code=="E2906"{"correct the provider evidence or bootstrap only when absent or stale evidence is eligible"}else{"improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"});}}let short=&stored.report_id[..12];if failed>0{eprintln!("budgets failed: {} · report {short}",count(failed,"budget failed","budgets failed"));1}else{eprintln!("budgets: {} passed · report {short}",count(stored.facts.len(),"budget","budgets"));0}}
 fn build_gate_tool_failure(why:&str)->i32{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry");1}
 
-/// `jet bench` is sole owner of BenchMeasurement refresh. Evidence comes from
-/// same harness invocation rendered to user; no second timing pass exists.
+/// `jet bench` owns BenchMeasurement and Bench-scoped AllocationProbe refresh.
+/// Both come from the same harness invocation; no second workload pass exists.
 pub(crate) fn reuse_bench_report(entry:&str)->Option<i32>{
     let entry=match std::path::Path::new(entry).canonicalize(){Ok(path)=>path,Err(error)=>return Some(build_gate_tool_failure(&format!("cannot resolve benchmark entry: {error}")))};
     let root=jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new("."))).unwrap_or_else(||entry.parent().unwrap_or(Path::new(".")).to_path_buf());
@@ -209,7 +209,7 @@ pub(crate) fn reuse_bench_report(entry:&str)->Option<i32>{
     if diagnostics.iter().any(|diagnostic|diagnostic.severity==jet::Diagnostics::Severity::Error){return None}
     let bundle=bundle?;
     let specs=jet::Sema::collect_located_budget_specs_bundle(&bundle).ok()?;
-    let active=specs.into_iter().filter(|located|provider_kind(&located.spec.provider)=="BenchMeasurement"&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
+    let active=specs.into_iter().filter(|located|bench_owned(&located.spec)&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
     if active.is_empty(){return None}
     match compatible_report(&root,&bundle,&active,"native","bench",None){Ok(Some(stored))=>Some(emit_stored_build_gates(&stored)),Ok(None)=>None,Err(error)=>Some(build_gate_tool_failure(&error))}
 }
@@ -222,7 +222,7 @@ pub(crate) fn run_bench_refresh(entry:&str,evidence:&[crate::CmdDevTools::BenchE
     if diagnostics.iter().any(|diagnostic|diagnostic.severity==jet::Diagnostics::Severity::Error){eprint!("{}",jet::render_all_colored(&entry_text,&std::fs::read_to_string(&entry).unwrap_or_default(),&diagnostics,false));return 1}
     let Some(bundle)=bundle else{return build_gate_tool_failure("front-end produced no checked benchmark program")};
     let specs=match jet::Sema::collect_located_budget_specs_bundle(&bundle){Ok(specs)=>specs,Err(diagnostics)=>{eprint!("{}",jet::render_all_colored(&entry_text,&std::fs::read_to_string(&entry).unwrap_or_default(),&diagnostics,false));return 1}};
-    let active=specs.into_iter().filter(|located|provider_kind(&located.spec.provider)=="BenchMeasurement"&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
+    let active=specs.into_iter().filter(|located|bench_owned(&located.spec)&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
     if active.is_empty(){return 0}
     match compatible_report(&root,&bundle,&active,"native","bench",None){Ok(Some(stored))=>return emit_stored_build_gates(&stored),Ok(None)=>{},Err(error)=>return build_gate_tool_failure(&error)}
     let store=BudgetStore::new(&root);let started=timestamp_now();
@@ -292,7 +292,7 @@ struct ResultRow { id:String, name:String, source:String, line:usize, column:usi
 type ArtifactIdentity = (PathBuf, u64, String);
 
 fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, bench_evidence:Option<&[crate::CmdDevTools::BenchEvidence]>)->Result<BuiltReport,String>{
-    for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
+    for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
     let artifact=if needs_artifact{Some(match supplied_artifact{Some(artifact)=>artifact,None=>build_selected_artifact(root,&project_entry(root))?})}else{None};
@@ -304,16 +304,27 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     for (index,located) in ordered.iter().enumerate(){groups.entry(located.spec.provider.clone()).or_default().push(index);}
     let mut registry=ProviderRegistry::with_builtins();
     registry.register_in_process("BenchMeasurement",bench_measurement_provider).map_err(|error|format!("cannot register BenchMeasurement: {error}"))?;
+    registry.register_in_process("AllocationProbe",allocation_probe_provider).map_err(|error|format!("cannot register AllocationProbe: {error}"))?;
     let mut samples=vec![Vec::new();ordered.len()];
     for (provider_name,indices) in groups {
         let kind=provider_kind(&provider_name);
-        if kind=="BenchMeasurement" {
+        if matches!(kind,"BenchMeasurement"|"AllocationProbe") {
             if let Some(evidence)=bench_evidence {
                 let name=provider_identity(&provider_name);
                 let bench=evidence.iter().find(|bench|bench.name==name).ok_or_else(||format!("#Bench `{name}` was not emitted by its selected benchmark target"))?;
                 for index in indices {
-                    if !ordered[index].spec.metric.starts_with("BenchTime("){return Err(format!("BenchMeasurement does not support metric `{}`",ordered[index].spec.metric))}
-                    samples[index]=bench.samples.iter().map(|(elapsed,iters)|Rational::parse(&elapsed.to_string(),&iters.to_string())).collect::<Result<Vec<_>,_>>()?;
+                    if kind=="BenchMeasurement" {
+                        if !ordered[index].spec.metric.starts_with("BenchTime("){return Err(format!("BenchMeasurement does not support metric `{}`",ordered[index].spec.metric))}
+                        samples[index]=bench.samples.iter().map(|(elapsed,iters)|Rational::parse(&elapsed.to_string(),&iters.to_string())).collect::<Result<Vec<_>,_>>()?;
+                    } else {
+                        let metric=ordered[index].spec.metric.as_str();
+                        if !matches!(metric,"AllocationCount"|"AllocationBytes"){return Err(format!("AllocationProbe does not support metric `{metric}`"))}
+                        if bench.allocation_samples.len()!=20{return Err(format!("AllocationProbe `{name}` returned {} samples; policy requires 20",bench.allocation_samples.len()))}
+                        samples[index]=bench.allocation_samples.iter().map(|(count,bytes,iters)|{
+                            let numerator=if metric=="AllocationCount"{count}else{bytes};
+                            Rational::parse(&numerator.to_string(),&iters.to_string())
+                        }).collect::<Result<Vec<_>,_>>()?;
+                    }
                 }
                 continue;
             }
@@ -321,7 +332,7 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         let provider=&providers[indices[0]];
         let workload=if kind=="BuildArtifact"{
             CanonicalJson::object([("path".into(),CanonicalJson::String(artifact.as_ref().expect("built artifact").0.to_string_lossy().into_owned()))])?
-        }else if kind=="BenchMeasurement"{
+        }else if matches!(kind,"BenchMeasurement"|"AllocationProbe"){
             CanonicalJson::object([("name".into(),CanonicalJson::String(provider_identity(&provider_name).into())),("path".into(),CanonicalJson::String(project_entry(root).to_string_lossy().into_owned()))])?
         }else{
             CanonicalJson::Array(indices.iter().map(|index|compiler_fact(bundle,effect_facts,&ordered[*index].spec).map(|value|CanonicalJson::Integer(value.to_string()))).collect::<Result<Vec<_>,_>>()?)
@@ -410,6 +421,27 @@ fn bench_measurement_provider(request:&ProviderRequest,_:&ProviderCancellation)-
     let samples=events.len()as u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
 }
 
+fn allocation_probe_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{
+    let CanonicalJson::Object(workload)=&request.workload else{return Err(ProviderFailure::malformed("AllocationProbe workload is not an object"))};
+    let Some(CanonicalJson::String(path))=workload.get("path") else{return Err(ProviderFailure::malformed("AllocationProbe workload has no source path"))};
+    let Some(CanonicalJson::String(name))=workload.get("name") else{return Err(ProviderFailure::malformed("AllocationProbe workload has no benchmark name"))};
+    let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read allocation workload source: {error}")))?;
+    let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never};
+    let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
+    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected allocation workload")))?;
+    if bench.allocation_samples.len()!=20{return Err(ProviderFailure::malformed(format!("AllocationProbe `{name}` emitted {} trials; policy requires 20",bench.allocation_samples.len())))}
+    let mut events=Vec::new();
+    for(index,spec)in request.specs.iter().enumerate(){
+        if !matches!(spec.metric.as_str(),"AllocationCount"|"AllocationBytes"){return Err(ProviderFailure::malformed(format!("AllocationProbe does not support metric `{}`",spec.metric)))}
+        for(count,bytes,iters)in &bench.allocation_samples{
+            let numerator=if spec.metric=="AllocationCount"{count}else{bytes};
+            let value=Rational::parse(&numerator.to_string(),&iters.to_string()).map_err(ProviderFailure::malformed)?;
+            events.push(ProviderEvent::Sample{spec:index as u32,metric:spec.metric.clone(),value});
+        }
+    }
+    let samples=events.len()as u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
+}
+
 fn measurement_base(root:&Path,bundle:&jet::AST::ProgramBundle,spec:&BudgetSpec,_subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson,target:&str,profile:&str)->Result<(CanonicalJson,String,String),String>{let metric_name=spec.metric.split('(').next().unwrap_or(&spec.metric);let percentile=metric_percentile(&spec.metric).map(|value|CanonicalJson::String(value.into())).unwrap_or(CanonicalJson::Null);let metric=CanonicalJson::object([("name".into(),CanonicalJson::String(metric_name.into())),("percentile".into(),percentile.clone())])?;let comparison=comparison_json(spec)?;let direction=if metric_name=="Throughput"{"higher_is_better"}else{"lower_is_better"};let applies=CanonicalJson::object([("profiles".into(),CanonicalJson::Array(axis(&spec.applicability.profiles,profile))), ("targets".into(),CanonicalJson::Array(axis(&spec.applicability.targets,target)))])?;let kind=provider_kind(&spec.provider);let identity=provider_identity(&spec.provider);let budget_spec=CanonicalJson::object([("applies".into(),applies),("comparison".into(),comparison.clone()),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("metric".into(),metric.clone()),("name".into(),CanonicalJson::String(spec.name.clone())),("package_id".into(),CanonicalJson::String(package_name(root))),("perf_role".into(),CanonicalJson::String(spec.role.clone())),("provider".into(),CanonicalJson::object([("identity".into(),CanonicalJson::String(identity.into())),("kind".into(),CanonicalJson::String(kind.into()))])?),("scope".into(),CanonicalJson::String(spec.scope.clone()))])?;let hash=stable_id(&budget_spec);let fingerprint=text_field(provider,"hardware_fingerprint")?;let mut framed=b"jet-budget-context-v1\0".to_vec();for value in ["package",metric_name,metric_percentile(&spec.metric).unwrap_or(""),target,std::env::consts::ARCH,profile,env!("CARGO_PKG_VERSION"),text_field(tool,"compiler_build_id")?,text_field(tool,"stdlib_id")?,text_field(tool,"runner_id")?,text_field(tool,"digest")?,kind,identity,text_field(provider,"version")?,text_field(provider,"isolation")?,text_field(provider,"cpu_arch")?,text_field(provider,"cpu_model")?,wire_map(as_object(provider)?,"logical_cpus")?,wire_map(as_object(provider)?,"memory_bytes")?,text_field(provider,"os")?,text_field(provider,"kernel")?,text_field(provider,"power_governor")?,fingerprint]{frame(&mut framed,value)}let context=sha256_hex(&framed);let(source,line,_)=source_location(root,bundle,spec);Ok((CanonicalJson::object([("baseline".into(),CanonicalJson::Null),("budget_id".into(),CanonicalJson::String(format!("{}:{}",spec.role,spec.name))),("budget_spec".into(),budget_spec),("budget_spec_sha256".into(),CanonicalJson::String(hash.clone())),("comparison".into(),comparison),("context_key".into(),CanonicalJson::String(context.clone())),("decision".into(),CanonicalJson::Null),("direction".into(),CanonicalJson::String(direction.into())),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("history".into(),CanonicalJson::Null),("metric".into(),metric),("policy".into(),if spec.comparison_fact.kind=="Absolute"{CanonicalJson::Null}else{policy_json()}),("provider".into(),provider.clone()),("samples".into(),CanonicalJson::Array(vec![CanonicalJson::Integer("0".into())])),("source".into(),CanonicalJson::String(format!("{source}:{line}"))),("statistics".into(),CanonicalJson::Null),("target_class".into(),CanonicalJson::String(target.into())),("unit".into(),CanonicalJson::String(metric_unit(&spec.metric).into()))])?,hash,context))}
 
 fn measurement_base_truthful(root:&Path,bundle:&jet::AST::ProgramBundle,located:&LocatedBudgetSpec,subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson,target:&str,profile:&str)->Result<(CanonicalJson,String,String),String>{
@@ -436,6 +468,7 @@ fn context_key(subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJso
 fn compiler_fact(bundle:&jet::AST::ProgramBundle,effect_facts:&jet::Sema::SemIndexEffectFacts,spec:&BudgetSpec)->Result<u128,String>{match spec.metric.as_str(){"PublicApiItems"=>Ok(bundle.modules.iter().flat_map(|m|&m.items).filter(|item|match item{Item::Func(v)=>v.is_pub,Item::Struct(v)=>v.is_pub,Item::Enum(v)=>v.is_pub,Item::Trait(v)=>v.is_pub,Item::CodeModule(v)=>v.is_pub,_=>false}).count()as u128),"DependencyCount"=>Ok(bundle.dep_roots.len()as u128),"EffectCount"=>{let effects=effect_facts.solved.values().flat_map(|set|set.iter().cloned()).collect::<std::collections::BTreeSet<_>>();Ok(effects.len()as u128)},"GeneratedUnsafe"=>Err("CompilerFacts metric `GeneratedUnsafe` has no exact checked front-end fact; refusing proxy measurement".into()),other=>Err(format!("CompilerFacts metric `{other}` is not implemented"))}}
 fn provider_kind(provider:&str)->&str{provider.split_once('(').map(|(kind,_)|kind).unwrap_or(provider)}
 fn provider_identity(provider:&str)->&str{provider.split_once('(').and_then(|(_,rest)|rest.strip_suffix(')')).unwrap_or("")}
+fn bench_owned(spec:&BudgetSpec)->bool{matches!(provider_kind(&spec.provider),"BenchMeasurement"|"AllocationProbe")&&spec.scope.starts_with("Bench(")}
 fn metric_unit(metric:&str)->&'static str{match metric.split('(').next().unwrap_or(metric){"BinarySize"|"ArtifactSize"=>"Bytes","StartupTime"|"FrameTime"|"Latency"|"BenchTime"|"ServiceReadiness"=>"Duration","MemoryHighWater"|"AllocationBytes"|"SceneAssetBytes"=>"Bytes","Throughput"=>"Rate",_=>"Count"}}
 fn build_selected_artifact(root:&Path,entry:&Path)->Result<(PathBuf,u64,String),String>{
     let executable=std::env::current_exe().map_err(|e|format!("cannot identify compiler for BuildArtifact: {e}"))?;
@@ -480,7 +513,7 @@ impl<T: BudgetSource + ?Sized> BudgetSource for &T {
 fn source_location<T:BudgetSource+?Sized>(root:&Path,bundle:&jet::AST::ProgramBundle,located:&T)->(String,usize,usize){let spec=located.spec();let module=&bundle.modules[located.module_index(bundle)];let(line,column)=jet::Diagnostics::span_line_col(&module.source,spec.span.start.min(module.source.len()));let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");(path,line,column)}
 fn subject(root:&Path,bundle:&jet::AST::ProgramBundle,start:&str,end:&str,target:&str,profile:&str,artifact:Option<&(PathBuf,u64,String)>)->Result<CanonicalJson,String>{let mut sources=Vec::new();for module in &bundle.modules{let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");sources.push((path,sha256_hex(module.source.as_bytes())))}sources.sort();let artifact=artifact.map(|(_,bytes,sha256)|CanonicalJson::object([("bytes".into(),CanonicalJson::Integer(bytes.to_string())),("sha256".into(),CanonicalJson::String(sha256.clone()))]).unwrap()).unwrap_or(CanonicalJson::Null);CanonicalJson::object([("artifact".into(),artifact),("measured_end".into(),CanonicalJson::String(end.into())),("measured_start".into(),CanonicalJson::String(start.into())),("member_sources".into(),CanonicalJson::Array(sources.into_iter().map(|(path,hash)|CanonicalJson::object([("path".into(),CanonicalJson::String(path)),("sha256".into(),CanonicalJson::String(hash))]).unwrap()).collect())),("profile".into(),CanonicalJson::String(profile.into())),("target_class".into(),CanonicalJson::String(target.into())),("target_id".into(),CanonicalJson::String(package_name(root))),("target_triple".into(),CanonicalJson::String(host_triple()?))])}
 fn toolchain()->Result<CanonicalJson,String>{let executable=std::env::current_exe().map_err(|e|format!("cannot identify running compiler executable: {e}"))?;let build=executable_digest(&executable)?;let body=CanonicalJson::object([("compiler_build_id".into(),CanonicalJson::String(build.clone())),("jet_version".into(),CanonicalJson::String(env!("CARGO_PKG_VERSION").into())),("runner_id".into(),CanonicalJson::String(build.clone())),("stdlib_id".into(),CanonicalJson::String(build))])?;let mut map=as_object(&body)?.clone();map.insert("digest".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
-fn provider(kind:&str,identity:&str)->Result<CanonicalJson,String>{let triple=host_triple()?;let cpu_arch=triple.split('-').next().filter(|v|!v.is_empty()).ok_or("host triple has no architecture")?;let cpuinfo=std::fs::read_to_string("/proc/cpuinfo").map_err(|e|format!("cannot read CPU identity: {e}"))?;let cpu_model=proc_value(&cpuinfo,"model name").or_else(||proc_value(&cpuinfo,"Hardware")).ok_or("CPU model is unavailable")?;let meminfo=std::fs::read_to_string("/proc/meminfo").map_err(|e|format!("cannot read memory identity: {e}"))?;let memory_kib=proc_value(&meminfo,"MemTotal").and_then(|v|v.split_whitespace().next()).ok_or("memory total is unavailable")?.parse::<u128>().map_err(|_|"memory total is malformed")?;let memory_bytes=memory_kib.checked_mul(1024).ok_or("memory total overflow")?;let kernel=read_trimmed("/proc/sys/kernel/osrelease","kernel identity")?;let power_governor=read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor","CPU power governor")?;let logical_cpus=std::thread::available_parallelism().map_err(|e|format!("logical CPU count unavailable: {e}"))?.get();let body=CanonicalJson::object([("cpu_arch".into(),CanonicalJson::String(cpu_arch.into())),("cpu_model".into(),CanonicalJson::String(cpu_model.into())),("identity".into(),CanonicalJson::String(identity.into())),("isolation".into(),CanonicalJson::String("process".into())),("kernel".into(),CanonicalJson::String(kernel)),("kind".into(),CanonicalJson::String(kind.into())),("logical_cpus".into(),CanonicalJson::Integer(logical_cpus.to_string())),("memory_bytes".into(),CanonicalJson::Integer(memory_bytes.to_string())),("os".into(),CanonicalJson::String(std::env::consts::OS.into())),("power_governor".into(),CanonicalJson::String(power_governor)),("version".into(),CanonicalJson::String("1".into()))])?;let mut map=as_object(&body)?.clone();map.insert("hardware_fingerprint".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
+fn provider(kind:&str,identity:&str)->Result<CanonicalJson,String>{let triple=host_triple()?;let cpu_arch=triple.split('-').next().filter(|v|!v.is_empty()).ok_or("host triple has no architecture")?;let cpuinfo=std::fs::read_to_string("/proc/cpuinfo").map_err(|e|format!("cannot read CPU identity: {e}"))?;let cpu_model=proc_value(&cpuinfo,"model name").or_else(||proc_value(&cpuinfo,"Hardware")).ok_or("CPU model is unavailable")?;let meminfo=std::fs::read_to_string("/proc/meminfo").map_err(|e|format!("cannot read memory identity: {e}"))?;let memory_kib=proc_value(&meminfo,"MemTotal").and_then(|v|v.split_whitespace().next()).ok_or("memory total is unavailable")?.parse::<u128>().map_err(|_|"memory total is malformed")?;let memory_bytes=memory_kib.checked_mul(1024).ok_or("memory total overflow")?;let kernel=read_trimmed("/proc/sys/kernel/osrelease","kernel identity")?;let power_governor=read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor","CPU power governor")?;let logical_cpus=std::thread::available_parallelism().map_err(|e|format!("logical CPU count unavailable: {e}"))?.get();let(version,isolation)=if kind=="AllocationProbe"{("jet-arena-events-v1-warmup-auto-trials-20","benchmark-process-counter-reset-per-trial")}else{("1","process")};let body=CanonicalJson::object([("cpu_arch".into(),CanonicalJson::String(cpu_arch.into())),("cpu_model".into(),CanonicalJson::String(cpu_model.into())),("identity".into(),CanonicalJson::String(identity.into())),("isolation".into(),CanonicalJson::String(isolation.into())),("kernel".into(),CanonicalJson::String(kernel)),("kind".into(),CanonicalJson::String(kind.into())),("logical_cpus".into(),CanonicalJson::Integer(logical_cpus.to_string())),("memory_bytes".into(),CanonicalJson::Integer(memory_bytes.to_string())),("os".into(),CanonicalJson::String(std::env::consts::OS.into())),("power_governor".into(),CanonicalJson::String(power_governor)),("version".into(),CanonicalJson::String(version.into()))])?;let mut map=as_object(&body)?.clone();map.insert("hardware_fingerprint".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
 fn executable_digest(path:&Path)->Result<String,String>{jet::SHA256::sha256_file_hex(path).map_err(|e|format!("cannot hash running compiler executable: {e}"))}
 fn host_triple()->Result<String,String>{let target=env!("JET_BUILD_TARGET");if target.split('-').count()<3{return Err("compiler build omitted canonical target triple".into())}Ok(target.into())}
 fn proc_value<'a>(text:&'a str,key:&str)->Option<&'a str>{text.lines().find_map(|line|{let(left,right)=line.split_once(':')?;(left.trim()==key).then(||right.trim())})}
