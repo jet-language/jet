@@ -13,7 +13,7 @@ fn run() {
         sender.send(listener.local_addr() ?? panic("address failed"))
         stream :: listener.accept() ?? panic("accept failed")
         _req :: stream.read_text(8192) ?? panic("read failed")
-        net.tcp_reply(stream, "200 OK", "hello, world!") ?? panic("tcp reply")
+        net.tcp_reply(^stream, "200 OK", "hello, world!") ?? panic("tcp reply")
     })
     addr :: ch.receive() ?? panic("no address")
     resp :: http.get("http://{addr}/") ?? panic("http get failed")
