@@ -175,130 +175,58 @@ fn jet_std_base32_decode(text: &String) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn jet_xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-fn jet_xml_unescape(s: &str) -> String {
-    s.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-}
-fn jet_xml_obj(name: String, attrs: Vec<(String, String)>, children: Vec<jet_std::DataTree>, text: String) -> jet_std::DataTree {
-    jet_std::DataTree::Object(vec![
-        ("name".to_string(), jet_std::DataTree::Text(name)),
-        (
-            "attrs".to_string(),
-            jet_std::DataTree::Object(
-                attrs
-                    .into_iter()
-                    .map(|(k, v)| (k, jet_std::DataTree::Text(v)))
-                    .collect(),
-            ),
+fn jet_xml_to_data_tree(value: crate::jet_xml_pull::Value) -> jet_std::DataTree {
+    match value {
+        crate::jet_xml_pull::Value::Null => jet_std::DataTree::Null,
+        crate::jet_xml_pull::Value::Bool(value) => jet_std::DataTree::Bool(value),
+        crate::jet_xml_pull::Value::Int(value) => jet_std::DataTree::Int(value),
+        crate::jet_xml_pull::Value::Text(value) => jet_std::DataTree::Text(value),
+        crate::jet_xml_pull::Value::Array(values) => jet_std::DataTree::Array(
+            values.into_iter().map(jet_xml_to_data_tree).collect(),
         ),
-        ("children".to_string(), jet_std::DataTree::Array(children)),
-        ("text".to_string(), jet_std::DataTree::Text(text)),
-    ])
+        crate::jet_xml_pull::Value::Object(entries) => jet_std::DataTree::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, jet_xml_to_data_tree(value)))
+                .collect(),
+        ),
+    }
 }
+
+fn jet_xml_from_data_tree(value: &jet_std::DataTree) -> Result<crate::jet_xml_pull::Value, String> {
+    match value {
+        jet_std::DataTree::Null => Ok(crate::jet_xml_pull::Value::Null),
+        jet_std::DataTree::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
+        jet_std::DataTree::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
+        jet_std::DataTree::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
+        jet_std::DataTree::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
+            values
+                .iter()
+                .map(jet_xml_from_data_tree)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        jet_std::DataTree::Object(entries) => Ok(crate::jet_xml_pull::Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| Ok((key.clone(), jet_xml_from_data_tree(value)?)))
+                .collect::<Result<Vec<_>, String>>()?,
+        )),
+        jet_std::DataTree::Float(_) | jet_std::DataTree::Bytes(_) => {
+            Err("XML tree cannot contain Float or Bytes values".to_string())
+        }
+    }
+}
+
 fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, String> {
-    #[derive(Clone)]
-    struct Node { name: String, attrs: Vec<(String, String)>, children: Vec<jet_std::DataTree>, text: String }
-    fn finish(n: Node) -> jet_std::DataTree { jet_xml_obj(n.name, n.attrs, n.children, n.text.trim().to_string()) }
-    fn parse_tag(src: &str) -> Result<(String, Vec<(String, String)>, bool), String> {
-        let mut s = src.trim().to_string();
-        let self_close = s.ends_with('/');
-        if self_close { s.pop(); }
-        let mut parts = s.split_whitespace();
-        let name = parts.next().ok_or_else(|| "empty XML tag".to_string())?.to_string();
-        let mut attrs = Vec::new();
-        let rest = &s[name.len()..];
-        let mut i = 0usize;
-        let bytes = rest.as_bytes();
-        while i < bytes.len() {
-            while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
-            if i >= bytes.len() { break; }
-            let start = i;
-            while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() { i += 1; }
-            let key = rest[start..i].trim().to_string();
-            while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b'=') { i += 1; }
-            if i >= bytes.len() || bytes[i] != b'"' { return Err(format!("XML attribute `{key}` needs quoted value")); }
-            i += 1;
-            let val_start = i;
-            while i < bytes.len() && bytes[i] != b'"' { i += 1; }
-            if i >= bytes.len() { return Err(format!("XML attribute `{key}` is unterminated")); }
-            attrs.push((key, jet_xml_unescape(&rest[val_start..i])));
-            i += 1;
-        }
-        Ok((name, attrs, self_close))
-    }
-    let mut stack: Vec<Node> = Vec::new();
-    let mut root: Option<jet_std::DataTree> = None;
-    let mut i = 0usize;
-    while let Some(rel) = text[i..].find('<') {
-        let start = i + rel;
-        if start > i {
-            if let Some(top) = stack.last_mut() { top.text.push_str(&jet_xml_unescape(&text[i..start])); }
-        }
-        let end = text[start..].find('>').ok_or_else(|| "unterminated XML tag".to_string())? + start;
-        let tag = text[start + 1..end].trim();
-        if tag.starts_with("!--") || tag.starts_with('?') {
-            i = end + 1;
-            continue;
-        }
-        if let Some(close) = tag.strip_prefix('/') {
-            let node = stack.pop().ok_or_else(|| format!("closing tag </{}> without opener", close.trim()))?;
-            if node.name != close.trim() { return Err(format!("closing tag </{}> does not match <{}>", close.trim(), node.name)); }
-            let tree = finish(node);
-            if let Some(parent) = stack.last_mut() { parent.children.push(tree); } else { root = Some(tree); }
-        } else {
-            let (name, attrs, self_close) = parse_tag(tag)?;
-            let node = Node { name, attrs, children: Vec::new(), text: String::new() };
-            if self_close {
-                let tree = finish(node);
-                if let Some(parent) = stack.last_mut() { parent.children.push(tree); } else { root = Some(tree); }
-            } else {
-                stack.push(node);
-            }
-        }
-        i = end + 1;
-    }
-    if i < text.len() {
-        if let Some(top) = stack.last_mut() { top.text.push_str(&jet_xml_unescape(&text[i..])); }
-    }
-    if !stack.is_empty() { return Err(format!("unclosed XML tag <{}>", stack.last().unwrap().name)); }
-    root.ok_or_else(|| "empty XML document".to_string())
+    crate::jet_xml_pull::parse_document(text)
+        .map(jet_xml_to_data_tree)
+        .map_err(|error| format!("XML at byte {}: {}", error.offset, error.reason))
 }
+
 fn jet_std_xml_render(d: &jet_std::DataTree) -> String {
-    fn field<'a>(d: &'a jet_std::DataTree, name: &str) -> Option<&'a jet_std::DataTree> {
-        if let jet_std::DataTree::Object(entries) = d {
-            entries.iter().find(|(k, _)| k == name).map(|(_, v)| v)
-        } else { None }
-    }
-    fn render_node(d: &jet_std::DataTree) -> String {
-        let name = match field(d, "name") { Some(jet_std::DataTree::Text(s)) => s.clone(), _ => "node".to_string() };
-        let attrs = match field(d, "attrs") {
-            Some(jet_std::DataTree::Object(es)) => es.iter().filter_map(|(k, v)| match v {
-                jet_std::DataTree::Text(s) => Some(format!(" {}=\"{}\"", k, jet_xml_escape(s))),
-                _ => None,
-            }).collect::<String>(),
-            _ => String::new(),
-        };
-        let text = match field(d, "text") { Some(jet_std::DataTree::Text(s)) => jet_xml_escape(s), _ => String::new() };
-        let children = match field(d, "children") {
-            Some(jet_std::DataTree::Array(xs)) => xs.iter().map(render_node).collect::<String>(),
-            _ => String::new(),
-        };
-        if text.is_empty() && children.is_empty() {
-            format!("<{name}{attrs}/>")
-        } else {
-            format!("<{name}{attrs}>{text}{children}</{name}>")
-        }
-    }
-    render_node(d)
+    jet_xml_from_data_tree(d)
+        .and_then(|value| crate::jet_xml_pull::render_document(&value))
+        .unwrap_or_default()
 }
 
 fn jet_cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {

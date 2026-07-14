@@ -4186,8 +4186,22 @@ fn run() {
     rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
     print(rows.len())
     print(jsonl.to_string(rows).contains("\"a\":1"))
-    doc := xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>") ?? panic("xml")
+    source := "<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>"
+    doc := xml.parse(source) ?? panic("xml")
     print(xml.to_string(doc))
+    print((doc.field("$xml") ?? panic("document tag")).text() ?? "bad")
+    root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+    name := root.field("name") ?? panic("root name")
+    print((name.field("namespace_uri") ?? panic("root namespace")).text() ?? "bad")
+    content := root.field("children") ?? panic("root children")
+    entity := content.at(1) ?? panic("entity")
+    comment := content.at(2) ?? panic("comment")
+    cdata := content.at(3) ?? panic("cdata")
+    pi := content.at(4) ?? panic("pi")
+    print((entity.field("$xml") ?? panic("entity tag")).text() ?? "bad")
+    print((comment.field("$xml") ?? panic("comment tag")).text() ?? "bad")
+    print((cdata.field("$xml") ?? panic("cdata tag")).text() ?? "bad")
+    print((pi.field("$xml") ?? panic("pi tag")).text() ?? "bad")
     encoded := cbor.encode(data)
     print(encoded.len() > 0)
     decoded := cbor.decode(encoded) ?? panic("cbor")
@@ -4207,7 +4221,7 @@ fn run() {
     assert_eq!(code, 0, "encoding breadth test failed: {stderr}");
     assert_eq!(
         stdout,
-        "{\"a\":1,\"b\":2}\ntrue\n2\ntrue\n<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>\ntrue\n{\"a\":1,\"b\":2}\naGk\n2\nNBUQ====\n2\n"
+        "{\"a\":1,\"b\":2}\ntrue\n2\ntrue\n<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>\ndocument\nurn:r\nentity_ref\ncomment\ncdata\nprocessing_instruction\ntrue\n{\"a\":1,\"b\":2}\naGk\n2\nNBUQ====\n2\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

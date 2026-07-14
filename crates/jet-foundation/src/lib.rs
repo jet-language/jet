@@ -19,4 +19,5 @@ pub mod Syntax;
 pub mod TargetProfile;
 pub mod Traits;
 pub mod WebPartition;
+pub mod XmlPull;
 pub use BuildEffects::BuildEffect;

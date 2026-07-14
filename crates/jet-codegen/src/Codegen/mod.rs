@@ -281,6 +281,9 @@ fn jet_cov_dump() {
 }
 "#;
 const CORELIB_PRELUDE_PARTS: &[&str] = &[
+    "\nmod jet_xml_pull {\n",
+    include_str!("../../../jet-foundation/src/XmlPull.rs"),
+    "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),

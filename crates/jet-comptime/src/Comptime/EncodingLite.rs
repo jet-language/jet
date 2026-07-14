@@ -1571,210 +1571,63 @@ fn yaml_needs_quote(s: &str) -> bool {
 }
 
 // ── core.encoding.xml ────────────────────────────────────────────────────────
-// Ported from `EncodingCodecs.rs`'s `jet_std_xml_parse`/`jet_std_xml_render`,
-// target type swapped from `DataTree` to the `Json`-tagged `CtValue` (each
-// XML node is an `Object` with `name`/`attrs`/`children`/`text` fields,
-// exactly mirroring `jet_xml_obj`'s shape).
-
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-fn xml_unescape(s: &str) -> String {
-    s.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-}
-fn xml_obj(name: String, attrs: Vec<(String, String)>, children: Vec<CtValue>, text: String) -> CtValue {
-    json_object(vec![
-        ("name".to_string(), json_variant("Text", Some(CtValue::Str(name)))),
-        (
-            "attrs".to_string(),
-            json_object(
-                attrs
-                    .into_iter()
-                    .map(|(k, v)| (k, json_variant("Text", Some(CtValue::Str(v)))))
-                    .collect(),
-            ),
+// Runtime and comptime share one parser/folder. These adapters only translate
+// the ordinary DataTree algebra to and from comptime's tagged representation.
+fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
+    use jet_foundation::XmlPull::Value;
+    match value {
+        Value::Null => json_variant("Null", None),
+        Value::Bool(value) => json_variant("Bool", Some(CtValue::Bool(value))),
+        Value::Int(value) => json_variant("Int", Some(CtValue::Int(value))),
+        Value::Text(value) => json_variant("Text", Some(CtValue::Str(value))),
+        Value::Array(values) => json_array(values.into_iter().map(xml_to_ct).collect()),
+        Value::Object(entries) => json_object(
+            entries.into_iter().map(|(key, value)| (key, xml_to_ct(value))).collect(),
         ),
-        ("children".to_string(), json_array(children)),
-        ("text".to_string(), json_variant("Text", Some(CtValue::Str(text)))),
-    ])
-}
-pub(super) fn xml_parse(text: &str) -> Result<CtValue, String> {
-    struct Node {
-        name: String,
-        attrs: Vec<(String, String)>,
-        children: Vec<CtValue>,
-        text: String,
     }
-    fn finish(n: Node) -> CtValue {
-        xml_obj(n.name, n.attrs, n.children, n.text.trim().to_string())
-    }
-    fn parse_tag(src: &str) -> Result<(String, Vec<(String, String)>, bool), String> {
-        let mut s = src.trim().to_string();
-        let self_close = s.ends_with('/');
-        if self_close {
-            s.pop();
-        }
-        let mut parts = s.split_whitespace();
-        let name = parts
-            .next()
-            .ok_or_else(|| "empty XML tag".to_string())?
-            .to_string();
-        let mut attrs = Vec::new();
-        let rest = &s[name.len()..];
-        let mut i = 0usize;
-        let bytes = rest.as_bytes();
-        while i < bytes.len() {
-            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            if i >= bytes.len() {
-                break;
-            }
-            let start = i;
-            while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            let key = rest[start..i].trim().to_string();
-            while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b'=') {
-                i += 1;
-            }
-            if i >= bytes.len() || bytes[i] != b'"' {
-                return Err(format!("XML attribute `{key}` needs quoted value"));
-            }
-            i += 1;
-            let val_start = i;
-            while i < bytes.len() && bytes[i] != b'"' {
-                i += 1;
-            }
-            if i >= bytes.len() {
-                return Err(format!("XML attribute `{key}` is unterminated"));
-            }
-            attrs.push((key, xml_unescape(&rest[val_start..i])));
-            i += 1;
-        }
-        Ok((name, attrs, self_close))
-    }
-    let mut stack: Vec<Node> = Vec::new();
-    let mut root: Option<CtValue> = None;
-    let mut i = 0usize;
-    while let Some(rel) = text[i..].find('<') {
-        let start = i + rel;
-        if start > i {
-            if let Some(top) = stack.last_mut() {
-                top.text.push_str(&xml_unescape(&text[i..start]));
-            }
-        }
-        let end = text[start..]
-            .find('>')
-            .ok_or_else(|| "unterminated XML tag".to_string())?
-            + start;
-        let tag = text[start + 1..end].trim();
-        if tag.starts_with("!--") || tag.starts_with('?') {
-            i = end + 1;
-            continue;
-        }
-        if let Some(close) = tag.strip_prefix('/') {
-            let node = stack
-                .pop()
-                .ok_or_else(|| format!("closing tag </{}> without opener", close.trim()))?;
-            if node.name != close.trim() {
-                return Err(format!(
-                    "closing tag </{}> does not match <{}>",
-                    close.trim(),
-                    node.name
-                ));
-            }
-            let tree = finish(node);
-            if let Some(parent) = stack.last_mut() {
-                parent.children.push(tree);
-            } else {
-                root = Some(tree);
-            }
-        } else {
-            let (name, attrs, self_close) = parse_tag(tag)?;
-            let node = Node {
-                name,
-                attrs,
-                children: Vec::new(),
-                text: String::new(),
-            };
-            if self_close {
-                let tree = finish(node);
-                if let Some(parent) = stack.last_mut() {
-                    parent.children.push(tree);
-                } else {
-                    root = Some(tree);
-                }
-            } else {
-                stack.push(node);
-            }
-        }
-        i = end + 1;
-    }
-    if i < text.len() {
-        if let Some(top) = stack.last_mut() {
-            top.text.push_str(&xml_unescape(&text[i..]));
-        }
-    }
-    if !stack.is_empty() {
-        return Err(format!("unclosed XML tag <{}>", stack.last().unwrap().name));
-    }
-    root.ok_or_else(|| "empty XML document".to_string())
-}
-pub(super) fn xml_render(d: &CtValue) -> String {
-    fn field(d: &CtValue, name: &str) -> Option<CtValue> {
-        json_object_entries(d)?
-            .into_iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v)
-    }
-    fn text_of(v: &Option<CtValue>) -> Option<String> {
-        match v {
-            Some(v) => match json_payload(v, "Text") {
-                Some(CtValue::Str(s)) => Some(s.clone()),
-                _ => None,
-            },
-            None => None,
-        }
-    }
-    fn render_node(d: &CtValue) -> String {
-        let name = text_of(&field(d, "name")).unwrap_or_else(|| "node".to_string());
-        let attrs = match field(d, "attrs") {
-            Some(v) => json_object_entries(&v)
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|(k, v)| match json_payload(&v, "Text") {
-                    Some(CtValue::Str(s)) => Some(format!(" {}=\"{}\"", k, xml_escape(s))),
-                    _ => None,
-                })
-                .collect::<String>(),
-            None => String::new(),
-        };
-        let text = text_of(&field(d, "text")).map(|s| xml_escape(&s)).unwrap_or_default();
-        let children = match field(d, "children") {
-            Some(v) => json_array_items(&v)
-                .unwrap_or_default()
-                .iter()
-                .map(render_node)
-                .collect::<String>(),
-            None => String::new(),
-        };
-        if text.is_empty() && children.is_empty() {
-            format!("<{name}{attrs}/>")
-        } else {
-            format!("<{name}{attrs}>{text}{children}</{name}>")
-        }
-    }
-    render_node(d)
 }
 
+fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
+    use jet_foundation::XmlPull::Value;
+    if json_payload(value, "Null").is_some() {
+        return Ok(Value::Null);
+    }
+    if let Some(CtValue::Bool(value)) = json_payload(value, "Bool") {
+        return Ok(Value::Bool(*value));
+    }
+    if let Some(CtValue::Int(value)) = json_payload(value, "Int") {
+        return Ok(Value::Int(*value));
+    }
+    if let Some(CtValue::Str(value)) = json_payload(value, "Text") {
+        return Ok(Value::Text(value.clone()));
+    }
+    if let Some(CtValue::List(values)) = json_payload(value, "Array") {
+        return Ok(Value::Array(
+            values.iter().map(xml_from_ct).collect::<Result<Vec<_>, _>>()?,
+        ));
+    }
+    if let Some(CtValue::Map(entries)) = json_payload(value, "Object") {
+        return Ok(Value::Object(
+            entries.iter().map(|(key, value)| match key {
+                CtKey::Str(key) => Ok((key.clone(), xml_from_ct(value)?)),
+                _ => Err("XML object key must be text".to_string()),
+            }).collect::<Result<Vec<_>, _>>()?,
+        ));
+    }
+    Err("XML tree contains a non-DataTree value".to_string())
+}
+
+pub(super) fn xml_parse(text: &str) -> Result<CtValue, String> {
+    jet_foundation::XmlPull::parse_document(text)
+        .map(xml_to_ct)
+        .map_err(|error| format!("XML at byte {}: {}", error.offset, error.reason))
+}
+
+pub(super) fn xml_render(value: &CtValue) -> String {
+    xml_from_ct(value)
+        .and_then(|value| jet_foundation::XmlPull::render_document(&value))
+        .unwrap_or_default()
+}
 // ── core.encoding.cbor ──────────────────────────────────────────────────────
 // Ported from `EncodingCodecs.rs`'s `jet_cbor_*`/`jet_std_cbor_*`, target
 // type swapped from `DataTree` to the `Json`-tagged `CtValue`.
