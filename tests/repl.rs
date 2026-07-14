@@ -2327,3 +2327,30 @@ fn repl_core_data_dispatch() {
     assert!(out.contains("mean: 2.5"), "got: {out}");
     assert!(out.contains("DataStatus(step: core.data.csv"), "got: {out}");
 }
+
+#[test]
+fn repl_core_data_lazy_plans_and_typed_joins() {
+    let inputs = &[
+        "use core.data as data",
+        "table :: data.table([3, 1, 2])",
+        "lazy :: data.lazy(table)",
+        "deferred :: data.lazy_filter(lazy, (x) => x > 10)",
+        "data.plan(deferred)",
+        "planned :: data.lazy_sort_by(data.lazy_filter(lazy, (x) => x > 1), (x) => \"{x}\")",
+        "data.rows(data.collect(planned))",
+        "data.inner_join([1, 2, 1], [1, 1], (x) => \"{x}\", (x) => \"{x}\")",
+        "data.left_join([1, 2], [1], (x) => \"{x}\", (x) => \"{x}\")",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(out.contains("[table, filter]"), "deferred plan missing: {out}");
+    assert!(out.contains("[2, 3]"), "materialized filter/sort result missing: {out}");
+    assert_eq!(
+        out.matches("DataJoin(left: 1, right: 1)").count(),
+        4,
+        "inner join multiplicity lost: {out}"
+    );
+    assert!(
+        out.contains("DataJoin(left: 2, right: None)"),
+        "left join unmatched row missing: {out}"
+    );
+}

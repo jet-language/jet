@@ -272,11 +272,24 @@
         pub missing: i64,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone)]
+    pub enum DataLazyOperation<T> {
+        Filter(std::sync::Arc<dyn Fn(T) -> bool>),
+        SortBy(std::sync::Arc<dyn Fn(T) -> String>),
+    }
+
+    #[derive(Clone)]
     pub struct DataLazyFrame<T> {
         pub rows: Vec<T>,
         pub missing: i64,
         pub plan: Vec<String>,
+        pub operations: Vec<DataLazyOperation<T>>,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataJoin<L, R> {
+        pub left: L,
+        pub right: R,
     }
 
     #[derive(Clone, Debug, PartialEq)]

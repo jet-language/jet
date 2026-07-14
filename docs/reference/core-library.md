@@ -1450,8 +1450,8 @@ field is a Jet field error before codegen.
 | `table(rows)` / `rows(table)` | `Table<T>` / `[T]` | Wrap and unwrap the typed in-memory table model |
 | `series(values)` / `values(series)` | `Series<T>` / `[T]` | Wrap and unwrap typed series values |
 | `missing_count(series)` | `Int` | Count absent `T?` values in a typed series |
-| `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T>` | Build and materialize a typed lazy plan |
-| `lazy_filter(plan, row => ok)` / `lazy_sort_by(plan, row => key)` | `LazyFrame<T>` | Typed lazy plan operations |
+| `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T>` | Build a typed plan; execute it only when materialized |
+| `lazy_filter(plan, row => ok)` / `lazy_sort_by(plan, row => key)` | `LazyFrame<T>` | Append deferred typed operations without visiting rows |
 | `plan(frame)` | `[String]` | Deterministic plan-step names for audit/test output |
 | `count(value)` | `Int` | Count rows/values in `[T]`, `Table<T>`, `Series<T>`, or `LazyFrame<T>` |
 | `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float` | Numeric series stats over `[Float]` |
@@ -1462,8 +1462,8 @@ field is a Jet field error before codegen.
 | `group_sum(rows, row => row.key, row => row.value)` | `[DataGroup]` | Sum a `Float` selector per key |
 | `group_mean(rows, row => row.key, row => row.value)` | `[DataGroup]` | Mean a `Float` selector per key |
 | `filter(rows, row => ok)` / `sort_by(rows, row => key)` | `[T]` | Typed in-memory row pipeline |
-| `inner_join(left, right, l => key, r => key)` | `[DataGroup]` | Matched-key counts between typed tables |
-| `left_join(left, right, l => key, r => key)` | `[DataGroup]` | Left-key counts plus match counts |
+| `inner_join(left, right, l => key, r => key)` | `[DataJoin<L, R>]` | Stable matching row pairs with SQL join multiplicity |
+| `left_join(left, right, l => key, r => key)` | `[DataJoin<L, R?>]` | Stable row pairs; unmatched left rows carry `None` |
 | `pivot_sum(rows, row => row_key, row => col_key, row => value)` | `[DataGroup]` | Deterministic row/column sum cells as `row|col` keys |
 | `status()` | `[DataStatus]` | Native/bridge replacement facts for data workflows |
 | `bar_text(groups)` / `bar_svg(groups)` | `String` | Deterministic text/SVG bar output |
@@ -1471,7 +1471,8 @@ field is a Jet field error before codegen.
 `Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.
 Missing values are ordinary Jet optionals (`T?`) inside a series, not a second
 sentinel type. `DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`,
-`.mean: Float`. `DataStatus` fields: `.step`, `.path`, `.replacement`.
+`.mean: Float`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the
+left-join form uses `R?`. `DataStatus` fields: `.step`, `.path`, `.replacement`.
 
 ```jet
 use core.data as data

@@ -50,6 +50,12 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
     // before the `Type::Named`-only path below. User-type-wins (D-SHIFT1
     // precedent): a user struct named `DecodeResult` shadows the core one.
     if let Type::Apply { name, .. } = recv_ty {
+        if name == "DataJoin"
+            && !cx.type_names.contains(name)
+            && matches!(member, "left" | "right")
+        {
+            return Some(member.to_string());
+        }
         if name == "DecodeResult"
             && !cx.type_names.contains(name)
             && matches!(member, "value" | "migration")
@@ -192,6 +198,13 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             return match field {
                 "value" => args.first().cloned(),
                 "migration" => Some(Type::Named("MigrationStatus".to_string())),
+                _ => None,
+            };
+        }
+        if name == "DataJoin" && args.len() == 2 {
+            return match field {
+                "left" => Some(args[0].clone()),
+                "right" => Some(args[1].clone()),
                 _ => None,
             };
         }

@@ -1094,7 +1094,8 @@ impl<'a> Interp<'a> {
                         "core.data",
                         "csv" | "count" | "table" | "rows" | "series" | "values" | "missing_count"
                             | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect" | "plan" | "filter"
-                            | "sort_by" | "group_count" | "group_sum" | "group_mean",
+                            | "sort_by" | "group_count" | "group_sum" | "group_mean" | "inner_join"
+                            | "left_join",
                     )
                 ) {
                     return self.eval_data_call(method, argv, type_args, span);

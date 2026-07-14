@@ -315,9 +315,9 @@ impl<T> JetDataCount for jet_std::DataSeries<T> {
     }
 }
 
-impl<T> JetDataCount for jet_std::DataLazyFrame<T> {
+impl<T: Clone> JetDataCount for jet_std::DataLazyFrame<T> {
     fn jet_data_count(&self) -> i64 {
-        self.rows.len() as i64
+        jet_data_materialize(self).len() as i64
     }
 }
 
@@ -357,7 +357,23 @@ fn jet_data_lazy<T: Clone>(table: &jet_std::DataTable<T>) -> jet_std::DataLazyFr
         rows: table.rows.clone(),
         missing: table.missing,
         plan: table.plan.clone(),
+        operations: Vec::new(),
     }
+}
+
+fn jet_data_materialize<T: Clone>(frame: &jet_std::DataLazyFrame<T>) -> Vec<T> {
+    let mut rows = frame.rows.clone();
+    for operation in &frame.operations {
+        match operation {
+            jet_std::DataLazyOperation::Filter(pred) => {
+                rows.retain(|row| pred(row.clone()));
+            }
+            jet_std::DataLazyOperation::SortBy(key) => {
+                rows.sort_by_key(|row| key(row.clone()));
+            }
+        }
+    }
+    rows
 }
 
 fn jet_data_lazy_filter<T, F>(
@@ -365,15 +381,18 @@ fn jet_data_lazy_filter<T, F>(
     pred: F,
 ) -> jet_std::DataLazyFrame<T>
 where
-    T: Clone,
-    F: Fn(T) -> bool,
+    T: Clone + 'static,
+    F: Fn(T) -> bool + 'static,
 {
     let mut plan = frame.plan.clone();
     plan.push("filter".to_string());
+    let mut operations = frame.operations.clone();
+    operations.push(jet_std::DataLazyOperation::Filter(std::sync::Arc::new(pred)));
     jet_std::DataLazyFrame {
-        rows: frame.rows.iter().cloned().filter(|row| pred(row.clone())).collect(),
+        rows: frame.rows.clone(),
         missing: frame.missing,
         plan,
+        operations,
     }
 }
 
@@ -382,17 +401,18 @@ fn jet_data_lazy_sort_by<T, F>(
     key: F,
 ) -> jet_std::DataLazyFrame<T>
 where
-    T: Clone,
-    F: Fn(T) -> String,
+    T: Clone + 'static,
+    F: Fn(T) -> String + 'static,
 {
-    let mut rows = frame.rows.clone();
-    rows.sort_by_key(|row| key(row.clone()));
     let mut plan = frame.plan.clone();
     plan.push("sort_by".to_string());
+    let mut operations = frame.operations.clone();
+    operations.push(jet_std::DataLazyOperation::SortBy(std::sync::Arc::new(key)));
     jet_std::DataLazyFrame {
-        rows,
+        rows: frame.rows.clone(),
         missing: frame.missing,
         plan,
+        operations,
     }
 }
 
@@ -400,7 +420,7 @@ fn jet_data_collect<T: Clone>(frame: &jet_std::DataLazyFrame<T>) -> jet_std::Dat
     let mut plan = frame.plan.clone();
     plan.push("collect".to_string());
     jet_std::DataTable {
-        rows: frame.rows.clone(),
+        rows: jet_data_materialize(frame),
         missing: frame.missing,
         plan,
     }

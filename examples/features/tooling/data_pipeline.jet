@@ -12,13 +12,20 @@ struct Budget {
     owner: String
 }
 
+fn must_stay_deferred(ticket: Ticket) -> Bool {
+    panic("lazy filter ran before collect")
+    return false
+}
+
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
-    budget_raw :: "team,owner\nCore,Ada\nTools,Grace"
+    budget_raw :: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
     budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
     table :: data.table(rows)
     lazy :: data.lazy(table)
+    deferred :: data.lazy_filter(lazy, (t) => must_stay_deferred(t))
+    print("deferred: {data.plan(deferred)[1]}")
     planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) => t.minutes >= 4.0), (t) => t.team)
     collected :: data.collect(planned)
     planned_rows :: data.rows(collected)
@@ -39,10 +46,20 @@ fn run() {
     print(data.count(planned))
     print(data.count(planned_rows))
     print(data.plan(planned)[2])
+    loop ticket in planned_rows {
+        print("planned: {ticket.team} {ticket.minutes}")
+    }
     print(data.missing_count(series))
     print(data.bar_text(groups))
-    print(data.bar_text(joined))
-    print(data.bar_text(left))
+    loop pair in joined {
+        print("join: {pair.left.team} -> {pair.right.owner}")
+    }
+    loop pair in left {
+        if pair.right == {
+            Val(budget) -> print("left: {pair.left.team} -> {budget.owner}")
+            None -> print("left: {pair.left.team} -> none")
+        }
+    }
     print(data.bar_text(pivot))
     print(summary.count)
     print(summary.median)

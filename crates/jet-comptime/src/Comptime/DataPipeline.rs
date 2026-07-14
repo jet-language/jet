@@ -59,6 +59,54 @@ fn expect_struct<'a>(v: &'a CtValue, type_name: &str, what: &str, span: Span) ->
 }
 
 impl<'a> Interp<'a> {
+    fn materialize_lazy(&mut self, frame: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+        let (rows, _, _) = expect_struct(frame, "LazyFrame", "collect", span)?;
+        let mut rows = rows.clone();
+        let operations = match struct_field(frame, "LazyFrame", "operations") {
+            Some(CtValue::List(operations)) => operations.clone(),
+            _ => Vec::new(),
+        };
+        for operation in operations {
+            let CtValue::Struct { type_name, fields } = operation else {
+                return Err(unsupported("`data.collect()` found an invalid lazy operation", span));
+            };
+            if type_name != "DataLazyOperation" {
+                return Err(unsupported("`data.collect()` found an invalid lazy operation", span));
+            }
+            let kind = fields.iter().find(|(name, _)| name == "kind").map(|(_, value)| value);
+            let function = fields.iter().find(|(name, _)| name == "function").map(|(_, value)| value);
+            match (kind, function) {
+                (Some(CtValue::Str(kind)), Some(function)) if kind == "filter" => {
+                    let mut out = Vec::new();
+                    for row in rows {
+                        if super::Builtins::as_bool(
+                            &self.call_closure(function, vec![row.clone()], span)?,
+                            span,
+                        )? {
+                            out.push(row);
+                        }
+                    }
+                    rows = out;
+                }
+                (Some(CtValue::Str(kind)), Some(function)) if kind == "sort_by" => {
+                    let mut keyed = Vec::with_capacity(rows.len());
+                    for row in rows {
+                        let key = as_string(
+                            &self.call_closure(function, vec![row.clone()], span)?,
+                            span,
+                        )?
+                        .to_string();
+                        keyed.push((key, row));
+                    }
+                    keyed.sort_by(|a, b| a.0.cmp(&b.0));
+                    rows = keyed.into_iter().map(|(_, row)| row).collect();
+                }
+                _ => return Err(unsupported("`data.collect()` found an invalid lazy operation", span)),
+            }
+        }
+        Ok(rows)
+    }
+
     pub(super) fn eval_data_call(
         &mut self,
         method: &str,
@@ -82,8 +130,12 @@ impl<'a> Interp<'a> {
                 match recv {
                     CtValue::List(xs) => Ok(CtValue::Int(xs.len() as i64)),
                     CtValue::Struct { type_name, .. } if type_name == "Table" || type_name == "LazyFrame" => {
-                        let (rows, ..) = expect_struct(recv, type_name, "count", span)?;
-                        Ok(CtValue::Int(rows.len() as i64))
+                        let count = if type_name == "LazyFrame" {
+                            self.materialize_lazy(recv, span)?.len()
+                        } else {
+                            expect_struct(recv, type_name, "count", span)?.0.len()
+                        };
+                        Ok(CtValue::Int(count as i64))
                     }
                     CtValue::Struct { type_name, .. } if type_name == "Series" => {
                         let (values, ..) = expect_struct(recv, "Series", "count", span)?;
@@ -128,6 +180,7 @@ impl<'a> Interp<'a> {
                         ("rows", CtValue::List(rows.clone())),
                         ("missing", CtValue::Int(missing)),
                         ("plan", CtValue::List(plan.cloned().unwrap_or_default())),
+                        ("operations", CtValue::List(Vec::new())),
                     ],
                 ))
             }
@@ -135,37 +188,39 @@ impl<'a> Interp<'a> {
                 let f = argv.pop().unwrap();
                 let (rows, missing, plan) = expect_struct(&argv[0], "LazyFrame", method, span)?;
                 let mut plan = plan.cloned().unwrap_or_default();
-                let new_rows = if method == "lazy_filter" {
-                    let mut out = Vec::new();
-                    for row in rows {
-                        if super::Builtins::as_bool(&self.call_closure(&f, vec![row.clone()], span)?, span)? {
-                            out.push(row.clone());
-                        }
-                    }
-                    plan.push(CtValue::Str("filter".to_string()));
-                    out
-                } else {
-                    let mut keyed = Vec::with_capacity(rows.len());
-                    for row in rows {
-                        let k = as_string(&self.call_closure(&f, vec![row.clone()], span)?, span)?.to_string();
-                        keyed.push((k, row.clone()));
-                    }
-                    keyed.sort_by(|a, b| a.0.cmp(&b.0));
-                    plan.push(CtValue::Str("sort_by".to_string()));
-                    keyed.into_iter().map(|(_, r)| r).collect()
+                let mut operations = match struct_field(&argv[0], "LazyFrame", "operations") {
+                    Some(CtValue::List(operations)) => operations.clone(),
+                    _ => Vec::new(),
                 };
+                let kind = if method == "lazy_filter" {
+                    plan.push(CtValue::Str("filter".to_string()));
+                    "filter"
+                } else {
+                    plan.push(CtValue::Str("sort_by".to_string()));
+                    "sort_by"
+                };
+                operations.push(ct_struct(
+                    "DataLazyOperation",
+                    vec![("kind", CtValue::Str(kind.to_string())), ("function", f)],
+                ));
                 Ok(ct_struct(
                     "LazyFrame",
-                    vec![("rows", CtValue::List(new_rows)), ("missing", CtValue::Int(missing)), ("plan", CtValue::List(plan))],
+                    vec![
+                        ("rows", CtValue::List(rows.clone())),
+                        ("missing", CtValue::Int(missing)),
+                        ("plan", CtValue::List(plan)),
+                        ("operations", CtValue::List(operations)),
+                    ],
                 ))
             }
             "collect" => {
-                let (rows, missing, plan) = expect_struct(&argv[0], "LazyFrame", "collect", span)?;
+                let (_, missing, plan) = expect_struct(&argv[0], "LazyFrame", "collect", span)?;
+                let rows = self.materialize_lazy(&argv[0], span)?;
                 let mut plan = plan.cloned().unwrap_or_default();
                 plan.push(CtValue::Str("collect".to_string()));
                 Ok(ct_struct(
                     "Table",
-                    vec![("rows", CtValue::List(rows.clone())), ("missing", CtValue::Int(missing)), ("plan", CtValue::List(plan))],
+                    vec![("rows", CtValue::List(rows)), ("missing", CtValue::Int(missing)), ("plan", CtValue::List(plan))],
                 ))
             }
             "plan" => {
@@ -226,6 +281,55 @@ impl<'a> Interp<'a> {
                     })
                     .collect();
                 Ok(CtValue::List(out))
+            }
+            "inner_join" | "left_join" => {
+                let right_key = argv.pop().unwrap();
+                let left_key = argv.pop().unwrap();
+                let right = expect_list(&argv[1], method, span)?.clone();
+                let left = expect_list(&argv[0], method, span)?.clone();
+                let mut right_rows = BTreeMap::<String, Vec<CtValue>>::new();
+                for row in right {
+                    let key = as_string(
+                        &self.call_closure(&right_key, vec![row.clone()], span)?,
+                        span,
+                    )?
+                    .to_string();
+                    right_rows.entry(key).or_default().push(row);
+                }
+                let mut joined = Vec::new();
+                for left_row in left {
+                    let key = as_string(
+                        &self.call_closure(&left_key, vec![left_row.clone()], span)?,
+                        span,
+                    )?
+                    .to_string();
+                    match right_rows.get(&key) {
+                        Some(matches) => {
+                            for right_row in matches {
+                                joined.push(ct_struct(
+                                    "DataJoin",
+                                    vec![
+                                        ("left", left_row.clone()),
+                                        (
+                                            "right",
+                                            if method == "left_join" {
+                                                CtValue::Some(Box::new(right_row.clone()))
+                                            } else {
+                                                right_row.clone()
+                                            },
+                                        ),
+                                    ],
+                                ));
+                            }
+                        }
+                        None if method == "left_join" => joined.push(ct_struct(
+                            "DataJoin",
+                            vec![("left", left_row), ("right", CtValue::None(Type::Named("Unknown".to_string())))],
+                        )),
+                        None => {}
+                    }
+                }
+                Ok(CtValue::List(joined))
             }
             _ => Err(unsupported(&format!("`data.{}()` at comptime", method), span)),
         }

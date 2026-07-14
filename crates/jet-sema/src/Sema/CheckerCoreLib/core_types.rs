@@ -520,6 +520,13 @@ pub(crate) fn core_generic_struct_field(
             _ => None,
         };
     }
+    if type_name == "DataJoin" && args.len() == 2 {
+        return match field {
+            "left" => Some(args[0].clone()),
+            "right" => Some(args[1].clone()),
+            _ => None,
+        };
+    }
     None
 }
 

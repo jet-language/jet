@@ -3873,20 +3873,30 @@ struct Budget {
     owner: String
 }
 
+fn must_stay_deferred(ticket: Ticket) -> Bool {
+    panic("lazy filter ran before collect")
+    return false
+}
+
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
-    budget_raw :: "team,owner\nCore,Ada\nTools,Grace"
+    budget_raw :: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
     budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
     print(data.count(rows))
     table :: data.table(rows)
     lazy :: data.lazy(table)
+    deferred :: data.lazy_filter(lazy, (t) => must_stay_deferred(t))
+    print(data.plan(deferred)[1])
     planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) => t.minutes >= 6.0), (t) => t.team)
     collected :: data.collect(planned)
     print(data.count(table))
     print(data.count(planned))
     print(data.count(data.rows(collected)))
     print(data.plan(planned)[2])
+    loop ticket in data.rows(collected) {
+        print("planned:{ticket.team}:{ticket.minutes}")
+    }
     none: Float? :: None
     maybe_minutes: [Float?] :: [Val(2.0), none, Val(6.0), none]
     series :: data.series(maybe_minutes)
@@ -3900,7 +3910,16 @@ fn run() {
     print(data.sum(values))
     print(data.mean(values))
     joined :: data.inner_join(rows, budgets, (t) => t.team, (b) => b.team)
-    print(data.bar_text(joined))
+    loop pair in joined {
+        print("{pair.left.team}:{pair.right.owner}")
+    }
+    left :: data.left_join(rows, [budgets[0]], (t) => t.team, (b) => b.team)
+    loop pair in left {
+        if pair.right == {
+            Val(budget) -> print("{pair.left.team}:{budget.owner}")
+            None -> print("{pair.left.team}:none")
+        }
+    }
     pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 { "long" } else { "short" }, (t) => t.minutes)
     print(data.bar_text(pivot))
     rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2)
@@ -3918,7 +3937,7 @@ fn run() {
     assert_eq!(code, 0, "core.data program failed: {stderr}");
     assert_eq!(
         stdout,
-        "4\n4\n2\n2\nsort_by\n4\n2\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore | ## 2\nTools | ## 2\nCore|long | # 1\nCore|short | # 1\nTools|long | # 1\nTools|short | # 1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
+        "4\nfilter\n4\n2\n2\nsort_by\nplanned:Core:8.0\nplanned:Tools:7.0\n4\n2\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nTools:none\nCore:Ada\nTools:none\nCore|long | # 1\nCore|short | # 1\nTools|long | # 1\nTools|short | # 1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

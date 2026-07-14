@@ -144,7 +144,7 @@ impl<'a> Checker<'a> {
                             // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
                             | "DecodeResult"
                             // D-DATAFRAME1=A: reserved core.data generic value types.
-                            | "Table" | "Series" | "LazyFrame"
+                            | "Table" | "Series" | "LazyFrame" | "DataJoin"
                             // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
                             | "Pool" | "Id"
                     );

@@ -150,8 +150,8 @@ pub(crate) fn lower_core_closure_call(
             };
             let left_s = emit_tir_expr(&left, cx);
             let right_s = emit_tir_expr(&right, cx);
-            let left_key = render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[left_ty]));
-            let right_key = render_lambda_str_expecting(lam_at(3)?, cx, env, Some(&[right_ty]));
+            let left_key = render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[left_ty.clone()]));
+            let right_key = render_lambda_str_expecting(lam_at(3)?, cx, env, Some(&[right_ty.clone()]));
             let helper = if method == "inner_join" {
                 "jet_data_inner_join"
             } else {
@@ -161,8 +161,16 @@ pub(crate) fn lower_core_closure_call(
                 "{}{}(&({}), &({}), {}, {})",
                 cx.root_prefix, helper, left_s, right_s, left_key, right_key
             );
+            let joined_right = if method == "left_join" {
+                Type::Option(Box::new(right_ty))
+            } else {
+                right_ty
+            };
             return Some(TExpr {
-                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                ty: Type::List(Box::new(Type::Apply {
+                    name: "DataJoin".to_string(),
+                    args: vec![left_ty, joined_right],
+                })),
                 kind: TExprKind::ConstInline(code),
             });
         }

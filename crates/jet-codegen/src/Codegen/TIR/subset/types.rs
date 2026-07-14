@@ -87,9 +87,13 @@ pub(crate) fn is_covered_data_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    matches!(name.as_str(), "Table" | "Series" | "LazyFrame")
-        && args.len() == 1
-        && is_subset_param_ty(&args[0], cx)
+    match name.as_str() {
+        "Table" | "Series" | "LazyFrame" => {
+            args.len() == 1 && is_subset_param_ty(&args[0], cx)
+        }
+        "DataJoin" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
+        _ => false,
+    }
 }
 
 /// D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` / `Id<T>` — the generational arena and

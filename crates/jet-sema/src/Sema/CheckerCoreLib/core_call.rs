@@ -671,7 +671,7 @@ impl<'a> Checker<'a> {
                     };
                     if let Some(left_key) = args.get_mut(2) {
                         let key_fn = Type::Fn {
-                            params: vec![left_row],
+                            params: vec![left_row.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None,
                         };
@@ -679,13 +679,21 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(right_key) = args.get_mut(3) {
                         let key_fn = Type::Fn {
-                            params: vec![right_row],
+                            params: vec![right_row.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None,
                         };
                         self.expect_core_arg(name, 3, &key_fn, right_key);
                     }
-                    return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+                    let joined_right = if name == "left_join" {
+                        Type::Option(Box::new(right_row))
+                    } else {
+                        right_row
+                    };
+                    return Some(Type::List(Box::new(Type::Apply {
+                        name: "DataJoin".to_string(),
+                        args: vec![left_row, joined_right],
+                    })));
                 }
                 ("core.data", "pivot_sum") => {
                     if args.len() != 4 {

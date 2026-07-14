@@ -1063,6 +1063,16 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
+            Type::Apply { name, args }
+                if name == "DataJoin" && args.len() == 2 && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DataJoin<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
             // D-HONESTNUM1=A: Measurement<T> → jet_std::JetMeasurement<T>.
             Type::Apply { name, args } if name == Syntax::TYPE_MEASUREMENT && !args.is_empty() => {
                 format!(

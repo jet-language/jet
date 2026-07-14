@@ -3,34 +3,29 @@ fn jet_data_inner_join<T, U, FL, FR>(
     right: &Vec<U>,
     left_key: FL,
     right_key: FR,
-) -> Vec<jet_std::DataGroup>
+) -> Vec<jet_std::DataJoin<T, U>>
 where
     T: Clone,
     U: Clone,
     FL: Fn(T) -> String,
     FR: Fn(U) -> String,
 {
-    let mut left_counts = std::collections::BTreeMap::<String, i64>::new();
-    let mut right_counts = std::collections::BTreeMap::<String, i64>::new();
-    for row in left.iter().cloned() {
-        *left_counts.entry(left_key(row)).or_insert(0) += 1;
-    }
+    let mut right_rows = std::collections::BTreeMap::<String, Vec<U>>::new();
     for row in right.iter().cloned() {
-        *right_counts.entry(right_key(row)).or_insert(0) += 1;
+        right_rows.entry(right_key(row.clone())).or_default().push(row);
     }
-    left_counts
-        .into_iter()
-        .filter_map(|(key, left_count)| {
-            let right_count = *right_counts.get(&key)?;
-            let matches = left_count * right_count;
-            Some(jet_std::DataGroup {
-                key,
-                count: matches,
-                sum: right_count as f64,
-                mean: if left_count == 0 { 0.0 } else { matches as f64 / left_count as f64 },
-            })
-        })
-        .collect()
+    let mut joined = Vec::new();
+    for left_row in left.iter().cloned() {
+        if let Some(matches) = right_rows.get(&left_key(left_row.clone())) {
+            for right_row in matches {
+                joined.push(jet_std::DataJoin {
+                    left: left_row.clone(),
+                    right: right_row.clone(),
+                });
+            }
+        }
+    }
+    joined
 }
 
 fn jet_data_left_join<T, U, FL, FR>(
@@ -38,34 +33,35 @@ fn jet_data_left_join<T, U, FL, FR>(
     right: &Vec<U>,
     left_key: FL,
     right_key: FR,
-) -> Vec<jet_std::DataGroup>
+) -> Vec<jet_std::DataJoin<T, Option<U>>>
 where
     T: Clone,
     U: Clone,
     FL: Fn(T) -> String,
     FR: Fn(U) -> String,
 {
-    let mut left_counts = std::collections::BTreeMap::<String, i64>::new();
-    let mut right_counts = std::collections::BTreeMap::<String, i64>::new();
-    for row in left.iter().cloned() {
-        *left_counts.entry(left_key(row)).or_insert(0) += 1;
-    }
+    let mut right_rows = std::collections::BTreeMap::<String, Vec<U>>::new();
     for row in right.iter().cloned() {
-        *right_counts.entry(right_key(row)).or_insert(0) += 1;
+        right_rows.entry(right_key(row.clone())).or_default().push(row);
     }
-    left_counts
-        .into_iter()
-        .map(|(key, left_count)| {
-            let right_count = *right_counts.get(&key).unwrap_or(&0);
-            let matches = left_count * right_count;
-            jet_std::DataGroup {
-                key,
-                count: left_count,
-                sum: right_count as f64,
-                mean: if left_count == 0 { 0.0 } else { matches as f64 / left_count as f64 },
+    let mut joined = Vec::new();
+    for left_row in left.iter().cloned() {
+        match right_rows.get(&left_key(left_row.clone())) {
+            Some(matches) => {
+                for right_row in matches {
+                    joined.push(jet_std::DataJoin {
+                        left: left_row.clone(),
+                        right: Some(right_row.clone()),
+                    });
+                }
             }
-        })
-        .collect()
+            None => joined.push(jet_std::DataJoin {
+                left: left_row,
+                right: None,
+            }),
+        }
+    }
+    joined
 }
 
 fn jet_data_pivot_sum<T, FR, FC, FV>(

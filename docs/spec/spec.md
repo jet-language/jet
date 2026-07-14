@@ -1504,6 +1504,14 @@ connecting, and never falls back to unsigned mail. Environment configuration
 requires the domain, selector, and base64 32-byte seed together. Separate
 identities use separate Mailers.
 
+D-DATAFRAME1/D-DATA-SURFACE1 define one typed `core.data` path. `Table<T>` and
+`Series<T>` own rows and values. `LazyFrame<T>` owns a source plus deferred
+filter/sort operations; `plan` inspects them without running selectors, while
+`collect` and reducers materialize them in order. `inner_join` returns stable
+`DataJoin<L, R>` row pairs with full duplicate-key multiplicity. `left_join`
+returns `DataJoin<L, R?>`, preserving every left row and representing an
+unmatched right row as `None`.
+
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
 
 `core.tasks` provides blocking tasks and typed channels. Import it as a normal
