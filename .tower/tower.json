@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 600,
-    "rev": 6682,
+    "nextNum": 601,
+    "rev": 6694,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17113,6 +17113,72 @@
       "needsAcceptance": false,
       "created": "2026-07-14T21:45:26.997Z",
       "updated": "2026-07-14"
+    },
+    {
+      "id": "c086i4qv",
+      "num": 600,
+      "title": "Full suite red: foreign namespace test rejects ratified Lua root",
+      "body": "Full verification reaches cffi and fails one stale assertion: unified foreign namespace coverage expects lua.socket to be unrecognized, but D-FFI-LUA1=A and the live registry intentionally activate the lua module root.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Replace hand-written partial assertions with table-driven coverage for every registered ForeignLanguage root, including Lua, plus malformed path rejection. Keep product registry unchanged. Run cffi target; parent full verification.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "terra-foreign-root-probe",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Foreign namespace acceptance covers every registered ForeignLanguage root and verifies language, library, and display round-trip, including D-FFI-LUA1 Lua.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T22:35:17.730Z"
+        },
+        {
+          "n": 2,
+          "text": "Malformed bare, empty, and over-segmented foreign module paths remain rejected; product registry and syntax are unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T22:35:17.832Z"
+        },
+        {
+          "n": 3,
+          "text": "All 44 cffi tests pass without product, diagnostic, dependency, unsafe, or user-syntax changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T22:35:17.928Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T22:35:18.027Z"
+        }
+      ],
+      "refs": [
+        "tests/cffi.rs",
+        "crates/jet-foundation/src/AST/program_imports.rs",
+        "crates/jet-foundation/src/Syntax/math_layout.rs",
+        "docs/spec/spec.md",
+        "docs/spec/syntax-decisions.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T22:35:17.631Z",
+      "updated": "2026-07-14",
+      "claimedAt": "2026-07-14T22:35:18.136Z"
     }
   ],
   "decisions": [
@@ -33286,7 +33352,7 @@
           "key": "C",
           "name": "Jet-native typed project graph",
           "detail": "Use one nominal graph with schema-owned composition. The root can contain everything or discover typed parts. Paths locate source; declared names and types carry identity. Role-aware inputs, sparse variants, actions, checks, images, systems, and normalized receipts share one model.",
-          "technical": "Core owns the finite root field families and each receiving field's composition law. Users extend the graph by defining package, service, image, and module types that produce typed `ProjectPart` values. They cannot invent global precedence or mutate the graph. Unique scalars must agree; keyed collections unite by identity; ordered fields declare stable order. Input identity includes source authority, compatibility line, variant, role, and target ABI. Sparse deltas specialize targets and profiles. Selective updates unlock only the required dependency frontier. Receipts record every resolved node and JetOS activation proof.",
+          "technical": "Core owns the finite root field families and each receiving field's composition law. Users extend the project graph by defining package, service, image, and module types that produce typed `ProjectPart` values. The root selects those ordinary values; parts are not another manifest or import language. Users cannot invent global precedence or mutate the graph. Unique scalars must agree; keyed collections unite by identity; ordered fields declare stable order. Input identity includes source authority, compatibility line, variant, role, and target ABI. Sparse deltas specialize targets and profiles. Selective updates unlock only the required dependency frontier. Semantic receipts record every resolved node, BuildContext fact, and JetOS activation proof.",
           "code": "project :: Project.{\n    inputs: [http: { source: registry@http#3, role: .Target }],\n    packages: [\n        api,\n        api.release: { profile: .Release, optimize: .Speed },\n        api.wasm: { target: .Wasm },\n    ],\n    checks: [unit, policy],\n    actions: [generate_api],\n    environments: [dev],\n    images: [api_image],\n    systems: [System.{\n        name: halcyon, boot: Boot.limine,\n        files: [\"/etc/api.toml\": file(\"config/api.toml\")],\n        users: [nate: User.{ groups: [wheel] }],\n        services: [api: Service.from(api.release)],\n        activation: .ProofBeforeSwitch, generations: .Keep(10),\n    }],\n    parts: find(\"project-parts/*.jet\"),\n}\n\n// project-parts/office.jet\npub office :: ProjectPart.{ systems: [office] }\n\n// Discovery finds contributions; `office` and its types define identity.\n// File order and location do not change composition."
         },
         {
@@ -33324,11 +33390,16 @@
           "lang": "Spack / Python",
           "note": "Spack supplies rich concrete build identity and normalized environment locks. Sources: https://spack.readthedocs.io/en/latest/spec_syntax.html and https://spack.readthedocs.io/en/latest/environments.html",
           "code": "hdf5@1.14 %gcc +mpi target=x86_64"
+        },
+        {
+          "lang": "Cargo / TOML and Rust",
+          "note": "Cargo supplies workspaces, checks, and conservative package-specific lock updates. Sources: https://doc.rust-lang.org/cargo/reference/workspaces.html and https://doc.rust-lang.org/cargo/commands/cargo-update.html",
+          "code": "cargo update -p http --precise 1.2.3"
         }
       ],
       "rec": "C",
       "recommendation": {
-        "why": "C keeps Guix's whole-system unity, CUE's order independence, Bazel's explicit graph, Spack's build identity, and Cargo's conservative updates inside one typed Jet model. The root stays simple and authoritative.",
+        "why": "C keeps Guix's whole-system unity, CUE's order independence, Bazel's explicit graph, Spack's build identity, and Cargo's conservative updates inside one typed Jet model. The root stays simple and authoritative. Discovery follows the underscore ballot; variants consume the one BuildContext chosen by the hash ballot.",
         "whyNot": [
           {
             "key": "A",
@@ -34883,7 +34954,7 @@
         {
           "key": "C",
           "name": "Visibility only plus reserved tools",
-          "detail": "Give `_name` no API meaning. Private, `pub`, and `pub(package)` remain the complete support and access story. Reserve `__name` for compiler and tools; use explicit configuration for module discovery.",
+          "detail": "Give `_name` no API meaning. Private, `pub`, and `pub(package)` remain the complete access story, with no encoded stability tier for reachable APIs. Reserve `__name` for compiler and tools; use explicit configuration for module discovery.",
           "technical": "Reject or treat one leading underscore as ordinary. Double underscore remains reserved. No strict unsupported-API policy exists.",
           "code": "fn scan_token(text: String) -> Token { ... }\npub(package) fn scan_for_tools(text: String) -> Token { ... }\n\n// __ names remain reserved"
         },
@@ -34919,7 +34990,7 @@
             "reason": "D creates a second encapsulation mechanism and lets outside source violate semantic invariants."
           }
         ],
-        "tradeoff": "Some public names become intentionally unsupported, and application code cannot patch compiler-owned slots. Tooling shows the first distinction and provides dedicated channels for the second."
+        "tradeoff": "Some public names become intentionally unsupported, and application code cannot patch compiler-owned slots. Tooling shows that tier; package policy may warn or reject outside use without changing resolution. Dedicated channels serve compiler-reserved state."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -35044,8 +35115,8 @@
           "key": "B",
           "name": "Jet adaptation: smallest scope plus finish",
           "detail": "Use lexical scope as the only lifetime control. Automatic cleanup stays infallible. Types expose consuming methods such as `finish`, `commit`, or `shutdown` only when callers must observe protocol success.",
-          "technical": "No new universal close or early-drop syntax. Cancellation performs the same safety cleanup as scope exit. Existing `.drop(reason)` remains forced value discard, not resource completion.",
-          "code": "data :: {\n    file :: File.open(path)?\n    file.read_all()?\n}\n\nwriter.finish()?\ntransaction.commit()?"
+          "technical": "No new universal close or early-drop syntax. Cancellation performs the same safety cleanup as scope exit. Existing `.drop(reason)` remains forced value discard, not protocol completion. Type-owned completion methods consume their receiver, so sema rejects later use even when the call fails.",
+          "code": "data :: {\n    file :: File.open(path)?\n    file.read_all()?\n}\n\nfn Archive.finish(^self) -> Result<()> { ... }\nwriter.finish()? // writer consumed; protocol result observed\ntransaction.commit()?"
         },
         {
           "key": "C",
@@ -35357,7 +35428,7 @@
       "group": "syntax",
       "title": "How does source request a non-owning view?",
       "gist": "Choose one visible operation that creates a lifetime-checked non-owning view.",
-      "lesson": "A view reads storage owned by another value without copying it. The compiler must prevent the view from outliving that owner or surviving a mutation that invalidates its storage.\n\nCreation should look like an operation because ownership and lifetime behavior change. A type annotation should describe a result, not secretly perform that operation.\n\nJet already documents `source.view(range)`. This ballot decides whether that source projection supersedes the older `.over(existing)` constructor guidance for all non-owning views.",
+      "lesson": "A view reads storage owned by another value without copying it. A `View<T>` is read-only. A mutable source projection must use the distinct mutable-view type and prove exclusive access.\n\nThe compiler prevents either view from outliving its owner. It also rejects owner mutation that could invalidate a live view, and rejects competing access while a mutable view lives.\n\nCreation should look like an operation because ownership and lifetime behavior change. This ballot decides whether `source.view(range)` supersedes the older `.over(existing)` guidance for every non-owning view.",
       "explainer": "",
       "story": "Inez parses a network frame. She needs a checked window over bytes for speed, then returns an owned result without copying the whole frame.",
       "inWild": "header :: packet.view(0..16)\nparse_header(header)?\n\n// header cannot escape packet or survive invalidating mutation",
@@ -35374,7 +35445,7 @@
           "key": "B",
           "name": "Jet adaptation: source projection",
           "detail": "Keep `source.view()` and `source.view(range)` as the ordinary path. The source owns storage; the result type is `View<T>`; sema infers lifetime and rejects escape or invalidating mutation.",
-          "technical": "This reaffirms existing diagnostics and D-DYNARRAY1. It supersedes D-API-CTOR1 for non-owning view creation: `.view()` and `.view(range)` are the sole canonical operation. Third-party source types implement `view`; standalone view types do not add `.over`. An explicit `View<T>` annotation may document the result but never triggers conversion.",
+          "technical": "This reaffirms existing diagnostics and D-DYNARRAY1. It supersedes D-API-CTOR1 for non-owning view creation: `.view()` and `.view(range)` are the sole canonical source projection. They produce read-only `View<T>` from shared access and a distinct mutable view from exclusive access. Third-party source types implement `view`; standalone view types do not add `.over`. An explicit result annotation never triggers conversion.",
           "code": "all :: bytes.view()\nheader: View<Byte> :: bytes.view(0..16)"
         },
         {
@@ -35416,7 +35487,7 @@
             "reason": "D makes a type annotation perform an ownership-changing operation, weakening readability and one-path semantics."
           }
         ],
-        "tradeoff": "A custom view cannot own a second constructor spelling. Its source type implements `.view`, keeping one visible operation and one lifetime-checking rule."
+        "tradeoff": "A custom view cannot own a second constructor spelling. Its source type implements `.view`, keeping one visible source projection and one lifetime rule for read-only and exclusive mutable access."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -35625,7 +35696,7 @@
           "key": "B",
           "name": "Jet adaptation: inferred dimension facts",
           "detail": "Let a `#UnitFamily` explicitly opt into linear, derived, or affine-point laws. Linear arithmetic produces a canonical erased dimension vector. Users write literals and nominal names such as `Speed`; free-form measure expressions never enter ordinary type syntax. Families without an algebra declaration, including currency, keep S26's nominal behavior.",
-          "technical": "This explicitly extends S26. `speed: length / time` declares a derived linear family; `mps: 1m / 1s` declares its scale. A point family declares an origin and offsets: point minus point yields its difference family, and point plus or minus a difference yields a point. Point plus point is rejected. The compiler mints nominal family types and checks conversions. Algebra is confined to marker declarations and quantity arithmetic, never general type-level execution or free-form `Quantity<Length / Time>` syntax.",
+          "technical": "This explicitly extends S26. `speed: length / time` declares a derived linear family; `mps: 1m / 1s` declares its scale. A point family declares an origin and offsets: point minus point yields its difference family, and point plus or minus a difference yields a point. Point plus point is rejected. The compiler mints nominal family types and checks conversions. Normalized exponents appear in tooling and semantic receipts, not source types. Representation follows the underlying number and measure metadata erases. Algebra never becomes general type-level execution or free-form `Quantity<Length / Time>` syntax.",
           "code": "#UnitFamily(length) { m, km: 1000m }\n#UnitFamily(time) { s, h: 3600s }\n#UnitFamily(speed: length / time) { mps: 1m / 1s }\n#UnitFamily(temperature: point) { K: origin, C: K - 273.15 }\n#UnitFamily(currency) { usd, eur } // nominal; runtime rates\n\nspeed: Quantity<Speed> :: 120km / 2h\nfn travel(v: Quantity<Speed>) { ... }"
         },
         {
@@ -35875,8 +35946,8 @@
         {
           "key": "B",
           "name": "Jet adaptation: compiler and comptime plane",
-          "detail": "Keep all ratified hash forms on Jet's compiler and compile-time-value plane. Preserve D-OSTARGET2 exactly: `comptime if build.os ==`. Packages, JetOS, locks, and receipts consume the same resolved build subject.",
-          "technical": "Reaffirm D-MARKER-FAMILY1 and the block-plane law without claiming every hash form is a scoped declaration marker. `#(Fs)`, `[T#N]`, `pkg#1.2.3`, and `#Caller()` remain valid members of the same plane. `build` is the compiler-known D-OSTARGET2 subject, not a new general namespace. Receipts record resolved branch facts. No alternate target-fact path appears.",
+          "detail": "Keep all ratified hash forms on Jet's compiler and compile-time-value plane. Preserve D-OSTARGET2 exactly: `comptime if build.os ==`. Packages, JetOS, locks, and semantic receipts consume the same resolved BuildContext subject.",
+          "technical": "Reaffirm D-MARKER-FAMILY1 and the block-plane law without claiming every hash form is a scoped declaration marker. `#(Fs)`, `[T#N]`, `pkg#1.2.3`, and `#Caller()` remain valid members of the same plane. `build` is the compiler-projected D-OSTARGET2 view of BuildContext, not a new general namespace. Semantic receipts record resolved branch facts. No alternate target-fact path appears.",
           "code": "comptime if build.os == {\n    .Linux -> linux_packages\n    else -> portable_packages\n}\n\nfn read(path: Path) #(Fs) -> [Byte#4096] { ... }\nversion :: pkg#1.2.3\ncaller :: #Caller()"
         },
         {
@@ -36913,6 +36984,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T22:35:26.369Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-HASH1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:35:26.270Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-QUANTITY1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:35:26.170Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:35:26.069Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:35:25.966Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:35:25.863Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T22:35:18.136Z",
+      "by": "terra-foreign-root-probe",
+      "action": "card.claim",
+      "ref": "c086i4qv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T22:35:18.028Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c086i4qv",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-14T22:35:17.928Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c086i4qv",
+      "note": "#3 All 44 cffi tests pass without product, diagnostic, dependen"
+    },
+    {
+      "at": "2026-07-14T22:35:17.833Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c086i4qv",
+      "note": "#2 Malformed bare, empty, and over-segmented foreign module pat"
+    },
+    {
+      "at": "2026-07-14T22:35:17.730Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c086i4qv",
+      "note": "#1 Foreign namespace acceptance covers every registered Foreign"
+    },
+    {
+      "at": "2026-07-14T22:35:17.631Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c086i4qv",
+      "note": "Full suite red: foreign namespace test rejects ratified Lua root"
+    },
     {
       "at": "2026-07-14T22:34:21.118Z",
       "by": "codex-main",
@@ -40328,90 +40483,6 @@
       "action": "decision.update",
       "ref": "D-SHAPE-CONVERT1",
       "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T17:19:45.474Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c03qvxt7",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:19:45.360Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE3a",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T17:19:45.264Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0cztb5h",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:19:45.149Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0v3vs1n",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-14T17:19:45.029Z",
-      "by": "codex",
-      "action": "decision.add",
-      "ref": "D-SHAPE-MODULEDISABLE1",
-      "note": "How should a source module be deliberately disabled? (draft)"
-    },
-    {
-      "at": "2026-07-14T17:19:44.929Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0v3vs1n",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:19:44.805Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0pyhjgi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-14T17:19:44.682Z",
-      "by": "codex",
-      "action": "decision.add",
-      "ref": "D-SHAPE-INTERNALOVERRIDE1",
-      "note": "Which implementation details may experts replace? (draft)"
-    },
-    {
-      "at": "2026-07-14T17:19:44.580Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0pyhjgi",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
-    },
-    {
-      "at": "2026-07-14T17:19:44.457Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0kxxeb6",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-14T17:19:44.335Z",
-      "by": "codex",
-      "action": "decision.add",
-      "ref": "D-SHAPE-INTERNALACCESS1",
-      "note": "How may outside code reach a leading-underscore name? (draft)"
-    },
-    {
-      "at": "2026-07-14T17:19:44.238Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0kxxeb6",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,blockedBy,workOrder"
     }
   ],
   "nextNum": 368,
