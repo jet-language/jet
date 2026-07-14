@@ -42,7 +42,7 @@ already right.
 - **D-ARCH-SOURCE1 — dissolve the Source/ monolith.** The root crate
   should be what architecture.md already claims: `main.rs` + rustc
   invocation/ICE banner (R5 pins CmdCompile at the root edge). REPL,
-  debugger and CLI registry/dispatch moved to seam crates; `jet-devserver` now owns dependency-free watch policy and HTTP/static transport. Full `CmdDevWeb` relocation waits on `Source/Canvas` and root web-artifact/diagnostic orchestration becoming inward seams; no callback adapter or root back-edge substitutes for that ownership move.
+  debugger and CLI registry/dispatch moved to seam crates; `jet-canvas` owns browser projection assets and `jet-devserver` owns watch/HTTP/static policy plus their routes. Full `CmdDevWeb` relocation still waits on semantic `Source/Canvas` and root web-artifact/diagnostic orchestration becoming inward seams; no callback adapter or root back-edge substitutes for that ownership move.
   (`jet-cli`, `jet-repl`, `jet-debug`) with the same I6/path-dep rules,
   truthfulness tests extended. Options: full dissolution / extract
   interactive tiers only / status quo.

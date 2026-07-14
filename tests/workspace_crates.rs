@@ -161,7 +161,8 @@ fn workspace_crates_keep_declared_dependency_direction() {
         "crates/jet-cli/Cargo.toml",
         &["jet-foundation", "jet-repl"],
     );
-    assert_deps("crates/jet-devserver/Cargo.toml", &[]);
+    assert_deps("crates/jet-canvas/Cargo.toml", &["jet-foundation"]);
+    assert_deps("crates/jet-devserver/Cargo.toml", &["jet-canvas"]);
     assert_deps(
         "crates/jet-jit/Cargo.toml",
         &["jet-codegen", "jet-foundation", "jet-rt"],
@@ -176,6 +177,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
         &[
             "jet-debug",
             "jet-cli",
+            "jet-canvas",
             "jet-devserver",
             "jet-driver",
             "jet-env-model",

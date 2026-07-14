@@ -2578,7 +2578,7 @@ fn canvas_javascript_assets_are_independently_syntax_checked_and_ordered() {
     ];
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let asset_dir = repo.join("Source/Canvas/js");
+    let asset_dir = repo.join("crates/jet-canvas/src/js");
     let mut discovered = fs::read_dir(&asset_dir)
         .unwrap_or_else(|err| panic!("read {}: {err}", asset_dir.display()))
         .filter_map(|entry| {
@@ -2634,7 +2634,7 @@ fn canvas_javascript_assets_are_independently_syntax_checked_and_ordered() {
     }
 
     assert_eq!(previous_end + "})();\n".len(), runtime.len());
-    let glue = fs::read_to_string(repo.join("Source/Canvas/js.rs")).expect("read Canvas JS glue");
+    let glue = fs::read_to_string(repo.join("crates/jet-canvas/src/js.rs")).expect("read Canvas JS glue");
     assert!(glue.lines().count() < 40, "js.rs must remain assembly glue");
 }
 

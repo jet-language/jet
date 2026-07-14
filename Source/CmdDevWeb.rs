@@ -912,29 +912,8 @@ fn handle_connection(
     }
 
     let path = target.split('?').next().unwrap_or("/");
-    if target == "/?jet_panel=1" {
-        if method != "GET" {
-            return method_not_allowed(&mut stream);
-        }
-        let body = jet::Canvas::canvas_html_query();
-        return write_response(
-            &mut stream,
-            "200 OK",
-            "text/html; charset=utf-8",
-            body.as_bytes(),
-        );
-    }
-    if target == "/?jet_panel_app=1" {
-        if method != "GET" {
-            return method_not_allowed(&mut stream);
-        }
-        let body = jet::Canvas::canvas_js();
-        return write_response(
-            &mut stream,
-            "200 OK",
-            "application/javascript; charset=utf-8",
-            body.as_bytes(),
-        );
+    if let Some(asset) = jet::DevServer::canvas_asset(method, target, path) {
+        return write_response(&mut stream, asset.status, asset.content_type, asset.body.as_bytes());
     }
     if target == "/?jet_panel_graph=1" {
         if method != "GET" {
@@ -958,41 +937,6 @@ fn handle_connection(
                 )
             }
         };
-    }
-    if path == "/__jet_canvas"
-        || path == "/__jet_canvas/"
-        || path == "/canvas"
-        || path == "/canvas/"
-        || path == "/panel"
-        || path == "/panel/"
-    {
-        if method != "GET" {
-            return method_not_allowed(&mut stream);
-        }
-        let base = if path.starts_with("/panel") {
-            "/panel"
-        } else {
-            "/canvas"
-        };
-        let body = jet::Canvas::canvas_html_for(base);
-        return write_response(
-            &mut stream,
-            "200 OK",
-            "text/html; charset=utf-8",
-            body.as_bytes(),
-        );
-    }
-    if path == "/__jet_canvas/app.js" || path == "/canvas/app.js" || path == "/panel/app.js" {
-        if method != "GET" {
-            return method_not_allowed(&mut stream);
-        }
-        let body = jet::Canvas::canvas_js();
-        return write_response(
-            &mut stream,
-            "200 OK",
-            "application/javascript; charset=utf-8",
-            body.as_bytes(),
-        );
     }
     if path == "/__jet_canvas/graph" || path == "/canvas/graph" || path == "/panel/graph" {
         if method != "GET" {

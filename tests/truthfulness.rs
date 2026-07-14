@@ -452,7 +452,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // D-ARCH-SOURCE1=A: CLI/interactive seams are not optional aliases hidden in
     // the root crate. Their manifests must exist and therefore pass this same
     // path-only dependency audit.
-    for required in ["jet-repl", "jet-debug", "jet-cli", "jet-devserver"] {
+    for required in ["jet-repl", "jet-debug", "jet-cli", "jet-canvas", "jet-devserver"] {
         assert!(
             crate_manifests.iter().any(|(name, _)| name == required),
             "D-ARCH-SOURCE1 requires the {required} workspace seam"
@@ -474,6 +474,13 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     assert!(
         root_lib.contains("pub use jet_devserver as DevServer;"),
         "D-ARCH-SOURCE1 requires direct jet-devserver ownership exposure"
+    );
+    assert!(
+        root_lib.contains("pub use jet_canvas as CanvasUi;")
+            && !root.join("Source/Canvas/html.rs").exists()
+            && !root.join("Source/Canvas/js.rs").exists()
+            && !root.join("Source/Canvas/js").exists(),
+        "Canvas browser projection assets must live in jet-canvas"
     );
     assert!(
         root_lib.contains("pub use jet_foundation::ExitCodes;")

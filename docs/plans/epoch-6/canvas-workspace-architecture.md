@@ -425,5 +425,5 @@ every other panel, so the harness scenario is copy-adjust, not new machinery.
 - `Source/Canvas/graph_projection.rs`
 - `Source/Canvas/edit_actions.rs`
 - `Source/Canvas/query_actions.rs`
-- `Source/Canvas/js/graph-rendering.js`
-- `Source/Canvas/js/inspector-connections.js`
+- `crates/jet-canvas/src/js/graph-rendering.js`
+- `crates/jet-canvas/src/js/inspector-connections.js`

@@ -80,8 +80,30 @@ pub fn static_path(root: &Path, path: &str) -> Result<PathBuf, ()> {
 
 pub fn content_type_for(path: &Path) -> &'static str { match path.extension().and_then(|e| e.to_str()) { Some("html") => "text/html; charset=utf-8", Some("js") => "application/javascript; charset=utf-8", Some("wasm") => "application/wasm", Some("json") => "application/json; charset=utf-8", Some("css") => "text/css; charset=utf-8", _ => "application/octet-stream" } }
 
+pub struct CanvasAsset { pub status: &'static str, pub content_type: &'static str, pub body: String }
+
+pub fn canvas_asset(method: &str, target: &str, path: &str) -> Option<CanvasAsset> {
+    let body = if target == "/?jet_panel=1" {
+        jet_canvas::canvas_html_query()
+    } else if target == "/?jet_panel_app=1" {
+        jet_canvas::canvas_js()
+    } else if matches!(path, "/__jet_canvas" | "/__jet_canvas/" | "/canvas" | "/canvas/" | "/panel" | "/panel/") {
+        jet_canvas::canvas_html_for(if path.starts_with("/panel") { "/panel" } else { "/canvas" })
+    } else if matches!(path, "/__jet_canvas/app.js" | "/canvas/app.js" | "/panel/app.js") {
+        jet_canvas::canvas_js()
+    } else {
+        return None;
+    };
+    if method != "GET" {
+        return Some(CanvasAsset { status: "405 Method Not Allowed", content_type: "text/plain; charset=utf-8", body: "method not allowed".into() });
+    }
+    let content_type = if path.ends_with("app.js") || target == "/?jet_panel_app=1" { "application/javascript; charset=utf-8" } else { "text/html; charset=utf-8" };
+    Some(CanvasAsset { status: "200 OK", content_type, body })
+}
+
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn request_and_query_policy() { let mut raw=&b"POST /x?q=a%20b HTTP/1.1\r\nContent-Length: 2\r\n\r\nok"[..]; let r=Request::read(&mut raw).unwrap().unwrap(); assert_eq!(r.body,b"ok"); assert_eq!(query_param(&r.target,"q").as_deref(),Some("a b")); }
     #[test] fn traversal_is_rejected() { assert!(static_path(Path::new("build"), "/../x").is_err()); }
+    #[test] fn canvas_assets_are_owned_routes() { let page=canvas_asset("GET","/canvas","/canvas").unwrap(); assert_eq!(page.status,"200 OK"); assert!(page.body.contains("<!doctype html>")); let js=canvas_asset("GET","/canvas/app.js","/canvas/app.js").unwrap(); assert_eq!(js.content_type,"application/javascript; charset=utf-8"); assert_eq!(canvas_asset("POST","/canvas","/canvas").unwrap().status,"405 Method Not Allowed"); }
 }

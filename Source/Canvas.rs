@@ -7,12 +7,10 @@
 #[path = "Canvas/schema_api.rs"]
 mod schema_api;
 pub use schema_api::*;
-#[path = "Canvas/html.rs"]
-mod html;
-pub use html::*;
-#[path = "Canvas/js.rs"]
-mod js;
-pub use js::*;
+// D-ARCH-SOURCE1=A: browser projection assets live in the dependency-free
+// Canvas seam; this module retains semantic/edit APIs until their compiler
+// dependencies sink behind inward seams.
+pub use jet_canvas::{canvas_html, canvas_html_for, canvas_html_query, canvas_js};
 #[path = "Canvas/project_scan.rs"]
 mod project_scan;
 #[path = "Canvas/project_transactions.rs"]
