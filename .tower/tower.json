@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5564,
+    "rev": 5565,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29836,6 +29836,93 @@
       "created": "2026-07-13T22:17:26.386Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-EVENT-CONTINUE1",
+      "cardId": "c0fiunwy",
+      "group": "runtime",
+      "title": "Make DecisionHook continuation values exact",
+      "gist": "Choose how a DecisionHook handler says continue while run still returns the final transformed value.",
+      "lesson": "A decision hook passes one value through ordered handlers. Each handler chooses whether processing continues, transforms the value, cancels, or fails. The next handler must receive the latest value.\n\nTwo moments need types. A handler returns a decision about the current value. The completed run returns the final value or the reason processing stopped. Those moments can share one enum only when every variant has one unambiguous payload shape.\n\nD-EVENT2 says a handler returns HookOutcome and that Continue keeps the current value. It also says zero handlers return Continue(original). A unit Continue serves the first sentence but cannot carry the final value. Continue(value) serves the second sentence but lets handlers transform through both Continue and Transform. This decision removes that contradiction.",
+      "explainer": "",
+      "story": "Maya normalizes a save request, then validates it. The normalizer transforms the request. The validator approves without changing it. Maya must receive the normalized request after the hook finishes, while a plain approval should not repeat or replace the current value.",
+      "inWild": "hook.on(scope, (request) => HookDecision.Transform(normalize(request)))\nhook.on(scope, (request) => HookDecision.Continue)\nresult :: hook.run(original)\n// HookOutcome.Continue(normalized)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One outcome, Continue carries T",
+          "detail": "Keep one HookOutcome<T,E> type. Every handler returns Continue(current) when it makes no change. run returns Continue(final). This preserves one visible enum, but handlers can replace the value through either Continue(other) or Transform(other).",
+          "technical": "HookOutcome variants are Continue(T), Transform(T), Cancel, and Fail(E). A handler returning Continue(T) advances with its payload. Transform(T) also advances with its payload. The runtime cannot distinguish accidental replacement through Continue from an intentional Transform.",
+          "code": "hook.on(scope, (request) => HookOutcome.Continue(request))\nhook.on(scope, (request) => HookOutcome.Transform(normalize(request)))\n// Both payload variants can replace the current request."
+        },
+        {
+          "key": "B",
+          "name": "Unit Continue plus separate run record",
+          "detail": "Handlers keep HookOutcome.Continue without a payload. run returns a separate HookRun record containing state, value, and error fields. Approval stays short, but callers must inspect a record with fields that are invalid in some states.",
+          "technical": "Handler HookOutcome variants remain Continue, Transform(T), Cancel, and Fail(E). HookRun<T,E> contains state, value:T?, and error:E?. Validation must reject or prevent impossible combinations such as Continued without value or Cancelled with error.",
+          "code": "hook.on(scope, (request) => HookOutcome.Continue)\nrun :: hook.run(original)\nif run.state == .Continued { use(run.value ?? panic(\"invalid hook run\")) }"
+        },
+        {
+          "key": "C",
+          "name": "Decision input, outcome output",
+          "detail": "Handlers return HookDecision<T,E>: Continue, Transform(T), Cancel, or Fail(E). run returns HookOutcome<T,E>: Continue(T), Cancel, or Fail(E). Each type models one moment, so Continue stays short inside handlers and always carries the final value outside.",
+          "technical": "HookDecision is accepted only from handlers. Continue preserves the current value; Transform replaces it. HookOutcome is returned only by run. Continue(T) contains the final value after every transform. Cancel and Fail(E) stop immediately in both phases. Zero handlers returns HookOutcome.Continue(original).",
+          "code": "hook.on(scope, (request) => HookDecision.Transform(normalize(request)))\nhook.on(scope, (request) => HookDecision.Continue)\nresult :: hook.run(original)\n// HookOutcome.Continue(normalized)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust iterator control",
+          "note": "Rust separates closure control from collected output. The closure returns a local decision, while the operation returns its completed result.",
+          "code": "try_fold(init, |state, item| ControlFlow::Continue(next_state))"
+        },
+        {
+          "lang": "Web middleware",
+          "note": "Middleware often returns a local next-or-stop decision, while the completed pipeline returns the final response. The two moments carry different information.",
+          "code": "next(request) -> response"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "C gives each semantic moment one valid shape. Handlers cannot transform through Continue, and every successful run contains the final value without nullable fields or hidden context.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A creates two spellings for replacement. Continue(other) and Transform(other) perform the same semantic job, weakening review and I8."
+          },
+          {
+            "key": "B",
+            "reason": "B replaces a closed outcome with state plus nullable fields. Callers can observe or construct impossible combinations unless another validation layer repairs them."
+          }
+        ],
+        "tradeoff": "C adds one small public enum name. The added name exposes a real phase boundary and keeps both handler and caller code total and unambiguous."
+      },
+      "hybrid": {
+        "result": "C",
+        "synthesis": "Use C's phase-specific types. Keep A's closed outcome for callers and B's payload-free Continue for handlers. Both feed the same ordered DecisionHook fold.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "A completed run carries its final value in a closed variant.",
+            "use": "HookOutcome.Continue(T) keeps that property only at the run boundary."
+          },
+          {
+            "key": "B",
+            "aspect": "A handler approves without repeating the current value.",
+            "use": "HookDecision.Continue keeps that concise handler spelling without nullable run fields."
+          },
+          {
+            "key": "C",
+            "aspect": "Input decisions and completed outcomes have distinct valid states.",
+            "use": "Keep both closed enums over one canonical fold and one stable ordering law."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-14T01:49:21.430Z"
     }
   ],
   "questions": [
@@ -30618,6 +30705,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T01:49:21.430Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-EVENT-CONTINUE1",
+      "note": "Make DecisionHook continuation values exact"
+    },
     {
       "at": "2026-07-14T01:37:52.182Z",
       "by": "sol-302-builder",
@@ -34110,13 +34204,6 @@
       "action": "card.criteria-meet",
       "ref": "c0wf4bxf",
       "note": "#4"
-    },
-    {
-      "at": "2026-07-13T09:10:59.472Z",
-      "by": "fable-impl-522",
-      "action": "card.criteria-meet",
-      "ref": "c0wf4bxf",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
