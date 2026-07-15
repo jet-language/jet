@@ -2261,6 +2261,13 @@ pub(crate) fn write_web_artifacts(
         ));
     }
 
+    let mut wasm = fs::read(&wasm_path)
+        .map_err(|e| format!("error: couldn't read {}: {}", wasm_path.display(), e))?;
+    jet_foundation::CliSchema::embed_wasm_record(&mut wasm, &web.command_record)
+        .map_err(|e| format!("error: couldn't embed JetCommandSchema metadata: {e}"))?;
+    fs::write(&wasm_path, wasm)
+        .map_err(|e| format!("error: couldn't write {}: {}", wasm_path.display(), e))?;
+
     Ok(WebBuildPaths {
         manifest: manifest_path,
         dom: dom_path,

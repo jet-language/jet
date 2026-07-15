@@ -28,6 +28,9 @@ pub struct WebArtifacts {
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): the entry file's `#Html("path.html")`
     /// marker, if any — relative to the `.jet` source's own directory.
     pub explicit_html_path: Option<String>,
+    /// D-SHAPE-CLI-CARRIER1=A: canonical record embedded as a Wasm custom
+    /// section by the artifact writer before publication/signing.
+    pub command_record: Vec<u8>,
 }
 
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
@@ -70,6 +73,9 @@ pub fn emit_web(
         dom_runtime: DOM_RUNTIME.to_string(),
         index_html: emit_index_html(),
         explicit_html_path: bundle.modules[bundle.entry].html_path.clone(),
+        command_record: jet_foundation::CliSchema::encode_record(
+            &jet_foundation::CliSchema::executable_schema(bundle),
+        ),
     })
 }
 

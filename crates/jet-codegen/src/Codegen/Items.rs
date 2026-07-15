@@ -422,6 +422,9 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     Some(jet_foundation::CliSchema::CliDefault::TypeDefault) => {
                         "Default::default()".to_string()
                     }
+                    Some(jet_foundation::CliSchema::CliDefault::Recorded(_)) => {
+                        unreachable!("recorded defaults are read from artifacts, never sema input")
+                    }
                     None => format!(
                         "return Err(format!(\"missing required flag --{{}}\\n\\n{{}}\", {flag:?}, __spec.help()))"
                     ),

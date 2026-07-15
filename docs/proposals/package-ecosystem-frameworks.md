@@ -1,9 +1,10 @@
 # Package and environment ecosystem research archive
 
-> **Status, 2026-07-14:** the Deck/Roles/Fold proposal and its later atomic
-> ballots are archived research. Seven focused live ballots now decide graph
-> scope, declaration shape, source control, extension authority, composition,
-> realization, and JetOS lifecycle. `project.jet` is an option only in D-ECO-SOURCE1; current
+> **Status, 2026-07-15:** the Deck/Roles/Fold proposal and its later atomic
+> ballots are archived research. D-ECO-COMPOSE2=A now fixes order-independent
+> typed composition. Six focused live ballots still decide graph scope,
+> declaration shape, source control, extension authority, realization, and
+> JetOS lifecycle. `project.jet` is an option only in D-ECO-SOURCE1; current
 > `pkg.jet` / `env.jet` / `workspace.jet` law remains until that vote. Nothing
 > below authorizes syntax.
 
@@ -17,7 +18,9 @@ The new ballots test one coherent model, not unrelated syntax samples:
 2. D-ECO-DECL1 chooses one ordinary Jet shape for every project part.
 3. D-ECO-SOURCE1 alone may replace the current role-file division.
 4. D-ECO-EXTENSION1 chooses how third parties produce normal typed nodes.
-5. D-ECO-COMPOSE2 chooses a finite, order-independent composition law.
+5. D-ECO-COMPOSE2=A fixes finite, order-independent typed composition: safe
+   additions combine, equal facts coalesce, disagreements stop with both
+   origins, and successful results retain provenance.
 6. D-ECO-RECEIPT2 chooses one action, output, receipt, and generation record.
 7. D-ECO-JETOS2 chooses build, proof, activation, and rollback behavior.
 

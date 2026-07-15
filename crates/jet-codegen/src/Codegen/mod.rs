@@ -52,6 +52,26 @@ fn push_prelude(out: &mut String) {
         out.push_str(part);
     }
 }
+
+fn emit_command_metadata(
+    bundle: &ProgramBundle,
+    active_os: Syntax::OsTarget,
+    out: &mut String,
+) {
+    let record = jet_foundation::CliSchema::encode_record(
+        &jet_foundation::CliSchema::executable_schema(bundle),
+    );
+    let section = match active_os {
+        Syntax::OsTarget::Linux => jet_foundation::CliSchema::ELF_SECTION,
+        Syntax::OsTarget::Macos => "__DATA,__jetcmd",
+        Syntax::OsTarget::Windows => jet_foundation::CliSchema::PE_SECTION,
+    };
+    let bytes = record.iter().map(u8::to_string).collect::<Vec<_>>().join(",");
+    out.push_str(&format!(
+        "#[used]\n#[no_mangle]\n#[link_section = {section:?}]\npub static __JET_COMMAND_SCHEMA: [u8; {}] = [{bytes}];\n\n",
+        record.len(),
+    ));
+}
 const ENV_INIT_PRELUDE: &str = include_str!("../Prelude/EnvInit.rs");
 
 /// Extra helpers for `jet test` harnesses only (M6/S43, E2-M11 D-TOOL4).
@@ -1537,6 +1557,7 @@ pub fn emit_bundle_dbg(
         out.push_str(&format!("// jet:generic-instance module={} fingerprint={} full-key={}\n", provenance.canonical_module, provenance.fingerprint, provenance.full_key_hex));
     }
     out.push_str("#![allow(warnings)]\n\n");
+    emit_command_metadata(bundle, active_os, &mut out);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }

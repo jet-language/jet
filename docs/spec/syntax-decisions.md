@@ -2398,6 +2398,25 @@ inventory are implemented by #587; language-wide shape enforcement is owned by
 #560. Aliases, default selection, and callable entry linking remain separate
 choices and are not implied by D-SHAPE5b.
 
+**D-ECO-COMPOSE2=A — Safe additions combine; disagreements stop**: composition
+is order-independent and follows the field type. Equal single facts coalesce.
+Unequal single facts conflict, and the diagnostic identifies both origins.
+Named collections combine by key; sets union their members; ordered steps
+combine only when their type defines an order. Every successful result retains
+the provenance of all contributions.
+
+Experts resolve a disagreement by using ordinary Jet functions to construct one
+final typed value before contributing it. There is no last-file-wins rule and
+this decision creates no override operator. Ballot examples involving
+`ProjectPart`, particular paths, or `project/backend.jet` are explanatory only;
+D-ECO-COMPOSE2 ratifies no source type, file layout, or source spelling.
+
+Executable implementation and conformance tests remain downstream. #560 owns
+language-wide shape enforcement; if project-graph composition is outside that
+program, a dedicated implementation card must own it before this law ships.
+#605 itself adds no `Syntax.rs` entry, grammar, snapshot, parser, sema, runtime
+behavior, diagnostic, or executable example.
+
 **D-SHAPE-MERGEPROVENANCE1=A — Complete successful merge history lives in
 `.jet/lock`**: the unified lock is the sole primary copy of that history,
 stored beside the resolved graph. For each semantic field path it retains the
@@ -3729,7 +3748,6 @@ implementation milestone is pending.
 | D-ECO-DECL1 | one source shape for packages through JetOS systems | **Epoch 4** — Tower #615 |
 | D-ECO-SOURCE1 | whether one `project.jet` replaces the current role-file division | **Epoch 4** — Tower #610 |
 | D-ECO-EXTENSION1 | how third parties add typed graph vocabulary | **Epoch 4** — Tower #611 |
-| D-ECO-COMPOSE2 | how independent project contributions compose | **Epoch 4** — Tower #605 |
 | D-ECO-RECEIPT2 | how the graph lowers to actions, receipts, and generations | **Epoch 4** — Tower #608 |
 | D-ECO-JETOS2 | how the project graph becomes JetOS and activates safely | **Epoch 4** — Tower #609 |
 | D-SHAPE-INTERNAL1 | whether public `_name` marks unsupported API | **Epoch 3** — Tower #551 |
