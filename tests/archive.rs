@@ -247,5 +247,22 @@ fn core_provider_compiles_ring_package_to_rlib() {
         "rlib path must be durable in hangar meta.json"
     );
 
+    // Source-built outputs may live in the configured store rather than the
+    // Hangar object directory. Their empty dependency set is valid only while
+    // the entire output tree still hashes to the committed closure digest.
+    let output_root = Path::new(&r.out);
+    let mut permissions = fs::metadata(output_root).unwrap().permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(output_root, permissions).unwrap();
+    fs::write(output_root.join("closure-tamper"), b"changed after commit").unwrap();
+    let error = Store::closure_graph(&roots)
+        .expect_err("changed output must invalidate closure proof");
+    assert!(
+        error
+            .to_string()
+            .contains("has no dependency references or store-validated closure proof"),
+        "changed output must fail its content-bound closure proof: {error}"
+    );
+
     let _ = fs::remove_dir_all(&base);
 }

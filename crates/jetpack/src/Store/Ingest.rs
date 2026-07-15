@@ -1,5 +1,22 @@
 use super::*;
 
+#[cfg(any(test, windows))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowsIngestContract {
+    open_reparse_point: u32,
+    reparse_attribute: u32,
+    stable_volume_and_file_id: bool,
+}
+
+#[cfg(any(test, windows))]
+fn windows_ingest_contract() -> WindowsIngestContract {
+    WindowsIngestContract {
+        open_reparse_point: 0x0020_0000,
+        reparse_attribute: 0x0000_0400,
+        stable_volume_and_file_id: true,
+    }
+}
+
 /// Inputs for a Hangar Store v2 ingest. `outputs` must include `"out"`.
 /// `cache_identity` is the store-side deriver/action identity (JP2 owns the
 /// full action IR — this only records the fingerprints Hangar already stores).
@@ -690,6 +707,7 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
     Ok(())
 }
 
+#[allow(unreachable_code)]
 fn copy_nofollow_file(
     src: &Path,
     dst: &Path,
@@ -700,7 +718,31 @@ fn copy_nofollow_file(
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
-        options.custom_flags(nofollow_open_flag()?);
+        options.custom_flags(
+            super::super::Envelope::nofollow_open_flag().map_err(IngestError::Invalid)?,
+        );
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+        let contract = windows_ingest_contract();
+        options.custom_flags(contract.open_reparse_point);
+        let file = options
+            .open(src)
+            .map_err(|e| IngestError::Io(format!("reparse-safe open `{}`: {e}", src.display())))?;
+        if file
+            .metadata()
+            .map_err(|e| IngestError::Io(e.to_string()))?
+            .file_attributes()
+            & contract.reparse_attribute
+            != 0
+        {
+            return Err(IngestError::Invalid(format!(
+                "reparse-point file `{}` is unsupported",
+                src.display()
+            )));
+        }
+        return copy_open_file(file, src, dst, expected);
     }
     let mut file = options
         .open(src)
@@ -737,23 +779,24 @@ fn copy_nofollow_file(
     Ok(())
 }
 
-#[cfg(unix)]
-fn nofollow_open_flag() -> Result<i32, IngestError> {
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    return Ok(0o400000);
-    #[cfg(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    ))]
-    return Ok(0x0100);
-    #[allow(unreachable_code)]
-    Err(IngestError::Invalid(
-        "nofollow ingest is unsupported on this Unix platform".into(),
-    ))
+#[cfg(windows)]
+fn copy_open_file(
+    mut file: fs::File,
+    src: &Path,
+    dst: &Path,
+    expected: &fs::Metadata,
+) -> Result<(), IngestError> {
+    let opened = file.metadata().map_err(|e| IngestError::Io(e.to_string()))?;
+    if stable_meta_identity(&opened) != stable_meta_identity(expected) {
+        return Err(IngestError::Mutated(format!("`{}` changed before copy", src.display())));
+    }
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|e| IngestError::Io(e.to_string()))?;
+    let after = file.metadata().map_err(|e| IngestError::Io(e.to_string()))?;
+    if stable_meta_identity(&opened) != stable_meta_identity(&after) {
+        return Err(IngestError::Mutated(format!("`{}` changed while copying", src.display())));
+    }
+    fs::write(dst, bytes).map_err(|e| IngestError::Io(e.to_string()))
 }
 
 fn stable_meta_identity(meta: &fs::Metadata) -> (u64, u64, u64, u32) {
@@ -764,41 +807,44 @@ fn stable_meta_identity(meta: &fs::Metadata) -> (u64, u64, u64, u32) {
     }
     #[cfg(not(unix))]
     {
-        (
-            0,
-            0,
-            meta.len(),
-            u32::from(meta.permissions().readonly()),
-        )
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt as _;
+            return (
+                u64::from(meta.volume_serial_number().unwrap_or(0)),
+                meta.file_index().unwrap_or(0),
+                meta.len(),
+                meta.file_attributes(),
+            );
+        }
+        #[cfg(not(windows))]
+        (0, 0, meta.len(), u32::from(meta.permissions().readonly()))
     }
 }
 
 #[cfg(test)]
 mod portability_tests {
+    #[test]
+    fn windows_contract_opens_reparse_points_and_tracks_stable_identity() {
+        let contract = super::windows_ingest_contract();
+        assert_eq!(contract.open_reparse_point, 0x0020_0000);
+        assert_eq!(contract.reparse_attribute, 0x0000_0400);
+        assert!(contract.stable_volume_and_file_id);
+    }
+
     #[cfg(unix)]
     #[test]
     fn nofollow_flag_matches_supported_target_abi() {
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        assert_eq!(super::nofollow_open_flag().unwrap(), 0o400000);
-        #[cfg(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd",
-            target_os = "dragonfly"
-        ))]
-        assert_eq!(super::nofollow_open_flag().unwrap(), 0x0100);
+        assert_eq!(super::super::super::Envelope::nofollow_open_flag().unwrap(), 0o400000);
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        assert_eq!(super::super::super::Envelope::nofollow_open_flag().unwrap(), 0x0100);
         #[cfg(not(any(
             target_os = "linux",
             target_os = "android",
             target_os = "macos",
             target_os = "ios",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd",
-            target_os = "dragonfly"
         )))]
-        assert!(super::nofollow_open_flag().is_err());
+        assert!(super::super::super::Envelope::nofollow_open_flag().is_err());
     }
 }

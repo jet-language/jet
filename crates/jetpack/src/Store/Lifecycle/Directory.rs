@@ -3,6 +3,11 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+fn tier_one_lifecycle_platform(os: &str) -> bool {
+    matches!(os, "linux" | "macos" | "windows")
+}
+
 #[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WindowsPinnedDirectoryContract {
@@ -863,5 +868,15 @@ mod tests {
         assert_eq!(contract.directory_flags, 0x0220_0000);
         assert_eq!(contract.member_share_mode, 0x3);
         assert_eq!(contract.member_flags, 0x0020_0000);
+    }
+
+    #[test]
+    fn platform_contract_keeps_bsd_fail_closed_outside_tier_one() {
+        assert!(tier_one_lifecycle_platform("linux"));
+        assert!(tier_one_lifecycle_platform("macos"));
+        assert!(tier_one_lifecycle_platform("windows"));
+        for os in ["freebsd", "openbsd", "netbsd", "dragonfly"] {
+            assert!(!tier_one_lifecycle_platform(os));
+        }
     }
 }

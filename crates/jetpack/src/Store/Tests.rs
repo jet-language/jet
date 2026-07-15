@@ -1302,6 +1302,82 @@ mod tests {
     }
 
     #[test]
+    fn nix_multi_projection_registers_recovers_queries_and_rolls_back_conflict() {
+        let (roots, _g) = temp_roots();
+        let out = ingest_fixture(&roots, "projection-out-bytes", &[("out", "out")], Vec::new());
+        let dev = ingest_fixture(&roots, "projection-dev-bytes", &[("out", "dev")], Vec::new());
+        let conflict = ingest_fixture(&roots, "projection-bad-dev", &[("out", "bad")], Vec::new());
+        let drv = "/nix/store/multi-projection.drv";
+        let project = |mut entry: StoreEntry, id: &str, output_name: &str| {
+            let path = entry.out.clone();
+            entry.id = id.into();
+            entry.name = "multi-projection".into();
+            entry.reference = format!("alias:{output_name}");
+            entry.named_outputs = BTreeMap::from([
+                ("out".into(), entry.envelope.output_hash.clone()),
+                (output_name.into(), entry.envelope.output_hash.clone()),
+            ]);
+            entry.producer_record = ProducerRecord::new(
+                "nix",
+                drv,
+                crate::SHA256::sha256_hex(drv.as_bytes()),
+                crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+                    ("nix.drv_path".into(), drv.into()),
+                    ("nix.reference".into(), entry.reference.clone()),
+                    (format!("nix.output.{output_name}"), path.clone()),
+                ])).unwrap(),
+                format!("nix-derivation:{drv}"),
+                "policy=test\nplatform=test",
+                BTreeMap::from([(format!("nix.output.{output_name}"), path)]),
+            ).unwrap().encode();
+            entry
+        };
+        let out = project(out.entry, "projection-out", "out");
+        let dev = project(dev.entry, "projection-dev", "dev");
+        let bad = project(conflict.entry, "projection-bad", "dev");
+        let action = entry_action_key(&out);
+        assert_eq!(entry_action_key(&dev), action);
+
+        crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &out)?;
+            register_entry_unlocked(&roots, &dev)
+        }).unwrap();
+        fs::remove_file(roots.hangar_dir().join(&dev.id).join("meta.json")).unwrap();
+        let outputs = action_outputs_of(&roots, &action).unwrap();
+        assert_eq!(outputs.get("out"), Some(&out.envelope.output_hash));
+        assert_eq!(outputs.get("dev"), Some(&dev.envelope.output_hash));
+        assert!(roots.hangar_dir().join(&dev.id).join("meta.json").is_file());
+
+        let before = closure_graph(&roots).unwrap();
+        let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &bad)
+        }).unwrap_err();
+        assert!(error.to_string().contains("conflicting bytes"));
+        assert_eq!(closure_graph(&roots).unwrap(), before);
+    }
+
+    #[test]
+    fn closure_empty_reference_proof_rejects_unknown_provider() {
+        let (roots, _g) = temp_roots();
+        let mut entry = ingest_fixture(&roots, "unknown-proof", &[("out", "bytes")], Vec::new()).entry;
+        entry.id = "unknown-proof-record".into();
+        let original = ProducerRecord::decode(&entry.producer_record).unwrap();
+        entry.producer_record = ProducerRecord::new(
+            "unknown-provider",
+            original.immutable_source,
+            original.source_digest,
+            original.plan,
+            original.toolchain_facts,
+            original.policy_facts,
+            BTreeMap::from([("closure.authority".into(), "hangar-cas".into())]),
+        ).unwrap().encode();
+        let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &entry)
+        }).unwrap_err();
+        assert!(error.to_string().contains("store-validated closure proof"));
+    }
+
+    #[test]
     fn closure_rejects_named_out_that_disagrees_with_primary() {
         let (roots, _g) = temp_roots();
         let primary = ingest_fixture(&roots, "named-out-primary", &[("out", "primary")], Vec::new());

@@ -867,21 +867,37 @@ fn store_validates_complete_closure(
 ) -> bool {
     let output = Path::new(&meta.out);
     let local = roots.hangar_dir().join(OBJECTS_DIR).join(&record.primary);
-    if output == local && local.exists() {
-        return true;
+    let authority = producer.facts.get("closure.authority").map(String::as_str);
+    match producer.provider.as_str() {
+        "core" => rehashes_as_recorded(roots, meta, record),
+        "adapter" | "cran" | "luarocks" if output == local => {
+            rehashes_as_recorded(roots, meta, record)
+        }
+        "hangar-ingest" if output == local && authority == Some("hangar-cas") => {
+            rehashes_as_recorded(roots, meta, record)
+        }
+        "store-record" if authority == Some("hangar-cas") => {
+            rehashes_as_recorded(roots, meta, record)
+        }
+        "nix" if output == local => rehashes_as_recorded(roots, meta, record),
+        "nix" if output.starts_with("/nix/store") => {
+            let root = roots.hangar_dir().join(&record.id).join("nix-gc-root");
+            root.exists()
+                && std::fs::canonicalize(root).ok() == std::fs::canonicalize(output).ok()
+        }
+        _ => false,
     }
-    if producer.provider == "store-record"
-        && super::super::Envelope::try_output_hash_of(&meta.out).ok().as_ref()
-            == Some(&record.primary)
-    {
-        return true;
-    }
-    if producer.provider != "nix" || !output.starts_with("/nix/store") {
-        return false;
-    }
-    let root = roots.hangar_dir().join(&record.id).join("nix-gc-root");
-    root.exists()
-        && std::fs::canonicalize(root).ok() == std::fs::canonicalize(output).ok()
+}
+
+fn rehashes_as_recorded(roots: &Roots, meta: &ParsedMeta, record: &ClosureRecord) -> bool {
+    super::super::Envelope::try_output_hash_of_in_hangar(
+        &meta.out,
+        &roots.hangar_dir(),
+        !meta.platform_artifact_kind.is_empty(),
+    )
+    .ok()
+    .as_ref()
+        == Some(&record.primary)
 }
 
 fn store_entry_from_meta(id: &str, meta: &ParsedMeta) -> StoreEntry {

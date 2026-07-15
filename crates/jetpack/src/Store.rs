@@ -523,7 +523,7 @@ fn canonicalize_local_output_unlocked(
             )));
         }
         fsync_tree(&destination)?;
-        fs::File::open(&objects)?.sync_all()?;
+        sync_store_directory(&objects)?;
         return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
     }
     if destination.exists() {
@@ -540,7 +540,7 @@ fn canonicalize_local_output_unlocked(
             )));
         }
         fsync_tree(&destination)?;
-        fs::File::open(&objects)?.sync_all()?;
+        sync_store_directory(&objects)?;
         if source != destination && source.exists() {
             make_tree_writable_for_removal(source)?;
             fs::remove_dir_all(source).map_err(|error| {
@@ -553,9 +553,13 @@ fn canonicalize_local_output_unlocked(
         // only while the Hangar transaction lock is held, publish, then seal
         // the canonical path again before metadata becomes visible.
         make_tree_writable_for_removal(source)?;
+        let source_parent = source.parent().map(Path::to_path_buf);
         fs::rename(source, &destination).map_err(|error| {
             std::io::Error::new(error.kind(), format!("publishing canonical provider output: {error}"))
         })?;
+        if let Some(parent) = source_parent {
+            sync_store_directory(&parent)?;
+        }
         seal_node(&destination)?;
         let actual = super::Envelope::try_output_hash_of_in_hangar(
             &destination.to_string_lossy(),
@@ -569,7 +573,7 @@ fn canonicalize_local_output_unlocked(
             )));
         }
         fsync_tree(&destination)?;
-        fs::File::open(&objects)?.sync_all().map_err(|error| {
+        sync_store_directory(&objects).map_err(|error| {
             std::io::Error::new(error.kind(), format!("syncing canonical object directory: {error}"))
         })?;
     }

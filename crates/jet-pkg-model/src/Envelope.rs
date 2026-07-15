@@ -228,17 +228,41 @@ pub fn is_excluded_xattr(name: &str) -> bool {
         .any(|prefix| name == *prefix || name.starts_with(prefix))
 }
 
-/// List xattr names on `path` (symlink-nofollow). Empty on platforms without
-/// xattrs or when none are present.
+/// Audited target `O_NOFOLLOW` value shared by hashing and ingest.
+#[cfg(unix)]
+pub fn nofollow_open_flag() -> Result<i32, String> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    return Ok(0o400000);
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    return Ok(0x0100);
+    #[allow(unreachable_code)]
+    Err(format!(
+        "nofollow file access is unsupported on target `{}`",
+        super::Platform::host_key()
+    ))
+}
+
+/// List xattr names on `path` without following symlinks.
 pub fn list_xattr_names(path: &Path) -> Result<Vec<String>, String> {
     #[cfg(target_os = "linux")]
     {
         list_xattr_names_linux(path)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        list_xattr_names_apple(path)
+    }
+    #[cfg(windows)]
     {
         let _ = path;
         Ok(Vec::new())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios", windows)))]
+    {
+        Err(format!(
+            "semantic xattr inspection is unsupported on target `{}`",
+            super::Platform::host_key()
+        ))
     }
 }
 
@@ -260,6 +284,92 @@ pub fn check_xattrs(path: &Path, allow_semantic_xattrs: bool) -> Result<(), Stri
     ))
 }
 
+fn encode_semantic_xattrs(
+    path: &Path,
+    archive: &mut Vec<u8>,
+    allow_semantic_xattrs: bool,
+) -> Result<(), String> {
+    let mut names = list_xattr_names(path)?
+        .into_iter()
+        .filter(|name| !is_excluded_xattr(name))
+        .collect::<Vec<_>>();
+    names.sort();
+    if names.is_empty() {
+        return Ok(());
+    }
+    if !allow_semantic_xattrs {
+        return Err(format!(
+            "unsupported semantic xattr(s) on `{}`: {} — set an explicit platform artifact kind to keep them",
+            path.display(),
+            names.join(", ")
+        ));
+    }
+    for name in names {
+        archive.push(b'X');
+        push_bytes(archive, name.as_bytes());
+        push_bytes(archive, &xattr_value(path, &name)?);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    unsafe extern "C" {
+        fn lgetxattr(path: *const i8, name: *const i8, value: *mut u8, size: usize) -> isize;
+    }
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "xattr path contains NUL".to_string())?;
+    let name_c = std::ffi::CString::new(name).map_err(|_| "xattr name contains NUL".to_string())?;
+    let size = unsafe { lgetxattr(path.as_ptr(), name_c.as_ptr(), std::ptr::null_mut(), 0) };
+    if size < 0 {
+        return Err(format!("lgetxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+    }
+    let mut value = vec![0; size as usize];
+    let wrote = unsafe { lgetxattr(path.as_ptr(), name_c.as_ptr(), value.as_mut_ptr(), value.len()) };
+    if wrote < 0 {
+        return Err(format!("lgetxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+    }
+    value.truncate(wrote as usize);
+    Ok(value)
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    unsafe extern "C" {
+        fn getxattr(path: *const i8, name: *const i8, value: *mut u8, size: usize, position: u32, options: i32) -> isize;
+    }
+    const XATTR_NOFOLLOW: i32 = 0x0001;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| "xattr path contains NUL".to_string())?;
+    let name_c = std::ffi::CString::new(name).map_err(|_| "xattr name contains NUL".to_string())?;
+    let size = unsafe { getxattr(path.as_ptr(), name_c.as_ptr(), std::ptr::null_mut(), 0, 0, XATTR_NOFOLLOW) };
+    if size < 0 {
+        return Err(format!("getxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+    }
+    let mut value = vec![0; size as usize];
+    let wrote = unsafe { getxattr(path.as_ptr(), name_c.as_ptr(), value.as_mut_ptr(), value.len(), 0, XATTR_NOFOLLOW) };
+    if wrote < 0 {
+        return Err(format!("getxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+    }
+    value.truncate(wrote as usize);
+    Ok(value)
+}
+
+#[cfg(windows)]
+fn xattr_value(_path: &Path, _name: &str) -> Result<Vec<u8>, String> {
+    Err("semantic xattrs are unsupported on Windows".into())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios", windows)))]
+fn xattr_value(_path: &Path, _name: &str) -> Result<Vec<u8>, String> {
+    Err(format!(
+        "semantic xattr values are unsupported on target `{}`",
+        super::Platform::host_key()
+    ))
+}
+
 #[cfg(target_os = "linux")]
 fn list_xattr_names_linux(path: &Path) -> Result<Vec<String>, String> {
     use std::os::unix::ffi::OsStrExt as _;
@@ -272,13 +382,11 @@ fn list_xattr_names_linux(path: &Path) -> Result<Vec<String>, String> {
         .map_err(|_| format!("path `{}` contains NUL", path.display()))?;
     let size = unsafe { llistxattr(c_path.as_ptr(), std::ptr::null_mut(), 0) };
     if size < 0 {
-        let err = std::io::Error::last_os_error();
-        // ENODATA / ENOTSUP / EOPNOTSUPP → no xattrs
-        if matches!(err.raw_os_error(), Some(61) | Some(95) | Some(524)) {
-            return Ok(Vec::new());
-        }
-        // Some filesystems return 0 size with errno set differently; treat as empty.
-        return Ok(Vec::new());
+        return Err(format!(
+            "cannot inspect xattrs on `{}`: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
     }
     if size == 0 {
         return Ok(Vec::new());
@@ -286,13 +394,43 @@ fn list_xattr_names_linux(path: &Path) -> Result<Vec<String>, String> {
     let mut buf = vec![0i8; size as usize];
     let wrote = unsafe { llistxattr(c_path.as_ptr(), buf.as_mut_ptr(), buf.len()) };
     if wrote < 0 {
-        return Ok(Vec::new());
+        return Err(format!(
+            "cannot read xattr names on `{}`: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
     }
     let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, wrote as usize) };
     Ok(bytes
         .split(|b| *b == 0)
         .filter(|s| !s.is_empty())
         .map(|s| String::from_utf8_lossy(s).into_owned())
+        .collect())
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn list_xattr_names_apple(path: &Path) -> Result<Vec<String>, String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    unsafe extern "C" {
+        fn listxattr(path: *const i8, list: *mut i8, size: usize, options: i32) -> isize;
+    }
+    const XATTR_NOFOLLOW: i32 = 0x0001;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| format!("path `{}` contains NUL", path.display()))?;
+    let size = unsafe { listxattr(path.as_ptr(), std::ptr::null_mut(), 0, XATTR_NOFOLLOW) };
+    if size < 0 {
+        return Err(format!("listxattr failed: {}", std::io::Error::last_os_error()));
+    }
+    let mut names = vec![0i8; size as usize];
+    let wrote = unsafe { listxattr(path.as_ptr(), names.as_mut_ptr(), names.len(), XATTR_NOFOLLOW) };
+    if wrote < 0 {
+        return Err(format!("listxattr failed: {}", std::io::Error::last_os_error()));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(names.as_ptr().cast::<u8>(), wrote as usize) };
+    Ok(bytes
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        .map(|name| String::from_utf8_lossy(name).into_owned())
         .collect())
 }
 
@@ -317,8 +455,7 @@ fn file_has_sparse_holes_linux(path: &Path) -> Result<bool, String> {
     options.read(true);
     {
         use std::os::unix::fs::OpenOptionsExt as _;
-        const O_NOFOLLOW: i32 = 0x20000;
-        options.custom_flags(O_NOFOLLOW);
+        options.custom_flags(nofollow_open_flag()?);
     }
     let file = options
         .open(path)
@@ -533,7 +670,6 @@ fn encode_node(
     // ingest can log policy without changing the digest stream.
     if kind.is_file() {
         let _ = file_has_sparse_holes(path)?;
-        check_xattrs(path, allow_semantic_xattrs)?;
     }
     if kind.is_dir() {
         let before = stable_file_identity(&meta);
@@ -604,6 +740,7 @@ fn encode_node(
             );
         }
         record_header(archive, b'F', &rel_bytes, mode_of(&meta));
+        encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
         let bytes = read_file_stable(path, &meta, hook)?;
         push_bytes(archive, &bytes);
     } else {
@@ -625,8 +762,7 @@ fn read_file_stable(
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
-        const O_NOFOLLOW: i32 = 0x20000;
-        options.custom_flags(O_NOFOLLOW);
+        options.custom_flags(nofollow_open_flag()?);
     }
     let mut file = options
         .open(path)
@@ -1060,6 +1196,30 @@ mod tests {
             err.contains("case-fold") || err.contains("collides"),
             "{err}"
         );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn semantic_xattr_name_and_value_are_canonical_digest_bytes() {
+        use std::os::unix::ffi::OsStrExt as _;
+        unsafe extern "C" {
+            fn lsetxattr(path: *const i8, name: *const i8, value: *const u8, size: usize, flags: i32) -> i32;
+        }
+        let dir = scratch("xattr-digest");
+        let file = dir.join("payload");
+        fs::write(&file, "bytes").unwrap();
+        let path = std::ffi::CString::new(file.as_os_str().as_bytes()).unwrap();
+        let name = std::ffi::CString::new("user.jet.identity").unwrap();
+        let set = |value: &[u8]| unsafe {
+            lsetxattr(path.as_ptr(), name.as_ptr(), value.as_ptr(), value.len(), 0)
+        };
+        assert_eq!(set(b"first"), 0);
+        assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+        let first = try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
+        assert_eq!(set(b"second"), 0);
+        let second = try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
+        assert_ne!(first, second);
         fs::remove_dir_all(dir).ok();
     }
 
