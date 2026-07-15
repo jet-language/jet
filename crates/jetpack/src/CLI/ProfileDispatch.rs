@@ -326,24 +326,34 @@ fn resolve_path_entry(
     directories: impl IntoIterator<Item = PathBuf>,
 ) -> Option<(PathBuf, fs::File)> {
     for directory in directories {
-        let entry = if directory.is_absolute() {
-            directory.join(invoked)
+        let directory = if directory.is_absolute() {
+            directory
         } else {
-            std::env::current_dir().ok()?.join(directory).join(invoked)
+            std::env::current_dir().ok()?.join(directory)
         };
-        let Ok(file) = open_pinned_regular(&entry) else {
-            continue;
-        };
-        if ensure_open_executable(&file).is_err() {
-            continue;
+        for entry in path_entries(&directory, invoked, cfg!(windows)) {
+            let Ok(file) = open_pinned_regular(&entry) else {
+                continue;
+            };
+            if ensure_open_executable(&file).is_err() {
+                continue;
+            }
+            if same_file_identity(executable_identity, &file.metadata().ok()?) {
+                return validate_dispatcher_layout(entry).map(|entry| (entry, file));
+            }
+            // argv[0] can be preserved across a launcher's own PATH
+            // resolution. Bind running file, not an earlier shadow.
         }
-        if same_file_identity(executable_identity, &file.metadata().ok()?) {
-            return validate_dispatcher_layout(entry).map(|entry| (entry, file));
-        }
-        // argv[0] can be preserved across a launcher's own PATH resolution.
-        // Bind the entry that is the running file, not an earlier shadow.
     }
     None
+}
+
+fn path_entries(directory: &Path, invoked: &Path, windows: bool) -> Vec<PathBuf> {
+    let mut entries = vec![directory.join(invoked)];
+    if windows && invoked.extension().is_none() {
+        entries.push(directory.join(format!("{}.exe", invoked.to_string_lossy())));
+    }
+    entries
 }
 
 fn eligible_dispatcher_entry(
@@ -796,23 +806,22 @@ fn freeze_unix_projection(source: &mut fs::File, expected: &str) -> io::Result<f
     fs::set_permissions(&private_dir, fs::Permissions::from_mode(0o700))?;
     let path = private_dir.join("image");
     let result = (|| {
-        let mut writer = fs::OpenOptions::new()
+        let mut frozen = fs::OpenOptions::new()
+            .read(true)
             .write(true)
             .create_new(true)
             .open(&path)?;
+        fs::remove_file(&path)?;
+        fs::remove_dir(&private_dir)?;
         source.seek(std::io::SeekFrom::Start(0))?;
-        io::copy(source, &mut writer)?;
-        writer.sync_all()?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o500))?;
-        let mut frozen = open_pinned_regular(&path)?;
-        drop(writer);
+        io::copy(source, &mut frozen)?;
+        frozen.sync_all()?;
+        frozen.set_permissions(fs::Permissions::from_mode(0o500))?;
         let actual = format!("sha256-{}", sha256_open_file_hex(&mut frozen)?);
         if actual != expected {
             return Err(invalid("profile projection changed while freezing"));
         }
         ensure_open_executable(&frozen)?;
-        fs::remove_file(&path)?;
-        fs::remove_dir(&private_dir)?;
         Ok(frozen)
     })();
     if result.is_err() {
@@ -1121,6 +1130,14 @@ mod tests {
         assert_eq!(physical_bin_name_for("foo.exe", true), "foo.exe");
         assert_eq!(physical_bin_name_for("foo.EXE", true), "foo.EXE");
         assert_eq!(physical_bin_name_for("foo", false), "foo");
+        assert_eq!(
+            path_entries(Path::new("C:\\bin"), Path::new("foo"), true),
+            vec![PathBuf::from("C:\\bin/foo"), PathBuf::from("C:\\bin/foo.exe")]
+        );
+        assert_eq!(
+            path_entries(Path::new("/bin"), Path::new("foo"), false),
+            vec![PathBuf::from("/bin/foo")]
+        );
 
         let mut metadata = metadata();
         metadata.tools[0].bins = vec!["foo".into()];
@@ -1291,6 +1308,9 @@ mod tests {
         running.store(false, Ordering::Relaxed);
         writer.join().unwrap();
         if let Ok(mut frozen) = frozen {
+            use std::os::unix::fs::MetadataExt as _;
+            assert_eq!(frozen.metadata().unwrap().nlink(), 0);
+            fs::write(&projection, vec![b'c'; original.len()]).unwrap();
             assert_eq!(
                 format!("sha256-{}", sha256_open_file_hex(&mut frozen).unwrap()),
                 expected

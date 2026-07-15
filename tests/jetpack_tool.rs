@@ -398,7 +398,16 @@ fn windows_logical_alias_executes_native_exe_with_exact_arguments_and_exit() {
         String::from_utf8_lossy(&output.stderr)
     );
     let alias = home.join(".jet/bin/native-alias.exe");
-    let status = Command::new(alias)
+    assert!(alias.is_file());
+    let path = env::join_paths(
+        std::iter::once(alias.parent().unwrap().to_path_buf()).chain(
+            env::var_os("PATH")
+                .into_iter()
+                .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>()),
+        ),
+    )
+    .unwrap();
+    let status = Command::new("native-alias")
         .args([
             "/d",
             "/s",
@@ -406,6 +415,7 @@ fn windows_logical_alias_executes_native_exe_with_exact_arguments_and_exit() {
             "if \"a&b\"==\"a&b\" (exit /b 23) else (exit /b 9)",
         ])
         .env("HOME", &home.path)
+        .env("PATH", path)
         .status()
         .unwrap();
     assert_eq!(status.code(), Some(23));
