@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 638,
-    "rev": 7595,
+    "rev": 7598,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14529,6 +14529,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "Owner declined the method plane for copy; ballot revised to sigil-leaning options (caret ^^ everywhere / copy word / ratified pair / fresh $ mark), rec A."
+        },
         {
           "at": "2026-07-15",
           "by": "claude-main",
@@ -38031,40 +38036,40 @@
       "cardId": "c0we378g",
       "group": "syntax",
       "title": "What is the one way to write a copy?",
-      "gist": "Pick the single way to write a copy: prefix copy x, method x.copy(), the ^^ shorthand, or Rust's .clone().",
-      "lesson": "Jet's memory model is a borrow checker in plain clothes. A bare name reads a value, & writes it, ^ takes ownership away. A taking parameter receives ownership: after f(^x) the name x is gone. A copy makes an independent duplicate, so the original survives. This ballot decides only how you write that copy. It does not touch the read, write, or take sigils.\n\nTwo shipped decisions now disagree. D-CAP2 and S4 made copy x the one copy spelling and deliberately deleted .clone(). D-SHAPE-LIFECYCLE then added ^^x as a second copy spelling at taking arguments. That is two ways to write one job, which invariant I8 forbids. This vote picks a single spelling and retires the rest.\n\nIn real code the prefix keyword lands mid-argument: ops.transform(pool, copy input, 5000). Nothing on input signals the copy, and the keyword breaks the left-to-right read of the argument list. The question is whether the copy marker belongs before the value, on the value, or as call-site punctuation.",
+      "gist": "Pick the single way to write a copy: caret ^^x, the copy x word, the ratified pair, or a fresh $x mark.",
+      "lesson": "Jet's memory model is a borrow checker in plain clothes. A bare name reads a value, & writes it, ^ takes ownership away. A taking parameter receives ownership: after f(^x) the name x is gone. A copy makes an independent duplicate, so the original survives. This ballot decides how you write that copy. The method form x.copy() was considered and declined by the owner on 2026-07-15; he prefers a sigil for copy over a method.\n\nTwo shipped decisions disagree. D-CAP2 and S4 made copy x the one copy spelling. D-SHAPE-LIFECYCLE then added ^^x as a second copy spelling at taking arguments only. That is two ways to write one job, which invariant I8 forbids. This vote picks one spelling and retires the rest.\n\nIn real code the copy lands mid-argument: ops.transform(pool, copy input, 5000). The caret plane already carries ownership: bare reads, & writes, ^ gives away. The open question is whether copy joins that plane as ^^, stays the copy word, or takes a fresh mark.",
       "explainer": "",
-      "story": "Maya loads a grid and calls transform, which takes ownership of its input. She still needs the grid for the next step, so she must hand transform an independent copy while keeping her own. She autocompletes on input, expecting the copy to appear there. She wants one spelling she can reuse in a chain and on its own line.",
-      "inWild": "input := load_grid()\n\n// four ways to copy the same value at a taking call:\nops.transform(pool, copy input, 5000)     // A  prefix verb\nops.transform(pool, input.copy(), 5000)   // B  method\nops.transform(pool, ^^input, 5000)        // C  taking-call shorthand\nops.transform(pool, input.clone(), 5000)  // D  rust spelling",
+      "story": "Maya loads a grid and calls transform, which takes ownership of its input. She still needs the grid for the next step, so she must hand transform an independent copy while keeping her own. She has already learned ^ to give a value away. She wants one spelling for copy she can reuse at a call and on its own line.",
+      "inWild": "input := load_grid()\n\n// four ways to copy the same value at a taking call:\nops.transform(pool, ^^input, 5000)      // A  caret plane\nops.transform(pool, copy input, 5000)   // B  copy word\nops.transform(pool, ^^input, 5000)      // C  ^^ only at taking calls; copy word elsewhere\nops.transform(pool, $input, 5000)       // D  fresh mark\n\n// and standalone:\nbackup := ^^input     // A\nbackup := copy input  // B\nbackup := copy input  // C  (^^ not allowed outside a taking call)\nbackup := $input      // D",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Prefix verb only",
-          "detail": "Write copy x before the value in every position. One searchable word, already the general spelling today. The ^^ shorthand is removed, so there is a single copy marker everywhere.",
-          "technical": "copy x stays the prefix-verb expression Expr::Copy, parsing on any expression. ^^ is deleted from the grammar. A chain needs parentheses because the verb binds looser than a method call. On a non-cloneable type it is E0211.",
-          "code": "// taking call\nops.transform(pool, copy input, 5000)\n// method chain\ngrid := (copy input).rotate().scale(2)\n// standalone\nbackup := copy input"
+          "name": "Caret plane ^^x everywhere",
+          "detail": "Generalize the taking-call shorthand into the one copy spelling. ^^x works in any expression position, so the whole ownership surface lives on one caret plane: bare reads, & writes, ^ gives away, ^^ copies. Mnemonic: ^ gives the value away, ^^ branches an independent duplicate first. The copy keyword is retired.",
+          "technical": "^^x lowers to an independent duplicate in every position; at a taking argument the duplicate is then transferred, as D-SHAPE-LIFECYCLE already defines. Standalone it is just the duplicate, nothing given. A chain needs parentheses: (^^input).rotate(). On a non-cloneable type it is E0211.",
+          "code": "// taking call\nops.transform(pool, ^^input, 5000)\n// method chain\ngrid := (^^input).rotate().scale(2)\n// standalone\nbackup := ^^input"
         },
         {
           "key": "B",
-          "name": "Method only",
-          "detail": "Write x.copy() as a method in every position. The copy marker sits on the value, next to the shipped .drop(). Autocomplete on input offers it. Both the copy keyword and ^^ are removed.",
-          "technical": "copy becomes a built-in method: input.copy() lowers to the same independent duplicate. The keyword copy and ^^ leave the grammar. On a non-cloneable type it is E0211. Chains and standalone lines use the identical form.",
-          "code": "// taking call\nops.transform(pool, input.copy(), 5000)\n// method chain\ngrid := input.copy().rotate().scale(2)\n// standalone\nbackup := input.copy()"
+          "name": "Copy word only",
+          "detail": "Keep the incumbent copy word and retire ^^. One searchable word in every position, the general spelling today. Copy stays off the caret plane.",
+          "technical": "copy x stays the prefix-verb expression Expr::Copy, parsing on any expression. ^^ is deleted from the grammar. A chain needs parentheses because the verb binds looser than a method call. On a non-cloneable type it is E0211.",
+          "code": "// taking call\nops.transform(pool, copy input, 5000)\n// method chain\ngrid := (copy input).rotate().scale(2)\n// standalone\nbackup := copy input"
         },
         {
           "key": "C",
           "name": "Keep the ratified pair",
           "detail": "Keep both ratified spellings. General code writes copy x; a taking argument may use the compact ^^x. Two spellings, but the call-site form stays short. This is the status quo after D-SHAPE-LIFECYCLE.",
-          "technical": "copy x (Expr::Copy) works anywhere. ^^x is legal only in a taking argument, lowering to copy-then-transfer. Outside a taking call ^^ is a syntax error, so chains still use (copy x).",
+          "technical": "copy x (Expr::Copy) works anywhere. ^^x is legal only in a taking argument, lowering to copy-then-transfer. Outside a taking call ^^ is a syntax error, so chains and standalone lines use copy x.",
           "code": "// taking call\nops.transform(pool, ^^input, 5000)\n// method chain  (^^ not allowed here)\ngrid := (copy input).rotate().scale(2)\n// standalone\nbackup := copy input"
         },
         {
           "key": "D",
-          "name": "Rust directly",
-          "detail": "Use Rust's own spelling, x.clone(), verbatim. Anyone coming from Rust reads it instantly. Both the copy keyword and ^^ are removed, and .clone() becomes user-typable again.",
-          "technical": "clone becomes a real method in the grammar. S4 had deliberately deleted .clone(); this re-admits it. On a non-cloneable type it is E0211. Chains and standalone lines use the identical form.",
-          "code": "// taking call\nops.transform(pool, input.clone(), 5000)\n// method chain\ngrid := input.clone().rotate().scale(2)\n// standalone\nbackup := input.clone()"
+          "name": "Fresh mark $x",
+          "detail": "Give copy its own prefix mark, $x. $ is the only unclaimed ASCII prefix in the syntax registry. A distinct operation gets a distinct mark, but it is a third ownership mark to learn with no mnemonic tie to the caret family. Both copy and ^^ are retired.",
+          "technical": "$x is a new prefix-verb expression, an independent duplicate in any position. %, +, *, ! are infix math and logic ops; ~ is deleted forever by D-MEM1; @ and # are marker planes. A chain needs parentheses. On a non-cloneable type it is E0211.",
+          "code": "// taking call\nops.transform(pool, $input, 5000)\n// method chain\ngrid := ($input).rotate().scale(2)\n// standalone\nbackup := $input"
         }
       ],
       "comparisons": [
@@ -38084,13 +38089,13 @@
           "code": "ops.transform(pool, input, 5000);"
         }
       ],
-      "rec": "B",
+      "rec": "A",
       "recommendation": {
-        "why": "B puts the copy marker on the value, so the call site signals the copy where the eye already is. input.copy() reads left-to-right, chains without parentheses, and autocompletes beside .drop(). One spelling covers every position, satisfying I8 and serving LSP discoverability.",
+        "why": "A adds no new mark and gives copy one spelling. The whole ownership surface becomes one caret plane: bare reads, & writes, ^ gives away, ^^ copies. ^ and ^^ read as a family, so a reader who knows take can guess copy.",
         "whyNot": [
           {
-            "key": "A",
-            "reason": "A keeps one searchable word, but the marker sits before the value with no signal on input, and a chain still needs wrapping parentheses."
+            "key": "B",
+            "reason": "B keeps a searchable word, but leaves copy off the caret plane the owner prefers, and forces ^^ back out of the language."
           },
           {
             "key": "C",
@@ -38098,16 +38103,16 @@
           },
           {
             "key": "D",
-            "reason": "D reads instantly for Rust users, but it re-admits .clone(), which S4 deleted on purpose, and imports Rust's cost-and-identity criticism along with the spelling."
+            "reason": "D gives copy a clean dedicated mark, but adds a third ownership mark to learn with no mnemonic link to ^, spending the last free ASCII prefix."
           }
         ],
-        "tradeoff": "B supersedes the D-CAP2 and S4 copy x spelling and retires D-SHAPE-LIFECYCLE's ^^. Fix-its and diagnostics that say copy name must move to input.copy(), and E0211 stays the non-cloneable error."
+        "tradeoff": "A retires the copy keyword, so it supersedes the D-CAP2 and S4 copy x spelling. It widens D-SHAPE-LIFECYCLE's ^^ from taking-calls-only to every position. Parenthesized chains stay, exactly as copy x needs them today. Fix-its that say copy name move to ^^name; E0211 stays the non-cloneable error."
       },
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
       "status": "open",
-      "created": "2026-07-15T12:57:55.341Z"
+      "created": "2026-07-15T13:41:05.787Z"
     }
   ],
   "questions": [
@@ -38910,6 +38915,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T13:41:45.914Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0we378g",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T13:41:05.787Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-SHAPE-COPY1",
+      "note": "What is the one way to write a copy?"
+    },
+    {
+      "at": "2026-07-15T13:40:42.260Z",
+      "by": "claude-main",
+      "action": "decision.delete",
+      "ref": "D-SHAPE-COPY1",
+      "note": "What is the one way to write a copy?"
+    },
     {
       "at": "2026-07-15T13:38:58.094Z",
       "by": "prelude-split-builder",
@@ -42388,27 +42414,6 @@
       "action": "card.criteria-meet",
       "ref": "c05t6xnx",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-15T01:14:43.215Z",
-      "by": "terra-605-builder",
-      "action": "card.criteria-add",
-      "ref": "c08d713o",
-      "note": "#4 Docs state executable implementation and conformance tests r"
-    },
-    {
-      "at": "2026-07-15T01:14:43.001Z",
-      "by": "terra-605-builder",
-      "action": "card.criteria-add",
-      "ref": "c08d713o",
-      "note": "#3 Package ecosystem status marks composition ratified, removes"
-    },
-    {
-      "at": "2026-07-15T01:14:42.772Z",
-      "by": "terra-605-builder",
-      "action": "card.criteria-add",
-      "ref": "c08d713o",
-      "note": "#2 Every composed result retains provenance, and experts resolv"
     }
   ],
   "nextNum": 368,
