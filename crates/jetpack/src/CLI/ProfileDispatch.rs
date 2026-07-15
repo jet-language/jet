@@ -280,21 +280,15 @@ pub fn dispatch_current_process() -> Option<i32> {
     let executable = std::env::current_exe().ok()?;
     let invoked = std::env::args_os().next()?;
     let bin = Path::new(&invoked).file_name()?.to_str()?;
-    if bin == "jetpack" {
+    if bin.eq_ignore_ascii_case("jetpack") || bin.eq_ignore_ascii_case("jetpack.exe") {
         return None;
     }
     validate_bin_name(bin).ok()?;
-    let installed = resolve_invoked_entry(Path::new(&invoked))?;
+    let executable_file = fs::File::open(&executable).ok()?;
+    let executable_identity = executable_file.metadata().ok()?;
+    let (installed, _installed_file) =
+        resolve_invoked_entry(Path::new(&invoked), &executable_identity)?;
     let bin_dir = installed.parent()?.to_path_buf();
-    let mut installed_file = open_pinned_regular(&installed).ok()?;
-    if executable != installed {
-        let mut executable_file = fs::File::open(&executable).ok()?;
-        if sha256_open_file_hex(&mut installed_file).ok()?
-            != sha256_open_file_hex(&mut executable_file).ok()?
-        {
-            return None;
-        }
-    }
     Some(match resolve_dispatch_target(&bin_dir, bin) {
         Ok(target) => execute_target(&target),
         Err(error) if error.kind() == io::ErrorKind::NotFound => MISSING_DISPATCH_EXIT,
@@ -302,26 +296,55 @@ pub fn dispatch_current_process() -> Option<i32> {
     })
 }
 
-fn resolve_invoked_entry(invoked: &Path) -> Option<PathBuf> {
-    let entry = if invoked.is_absolute() {
-        invoked.to_path_buf()
-    } else {
-        let mut components = invoked.components();
-        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
-            return None;
+fn resolve_invoked_entry(
+    invoked: &Path,
+    executable_identity: &fs::Metadata,
+) -> Option<(PathBuf, fs::File)> {
+    if invoked.is_absolute() {
+        return eligible_dispatcher_entry(invoked, executable_identity);
+    }
+    let mut components = invoked.components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return None;
+    }
+    for directory in std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+    {
+        let entry = if directory.is_absolute() {
+            directory.join(invoked)
+        } else {
+            std::env::current_dir().ok()?.join(directory).join(invoked)
+        };
+        let Ok(file) = open_pinned_regular(&entry) else {
+            continue;
+        };
+        if ensure_open_executable(&file).is_err() {
+            continue;
         }
-        std::env::var_os("PATH")
-            .into_iter()
-            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-            .filter_map(|directory| {
-                if directory.is_absolute() {
-                    Some(directory.join(invoked))
-                } else {
-                    Some(std::env::current_dir().ok()?.join(directory).join(invoked))
-                }
-            })
-            .find(|candidate| fs::symlink_metadata(candidate).is_ok())?
-    };
+        if same_file_identity(executable_identity, &file.metadata().ok()?) {
+            return validate_dispatcher_layout(entry).map(|entry| (entry, file));
+        }
+        // First OS-eligible PATH entry is authoritative. A later same-byte
+        // executable must never impersonate it through argv[0].
+        return None;
+    }
+    None
+}
+
+fn eligible_dispatcher_entry(
+    entry: &Path,
+    executable_identity: &fs::Metadata,
+) -> Option<(PathBuf, fs::File)> {
+    let file = open_pinned_regular(entry).ok()?;
+    ensure_open_executable(&file).ok()?;
+    if !same_file_identity(executable_identity, &file.metadata().ok()?) {
+        return None;
+    }
+    validate_dispatcher_layout(entry.to_path_buf()).map(|entry| (entry, file))
+}
+
+fn validate_dispatcher_layout(entry: PathBuf) -> Option<PathBuf> {
     let bin_dir = entry.parent()?;
     if bin_dir.file_name()? != Syntax::TOOL_BIN_DIR
         || bin_dir.parent()?.file_name()? != Syntax::CONFIG_DEFAULT_DIR
@@ -329,6 +352,18 @@ fn resolve_invoked_entry(invoked: &Path) -> Option<PathBuf> {
         return None;
     }
     Some(entry)
+}
+
+pub(crate) fn physical_bin_name(logical: &str) -> String {
+    physical_bin_name_for(logical, cfg!(windows))
+}
+
+fn physical_bin_name_for(logical: &str, windows: bool) -> String {
+    if windows && !logical.to_ascii_lowercase().ends_with(".exe") {
+        format!("{logical}.exe")
+    } else {
+        logical.to_string()
+    }
 }
 
 struct DispatchTarget {
@@ -360,7 +395,9 @@ fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<DispatchTarg
         return Err(invalid("profile generation complete witness mismatch"));
     }
     let (tool, slot) = find_bin(&metadata, bin)?;
-    let projection = generation_dir.join("bin").join(bin);
+    let projection = generation_dir
+        .join("bin")
+        .join(physical_bin_name(&tool.bins[slot]));
     let mut projection_file = open_pinned_regular(&projection)?;
     let actual = format!("sha256-{}", sha256_open_file_hex(&mut projection_file)?);
     if actual != tool.projection_hashes[slot] {
@@ -368,6 +405,8 @@ fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<DispatchTarg
     }
     validate_original_authority(tool, slot, &actual)?;
     ensure_open_executable(&projection_file)?;
+    #[cfg(unix)]
+    let projection_file = freeze_unix_projection(&mut projection_file, &actual)?;
     Ok(DispatchTarget {
         #[cfg(windows)]
         path: projection,
@@ -379,11 +418,28 @@ fn find_bin<'a>(
     metadata: &'a GenerationMetadata,
     bin: &str,
 ) -> io::Result<(&'a GenerationTool, usize)> {
-    metadata
+    if let Some(found) = metadata
         .tools
         .iter()
         .find_map(|tool| tool.bins.iter().position(|candidate| candidate == bin).map(|i| (tool, i)))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "profile bin was removed"))
+    {
+        return Ok(found);
+    }
+    #[cfg(windows)]
+    if bin.to_ascii_lowercase().ends_with(".exe") {
+        if let Some(found) = metadata.tools.iter().find_map(|tool| {
+            tool.bins
+                .iter()
+                .position(|candidate| physical_bin_name(candidate).eq_ignore_ascii_case(bin))
+                .map(|index| (tool, index))
+        }) {
+            return Ok(found);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "profile bin was removed",
+    ))
 }
 
 fn validate_original_authority(tool: &GenerationTool, slot: usize, digest: &str) -> io::Result<()> {
