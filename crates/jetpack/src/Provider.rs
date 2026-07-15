@@ -492,7 +492,11 @@ impl Provider for NixProvider {
         // later offline reuse trusts re-hashed bytes, never text. `recipe`/
         // `policy`/`platform` are reproducible offline from constants + host.
         realized.cache_identity = super::Store::CacheIdentity {
-            source_fingerprint: realized.envelope.output_hash.clone(),
+            source_fingerprint: if realized.envelope.output_hash.is_empty() {
+                realized.producer.source_digest.clone()
+            } else {
+                realized.envelope.output_hash.clone()
+            },
             recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
             policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
             platform: super::Envelope::host_platform(),
@@ -501,7 +505,7 @@ impl Provider for NixProvider {
         realized.producer = super::Store::ProducerRecord::new(
             previous.provider,
             previous.immutable_source,
-            realized.envelope.output_hash.clone(),
+            previous.source_digest,
             previous.plan,
             previous.toolchain_facts,
             format!(
@@ -1270,10 +1274,13 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         replay_facts.insert(format!("nix.output.{name}"), path.clone());
         facts.insert(format!("nix.output.{name}"), path.clone());
     }
+    let derivation_digest = SHA256::sha256_hex(
+        format!("{drv_path}\n{:?}", named_outputs).as_bytes(),
+    );
     let producer = producer_record(
         "nix",
         drv_path,
-        &envelope.output_hash,
+        &derivation_digest,
         replay_facts,
         &format!("nix-derivation:{drv_path}"),
         &provisional_identity,

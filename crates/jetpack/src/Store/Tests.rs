@@ -1283,6 +1283,29 @@ mod tests {
     }
 
     #[test]
+    fn committed_producer_transaction_recovers_missing_package_projection() {
+        let (roots, _g) = temp_roots();
+        let ingested = ingest_fixture(
+            &roots,
+            "producer-recovery",
+            &[("out", "primary"), ("dev", "headers")],
+            Vec::new(),
+        );
+        let meta = roots
+            .hangar_dir()
+            .join(&ingested.entry.id)
+            .join("meta.json");
+        let expected = fs::read_to_string(&meta).unwrap();
+        fs::remove_file(&meta).unwrap();
+
+        let graph = closure_graph(&roots).unwrap();
+        let record = graph.records.get(&ingested.entry.id).unwrap();
+        assert_eq!(ProducerRecord::decode(&record.producer_record).unwrap().provider, "hangar-ingest");
+        assert_eq!(record.outputs.len(), 2);
+        assert_eq!(fs::read_to_string(meta).unwrap(), expected);
+    }
+
+    #[test]
     fn closure_legacy_migration_is_idempotent() {
         let (roots, _g) = temp_roots();
         let mut first = ingest_fixture(&roots, "legacy-first", &[("out", "first")], Vec::new()).entry;
@@ -1333,6 +1356,29 @@ mod tests {
             .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn"))
             .count();
         assert_eq!(transactions, 0);
+    }
+
+    #[test]
+    fn legacy_migration_fails_closed_without_immutable_producer_facts() {
+        let (roots, _g) = temp_roots();
+        let mut entry = ingest_fixture(
+            &roots,
+            "legacy-missing-producer",
+            &[("out", "legacy")],
+            Vec::new(),
+        )
+        .entry;
+        entry.producer_record.clear();
+        entry.cache_identity = CacheIdentity::default();
+        fs::write(
+            roots.hangar_dir().join(&entry.id).join("meta.json"),
+            entry.meta_json(),
+        )
+        .unwrap();
+        fs::remove_dir_all(roots.hangar_dir().join("closure-db")).unwrap();
+
+        let error = migrate_closure_graph(&roots).unwrap_err();
+        assert!(error.to_string().contains("lacks immutable producer facts"));
     }
 
     #[test]
