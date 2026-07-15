@@ -20,7 +20,10 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 mod common;
-use common::{fixture_filter, fixture_matches, normalize_fixture_selector, unified_diff};
+use common::{
+    fixture_filter, fixture_matches, jetpack_bin, normalize_fixture_selector, unified_diff,
+    unique_tmp,
+};
 
 // ============================================================================
 // Section: error snapshots, tests/ui/*.stderr (was tests/ui.rs)
@@ -140,7 +143,15 @@ fn ui_snapshots() {
             .map(|list| list.split(',').map(|item| item.trim().to_string()).collect::<Vec<_>>())
             .unwrap_or_default();
         let build_locked = src.lines().any(|line| line.trim() == "// @build_locked");
-        let actual = if programmable_build {
+        // Hangar diagnostics originate in the real Jetpack command surface,
+        // not Jet source compilation. This directive runs that command against
+        // an isolated root so its exact user-facing output remains I4-pinned.
+        let jetpack_hangar_digest_mismatch = src
+            .lines()
+            .any(|line| line.trim() == "// @jetpack_hangar_digest_mismatch");
+        let actual = if jetpack_hangar_digest_mismatch {
+            run_jetpack_hangar_digest_mismatch_snapshot()
+        } else if programmable_build {
             let result = if build_locked {
                 jet::compile_programmable_build_opts(
                     &file_arg,
@@ -252,6 +263,70 @@ fn ui_snapshots() {
         "expected the ui suite to contain tests, found {}",
         checked
     );
+}
+
+fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {
+    let scratch = unique_tmp("jet_ui_hangar_digest_mismatch");
+    let root = scratch.join("root");
+    let project = scratch.join("project");
+    let source = scratch.join("source");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("payload"), "trusted bytes\n").unwrap();
+
+    let ingest = Command::new(jetpack_bin())
+        .args([
+            "hangar",
+            "ingest",
+            source.to_str().unwrap(),
+            "--name",
+            "ui-e1315",
+            "--no-color",
+        ])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .expect("seed real Hangar object for diagnostic fixture");
+    assert!(
+        ingest.status.success(),
+        "seeding Hangar object failed: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    let ingest_stderr =
+        String::from_utf8(ingest.stderr).expect("Jetpack status is UTF-8");
+    let digest = ingest_stderr
+        .split_whitespace()
+        .find(|token| token.starts_with("sha256-"))
+        .expect("ingest status contains output digest");
+
+    let object = root.join("hangar/objects").join(digest);
+    let payload = object.join("payload");
+    for path in [&object, &payload] {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+    fs::write(&payload, "tampered bytes\n").unwrap();
+
+    let output = Command::new(jetpack_bin())
+        .args(["hangar", "verify", digest, "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .expect("run real jetpack hangar verify diagnostic fixture");
+    let _ = fs::remove_dir_all(&scratch);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "tampered Hangar object must fail verification: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8");
+    let start = stderr
+        .find("\n  error[E1315]")
+        .expect("real hangar verify must emit E1315");
+    stderr[start..].to_string()
 }
 
 fn normalize_volatile_ui_snapshot(shown_path: &str, actual: String) -> String {
