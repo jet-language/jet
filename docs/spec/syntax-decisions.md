@@ -2346,6 +2346,38 @@ packages, never compiler deps.
 
 ### Manifest, packages & jetpack
 
+**D-SHAPE5a=A — Package roles are typed fields**: each role is a named field
+whose package schema fixes one role type. Its value uses the existing
+expected-type record form `.{ ... }`; writing the role type explicitly produces
+the same typed value:
+
+```jet
+greeter: Package :: .{
+    identity: .{ name: "greeter", version: "1.0.0" }
+    sources: .{ roots: ["Source"] }
+}
+```
+
+The exact view may pin those same role types without changing meaning:
+
+```jet
+greeter: Package :: .{
+    identity: Package.Identity.{ name: "greeter", version: "1.0.0" }
+    sources: Package.Sources.{ roots: ["Source"] }
+}
+```
+
+There is no package-only `identity { ... }` block and no untyped, dotless
+`identity: { ... }` record. This decision reuses ordinary `.{ ... }` and
+`Type.{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
+production, formatter form, editor grammar, snapshot, or executable example.
+
+#560 owns all runtime enforcement and acceptance work: parser, sema, TIR,
+formatter, hover, inspect, Canvas, templates, migration, and rejection of
+unknown role fields. D-SHAPE5a does not choose file placement; the final role
+inventory or its fields; merge, composition, or override law; provenance
+(#578); outputs (#540/#587); or callable entry linking (#544).
+
 **D-SHAPE5b=A — One package output is an `Output` variant**: an executable,
 library, service, image, or bundle is one case of the closed `Output` sum. Each
 case carries a checked named record payload. An expected `Output` type may

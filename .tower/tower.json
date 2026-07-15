@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 617,
-    "rev": 6990,
+    "rev": 7006,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14168,12 +14168,16 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "Ratify one file-placement law, then make one-file packages and split workspaces follow it without translation.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-14",
           "by": "codex-main",
@@ -14246,7 +14250,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T11:56:28.357Z",
-      "updated": "2026-07-14",
+      "updated": "2026-07-15",
       "workOrder": 26
     },
     {
@@ -14529,12 +14533,17 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Ratify one role shape, then apply it consistently to identity, sources, dependencies, outputs, environments, and policy.",
       "blockedBy": [],
       "assignee": "terra-539-builder",
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "terra-539-builder",
+          "text": "Decision closure complete: canon and proposal record D-SHAPE5a=A as fixed typed role fields using existing inferred and explicit record construction. #560 owns all runtime enforcement; sibling package concerns and syntax/tooling claims remain excluded. decisions test passed; Tower docs lint clean."
+        },
         {
           "at": "2026-07-15",
           "by": "codex-orchestrator",
@@ -14545,7 +14554,44 @@
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canon fixes each package role as a schema field with a fixed role type, using existing expected-type `.{ ... }` construction.",
+          "status": "met",
+          "metBy": "terra-539-builder",
+          "verifiedBy": null,
+          "evidence": "docs/spec/syntax-decisions.md:2349-2373 records fixed schema role types and existing expected-type .{ ... } construction; decisions test passed.",
+          "at": "2026-07-15T00:18:21.542Z"
+        },
+        {
+          "n": 2,
+          "text": "Canon and proposal show equivalent inferred and explicit role values: `identity: .{ ... }` and `identity: Package.Identity.{ ... }` inside the same typed Package shape.",
+          "status": "met",
+          "metBy": "terra-539-builder",
+          "verifiedBy": null,
+          "evidence": "Canon lines 2355-2368 and proposal lines 158-169 show valid compact identity: .{ ... } and exact identity: Package.Identity.{ ... } inside typed Package values.",
+          "at": "2026-07-15T00:18:21.769Z"
+        },
+        {
+          "n": 3,
+          "text": "#560 exclusively owns parser, sema, TIR, formatter, hover, inspect, Canvas, templates, migration, closed-field enforcement, and executable acceptance work.",
+          "status": "met",
+          "metBy": "terra-539-builder",
+          "verifiedBy": null,
+          "evidence": "docs/spec/syntax-decisions.md:2375-2377 assigns parser, sema, TIR, formatter, hover, inspect, Canvas, templates, migration, unknown-field enforcement, and acceptance work to #560.",
+          "at": "2026-07-15T00:18:21.987Z"
+        },
+        {
+          "n": 4,
+          "text": "Docs exclude file placement, final role inventory or fields, merge/composition/override, provenance, outputs, callable linking, and any Syntax.rs, token, parser, grammar, snapshot, or executable-example change.",
+          "status": "met",
+          "metBy": "terra-539-builder",
+          "verifiedBy": null,
+          "evidence": "docs/spec/syntax-decisions.md:2370-2380 and proposal lines 171-175 reject package-only and dotless forms, enumerate excluded sibling scope, and claim no Syntax.rs/token/parser/grammar/snapshot/example change; Tower lint --docs clean.",
+          "at": "2026-07-15T00:18:22.201Z"
+        }
+      ],
       "refs": [
         "docs/proposals/language-shape-constitution.md",
         "docs/proposals/package-ecosystem-frameworks.md",
@@ -16900,43 +16946,49 @@
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "codex-orchestrator",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "codex-codemod-builder",
+          "text": "[handoff] Root cause fixed in checkpoint e279bfcf2: selected definitions carried Some(semantic identity), ordinary resolved references intentionally carried None, so raw equality lost calls and prevented expected crash hooks. Local matcher uses semantic identity when both anchors have one, else exact compiler module/kind/definition span. Codemod target passed 22/22 twice under default scheduler. Criteria 1-4 met; criterion 5 remains for parent full gate and independent verification."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Batch codemod planning sees every declared clean and fixture root deterministically under the default test scheduler; exact expected match counts hold.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-codemod-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T00:09:03.194Z"
+          "evidence": "Optional semantic anchors match by compiler identity when both sides provide one, otherwise exact module/kind/definition span; default-scheduler multi-root exact-count test passed twice.",
+          "at": "2026-07-15T00:18:14.202Z"
         },
         {
           "n": 2,
           "text": "Crash, journal, temp-inode, parent-directory, and hardlink adversarial paths reach their intended hooks and preserve fail-closed recovery semantics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-codemod-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T00:09:03.293Z"
+          "evidence": "Default-scheduler codemod target passed twice with crash completion/recovery, journal/temp inode and destination-parent swap rejection, hostile hardlink lock handling, undo, and fail-closed path checks unchanged.",
+          "at": "2026-07-15T00:18:19.097Z"
         },
         {
           "n": 3,
           "text": "All 22 codemod tests pass under the default scheduler without global single-thread mode or weakened transaction checks.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-codemod-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T00:09:03.386Z"
+          "evidence": "Ran nix develop -c cargo test --test codemod twice under default scheduler: 22 passed, 0 failed, 0 ignored both runs.",
+          "at": "2026-07-15T00:18:23.990Z"
         },
         {
           "n": 4,
           "text": "No new syntax, diagnostic code, dependency, unsafe code, or owner decision is introduced.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-codemod-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T00:09:03.478Z"
+          "evidence": "Change is local internal anchor comparison in Source/CmdCodemod.rs; no syntax, diagnostic, dependency, unsafe, invariant carve-out, or owner decision.",
+          "at": "2026-07-15T00:18:28.808Z"
         },
         {
           "n": 5,
@@ -30925,8 +30977,11 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-14T12:11:18.808Z"
+      "status": "ratified",
+      "created": "2026-07-14T12:11:18.808Z",
+      "outcome": "A",
+      "comment": "But open a ballot for project, that doesn’t sound right for jetos config, if this is going to fit both jetos and regular jet/jetpack it needs to be a fitting word in both cases",
+      "ratifiedAt": "2026-07-15"
     },
     {
       "id": "D-ECO2",
@@ -35346,6 +35401,118 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T00:18:34.669Z",
+      "by": "codex-codemod-builder",
+      "action": "card.update",
+      "ref": "c098lmb7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T00:18:28.808Z",
+      "by": "codex-codemod-builder",
+      "action": "card.criteria-meet",
+      "ref": "c098lmb7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-15T00:18:27.623Z",
+      "by": "terra-539-builder",
+      "action": "card.update",
+      "ref": "c0vvxein",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T00:18:23.990Z",
+      "by": "codex-codemod-builder",
+      "action": "card.criteria-meet",
+      "ref": "c098lmb7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T00:18:22.201Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0vvxein",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-15T00:18:21.987Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0vvxein",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T00:18:21.769Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0vvxein",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T00:18:21.542Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0vvxein",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T00:18:19.098Z",
+      "by": "codex-codemod-builder",
+      "action": "card.criteria-meet",
+      "ref": "c098lmb7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T00:18:14.202Z",
+      "by": "codex-codemod-builder",
+      "action": "card.criteria-meet",
+      "ref": "c098lmb7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T00:16:55.411Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ECO1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-15T00:16:27.165Z",
+      "by": "terra-539-builder",
+      "action": "card.update",
+      "ref": "c0vvxein",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-07-15T00:15:03.777Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-add",
+      "ref": "c0vvxein",
+      "note": "#4 Docs exclude file placement, final role inventory or fields,"
+    },
+    {
+      "at": "2026-07-15T00:15:03.564Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-add",
+      "ref": "c0vvxein",
+      "note": "#3 #560 exclusively owns parser, sema, TIR, formatter, hover, i"
+    },
+    {
+      "at": "2026-07-15T00:15:03.354Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-add",
+      "ref": "c0vvxein",
+      "note": "#2 Canon and proposal show equivalent inferred and explicit rol"
+    },
+    {
+      "at": "2026-07-15T00:15:03.143Z",
+      "by": "terra-539-builder",
+      "action": "card.criteria-add",
+      "ref": "c0vvxein",
+      "note": "#1 Canon fixes each package role as a schema field with a fixed"
+    },
+    {
       "at": "2026-07-15T00:14:31.755Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -38732,118 +38899,6 @@
       "action": "decision.ratify",
       "ref": "D-ECO-ENV1",
       "note": "A"
-    },
-    {
-      "at": "2026-07-14T19:03:59.191Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE3a",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T19:03:59.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0cztb5h",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T19:03:59.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0cztb5h",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T19:03:59.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0cztb5h",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T19:03:59.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0cztb5h",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T19:03:20.333Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-LIFECYCLE",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-14T19:03:20.333Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0we378g",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T19:03:20.333Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0we378g",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T19:03:20.333Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0we378g",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T19:03:20.333Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0we378g",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T19:02:45.843Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-14T19:02:45.843Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c083ne8x",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-14T19:02:45.843Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c083ne8x",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-14T19:02:45.843Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c083ne8x",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-14T19:02:45.843Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c083ne8x",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-14T18:59:24.290Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-RECEIPT-SCOPE1",
-      "note": "marked ready"
     }
   ],
   "nextNum": 368,

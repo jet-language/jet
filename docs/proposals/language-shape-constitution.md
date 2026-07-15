@@ -150,6 +150,30 @@ This does not decide the source spelling. Separate ballots choose:
 The same `Greeter` package appears in every option. A package ballot may not
 quietly choose effect syntax, entry conventions, or record construction.
 
+D-SHAPE5a has fixed one package role as a typed schema field. The expected role
+type permits the ordinary inferred record form; an expert can reveal and pin
+that same type without changing the value:
+
+```jet
+greeter: Package :: .{
+    identity: .{ name: "greeter", version: "1.0.0" }
+}
+```
+
+The exact view is:
+
+```jet
+greeter: Package :: .{
+    identity: Package.Identity.{ name: "greeter", version: "1.0.0" }
+}
+```
+
+This result creates neither a package-only `identity { ... }` block nor an
+untyped `identity: { ... }` record. It does not choose file placement, the
+role inventory, composition or overrides, provenance, outputs, or callable
+links. The language-wide implementation and every tool view remain #560 work;
+D-SHAPE5a itself reuses existing record construction.
+
 D-SHAPE5b has now fixed the representation of one output: it is a case of the
 closed `Output` sum, with a checked named record payload. Beginners may rely on
 an expected `Output` type and write the existing inferred variant form;
