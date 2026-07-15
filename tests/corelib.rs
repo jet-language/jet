@@ -2873,7 +2873,13 @@ fn bind_dns_dual_protocol_fixture() -> (
     for attempt in 1..=MAX_ATTEMPTS {
         let tcp = match std::net::TcpListener::bind("127.0.0.1:0") {
             Ok(tcp) => tcp,
-            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AddrInUse
+                    && attempt < MAX_ATTEMPTS =>
+            {
+                continue;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => break,
             Err(error) => panic!("failed to bind DNS fixture TCP listener: {error}"),
         };
         let addr = tcp.local_addr().unwrap_or_else(|error| {
@@ -2887,14 +2893,12 @@ fn bind_dns_dual_protocol_fixture() -> (
             {
                 continue;
             }
-            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => panic!(
-                "failed to reserve one TCP/UDP DNS fixture port after {MAX_ATTEMPTS} attempts"
-            ),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => break,
             Err(error) => panic!("failed to bind DNS fixture UDP socket at {addr}: {error}"),
         }
     }
 
-    unreachable!("DNS fixture bind loop always returns or panics")
+    panic!("failed to reserve one TCP/UDP DNS fixture port after {MAX_ATTEMPTS} attempts")
 }
 
 #[test]
