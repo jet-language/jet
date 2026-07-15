@@ -843,10 +843,37 @@ mod tests {
             third.entry.envelope.output_hash
         );
         assert_eq!(
-            referrers_of(&roots, &first.entry.envelope.output_hash),
+            referrers_of(&roots, &first.entry.envelope.output_hash).unwrap(),
             vec![third.entry.envelope.output_hash.clone()]
         );
         assert_eq!(recover_hangar_staging(&roots).unwrap(), 0);
+    }
+
+    #[test]
+    fn ingest_retry_after_object_publish_seals_before_metadata() {
+        let (roots, _g) = temp_roots();
+        let first = ingest_fixture(&roots, "retry-crash", &[("out", "retry")], Vec::new());
+        let object = PathBuf::from(&first.entry.out);
+        make_tree_writable_for_removal(&object).unwrap();
+        fs::remove_dir_all(roots.hangar_dir().join(&first.entry.id)).unwrap();
+        fs::remove_dir_all(roots.hangar_dir().join("closure-db")).unwrap();
+
+        let retry = ingest_fixture(&roots, "retry-crash", &[("out", "retry")], Vec::new());
+        assert!(retry.deduplicated);
+        assert!(fs::metadata(&object).unwrap().permissions().readonly());
+        assert!(fs::metadata(object.join("payload"))
+            .unwrap()
+            .permissions()
+            .readonly());
+        assert!(roots
+            .hangar_dir()
+            .join(&retry.entry.id)
+            .join("meta.json")
+            .is_file());
+        assert!(closure_graph(&roots)
+            .unwrap()
+            .records
+            .contains_key(&retry.entry.id));
     }
 
     #[test]
@@ -1041,8 +1068,15 @@ mod tests {
                 middle.entry.envelope.output_hash.clone(),
             ]
         );
+        let mut expected_closure = vec![
+            base.entry.envelope.output_hash.clone(),
+            dev.clone(),
+            middle.entry.envelope.output_hash.clone(),
+        ];
+        expected_closure.sort();
+        assert_eq!(closure_of(&roots, &dev).unwrap(), expected_closure);
         assert_eq!(
-            referrers_of(&roots, &middle.entry.envelope.output_hash),
+            referrers_of(&roots, &middle.entry.envelope.output_hash).unwrap(),
             vec![dev.clone(), primary.clone()]
         );
         let action = entry_action_key(&consumer.entry);
@@ -1059,6 +1093,27 @@ mod tests {
         assert!(transitive.contains(&base.entry.envelope.output_hash));
         assert!(transitive.contains(&middle.entry.envelope.output_hash));
         assert!(!transitive.contains(&primary));
+        let mut expected_referrers = vec![
+            dev.clone(),
+            middle.entry.envelope.output_hash.clone(),
+            primary.clone(),
+        ];
+        expected_referrers.sort();
+        assert_eq!(
+            transitive_referrers_of(&roots, &base.entry.envelope.output_hash).unwrap(),
+            expected_referrers
+        );
+        let mut expected_reverse_closure = vec![
+            base.entry.envelope.output_hash.clone(),
+            dev,
+            middle.entry.envelope.output_hash.clone(),
+            primary,
+        ];
+        expected_reverse_closure.sort();
+        assert_eq!(
+            reverse_closure_of(&roots, &base.entry.envelope.output_hash).unwrap(),
+            expected_reverse_closure
+        );
     }
 
     #[test]
@@ -1073,7 +1128,7 @@ mod tests {
             vec![left.entry.envelope.output_hash.clone()],
         );
         assert_eq!(
-            referrers_of(&roots, &left.entry.envelope.output_hash),
+            referrers_of(&roots, &left.entry.envelope.output_hash).unwrap(),
             vec![consumer.entry.envelope.output_hash.clone()]
         );
 
@@ -1146,6 +1201,30 @@ mod tests {
         assert_eq!(entry_action_key(&entry), ordered);
         entry.references.pop();
         assert_ne!(entry_action_key(&entry), ordered);
+
+        let mut left = first.entry.clone();
+        left.reference = "a\nsource=b".to_string();
+        left.cache_identity.source_fingerprint = "c".to_string();
+        let mut right = first.entry.clone();
+        right.reference = "a".to_string();
+        right.cache_identity.source_fingerprint = "b\nsource=c".to_string();
+        assert_ne!(entry_action_key(&left), entry_action_key(&right));
+    }
+
+    #[test]
+    fn closure_rejects_named_out_that_disagrees_with_primary() {
+        let (roots, _g) = temp_roots();
+        let primary = ingest_fixture(&roots, "named-out-primary", &[("out", "primary")], Vec::new());
+        let other = ingest_fixture(&roots, "named-out-other", &[("out", "other")], Vec::new());
+        let mut conflicting = primary.entry.clone();
+        conflicting
+            .named_outputs
+            .insert("out".to_string(), other.entry.envelope.output_hash);
+        let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &conflicting)
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("names `out`"));
     }
 
     #[test]
@@ -1185,6 +1264,9 @@ mod tests {
             .map(|entry| entry.path())
             .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("txn"))
             .unwrap();
+        let legacy_referrers = roots.hangar_dir().join("referrers");
+        fs::create_dir_all(&legacy_referrers).unwrap();
+        fs::write(legacy_referrers.join("fake.refs"), "fallback-must-not-win\n").unwrap();
         std::fs::OpenOptions::new()
             .append(true)
             .open(transaction)
@@ -1194,36 +1276,60 @@ mod tests {
         let error = closure_graph(&roots).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("checksum mismatch"));
+        assert!(referrers_of(&roots, "fake").is_err());
     }
 
     #[test]
     fn closure_legacy_migration_is_idempotent() {
         let (roots, _g) = temp_roots();
-        let out = roots.root.join("legacy-output");
-        fs::create_dir_all(&out).unwrap();
-        fs::write(out.join("payload"), "legacy").unwrap();
-        let envelope = super::super::super::Envelope::Envelope::for_output(
-            &out.to_string_lossy(),
-            "path:legacy",
-            "legacy",
-        );
-        let entry = record_verified(
-            &roots,
-            "legacy",
-            "1",
-            "path:legacy",
-            &out.to_string_lossy(),
-            "",
-            "",
-            &envelope,
-            &test_identity(),
+        let mut first = ingest_fixture(&roots, "legacy-first", &[("out", "first")], Vec::new()).entry;
+        let mut second = ingest_fixture(&roots, "legacy-second", &[("out", "second")], Vec::new()).entry;
+        first.references = vec![second.envelope.output_hash.clone()];
+        second.references = vec![first.envelope.output_hash.clone()];
+        fs::write(
+            roots.hangar_dir().join(&first.id).join("meta.json"),
+            first.meta_json(),
+        )
+        .unwrap();
+        fs::write(
+            roots.hangar_dir().join(&second.id).join("meta.json"),
+            second.meta_json(),
         )
         .unwrap();
         fs::remove_dir_all(roots.hangar_dir().join("closure-db")).unwrap();
 
-        assert_eq!(migrate_closure_graph(&roots).unwrap(), 1);
+        assert_eq!(migrate_closure_graph(&roots).unwrap(), 2);
         assert_eq!(migrate_closure_graph(&roots).unwrap(), 0);
-        assert!(closure_graph(&roots).unwrap().records.contains_key(&entry.id));
+        let graph = closure_graph(&roots).unwrap();
+        assert!(graph.records.contains_key(&first.id));
+        assert!(graph.records.contains_key(&second.id));
+        assert_eq!(graph.direct_references(&first.envelope.output_hash), first.references);
+        assert_eq!(graph.direct_references(&second.envelope.output_hash), second.references);
+    }
+
+    #[test]
+    fn closure_legacy_migration_rejects_atomically() {
+        let (roots, _g) = temp_roots();
+        let mut entry = ingest_fixture(&roots, "legacy-invalid", &[("out", "invalid")], Vec::new()).entry;
+        entry.references = vec!["sha256-missing".to_string()];
+        fs::write(
+            roots.hangar_dir().join(&entry.id).join("meta.json"),
+            entry.meta_json(),
+        )
+        .unwrap();
+        fs::remove_dir_all(roots.hangar_dir().join("closure-db")).unwrap();
+
+        let error = migrate_closure_graph(&roots).unwrap_err();
+        assert!(error.to_string().contains("references missing object"));
+        let journal = roots.hangar_dir().join("closure-db/journal");
+        let transactions = fs::read_dir(journal)
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn"))
+            .count();
+        assert_eq!(transactions, 0);
     }
 
     #[test]
@@ -1571,6 +1677,7 @@ fn store_stays_split_along_existing_phases() {
     let read = |relative: &str| std::fs::read_to_string(root.join(relative)).unwrap();
     let store = read("src/Store.rs");
     let ingest = read("src/Store/Ingest.rs");
+    let closure = read("src/Store/Closure.rs");
     let tests = read("src/Store/Tests.rs");
     let tests_production = tests
         .split("#[test]\nfn store_stays_split_along_existing_phases")
@@ -1580,6 +1687,7 @@ fn store_stays_split_along_existing_phases() {
     for (relative, source) in [
         ("src/Store.rs", store.as_str()),
         ("src/Store/Ingest.rs", ingest.as_str()),
+        ("src/Store/Closure.rs", closure.as_str()),
         ("src/Store/Tests.rs", tests_production),
     ] {
         assert!(
@@ -1590,19 +1698,31 @@ fn store_stays_split_along_existing_phases() {
         assert!(!source.contains("#[path"));
     }
     assert!(store.contains("\nmod Ingest;\npub use Ingest::*;"));
+    assert!(store.contains("\nmod Closure;\npub use Closure::*;"));
     assert!(store.contains("\n#[cfg(test)]\nmod Tests;"));
 
     let ordered = [
         "pub struct IngestRequest",
         "pub fn recover_hangar_staging",
         "pub fn ingest_tree",
-        "pub fn referrers_of",
         "fn copy_nofollow_tree",
         "fn stable_meta_identity",
     ];
     let positions: Vec<usize> = ordered
         .iter()
         .map(|needle| ingest.find(needle).unwrap())
+        .collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    let closure_ordered = [
+        "pub fn closure_graph",
+        "pub fn referrers_of",
+        "pub fn migrate_closure_graph",
+        "fn load_graph",
+        "fn validate_graph",
+    ];
+    let positions: Vec<usize> = closure_ordered
+        .iter()
+        .map(|needle| closure.find(needle).unwrap())
         .collect();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
 }

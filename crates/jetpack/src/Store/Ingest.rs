@@ -175,6 +175,7 @@ fn ingest_tree_unlocked(
             if req.allow_semantic_xattrs() {
                 copy_semantic_xattrs_tree(src, &dst)?;
             }
+            seal_node(&dst)?;
             let digest = super::super::Envelope::try_output_hash_of_with_policy(
                 &dst.to_string_lossy(),
                 req.allow_semantic_xattrs(),
@@ -214,6 +215,7 @@ fn ingest_tree_unlocked(
             })?;
             let destination = objects.join(digest);
             if destination.is_dir() {
+                seal_node(&destination)?;
                 let actual = super::super::Envelope::try_output_hash_of_in_hangar(
                     &destination.to_string_lossy(),
                     &hangar,
@@ -225,14 +227,32 @@ fn ingest_tree_unlocked(
                         "existing object `{digest}` re-hashed as `{actual}`"
                     )));
                 }
+                fsync_tree(&destination)?;
+                fsync_dir(&objects)?;
                 continue;
             }
             let partial = objects.join(format!("{digest}{PARTIAL_SUFFIX}"));
             if partial.exists() {
                 let _ = fs::remove_dir_all(&partial);
             }
+            // This filesystem denies renaming a read-only directory. Reopen
+            // only inside the Hangar lock, publish, then restore the sealed
+            // mode before the canonical path or metadata becomes visible.
+            make_tree_writable_for_removal(staged)?;
             fs::rename(staged, &partial)?;
-            fsync_dir_recursive(&partial)?;
+            seal_node(&partial)?;
+            let actual = super::super::Envelope::try_output_hash_of_in_hangar(
+                &partial.to_string_lossy(),
+                &hangar,
+                req.allow_semantic_xattrs(),
+            )
+            .map_err(IngestError::Invalid)?;
+            if &actual != digest {
+                return Err(IngestError::Invalid(format!(
+                    "sealed object `{digest}` re-hashed as `{actual}`"
+                )));
+            }
+            fsync_tree(&partial)?;
             fsync_dir(&objects)?;
             fs::rename(&partial, &destination)?;
             fsync_dir(&objects)?;
@@ -285,7 +305,6 @@ fn ingest_tree_unlocked(
         };
         atomic_write_meta(&dir.join("meta.json"), &entry.meta_json())?;
         register_entry_unlocked(roots, &entry)?;
-        register_referrers(&hangar, &primary, &req.references)?;
         Ok(IngestedObject { entry, deduplicated })
     })();
 
@@ -318,53 +337,6 @@ fn valid_output_name(name: &str) -> bool {
     component == path.as_os_str() && components.next().is_none()
 }
 
-/// Referrers of `digest`: objects that list it in `references`.
-pub fn referrers_of(roots: &Roots, digest: &str) -> Vec<String> {
-    if let Ok(graph) = closure_graph(roots) {
-        let referrers = graph.referrers(digest);
-        if !referrers.is_empty() {
-            return referrers;
-        }
-    }
-    let path = roots
-        .hangar_dir()
-        .join(REFERRERS_DIR)
-        .join(format!("{digest}.refs"));
-    let Ok(text) = fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    let mut out: Vec<String> = text.lines().filter(|l| !l.is_empty()).map(str::to_string).collect();
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn register_referrers(
-    hangar: &Path,
-    digest: &str,
-    references: &[String],
-) -> Result<(), IngestError> {
-    let dir = hangar.join(REFERRERS_DIR);
-    fs::create_dir_all(&dir)?;
-    for dep in references {
-        let path = dir.join(format!("{dep}.refs"));
-        let mut lines = if path.exists() {
-            fs::read_to_string(&path)?
-                .lines()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        if !lines.iter().any(|l| l == digest) {
-            lines.push(digest.to_string());
-            lines.sort();
-            atomic_write_meta(&path, &format!("{}\n", lines.join("\n")))?;
-        }
-    }
-    Ok(())
-}
-
 fn atomic_write_meta(path: &Path, contents: &str) -> Result<(), IngestError> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, contents)?;
@@ -379,6 +351,9 @@ fn atomic_write_meta(path: &Path, contents: &str) -> Result<(), IngestError> {
         }
     }
     fs::rename(&tmp, path)?;
+    if let Some(parent) = path.parent() {
+        fsync_dir(parent)?;
+    }
     Ok(())
 }
 
@@ -402,23 +377,6 @@ fn fsync_dir(path: &Path) -> std::io::Result<()> {
         }
     }
     let _ = path;
-    Ok(())
-}
-
-fn fsync_dir_recursive(path: &Path) -> std::io::Result<()> {
-    if path.is_dir() {
-        for ent in fs::read_dir(path)?.flatten() {
-            fsync_dir_recursive(&ent.path())?;
-        }
-        fsync_dir(path)?;
-    } else if path.is_file() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::io::AsRawFd as _;
-            let file = fs::File::open(path)?;
-            let _ = libc_fsync(file.as_raw_fd());
-        }
-    }
     Ok(())
 }
 

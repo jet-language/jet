@@ -239,7 +239,17 @@ fn cmd_hangar_referrers(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     };
     let roots = Store::resolve();
-    let refs = Store::referrers_of(&roots, &digest);
+    let refs = match Store::referrers_of(&roots, &digest) {
+        Ok(refs) => refs,
+        Err(error) => {
+            theme.error(
+                "could not read the hangar closure graph",
+                &error.to_string(),
+                "run `jetpack hangar verify` before querying referrers.",
+            );
+            return 2;
+        }
+    };
     if refs.is_empty() {
         theme.status("no referrers.");
         return 0;

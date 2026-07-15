@@ -55,6 +55,14 @@ impl ClosureGraph {
         seen.into_iter().collect()
     }
 
+    pub fn closure(&self, digest: &str) -> Vec<String> {
+        let mut closure = self.transitive_references(digest);
+        closure.push(digest.to_string());
+        closure.sort();
+        closure.dedup();
+        closure
+    }
+
     pub fn referrers(&self, digest: &str) -> Vec<String> {
         self.records
             .values()
@@ -63,6 +71,26 @@ impl ClosureGraph {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
+    }
+
+    pub fn transitive_referrers(&self, digest: &str) -> Vec<String> {
+        let mut seen = BTreeSet::new();
+        let mut pending = self.referrers(digest);
+        while let Some(next) = pending.pop() {
+            if next == digest || !seen.insert(next.clone()) {
+                continue;
+            }
+            pending.extend(self.referrers(&next));
+        }
+        seen.into_iter().collect()
+    }
+
+    pub fn reverse_closure(&self, digest: &str) -> Vec<String> {
+        let mut closure = self.transitive_referrers(digest);
+        closure.push(digest.to_string());
+        closure.sort();
+        closure.dedup();
+        closure
     }
 
     pub fn action_outputs(&self, action_key: &str) -> BTreeMap<String, String> {
@@ -103,6 +131,9 @@ struct JournalEntry {
 pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_closure_journal_unlocked(roots)?;
+        if transaction_paths(&journal_dir(roots))?.is_empty() {
+            migrate_closure_graph_unlocked(roots)?;
+        }
         load_graph(roots)
     })
 }
@@ -113,6 +144,22 @@ pub fn direct_references_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<
 
 pub fn transitive_references_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
     Ok(closure_graph(roots)?.transitive_references(digest))
+}
+
+pub fn closure_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
+    Ok(closure_graph(roots)?.closure(digest))
+}
+
+pub fn referrers_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
+    Ok(closure_graph(roots)?.referrers(digest))
+}
+
+pub fn transitive_referrers_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
+    Ok(closure_graph(roots)?.transitive_referrers(digest))
+}
+
+pub fn reverse_closure_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
+    Ok(closure_graph(roots)?.reverse_closure(digest))
 }
 
 pub fn action_outputs_of(
@@ -131,20 +178,27 @@ pub fn actions_for_output(
 
 pub fn entry_action_key(entry: &StoreEntry) -> String {
     let identity = &entry.cache_identity;
-    let mut canonical = format!(
-        "jet.action-store.v2\nreference={}\nsource={}\nrecipe={}\npolicy={}\nplatform={}\n",
-        entry.reference,
-        identity.source_fingerprint,
-        identity.recipe_fingerprint,
-        identity.policy_fingerprint,
-        identity.platform,
-    );
-    for digest in entry.references.iter().collect::<BTreeSet<_>>() {
-        canonical.push_str("reference-digest=");
-        canonical.push_str(digest);
-        canonical.push('\n');
+    let mut canonical = b"jet.action-store.v3\0".to_vec();
+    for field in [
+        entry.reference.as_bytes(),
+        identity.source_fingerprint.as_bytes(),
+        identity.recipe_fingerprint.as_bytes(),
+        identity.policy_fingerprint.as_bytes(),
+        identity.platform.as_bytes(),
+    ] {
+        push_frame(&mut canonical, field);
     }
-    format!("sha256-{}", SHA256::sha256_hex(canonical.as_bytes()))
+    let references = entry.references.iter().collect::<BTreeSet<_>>();
+    canonical.extend_from_slice(&(references.len() as u64).to_be_bytes());
+    for digest in references {
+        push_frame(&mut canonical, digest.as_bytes());
+    }
+    format!("sha256-{}", SHA256::sha256_hex(&canonical))
+}
+
+fn push_frame(out: &mut Vec<u8>, field: &[u8]) {
+    out.extend_from_slice(&(field.len() as u64).to_be_bytes());
+    out.extend_from_slice(field);
 }
 
 pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
@@ -155,12 +209,55 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
 
 fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
     recover_closure_journal_unlocked(roots)?;
-    let mut migrated = 0;
-    for entry in list(roots) {
-        if register_entry_unlocked(roots, &entry)? {
-            migrated += 1;
+    let mut graph = load_graph(roots)?;
+    let mut entries = list(roots);
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut seen_records = BTreeSet::new();
+    let mut objects = BTreeMap::new();
+    let mut records = Vec::new();
+    for entry in entries {
+        let (descriptors, record) = descriptor_for_entry(roots, &entry)?;
+        if !seen_records.insert(record.id.clone()) {
+            return Err(std::io::Error::other(format!(
+                "legacy migration contains duplicate record `{}`",
+                record.id
+            )));
+        }
+        for object in descriptors {
+            if let Some(existing) = graph.objects.get(&object.digest) {
+                if existing != &object {
+                    return Err(std::io::Error::other(format!(
+                        "immutable closure object `{}` changed descriptor",
+                        object.digest
+                    )));
+                }
+            } else if let Some(existing) = objects.insert(object.digest.clone(), object.clone()) {
+                if existing != object {
+                    return Err(std::io::Error::other(format!(
+                        "legacy migration gives object `{}` conflicting descriptors",
+                        object.digest
+                    )));
+                }
+            }
+        }
+        if graph.records.get(&record.id) != Some(&record) {
+            records.push(record);
         }
     }
+    if objects.is_empty() && records.is_empty() {
+        return Ok(0);
+    }
+    let migrated = records.len();
+    let transaction = JournalEntry {
+        kind: JournalKind::Delta,
+        objects: objects.into_values().collect(),
+        records,
+        deleted_records: Vec::new(),
+    };
+    apply_entry(&mut graph, transaction.clone()).map_err(std::io::Error::other)?;
+    validate_graph(roots, &graph).map_err(std::io::Error::other)?;
+    append_entry(roots, &transaction)?;
+    compact_if_needed(roots)?;
     Ok(migrated)
 }
 
@@ -181,40 +278,16 @@ pub(crate) fn register_entry_unlocked(
     {
         return Ok(false);
     }
-    for object in &objects {
-        if let Some(existing) = graph.objects.get(&object.digest) {
-            if existing != object {
-                return Err(std::io::Error::other(format!(
-                    "immutable closure object `{}` changed descriptor",
-                    object.digest
-                )));
-            }
-        }
-    }
-    let new_digests = objects
-        .iter()
-        .map(|object| object.digest.as_str())
-        .collect::<BTreeSet<_>>();
-    if let Some(missing) = record
-        .references
-        .iter()
-        .find(|digest| !graph.objects.contains_key(*digest) && !new_digests.contains(digest.as_str()))
-    {
-        return Err(std::io::Error::other(format!(
-            "closure record `{}` references missing object `{missing}`",
-            record.id
-        )));
-    }
-    reject_action_conflict(&graph, &record).map_err(std::io::Error::other)?;
-    append_entry(
-        roots,
-        &JournalEntry {
-            kind: JournalKind::Delta,
-            objects,
-            records: vec![record],
-            deleted_records: Vec::new(),
-        },
-    )?;
+    let transaction = JournalEntry {
+        kind: JournalKind::Delta,
+        objects,
+        records: vec![record],
+        deleted_records: Vec::new(),
+    };
+    let mut candidate = graph;
+    apply_entry(&mut candidate, transaction.clone()).map_err(std::io::Error::other)?;
+    validate_graph(roots, &candidate).map_err(std::io::Error::other)?;
+    append_entry(roots, &transaction)?;
     compact_if_needed(roots)?;
     Ok(true)
 }
@@ -285,6 +358,14 @@ fn descriptor_for_entry(
         )));
     }
     let object_root = roots.hangar_dir().join(OBJECTS_DIR);
+    if let Some(named_primary) = entry.named_outputs.get("out") {
+        if named_primary != &primary {
+            return Err(std::io::Error::other(format!(
+                "closure record `{}` names `out` as `{named_primary}`, not primary `{primary}`",
+                entry.id
+            )));
+        }
+    }
     let mut outputs = entry.named_outputs.clone();
     outputs.insert("out".to_string(), primary.clone());
     let mut objects = Vec::new();
@@ -334,32 +415,109 @@ fn load_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
                 format!("closure journal `{}`: {error}", path.display()),
             )
         })?;
-        if entry.kind == JournalKind::Snapshot {
-            graph = ClosureGraph::default();
-        }
-        for id in entry.deleted_records {
-            graph.records.remove(&id);
-        }
-        for object in entry.objects {
-            if let Some(existing) = graph.objects.get(&object.digest) {
-                if existing != &object {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("closure object `{}` changed immutable descriptor", object.digest),
-                    ));
-                }
-            } else {
-                graph.objects.insert(object.digest.clone(), object);
-            }
-        }
-        for record in entry.records {
-            reject_action_conflict(&graph, &record).map_err(|error| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, error)
-            })?;
-            graph.records.insert(record.id.clone(), record);
-        }
+        apply_entry(&mut graph, entry)
+            .and_then(|()| validate_graph(roots, &graph))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     }
     Ok(graph)
+}
+
+fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), String> {
+    if entry.kind == JournalKind::Snapshot {
+        *graph = ClosureGraph::default();
+    }
+    for id in entry.deleted_records {
+        graph.records.remove(&id);
+    }
+    for object in entry.objects {
+        if let Some(existing) = graph.objects.get(&object.digest) {
+            if existing != &object {
+                return Err(format!(
+                    "closure object `{}` changed immutable descriptor",
+                    object.digest
+                ));
+            }
+        } else {
+            graph.objects.insert(object.digest.clone(), object);
+        }
+    }
+    for record in entry.records {
+        reject_action_conflict(graph, &record)?;
+        graph.records.insert(record.id.clone(), record);
+    }
+    Ok(())
+}
+
+fn validate_graph(roots: &Roots, graph: &ClosureGraph) -> Result<(), String> {
+    let hangar = roots.hangar_dir();
+    for (digest, object) in &graph.objects {
+        if digest.is_empty() || digest != &object.digest || object.path.is_empty() {
+            return Err(format!("invalid closure object descriptor `{digest}`"));
+        }
+        let path = Path::new(&object.path);
+        if path
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+        {
+            return Err(format!(
+                "closure object `{digest}` path contains parent traversal"
+            ));
+        }
+        let expected_external = !path.starts_with(&hangar);
+        if object.external != expected_external {
+            return Err(format!(
+                "closure object `{digest}` has invalid external marker"
+            ));
+        }
+    }
+    let mut actions: BTreeMap<&str, &ClosureRecord> = BTreeMap::new();
+    for (id, record) in &graph.records {
+        if id.is_empty() || id != &record.id || record.action_key.is_empty() {
+            return Err(format!("invalid closure record `{id}`"));
+        }
+        if record.outputs.get("out") != Some(&record.primary) {
+            return Err(format!(
+                "closure record `{id}` primary is not its `out` output"
+            ));
+        }
+        for (name, digest) in &record.outputs {
+            if !valid_output_name(name) {
+                return Err(format!("closure record `{id}` has invalid output name `{name}`"));
+            }
+            if !graph.objects.contains_key(digest) {
+                return Err(format!(
+                    "closure record `{id}` output `{name}` references missing object `{digest}`"
+                ));
+            }
+        }
+        if let Some(missing) = record
+            .references
+            .iter()
+            .find(|digest| !graph.objects.contains_key(*digest))
+        {
+            return Err(format!(
+                "closure record `{id}` references missing object `{missing}`"
+            ));
+        }
+        if let Some(existing) = actions.insert(&record.action_key, record) {
+            if existing.outputs != record.outputs || existing.references != record.references {
+                return Err(format!(
+                    "action `{}` maps to conflicting records `{}` and `{}`",
+                    record.action_key, existing.id, record.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn valid_output_name(name: &str) -> bool {
+    if name.bytes().any(|byte| matches!(byte, b'/' | b'\\')) {
+        return false;
+    }
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }
 
 fn reject_action_conflict(graph: &ClosureGraph, candidate: &ClosureRecord) -> Result<(), String> {
@@ -487,13 +645,16 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
     for line in lines {
         let fields = line.split('\t').collect::<Vec<_>>();
         match fields.as_slice() {
-            ["object", digest, path, external] => objects.push(ClosureObject {
+            ["object", digest, path, external @ ("0" | "1")] => objects.push(ClosureObject {
                 digest: unhex(digest)?,
                 path: unhex(path)?,
                 external: *external == "1",
             }),
             ["record", id, primary, action_key] => {
                 let id = unhex(id)?;
+                if records.contains_key(&id) {
+                    return Err(format!("duplicate closure record `{id}`"));
+                }
                 records.insert(
                     id.clone(),
                     ClosureRecord {
@@ -510,7 +671,13 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
                 let record = records
                     .get_mut(&id)
                     .ok_or_else(|| format!("output precedes record `{id}`"))?;
-                record.outputs.insert(unhex(name)?, unhex(digest)?);
+                let name = unhex(name)?;
+                if record.outputs.contains_key(&name) {
+                    return Err(format!(
+                        "duplicate output `{name}` in closure record `{id}`"
+                    ));
+                }
+                record.outputs.insert(name, unhex(digest)?);
             }
             ["reference", id, digest] => {
                 let id = unhex(id)?;
@@ -592,5 +759,88 @@ fn nibble(byte: u8) -> Result<u8, String> {
         b'0'..=b'9' => Ok(byte - b'0'),
         b'a'..=b'f' => Ok(byte - b'a' + 10),
         _ => Err("invalid hex field".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod integrity_tests {
+    use super::*;
+
+    fn checked(body: String) -> String {
+        let checksum = SHA256::sha256_hex(body.as_bytes());
+        format!("{body}checksum\t{checksum}\n")
+    }
+
+    #[test]
+    fn parser_rejects_duplicate_record_ids_and_output_names() {
+        let id = hex("record");
+        let primary = hex("sha256-primary");
+        let action = hex("sha256-action");
+        let duplicate_record = checked(format!(
+            "jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\nrecord\t{id}\t{primary}\t{action}\n"
+        ));
+        assert!(parse_entry(&duplicate_record)
+            .unwrap_err()
+            .contains("duplicate closure record"));
+
+        let out = hex("out");
+        let duplicate_output = checked(format!(
+            "jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\noutput\t{id}\t{out}\t{primary}\noutput\t{id}\t{out}\t{primary}\n"
+        ));
+        assert!(parse_entry(&duplicate_output)
+            .unwrap_err()
+            .contains("duplicate output"));
+    }
+
+    #[test]
+    fn graph_validation_rejects_external_and_relation_inconsistency() {
+        let roots = Roots {
+            root: std::env::temp_dir().join(format!(
+                "jet-closure-integrity-{}",
+                std::process::id()
+            )),
+            dev_mode: true,
+        };
+        let digest = "sha256-primary".to_string();
+        let object = ClosureObject {
+            digest: digest.clone(),
+            path: roots
+                .hangar_dir()
+                .join(OBJECTS_DIR)
+                .join(&digest)
+                .to_string_lossy()
+                .into_owned(),
+            external: true,
+        };
+        let record = ClosureRecord {
+            id: "record".to_string(),
+            primary: digest.clone(),
+            action_key: "sha256-action".to_string(),
+            outputs: BTreeMap::from([("out".to_string(), digest.clone())]),
+            references: BTreeSet::new(),
+        };
+        let mut graph = ClosureGraph {
+            objects: BTreeMap::from([(digest.clone(), object)]),
+            records: BTreeMap::from([(record.id.clone(), record)]),
+        };
+        assert!(validate_graph(&roots, &graph)
+            .unwrap_err()
+            .contains("invalid external marker"));
+
+        graph.objects.get_mut(&digest).unwrap().external = false;
+        graph.records.get_mut("record").unwrap().primary = "sha256-other".to_string();
+        assert!(validate_graph(&roots, &graph)
+            .unwrap_err()
+            .contains("primary is not its `out` output"));
+
+        graph.records.get_mut("record").unwrap().primary = digest.clone();
+        graph.records
+            .get_mut("record")
+            .unwrap()
+            .references
+            .insert("sha256-missing".to_string());
+        assert!(validate_graph(&roots, &graph)
+            .unwrap_err()
+            .contains("references missing object"));
     }
 }

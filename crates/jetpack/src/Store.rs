@@ -72,6 +72,19 @@ fn seal_node(path: &Path) -> std::io::Result<()> {
     fs::set_permissions(path, permissions)
 }
 
+fn fsync_tree(path: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            fsync_tree(&entry?.path())?;
+        }
+    }
+    fs::File::open(path)?.sync_all()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheExpectation {
     pub identity: CacheIdentity,
@@ -286,13 +299,36 @@ fn canonicalize_local_output_unlocked(
 ) -> std::io::Result<(String, String, String)> {
     let source = Path::new(out);
     let objects = roots.hangar_dir().join(OBJECTS_DIR);
-    if digest.is_empty() || !source.starts_with(roots.hangar_dir()) || source.starts_with(&objects) {
+    if digest.is_empty() || !source.starts_with(roots.hangar_dir()) {
         return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
     }
     let destination = objects.join(digest);
     fs::create_dir_all(&objects).map_err(|error| {
         std::io::Error::new(error.kind(), format!("creating canonical object directory: {error}"))
     })?;
+    if source.starts_with(&objects) {
+        if source != destination {
+            return Err(std::io::Error::other(format!(
+                "canonical object path `{}` disagrees with digest `{digest}`",
+                source.display()
+            )));
+        }
+        let actual = super::Envelope::try_output_hash_of_in_hangar(
+            &destination.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .map_err(std::io::Error::other)?;
+        if actual != digest {
+            return Err(std::io::Error::other(format!(
+                "canonical object `{digest}` re-hashed as `{actual}`"
+            )));
+        }
+        seal_local_output(&destination)?;
+        fsync_tree(&destination)?;
+        fs::File::open(&objects)?.sync_all()?;
+        return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
+    }
     if destination.exists() {
         let actual = super::Envelope::try_output_hash_of_in_hangar(
             &destination.to_string_lossy(),
@@ -305,6 +341,9 @@ fn canonicalize_local_output_unlocked(
                 "canonical object `{digest}` re-hashed as `{actual}`"
             )));
         }
+        seal_local_output(&destination)?;
+        fsync_tree(&destination)?;
+        fs::File::open(&objects)?.sync_all()?;
         if source != destination && source.exists() {
             make_tree_writable_for_removal(source)?;
             fs::remove_dir_all(source).map_err(|error| {
@@ -321,6 +360,7 @@ fn canonicalize_local_output_unlocked(
             std::io::Error::new(error.kind(), format!("publishing canonical provider output: {error}"))
         })?;
         seal_local_output(&destination)?;
+        fsync_tree(&destination)?;
         fs::File::open(&objects)?.sync_all().map_err(|error| {
             std::io::Error::new(error.kind(), format!("syncing canonical object directory: {error}"))
         })?;
@@ -1583,6 +1623,7 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
         if !path.is_dir() || name.ends_with(PARTIAL_SUFFIX) {
             continue;
         }
+        make_tree_writable_for_removal(&path)?;
         for file in files_under(&path) {
             let Ok(meta) = fs::metadata(&file) else {
                 continue;
@@ -1608,7 +1649,10 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
                 report.optimized_bytes += meta.len();
             }
         }
+        seal_node(&path)?;
+        fsync_tree(&path)?;
     }
+    fs::File::open(&objects)?.sync_all()?;
     Ok(report)
 }
 

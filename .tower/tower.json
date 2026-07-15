@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 622,
-    "rev": 7237,
+    "nextNum": 623,
+    "rev": 7246,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8936,8 +8936,13 @@
         "c0c7d9qt"
       ],
       "workOrder": 78,
-      "assignee": null,
+      "assignee": "terra-420-builder",
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "terra-420-builder",
+          "text": "Hardening criterion 2 graph integrity, migration, canonical referrers, closure APIs, and retry publication."
+        },
         {
           "at": "2026-07-15",
           "by": "terra-420-builder",
@@ -9049,7 +9054,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-15T02:50:15.782Z"
     },
     {
       "id": "c041flkr",
@@ -18101,6 +18107,82 @@
       "created": "2026-07-15T02:23:00.937Z",
       "updated": "2026-07-15",
       "claimedAt": "2026-07-15T02:23:31.287Z"
+    },
+    {
+      "id": "c0izrn87",
+      "num": 622,
+      "title": "Full suite red: UI snapshots lag ratified diagnostics and core surface",
+      "body": "diagnostic_snapshots reports reviewed-product drift: retired-core module lists changed (core.auth active/core.numeric absent), Secret interpolation is now hard E0915, no-alloc wording uses ratified #Policy syntax, single-use fixture now diagnoses consume(t), and taint credential leak emits E0722. Snapshots must be checked against source/canon before selective blessing.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Map each mismatch to its ratified decision and current fixture source; reject accidental product drift; selectively update only exact reviewed snapshots with canonical UPDATE_EXPECT/JET_UI_FILTER flow; rerun snapshots clean, independent review, then resume full gate.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "codex-orchestrator",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every mismatched UI fixture is traced to current source plus a ratified decision/diagnostic contract; accidental product drift is fixed rather than blessed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T03:01:28.595Z"
+        },
+        {
+          "n": 2,
+          "text": "Core-module E1001 snapshots exactly match the active frozen module registry, including core.auth and excluding retired core.numeric.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T03:01:28.742Z"
+        },
+        {
+          "n": 3,
+          "text": "E0915, E0921, E0143, and E0722 snapshots match current fixture spans and canonical what/why/fix copy; selective update flow and clean non-update rerun pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T03:01:28.846Z"
+        },
+        {
+          "n": 4,
+          "text": "Full diagnostic_snapshots target passes; no unreviewed snapshot, syntax, diagnostic code/copy, dependency, unsafe, or owner decision changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T03:01:28.952Z"
+        },
+        {
+          "n": 5,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T03:01:29.054Z"
+        }
+      ],
+      "refs": [
+        "tests/diagnostic_snapshots.rs",
+        "tests/ui",
+        "docs/spec/diagnostics.md",
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/Syntax.rs",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T03:01:07.568Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T03:01:29.157Z"
     }
   ],
   "decisions": [
@@ -36956,6 +37038,69 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T03:01:29.157Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c0izrn87",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T03:01:29.054Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0izrn87",
+      "note": "#5 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T03:01:28.952Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0izrn87",
+      "note": "#4 Full diagnostic_snapshots target passes; no unreviewed snaps"
+    },
+    {
+      "at": "2026-07-15T03:01:28.846Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0izrn87",
+      "note": "#3 E0915, E0921, E0143, and E0722 snapshots match current fixtu"
+    },
+    {
+      "at": "2026-07-15T03:01:28.742Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0izrn87",
+      "note": "#2 Core-module E1001 snapshots exactly match the active frozen "
+    },
+    {
+      "at": "2026-07-15T03:01:28.596Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0izrn87",
+      "note": "#1 Every mismatched UI fixture is traced to current source plus"
+    },
+    {
+      "at": "2026-07-15T03:01:07.569Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c0izrn87",
+      "note": "Full suite red: UI snapshots lag ratified diagnostics and core surface"
+    },
+    {
+      "at": "2026-07-15T02:50:16.281Z",
+      "by": "terra-420-builder",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T02:50:15.783Z",
+      "by": "terra-420-builder",
+      "action": "card.claim",
+      "ref": "c01fj815",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T02:44:22.166Z",
       "by": "codex-json-reviewer",
       "action": "card.update",
@@ -40391,69 +40536,6 @@
       "action": "card.add",
       "ref": "c0m1zysi",
       "note": "Choose the one-file project control surface"
-    },
-    {
-      "at": "2026-07-14T23:05:57.757Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c002osb3",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-07-14T23:05:57.644Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:05:57.548Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0t6owk6",
-      "note": "blockedBy,title,body,plan,phase"
-    },
-    {
-      "at": "2026-07-14T23:05:57.431Z",
-      "by": "codex-main",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-AFFINE1",
-      "note": "How do affine points and differences behave?"
-    },
-    {
-      "at": "2026-07-14T23:05:57.338Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0dv54re",
-      "note": "Reconcile the ratified # compiler plane"
-    },
-    {
-      "at": "2026-07-14T23:05:57.250Z",
-      "by": "codex-main",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-HASH1",
-      "note": "What conceptual plane does `#` keep?"
-    },
-    {
-      "at": "2026-07-14T23:05:57.157Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0enf8e9",
-      "note": "Choose dependency identity and sharing"
-    },
-    {
-      "at": "2026-07-14T23:05:57.064Z",
-      "by": "codex-main",
-      "action": "decision.delete",
-      "ref": "D-ECO-RESOLVE2",
-      "note": "How are inputs resolved and shared?"
-    },
-    {
-      "at": "2026-07-14T23:05:56.969Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0bkb5ik",
-      "note": "Choose build and target variation"
     }
   ],
   "nextNum": 368,
