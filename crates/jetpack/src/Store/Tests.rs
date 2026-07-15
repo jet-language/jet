@@ -275,6 +275,70 @@ mod tests {
     }
 
     #[test]
+    fn external_consumer_root_resumes_and_replaces_with_union_protection() {
+        let (roots, _g) = temp_roots();
+        let first = ingest_fixture(&roots, "external-first", &[("out", "first")], Vec::new());
+        let second = ingest_fixture(&roots, "external-second", &[("out", "second")], Vec::new());
+        let first_hash = first.entry.envelope.output_hash.clone();
+        let second_hash = second.entry.envelope.output_hash.clone();
+
+        let prepared = reconcile_external_consumer_root(
+            &roots,
+            "jetos-generation",
+            "host\0generation",
+            &format!("sha256-{}", "1".repeat(64)),
+            vec![first_hash.clone()],
+            1,
+        )
+        .unwrap()
+        .unwrap();
+        let resumed = reconcile_external_consumer_root(
+            &roots,
+            "jetos-generation",
+            "host\0generation",
+            &format!("sha256-{}", "1".repeat(64)),
+            vec![first_hash.clone()],
+            9,
+        )
+        .unwrap()
+        .unwrap();
+        commit_external_consumer_root(&roots, &resumed, 10).unwrap();
+        assert!(reconcile_external_consumer_root(
+            &roots,
+            "jetos-generation",
+            "host\0generation",
+            &format!("sha256-{}", "1".repeat(64)),
+            vec![first_hash.clone()],
+            11,
+        )
+        .unwrap()
+        .is_none());
+        drop(prepared);
+
+        let replacement = reconcile_external_consumer_root(
+            &roots,
+            "jetos-generation",
+            "host\0generation",
+            &format!("sha256-{}", "2".repeat(64)),
+            vec![second_hash.clone()],
+            12,
+        )
+        .unwrap()
+        .unwrap();
+        let snapshot = Lifecycle::snapshot(&roots).unwrap();
+        let root = snapshot.roots.values().next().unwrap();
+        assert_eq!(root.identity.kind, Lifecycle::RootKind::ExternalConsumer);
+        assert_eq!(root.identity.incarnation.get(), 2);
+        assert_eq!(
+            root.protected_targets,
+            BTreeSet::from([first_hash, second_hash.clone()])
+        );
+        commit_external_consumer_root(&roots, &replacement, 13).unwrap();
+        let committed = Lifecycle::snapshot(&roots).unwrap();
+        assert_eq!(committed.protected_targets, BTreeSet::from([second_hash]));
+    }
+
+    #[test]
     fn ids_differ_by_ref() {
         let a = entry_id("x", "1.0", "nixpkgs:x", "/o");
         let b = entry_id("x", "1.0", "github:o/x", "/o");

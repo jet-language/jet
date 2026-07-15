@@ -1837,6 +1837,101 @@ pub(crate) fn commit_profile_generation_root(
     Ok(())
 }
 
+/// Opaque receipt for a durable generation owned by a consumer outside the
+/// package/profile engines. The consumer controls only its own stable key;
+/// lifecycle kind, producer, incarnation, and witness matching stay here.
+pub(crate) struct PreparedExternalConsumerRoot {
+    id: Lifecycle::RootId,
+    incarnation: Lifecycle::Incarnation,
+    witness: Lifecycle::RootWitness,
+}
+
+/// Prepare or resume one external consumer root. A changed witness advances
+/// the incarnation and protects old union new until commit. An exact committed
+/// retry is already complete and returns `None`.
+pub(crate) fn reconcile_external_consumer_root(
+    roots: &Roots,
+    consumer: &str,
+    key: &str,
+    witness: &str,
+    mut targets: Vec<String>,
+    at: u64,
+) -> std::io::Result<Option<PreparedExternalConsumerRoot>> {
+    targets.sort();
+    targets.dedup();
+    let id = Lifecycle::RootId::new(format!(
+        "external-consumer:{consumer}:{}",
+        SHA256::sha256_hex(key.as_bytes())
+    ))?;
+    let expected_targets = targets.iter().cloned().collect::<BTreeSet<_>>();
+    let snapshot = Lifecycle::snapshot(roots)?;
+    let (incarnation, resume) = match snapshot.roots.get(&id) {
+        Some(root) => {
+            if root.identity.kind != Lifecycle::RootKind::ExternalConsumer
+                || root.identity.producer.as_str() != consumer
+                || root.phase == Lifecycle::RootPhase::Tombstoned
+            {
+                return Err(std::io::Error::other(
+                    "external consumer root disagrees with immutable identity",
+                ));
+            }
+            if root.identity.witness.as_str() == witness && root.targets == expected_targets {
+                if root.phase == Lifecycle::RootPhase::Committed {
+                    return Ok(None);
+                }
+                (root.identity.incarnation.get(), true)
+            } else {
+                if root.phase != Lifecycle::RootPhase::Committed {
+                    return Err(std::io::Error::other(
+                        "external consumer root has an unfinished different replacement",
+                    ));
+                }
+                (root.identity.incarnation.get().checked_add(1).ok_or_else(|| {
+                    std::io::Error::other("external consumer root incarnation overflow")
+                })?, false)
+            }
+        }
+        None => (1, false),
+    };
+    let witness = Lifecycle::RootWitness::new(witness)?;
+    let incarnation = Lifecycle::Incarnation::new(incarnation)?;
+    if !resume {
+        let identity = Lifecycle::RootIdentity::new(
+            Lifecycle::RootKind::ExternalConsumer,
+            id.clone(),
+            Lifecycle::ProducerId::new(consumer)?,
+            incarnation,
+            witness.clone(),
+        );
+        Lifecycle::prepare(
+            roots,
+            identity,
+            targets,
+            Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+        )?;
+    }
+    Ok(Some(PreparedExternalConsumerRoot {
+        id,
+        incarnation,
+        witness,
+    }))
+}
+
+pub(crate) fn commit_external_consumer_root(
+    roots: &Roots,
+    prepared: &PreparedExternalConsumerRoot,
+    at: u64,
+) -> std::io::Result<()> {
+    Lifecycle::commit(
+        roots,
+        &prepared.id,
+        prepared.incarnation,
+        &prepared.witness,
+        Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    )?;
+    Ok(())
+}
+
 pub(crate) fn reconcile_profile_generation_root(
     roots: &Roots,
     owner: &str,
