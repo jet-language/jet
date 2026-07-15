@@ -65,20 +65,20 @@ This proposal completes, and does not reopen, these decisions:
 
 `Package` is recursive and independent of checkout boundaries. A package may contain packages; the outermost package is the semantic whole. A repository may contain several outer packages, and one package may import signed Configs from several repositories. A source file may hold one or many Configs. File order and path never decide meaning.
 
-```jet
-package: Package :: Package.{                 // NEW: D-ECO-ROOTNAME1
-    configs: [app, operations]                 // NEW: D-ECO-SLICENAME1
-}
+The reserved filename supplies the `Package` type: top-level fields construct it, with no wrapper value and no repeated noun.
 
-app: Config :: Config.{                        // NEW: D-ECO-SLICENAME1
+```jet
+configs: [app, operations]                     // NEW: D-ECO-SLICENAME1
+
+app :: Config.{                        // NEW: D-ECO-SLICENAME1
     packages: .{
-        api: Package.{ source: "Source/api" }
+        api: .{ source: "Source/api" }
     }
 }
 
-operations: Config :: Config.{                 // NEW: D-ECO-SLICENAME1
+operations :: Config.{                 // NEW: D-ECO-SLICENAME1
     services: .{
-        api: Service.{ enable: true, from: app.packages.api, ports: [8080] }
+        api: .{ enable: true, from: app.packages.api, ports: [8080] }
     }
 }
 ```
@@ -242,7 +242,7 @@ plan -> build -> verify -> canary -> activate -> observe -> rollback
 |---|---|
 | Three ecosystem shapes | **Typed-root convergence.** Retire role-module and wrapper shapes after migration; ordinary named typed values under Package are final. |
 | `pkg.jet` permanence versus `package.jet` | **One-root amendment.** D-ECO-FILEROOT1 explicitly supersedes S52, D-JPK-FILENAME2, and D-JPK-TWONAMES1. |
-| Environment identity split | **Environment projection.** One Output.Environment feeds `jet env`, `jet dev`, editors, tasks, and CI. `env.jet` is migration input only. |
+| Environment identity split | **Environment projection.** One Environment Output feeds `jet env`, `jet dev`, editors, tasks, and CI. `env.jet` is migration input only. |
 | U10 package-as-module versus typed values | **Value identity.** D-ECO-DECL1 retires U10's package-is-module rule. Modules remain code namespaces; Package is a value. |
 | `/etc/jet/hangar` versus no-root law | **User Hangar.** Platform user-data paths are default; shared storage is explicit administrator policy. |
 | U28 no daemon versus MULTIUSER1 broker | **Transient verifier boundary.** Socket activation, idle exit, no source evaluation, and independent verification distinguish broker from a resident daemon. |
@@ -358,14 +358,13 @@ Created package.jet.
 package graph unchanged: sha256:65aa…
 ```
 
-Generated `package.jet` (four source lines; `Package` is `NEW: D-ECO-ROOTNAME1`):
+Generated `package.jet` (one source line; `Package` is `NEW: D-ECO-ROOTNAME1`):
 
 ```jet
-package: Package :: Package.{
-    packages: .{ report: Package.{ source: "report.jet" } }
-    deps: .{ textkit: "1.4" }
-}
+deps: .{ textkit: "1.4" }
 ```
+
+The reserved filename supplies the `Package` type; top-level fields construct it with no wrapper value or repeated noun. The sole source file is discovered automatically; explicit `packages:` entries begin only when the package gains structure in S3.
 
 Resulting `report.jet`:
 
@@ -398,12 +397,9 @@ $ cd weather && jet run
 Hello from weather!
 ```
 
-Fresh `weather/package.jet`:
+Fresh `weather/package.jet` is empty: the reserved filename opts into package mode, and the sole source file is discovered automatically.
 
 ```jet
-package: Package :: Package.{                 // NEW: D-ECO-ROOTNAME1
-    packages: .{ weather: Package.{ source: "weather.jet" } }
-}
 ```
 
 Fresh `weather/weather.jet`:
@@ -435,29 +431,27 @@ One file owns application, development environment, service, secret binding, and
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1; NEW: D-ECO-OUTPUT-DEFAULT1
-package: Package :: Package.{
-    packages: .{
-        pulse: Package.{
-            source: "Source"
-            deps: .{ http: "2.3", postgres: "1.9" }
-            outputs: .{
-                app: Output.Executable.{ name: "pulse", entry: run }
-                unit: Output.Check.{ name: "unit", entry: test_unit }
-            }
+packages: .{
+    pulse: .{
+        source: "Source"
+        deps: .{ http: "2.3", postgres: "1.9" }
+        outputs: .{
+            app: .Executable.{ name: "pulse", entry: run }
+            unit: .Check.{ name: "unit", entry: test_unit }
         }
     }
-    environments: .{
-        dev: Output.Environment.{
-            name: "dev"
-            tools: [ripgrep, jet_language_server]
-            services: .{
-                postgres: Service.{ enable: true, ports: [5432], ready: postgres_ready }
-            }
-            secrets: .{ DB_PASS: secret("db-dev") }
-        }
-    }
-    defaults: .{ run: packages.pulse.outputs.app, check: packages.pulse.outputs.unit, enter: environments.dev }
 }
+environments: .{
+    dev: .Environment.{
+        name: "dev"
+        tools: [ripgrep, jet_language_server]
+        services: .{
+            postgres: .{ enable: true, ports: [5432], ready: postgres_ready }
+        }
+        secrets: .{ DB_PASS: secret("db-dev") }
+    }
+}
+defaults: .{ run: packages.pulse.outputs.app, check: packages.pulse.outputs.unit, enter: environments.dev }
 ```
 
 `Source/main.jet`:
@@ -538,19 +532,17 @@ Resulting `package.jet`:
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1; NEW: D-ECO-OUTPUT-DEFAULT1
-package: Package :: Package.{                 // NEW: D-ECO-ROOTNAME1
-    configs: [application, development]        // NEW: D-ECO-SLICENAME1
-    defaults: .{ run: application.packages.pulse.outputs.app, check: application.packages.pulse.outputs.unit, enter: development.environments.dev }
-}
+configs: [application, development]            // NEW: D-ECO-SLICENAME1
+defaults: .{ run: application.packages.pulse.outputs.app, check: application.packages.pulse.outputs.unit, enter: development.environments.dev }
 
-application: Config :: Config.{                // NEW: D-ECO-SLICENAME1
+application :: Config.{                // NEW: D-ECO-SLICENAME1
     packages: .{
-        pulse: Package.{
+        pulse: .{
             source: "Source"
             deps: .{ http: "2.3", postgres: "1.9" }
             outputs: .{
-                app: Output.Executable.{ name: "pulse", entry: run }
-                unit: Output.Check.{ name: "unit", entry: test_unit }
+                app: .Executable.{ name: "pulse", entry: run }
+                unit: .Check.{ name: "unit", entry: test_unit }
             }
         }
     }
@@ -560,12 +552,12 @@ application: Config :: Config.{                // NEW: D-ECO-SLICENAME1
 Resulting `package/env.jet`:
 
 ```jet
-pub development: Config :: Config.{            // NEW: D-ECO-SLICENAME1
+pub development :: Config.{            // NEW: D-ECO-SLICENAME1
     environments: .{
-        dev: Output.Environment.{             // NEW: D-ECO-OUTPUT-KINDS1
+        dev: .Environment.{             // NEW: D-ECO-OUTPUT-KINDS1
             name: "dev"
             tools: [ripgrep, jet_language_server]
-            services: .{ postgres: Service.{ enable: true, ports: [5432], ready: postgres_ready } }
+            services: .{ postgres: .{ enable: true, ports: [5432], ready: postgres_ready } }
             secrets: .{ DB_PASS: secret("db-dev") }
         }
     }
@@ -580,37 +572,35 @@ The common path remains `jet build`. The same Package records build, host, and t
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-package: Package :: Package.{
-    packages: .{
-        edge_agent: Package.{
-            source: "Source"
-            deps: .{
-                wire: "3.1"
-                weirdctl: Pkg.adapt(
-                    name: "weirdctl"
-                    source: github@acme/weirdctl#8a31c9d
-                    recipe: Recipe.cmake
-                )
-            }
-            outputs: .{ agent: Output.Executable.{ name: "edge-agent", entry: run } }
+packages: .{
+    edge_agent: .{
+        source: "Source"
+        deps: .{
+            wire: "3.1"
+            weirdctl: Pkg.adapt(
+                name: "weirdctl"
+                source: github@acme/weirdctl#8a31c9d
+                recipe: Recipe.cmake
+            )
         }
+        outputs: .{ agent: .Executable.{ name: "edge-agent", entry: run } }
     }
-    targets: .{
-        appliance: Target.{ build: linux.x64, host: linux.x64, target: linux.arm64, libc: .Musl }
-    }
-    profiles: .{
-        release: Build.{ optimize: .Speed, debug_info: .Lines, small: false, panic: .Abort }
-    }
-    toolchains: .{ appliance: Toolchain.{ jet: "3.2.0", sdk: "aarch64-linux-musl#1.2.5" } }
-    build: .{
-        remote: RemoteBuild.{ role: "trusted-arm", fallback: .Local }
-        cache: CachePolicy.{ read: [team_read], write: team_ci, require_provenance: true }
-        scheduler: Scheduler.{ pools: .{ cpu: 12, memory: 24GB, linker: 1 } }
-    }
-    policy: .{
-        trust: .{ ci: .DenyPrompt }
-        audit: .{ sandbox: .Require, reproducibility: .TwoCleanBuilds }
-    }
+}
+targets: .{
+    appliance: .{ build: linux.x64, host: linux.x64, target: linux.arm64, libc: .Musl }
+}
+profiles: .{
+    release: .{ optimize: .Speed, debug_info: .Lines, small: false, panic: .Abort }
+}
+toolchains: .{ appliance: .{ jet: "3.2.0", sdk: "aarch64-linux-musl#1.2.5" } }
+build: .{
+    remote: .{ role: "trusted-arm", fallback: .Local }
+    cache: .{ read: [team_read], write: team_ci, require_provenance: true }
+    scheduler: .{ pools: .{ cpu: 12, memory: 24GB, linker: 1 } }
+}
+policy: .{
+    trust: .{ ci: .DenyPrompt }
+    audit: .{ sandbox: .Require, reproducibility: .TwoCleanBuilds }
 }
 ```
 
@@ -668,29 +658,27 @@ One Package owns members, shared versions, policy, source authority, cache roles
 `package.jet` (`NEW: D-ECO-ROOTNAME1`, `NEW: D-ECO-FILEROOT1`):
 
 ```jet
-package: Package :: Package.{
-    members: find("./packages")
-    catalog: .{
-        http: "4.2.1"
-        postgres: "1.9.4"
-        tracing: "3.0.2"
-    }
-    sources: .{
-        public: registry@registry.jet.dev
-        company: registry@packages.example.test
-    }
-    policy: .{
-        providers: .{ company: .{ trust_root: "company-registry-root#7" } }
-        licenses: .{ allow: [.Apache2, .MIT, .BSD3], deny: [.AGPL3] }
-        advisories: .{ severity: .High, action: .Deny }
-        maturity: .{ third_party: 24h, company: 0h }
-        cache: .{ read: [company_read], write: company_ci }
-        resolution: .Conservative
-    }
-    checks: .{
-        minimum: MatrixCheck.{ resolution: .Lowest, targets: [linux.x64, linux.arm64, macos.arm64, windows.x64] }
-        current: MatrixCheck.{ resolution: .Latest, targets: [linux.x64, linux.arm64, macos.arm64, windows.x64] }
-    }
+members: find("./packages")
+catalog: .{
+    http: "4.2.1"
+    postgres: "1.9.4"
+    tracing: "3.0.2"
+}
+sources: .{
+    public: registry@registry.jet.dev
+    company: registry@packages.example.test
+}
+policy: .{
+    providers: .{ company: .{ trust_root: "company-registry-root#7" } }
+    licenses: .{ allow: [.Apache2, .MIT, .BSD3], deny: [.AGPL3] }
+    advisories: .{ severity: .High, action: .Deny }
+    maturity: .{ third_party: 24h, company: 0h }
+    cache: .{ read: [company_read], write: company_ci }
+    resolution: .Conservative
+}
+checks: .{
+    minimum: .{ resolution: .Lowest, targets: [linux.x64, linux.arm64, macos.arm64, windows.x64] }
+    current: .{ resolution: .Latest, targets: [linux.x64, linux.arm64, macos.arm64, windows.x64] }
 }
 ```
 
@@ -698,14 +686,14 @@ package: Package :: Package.{
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-pub api: Config :: Config.{                     // NEW: D-ECO-SLICENAME1
+pub api :: Config.{                     // NEW: D-ECO-SLICENAME1
     packages: .{
-        api: Package.{
+        api: .{
             source: "Source"
             deps: .{ http: catalog.http, postgres: catalog.postgres, tracing: catalog.tracing }
             outputs: .{
-                server: Output.Executable.{ name: "acme-api", entry: run }
-                unit: Output.Check.{ name: "api-unit", entry: unit }
+                server: .Executable.{ name: "acme-api", entry: run }
+                unit: .Check.{ name: "api-unit", entry: unit }
             }
         }
     }
@@ -728,14 +716,14 @@ fn unit() -> Void ? {
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-pub billing: Config :: Config.{                 // NEW: D-ECO-SLICENAME1
+pub billing :: Config.{                 // NEW: D-ECO-SLICENAME1
     packages: .{
-        billing: Package.{
+        billing: .{
             source: "Source"
             deps: .{ http: catalog.http, api_contract: packages.api }
             outputs: .{
-                library: Output.Library.{ name: "billing", modules: [Billing] }
-                unit: Output.Check.{ name: "billing-unit", entry: unit }
+                library: .Library.{ name: "billing", modules: [Billing] }
+                unit: .Check.{ name: "billing-unit", entry: unit }
             }
         }
     }
@@ -754,12 +742,12 @@ fn unit() -> Void ? {
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-pub web: Config :: Config.{                     // NEW: D-ECO-SLICENAME1
+pub web :: Config.{                     // NEW: D-ECO-SLICENAME1
     packages: .{
-        web: Package.{
+        web: .{
             source: "Source"
             deps: .{ http: catalog.http, api_contract: packages.api }
-            outputs: .{ app: Output.Executable.{ name: "acme-web", entry: run } }
+            outputs: .{ app: .Executable.{ name: "acme-web", entry: run } }
         }
     }
 }
@@ -845,23 +833,21 @@ The split ledger stores stable identity, origin span, destination span, ordinal,
 
 ### S6 — environment manager without an application
 
-A Package may contain only an Environment Output. There is no dummy Package and no shell hook state.
+A Package may contain only an Environment Output; no dummy value or shell hook state exists.
 
 `package.jet` (`NEW: D-ECO-ROOTNAME1`, `NEW: D-ECO-FILEROOT1`, and `NEW: D-ECO-OUTPUT-KINDS1`):
 
 ```jet
 // NEW: D-ECO-OUTPUT-DEFAULT1
-package: Package :: Package.{
-    sources: .{ upstream: nixpkgs@nixos-unstable }
-    environments: .{
-        data: Output.Environment.{
-            name: "data"
-            tools: [upstream.[python3, duckdb, ripgrep]]
-            variables: .{ DATA_ROOT: path("./data") }
-        }
+sources: .{ upstream: nixpkgs@nixos-unstable }
+environments: .{
+    data: .Environment.{
+        name: "data"
+        tools: [upstream.[python3, duckdb, ripgrep]]
+        variables: .{ DATA_ROOT: path("./data") }
     }
-    defaults: .{ enter: environments.data }
 }
+defaults: .{ enter: environments.data }
 ```
 
 Beginner path:
@@ -933,67 +919,65 @@ Under D-ECO-JETOS2, `profiles:`, `themes:`, the VM `checks:` entry, and `filesys
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-package: Package :: Package.{
-    imports: find("./system")
-    options: laptop_options
-    themes: .{ halcyon: halcyon_theme }
-    profiles: .{ nate: Profile.{ packages: [fish, helix, git] } }
-    systems: .{
-        halcyon: Output.System.{
-            name: "halcyon"
-            target: linux.x64
-            packages: [firefox, ghostty, helix, git, ripgrep, btop]
-            users: .{
-                nate: User.{ shell: fish, groups: [wheel], profile: profiles.nate }
-            }
-            filesystem: .{
-                root: Filesystem.{ device: "/dev/disk/by-label/jetos", type: .Ext4 }
-            }
-            hardware: hardware.halcyon
-            variants: .{
-                rescue: SystemVariant.{ services: .{ desktop: .{ enable: false } }, boot: .{ target: .Rescue } }
-            }
-            network: .{ hostName: "halcyon", firewall: .{ allowedTcpPorts: [22] } }
-            services: .{
-                desktop: .{ environment: .Kde }
-                audio: .{ pipewire: true }
-                openssh: .{ enable: false }
-            }
-            apps: .{ flatpak: [FlatpakApp.{ ref: "org.mozilla.firefox" }] } // NEW: D-ECO-JETOS2
-            theme: themes.halcyon
-            files: .{
-                issue: File.{ path: "/etc/issue", text: "jetos 26.10 (Apex)\n", mode: 0o644 }
-                sysctl: generated_sysctl
-            }
-            health: [booted, desktop_ready, user_login]
+imports: find("./system")
+options: laptop_options
+themes: .{ halcyon: halcyon_theme }
+profiles: .{ nate: .{ packages: [fish, helix, git] } }
+systems: .{
+    halcyon: .System.{
+        name: "halcyon"
+        target: linux.x64
+        packages: [firefox, ghostty, helix, git, ripgrep, btop]
+        users: .{
+            nate: .{ shell: fish, groups: [wheel], profile: profiles.nate }
         }
-    }
-    images: .{
-        installer: Output.Image.{
-            name: "halcyon-installer"
-            from: systems.halcyon
-            kind: .Iso
-            installer: Installer.{ mode: .Guided, desktop: .Kde, storage: .FromSystem }
+        filesystem: .{
+            root: .{ device: "/dev/disk/by-label/jetos", type: .Ext4 }
         }
+        hardware: hardware.halcyon
+        variants: .{
+            rescue: .{ services: .{ desktop: .{ enable: false } }, boot: .{ target: .Rescue } }
+        }
+        network: .{ hostName: "halcyon", firewall: .{ allowedTcpPorts: [22] } }
+        services: .{
+            desktop: .{ environment: .Kde }
+            audio: .{ pipewire: true }
+            openssh: .{ enable: false }
+        }
+        apps: .{ flatpak: [.{ ref: "org.mozilla.firefox" }] } // NEW: D-ECO-JETOS2
+        theme: themes.halcyon
+        files: .{
+            issue: .{ path: "/etc/issue", text: "jetos 26.10 (Apex)\n", mode: 0o644 }
+            sysctl: generated_sysctl
+        }
+        health: [booted, desktop_ready, user_login]
     }
-    checks: .{
-        vm: Output.Check.{ name: "halcyon-vm", entry: verify_halcyon_vm }
+}
+images: .{
+    installer: .Image.{
+        name: "halcyon-installer"
+        from: systems.halcyon
+        kind: .Iso
+        installer: .{ mode: .Guided, desktop: .Kde, storage: .FromSystem }
     }
+}
+checks: .{
+    vm: .Check.{ name: "halcyon-vm", entry: verify_halcyon_vm }
 }
 ```
 
 `system/options.jet`:
 
 ```jet
-pub laptop_options: OptionSet :: OptionSet.{   // NEW: D-ECO-JETOS2
+pub laptop_options :: OptionSet.{   // NEW: D-ECO-JETOS2
     declarations: .{
-        desktop: Option<Desktop>.{
+        desktop: .{
             path: "services.desktop.environment"
             default: .Kde
             docs: "Desktop session installed for graphical login."
             allowed: [.Gnome, .Kde, .Hyprland, .Niri]
         }
-        ssh: Option<Bool>.{
+        ssh: .{
             path: "services.openssh.enable"
             default: false
             docs: "Accept remote shell connections."
@@ -1005,7 +989,7 @@ pub laptop_options: OptionSet :: OptionSet.{   // NEW: D-ECO-JETOS2
 `system/theme.jet`:
 
 ```jet
-pub halcyon_theme: Theme :: Theme.{            // D-JOS-THEME1; unified placement: D-ECO-JETOS2
+pub halcyon_theme :: Theme.{            // D-JOS-THEME1; unified placement: D-ECO-JETOS2
     polarity: .Dark
     wallpaper: "wallpapers/forest.png"
     fonts: .{ ui: "Inter", monospace: "JetBrains Mono" }
@@ -1016,9 +1000,9 @@ pub halcyon_theme: Theme :: Theme.{            // D-JOS-THEME1; unified placemen
 `system/hardware.jet`:
 
 ```jet
-pub halcyon_hardware: Config :: Config.{        // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+pub halcyon_hardware :: Config.{        // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     hardware: .{
-        halcyon: Hardware.{
+        halcyon: .{
             cpu: .Amd64
             graphics: .Amd
             storage: [nvme]
@@ -1032,9 +1016,9 @@ pub halcyon_hardware: Config :: Config.{        // NEW: D-ECO-SLICENAME1; schema
 
 ```jet
 fn workstation() -> Config {                   // NEW: D-ECO-SLICENAME1
-    return Config.{
+    return .{
         overlays: .{
-            browsers: Overlay.{ packages: .{ firefox: PackageOverride.{ channel: "stable" } } }
+            browsers: .{ packages: .{ firefox: .{ channel: "stable" } } }
         }
     }
 }
@@ -1045,14 +1029,14 @@ pub workstation_packages: Config :: workstation() // NEW: D-ECO-SLICENAME1
 `system/files.jet`:
 
 ```jet
-pub generated_sysctl: File :: File.{          // NEW: D-ECO-JETOS2
+pub generated_sysctl :: File.{          // NEW: D-ECO-JETOS2
     path: "/etc/sysctl.d/90-jetos.conf"
     text: "vm.swappiness=10\n"
     mode: 0o644
     replace: .Force
 }
 
-pub ghostty_config: File :: File.{            // NEW: D-ECO-JETOS2
+pub ghostty_config :: File.{            // NEW: D-ECO-JETOS2
     path: "/home/nate/.config/ghostty/config"
     source: path("home/ghostty/config")
     mode: 0o644
@@ -1063,12 +1047,12 @@ pub ghostty_config: File :: File.{            // NEW: D-ECO-JETOS2
 `system/laptop.jet` contributes one closed feature across system and user scope:
 
 ```jet
-pub laptop: Config :: Config.{                  // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+pub laptop :: Config.{                  // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     systems: .{
-        halcyon: SystemDelta.{ services: .{ power: .{ profile: .Balanced } } }
+        halcyon: .{ services: .{ power: .{ profile: .Balanced } } }
     }
     profiles: .{
-        nate: ProfileDelta.{ packages: [brightnessctl], files: [ghostty_config] }
+        nate: .{ packages: [brightnessctl], files: [ghostty_config] }
     }
 }
 ```
@@ -1092,8 +1076,8 @@ fn verify_halcyon_vm() -> Void ? {
 `system/_nvidia.jet` is discovered but disabled by its one-character `_` prefix (`NEW: D-ECO-FILEROOT1`):
 
 ```jet
-pub nvidia: Config :: Config.{                  // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
-    systems: .{ halcyon: SystemDelta.{ kernel: .{ drivers: [nvidia] } } }
+pub nvidia :: Config.{                  // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
+    systems: .{ halcyon: .{ kernel: .{ drivers: [nvidia] } } }
 }
 ```
 
@@ -1198,12 +1182,12 @@ System graph unchanged: sha256:7780…
 Generated `package/fleet.jet`:
 
 ```jet
-pub home: Config :: Config.{                    // NEW: D-ECO-SLICENAME1
+pub home :: Config.{                    // NEW: D-ECO-SLICENAME1
     fleets: .{
-        home: Output.Fleet.{                  // NEW: D-ECO-OUTPUT-KINDS1
+        home: .Fleet.{                  // NEW: D-ECO-OUTPUT-KINDS1
             name: "home"
             hosts: .{ halcyon: systems.halcyon }
-            rollout: Rollout.{ canary: 1, max_parallel: 1, on_failure: .RollbackAndStop }
+            rollout: .{ canary: 1, max_parallel: 1, on_failure: .RollbackAndStop }
         }
     }
 }
@@ -1234,15 +1218,15 @@ fn api_can_serve() -> Void ? {
     require(response.status() == 200, "api could not serve a request")
 }
 
-pub web_base: Config :: Config.{
+pub web_base :: Config.{
     packages: .{
-        api: Package.{
+        api: .{
             source: "Source/api"
-            outputs: .{ service: Output.Service.{ name: "api", entry: run_api } }
+            outputs: .{ service: .Service.{ name: "api", entry: run_api } }
         }
     }
     systems: .{
-        web: SystemTemplate.{
+        web: .{
             target: linux.x64
             packages: [packages.api, curl, btop]
             services: .{ api: .{ enable: true, ports: [8080], ready: api_ready } }
@@ -1251,19 +1235,19 @@ pub web_base: Config :: Config.{
     }
 }
 
-pub production: Config :: Config.{
+pub production :: Config.{
     systems: .{
-        web1: web_base.systems.web.with(SystemDelta.{ network: .{ hostName: "web1" }, region: "us-east" })
-        web2: web_base.systems.web.with(SystemDelta.{ network: .{ hostName: "web2" }, region: "eu-west" })
+        web1: web_base.systems.web.with(.{ network: .{ hostName: "web1" }, region: "us-east" })
+        web2: web_base.systems.web.with(.{ network: .{ hostName: "web2" }, region: "eu-west" })
     }
     fleets: .{
-        prod: Output.Fleet.{
+        prod: .Fleet.{
             name: "prod"
             hosts: .{
-                web1: Host.{ system: systems.web1, target: DeployTarget.{ binding: "web1" }, authority: DeployAuthority.{ identity: "deploy", privilege: .Root } }
-                web2: Host.{ system: systems.web2, target: DeployTarget.{ binding: "web2" }, authority: DeployAuthority.{ identity: "deploy", privilege: .Root } }
+                web1: .{ system: systems.web1, target: .{ binding: "web1" }, authority: .{ identity: "deploy", privilege: .Root } }
+                web2: .{ system: systems.web2, target: .{ binding: "web2" }, authority: .{ identity: "deploy", privilege: .Root } }
             }
-            rollout: Rollout.{
+            rollout: .{
                 cohorts: [[web1], [web2]]
                 canary: 1
                 max_parallel: 1
@@ -1367,7 +1351,7 @@ The S7/S8 shape covers every requirement in the Epoch 4 JetOS research appendix 
 | Final-value reads and cycle diagnostics | Resolved graph view; shortest cycle with all source spans. |
 | Deterministic merge and provenance | Field-law composition; `.jet/lock`; `jet explain` shows contributors, priority, winner, and reason. |
 | One-character disable | S7's `system/_nvidia.jet` uses D-ECO-FILEROOT1's proposed discovered-file rule. |
-| File emission | Typed `File.{ path, text, mode, replace }` projected inside generation (`NEW: D-ECO-JETOS2`). |
+| File emission | Typed `.{ path, text, mode, replace }` entries projected inside generation (`NEW: D-ECO-JETOS2`). |
 | Stable/unstable sets, overlays, custom derivations | S6 shows `nixpkgs@nixos-unstable`; S7 shows a stable browser Overlay. Custom derivation acceptance uses ordinary Package recipes and is not shown here. |
 | One feature spanning system and user scope | A Config may contribute System facts and referenced user Profile facts in one closed value. |
 | KDE, GNOME, Hyprland, Niri and display managers | S7 shows representative KDE selection. GNOME/Hyprland/Niri and display-manager swap acceptance over the same typed field are not shown here. |
@@ -1447,6 +1431,8 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 **Owner selected (2026-07-15): Package.** This collapses the old Project/Package split into one recursive noun: a package may contain packages, and the outermost package is the whole. It fits Jetpack and keeps one noun from script through fleet.
 
+Source example: `packages: .{}`. The reserved file supplies the outer `Package` type.
+
 Rejected: Hub, Manifest, Project.
 
 ### 2. D-ECO-SLICENAME1 — name one typed contribution
@@ -1465,9 +1451,11 @@ Rejected: Hub, Manifest, Project.
 
 **Gist:** Decide whether one reserved Package file replaces permanent package, environment, workspace, and OS role files.
 
+Bare-fields root form: the file supplies the type and top-level fields construct it; a wrapper value was rejected as noun noise.
+
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — One `package.jet` | `package.jet` contains `package: Package :: Package.{…}`; `jet os plan halcyon` discovers `systems.halcyon` there. `jet init` folds old files with a teaching diagnostic. |
+| A — One `package.jet` | `package.jet` contains `systems: .{…}` as a top-level field; `jet os plan halcyon` discovers `systems.halcyon` there. `jet init` folds old files with a teaching diagnostic. |
 | B — Keep role files | `pkg.jet`, `env.jet`, `workspace.jet`, and `config.jet` remain authorities; `jet explain services.db.port` must report which role file won, preserving the current identity splits. |
 | C — No reserved file | User runs `jet --package config/root.jet build`; bare `jet build` prints `No Package root selected.` Layout is free, but first Package adds permanent selection ceremony. |
 
@@ -1520,9 +1508,9 @@ Rejected: flag-based reversal, intent-specific transition verbs.
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Nine closed kinds | `Output.Environment.{…}`, `Output.System.{…}`, and `Output.Fleet.{…}` check beside Library, Executable, Service, Check, Image, and Bundle. `Output.Wheel.{}` prints `unknown Output kind; add a ratified kind or use Bundle.` |
+| A — Nine closed kinds | `.Environment.{…}`, `.System.{…}`, and `.Fleet.{…}` check beside Library, Executable, Service, Check, Image, and Bundle. `.Wheel.{}` prints `unknown Output kind; add a ratified kind or use Bundle.` |
 | B — Package-only closure | Package kinds remain closed; System and Fleet use separate root node types. `jet inspect output halcyon` prints `halcyon is not an Output`, splitting selection and lifecycle rules. |
-| C — Extensible text kinds | `Output.Custom.{ kind: "wheel", payload: … }` succeeds under a plugin. Experts gain reach, but exhaustive tools and beginner diagnostics cannot know the contract. |
+| C — Extensible text kinds | `.Custom.{ kind: "wheel", payload: … }` succeeds under a plugin. Experts gain reach, but exhaustive tools and beginner diagnostics cannot know the contract. |
 
 **Recommendation: A.** One closed capability model makes build, selection, inspection, proof, and defaults exhaustive from package through fleet. Tradeoff: a genuinely new kind requires an owner decision instead of a local string.
 
@@ -1558,12 +1546,12 @@ Rejected: flag-based reversal, intent-specific transition verbs.
 
 **Answers/replaces:** open D-ECO-OUTPUT-DEFAULT1.
 
-**Gist:** Choose the deterministic selection rule for singular `run`, `enter`, `publish`, and activation intents; plural `test` runs every Check Output.
+**Gist:** Choose the deterministic selection rule for singular `run`, `enter`, `publish`, and activation intents; plural `test` runs every Check Output value.
 
 | Option | Worked source and terminal consequence |
 |---|---|
 | A — Plural all; singular explicit, legacy, sole, defaults, error | `jet test` runs every Check. With one executable, `jet run` selects it. After a second appears, output lists both until `defaults: .{ run: cli }` is added. Explicit `jet run admin` always wins. |
-| B — Conventional keys | `outputs: .{ run: Output.Executable.{…}, check: Output.Check.{…} }`; `jet run` selects key `run`. Names become reserved policy vocabulary. |
+| B — Conventional keys | `outputs: .{ run: .Executable.{…}, check: .Check.{…} }`; `jet run` selects key `run`. Names become reserved policy vocabulary. |
 | C — Always explicit after Outputs | A sole `cli` still makes `jet run` print `name an Output; use jet run cli`. Typing adds no information. |
 
 **Recommendation: A.** Small Packages stay automatic, large Packages record checked intent, and adding an Output cannot silently retarget automation. Tradeoff: multi-output Packages carry a small defaults record.

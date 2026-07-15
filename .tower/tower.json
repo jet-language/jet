@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 650,
-    "rev": 7736,
+    "nextNum": 652,
+    "rev": 7741,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8981,6 +8981,11 @@
         {
           "at": "2026-07-15",
           "by": "claude-main",
+          "text": "Fixture debt round 1 landed (drvPath in all fake nix JSON; write_hangar_meta now seeds real objects via ingest_tree — 2 tests flipped green, 0 regressions, both original patterns extinct in output). Round 2 in flight on card #650: hangar-seeded fixture outputs (~9 sites) + cfg(test) observed-at seam for journal-clobbered staleness tests. Silent no-op ingest on missing paths carded #651."
+        },
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
           "text": "Producer-record strictness (3361cb438/5267856bb/980e7935e) left shared test fixtures unupdated: ~25 red across jetpack_dispatch/engine/offline (missing drvPath; legacy entries lack producer_record/cache_identity). jet-impl deriving contract from refactor's own tests and completing fixture debt now — tests only, fail-closed production behavior untouched. Blocks full-suite gate for #535 and the C4 sweep."
         },
         {
@@ -14593,8 +14598,13 @@
       "priority": "P0",
       "plan": "Ratify the copy-at-take spelling, then align ownership checks, fix-its, examples, and formatter output.",
       "blockedBy": [],
-      "assignee": "jet-impl-copy",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "[handoff] C1-C4 all met (grammars regenerated: copy_expr → ~, tree-sitter artifacts committed a59719653; fresh-binary ~x smoke green). Remaining: full gate green (blocked on #650 fixture work in flight), then jet-verify criteria verification, then verify lane. Gate attempts logged: probe-trio flake carded #640; provider-noise fixed #641 (in ecc18bbe4)."
+        },
         {
           "at": "2026-07-15",
           "by": "claude-main",
@@ -14676,8 +14686,7 @@
       "needsAcceptance": false,
       "created": "2026-07-14T14:02:47.690Z",
       "updated": "2026-07-15",
-      "workOrder": 14,
-      "claimedAt": "2026-07-15T15:00:51.821Z"
+      "workOrder": 14
     },
     {
       "id": "c0cztb5h",
@@ -20293,6 +20302,54 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:05.496Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c06qg7a2",
+      "num": 650,
+      "title": "Jetpack test fixtures: hangar-seeded outputs + staleness backdating",
+      "body": "Card #420's store-validated closure proof made the fixture strategy obsolete: write_runnable_fixture/write_fastfetch_fixture point nix-JSON out at Scratch dirs, but the nix closure arm only accepts hangar-local objects or real /nix/store paths with a working gc-root — every nixpkgs:greet/fastfetch fixture test reds with 'no dependency references or store-validated closure proof' (~9 call sites, 3 files). Traced fix: seed real content into hangar/objects/<digest> via ingest_tree (Envelope::try_output_hash_of == Envelope::for_output hash), point fixture out there; offline_reuse_refuses_a_tampered_closure needs a mutable re-sealable path. Second blocker: closure journal re-materializes meta.json on every hangar op, so last_used_at cannot be backdated out-of-band — all staleness tests (clean_removes_only_stale..., opportunistic clean, jet_clean_delegates...) blocked; needs a test-gated observed-at seam on IngestRequest that does NOT weaken producer/closure validation. Doc-comment on write_hangar_meta (jetpack_fixtures.rs:453) records the journal finding.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "[handoff] jet-impl agent was mid-flight on Pattern 3 (hangar-seeded fixture outputs, ~9 sites, exact fix traced in card body) + Pattern 5 (cfg(test) observed-at seam on IngestRequest for journal-clobbered staleness) when session ended. Round-1 fixes already committed (drvPath + ingest_tree-seeded write_hangar_meta, see #420 log). Re-check tree for uncommitted round-2 work before restarting; derive contract from Store/Closure.rs tests, never weaken validation."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T20:01:44.068Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c08wtn3k",
+      "num": 651,
+      "title": "Store ingest silently no-ops on nonexistent output paths",
+      "body": "Found during #420 fixture debt: tests/fixtures/jetpack-project/fixtures/ placeholder paths never exist on disk; hashing a nonexistent path fails silently, envelope.output_hash lands empty, register_entry_unlocked short-circuits — jetpack build reports success while nothing lands in the store. Silent success on missing content violates fail-closed spirit: ingest/registration of a nonexistent output must error loudly. Audit register_entry_unlocked + try_output_hash_of error handling; fix list_shows_realized_package and any other test relying on inert placeholders.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T20:01:44.200Z",
       "updated": "2026-07-15"
     }
   ],
@@ -39951,6 +40008,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T20:07:49.401Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06qg7a2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T20:07:49.249Z",
+      "by": "claude-main",
+      "action": "card.release",
+      "ref": "c0we378g",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T20:02:33.683Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T20:01:44.200Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c08wtn3k",
+      "note": "Store ingest silently no-ops on nonexistent output paths"
+    },
+    {
+      "at": "2026-07-15T20:01:44.068Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c06qg7a2",
+      "note": "Jetpack test fixtures: hangar-seeded outputs + staleness backdating"
+    },
+    {
       "at": "2026-07-15T20:00:20.033Z",
       "by": "owner",
       "action": "decision.ratify",
@@ -43414,41 +43506,6 @@
       "action": "card.update",
       "ref": "c01fj815",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T03:22:10.066Z",
-      "by": "terra-420-builder",
-      "action": "card.criteria-meet",
-      "ref": "c01fj815",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T03:18:57.277Z",
-      "by": "terra-420-builder",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T03:18:57.161Z",
-      "by": "terra-420-builder",
-      "action": "card.claim",
-      "ref": "c01fj815",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T03:17:45.426Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mwjrp1",
-      "note": "#5 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-15T03:17:45.331Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mwjrp1",
-      "note": "#4 Diagnostic snapshots and affected crypto/display UI regressi"
     }
   ],
   "nextNum": 368,

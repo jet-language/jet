@@ -455,19 +455,10 @@ pub fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
 /// that need to cross-reference the digest elsewhere (e.g. a lockfile's
 /// `output-hash`) read it back from the second element.
 ///
-/// KNOWN LIMITATION (found while wiring this up, not fixed here — see the
-/// delegation report): `last_used_at`/`realized_at` are patched into
-/// `meta.json` on disk *after* `ingest_tree` registers the entry, but the
-/// closure journal (not `meta.json`) is the actual source of truth now.
-/// `recover_closure_journal_graph_unlocked` re-materializes `meta.json` from
-/// the journal's stored record on every subsequent hangar operation
-/// (including the very `jetpack clean` a caller is about to invoke), which
-/// clobbers this patch back to the real ingest-time timestamp before any
-/// staleness check ever reads it. There is no public API to backdate a
-/// hangar entry's timestamp through `ingest_tree`. Tests that need a
-/// genuinely *stale* or *timestamp-less* (legacy) entry cannot get one this
-/// way post-card-#420; that needs either a production-side test hook or
-/// direct closure-journal surgery (see the report for detail).
+/// `last_used_at`, when given, is backdated via the card #650 `test-seam`
+/// (`jetpack::Store::test_backdate_last_used_at`) — a plain `meta.json` text
+/// edit doesn't survive the next hangar operation (the closure journal is
+/// the real source of truth and gets re-materialized over it).
 pub fn write_hangar_meta(
     root: &Path,
     id: &str,
@@ -504,23 +495,10 @@ pub fn write_hangar_meta(
     .unwrap()
     .entry;
     fs::remove_dir_all(&src).ok();
-    let dir = root.join("hangar").join(&entry.id);
-    let meta_path = dir.join("meta.json");
-    let mut text = fs::read_to_string(&meta_path).unwrap();
     if let Some(ts) = last_used_at {
-        text = text.replace(
-            &format!("\"realized_at\": \"{}\"", entry.realized_at),
-            &format!("\"realized_at\": \"{ts}\""),
-        );
+        jetpack::Store::test_backdate_last_used_at(&roots, &entry.id, ts).unwrap();
     }
-    let last_used_replacement = last_used_at
-        .map(|ts| ts.to_string())
-        .unwrap_or_default();
-    text = text.replace(
-        &format!("\"last_used_at\": \"{}\"", entry.last_used_at),
-        &format!("\"last_used_at\": \"{last_used_replacement}\""),
-    );
-    fs::write(&meta_path, text).unwrap();
+    let dir = root.join("hangar").join(&entry.id);
     (dir, entry.envelope.output_hash)
 }
 

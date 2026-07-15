@@ -7,6 +7,13 @@ edition = "2021"
 name = "jetpack"
 path = "src/lib.rs"
 
+[features]
+# Card #650: opt-in seam so integration tests (which link this crate as an
+# ordinary dependency, not via #[cfg(test)]) can backdate a hangar entry's
+# `last_used_at` to simulate staleness/GC scenarios without waiting real
+# time. Off by default — no release build enables it, so it never ships.
+test-seam = []
+
 [dependencies]
 jet-foundation = { path = "../jet-foundation" }
 jet-lexer = { path = "../jet-lexer" }

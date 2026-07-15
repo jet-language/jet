@@ -363,6 +363,35 @@ pub(crate) fn register_entry_unlocked(
     Ok(true)
 }
 
+/// Test-only seam (card #650): backdate a hangar entry's `last_used_at` in
+/// the closure journal — not just `meta.json` — so a staleness/GC test can
+/// simulate an old entry without waiting real time. A plain `meta.json`
+/// edit doesn't survive: `recover_closure_journal_graph_unlocked` (run at
+/// the top of every hangar operation, including the `jetpack clean` a test
+/// is about to invoke) re-materializes `meta.json` from the journal's
+/// stored record, clobbering any out-of-band file edit first. This instead
+/// re-registers the SAME entry (identical producer record, digests,
+/// references — only `last_used_at` changes) through
+/// `register_entry_unlocked`, the same path every real registration uses,
+/// so it re-runs full structure/producer-record/digest/closure-proof
+/// validation — there is no bypass here, just a different timestamp on an
+/// otherwise-identical, still-valid record. Compiled only under the
+/// `test-seam` feature (never enabled by a release build), so no
+/// production caller can reach it.
+#[cfg(feature = "test-seam")]
+pub fn test_backdate_last_used_at(roots: &Roots, id: &str, last_used_at: u64) -> std::io::Result<()> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        recover_closure_journal_unlocked(roots)?;
+        let mut entry = list_unlocked(roots)
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| std::io::Error::other(format!("no hangar entry `{id}`")))?;
+        entry.last_used_at = last_used_at;
+        register_entry_unlocked(roots, &entry)?;
+        Ok(())
+    })
+}
+
 pub fn remove_closure_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_closure_journal_unlocked(roots)?;
