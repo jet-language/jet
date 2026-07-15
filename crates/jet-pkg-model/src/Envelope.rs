@@ -684,6 +684,7 @@ fn encode_node(
             return Err(format!("directory `{}` escapes output root", path.display()));
         }
         record_header(archive, b'D', &rel_bytes, mode_of(&meta));
+        encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
         hook(path, "directory-snapshotted");
         let mut entries = fs::read_dir(path)
             .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?
@@ -721,6 +722,7 @@ fn encode_node(
         }
         record_header(archive, b'L', &rel_bytes, mode_of(&meta));
         push_bytes(archive, &path_bytes(&target));
+        encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
     } else if kind.is_file() {
         let key = file_identity(&meta);
         if let Some(state) = key.and_then(|key| hardlinks.get_mut(&key)) {

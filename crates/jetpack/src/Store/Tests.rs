@@ -1778,6 +1778,7 @@ mod tests {
         fs::create_dir_all(&src).unwrap();
         let file = src.join("payload");
         fs::write(&file, "xattr-bytes").unwrap();
+        set_user_xattr(&src, "user.jet.directory", b"directory");
         set_user_xattr(&file, "user.jet.test", b"keep");
         let mut outputs = BTreeMap::new();
         outputs.insert("out".to_string(), src);
@@ -1804,6 +1805,36 @@ mod tests {
             names.iter().any(|n| n == "user.jet.test"),
             "semantic xattr must be preserved on sealed object: {names:?}"
         );
+        let root_names = super::super::super::Envelope::list_xattr_names(
+            Path::new(&ingested.entry.out),
+        )
+        .unwrap();
+        assert!(root_names.iter().any(|name| name == "user.jet.directory"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ingest_rejects_semantic_directory_xattr_without_platform_kind() {
+        let (roots, _g) = temp_roots();
+        let src = roots.root.join("xattr-directory-reject");
+        fs::create_dir_all(&src).unwrap();
+        set_user_xattr(&src, "user.jet.directory", b"reject");
+        let error = ingest_tree(
+            &roots,
+            &IngestRequest {
+                name: "xattr-directory".into(),
+                version: "1".into(),
+                reference: "path:xattr-directory".into(),
+                cache_identity: test_identity(),
+                references: Vec::new(),
+                outputs: BTreeMap::from([("out".into(), src)]),
+                signature: String::new(),
+                provenance: String::new(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap_err();
+        assert!(error.what().contains("semantic xattr") || error.why().contains("semantic xattr"));
     }
 
     #[cfg(unix)]

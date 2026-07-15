@@ -17,6 +17,24 @@ fn windows_ingest_contract() -> WindowsIngestContract {
     }
 }
 
+type StableMetaIdentity = (u64, u64, u64, u32);
+
+#[cfg(any(test, windows))]
+fn windows_stable_identity(
+    volume: Option<u32>,
+    file: Option<u64>,
+    len: u64,
+    attributes: u32,
+) -> Result<StableMetaIdentity, IngestError> {
+    let volume = volume.ok_or_else(|| {
+        IngestError::Invalid("Windows file identity has no volume serial number".into())
+    })?;
+    let file = file.ok_or_else(|| {
+        IngestError::Invalid("Windows file identity has no file index".into())
+    })?;
+    Ok((u64::from(volume), file, len, attributes))
+}
+
 /// Inputs for a Hangar Store v2 ingest. `outputs` must include `"out"`.
 /// `cache_identity` is the store-side deriver/action identity (JP2 owns the
 /// full action IR — this only records the fingerprints Hangar already stores).
@@ -384,11 +402,9 @@ fn valid_output_name(name: &str) -> bool {
 fn reject_semantic_xattrs_tree(root: &Path) -> Result<(), IngestError> {
     fn walk(path: &Path) -> Result<(), IngestError> {
         let meta = fs::symlink_metadata(path).map_err(|e| IngestError::Io(e.to_string()))?;
+        super::super::Envelope::check_xattrs(path, false).map_err(IngestError::Invalid)?;
         if meta.file_type().is_symlink() {
             return Ok(());
-        }
-        if meta.is_file() {
-            super::super::Envelope::check_xattrs(path, false).map_err(IngestError::Invalid)?;
         }
         if meta.is_dir() {
             for ent in fs::read_dir(path).map_err(|e| IngestError::Io(e.to_string()))? {
@@ -406,11 +422,9 @@ fn reject_semantic_xattrs_tree(root: &Path) -> Result<(), IngestError> {
 fn copy_semantic_xattrs_tree(src_root: &Path, dst_root: &Path) -> Result<(), IngestError> {
     fn walk(src: &Path, dst: &Path) -> Result<(), IngestError> {
         let meta = fs::symlink_metadata(src).map_err(|e| IngestError::Io(e.to_string()))?;
+        copy_semantic_xattrs_node(src, dst)?;
         if meta.file_type().is_symlink() {
             return Ok(());
-        }
-        if meta.is_file() {
-            copy_semantic_xattrs_file(src, dst)?;
         }
         if meta.is_dir() {
             for ent in fs::read_dir(src).map_err(|e| IngestError::Io(e.to_string()))? {
@@ -424,7 +438,7 @@ fn copy_semantic_xattrs_tree(src_root: &Path, dst_root: &Path) -> Result<(), Ing
     walk(src_root, dst_root)
 }
 
-fn copy_semantic_xattrs_file(src: &Path, dst: &Path) -> Result<(), IngestError> {
+fn copy_semantic_xattrs_node(src: &Path, dst: &Path) -> Result<(), IngestError> {
     let names = semantic_xattr_names(src)?;
     for name in names {
         if super::super::Envelope::is_excluded_xattr(&name) {
@@ -658,7 +672,7 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
             )));
         }
     }
-    let before = stable_meta_identity(&meta);
+    let before = stable_meta_identity(&meta)?;
     if meta.file_type().is_dir() {
         fs::create_dir_all(dst)?;
         let mut names = Vec::new();
@@ -708,7 +722,7 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
         )));
     }
     let after = fs::symlink_metadata(src).map_err(|e| IngestError::Io(e.to_string()))?;
-    if before != stable_meta_identity(&after) {
+    if before != stable_meta_identity(&after)? {
         return Err(IngestError::Mutated(format!(
             "`{}` changed during ingest",
             src.display()
@@ -760,7 +774,7 @@ fn copy_nofollow_file(
     let opened = file
         .metadata()
         .map_err(|e| IngestError::Io(e.to_string()))?;
-    if stable_meta_identity(&opened) != stable_meta_identity(expected) {
+    if stable_meta_identity(&opened)? != stable_meta_identity(expected)? {
         return Err(IngestError::Mutated(format!(
             "`{}` changed before copy",
             src.display()
@@ -772,7 +786,7 @@ fn copy_nofollow_file(
     let after = file
         .metadata()
         .map_err(|e| IngestError::Io(e.to_string()))?;
-    if stable_meta_identity(&opened) != stable_meta_identity(&after) {
+    if stable_meta_identity(&opened)? != stable_meta_identity(&after)? {
         return Err(IngestError::Mutated(format!(
             "`{}` changed while copying",
             src.display()
@@ -797,38 +811,38 @@ fn copy_open_file(
     expected: &fs::Metadata,
 ) -> Result<(), IngestError> {
     let opened = file.metadata().map_err(|e| IngestError::Io(e.to_string()))?;
-    if stable_meta_identity(&opened) != stable_meta_identity(expected) {
+    if stable_meta_identity(&opened)? != stable_meta_identity(expected)? {
         return Err(IngestError::Mutated(format!("`{}` changed before copy", src.display())));
     }
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|e| IngestError::Io(e.to_string()))?;
     let after = file.metadata().map_err(|e| IngestError::Io(e.to_string()))?;
-    if stable_meta_identity(&opened) != stable_meta_identity(&after) {
+    if stable_meta_identity(&opened)? != stable_meta_identity(&after)? {
         return Err(IngestError::Mutated(format!("`{}` changed while copying", src.display())));
     }
     fs::write(dst, bytes).map_err(|e| IngestError::Io(e.to_string()))
 }
 
-fn stable_meta_identity(meta: &fs::Metadata) -> (u64, u64, u64, u32) {
+fn stable_meta_identity(meta: &fs::Metadata) -> Result<StableMetaIdentity, IngestError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt as _;
-        (meta.dev(), meta.ino(), meta.len(), meta.mode())
+        Ok((meta.dev(), meta.ino(), meta.len(), meta.mode()))
     }
     #[cfg(not(unix))]
     {
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt as _;
-            return (
-                u64::from(meta.volume_serial_number().unwrap_or(0)),
-                meta.file_index().unwrap_or(0),
+            return windows_stable_identity(
+                meta.volume_serial_number(),
+                meta.file_index(),
                 meta.len(),
                 meta.file_attributes(),
             );
         }
         #[cfg(not(windows))]
-        (0, 0, meta.len(), u32::from(meta.permissions().readonly()))
+        Ok((0, 0, meta.len(), u32::from(meta.permissions().readonly())))
     }
 }
 
@@ -840,6 +854,12 @@ mod portability_tests {
         assert_eq!(contract.open_reparse_point, 0x0020_0000);
         assert_eq!(contract.reparse_attribute, 0x0000_0400);
         assert!(contract.stable_volume_and_file_id);
+        assert_eq!(
+            super::windows_stable_identity(Some(7), Some(11), 13, 17).unwrap(),
+            (7, 11, 13, 17)
+        );
+        assert!(super::windows_stable_identity(None, Some(11), 13, 17).is_err());
+        assert!(super::windows_stable_identity(Some(7), None, 13, 17).is_err());
     }
 
     #[cfg(unix)]
