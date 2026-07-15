@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 624,
-    "rev": 7298,
+    "rev": 7301,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17517,6 +17517,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "codex-budget-collision-reviewer",
+          "text": "Independent C6 review confirms atomic never-reused fixture reservation and a live executing-child regression with release/wait/cleanup. Collision, unreadable, and parallel-unlink exacts pass; full CLI passes 134/134 in 193.46s under default scheduler. Criteria 3 and 6 verified; criterion 5 remains open for parent full-suite gate."
+        },
+        {
+          "at": "2026-07-15",
           "by": "codex-budget-investigator",
           "text": "C6 repair: isolated_cwd atomically claims never-reused directories and skips existing candidates; executing stale-inode regression, unreadable preflight, parallel unlink, and full 134-test CLI target pass. C3 evidence refreshed. Criterion 5 remains parent full-suite gate."
         },
@@ -17568,11 +17573,11 @@
         {
           "n": 3,
           "text": "A focused parallel regression and the full 126-test CLI target pass under the default test scheduler without global single-thread mode.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-budget-investigator",
-          "verifiedBy": null,
-          "evidence": "Refreshed after fixture collision repair: executing-path regression passes 1/1; parallel unlink regression passes 1/1 in 41.31s; cargo test --test cli -- --nocapture passes 134/134 under default scheduler in 196.03s. No global single-thread mode.",
-          "at": "2026-07-15T03:54:54.121Z"
+          "verifiedBy": "codex-budget-collision-reviewer",
+          "evidence": "Independent rerun under default scheduler: executing-path collision exact passes 1/1 in 0.16s; unreadable identity exact passes 1/1 in 0.15s; real parallel unlink exact passes 1/1 in 40.68s; full CLI passes 134/134 in 193.46s. No global test lock, single-thread flag, or serialized full target.",
+          "at": "2026-07-15T04:05:57.536Z"
         },
         {
           "n": 4,
@@ -17595,11 +17600,11 @@
         {
           "n": 6,
           "text": "CLI fixture directories are unique across repeated/concurrent harness processes and PID reuse; unreadable-identity setup never truncates an executing stale inode or unwraps ETXTBSY.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-budget-investigator",
-          "verifiedBy": null,
-          "evidence": "Atomic fs::create_dir reservation uses PID plus monotonic sequence; existing candidates are skipped without removal, so concurrent harnesses, PID reuse, and stale executing paths cannot be reused. Linux executing-copy regression failed against old helper and now passes 1/1 while stale child remains live; unreadable preflight passes 1/1; parallel unlink passes 1/1; full CLI passes 134/134.",
-          "at": "2026-07-15T03:54:54.023Z"
+          "verifiedBy": "codex-budget-collision-reviewer",
+          "evidence": "Independent review confirms isolated_cwd reserves via atomic fs::create_dir over PID+AtomicU64 candidates and skips AlreadyExists without unlinking, covering concurrent threads, concurrent process namespaces, PID reuse, and stale executing paths. Regression copies and execs the test harness, waits for a child-written readiness file, holds it blocked on stdin while reserving/copying a distinct path, then releases, waits, and cleans both dirs. No child/fixture leak on the exercised path and no product behavior changed. All focused and full CLI gates pass.",
+          "at": "2026-07-15T04:06:06.047Z"
         }
       ],
       "refs": [
@@ -37211,6 +37216,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T04:06:11.795Z",
+      "by": "codex-budget-collision-reviewer",
+      "action": "card.update",
+      "ref": "c0c008wm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T04:06:06.047Z",
+      "by": "codex-budget-collision-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0c008wm",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-15T04:05:57.539Z",
+      "by": "codex-budget-collision-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0c008wm",
+      "note": "#3"
+    },
+    {
       "at": "2026-07-15T04:01:41.501Z",
       "by": "terra-420-producer",
       "action": "card.update",
@@ -40687,27 +40713,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-ECO-EXTENSION1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:14:09.595Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:14:09.431Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:14:09.265Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-RECEIPT2",
       "note": "marked ready"
     }
   ],
