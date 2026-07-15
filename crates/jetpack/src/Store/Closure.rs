@@ -143,12 +143,8 @@ struct JournalEntry {
 
 pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        recover_closure_journal_unlocked(roots)?;
-        migrate_closure_graph_unlocked(roots)?;
-        let graph = load_graph(roots)?;
-        for record in graph.records.values() {
-            materialize_package_record(roots, record)?;
-        }
+        let (_, graph) = migrate_closure_graph_unlocked(roots)?;
+        validate_graph_store_proofs(roots, &graph, false).map_err(std::io::Error::other)?;
         Ok(graph)
     })
 }
@@ -261,13 +257,12 @@ fn push_frame(out: &mut Vec<u8>, field: &[u8]) {
 
 pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        migrate_closure_graph_unlocked(roots)
+        migrate_closure_graph_unlocked(roots).map(|(migrated, _)| migrated)
     })
 }
 
-fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
-    recover_closure_journal_unlocked(roots)?;
-    let mut graph = load_graph_mode(roots, true)?;
+fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, ClosureGraph)> {
+    let (_, mut graph) = recover_closure_journal_graph_unlocked(roots)?;
     let mut entries = list_unlocked(roots);
     entries.sort_by(|left, right| left.id.cmp(&right.id));
     let mut seen_records = BTreeSet::new();
@@ -307,7 +302,7 @@ fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
         }
     }
     if objects.is_empty() && records.is_empty() {
-        return Ok(0);
+        return Ok((0, graph));
     }
     let migrated = records.len();
     let transaction = JournalEntry {
@@ -317,13 +312,16 @@ fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
         deleted_records: Vec::new(),
     };
     apply_entry(&mut graph, transaction.clone()).map_err(std::io::Error::other)?;
-    validate_graph(roots, &graph).map_err(std::io::Error::other)?;
+    validate_graph_structure_mode(roots, &graph, false).map_err(std::io::Error::other)?;
+    for record in &transaction.records {
+        validate_record_store_proof(roots, record, false).map_err(std::io::Error::other)?;
+    }
     append_entry(roots, &transaction)?;
     for record in &transaction.records {
         materialize_package_record(roots, record)?;
     }
     compact_if_needed(roots)?;
-    Ok(migrated)
+    Ok((migrated, graph))
 }
 
 pub(crate) fn register_entry_unlocked(
@@ -333,9 +331,7 @@ pub(crate) fn register_entry_unlocked(
     if entry.envelope.output_hash.is_empty() {
         return Ok(false);
     }
-    recover_closure_journal_unlocked(roots)?;
-    migrate_closure_graph_unlocked(roots)?;
-    let graph = load_graph(roots)?;
+    let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     let (objects, record) = descriptor_for_entry(roots, entry)?;
     if graph.records.get(&record.id) == Some(&record)
         && objects
@@ -352,7 +348,9 @@ pub(crate) fn register_entry_unlocked(
     };
     let mut candidate = graph;
     apply_entry(&mut candidate, transaction.clone()).map_err(std::io::Error::other)?;
-    validate_graph(roots, &candidate).map_err(std::io::Error::other)?;
+    validate_graph_structure_mode(roots, &candidate, false).map_err(std::io::Error::other)?;
+    validate_record_store_proof(roots, &transaction.records[0], false)
+        .map_err(std::io::Error::other)?;
     append_entry(roots, &transaction)?;
     materialize_package_record(roots, &transaction.records[0])?;
     compact_if_needed(roots)?;
@@ -387,9 +385,15 @@ pub fn recover_closure_journal(roots: &Roots) -> std::io::Result<usize> {
 }
 
 pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result<usize> {
+    recover_closure_journal_graph_unlocked(roots).map(|(recovered, _)| recovered)
+}
+
+fn recover_closure_journal_graph_unlocked(
+    roots: &Roots,
+) -> std::io::Result<(usize, ClosureGraph)> {
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
-        return Ok(0);
+        return Ok((0, ClosureGraph::default()));
     };
     let mut recovered = 0;
     for entry in entries {
@@ -412,7 +416,7 @@ pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result
             })?;
         }
     }
-    let graph = load_graph_mode(roots, true)?;
+    let graph = load_graph_structure_mode(roots, true)?;
     for record in graph
         .records
         .values()
@@ -423,7 +427,7 @@ pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result
     for id in &graph.deleted_records {
         recovered += usize::from(remove_package_record(roots, id)?);
     }
-    Ok(recovered)
+    Ok((recovered, graph))
 }
 
 fn descriptor_for_entry(
@@ -617,6 +621,21 @@ pub(super) fn lifecycle_inputs_unlocked(
 }
 
 fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<ClosureGraph> {
+    load_graph_mode_with_proofs(roots, allow_legacy, true)
+}
+
+fn load_graph_structure_mode(
+    roots: &Roots,
+    allow_legacy: bool,
+) -> std::io::Result<ClosureGraph> {
+    load_graph_mode_with_proofs(roots, allow_legacy, false)
+}
+
+fn load_graph_mode_with_proofs(
+    roots: &Roots,
+    allow_legacy: bool,
+    validate_store_proofs: bool,
+) -> std::io::Result<ClosureGraph> {
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
         return Ok(ClosureGraph::default());
@@ -637,8 +656,15 @@ fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<Closure
                 format!("closure journal `{}`: {error}", path.display()),
             )
         })?;
+        let applied = entry.clone();
         apply_entry(&mut graph, entry)
-            .and_then(|()| validate_graph_mode(roots, &graph, allow_legacy))
+            .and_then(|()| validate_applied_entry(roots, &graph, &applied, allow_legacy))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    }
+    validate_graph_structure_mode(roots, &graph, allow_legacy)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    if validate_store_proofs {
+        validate_graph_store_proofs(roots, &graph, allow_legacy)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     }
     Ok(graph)
@@ -672,11 +698,22 @@ fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), Stri
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_graph(roots: &Roots, graph: &ClosureGraph) -> Result<(), String> {
     validate_graph_mode(roots, graph, false)
 }
 
+#[cfg(test)]
 fn validate_graph_mode(
+    roots: &Roots,
+    graph: &ClosureGraph,
+    allow_legacy: bool,
+) -> Result<(), String> {
+    validate_graph_structure_mode(roots, graph, allow_legacy)?;
+    validate_graph_store_proofs(roots, graph, allow_legacy)
+}
+
+fn validate_graph_structure_mode(
     roots: &Roots,
     graph: &ClosureGraph,
     allow_legacy: bool,
@@ -740,7 +777,7 @@ fn validate_graph_mode(
         }
         let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
         if !allow_legacy || !legacy {
-            let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
+            ProducerRecord::decode(&record.producer_record).map_err(|error| {
                 format!("closure record `{id}` has invalid producer record: {error}")
             })?;
             let meta = parse_meta(&record.package_meta)
@@ -748,13 +785,6 @@ fn validate_graph_mode(
             if record.action_key != entry_action_key(&store_entry_from_meta(id, &meta)) {
                 return Err(format!(
                     "closure record `{id}` action key disagrees with package metadata"
-                ));
-            }
-            if record.references.is_empty()
-                && !store_validates_complete_closure(roots, record, &meta, &producer)
-            {
-                return Err(format!(
-                    "closure record `{id}` has no dependency references or store-validated closure proof"
                 ));
             }
             if meta.producer_record != record.producer_record {
@@ -776,6 +806,136 @@ fn validate_graph_mode(
         }
     }
     Ok(())
+}
+
+fn validate_applied_entry(
+    roots: &Roots,
+    graph: &ClosureGraph,
+    entry: &JournalEntry,
+    allow_legacy: bool,
+) -> Result<(), String> {
+    if entry.kind == JournalKind::Snapshot {
+        return validate_graph_structure_mode(roots, graph, allow_legacy);
+    }
+    let hangar = roots.hangar_dir();
+    for id in &entry.deleted_records {
+        if id.is_empty() || graph.records.contains_key(id) || !graph.deleted_records.contains(id) {
+            return Err(format!("invalid deleted closure record `{id}`"));
+        }
+    }
+    for object in &entry.objects {
+        let digest = &object.digest;
+        if digest.is_empty() || object.path.is_empty() {
+            return Err(format!("invalid closure object descriptor `{digest}`"));
+        }
+        let path = Path::new(&object.path);
+        if path
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+        {
+            return Err(format!(
+                "closure object `{digest}` path contains parent traversal"
+            ));
+        }
+        if object.external != !path.starts_with(&hangar) {
+            return Err(format!(
+                "closure object `{digest}` has invalid external marker"
+            ));
+        }
+    }
+    for record in &entry.records {
+        let id = &record.id;
+        if id.is_empty() || record.action_key.is_empty() {
+            return Err(format!("invalid closure record `{id}`"));
+        }
+        if record.outputs.get("out") != Some(&record.primary) {
+            return Err(format!(
+                "closure record `{id}` primary is not its `out` output"
+            ));
+        }
+        for (name, digest) in &record.outputs {
+            if !valid_output_name(name) {
+                return Err(format!("closure record `{id}` has invalid output name `{name}`"));
+            }
+            if !graph.objects.contains_key(digest) {
+                return Err(format!(
+                    "closure record `{id}` output `{name}` references missing object `{digest}`"
+                ));
+            }
+        }
+        if let Some(missing) = record
+            .references
+            .iter()
+            .find(|digest| !graph.objects.contains_key(*digest))
+        {
+            return Err(format!(
+                "closure record `{id}` references missing object `{missing}`"
+            ));
+        }
+        let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
+        if !allow_legacy || !legacy {
+            ProducerRecord::decode(&record.producer_record).map_err(|error| {
+                format!("closure record `{id}` has invalid producer record: {error}")
+            })?;
+            let meta = parse_meta(&record.package_meta)
+                .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
+            if record.action_key != entry_action_key(&store_entry_from_meta(id, &meta)) {
+                return Err(format!(
+                    "closure record `{id}` action key disagrees with package metadata"
+                ));
+            }
+            if meta.producer_record != record.producer_record {
+                return Err(format!(
+                    "closure record `{id}` package metadata disagrees with producer record"
+                ));
+            }
+            if meta.envelope.output_hash != record.primary || meta.named_outputs != record.outputs {
+                return Err(format!(
+                    "closure record `{id}` package metadata disagrees with outputs"
+                ));
+            }
+        }
+        canonical_action_projection(record)?;
+    }
+    Ok(())
+}
+
+fn validate_graph_store_proofs(
+    roots: &Roots,
+    graph: &ClosureGraph,
+    allow_legacy: bool,
+) -> Result<(), String> {
+    for record in graph.records.values() {
+        validate_record_store_proof(roots, record, allow_legacy)?;
+    }
+    Ok(())
+}
+
+fn validate_record_store_proof(
+    roots: &Roots,
+    record: &ClosureRecord,
+    allow_legacy: bool,
+) -> Result<(), String> {
+    let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
+    if allow_legacy && legacy || !record.references.is_empty() {
+        return Ok(());
+    }
+    let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
+        format!(
+            "closure record `{}` has invalid producer record: {error}",
+            record.id
+        )
+    })?;
+    let meta = parse_meta(&record.package_meta)
+        .ok_or_else(|| format!("closure record `{}` has invalid package metadata", record.id))?;
+    if store_validates_complete_closure(roots, record, &meta, &producer) {
+        Ok(())
+    } else {
+        Err(format!(
+            "closure record `{}` has no dependency references or store-validated closure proof",
+            record.id
+        ))
+    }
 }
 
 fn valid_output_name(name: &str) -> bool {
@@ -933,7 +1093,7 @@ fn compact_if_needed(roots: &Roots) -> std::io::Result<()> {
     if paths.len() <= COMPACT_AFTER {
         return Ok(());
     }
-    let graph = load_graph(roots)?;
+    let graph = load_graph_structure_mode(roots, false)?;
     let snapshot = JournalEntry {
         kind: JournalKind::Snapshot,
         objects: graph.objects.into_values().collect(),
