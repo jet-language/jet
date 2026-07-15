@@ -167,7 +167,7 @@ fn top_level_jet_run_nixpkgs_colon_tool_execs_tool() {
     let proj = Scratch::new("jet-run-nixpkgs-proj");
     let fixtures = Scratch::new("jet-run-nixpkgs-fx");
     let out = Scratch::new("jet-run-nixpkgs-out");
-    write_runnable_fixture(&fixtures.path, &out.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out.path);
     let output = jet()
         .args([
             "run",
@@ -199,5 +199,4 @@ fn top_level_jet_run_nixpkgs_colon_tool_execs_tool() {
 }
 
 // ── U16: `jetpack bridge flake` ──
-
 

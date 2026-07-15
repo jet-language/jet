@@ -275,12 +275,20 @@ fn build_resolves_fixture_ref() {
 #[test]
 fn list_shows_realized_package() {
     let root = Scratch::new("root");
-    jetpack()
-        .args(["build", "nixpkgs:ripgrep", "--no-color", "--offline"])
+    let fixtures = Scratch::new("fixtures");
+    let staging = Scratch::new("greet-out");
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+    let built = jetpack()
+        .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
         .unwrap();
+    assert!(
+        built.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let out = jetpack()
         .args(["list", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
@@ -288,7 +296,7 @@ fn list_shows_realized_package() {
         .unwrap();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("ripgrep"), "stderr: {stderr}");
+    assert!(stderr.contains("greet"), "stderr: {stderr}");
 }
 
 
@@ -438,7 +446,10 @@ fn clean_optimizes_duplicate_files_inside_hangar_only() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("optimized 1 file"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("optimized duplicate Jet-owned files: saved"),
+        "stderr: {stderr}"
+    );
     assert_eq!(
         fs::read_to_string(first.join("blob")).unwrap(),
         "same payload"
@@ -481,7 +492,7 @@ fn run_dash_dash_executes_in_env_and_returns_status() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
     let out_dir = Scratch::new("out");
-    write_runnable_fixture(&fixtures.path, &out_dir.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
 
     let output = jetpack()
         .args([
@@ -511,7 +522,7 @@ fn run_explicit_package_without_command_runs_package_visibly() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
     let out_dir = Scratch::new("out");
-    write_runnable_fixture(&fixtures.path, &out_dir.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
 
     let output = jetpack()
         .args(["run", "nixpkgs:greet", "--no-color", "--offline"])
@@ -542,7 +553,7 @@ fn run_dash_dash_propagates_failure_status() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
     let out_dir = Scratch::new("out");
-    write_runnable_fixture(&fixtures.path, &out_dir.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
 
     let output = jetpack()
         .args([
@@ -576,7 +587,7 @@ fn parent_env_unchanged_after_run() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
     let out_dir = Scratch::new("out");
-    write_runnable_fixture(&fixtures.path, &out_dir.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
     let before = std::env::var("PATH").unwrap_or_default();
 
     let output = jetpack()
@@ -767,7 +778,7 @@ fn run_with_project_env_file_resolves_declared_packages() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fixtures");
     let fastfetch_out = Scratch::new("fastfetch-out");
-    write_fastfetch_fixture(&fixtures.path, &fastfetch_out.path);
+    write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
     // Declare one package, then run with no ref → it resolves from env.jet.
     fs::write(
         proj.join("env.jet"),
@@ -826,15 +837,16 @@ module dev {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let entries = fs::read_dir(root.path.join("hangar"))
-        .unwrap()
-        .flatten()
-        .map(|e| e.path())
-        .collect::<Vec<_>>();
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entries = jetpack::Store::list(&roots);
     assert!(
-        entries.iter().any(
-            |p| fs::read_to_string(p.join("share/readme.txt")).unwrap_or_default() == "adapted\n"
-        ),
+        entries.iter().any(|entry| {
+            fs::read_to_string(Path::new(&entry.out).join("share/readme.txt")).unwrap_or_default()
+                == "adapted\n"
+        }),
         "adapter output missing copied file: {entries:?}"
     );
     let cached = jetpack()
@@ -1371,7 +1383,7 @@ fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
     let proj = Scratch::new("dashp-proj");
     let fixtures = Scratch::new("dashp-fx");
     let out = Scratch::new("dashp-out");
-    write_runnable_fixture(&fixtures.path, &out.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out.path);
     let output = jetpack()
         .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
         .arg(&fixtures.path)
@@ -1399,7 +1411,7 @@ fn enter_dash_p_merges_with_project_declared_packages() {
     let (base, proj, root) = core_hello_project("dashp-merge");
     let fixtures = base.join("fixtures");
     let out = base.join("greet-out");
-    write_runnable_fixture(&fixtures, &out);
+    write_runnable_fixture(&fixtures, &root, &out);
     let output = jetpack()
         .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
         .arg(&fixtures)

@@ -32,13 +32,41 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        make_tree_writable(&self.path);
         let _ = fs::remove_dir_all(&self.path);
     }
 }
 
-fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
+#[cfg(unix)]
+fn make_tree_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).unwrap() {
+            make_tree_writable(&entry.unwrap().path());
+        }
+    }
+    if !meta.file_type().is_symlink() {
+        let mode = if meta.is_dir() { 0o755 } else { meta.permissions().mode() | 0o600 };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+}
+
+#[cfg(not(unix))]
+fn make_tree_writable(path: &Path) {
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    let mut permissions = meta.permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
     fs::create_dir_all(fixtures).unwrap();
-    let bin = out_dir.join("bin");
+    let bin = staging_dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let greet = bin.join(if cfg!(windows) { "greet.bat" } else { "greet" });
     #[cfg(windows)]
@@ -49,11 +77,32 @@ fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
     }
+    jetpack::Store::seal_local_output(staging_dir).unwrap();
+    let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
+    let out_dir = root.join("hangar").join("objects").join(&digest);
+    fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+    let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        staging_permissions.set_mode(staging_permissions.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    staging_permissions.set_readonly(false);
+    fs::set_permissions(staging_dir, staging_permissions).unwrap();
+    fs::rename(staging_dir, &out_dir).unwrap();
+    jetpack::Store::seal_local_output(&out_dir).unwrap();
+    assert_eq!(
+        jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
+        digest,
+        "published fixture must retain its content-addressed identity"
+    );
     let json = format!(
         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
+    out_dir
 }
 
 #[test]
@@ -62,7 +111,7 @@ fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fixtures");
     let out_dir = Scratch::new("out");
-    write_runnable_fixture(&fixtures.path, &out_dir.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
 
     let first = jetpack()
         .args([
@@ -137,7 +186,7 @@ fn offline_reuse_refuses_a_tampered_closure() {
     let root = Scratch::new("tamper-root");
     let fixtures = Scratch::new("tamper-fixtures");
     let out_dir = Scratch::new("tamper-out");
-    write_runnable_fixture(&fixtures.path, &out_dir.path);
+    let seeded_out = write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
 
     let first = jetpack()
         .args([
@@ -160,15 +209,14 @@ fn offline_reuse_refuses_a_tampered_closure() {
 
     // Corrupt the realized closure on disk (a partial GC / bit-rot / tamper
     // stand-in): drop the executable the recorded digest covers.
-    let greet = out_dir
-        .path
+    let greet = seeded_out
         .join("bin")
         .join(if cfg!(windows) { "greet.bat" } else { "greet" });
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(
-            out_dir.path.join("bin"),
+            seeded_out.join("bin"),
             fs::Permissions::from_mode(0o755),
         );
     }

@@ -295,11 +295,36 @@ pub fn example_dir() -> PathBuf {
 }
 
 
-/// Write a provider fixture whose `out` points at a real dir we control, so a
-/// `-- cmd` invocation can actually execute a binary from the realized env.
-pub fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
+fn seed_hangar_object(root: &Path, staging_dir: &Path) -> PathBuf {
+    jetpack::Store::seal_local_output(staging_dir).unwrap();
+    let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
+    let out_dir = root.join("hangar").join("objects").join(&digest);
+    fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+    let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        staging_permissions.set_mode(staging_permissions.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    staging_permissions.set_readonly(false);
+    fs::set_permissions(staging_dir, staging_permissions).unwrap();
+    fs::rename(staging_dir, &out_dir).unwrap();
+    jetpack::Store::seal_local_output(&out_dir).unwrap();
+    assert_eq!(
+        jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
+        digest,
+        "published fixture must retain its content-addressed identity"
+    );
+    out_dir
+}
+
+
+/// Write a provider fixture whose `out` is a real content-addressed Hangar
+/// object, so closure validation can prove it before executing its binary.
+pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
     fs::create_dir_all(fixtures).unwrap();
-    let bin = out_dir.join("bin");
+    let bin = staging_dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let greet = bin.join("greet");
     fs::write(&greet, "#!/bin/sh\necho hello from jetpack\n").unwrap();
@@ -308,11 +333,13 @@ pub fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
     }
+    let out_dir = seed_hangar_object(root, staging_dir);
     let json = format!(
         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
+    out_dir
 }
 
 
@@ -324,9 +351,9 @@ pub fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
 /// (`snapshot_lease`) refuses to hand a consumer any path whose `out` doesn't
 /// exist, so a test that enters the composed env (`run`/`dev` with no
 /// explicit command consuming the package) needs a real backing tree.
-pub fn write_fastfetch_fixture(fixtures: &Path, out_dir: &Path) {
+pub fn write_fastfetch_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
     fs::create_dir_all(fixtures).unwrap();
-    let bin = out_dir.join("bin");
+    let bin = staging_dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let fastfetch = bin.join("fastfetch");
     fs::write(&fastfetch, "#!/bin/sh\necho fastfetch stub\n").unwrap();
@@ -335,11 +362,13 @@ pub fn write_fastfetch_fixture(fixtures: &Path, out_dir: &Path) {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
     }
+    let out_dir = seed_hangar_object(root, staging_dir);
     let json = format!(
         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-fastfetch.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap();
+    out_dir
 }
 
 
@@ -672,5 +701,4 @@ pub fn harness_json_field(text: &str, key: &str) -> String {
 pub fn mono_example_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-mono")
 }
-
 
