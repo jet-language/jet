@@ -1,4 +1,7 @@
-use super::generation_files::{generation_dir, write_generation_files};
+use super::generation_files::{
+    generation_dir, write_generation_files, write_generation_root_proof,
+    write_generation_source_proof,
+};
 use super::generations_activation::{append_generation, now_secs};
 use super::kernel_bootstrap::{run_kernel_bootstrap_builder, validate_boot_payloads};
 use super::nixos_backend::is_nixpkgs_source;
@@ -13,12 +16,14 @@ use crate::Output::Theme;
 use crate::RefSpec;
 use crate::Store;
 use std::fs;
+use std::path::Path;
 
 pub(super) fn build_generation(
     theme: &Theme,
     plan: &EnvPlan,
     system: &SystemPlan,
     flags: &OsFlags,
+    source_config: &Path,
 ) -> Option<Generation> {
     let roots = Store::resolve();
     let dir = generation_dir(system, flags.name.as_deref());
@@ -301,11 +306,67 @@ pub(super) fn build_generation(
         );
         return None;
     }
+    if let Err(e) = write_generation_source_proof(&dir, source_config) {
+        theme.error_coded(
+            "E1278",
+            "jetos generation source proof is incomplete",
+            &format!("binding source and plan hashes failed: {e}"),
+            "check generation storage permissions, then rebuild the generation.",
+        );
+        return None;
+    }
+    let generation_name = dir.file_name()?.to_string_lossy().into_owned();
+    let root_proof = match write_generation_root_proof(
+        &dir,
+        &system.name,
+        &generation_name,
+        &realized,
+    ) {
+        Ok(proof) => proof,
+        Err(e) => {
+            theme.error(
+                "could not seal the jetos generation",
+                &format!("writing the complete files/output proof failed: {e}."),
+                "rebuild the generation after checking Hangar and generation storage integrity.",
+            );
+            return None;
+        }
+    };
+    let created_at = now_secs();
+    let prepared = match Store::reconcile_external_consumer_root(
+        &roots,
+        "jetos-generation",
+        &format!("{}\0{}", system.name, generation_name),
+        &root_proof.witness,
+        root_proof.output_digests,
+        created_at,
+    ) {
+        Ok(prepared) => prepared,
+        Err(e) => {
+            theme.error(
+                "could not prepare the jetos generation root",
+                &format!("recording its Hangar output roots failed: {e}."),
+                "verify the Hangar, then rebuild the generation; no ledger entry was committed.",
+            );
+            return None;
+        }
+    };
+    if cfg!(debug_assertions)
+        && std::env::var_os("JET_TEST_GENERATION_FAILPOINT").as_deref()
+            == Some(std::ffi::OsStr::new("after-root-prepare"))
+    {
+        theme.error(
+            "jetos generation test failpoint stopped publication",
+            "the external-consumer root is prepared and the generation ledger is still absent.",
+            "rerun the same build without JET_TEST_GENERATION_FAILPOINT to exercise recovery.",
+        );
+        return None;
+    }
     let gen = Generation {
-        name: dir.file_name()?.to_string_lossy().into_owned(),
+        name: generation_name,
         host: system.name.clone(),
         path: dir,
-        created_at: now_secs(),
+        created_at,
     };
     if append_generation(&gen).is_err() {
         theme.error(
@@ -314,6 +375,27 @@ pub(super) fn build_generation(
             "check permissions on the Jetpack root, or set JETPACK_ROOT.",
         );
         return None;
+    }
+    if cfg!(debug_assertions)
+        && std::env::var_os("JET_TEST_GENERATION_FAILPOINT").as_deref()
+            == Some(std::ffi::OsStr::new("after-ledger"))
+    {
+        theme.error(
+            "jetos generation test failpoint stopped publication",
+            "the generation ledger is durable and the external-consumer root remains prepared.",
+            "rerun the same build without JET_TEST_GENERATION_FAILPOINT to exercise recovery.",
+        );
+        return None;
+    }
+    if let Some(prepared) = prepared {
+        if let Err(e) = Store::commit_external_consumer_root(&roots, &prepared, now_secs()) {
+            theme.error(
+                "could not commit the jetos generation root",
+                &format!("the generation ledger is durable, but its Hangar root commit failed: {e}."),
+                "rerun the same build; Jetpack will recover the exact prepared root and ledger entry.",
+            );
+            return None;
+        }
     }
     // Tier 2 close: erase any leftover pinned status and leave one ledger
     // summary, matching jetpack build's region→ledger settle (D-FE-CLI1).

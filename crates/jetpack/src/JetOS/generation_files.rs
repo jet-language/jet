@@ -25,7 +25,6 @@ use super::theme_fleet_lifecycle::{
     write_lifecycle_facts, write_options_reference, write_service_manager_depth,
     write_theme_facts,
 };
-use super::types::Target;
 use super::user_flatpak_perf::{
     write_flatpak_facts, write_performance_facts, write_user_environment_facts,
 };
@@ -36,6 +35,11 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+pub(super) struct GenerationRootProof {
+    pub(super) witness: String,
+    pub(super) output_digests: Vec<String>,
+}
 
 pub(super) fn generation_dir(system: &SystemPlan, explicit: Option<&str>) -> PathBuf {
     let name = explicit
@@ -133,8 +137,8 @@ pub(super) fn write_generation_files(
     Ok(())
 }
 
-pub(super) fn write_generation_source_proof(dir: &Path, target: &Target) -> std::io::Result<()> {
-    let source = fs::read(&target.config)?;
+pub(super) fn write_generation_source_proof(dir: &Path, config: &Path) -> std::io::Result<()> {
+    let source = fs::read(config)?;
     let plan = fs::read(dir.join("plan.json"))?;
     let input_plan = std::env::var("JETOS_STUDIO_INPUT_PLAN_SHA256").unwrap_or_default();
     let proof = format!(
@@ -144,6 +148,156 @@ pub(super) fn write_generation_source_proof(dir: &Path, target: &Target) -> std:
         JSON::quote(&crate::SHA256::sha256_hex(&plan)),
     );
     fs::write(dir.join("source-proof.json"), proof)
+}
+
+/// Seal complete generation inputs before its durable ledger transaction.
+/// The manifest excludes only its own two proof files, avoiding self-hashing;
+/// every other directory, file, symlink target, mode, and byte digest is bound.
+pub(super) fn write_generation_root_proof(
+    dir: &Path,
+    host: &str,
+    name: &str,
+    realized: &[RealizedPackage],
+) -> std::io::Result<GenerationRootProof> {
+    let manifest = generation_files_manifest(dir)?;
+    fs::write(dir.join("generation-files.proof"), &manifest)?;
+    let source_proof = fs::read(dir.join("source-proof.json"))?;
+    let plan = fs::read(dir.join("plan.json"))?;
+    let mut output_digests = realized
+        .iter()
+        .flat_map(RealizedPackage::output_digests)
+        .collect::<Vec<_>>();
+    output_digests.sort();
+    output_digests.dedup();
+    if output_digests.is_empty() {
+        return Err(std::io::Error::other(
+            "jetos generation has no Hangar output digests",
+        ));
+    }
+    let mut canonical = Vec::new();
+    frame(&mut canonical, b"jetos-generation-root-v1");
+    frame(&mut canonical, host.as_bytes());
+    frame(&mut canonical, name.as_bytes());
+    frame(&mut canonical, &source_proof);
+    frame(&mut canonical, &plan);
+    frame(&mut canonical, &manifest);
+    for digest in &output_digests {
+        frame(&mut canonical, digest.as_bytes());
+    }
+    let witness = format!("sha256-{}", crate::SHA256::sha256_hex(&canonical));
+    let digests = output_digests
+        .iter()
+        .map(|digest| JSON::quote(digest))
+        .collect::<Vec<_>>()
+        .join(",");
+    let root = format!(
+        "{{\"kind\":\"jetos.generation-root.v1\",\"host\":{},\"generation\":{},\"witness\":{},\"source_proof_sha256\":{},\"plan_sha256\":{},\"files_proof_sha256\":{},\"output_digests\":[{}]}}",
+        JSON::quote(host),
+        JSON::quote(name),
+        JSON::quote(&witness),
+        JSON::quote(&crate::SHA256::sha256_hex(&source_proof)),
+        JSON::quote(&crate::SHA256::sha256_hex(&plan)),
+        JSON::quote(&crate::SHA256::sha256_hex(&manifest)),
+        digests,
+    );
+    fs::write(dir.join("generation-root.json"), root)?;
+    Ok(GenerationRootProof {
+        witness,
+        output_digests,
+    })
+}
+
+fn frame(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+    out.extend_from_slice(bytes);
+}
+
+fn generation_files_manifest(root: &Path) -> std::io::Result<Vec<u8>> {
+    let mut paths = Vec::new();
+    collect_generation_paths(root, root, &mut paths)?;
+    paths.sort_by(|a, b| path_bytes(a).cmp(&path_bytes(b)));
+    let mut out = Vec::new();
+    for relative in paths {
+        if relative == Path::new("generation-files.proof")
+            || relative == Path::new("generation-root.json")
+        {
+            continue;
+        }
+        let path = root.join(&relative);
+        let metadata = fs::symlink_metadata(&path)?;
+        let kind = if metadata.file_type().is_symlink() {
+            b'l'
+        } else if metadata.is_dir() {
+            b'd'
+        } else if metadata.is_file() {
+            b'f'
+        } else {
+            return Err(std::io::Error::other(
+                "generation contains an unsupported filesystem object",
+            ));
+        };
+        out.push(kind);
+        frame(&mut out, &path_bytes(&relative));
+        frame(&mut out, &generation_mode(&metadata).to_be_bytes());
+        if kind == b'f' {
+            frame(
+                &mut out,
+                crate::SHA256::sha256_hex(&fs::read(&path)?).as_bytes(),
+            );
+        } else if kind == b'l' {
+            frame(&mut out, &path_bytes(&fs::read_link(&path)?));
+        } else {
+            frame(&mut out, &[]);
+        }
+    }
+    Ok(out)
+}
+
+fn collect_generation_paths(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    let mut entries = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| path_bytes(&entry.path()));
+    for entry in entries {
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| std::io::Error::other("generation member escaped its root"))?
+            .to_path_buf();
+        out.push(relative);
+        if fs::symlink_metadata(&path)?.is_dir() {
+            collect_generation_paths(root, &path, out)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(windows)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    path.as_os_str()
+        .encode_wide()
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+#[cfg(unix)]
+fn generation_mode(metadata: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    metadata.mode()
+}
+
+#[cfg(windows)]
+fn generation_mode(metadata: &fs::Metadata) -> u32 {
+    u32::from(metadata.permissions().readonly())
 }
 
 pub(super) fn render_plan_json(

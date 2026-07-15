@@ -2,7 +2,7 @@ use super::entry::default_config_path;
 use super::generation::build_generation;
 use super::generation_files::{
     diff_packages, dir_size_bytes, generation_ordinal, read_generation_packages,
-    render_plan_json, write_generation_source_proof,
+    render_plan_json,
 };
 use super::generations_activation::{
     activate_generation, find_rollback_generation, generation_named, latest_generation_for,
@@ -154,17 +154,8 @@ pub(super) fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activat
     } else {
         Vec::new()
     };
-    match build_generation(theme, &plan, &system, flags) {
+    match build_generation(theme, &plan, &system, flags, &target.config) {
         Some(gen) => {
-            if let Err(error) = write_generation_source_proof(&gen.path, &target) {
-                theme.error_coded(
-                    "E1278",
-                    "jetos generation source proof is incomplete",
-                    &format!("binding source and plan hashes failed: {error}"),
-                    "check generation storage permissions, then rebuild the generation.",
-                );
-                return 2;
-            }
             theme.ok(&format!(
                 "jetos generation {} built for {}",
                 theme.bold(&gen.name),
@@ -357,7 +348,7 @@ pub(super) fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 
     let Some((plan, system)) = load_target(theme, &target) else {
         return 2;
     };
-    let Some(gen) = build_generation(theme, &plan, &system, flags) else {
+    let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
         return 2;
     };
     let disk = flags.manual_disk.as_deref().unwrap_or("guided-ext4");

@@ -687,6 +687,7 @@ pub(super) fn run_vmtest(
     vmtest: &VmTestPlan,
     disk: &str,
     flags: &OsFlags,
+    source_config: &Path,
 ) -> Result<PathBuf, String> {
     let proof_dir = systems_dir().join("vm-tests");
     fs::create_dir_all(&proof_dir)
@@ -703,7 +704,7 @@ pub(super) fn run_vmtest(
             return Err(format!("system `{}` failed option validation", system.name));
         }
         let host_disk = vmtest_host_disk(disk, &host.name, vmtest.hosts.len());
-        let Some(gen) = build_generation(theme, plan, &system, flags) else {
+        let Some(gen) = build_generation(theme, plan, &system, flags, source_config) else {
             return Err(format!("building system `{}` failed", system.name));
         };
         let media = write_installer_media(&gen, &system, "guided-ext4")

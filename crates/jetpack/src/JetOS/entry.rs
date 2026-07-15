@@ -95,7 +95,7 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsF
             0
         }
         "build" => {
-            let Some(gen) = build_generation(theme, &plan, &system, flags) else {
+            let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
                 return 2;
             };
             theme.ok(&format!(
@@ -107,7 +107,7 @@ pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsF
             0
         }
         "switch" => {
-            let Some(gen) = build_generation(theme, &plan, &system, flags) else {
+            let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
                 return 2;
             };
             if let Err(e) = activate_generation(&gen) {

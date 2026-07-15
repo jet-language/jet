@@ -3,6 +3,7 @@ use super::options_rendering::risk_classes;
 use super::types::Generation;
 use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
+use crate::Store;
 use crate::JSON;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -141,22 +142,40 @@ fn rollback_proof_for(host: &str, current: &Path) -> String {
 }
 
 pub(super) fn append_generation(gen: &Generation) -> std::io::Result<()> {
-    if let Some(parent) = generations_log().parent() {
+    let roots = Store::resolve();
+    crate::RuntimePolicy::with_lock(&roots.root, "jetos-generations", || {
+        let log = generations_log();
+        let parent = log
+            .parent()
+            .ok_or_else(|| std::io::Error::other("generation ledger has no parent"))?;
         fs::create_dir_all(parent)?;
-    }
-    let line = format!(
-        "{}\t{}\t{}\t{}\n",
-        gen.created_at,
-        gen.host,
-        gen.name,
-        gen.path.display()
-    );
-    use std::io::Write;
-    fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(generations_log())?
-        .write_all(line.as_bytes())
+        let existing = fs::read_to_string(&log).unwrap_or_default();
+        let already_recorded = existing.lines().any(|line| {
+            let parts = line.split('\t').collect::<Vec<_>>();
+            parts.len() == 4
+                && parts[1] == gen.host
+                && parts[2] == gen.name
+                && Path::new(parts[3]) == gen.path
+        });
+        if already_recorded {
+            return Ok(());
+        }
+        let line = format!(
+            "{}\t{}\t{}\t{}\n",
+            gen.created_at,
+            gen.host,
+            gen.name,
+            gen.path.display()
+        );
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)?;
+        file.write_all(line.as_bytes())?;
+        file.sync_all()?;
+        fs::File::open(parent)?.sync_all()
+    })
 }
 
 pub(super) fn read_generations() -> Vec<Generation> {

@@ -58,6 +58,24 @@ impl RealizedPackage {
     pub(super) fn original_reference(&self) -> &str {
         &self.original_reference
     }
+
+    /// Hangar identities only. Provider-native paths such as `/nix/store/...`
+    /// remain provider roots and never enter Jetpack lifecycle target sets.
+    pub(super) fn output_digests(&self) -> Vec<String> {
+        let mut digests = self
+            .entry
+            .named_outputs
+            .values()
+            .filter(|digest| !digest.is_empty())
+            .cloned()
+            .collect::<Vec<_>>();
+        if digests.is_empty() && !self.entry.envelope.output_hash.is_empty() {
+            digests.push(self.entry.envelope.output_hash.clone());
+        }
+        digests.sort();
+        digests.dedup();
+        digests
+    }
 }
 
 pub(super) fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Option<String> {

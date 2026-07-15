@@ -117,7 +117,7 @@ pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let mut flags = flags.clone();
     flags.real_tier = real_guest;
     let flags = &flags;
-    let Some(gen) = build_generation(theme, &plan, &system, flags) else {
+    let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
         return 2;
     };
     if real_guest {
@@ -226,7 +226,7 @@ fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OsFlags) -> i
         );
         return 2;
     }
-    match run_vmtest(theme, &plan, &vmtest, disk, flags) {
+    match run_vmtest(theme, &plan, &vmtest, disk, flags, &target.config) {
         Ok(path) => {
             theme.ok(&format!("proved jetos VM test {}", path.display()));
             0

@@ -405,6 +405,41 @@ fn os_build_realizes_selected_system_offline() {
         "expected a systems dir under the root"
     );
     let generation = root.join("systems/generations/fixture-source-built");
+    let root_proof = fs::read_to_string(generation.join("generation-root.json")).unwrap();
+    assert!(
+        root_proof.contains("\"kind\":\"jetos.generation-root.v1\"")
+            && root_proof.contains("\"source_proof_sha256\":\"")
+            && root_proof.contains("\"files_proof_sha256\":\"")
+            && root_proof.contains("\"output_digests\":[\"sha256-"),
+        "generation root must bind complete source/files proof and Hangar digests: {root_proof}"
+    );
+    assert!(
+        !fs::read(generation.join("generation-files.proof"))
+            .unwrap()
+            .is_empty(),
+        "generation files proof must be durable before ledger publication"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("systems/generations.log"))
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains("\tfixture-source-built\t"))
+            .count(),
+        1,
+        "exact retry must not duplicate a generation ledger row"
+    );
+    let journal = root.join("store/lifecycle-db/journal");
+    let lifecycle = fs::read_dir(&journal)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+        .collect::<String>();
+    assert!(
+        lifecycle.contains("external-consumer")
+            && lifecycle.contains("jetos-generation")
+            && lifecycle.contains("commit"),
+        "generation must own a committed typed ExternalConsumer root: {lifecycle}"
+    );
     let kernel = fs::read_to_string(generation.join("boot/kernel")).unwrap();
     let initrd = fs::read_to_string(generation.join("boot/initrd")).unwrap();
     assert!(
@@ -421,6 +456,55 @@ fn os_build_realizes_selected_system_offline() {
     assert!(
         String::from_utf8_lossy(&hello.stdout).contains("hello"),
         "generation-owned executable must survive lease close and FD reuse"
+    );
+}
+
+#[test]
+fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
+    let root = Scratch::new("os-generation-root-recovery");
+    let run = |failpoint: Option<&str>| {
+        let mut command = jet();
+        command
+            .args([
+                "os",
+                "build",
+                "halcyon",
+                "--name",
+                "root-recovery",
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .env("PATH", "/usr/bin:/bin");
+        if let Some(failpoint) = failpoint {
+            command.env("JET_TEST_GENERATION_FAILPOINT", failpoint);
+        }
+        command.output().unwrap()
+    };
+
+    let interrupted = run(Some("after-ledger"));
+    assert_eq!(interrupted.status.code(), Some(2));
+    let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
+    assert_eq!(ledger.lines().count(), 1, "ledger must be durable before root commit");
+
+    let recovered = run(None);
+    assert!(
+        recovered.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
+    assert_eq!(ledger.lines().count(), 1, "recovery must reuse exact ledger row");
+    let journal = root.join("store/lifecycle-db/journal");
+    let lifecycle = fs::read_dir(journal)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+        .collect::<String>();
+    assert!(
+        lifecycle.contains("commit"),
+        "retry must commit the exact prepared root: {lifecycle}"
     );
 }
 
@@ -3530,5 +3614,4 @@ fn os_init_writes_guided_ext4_config() {
     assert!(config.contains("filesystem.layout"), "config: {config}");
     assert!(config.contains("network.hostName"), "config: {config}");
 }
-
 
