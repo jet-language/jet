@@ -51,16 +51,19 @@ fn jet() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jet"))
 }
 
-/// Write a `nixpkgs:fastfetch` fixture whose `out` points at a real directory
-/// we control. The committed `example_fixtures()` set uses placeholder
-/// `/nix/store/...` paths that never exist on disk — fine for tests that only
-/// check `jetpack build`'s ledger output, but Store's post-#418 fail-closed
-/// leasing (`snapshot_lease`) refuses to hand a consumer any path whose `out`
-/// doesn't exist, so any test that actually enters the composed env (`dev`,
-/// `run` with no explicit command) needs a real backing tree.
-fn write_fastfetch_fixture(fixtures: &std::path::Path, out_dir: &std::path::Path) {
+/// Write a `nixpkgs:fastfetch` fixture backed by a sealed Hangar object.
+/// Store's closure proof accepts a zero-reference Nix realization only when
+/// Hangar can re-hash its canonical object (or Nix protects a real
+/// `/nix/store` output with a GC root). A generic temp directory is real
+/// enough for leasing but has neither proof, so trust tests must place their
+/// fixture output at the same content-addressed path production ingest uses.
+fn write_fastfetch_fixture(
+    fixtures: &std::path::Path,
+    root: &std::path::Path,
+    staging_dir: &std::path::Path,
+) {
     fs::create_dir_all(fixtures).unwrap();
-    let bin = out_dir.join("bin");
+    let bin = staging_dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let fastfetch = bin.join("fastfetch");
     fs::write(&fastfetch, "#!/bin/sh\necho fastfetch stub\n").unwrap();
@@ -69,7 +72,14 @@ fn write_fastfetch_fixture(fixtures: &std::path::Path, out_dir: &std::path::Path
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let drv_path = out_dir.with_extension("drv");
+    jetpack::Store::seal_local_output(staging_dir).unwrap();
+    let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
+    let out_dir = root.join("hangar").join("objects").join(digest);
+    fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+    fs::rename(staging_dir, &out_dir).unwrap();
+
+    let drv_path = fixtures.join("fastfetch.drv");
+    fs::write(&drv_path, "fixture derivation identity\n").unwrap();
     let json = format!(
         "[{{\"drvPath\":{:?},\"outputs\":{{\"out\":{:?}}}}}]",
         drv_path.to_string_lossy(),
@@ -305,7 +315,7 @@ fn dev_trust_flag_bypasses() {
     let fixtures = Scratch::new("dev-trust-flag-fixtures");
     let fastfetch_out = Scratch::new("dev-trust-flag-fastfetch-out");
     write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
-    write_fastfetch_fixture(&fixtures.path, &fastfetch_out.path);
+    write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
     let out = jetpack()
         .args(["dev", "--no-color", "--offline", "--trust"])
         .current_dir(&proj.path)
@@ -336,7 +346,7 @@ fn dev_pattern_trust_preauthorizes() {
     let fixtures = Scratch::new("dev-pattern-trust-fixtures");
     let fastfetch_out = Scratch::new("dev-pattern-trust-fastfetch-out");
     write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
-    write_fastfetch_fixture(&fixtures.path, &fastfetch_out.path);
+    write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
 
     let pattern = format!("{}*", proj.path.display());
     let add_out = jetpack()
