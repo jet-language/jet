@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 624,
-    "rev": 7284,
+    "rev": 7292,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17600,7 +17600,7 @@
       "needsAcceptance": false,
       "created": "2026-07-14T23:18:34.763Z",
       "updated": "2026-07-15",
-      "claimedAt": "2026-07-14T23:19:12.037Z"
+      "claimedAt": "2026-07-15T03:53:31.013Z"
     },
     {
       "id": "c0yrwcvx",
@@ -18266,8 +18266,18 @@
       "priority": "P0",
       "plan": "Fix crypto secret checks by resolved nominal provenance; preserve the local Secret display regression; update reviewed expectations and stale diagnostic copy; rename the consume fixture; rerun diagnostic snapshots, affected crypto UI tests, then full verification.",
       "blockedBy": [],
-      "assignee": "terra-623-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "terra-623-readback",
+          "text": "[handoff] Readback accidentally reclaimed after completed handoff; implementation remains 3c478064, criteria 1-4 await independent verification, criterion 5 parent-owned."
+        },
+        {
+          "at": "2026-07-15",
+          "by": "terra-623-builder",
+          "text": "[handoff] Implementation committed as 3c478064. Criteria 1-4 met with evidence and await independent verification. Criterion 5 intentionally open: parent must run full suite. Unrelated tests/cli.rs working-tree edit preserved and excluded."
+        },
         {
           "at": "2026-07-15",
           "by": "terra-623-builder",
@@ -18278,38 +18288,38 @@
         {
           "n": 1,
           "text": "Crypto secret restrictions use resolved core nominal provenance: a local struct named Secret keeps generic Display behavior while core.crypto secret types remain non-printable, non-debuggable, non-reflectable, non-comparable, and non-serializable.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-623-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T03:17:45.047Z"
+          "evidence": "Commit 3c478064 carries internal core.crypto nominal provenance through qualified annotations, static constructors, fixed signatures, and core fields. All print/debug/reflect/compare/serialize/method restriction sites resolve against provenance; mixed collision snapshot keeps four local leaf names generic while four core values remain E0915.",
+          "at": "2026-07-15T03:53:20.684Z"
         },
         {
           "n": 2,
           "text": "The four core-module snapshots, #Policy(no_alloc) snapshot, renamed consume snapshot, and new credential-taint snapshot match ratified behavior without blessing the local Secret regression.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-623-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T03:17:45.142Z"
+          "evidence": "Scoped diagnostic snapshots green for crypto_secret*, display_no_impl, renamed single_use_consume_unaudited, four retired/unknown core modules, no_alloc_policy_violation, and taint_credential_leak. Reviewed exact snapshots; no bulk blessing.",
+          "at": "2026-07-15T03:53:20.787Z"
         },
         {
           "n": 3,
           "text": "Diagnostics documentation uses current #Policy(no_alloc), consume, and E0722 what/why/fix language; D-AUTH2 and D-TAINT2 decision records remain truthful.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-623-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T03:17:45.236Z"
+          "evidence": "docs/spec/diagnostics.md already truthfully documents #Policy(no_alloc), consume/E0143, and E0722. Commit 3c478064 adds missing ratified D-AUTH2 and D-TAINT2 records to syntax-decisions.md, matching shipped behavior.",
+          "at": "2026-07-15T03:53:20.885Z"
         },
         {
           "n": 4,
           "text": "Diagnostic snapshots and affected crypto/display UI regressions pass with no new syntax, dependency, unsafe code, or diagnostic code.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-623-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T03:17:45.330Z"
+          "evidence": "Affected snapshots pass; targeted core email crypto construction passes; filtered crypto golden examples pass; fresh cargo build plus hello and typed_crypto runtime smokes pass. No new diagnostic codes, user syntax, dependencies, or unsafe.",
+          "at": "2026-07-15T03:53:20.982Z"
         },
         {
           "n": 5,
@@ -18329,8 +18339,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T03:17:36.064Z",
-      "updated": "2026-07-15",
-      "claimedAt": "2026-07-15T03:33:58.970Z"
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -37186,6 +37195,62 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T03:53:33.021Z",
+      "by": "terra-623-readback",
+      "action": "card.release",
+      "ref": "c0mwjrp1",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T03:53:31.013Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c0c008wm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T03:53:27.761Z",
+      "by": "terra-623-readback",
+      "action": "card.claim",
+      "ref": "c0mwjrp1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T03:53:21.080Z",
+      "by": "terra-623-builder",
+      "action": "card.release",
+      "ref": "c0mwjrp1",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T03:53:20.982Z",
+      "by": "terra-623-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0mwjrp1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-15T03:53:20.885Z",
+      "by": "terra-623-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0mwjrp1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T03:53:20.787Z",
+      "by": "terra-623-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0mwjrp1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T03:53:20.684Z",
+      "by": "terra-623-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0mwjrp1",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T03:41:08.277Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -40627,62 +40692,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-SHAPE-RESOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:14:08.232Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:14:08.086Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:10:44.493Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEWMUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:10:44.354Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-RESOURCEFINISH1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:10:44.215Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-EXTENSION1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:10:44.079Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:10:43.944Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:10:43.806Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-RECEIPT2",
       "note": "marked ready"
     }
   ],
