@@ -14,14 +14,14 @@
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "continue", "else", "if", "in", "loop", "return", "step"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Pure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "const", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
-const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["copy", "uninit"];
+const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "err", "false", "ok", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "Char", "Computed", "Csv", "DataTree", "DbValue", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "JSON", "JSONError", "Json", "Key", "Lru", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "SortedSet", "Stream", "String", "Subscription", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "Yaml"];
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
 const JET_HIGHLIGHT_MARKER_DIRECTIVE = ["Abi", "Bench", "Bindgen", "Caller", "Caps", "DebugOnly", "Default", "DenyUnknownFields", "Every", "Extern", "FFI", "Flatten", "Grant", "Html", "Impure", "Invariant", "Layout", "Live", "Meta", "Nondeterministic", "Off", "Policy", "Reactive", "Region", "Rename", "RenameAll", "Replayable", "Sanitizer", "SingleUse", "Skip", "Sql", "State", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow"];
 const JET_HIGHLIGHT_MARKER_CONTRACT = ["Cli", "Codable", "CodableAsBase", "Comparable", "Decode", "Doc", "Encode", "Inline", "InlineAlways", "MustUse", "Numeric", "Patchable", "Persist", "Post", "Pre", "Printable", "PublishedSchema", "Pure", "Redact", "Summarize"];
-const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "^"];
+const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
@@ -708,7 +708,7 @@ module.exports = grammar({
     // a bare marker value such as the typed hole `#Todo` (D-TOOL2).
     marked_expr: ($) => prec.right(seq($.attribute, optional($._expr))),
 
-    copy_expr: ($) => prec.right(6, seq("copy", $._expr)),
+    copy_expr: ($) => prec.right(6, seq("~", $._expr)),
 
     // A type-applied member access: `mem.Ptr<Int>.from_addr(…)` — a generic
     // applied to a path before a further `.method`. The `<` is adjacent.

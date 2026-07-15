@@ -96,11 +96,7 @@
   "via"
 ] @keyword
 
-; keyword.ownership: copy uninit
-[
-  "copy"
-] @keyword
-
+; keyword.ownership: uninit
 ; keyword.other: it self
 [
   "self"
@@ -138,7 +134,7 @@
 ; builtin: check input print
 ; marker.directive: Abi Bench Bindgen Caller Caps DebugOnly Default DenyUnknownFields Every Extern FFI Flatten Grant Html Impure Invariant Layout Live Meta Nondeterministic Off Policy Reactive Region Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow
 ; marker.contract: Cli Codable CodableAsBase Comparable Decode Doc Encode Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize
-; sigil: # & ... :: := @ ^
+; sigil: # & ... :: := @ ^ ~
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 
