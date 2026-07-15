@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 619,
-    "rev": 7092,
+    "nextNum": 620,
+    "rev": 7103,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17505,9 +17505,46 @@
       "plan": "Point the codec probe at canonical source-reentry facts without weakening its no-AST-transplant/no-Rust-fallback guarantee; document core.auth in the canonical Core reference with existing module facts. Run exact tests and corelib target; independent review; parent full verification.",
       "blockedBy": [],
       "workOrder": 0,
-      "assignee": null,
+      "assignee": "codex-orchestrator",
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Codec truth probe proves generated Encode/Decode source reenters the canonical Parser path while retired AST transplantation and Rust fallback remain absent, without relying on brittle generated impl spelling.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:18.576Z"
+        },
+        {
+          "n": 2,
+          "text": "Canonical Core reference lists core.auth with accurate module scope and no invented API.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:18.811Z"
+        },
+        {
+          "n": 3,
+          "text": "Both exact failing corelib tests and the full corelib target pass; no syntax, diagnostic, dependency, unsafe, or owner decision changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:19.040Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:19.269Z"
+        }
+      ],
       "refs": [
         "tests/corelib.rs",
         "crates/jet-sema/src/Sema/Registration/Serde.rs",
@@ -17516,7 +17553,73 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T01:02:46.221Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T01:04:19.492Z"
+    },
+    {
+      "id": "c05t6xnx",
+      "num": 619,
+      "title": "Full suite red: typed CSV decode nests list results",
+      "body": "core_data typed CSV compile reaches rustc with Vec<Vec<Ticket>> and Vec<Vec<Budget>> where Jet promises [Ticket] and [Budget]. This violates sema-owned typing and I2 because rustc rejects generated code.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Write a frontend-owned regression first; trace CSV decode registration through sema/TIR; make list-result shape exact before codegen; preserve runtime CSV behavior; run exact core_data and corelib target; independent review; parent full verification.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "codex-orchestrator",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Typed CSV decoding of [Ticket] and [Budget] yields one list layer (Vec<T>), never Vec<Vec<T>>; scalar and nested-field decoding remain correct.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:28.278Z"
+        },
+        {
+          "n": 2,
+          "text": "Sema/TIR owns and validates the exact decode result shape before codegen; no user-visible rustc diagnostic can escape for the regression.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:28.513Z"
+        },
+        {
+          "n": 3,
+          "text": "Exact core_data regression and full corelib target pass; no syntax, diagnostic code, external dependency, unsafe, or owner decision changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:28.728Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:04:28.946Z"
+        }
+      ],
+      "refs": [
+        "tests/corelib.rs",
+        "crates/jet-sema/src",
+        "crates/jet-codegen/src/Prelude/CoreLib/Csv.rs",
+        "Source"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T01:04:19.709Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T01:04:29.166Z"
     }
   ],
   "decisions": [
@@ -35994,6 +36097,83 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T01:04:29.167Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c05t6xnx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T01:04:28.946Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05t6xnx",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T01:04:28.729Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05t6xnx",
+      "note": "#3 Exact core_data regression and full corelib target pass; no "
+    },
+    {
+      "at": "2026-07-15T01:04:28.513Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05t6xnx",
+      "note": "#2 Sema/TIR owns and validates the exact decode result shape be"
+    },
+    {
+      "at": "2026-07-15T01:04:28.278Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05t6xnx",
+      "note": "#1 Typed CSV decoding of [Ticket] and [Budget] yields one list "
+    },
+    {
+      "at": "2026-07-15T01:04:19.709Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c05t6xnx",
+      "note": "Full suite red: typed CSV decode nests list results"
+    },
+    {
+      "at": "2026-07-15T01:04:19.492Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c07p1xxq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T01:04:19.269Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07p1xxq",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T01:04:19.040Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07p1xxq",
+      "note": "#3 Both exact failing corelib tests and the full corelib target"
+    },
+    {
+      "at": "2026-07-15T01:04:18.811Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07p1xxq",
+      "note": "#2 Canonical Core reference lists core.auth with accurate modul"
+    },
+    {
+      "at": "2026-07-15T01:04:18.576Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07p1xxq",
+      "note": "#1 Codec truth probe proves generated Encode/Decode source reen"
+    },
+    {
       "at": "2026-07-15T01:02:46.222Z",
       "by": "codex-orchestrator",
       "action": "card.add",
@@ -39415,83 +39595,6 @@
       "action": "card.update",
       "ref": "c002osb3",
       "note": "title,track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-14T22:08:54.113Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0tbtpb7",
-      "note": "Choose package receipt slicing"
-    },
-    {
-      "at": "2026-07-14T22:08:54.019Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0q5ycsn",
-      "note": "Choose deliberate expert replacement of double-underscore state"
-    },
-    {
-      "at": "2026-07-14T22:08:53.926Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c05tkc8v",
-      "note": "Choose selective package update scope"
-    },
-    {
-      "at": "2026-07-14T22:08:53.833Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c02opb9d",
-      "note": "Choose what the package lock records"
-    },
-    {
-      "at": "2026-07-14T22:08:53.737Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0zgfaml",
-      "note": "Choose how packages share one input selection"
-    },
-    {
-      "at": "2026-07-14T22:08:53.646Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0w907me",
-      "note": "Choose how target and profile deltas conflict"
-    },
-    {
-      "at": "2026-07-14T22:08:53.553Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0sy8a96",
-      "note": "Choose deliberate expert reading of double-underscore state"
-    },
-    {
-      "at": "2026-07-14T22:08:53.463Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0wv3f1v",
-      "note": "Choose the package input graph shape"
-    },
-    {
-      "at": "2026-07-14T22:08:53.369Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0tocbko",
-      "note": "Choose target and profile variation"
-    },
-    {
-      "at": "2026-07-14T22:08:53.279Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0ka97qg",
-      "note": "Choose workspace package discovery"
-    },
-    {
-      "at": "2026-07-14T22:08:53.186Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0h376ay",
-      "note": "Choose what double underscore means"
     }
   ],
   "nextNum": 368,
