@@ -3335,6 +3335,18 @@ and Tvix are dev/CI differential oracles only. Product paths verify computed
 divergence. No evaluator stage reaches a provider path before the pinned corpus
 is bit-exact.
 
+**D-JPK-NIXPIN1=A — hermetic reference oracle**: compatibility fixtures use
+Nix 2.34.8 at annotated tag object
+`b6769c588f60b3e762f73d3a8cf60294df078ccd`, peeled source commit
+`f3f1c3c5b8ad91850e0f7c590cf177f7ab022024`, and nixpkgs revision
+`b5aa0fbd538984f6e3d201be0005b4463d8b09f8` with `lastModified = 1782723713`
+and NAR hash `sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=`. The
+supported oracle systems are `x86_64-linux`, `aarch64-linux`,
+`x86_64-darwin`, and `aarch64-darwin`. Each system records both the complete
+Nix installation NAR hash and exact evaluator executable NAR hash. Missing,
+unknown, or mismatched identity blocks fixture generation and acceptance.
+Root `flake.lock` updates cannot change this independent manifest.
+
 **D-JPK-SANDBOX2=D — sandbox or substitute**: non-executing copy and prebuilt
 verification may proceed directly. Fetched/transitive executable actions require
 the strong sandbox; unavailable backends try a trusted substitute or approved

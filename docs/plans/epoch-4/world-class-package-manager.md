@@ -337,6 +337,12 @@ live acceptance, and documentation. Work order is binding.
 
 ### E4-JP9 — Nix evaluator stage A
 
+- The first ordered slice is landed as a private `NixEval` boundary. Its strict,
+  independently committed oracle manifest pins the ratified Nix and nixpkgs
+  identities and remains fail-closed until every supported system records both
+  required NAR hashes. Partial-stage permits can be minted only by unit tests.
+  A structural gate rejects process execution and external evaluator linkage in
+  this module, and the module has no provider or product-visible entry point.
 - Lazy thunks, attrsets, functions, string contexts, path values, import,
   derivation primitive, required builtins, flake inputs/locks/registries.
 - Pure/restricted default, explicit URI/path authority, dirty-tree identity,

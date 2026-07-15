@@ -56,6 +56,8 @@ pub mod MigrationImport;
 // crate. No re-export here; that was the step-2 shim, now dropped.
 /// E4-JP8 — native Nix `.drv` / path calculus (internal compat surface).
 pub mod NixDrv;
+/// E4-JP9 — native evaluator internals. No product/provider entry point before JP11.
+pub(crate) mod NixEval;
 pub mod Output;
 pub mod Overlay;
 pub mod PackageGraph;
