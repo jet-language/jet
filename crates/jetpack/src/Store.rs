@@ -828,6 +828,20 @@ impl CacheLease {
         })
     }
 
+    pub(crate) fn copy_profile_executable(
+        &self,
+        member: &str,
+        destination: &Path,
+    ) -> std::io::Result<ProfileExecutableProof> {
+        self.validate()?;
+        let (_, source) = self
+            .executables
+            .iter()
+            .find(|(name, _)| name == member)
+            .ok_or_else(|| std::io::Error::other("verified receipt lost executable member"))?;
+        copy_open_profile_file(source, destination)
+    }
+
     fn require_consumable(&self) -> std::io::Result<()> {
         match &self.status {
             ConsumptionStatus::Consumable => Ok(()),
@@ -968,6 +982,121 @@ pub(crate) struct ProfileInstallReceipt {
     pub(crate) reference: String,
     pub(crate) output_hash: String,
     pub(crate) executable_members: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProfileExecutableProof {
+    pub(crate) digest: String,
+    pub(crate) mode: u32,
+}
+
+fn copy_open_profile_file(
+    source: &fs::File,
+    destination: &Path,
+) -> std::io::Result<ProfileExecutableProof> {
+    use std::io::{Read as _, Seek as _, Write as _};
+
+    let mut input = source.try_clone()?;
+    input.seek(std::io::SeekFrom::Start(0))?;
+    let metadata = input.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::other("profile executable is not a regular file"));
+    }
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    let mut hasher = SHA256::StreamingSha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+        output.write_all(&buffer[..count])?;
+    }
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = metadata.permissions().mode() & 0o777;
+        fs::set_permissions(destination, fs::Permissions::from_mode(mode))?;
+        mode
+    };
+    #[cfg(not(unix))]
+    let mode = 0;
+    output.sync_all()?;
+    let digest = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if SHA256::sha256_file_hex(destination)? != digest {
+        return Err(std::io::Error::other("copied profile executable changed"));
+    }
+    Ok(ProfileExecutableProof {
+        digest: format!("sha256-{digest}"),
+        mode,
+    })
+}
+
+pub(crate) fn copy_profile_store_member(
+    roots: &Roots,
+    reference: &str,
+    output_hash: &str,
+    member: &str,
+    destination: &Path,
+) -> std::io::Result<ProfileExecutableProof> {
+    let entry = list_checked(roots)?
+        .into_iter()
+        .find(|entry| {
+            entry.reference == reference && entry.envelope.output_hash == output_hash
+        })
+        .ok_or_else(|| std::io::Error::other("profile StoreEntry authority is unavailable"))?;
+    let source = Path::new(&entry.bin).join(member);
+    let path_metadata = fs::symlink_metadata(&source)?;
+    if !path_metadata.is_file() || path_metadata.file_type().is_symlink() {
+        return Err(std::io::Error::other(
+            "profile executable member is not a no-follow file",
+        ));
+    }
+    let source_file = fs::File::open(&source)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let opened = source_file.metadata()?;
+        if path_metadata.dev() != opened.dev() || path_metadata.ino() != opened.ino() {
+            return Err(std::io::Error::other("profile executable changed while opening"));
+        }
+    }
+    copy_open_profile_file(&source_file, destination)
+}
+
+pub(crate) fn profile_file_proof(path: &Path) -> std::io::Result<ProfileExecutableProof> {
+    let path_metadata = fs::symlink_metadata(path)?;
+    if !path_metadata.is_file() || path_metadata.file_type().is_symlink() {
+        return Err(std::io::Error::other(
+            "profile projection is not a no-follow file",
+        ));
+    }
+    let opened = fs::File::open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        let metadata = opened.metadata()?;
+        if path_metadata.dev() != metadata.dev() || path_metadata.ino() != metadata.ino() {
+            return Err(std::io::Error::other("profile projection changed while opening"));
+        }
+        return Ok(ProfileExecutableProof {
+            digest: format!("sha256-{}", SHA256::sha256_file_hex(path)?),
+            mode: metadata.permissions().mode() & 0o777,
+        });
+    }
+    #[cfg(not(unix))]
+    Ok(ProfileExecutableProof {
+        digest: format!("sha256-{}", SHA256::sha256_file_hex(path)?),
+        mode: 0,
+    })
 }
 
 impl Drop for CacheLease {

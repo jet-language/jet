@@ -427,6 +427,8 @@ struct InstalledTool {
     reference: String,
     bins: Vec<String>,
     members: Vec<String>,
+    member_digests: Vec<String>,
+    member_modes: Vec<u32>,
     output_hash: String,
     store_root: String,
 }
@@ -559,6 +561,8 @@ fn project_install(
             reference: spec.raw.clone(),
             bins: bins.iter().map(|(name, _)| name.clone()).collect(),
             members: bins.iter().map(|(_, member)| member.clone()).collect(),
+            member_digests: Vec::new(),
+            member_modes: Vec::new(),
             output_hash: receipt.output_hash.clone(),
             store_root: receipt.store_root.to_string_lossy().into_owned(),
         });
@@ -595,10 +599,12 @@ fn write_generation_locked(
     let gen = next_generation()?;
     let gen_dir = generations_dir().join(gen.to_string());
     fs::create_dir(&gen_dir)?;
-    let meta = format_generation_meta(gen, tools);
+    let mut generation_tools = tools.to_vec();
+    materialize_generation_bins(&gen_dir, &mut generation_tools, live)?;
+    let meta = format_generation_meta(gen, &generation_tools);
     write_synced(&gen_dir.join("meta.json"), meta.as_bytes())?;
-    materialize_generation_bins(&gen_dir, tools, live)?;
-    let digests = tools
+    validate_generation_bins(gen, &generation_tools)?;
+    let digests = generation_tools
         .iter()
         .map(|tool| tool.output_hash.clone())
         .collect::<std::collections::BTreeSet<_>>();
@@ -612,11 +618,11 @@ fn write_generation_locked(
     profile_failpoint("after-generation")?;
 
     if !digests.is_empty() {
-        ensure_generation_roots(gen, tools, &witness)?;
+        ensure_generation_roots(gen, &generation_tools, &witness)?;
         profile_failpoint("after-root-commit")?;
     }
     profile_failpoint("before-pointer")?;
-    publish_generation(gen, &witness, tools)?;
+    publish_generation(gen, &witness, &generation_tools)?;
     profile_failpoint("after-pointer")?;
     Ok(gen)
 }
@@ -758,7 +764,7 @@ fn ensure_generation_roots(
 
 fn materialize_generation_bins(
     generation_dir: &Path,
-    tools: &[InstalledTool],
+    tools: &mut [InstalledTool],
     live: Option<(&Store::ProfileInstallReceipt, &Store::CacheLease)>,
 ) -> io::Result<()> {
     let bin_dir = generation_dir.join("bin");
@@ -768,6 +774,8 @@ fn materialize_generation_bins(
         if tool.bins.len() != tool.members.len() || tool.bins.is_empty() {
             return Err(io::Error::other("profile tool has mismatched bin/member pairs"));
         }
+        let mut member_digests = Vec::with_capacity(tool.bins.len());
+        let mut member_modes = Vec::with_capacity(tool.bins.len());
         for (bin, member) in tool.bins.iter().zip(&tool.members) {
             validate_bin_name(bin).map_err(io::Error::other)?;
             validate_bin_name(member).map_err(io::Error::other)?;
@@ -775,36 +783,30 @@ fn materialize_generation_bins(
                 return Err(io::Error::other(format!("duplicate profile bin `{bin}`")));
             }
             let destination = bin_dir.join(bin);
-            let source = if let Some((_receipt, lease)) = live.filter(|(receipt, _)| {
+            let proof = if let Some((_receipt, lease)) = live.filter(|(receipt, _)| {
                 receipt.reference == tool.reference
                     && receipt.output_hash == tool.output_hash
                     && receipt.store_root.to_string_lossy() == tool.store_root
             }) {
-                lease.validate()?;
-                lease
-                    .executable(member)
-                    .ok_or_else(|| io::Error::other("verified receipt lost executable member"))?
+                lease.copy_profile_executable(member, &destination)?
             } else {
-                validated_store_member(tool, member)?
+                let roots = Store::Roots {
+                    root: PathBuf::from(&tool.store_root),
+                    dev_mode: true,
+                };
+                Store::copy_profile_store_member(
+                    &roots,
+                    &tool.reference,
+                    &tool.output_hash,
+                    member,
+                    &destination,
+                )?
             };
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&source, &destination)?;
-            #[cfg(windows)]
-            {
-                let mut input = fs::File::open(&source)?;
-                let mut output = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&destination)?;
-                std::io::copy(&mut input, &mut output)?;
-                output.sync_all()?;
-                if fs::read(&source)? != fs::read(&destination)? {
-                    return Err(io::Error::other("copied profile executable changed"));
-                }
-            }
-            #[cfg(not(any(unix, windows)))]
-            return Err(io::Error::other("profile projection unsupported on this platform"));
+            member_digests.push(proof.digest);
+            member_modes.push(proof.mode);
         }
+        tool.member_digests = member_digests;
+        tool.member_modes = member_modes;
     }
     Store::sync_store_directory(&bin_dir)
 }
@@ -846,8 +848,26 @@ fn validate_generation_bins(generation: u64, tools: &[InstalledTool]) -> io::Res
         return Err(io::Error::other("profile generation bin projection mismatch"));
     }
     for tool in tools {
+        if tool.bins.len() != tool.member_digests.len()
+            || tool.bins.len() != tool.member_modes.len()
+        {
+            return Err(io::Error::other("profile projection proof count mismatch"));
+        }
         for member in &tool.members {
             let _ = validated_store_member(tool, member)?;
+        }
+        for ((bin, digest), mode) in tool
+            .bins
+            .iter()
+            .zip(&tool.member_digests)
+            .zip(&tool.member_modes)
+        {
+            let proof = Store::profile_file_proof(&bin_dir.join(bin))?;
+            if &proof.digest != digest || &proof.mode != mode {
+                return Err(io::Error::other(format!(
+                    "profile projection proof mismatch for `{bin}`"
+                )));
+            }
         }
     }
     Ok(())
@@ -1128,6 +1148,22 @@ fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> String {
             }
             out.push_str(&json_str(b));
         }
+        out.push_str("],\n");
+        out.push_str("      \"member_digests\": [");
+        for (j, digest) in t.member_digests.iter().enumerate() {
+            if j > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&json_str(digest));
+        }
+        out.push_str("],\n");
+        out.push_str("      \"member_modes\": [");
+        for (j, mode) in t.member_modes.iter().enumerate() {
+            if j > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&mode.to_string());
+        }
         out.push_str("]\n");
         out.push_str("    }");
         if i + 1 < tools.len() {
@@ -1181,8 +1217,8 @@ fn parse_generation_meta(text: &str, expected_generation: u64) -> Result<Vec<Ins
         expect_exact_keys(
             tool,
             &[
-                "bins", "members", "name", "output_hash", "reference", "source",
-                "store_root", "version",
+                "bins", "member_digests", "member_modes", "members", "name",
+                "output_hash", "reference", "source", "store_root", "version",
             ],
             "profile tool",
         )?;
@@ -1196,7 +1232,13 @@ fn parse_generation_meta(text: &str, expected_generation: u64) -> Result<Vec<Ins
         validate_store_root(&store_root)?;
         let bins = json_string_array(tool, "bins")?;
         let members = json_string_array(tool, "members")?;
-        if bins.is_empty() || bins.len() != members.len() {
+        let member_digests = json_string_array(tool, "member_digests")?;
+        let member_modes = json_u32_array(tool, "member_modes")?;
+        if bins.is_empty()
+            || bins.len() != members.len()
+            || bins.len() != member_digests.len()
+            || bins.len() != member_modes.len()
+        {
             return Err("profile tool has mismatched bin/member pairs".into());
         }
         if seen_bins.len() + bins.len() > MAX_PROFILE_BINS {
@@ -1204,6 +1246,12 @@ fn parse_generation_meta(text: &str, expected_generation: u64) -> Result<Vec<Ins
         }
         for value in bins.iter().chain(&members) {
             validate_bin_name(value)?;
+        }
+        for digest in &member_digests {
+            validate_digest(digest).map_err(|error| error.to_string())?;
+        }
+        if member_modes.iter().any(|mode| *mode > 0o777) {
+            return Err("profile executable mode exceeds bounds".into());
         }
         for bin in &bins {
             if !seen_bins.insert(bin.clone()) {
@@ -1220,6 +1268,8 @@ fn parse_generation_meta(text: &str, expected_generation: u64) -> Result<Vec<Ins
             reference,
             bins,
             members,
+            member_digests,
+            member_modes,
             output_hash,
             store_root,
         });
@@ -1299,6 +1349,27 @@ fn json_string_array(
         .collect()
 }
 
+fn json_u32_array(
+    object: &std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+) -> Result<Vec<u32>, String> {
+    let Some(JSON::Json::Array(values)) = object.get(key) else {
+        return Err(format!("profile field `{key}` is not an array"));
+    };
+    values
+        .iter()
+        .map(|value| {
+            let JSON::Json::Num(value) = value else {
+                return Err(format!("profile field `{key}` contains a non-number"));
+            };
+            if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 || *value > u32::MAX as f64 {
+                return Err(format!("profile field `{key}` contains an invalid integer"));
+            }
+            Ok(*value as u32)
+        })
+        .collect()
+}
+
 fn validate_store_root(value: &str) -> Result<(), String> {
     let path = Path::new(value);
     if !path.is_absolute()
@@ -1362,6 +1433,8 @@ fn run() { }
             reference: "path:tool".into(),
             bins: vec!["tool".into()],
             members: vec!["tool".into()],
+            member_digests: vec![format!("sha256-{}", "e".repeat(64))],
+            member_modes: vec![0o755],
             output_hash: digest.clone(),
             store_root: "/store".into(),
         }];
@@ -1370,5 +1443,42 @@ fn run() { }
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].output_hash, digest);
         assert!(metadata.contains("\"generation\": 7"));
+    }
+
+    #[test]
+    fn profile_metadata_rejects_unknown_fields_and_duplicate_bins() {
+        let digest = format!("sha256-{}", "d".repeat(64));
+        let projection = format!("sha256-{}", "e".repeat(64));
+        let tool = InstalledTool {
+            name: "left".into(),
+            version: "1".into(),
+            source: "path".into(),
+            reference: "path:left".into(),
+            bins: vec!["same".into()],
+            members: vec!["left".into()],
+            member_digests: vec![projection.clone()],
+            member_modes: vec![0o755],
+            output_hash: digest.clone(),
+            store_root: "/store".into(),
+        };
+        let metadata = format_generation_meta(1, std::slice::from_ref(&tool));
+        let corrupted = metadata.replacen("{\n", "{\n  \"unknown\": true,\n", 1);
+        assert!(parse_generation_meta(&corrupted, 1).is_err());
+
+        let mut right = tool.clone();
+        right.name = "right".into();
+        right.reference = "path:right".into();
+        right.members = vec!["right".into()];
+        let duplicate = format_generation_meta(1, &[tool, right]);
+        assert!(parse_generation_meta(&duplicate, 1).is_err());
+    }
+
+    #[test]
+    fn current_pointer_checksum_rejects_bitflips_and_truncation() {
+        let witness = format!("sha256-{}", "f".repeat(64));
+        let pointer = format_current_pointer(9, &witness);
+        assert_eq!(parse_current_pointer(&pointer).unwrap(), (9, witness));
+        assert!(parse_current_pointer(&pointer.replace("generation\t9", "generation\t8")).is_err());
+        assert!(parse_current_pointer(pointer.trim_end()).is_err());
     }
 }

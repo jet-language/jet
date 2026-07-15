@@ -234,6 +234,47 @@ mod tests {
     }
 
     #[test]
+    fn profile_generation_root_keeps_transitive_closure_cycle_safely() {
+        let (roots, _g) = temp_roots();
+        let base = ingest_fixture(&roots, "profile-base", &[("out", "base")], Vec::new());
+        let middle = ingest_fixture(
+            &roots,
+            "profile-middle",
+            &[("out", "middle")],
+            vec![base.entry.envelope.output_hash.clone()],
+        );
+        let consumer = ingest_fixture(
+            &roots,
+            "profile-consumer",
+            &[("out", "consumer")],
+            vec![middle.entry.envelope.output_hash.clone()],
+        );
+        let prepared = prepare_profile_generation_root(
+            &roots,
+            "user",
+            "tools",
+            8,
+            &format!("sha256-{}", "8".repeat(64)),
+            vec![consumer.entry.envelope.output_hash.clone()],
+            1,
+        )
+        .unwrap();
+        commit_profile_generation_root(&roots, &prepared, 2).unwrap();
+
+        for mut entry in [base.entry, middle.entry, consumer.entry] {
+            entry.last_used_at = 1;
+            fs::write(
+                roots.hangar_dir().join(&entry.id).join("meta.json"),
+                entry.meta_json(),
+            )
+            .unwrap();
+        }
+        assert_eq!(clean_plan(&roots).unwrap().removed_objects, 0);
+        assert_eq!(clean(&roots).unwrap().removed_objects, 0);
+        assert_eq!(list_checked(&roots).unwrap().len(), 3);
+    }
+
+    #[test]
     fn ids_differ_by_ref() {
         let a = entry_id("x", "1.0", "nixpkgs:x", "/o");
         let b = entry_id("x", "1.0", "github:o/x", "/o");

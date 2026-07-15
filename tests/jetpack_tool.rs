@@ -266,6 +266,24 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
     let stdout = String::from_utf8_lossy(&listed.stdout);
     assert!(stdout.contains("greet"), "stdout: {stdout}");
 
+    let projection = home.join(".jet/tools/generations/1/bin/greet");
+    let original_projection = fs::read(&projection).unwrap();
+    fs::write(&projection, b"#!/bin/sh\necho corrupted\n").unwrap();
+    let rejected = jetpack()
+        .args(["tool", "list", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("projection proof mismatch"),
+        "stderr: {}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    fs::write(&projection, original_projection).unwrap();
+
     let removed = jetpack()
         .args(["tool", "uninstall", "greet", "--no-color"])
         .current_dir(&proj.path)
