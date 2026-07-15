@@ -101,32 +101,22 @@ fn entry_command_schema(
     bundle: &jet::AST::ProgramBundle,
 ) -> Option<jet_foundation::CliSchema::CliCommandSchema> {
     let items = &bundle.modules.get(bundle.entry)?.items;
-    let run_type = items.iter().find_map(|item| match item {
+    items.iter().find_map(|item| match item {
         jet::AST::Item::Func(function)
             if function.name == "run" && function.params.len() == 1 =>
         {
-            match &function.params[0].ty {
-                jet::AST::Type::Named(name) => Some(name.as_str()),
-                _ => None,
-            }
+            Some(())
         }
         _ => None,
     })?;
-    let structure = items.iter().find_map(|item| match item {
-        jet::AST::Item::Struct(structure) if structure.name == run_type => Some(structure),
-        _ => None,
-    })?;
-    jet_foundation::CliSchema::command_schema(structure)
+    Some(jet_foundation::CliSchema::executable_schema(bundle))
 }
 
 fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -> String {
     let Some(command) = command else {
         return "null".to_string();
     };
-    let inputs = command
-        .inputs
-        .iter()
-        .map(|input| {
+    let input_json = |input: &jet_foundation::CliSchema::CliInputSchema| {
             let shape = match input.shape {
                 jet_foundation::CliSchema::CliInputShape::Flag => "flag",
                 jet_foundation::CliSchema::CliInputShape::Value { .. } => "option",
@@ -151,9 +141,14 @@ fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
                 metavar,
                 json_string(&input.help),
             )
-        })
+    };
+    let inputs = command.inputs.iter().map(&input_json)
         .collect::<Vec<_>>()
         .join(",");
+    let commands = command.commands.iter().map(|subcommand| {
+        let inputs = subcommand.inputs.iter().map(&input_json).collect::<Vec<_>>().join(",");
+        format!("{{\"name\":{},\"inputs\":[{}]}}", json_string(&subcommand.name), inputs)
+    }).collect::<Vec<_>>().join(",");
     let completion = command
         .completion_words()
         .iter()
@@ -161,10 +156,11 @@ fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"source\":{},\"entry_type\":{},\"inputs\":[{}],\"completion_words\":[{}]}}",
+        "{{\"source\":{},\"entry_type\":{},\"inputs\":[{}],\"commands\":[{}],\"completion_words\":[{}]}}",
         json_string(&format!("fn run(args: {})", command.entry_type)),
         json_string(&command.entry_type),
         inputs,
+        commands,
         completion,
     )
 }
@@ -186,6 +182,12 @@ fn command_text(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
             input.value_kind().as_str(),
             input.help,
         ));
+    }
+    for subcommand in &command.commands {
+        out.push_str(&format!("  command {}\n", subcommand.name));
+        for input in &subcommand.inputs {
+            out.push_str(&format!("    --{}: {} — {}\n", input.flag, input.value_kind().as_str(), input.help));
+        }
     }
     out.push_str(&format!(
         "  completion words: {}\n",

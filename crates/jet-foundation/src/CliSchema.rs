@@ -2,7 +2,7 @@
 //! inspection. The entry parameter type remains source truth; consumers never
 //! reconstruct shell names, requiredness, defaults, or help independently.
 
-use crate::AST::{CtValue, Expr, Item, Marker, ProgramBundle, StrPart, StructDef, Type};
+use crate::AST::{CtValue, Expr, Item, Marker, ProgramBundle, StrPart, StructDef, Type, VariantPayload};
 use crate::Syntax;
 
 const RECORD_MAGIC: &[u8; 8] = b"JETCMD\0\0";
@@ -106,6 +106,13 @@ impl CliInputSchema {
 pub struct CliCommandSchema {
     pub entry_type: String,
     pub inputs: Vec<CliInputSchema>,
+    pub commands: Vec<CliSubcommandSchema>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CliSubcommandSchema {
+    pub name: String,
+    pub inputs: Vec<CliInputSchema>,
 }
 
 /// Checked command surface for an executable. Plain `fn run()` deliberately
@@ -123,12 +130,26 @@ pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
         _ => None,
     });
     let schema = run_type.and_then(|name| {
-        items.iter().find_map(|item| match item {
+        if let Some(structure) = items.iter().find_map(|item| match item {
             Item::Struct(structure) if structure.name == name => command_schema(structure),
             _ => None,
-        })
+        }) { return Some(structure); }
+        let enumeration = items.iter().find_map(|item| match item {
+            Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
+            _ => None,
+        })?;
+        let commands = enumeration.variants.iter().filter_map(|variant| {
+            let VariantPayload::Single(Type::Named(payload), _) = &variant.payload else { return None };
+            let structure = items.iter().find_map(|item| match item {
+                Item::Struct(structure) if structure.name == *payload => Some(structure),
+                _ => None,
+            })?;
+            let payload = command_schema(structure)?;
+            Some(CliSubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
+        }).collect();
+        Some(CliCommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
     });
-    schema.unwrap_or(CliCommandSchema { entry_type: String::new(), inputs: Vec::new() })
+    schema.unwrap_or(CliCommandSchema { entry_type: String::new(), inputs: Vec::new(), commands: Vec::new() })
 }
 
 /// Canonical, versioned JetCommandSchema record. The digest makes corruption
@@ -139,32 +160,13 @@ pub fn encode_record(schema: &CliCommandSchema) -> Vec<u8> {
     put_string(&mut payload, &schema.entry_type);
     put_u32(&mut payload, schema.inputs.len() as u32);
     for input in &schema.inputs {
-        put_string(&mut payload, &input.field);
-        put_string(&mut payload, &input.flag);
-        put_string(&mut payload, &input.help);
-        put_optional_string(&mut payload, input.metavar.as_deref());
-        match &input.shape {
-            CliInputShape::Flag => payload.push(0),
-            CliInputShape::Value { kind, optional, default } => {
-                payload.push(1);
-                payload.push(match kind {
-                    CliValueKind::Bool => 0,
-                    CliValueKind::Int => 1,
-                    CliValueKind::Float => 2,
-                    CliValueKind::String => 3,
-                    CliValueKind::Path => 4,
-                });
-                payload.push(u8::from(*optional));
-                match default {
-                    None => payload.push(0),
-                    Some(CliDefault::TypeDefault) => payload.push(1),
-                    Some(value) => {
-                        payload.push(2);
-                        put_string(&mut payload, &value.display());
-                    }
-                }
-            }
-        }
+        encode_input(&mut payload, input);
+    }
+    put_u32(&mut payload, schema.commands.len() as u32);
+    for command in &schema.commands {
+        put_string(&mut payload, &command.name);
+        put_u32(&mut payload, command.inputs.len() as u32);
+        for input in &command.inputs { encode_input(&mut payload, input); }
     }
     let mut record = Vec::with_capacity(46 + payload.len());
     record.extend_from_slice(RECORD_MAGIC);
@@ -233,6 +235,44 @@ pub fn decode_record(record: &[u8]) -> Result<CliCommandSchema, MetadataError> {
     if count > MAX_INPUTS { return Err(MetadataError::Malformed("too many inputs")); }
     let mut inputs = Vec::with_capacity(count);
     for _ in 0..count {
+        inputs.push(decode_input(&mut cursor)?);
+    }
+    let command_count = cursor.u32()? as usize;
+    if command_count > MAX_INPUTS { return Err(MetadataError::Malformed("too many commands")); }
+    let mut commands = Vec::with_capacity(command_count);
+    for _ in 0..command_count {
+        let name = cursor.string()?;
+        let input_count = cursor.u32()? as usize;
+        if input_count > MAX_INPUTS { return Err(MetadataError::Malformed("too many command inputs")); }
+        let mut command_inputs = Vec::with_capacity(input_count);
+        for _ in 0..input_count { command_inputs.push(decode_input(&mut cursor)?); }
+        commands.push(CliSubcommandSchema { name, inputs: command_inputs });
+    }
+    if !cursor.done() { return Err(MetadataError::Malformed("trailing payload bytes")); }
+    Ok(CliCommandSchema { entry_type, inputs, commands })
+}
+
+fn encode_input(payload: &mut Vec<u8>, input: &CliInputSchema) {
+    put_string(payload, &input.field);
+    put_string(payload, &input.flag);
+    put_string(payload, &input.help);
+    put_optional_string(payload, input.metavar.as_deref());
+    match &input.shape {
+        CliInputShape::Flag => payload.push(0),
+        CliInputShape::Value { kind, optional, default } => {
+            payload.push(1);
+            payload.push(match kind { CliValueKind::Bool => 0, CliValueKind::Int => 1, CliValueKind::Float => 2, CliValueKind::String => 3, CliValueKind::Path => 4 });
+            payload.push(u8::from(*optional));
+            match default {
+                None => payload.push(0),
+                Some(CliDefault::TypeDefault) => payload.push(1),
+                Some(value) => { payload.push(2); put_string(payload, &value.display()); }
+            }
+        }
+    }
+}
+
+fn decode_input(cursor: &mut Cursor<'_>) -> Result<CliInputSchema, MetadataError> {
         let field = cursor.string()?;
         let flag = cursor.string()?;
         let help = cursor.string()?;
@@ -257,10 +297,7 @@ pub fn decode_record(record: &[u8]) -> Result<CliCommandSchema, MetadataError> {
             }
             _ => return Err(MetadataError::Malformed("unknown input shape")),
         };
-        inputs.push(CliInputSchema { field, flag, help, metavar, shape });
-    }
-    if !cursor.done() { return Err(MetadataError::Malformed("trailing payload bytes")); }
-    Ok(CliCommandSchema { entry_type, inputs })
+    Ok(CliInputSchema { field, flag, help, metavar, shape })
 }
 
 fn put_u32(out: &mut Vec<u8>, value: u32) { out.extend_from_slice(&value.to_le_bytes()); }
@@ -486,6 +523,10 @@ impl CliCommandSchema {
     pub fn completion_words(&self) -> Vec<String> {
         let mut words = vec!["--help".to_string()];
         words.extend(self.inputs.iter().map(|input| format!("--{}", input.flag)));
+        for command in &self.commands {
+            words.push(command.name.clone());
+            words.extend(command.inputs.iter().map(|input| format!("--{}", input.flag)));
+        }
         words
     }
 }
@@ -537,6 +578,7 @@ pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
     Some(CliCommandSchema {
         entry_type: structure.name.clone(),
         inputs,
+        commands: Vec::new(),
     })
 }
 
@@ -591,6 +633,7 @@ mod tests {
                     default: None,
                 },
             }],
+            commands: Vec::new(),
         }
     }
 
