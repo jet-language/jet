@@ -235,6 +235,33 @@ fn command_output_with_timeout(mut cmd: Command, timeout: Duration, label: &str)
     }
 }
 
+fn dev_cli_output_with_stdin(
+    file: &str,
+    stdin: &std::path::Path,
+    label: &str,
+) -> ProgramOutput {
+    let mut dev_cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+    dev_cmd
+        .args(["dev", file, "--watch=off"])
+        .stdin(fs::File::open(stdin).unwrap());
+    let dev = command_output_with_timeout(dev_cmd, DEV_DIFF_TIMEOUT, label);
+    let stdout = String::from_utf8_lossy(&dev.stdout);
+    let (runtime_stdout, status) = stdout
+        .rsplit_once("✓ ran in ")
+        .expect("one-shot jet dev must print its completion status");
+    assert!(
+        status
+            .strip_suffix(" ms\n")
+            .is_some_and(|millis| !millis.is_empty() && millis.bytes().all(|b| b.is_ascii_digit())),
+        "unexpected one-shot jet dev completion status: {status:?}"
+    );
+    ProgramOutput::ran(
+        runtime_stdout.to_string(),
+        String::from_utf8_lossy(&dev.stderr).to_string(),
+        dev.status.code().unwrap_or(1),
+    )
+}
+
 fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> RunOutcome {
     let stem = stem.to_string();
     let file = file.to_string();
@@ -498,11 +525,10 @@ const BOUNDARY_CODES: &[&str] = &[
     "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265",
 ];
 
-// The in-process harness cannot close or inject its own ambient stdin without
-// changing product behavior. `stdin_filter` gets a real piped-stdin CLI parity
-// test below; keeping it here as an exact boundary prevents a hanging battery.
-const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] =
-    &["io/stdin_filter", "ui/ui_native_linux"];
+// `stdin_filter` runs through the real CLI with an explicit empty stdin below,
+// so the battery never inherits an interactive terminal and cannot hang.
+// A separate non-empty piped-stdin CLI parity test covers its real input path.
+const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &["ui/ui_native_linux"];
 
 #[derive(Default, Clone)]
 struct DevBatteryStats {
@@ -537,35 +563,56 @@ fn check_dev_default_stem(
     let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
     let file = example_path(stem);
     eprintln!("dev-default checking {stem}");
-    let outcome = dev_iteration_with_timeout(stem, &file, false);
-    let interpreted = match outcome {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => {
-            eprintln!(
-                "default boundary: {stem}: {}",
-                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>().join(",")
-            );
-            assert!(
-                is_named_dev_boundary(stem, &diags),
-                "`{}` neither ran nor stopped at a named boundary {:?} under the default \
-                 jet dev backend; codes were {:?}",
-                stem,
-                BOUNDARY_CODES,
-                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-            );
-            return DevBatteryStats {
-                boundary: 1,
-                boundary_stems: vec![stem.to_string()],
-                ..DevBatteryStats::default()
-            };
+    let stdin = if stem == "io/stdin_filter" {
+        let path = dir.join(format!("dev_default_stdin_{i}.txt"));
+        fs::write(&path, "").unwrap();
+        Some(path)
+    } else {
+        None
+    };
+    let interpreted = if let Some(stdin) = &stdin {
+        dev_cli_output_with_stdin(&file, stdin, "empty-input jet dev")
+    } else {
+        match dev_iteration_with_timeout(stem, &file, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                eprintln!(
+                    "default boundary: {stem}: {}",
+                    diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>().join(",")
+                );
+                assert!(
+                    is_named_dev_boundary(stem, &diags),
+                    "`{}` neither ran nor stopped at a named boundary {:?} under the default \
+                     jet dev backend; codes were {:?}",
+                    stem,
+                    BOUNDARY_CODES,
+                    diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+                );
+                return DevBatteryStats {
+                    boundary: 1,
+                    boundary_stems: vec![stem.to_string()],
+                    ..DevBatteryStats::default()
+                };
+            }
         }
     };
 
-    let compiled = compiled_binary_output(dir, "dev_default_diff", i, stem, &file);
+    let compiled = if let Some(stdin) = &stdin {
+        compiled_binary_output_with_stdin(
+            dir,
+            "dev_default_diff",
+            i,
+            stem,
+            &file,
+            Some(stdin),
+        )
+    } else {
+        compiled_binary_output(dir, "dev_default_diff", i, stem, &file)
+    };
     let interpreted = normalize_for_parity(stem, interpreted);
     let compiled = normalize_for_parity(stem, compiled);
     if interpreted != compiled {
@@ -852,24 +899,8 @@ fn stdin_filter_cli_uses_transparent_aot_fallback() {
         Some(&input),
     );
 
-    let mut dev_cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
-    dev_cmd
-        .args(["dev", &file, "--watch=off"])
-        .stdin(fs::File::open(&input).unwrap());
-    let dev = command_output_with_timeout(dev_cmd, DEV_DIFF_TIMEOUT, "piped-input jet dev");
-    let dev_stdout = String::from_utf8_lossy(&dev.stdout);
-    let (runtime_stdout, status) = dev_stdout
-        .rsplit_once("✓ ran in ")
-        .expect("one-shot jet dev must print its completion status");
-    assert!(
-        status
-            .strip_suffix(" ms\n")
-            .is_some_and(|millis| !millis.is_empty() && millis.bytes().all(|b| b.is_ascii_digit())),
-        "unexpected one-shot jet dev completion status: {status:?}"
-    );
-    assert_eq!(runtime_stdout, compiled.stdout);
-    assert_eq!(String::from_utf8_lossy(&dev.stderr), compiled.stderr);
-    assert_eq!(dev.status.code().unwrap_or(1), compiled.exit_code);
+    let dev = dev_cli_output_with_stdin(&file, &input, "piped-input jet dev");
+    assert_eq!(dev, compiled);
 }
 
 #[test]
@@ -2771,7 +2802,7 @@ struct Email { addr: String }
 
 impl Email.Encode {
     fn encode(self) -> DataTree {
-        m: [String: DataTree] :: ["email": DataTree.Text(copy self.addr)]
+        m: [String: DataTree] :: ["email": DataTree.Text(~self.addr)]
         return DataTree.Object(m)
     }
 }
