@@ -74,9 +74,24 @@ fn write_fastfetch_fixture(
     }
     jetpack::Store::seal_local_output(staging_dir).unwrap();
     let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
-    let out_dir = root.join("hangar").join("objects").join(digest);
+    let out_dir = root.join("hangar").join("objects").join(&digest);
     fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+    let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        staging_permissions.set_mode(staging_permissions.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    staging_permissions.set_readonly(false);
+    fs::set_permissions(staging_dir, staging_permissions).unwrap();
     fs::rename(staging_dir, &out_dir).unwrap();
+    jetpack::Store::seal_local_output(&out_dir).unwrap();
+    assert_eq!(
+        jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
+        digest,
+        "published fixture must retain its content-addressed identity"
+    );
 
     let drv_path = fixtures.join("fastfetch.drv");
     fs::write(&drv_path, "fixture derivation identity\n").unwrap();
