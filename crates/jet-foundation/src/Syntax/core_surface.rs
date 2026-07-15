@@ -176,18 +176,22 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
     TYPE_F64,
 ];
 
-/// D-MEM1 (ratified, supersedes D-CAP7): memory model v5 sigils. Two sigils
-/// plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive write,
-/// `^T` = move (consume). `~` is not part of the v5 grammar — it fails as an
-/// ordinary unknown-token syntax error, no special-case message. `copy` stays
-/// a verb (no sigil — D-CAP2).
+/// D-MEM1 (ratified, supersedes D-CAP7): memory model v5 sigils. Three
+/// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
+/// write, `^T` = move (consume), `~T` = copy (D-SHAPE-COPY1=A, supersedes
+/// D-CAP2/S4's `copy` verb).
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
 
-/// D-CAP2 (ratified, part of D-MEM1/S4): the one copy spelling — `copy x`
+/// D-SHAPE-COPY1=A (supersedes D-CAP2/S4): the one copy spelling — `~x`
 /// produces an owned, independent value. A temporary (no named binding
 /// survives to be used-after), so it never needs `^` and never trips E0209.
 /// `.clone()` is not user-typable Jet syntax (I8 — one way to mean it).
+pub const SIGIL_COPY: &str = "~";
+
+/// D-SHAPE-COPY1=A: the retired `copy` word (was D-CAP2/S4's one copy
+/// spelling). Recognized only for the E0991 teaching error that points at
+/// the `~` sigil.
 pub const KW_COPY: &str = "copy";
 
 /// S10 (M2) → D-MEM1: the retired write keyword. Recognized only for the E0056

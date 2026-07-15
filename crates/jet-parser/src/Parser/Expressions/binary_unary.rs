@@ -394,11 +394,35 @@ impl<'a> Parser<'a> {
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::RawOf(Box::new(inner), full))
                 }
-                // D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb, a prefix-verb
+                // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
                 // expression form. Legal on any expression; most useful on a named
                 // binding. `.clone()` is not user-typable Jet syntax (I8).
+                TokKind::Tilde => {
+                    let span = self.bump().span;
+                    let inner = self.expr_unary(allow_struct_lit)?;
+                    let full = Span::new(span.start, inner.span().end);
+                    Ok(Expr::Copy(Box::new(inner), full))
+                }
+                // D-SHAPE-COPY1=A: the `copy` word is retired — copy is now the
+                // `~` sigil (was D-CAP2/S4). Teach, then recover as Expr::Copy so
+                // parsing continues.
                 TokKind::KwCopy => {
                     let span = self.bump().span;
+                    self.diags.push(Diagnostic::error(
+                        "E0991",
+                        format!("`{}` is now the `{}` sigil", Syntax::KW_COPY, Syntax::SIGIL_COPY),
+                        format!(
+                            "Jet has exactly one spelling for a copy — the `{}` sigil \
+                             (D-SHAPE-COPY1) — so all code reads the same",
+                            Syntax::SIGIL_COPY
+                        ),
+                        format!(
+                            "write `{}name` in place of `{} name`",
+                            Syntax::SIGIL_COPY,
+                            Syntax::KW_COPY
+                        ),
+                        Some(span),
+                    ));
                     let inner = self.expr_unary(allow_struct_lit)?;
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::Copy(Box::new(inner), full))
