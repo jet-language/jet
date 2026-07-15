@@ -596,7 +596,7 @@ fn write_generation_locked(
     fs::create_dir(&gen_dir)?;
     let mut generation_tools = tools.to_vec();
     materialize_generation_bins(&gen_dir, &mut generation_tools, live)?;
-    let meta = format_generation_meta(gen, &generation_tools);
+    let meta = format_generation_meta(gen, &generation_tools)?;
     write_synced(&gen_dir.join("meta.json"), meta.as_bytes())?;
     validate_generation_bins(gen, &generation_tools)?;
     let witness = generation_record_witness(&meta, gen).map_err(io::Error::other)?;
@@ -1107,7 +1107,7 @@ fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()
     fs::rename(partial, destination)
 }
 
-fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> String {
+fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> io::Result<String> {
     let metadata = ProfileDispatch::GenerationMetadata {
         generation: gen,
         created_at: now_secs(),
@@ -1127,7 +1127,6 @@ fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> String {
             .collect(),
     };
     ProfileDispatch::format_generation_metadata(&metadata)
-        .expect("validated producer metadata must match dispatcher schema")
 }
 fn json_str(s: &str) -> String {
     format!(
@@ -1392,7 +1391,7 @@ fn run() { }
             output_hash: digest.clone(),
             store_root: "/store".into(),
         }];
-        let metadata = format_generation_meta(7, &tools);
+        let metadata = format_generation_meta(7, &tools).expect("format metadata");
         let parsed = parse_generation_meta(&metadata, 7).expect("parse");
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].output_hash, digest);
@@ -1414,7 +1413,8 @@ fn run() { }
             output_hash: digest.clone(),
             store_root: "/store".into(),
         };
-        let metadata = format_generation_meta(1, std::slice::from_ref(&tool));
+        let metadata = format_generation_meta(1, std::slice::from_ref(&tool))
+            .expect("format metadata");
         let corrupted = metadata.replacen("{\n", "{\n  \"unknown\": true,\n", 1);
         assert!(parse_generation_meta(&corrupted, 1).is_err());
 
