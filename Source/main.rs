@@ -1104,7 +1104,7 @@ fn main() {
             return;
         }
         "completions" => {
-            run_completions(args.get(1).map(|s| s.as_str()));
+            run_completions(&raw[1..]);
             return;
         }
         "devtools" => {

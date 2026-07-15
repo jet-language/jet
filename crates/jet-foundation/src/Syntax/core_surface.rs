@@ -53,6 +53,9 @@ pub const MARKER_NO_PRELUDE: &str = "NoPrelude";
 /// D-VISDEFAULT2 option B (rejected): retired spelling for the private exception
 /// keyword — recognized only for E0412 teaching diagnostics.
 pub const FOREIGN_PRIVATE: &str = "private";
+/// D-SHAPE-CLI-COMPLETE1=A: external program schema source for
+/// `jet self completions SHELL --for PROGRAM`.
+pub const CLI_COMPLETIONS_FOR: &str = "--for";
 
 /// D-VISDEFAULT2 option B (rejected): retired spelling for the file marker —
 /// recognized only for E0418 teaching diagnostics.

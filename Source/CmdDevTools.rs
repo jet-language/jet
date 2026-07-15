@@ -441,25 +441,49 @@ fn render_outcome_timed(
     }
 }
 
-/// `jet self completions <shell>` — print a shell completion script (D-DX4).
-pub(crate) fn run_completions(shell: Option<&str>) {
-    let out = match shell {
-        Some("bash") => jet::CLI::completions_bash(),
-        Some("zsh") => jet::CLI::completions_zsh(),
-        Some("fish") => jet::CLI::completions_fish(),
-        Some("powershell") => jet::CLI::completions_powershell(),
-        other => {
-            eprintln!(
-                "error: completions need a shell: {} self completions <bash|zsh|fish|powershell>",
-                jet::Syntax::BINARY_NAME
-            );
-            if let Some(s) = other {
-                eprintln!(" why: `{}` isn't a shell I generate completions for", s);
-            }
-            exit(ExitCodes::USAGE);
+/// `jet self completions SHELL [--for PROGRAM]` (D-DX4,
+/// D-SHAPE-CLI-COMPLETE1=A). External schemas are read statically from the
+/// executable; no application code runs.
+pub(crate) fn run_completions(args: &[String]) {
+    const USAGE: &str = "jet self completions <bash|zsh|fish|powershell> [--for PROGRAM]";
+    let shell = args.first().map(String::as_str);
+    if !matches!(shell, Some("bash" | "zsh" | "fish" | "powershell"))
+        || !matches!(args.len(), 1 | 3)
+        || (args.len() == 3 && args[1] != jet::Syntax::CLI_COMPLETIONS_FOR)
+    {
+        eprintln!("Error [E2102]: completions arguments don't match `{USAGE}`.");
+        eprintln!(" Why: a completion script needs one supported shell and, optionally, one compiled Jet program.");
+        eprintln!(" Fix: run `{USAGE}`.");
+        exit(ExitCodes::USAGE);
+    }
+    let shell = shell.unwrap();
+    let out = if args.len() == 1 {
+        match shell {
+            "bash" => jet::CLI::completions_bash(),
+            "zsh" => jet::CLI::completions_zsh(),
+            "fish" => jet::CLI::completions_fish(),
+            "powershell" => jet::CLI::completions_powershell(),
+            _ => unreachable!(),
         }
+    } else {
+        let program = &args[2];
+        let metadata = fs::metadata(program).unwrap_or_else(|error| completion_metadata_error(program, &format!("the program could not be opened ({error})")));
+        if metadata.len() > 512 * 1024 * 1024 {
+            completion_metadata_error(program, "the program is larger than the 512 MiB metadata-reader limit");
+        }
+        let bytes = fs::read(program).unwrap_or_else(|error| completion_metadata_error(program, &format!("the program could not be read ({error})")));
+        let schema = jet_foundation::CliSchema::read_executable(&bytes)
+            .unwrap_or_else(|error| completion_metadata_error(program, &error.to_string()));
+        jet::CLI::completions_for_program(shell, program, &schema).unwrap()
     };
     print!("{}", out);
+}
+
+fn completion_metadata_error(program: &str, why: &str) -> ! {
+    eprintln!("Error [E2103]: couldn't read command metadata from `{program}`.");
+    eprintln!(" Why: {why}.");
+    eprintln!(" Fix: rebuild the program with this Jet toolchain, then try again.");
+    exit(ExitCodes::USER_ERROR);
 }
 
 /// Every `jet self devtools` subcommand name, for the usage line and typo errors.
