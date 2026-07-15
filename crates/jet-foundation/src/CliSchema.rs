@@ -425,10 +425,18 @@ fn pe_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
 }
 
 fn is_mach(bytes: &[u8]) -> bool {
-    matches!(bytes.get(..4), Some([0xce, 0xfa, 0xed, 0xfe]) | Some([0xcf, 0xfa, 0xed, 0xfe]))
+    matches!(bytes.get(..4),
+        Some([0xce, 0xfa, 0xed, 0xfe]) | Some([0xcf, 0xfa, 0xed, 0xfe]) |
+        Some([0xca, 0xfe, 0xba, 0xbe]) | Some([0xca, 0xfe, 0xba, 0xbf]) |
+        Some([0xbe, 0xba, 0xfe, 0xca]) | Some([0xbf, 0xba, 0xfe, 0xca]))
 }
 
 fn mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
+    if matches!(bytes.get(..4),
+        Some([0xca, 0xfe, 0xba, 0xbe]) | Some([0xca, 0xfe, 0xba, 0xbf]) |
+        Some([0xbe, 0xba, 0xfe, 0xca]) | Some([0xbf, 0xba, 0xfe, 0xca])) {
+        return fat_mach_sections(bytes);
+    }
     let is_64 = bytes.get(..4) == Some(&[0xcf, 0xfa, 0xed, 0xfe]);
     let header = if is_64 { 32 } else { 28 };
     bounds(bytes, 0, header)?;
@@ -462,6 +470,34 @@ fn mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
         command = command.checked_add(size).ok_or(MetadataError::Malformed("Mach-O load command overflow"))?;
     }
     Ok(found)
+}
+
+fn fat_mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
+    let magic = bounds(bytes, 0, 4)?;
+    let little = matches!(magic, [0xbe, 0xba, 0xfe, 0xca] | [0xbf, 0xba, 0xfe, 0xca]);
+    let is_64 = matches!(magic, [0xca, 0xfe, 0xba, 0xbf] | [0xbf, 0xba, 0xfe, 0xca]);
+    let count = usize_num(read_num(bytes, 4, 4, little)?)?;
+    if count == 0 || count > 64 { return Err(MetadataError::Malformed("invalid universal Mach-O architecture count")); }
+    let entry_size = if is_64 { 32usize } else { 20usize };
+    bounds(bytes, 8, count.checked_mul(entry_size).ok_or(MetadataError::Malformed("universal Mach-O table overflow"))?)?;
+    let mut canonical: Option<&[u8]> = None;
+    for index in 0..count {
+        let arch = 8 + index * entry_size;
+        let width = if is_64 { 8 } else { 4 };
+        let offset = usize_num(read_num(bytes, arch + 8, width, little)?)?;
+        let size = usize_num(read_num(bytes, arch + 8 + width, width, little)?)?;
+        let slice = bounds(bytes, offset, size)?;
+        let sections = mach_sections(slice)?;
+        if sections.len() != 1 {
+            return if sections.is_empty() { Err(MetadataError::Missing) } else { Err(MetadataError::Duplicate) };
+        }
+        match canonical {
+            None => canonical = Some(sections[0]),
+            Some(record) if record == sections[0] => {}
+            Some(_) => return Err(MetadataError::Malformed("universal Mach-O slices disagree")),
+        }
+    }
+    Ok(vec![canonical.unwrap()])
 }
 
 fn wasm_leb(bytes: &[u8], at: &mut usize) -> Result<usize, MetadataError> {
@@ -702,6 +738,23 @@ mod tests {
         bytes
     }
 
+    fn fat_mach(record: &[u8]) -> Vec<u8> {
+        let first = mach(record);
+        let second = mach(record);
+        let table_end = 8 + 2 * 20;
+        let second_at = table_end + first.len();
+        let mut bytes = vec![0u8; second_at + second.len()];
+        bytes[..4].copy_from_slice(&[0xca, 0xfe, 0xba, 0xbe]);
+        bytes[4..8].copy_from_slice(&2u32.to_be_bytes());
+        bytes[16..20].copy_from_slice(&(table_end as u32).to_be_bytes());
+        bytes[20..24].copy_from_slice(&(first.len() as u32).to_be_bytes());
+        bytes[36..40].copy_from_slice(&(second_at as u32).to_be_bytes());
+        bytes[40..44].copy_from_slice(&(second.len() as u32).to_be_bytes());
+        bytes[table_end..second_at].copy_from_slice(&first);
+        bytes[second_at..].copy_from_slice(&second);
+        bytes
+    }
+
     #[test]
     fn canonical_record_round_trips() {
         let schema = schema();
@@ -715,6 +768,7 @@ mod tests {
         assert_eq!(read_executable(&elf(&record)).unwrap(), schema);
         assert_eq!(read_executable(&pe(&record, false)).unwrap(), schema);
         assert_eq!(read_executable(&mach(&record)).unwrap(), schema);
+        assert_eq!(read_executable(&fat_mach(&record)).unwrap(), schema);
         let mut wasm = b"\0asm\x01\0\0\0".to_vec();
         embed_wasm_record(&mut wasm, &record).unwrap();
         assert_eq!(read_executable(&wasm).unwrap(), schema);

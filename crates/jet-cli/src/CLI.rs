@@ -905,7 +905,7 @@ pub fn completions_for_program(
     let bash_words = words.join(" ");
     match shell {
         "bash" => Some(format!(
-            "# bash completion for {program} (JetCommandSchema v{})\n_jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F _jet_program_completion -- {}\n",
+            "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F _jet_program_completion -- {}\n",
             jet_foundation::CliSchema::RECORD_VERSION,
             shell_single_quote(&bash_words),
             shell_single_quote(program),
@@ -917,11 +917,11 @@ pub fn completions_for_program(
             }).chain(std::iter::once("    '--help[show help]'".to_string())).collect::<Vec<_>>().join(" \\\n");
             Some(format!(
                 "#compdef {}\n# zsh completion from JetCommandSchema v{}\n_arguments \\\n{}\n",
-                zsh_single(program), jet_foundation::CliSchema::RECORD_VERSION, args,
+                shell_single_quote(program), jet_foundation::CliSchema::RECORD_VERSION, args,
             ))
         }
         "fish" => {
-            let mut out = format!("# fish completion for {program} (JetCommandSchema v{})\n", jet_foundation::CliSchema::RECORD_VERSION);
+            let mut out = format!("# fish completion from JetCommandSchema v{}\n", jet_foundation::CliSchema::RECORD_VERSION);
             out.push_str(&format!("complete -c {} -l help -d 'show help'\n", fish_single(program)));
             for input in &schema.inputs {
                 out.push_str(&format!("complete -c {} -l {} -d {}{}\n", fish_single(program), input.flag, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
@@ -930,7 +930,7 @@ pub fn completions_for_program(
         }
         "powershell" => {
             let values = words.iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
-            Some(format!("# PowerShell completion for {program} (JetCommandSchema v{})\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({values}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CliSchema::RECORD_VERSION, ps_single(program)))
+            Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({values}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CliSchema::RECORD_VERSION, ps_single(program)))
         }
         _ => None,
     }
@@ -1009,6 +1009,21 @@ fn roff_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_completion_quotes_hostile_program_names() {
+        let schema = jet_foundation::CliSchema::CliCommandSchema {
+            entry_type: String::new(),
+            inputs: Vec::new(),
+            commands: Vec::new(),
+        };
+        let program = "safe\nINJECT_COMMAND\rnext";
+        for shell in ["bash", "zsh", "fish", "powershell"] {
+            let script = completions_for_program(shell, program, &schema).unwrap();
+            assert!(!script.contains("\nINJECT_COMMAND\n"), "{shell} exposed raw program text: {script:?}");
+            assert!(!script.lines().any(|line| line == "INJECT_COMMAND"), "{shell} created an attacker-controlled line");
+        }
+    }
 
     #[test]
     fn typo_finds_closest_command() {

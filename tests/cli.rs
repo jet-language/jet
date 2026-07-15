@@ -1137,6 +1137,40 @@ fn external_completion_metadata_errors_fail_closed() {
 }
 
 #[test]
+fn external_completion_preserves_checked_subcommands() {
+    let dir = isolated_cwd("shape_cli_subcommands");
+    fs::write(dir.join("commands.jet"), r#"@Cli
+struct ServeArgs { port: Int }
+@Cli
+struct ImportArgs { file: String }
+enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
+fn run(cmd: Cmd) {}
+"#).unwrap();
+    let build = Command::new(jet()).args(["build", "commands.jet"]).current_dir(&dir).output().unwrap();
+    assert!(build.status.success(), "subcommand build failed: {}", String::from_utf8_lossy(&build.stderr));
+    let completion = Command::new(jet())
+        .args(["self", "completions", "bash", "--for", "build/commands"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(completion.status.success(), "subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
+    let script = String::from_utf8(completion.stdout).unwrap();
+    for word in ["serve", "import", "--port", "--file"] {
+        assert!(script.contains(word), "external completion omitted {word}: {script}");
+    }
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier", "commands.jet", "run", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(dossier.status.success());
+    let dossier = String::from_utf8(dossier.stdout).unwrap();
+    for fact in ["\"commands\":[", "\"name\":\"serve\"", "\"name\":\"import\"", "\"flag\":\"--port\"", "\"flag\":\"--file\""] {
+        assert!(dossier.contains(fact), "dossier omitted {fact}: {dossier}");
+    }
+}
+
+#[test]
 fn moved_bare_commands_are_teaching_errors_not_aliases() {
     for (verb, replacement) in [
         ("publish", "jet registry publish"),
