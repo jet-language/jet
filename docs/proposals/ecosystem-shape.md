@@ -1,6 +1,6 @@
 # Jet ecosystem shape
 
-**Status:** owner proposal. Examples describe the intended final product, not shipped behavior. A source spelling marked `NEW: D-*` is gated by that decision. A marker in a code-block caption or first line governs every new spelling in that block. Unmarked Jet syntax and command names are already ratified.
+**Status:** vocabulary and shape ratified 2026-07-15. Examples describe the intended final product, not shipped behavior. A source spelling marked `NEW: D-*` is ratified but not yet implemented; implementation is tracked on Tower cards. A marker in a code-block caption or first line governs every new spelling in that block. Unmarked Jet syntax and command names are already ratified.
 
 ## Glossary
 
@@ -1404,7 +1404,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 
 ## Decision stack
 
-Decide in order. Later rows depend on earlier vocabulary. Every recommendation preserves one beginner path and exposes expert controls through the same mechanism. **6 decided · 13 open.**
+All 19 rows are decided. Later rows depend on earlier vocabulary. The stack is now the ratified record; every outcome preserves one beginner path and exposes expert controls through the same mechanism. **19 decided · 0 open.**
 
 ### 1. D-ECO-ROOTNAME1 — name the semantic whole
 
@@ -1412,9 +1412,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 **Gist:** Record the noun used in source, diagnostics, docs, and inspection for the repository-neutral semantic whole.
 
-**Decision: DECIDED.**
-
-**Owner selected (2026-07-15): Package, one noun, flat membership.** This collapses the old Project/Package split while keeping one noun from script through fleet. Recursive nesting was rejected by the owner on 2026-07-15: `members:` contains references only, and member depth is capped at one.
+**Ratified (2026-07-15): I — Package.** One noun spans script through fleet; `members:` contains references only, with depth capped at one.
 
 Source example: `members: find("./packages")`. The reserved file supplies the root `Package` type; ordinary single packages need no `members:` field.
 
@@ -1426,9 +1424,9 @@ Rejected: Hub, Manifest, Project.
 
 **Gist:** Record the noun for one layout-neutral typed value that contributes facts to a Package.
 
-**Decision: DECIDED.**
+**Ratified (2026-07-15): G — Config.** Plain English distinguishes code modules, shipped Packages, and merged settings while matching NixOS migration vocabulary.
 
-**Owner selected (2026-07-15): Config.** Rationale: plain English, self-explanatory (modules hold code, packages ship things, configs merge settings), inherits NixOS's own "configuration" vocabulary for migrating users. Rejected runners-up: Shard, Spoke, Part.
+Rejected: Shard, Spoke, Part.
 
 ### 3. D-ECO-FILEROOT1 — choose the final source-file law
 
@@ -1436,28 +1434,19 @@ Rejected: Hub, Manifest, Project.
 
 **Gist:** Decide whether one reserved Package file replaces permanent package, environment, workspace, and OS role files.
 
-Bare-fields root form: the file supplies the type and top-level fields construct it; a wrapper value was rejected as noun noise.
+**Ratified (2026-07-15): A — One `package.jet`.** Bare top-level fields construct the Package; one teaching diagnostic folds `pkg.jet`, `env.jet`, `workspace.jet`, and `config.jet` during one migration epoch while scripts remain file-free.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — One `package.jet` | `package.jet` contains `systems: .{…}` as a top-level field; `jet os plan halcyon` discovers `systems.halcyon` there. `jet init` folds old files with a teaching diagnostic. |
-| B — Keep role files | `pkg.jet`, `env.jet`, `workspace.jet`, and `config.jet` remain authorities; `jet explain services.db.port` must report which role file won, preserving the current identity splits. |
-| C — No reserved file | User runs `jet --package config/root.jet build`; bare `jet build` prints `No Package root selected.` Layout is free, but first Package adds permanent selection ceremony. |
-
-**Recommendation: A.** It makes file growth organizational, retires three competing shapes, and keeps S0 file-free. Tradeoff: one migration epoch must teach and reversibly fold four ratified old filenames.
+Rejected: keep role files; no reserved file.
 
 ### 4. D-ECO-SPLITPOLICY1 — define what split does
 
-**Answers/replaces:** open D-ECO-SPLITPOLICY1.
+**Answers/replaces:** D-ECO-SPLITPOLICY1.
 
 **Gist:** Decide whether `jet split` extracts inline facts or only moves an already-authored Config.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Extract and move | From inline `environments: .{ dev: … }`, `jet split env --check` prints `Would create package/env.jet::development; graph unchanged.` It then creates the Config and records a reversible ledger. |
-| B — Move Configs only | Same input prints `Error: no exported Config owns tier env. Fix: extract it, then retry.` Experts get a smaller refactor tool; beginners perform its prerequisite manually. |
+**Ratified (2026-07-15): A — Extract and move.** `jet split` extracts closed inline facts into the same Config an expert would write, previews the generated binding, and records reversible provenance.
 
-**Recommendation: A.** It fulfills the user's intent while producing the same Config experts write directly. Tradeoff: preview must name the generated binding and refuse non-closed extraction before writes.
+Rejected: move Configs only.
 
 ### 5. D-ECO-TRANSITION1 — name growth and reversal commands
 
@@ -1465,25 +1454,19 @@ Bare-fields root form: the file supplies the type and top-level fields construct
 
 **Gist:** Record the commands for extracting and folding package tiers.
 
-**Decision: DECIDED.**
-
-**Owner selected (2026-07-15): `jet split` / `jet fold`.** `fold` is the clearest reverse verb and keeps reversal visible as its own operation while both commands use one provenance ledger.
+**Ratified (2026-07-15): A — `jet split` / `jet fold`.** Separate growth and reversal verbs share one provenance ledger and make reversal explicit.
 
 Rejected: flag-based reversal, intent-specific transition verbs.
 
 ### 6. D-ECO-OUTPUT-PAYLOAD1 — decide where output facts live
 
-**Answers/replaces:** open D-ECO-OUTPUT-PAYLOAD1.
+**Answers/replaces:** D-ECO-OUTPUT-PAYLOAD1.
 
 **Gist:** Decide whether Output values are thin typed projections or repeat graph slices.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Thin projections | `cli: Output :: .Executable.{ name: "todo", entry: run }`; `jet inspect output cli` renders sources, deps, action, target, policy, and provenance from the graph. |
-| B — Explicit slice per Output | `cli: Output :: .Executable.{ name: "todo", entry: run, sources: [app], deps: [textkit], actions: [compile], policy: release }`; inspection is local, but every Output repeats references. |
-| C — Verb sections | `cli: Output :: .Executable.{ name: "todo", build: .{ actions: [compile] }, run: .{ entry: run }, publish: .{ policy: release } }`; `jet inspect` mirrors commands while one stable fact scatters by verb. |
+**Ratified (2026-07-15): A — Thin projections.** Output payloads keep only name and kind-specific facts; `jet inspect output` reconstructs shared graph facts and provenance without duplication.
 
-**Recommendation: A.** Facts remain single-copy and Outputs stay readable; one exact inspect view supplies expert audit. Tradeoff: an isolated Output literal does not display its whole build path.
+Rejected: explicit slice per Output; verb sections.
 
 ### 7. D-ECO-OUTPUT-KINDS1 — close the v1 Output kind set
 
@@ -1491,95 +1474,69 @@ Rejected: flag-based reversal, intent-specific transition verbs.
 
 **Gist:** Decide whether v1 has one closed kind set spanning package and JetOS results.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Nine closed kinds | `.Environment.{…}`, `.System.{…}`, and `.Fleet.{…}` check beside Library, Executable, Service, Check, Image, and Bundle. `.Wheel.{}` prints `unknown Output kind; add a ratified kind or use Bundle.` |
-| B — Package-only closure | Package kinds remain closed; System and Fleet use separate root node types. `jet inspect output halcyon` prints `halcyon is not an Output`, splitting selection and lifecycle rules. |
-| C — Extensible text kinds | `.Custom.{ kind: "wheel", payload: … }` succeeds under a plugin. Experts gain reach, but exhaustive tools and beginner diagnostics cannot know the contract. |
+**Ratified (2026-07-15): A — Nine closed kinds.** `Library`, `Executable`, `Service`, `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet` make tooling exhaustive; new kinds require ratification.
 
-**Recommendation: A.** One closed capability model makes build, selection, inspection, proof, and defaults exhaustive from package through fleet. Tradeoff: a genuinely new kind requires an owner decision instead of a local string.
+Rejected: package-only closure; extensible text kinds.
 
 ### 8. D-SHAPE-OUTPUT-CALLABLE1 — link runnable Outputs to code
 
-**Answers/replaces:** open D-SHAPE-OUTPUT-CALLABLE1.
+**Answers/replaces:** D-SHAPE-OUTPUT-CALLABLE1.
 
 **Gist:** Choose the one checked relationship between a runnable Output and ordinary Jet code.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Function reference | `admin: Output :: .Executable.{ name: "todo-admin", entry: admin }`; after renaming only the function, `jet check` prints `entry admin no longer exists; update the reference or restore the function.` |
-| B — Module with `run` | `admin: Output :: .Executable.{ name: "todo-admin", module: Admin }`; `module Admin { fn run() {} }`; a second runnable command needs another module. |
-| C — Text name | `entry: "Admin.start"`; after rename, `jet check` prints `cannot resolve Admin.start; change text to Admin.serve.` Symbol rename and navigation cannot guarantee the edit. |
+**Ratified (2026-07-15): A — Function reference.** Checked entry references reuse normal resolution, visibility, rename, provenance, and role validation while preserving zero-config `fn run`.
 
-**Recommendation: A.** It reuses normal name resolution, visibility, rename, provenance, and role validation while preserving zero-config `fn run`. Tradeoff: function and Output references must change together.
+Rejected: module with `run`; text name.
 
 ### 9. D-ECO-OUTPUT-CALLCONTRACT1 — define callable role contracts
 
-**Answers/replaces:** open D-ECO-OUTPUT-CALLCONTRACT1.
+**Answers/replaces:** D-ECO-OUTPUT-CALLCONTRACT1.
 
 **Gist:** Choose how commands, services, and checks use ordinary functions.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Role-specific ordinary functions | `fn export(path: Path) -> Void ?`; `jet run export --path out.json` derives a flag. `fn serve() -> Void ?` and `fn verify() -> Void ?` take no flags; `jet test verify` reports pass on normal return. |
-| B — One permissive shape | `fn verify(channel: String = "stable") -> Void ?`; both `jet test verify` and `jet test verify --channel nightly` pass while checking different releases. |
-| C — Lifecycle result types | `fn verify() -> CheckResult { return .Pass }`; `jet test verify` prints structured result, but business code must construct tool protocol values. |
+**Ratified (2026-07-15): A — Role-specific ordinary functions.** Executables derive typed flags from parameters; Services and Checks take no ad hoc invocation flags and report success through ordinary return.
 
-**Recommendation: A.** Typed command flags remain ergonomic while unattended service/check configuration has one checked source. Tradeoff: services and checks cannot accept ad hoc invocation flags.
+Rejected: one permissive shape; lifecycle result types.
 
 ### 10. D-ECO-OUTPUT-DEFAULT1 — select an omitted Output address
 
-**Answers/replaces:** open D-ECO-OUTPUT-DEFAULT1.
+**Answers/replaces:** D-ECO-OUTPUT-DEFAULT1.
 
 **Gist:** Choose the deterministic selection rule for singular `run`, `enter`, `publish`, and activation intents; plural `test` runs every Check Output value.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Plural all; singular explicit, legacy, sole, defaults, error | `jet test` runs every Check. With one executable, `jet run` selects it. After a second appears, output lists both until `defaults: .{ run: cli }` is added. Explicit `jet run admin` always wins. |
-| B — Conventional keys | `outputs: .{ run: .Executable.{…}, check: .Check.{…} }`; `jet run` selects key `run`. Names become reserved policy vocabulary. |
-| C — Always explicit after Outputs | A sole `cli` still makes `jet run` print `name an Output; use jet run cli`. Typing adds no information. |
+**Ratified (2026-07-15): A — Plural all; singular explicit, legacy, sole, defaults, error.** `jet test` runs every Check; singular intents follow that five-step rule so small Packages stay automatic and growth cannot silently retarget automation.
 
-**Recommendation: A.** Small Packages stay automatic, large Packages record checked intent, and adding an Output cannot silently retarget automation. Tradeoff: multi-output Packages carry a small defaults record.
+Rejected: conventional keys; always explicit after Outputs.
 
 ### 11. D-SHAPE-INTERNAL1 — define `pub _name`
 
-**Answers/replaces:** open D-SHAPE-INTERNAL1.
+**Answers/replaces:** D-SHAPE-INTERNAL1.
 
 **Gist:** Decide whether a public underscore name is callable without becoming a compatibility promise.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Soft-public | `pub fn _scan_token() {}`; outside call works with one unsuppressible warning. `jet registry publish` prints `semver ok; removed unsupported name _scan_token.` One semantic flag drives docs, completion, policy, dossier, and semver. |
-| B — All public is supported | Same source is ordinary public API. Removal makes publish print `Error: breaking change; restore _scan_token or publish a major version.` Helpers must remain private or package-visible. |
+**Ratified (2026-07-15): A — Soft-public.** `pub _name` permits outside use with one unsuppressible warning while excluding the name from supported API and semver promises.
 
-**Recommendation: A.** Expert integrations gain an honest escape hatch without polluting beginner discovery or supported API promises. Tradeoff: intentional outside callers always retain a warning.
+Rejected: all public is supported.
 
 ### 12. D-ECO-JETOS2 — connect Package to JetOS
 
-**Answers/replaces:** open D-ECO-JETOS2 and the JetOS half of D-ECO1. It re-homes ratified D-JOS-USERENV1 (`user.<name>`), D-JOS-THEME1 (`theme.<name>`), D-JOS-VMTEST1, and D-JOS-DISK1 spellings as typed Package values — semantics preserved, re-spelling gated by this row.
+**Answers/replaces:** D-ECO-JETOS2 and the JetOS half of D-ECO1. It re-homes ratified D-JOS-USERENV1 (`user.<name>`), D-JOS-THEME1 (`theme.<name>`), D-JOS-VMTEST1, and D-JOS-DISK1 spellings as typed Package values — semantics preserved, re-spelling gated by this row.
 
 **Gist:** Decide whether Systems and Fleets are Outputs of the same package graph and use the same realization substrate.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Same graph, typed Outputs | `halcyon: Output :: .System.{ packages: [cli] }`; `jet os plan halcyon` reports the same locked package digest and policy as `jet build cli`. Fleet hosts reference System Outputs. |
-| B — Same source, separate OS graph | `package.jet` contains `systems`, but JetOS re-resolves them into an OS lock. `jet os plan` can select a different package/toolchain than `jet build`, requiring reconciliation. |
-| C — Separate OS root | Application uses `package.jet`; machine uses `config.jet`. `jet os plan` reads a second graph and merge model, preserving current split. |
+**Ratified (2026-07-15): A — Same graph, typed Outputs.** Systems and Fleets share Package identity, policy, cache, explanation, and receipts while JetOS retains its activation engine.
 
-**Recommendation: A.** Package, environment, image, machine, and fleet share identity, policy, cache, explanation, and receipts while JetOS retains a separate activation engine. Tradeoff: the shared graph/receipt schema becomes a strict versioned seam across L1, L2, and L3.
+Rejected: same source with separate OS graph; separate OS root.
 
 ### 13. D-ECO-JETOS-PREVIEW1 — define plan and proof
 
-**Answers/replaces:** open D-ECO-JETOS-PREVIEW1.
+**Answers/replaces:** D-ECO-JETOS-PREVIEW1.
 
 **Gist:** Decide whether proof preserves the exact built delta from a captured parent generation.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Plan predicts, proof confirms | `jet os plan halcyon` shows predicted `gen-41 -> candidate`. Later `jet os proof halcyon --name gen-42` prints baseline `gen-41`, built changes, output digests, readiness, activation, provenance, and rollback. |
-| B — Plan is the only delta | Plan shows current desired versus active. Historical proof prints `changes: not recorded`; after active state moves, gen-42's exact delta cannot be reconstructed. |
+**Ratified (2026-07-15): A — Plan predicts, proof confirms.** Plan previews change; proof preserves exact built delta from its captured baseline plus outputs, readiness, activation, provenance, and rollback.
 
-**Recommendation: A.** Beginners get a safe preview and auditors get immutable historical evidence without another command. Tradeoff: each generation retains a compact typed delta and observation record.
+Rejected: plan as the only delta.
 
 ### 14. D-ECO-RECEIPTSTORE1 — place connected receipts
 
@@ -1587,13 +1544,9 @@ Rejected: flag-based reversal, intent-specific transition verbs.
 
 **Gist:** Choose where action and activation evidence lives without creating a second merge authority.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Hangar objects referenced by lock/generation | `.jet/lock` contains `receipt sha256:91b8…`; `jet os proof halcyon --name gen-42` loads the immutable Hangar object and prints its locked-input ref. Export copies the receipt closure. |
-| B — Inline every receipt in `.jet/lock` | One build appends action, logs, output, readiness, and activation fields directly. `git diff .jet/lock` grows with every local realization and mixes source resolution with observations. |
-| C — Package-local receipt directory | `.jet/receipts/gen-42.json` is readable and portable; `jet clean` must treat mutable paths as identity and prevent edits from rewriting evidence. |
+**Ratified (2026-07-15): A — Hangar objects referenced by lock/generation.** Immutable receipt objects use Hangar identity, deduplication, signing, retention, and export while `.jet/lock` remains the sole graph and merge index.
 
-**Recommendation: A.** Content identity, deduplication, signatures, retention, export, and generation roots already belong in Hangar; the lock remains the sole graph/merge index. Tradeoff: human review uses `jet proof/inspect` or an exported receipt instead of opening one source-adjacent file.
+Rejected: inline every receipt in `.jet/lock`; package-local receipt directory.
 
 ### 15. D-ECO-FLEETVERB1 — choose fleet lifecycle verbs
 
@@ -1601,9 +1554,7 @@ Rejected: flag-based reversal, intent-specific transition verbs.
 
 **Gist:** Record the command users type for plan, staged rollout, observation, and rollback across hosts.
 
-**Decision: DECIDED.**
-
-**Owner selected (2026-07-15): `jet deploy <fleet>`.** `deploy` is the industry word for rollout and leaves `push` free for another job. It still amends D-CLI-SURFACE3's `jet os push` grouping.
+**Ratified (2026-07-15): A — `jet deploy <fleet>`.** `deploy` names fleet rollout directly and leaves `push` free for another job.
 
 Rejected: `jet fleet push`, `jet os push`, bare push.
 
@@ -1613,9 +1564,7 @@ Rejected: `jet fleet push`, `jet os push`, bare push.
 
 **Gist:** Record the rare expert operations that retain a closure with no Package, profile, process, build, toolchain, System, or Generation owner.
 
-**Decision: DECIDED.**
-
-**Owner selected (2026-07-15): `register-external-root` / `unregister-external-root` / `list-external-roots`.** These precise verbs distinguish retention metadata from realization in scripts, CAS errors, and audit records.
+**Ratified (2026-07-15): B — `register-external-root` / `unregister-external-root` / `list-external-roots`.** Precise verbs distinguish retention metadata from realization in scripts, CAS errors, and audit records.
 
 Rejected: add/remove, keep/release, pin/unpin.
 
@@ -1625,13 +1574,9 @@ Rejected: add/remove, keep/release, pin/unpin.
 
 **Gist:** Choose the default physical Hangar ownership model across Linux, macOS, and Windows.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Native per-user data path | First `jet run` prints no setup prompt and writes under the platform user-data directory. `jet hangar path` prints the resolved path. Shared broker is optional. |
-| B — `/etc/jet/hangar` everywhere possible | First run prints `permission denied; rerun installer as root or configure a store.` Cross-platform parity and no-root default fail. |
-| C — Package-local `.jet/hangar` | First run works without root, but every Package duplicates objects and cleanup cannot share verified bytes across Packages. |
+**Ratified (2026-07-15): A — Native per-user data path.** Linux uses `$XDG_DATA_HOME/jet/hangar` or `~/.local/share/jet/hangar`, macOS uses `~/Library/Application Support/Jet/Hangar`, and Windows uses `%LOCALAPPDATA%\Jet\Hangar`; shared storage stays optional.
 
-**Recommendation: A.** It satisfies rootless first use and cross-platform sharing while leaving secure organization-wide deduplication opt-in. Tradeoff: each user initially owns a separate physical cache.
+Rejected: `/etc/jet/hangar` default; package-local `.jet/hangar`.
 
 ### 18. D-ECO-BROKERBOUNDARY1 — reconcile U28 with shared storage
 
@@ -1639,13 +1584,9 @@ Rejected: add/remove, keep/release, pin/unpin.
 
 **Gist:** State the privilege and lifetime boundary that keeps a shared Hangar optional and non-resident.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Socket-activated transient verifier | `jetpack shared-store install` is administrator-only. A later build prints `shared broker verified 3 objects; broker idle exit.` Missing socket silently uses user Hangar. Broker never evaluates source. |
-| B — Resident build daemon | Installer enables a root service. `jet build` submits source evaluation and builds to it. Shared performance is direct, but U28's daemon and privilege boundary are overturned. |
-| C — No privileged process ever | `jetpack shared-store install` prints `unsupported`; macOS canonical Nix projection and secure cross-user promotion lose the ratified narrow path. |
+**Ratified (2026-07-15): A — Socket-activated transient verifier.** Optional administrator-installed broker exits when idle, never evaluates user source, rebuilds under ephemeral identities, and independently verifies promotion into shared storage.
 
-**Recommendation: A.** Request-bounded lifetime, independent re-verification, ephemeral builders, and no source evaluation preserve U28's user promise while enabling explicit shared storage. Tradeoff: administrators who opt in must maintain the broker socket and promotion policy.
+Rejected: resident build daemon; no privileged process ever.
 
 ### 19. D-ECO-MEMBERS1 — how packages relate
 
@@ -1653,9 +1594,7 @@ Rejected: add/remove, keep/release, pin/unpin.
 
 **Gist:** Decide whether monorepo packages contain package definitions or refer to independent packages.
 
-**Decision: DECIDED.**
-
-**Owner selected (2026-07-15): flat members.** A monorepo root lists `members:` by reference. Members cannot have members, and a single package needs no `packages:` or `members:` field.
+**Ratified (2026-07-15): A — Flat members.** A monorepo root lists `members:` by reference, members cannot have members, and a single Package needs no membership field.
 
 Rejected: full recursion (noun soup), a two-noun workspace split, and renamed sub-units.
 
@@ -1669,4 +1608,4 @@ Error: member package `packages/api/package.jet` lists members from `packages/ap
 
 ### Decision order
 
-Rows 1-5 and 19 now use the owner's in-session core vocabulary: flat Package membership, Config, `package.jet`, and `jet split` / `jet fold`. Rows 1, 2, 5, 15, 16, and 19 are owner-selected; rows 3-4, 6-14, and 17-18 remain open. Formal Tower ratification of the selected rows records these outcomes. No implementation or migration should mint a marked spelling before its row is formally ratified.
+Rows 1-19 are ratified in dependency order: vocabulary and membership, file growth, Output shape and selection, JetOS integration and proof, then Hangar retention and sharing. This stack is the durable decision record; `NEW:` markers identify ratified spellings whose implementation remains tracked on Tower cards.

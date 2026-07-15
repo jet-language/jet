@@ -2429,8 +2429,7 @@ image, fleet, and system is an ordinary named field whose value uses the
 existing D-DOTCTOR1 `Type.{ field: value }` constructor. The root value has
 typed sections; section-qualified names such as `packages.api`,
 `services.web`, and `images.server` are stable references within that root.
-The root type remains written here as `<Root>` until D-ECO-ROOTNAME1 chooses
-its noun.
+The root type is `Package` (D-ECO-ROOTNAME1=I).
 
 ```text
 root: <Root> :: <Root>.{
@@ -3805,6 +3804,107 @@ type name never appears. Every app's config supports standard `package:`,
 `extraConfig:` (verbatim passthrough), and `files:` fields. Presence in the
 record means installed and configured; no `enable:` ceremony.
 
+**D-ECO-ROOTNAME1=I — the ecosystem root is `Package`** *(ratified
+2026-07-15)*: `Package` is the one noun for the complete graph from a single
+package through a monorepo and fleet. A root may list flat `members:` by
+reference, member depth is capped at one, and members cannot list members.
+
+**D-ECO-SLICENAME1=G — typed contributions are `Config` values** *(ratified
+2026-07-15)*: `Config` names one layout-neutral typed contribution of Package
+facts. Modules hold code, Packages ship things, and Configs merge settings.
+
+**D-ECO-FILEROOT1=A — `package.jet` is the single reserved ecosystem file**
+*(ratified 2026-07-15)*: bare top-level fields in `package.jet` construct the
+Package; no wrapper binding is required. `pkg.jet`, `env.jet`, `workspace.jet`,
+and JetOS `config.jet` fold into it through one teaching diagnostic and one
+migration epoch; a leading `_` disables a discovered `.jet` file.
+
+**D-ECO-SPLITPOLICY1=A — `jet split` extracts and moves closed facts**
+*(ratified 2026-07-15)*: splitting inline Package facts creates the equivalent
+Config, previews its binding before writes, and records enough provenance for
+exact reversal. A non-closed extraction refuses before changing files.
+
+**D-ECO-TRANSITION1=A — growth uses `jet split`; reversal uses `jet fold`**
+*(ratified 2026-07-15)*: both commands preserve graph identity through one
+reversible provenance ledger. `jet split env`, `jet split package <name>`, and
+`jet split hosts <name>` use the same transition law.
+
+**D-ECO-OUTPUT-PAYLOAD1=A — Outputs are thin projections** *(ratified
+2026-07-15)*: an Output payload stores only its name and kind-specific facts;
+sources, dependencies, actions, effects, policy, target facts, and provenance
+remain single-copy graph facts. `jet inspect output <address>` reconstructs the
+complete path.
+
+**D-ECO-OUTPUT-KINDS1=A — Output has nine closed kinds** *(ratified
+2026-07-15)*: the exact set is `Library`, `Executable`, `Service`, `Check`,
+`Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Arbitrary text kinds
+are rejected; another kind requires ratification.
+
+**D-SHAPE-OUTPUT-CALLABLE1=A — runnable Outputs hold checked function
+references** *(ratified 2026-07-15)*: `entry: run` refers to ordinary Jet code
+through normal name resolution, visibility, rename, provenance, and role
+validation. Text entry names and mandatory wrapper modules are not alternate
+paths.
+
+**D-ECO-OUTPUT-CALLCONTRACT1=A — runnable roles use distinct ordinary-function
+contracts** *(ratified 2026-07-15)*: Executable parameters derive typed command
+flags; Service and Check entries accept no ad hoc invocation flags. Normal
+return means success, and `?` carries failure without lifecycle result types.
+
+**D-ECO-OUTPUT-DEFAULT1=A — plural runs all; singular uses a five-step rule**
+*(ratified 2026-07-15)*: `jet test` runs every Check Output. Singular intents
+select in order: explicit address, legacy zero-config entry, sole compatible
+Output, checked `defaults:` entry, then an ambiguity error listing choices.
+
+**D-SHAPE-INTERNAL1=A — `pub _name` is soft-public** *(ratified 2026-07-15)*:
+outside use is allowed with one unsuppressible warning, but the name is omitted
+from beginner discovery and carries no supported-API or semver promise.
+
+**D-ECO-JETOS2=A — Systems and Fleets are Outputs of the Package graph**
+*(ratified 2026-07-15)*: Package, environment, image, System, and Fleet share
+locked identity, policy, cache, explanation, and receipts. JetOS consumes that
+graph while retaining its separate assembly and activation engine.
+
+**D-ECO-JETOS-PREVIEW1=A — plan predicts; proof confirms against a baseline**
+*(ratified 2026-07-15)*: `jet os plan <host>` previews the candidate delta.
+`jet os proof <host> --name <generation>` preserves the exact built delta from
+its captured parent generation with output digests, readiness, activation,
+provenance, and rollback evidence.
+
+**D-ECO-RECEIPTSTORE1=A — receipts are immutable Hangar objects** *(ratified
+2026-07-15)*: `.jet/lock` or a generation references each receipt by digest;
+the receipt points back to locked inputs without duplicating merge history.
+Inspection and export load or copy the receipt closure from the Hangar.
+
+**D-ECO-FLEETVERB1=A — fleet rollout is `jet deploy <fleet>`** *(ratified
+2026-07-15)*: `deploy` owns plan, staged rollout, observation, and rollback for
+Fleet Outputs. It supersedes D-CLI-SURFACE3's `jet os push` grouping and leaves
+`push` unclaimed.
+
+**D-JPK-MANUALROOT1=B — external retention uses explicit root verbs**
+*(ratified 2026-07-15)*: the exact commands are
+`jet hangar register-external-root`, `jet hangar unregister-external-root`, and
+`jet hangar list-external-roots`. They retain closures lacking any automatic
+Package, profile, process, build, toolchain, System, or Generation owner.
+
+**D-ECO-HANGARPATH1=A — Hangar defaults to native per-user data paths**
+*(ratified 2026-07-15)*: Linux uses `$XDG_DATA_HOME/jet/hangar` or
+`~/.local/share/jet/hangar`, macOS uses
+`~/Library/Application Support/Jet/Hangar`, and Windows uses
+`%LOCALAPPDATA%\\Jet\\Hangar`. `jet hangar path` reports the resolved path;
+shared storage remains an administrator opt-in.
+
+**D-ECO-BROKERBOUNDARY1=A — shared storage uses a transient verifier**
+*(ratified 2026-07-15)*: the optional administrator-installed broker is
+socket-activated, exits when idle, never evaluates user source, rebuilds only
+under ephemeral sandbox identities, and re-verifies bytes, signatures,
+provenance, and writer authority before promotion.
+
+**D-ECO-MEMBERS1=A — Package membership is flat** *(ratified 2026-07-15)*: a
+monorepo root's `members:` field contains references to independent Packages;
+members cannot have members. A single Package needs no `packages:` or
+`members:` field.
+
 ### Superseded & deferred IDs (tombstones)
 
 **S6 — semicolons**: superseded by S6-R (see Formatting).
@@ -3866,10 +3966,6 @@ implementation milestone is pending.
 
 | ID | Question | Needed by |
 | --- | -------- | --------- |
-| D-ECO1 | which project concepts share one semantic graph | **Epoch 4** — Tower #532 |
-| D-ECO-SOURCE1 | whether one `project.jet` replaces the current role-file division | **Epoch 4** — Tower #610 |
-| D-ECO-JETOS2 | how the project graph becomes JetOS and activates safely | **Epoch 4** — Tower #609 |
-| D-SHAPE-INTERNAL1 | whether public `_name` marks unsupported API | **Epoch 3** — Tower #551 |
 | D-SHAPE-DUNDER2 | who owns the `__name` namespace | **Epoch 3** — Tower #601 |
 | D-SHAPE-MODULEINTERNAL1 | how `module _name` participates in discovery | **Epoch 3** — Tower #602 |
 | D-SHAPE-RESOURCE1 | how an owned resource releases before its surrounding scope | **Epoch 3** — Tower #557 |
