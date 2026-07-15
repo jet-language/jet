@@ -205,16 +205,18 @@ impl PartialEq for Type {
             // Internal core nominal provenance is identity-bearing. User-written
             // D-QUAL4 tags remain transparent flow annotations.
             (Tagged { marker: ma, inner: a }, Tagged { marker: mb, inner: b })
-                if ma == CORE_CRYPTO_NOMINAL_MARKER || mb == CORE_CRYPTO_NOMINAL_MARKER =>
+                if ma == CORE_CRYPTO_NOMINAL_MARKER && mb == CORE_CRYPTO_NOMINAL_MARKER =>
             {
-                ma == mb && a == b
+                a == b
+            }
+            (Tagged { marker, inner }, other) if marker != CORE_CRYPTO_NOMINAL_MARKER => {
+                inner.as_ref() == other
+            }
+            (other, Tagged { marker, inner }) if marker != CORE_CRYPTO_NOMINAL_MARKER => {
+                other == inner.as_ref()
             }
             (Tagged { marker, .. }, _) | (_, Tagged { marker, .. })
                 if marker == CORE_CRYPTO_NOMINAL_MARKER => false,
-            (Tagged { inner: a, .. }, Tagged { inner: b, .. }) => a == b,
-            (Tagged { inner, .. }, other) | (other, Tagged { inner, .. }) => {
-                inner.as_ref() == other
-            }
             _ => false,
         }
     }
@@ -441,5 +443,30 @@ impl Type {
 
     pub fn is_fallible(&self) -> bool {
         matches!(self, Type::Option(_) | Type::Result { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Type, CORE_CRYPTO_NOMINAL_MARKER};
+
+    fn core_secret() -> Type {
+        Type::Tagged {
+            marker: CORE_CRYPTO_NOMINAL_MARKER.to_string(),
+            inner: Box::new(Type::Named("Secret".to_string())),
+        }
+    }
+
+    #[test]
+    fn core_crypto_nominal_provenance_is_identity_bearing_but_flow_tags_stay_transparent() {
+        let local = Type::Named("Secret".to_string());
+        let core = core_secret();
+        let tainted_core = Type::Tagged {
+            marker: "Tainted(Credential)".to_string(),
+            inner: Box::new(core.clone()),
+        };
+
+        assert_ne!(core, local);
+        assert_eq!(tainted_core, core);
     }
 }
