@@ -163,7 +163,7 @@ fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
     }
     #[cfg(unix)]
     {
-        return fs::File::open(path)?.sync_all();
+        return sync_store_directory_handle(&fs::File::open(path)?);
     }
     #[cfg(windows)]
     {
@@ -173,13 +173,13 @@ fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
 
         // BACKUP_SEMANTICS is the Win32 directory-open contract. sync_all is
         // std's durable FlushFileBuffers-equivalent for the resulting handle.
-        return fs::OpenOptions::new()
+        let directory = fs::OpenOptions::new()
             .read(contract.read)
             .write(contract.write)
             .share_mode(contract.share_mode)
             .custom_flags(contract.custom_flags)
-            .open(path)?
-            .sync_all();
+            .open(path)?;
+        return sync_store_directory_handle(&directory);
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -189,6 +189,10 @@ fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
         let _ = path;
         Ok(())
     }
+}
+
+pub(super) fn sync_store_directory_handle(directory: &fs::File) -> std::io::Result<()> {
+    directory.sync_all()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
