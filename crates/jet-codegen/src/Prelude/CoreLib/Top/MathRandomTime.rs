@@ -45,7 +45,7 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
 Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
 Fix: raise the deadline budget or shorten the work before this wait point"
     );
-    if jet_runtime_should_unwind() {
+    if jet_interrupt_handler_should_unwind() || jet_scheduler_wait_boundary_should_unwind() {
         std::panic::panic_any(JetDeadlineUnwind { rendered });
     }
     jet_runtime_diagnostic(rendered);

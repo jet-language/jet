@@ -15,6 +15,29 @@ type Job = Box<dyn FnOnce() + Send>;
 thread_local! {
     static JET_SCHEDULER_CATCHING_PANIC: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    static JET_SCHEDULER_WAIT_BOUNDARY_DEPTH: std::cell::Cell<u32> =
+        const { std::cell::Cell::new(0) };
+}
+
+struct JetSchedulerWaitBoundary;
+
+impl JetSchedulerWaitBoundary {
+    fn enter() -> Self {
+        JET_SCHEDULER_WAIT_BOUNDARY_DEPTH
+            .with(|depth| depth.set(depth.get().saturating_add(1)));
+        Self
+    }
+}
+
+impl Drop for JetSchedulerWaitBoundary {
+    fn drop(&mut self) {
+        JET_SCHEDULER_WAIT_BOUNDARY_DEPTH
+            .with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+fn jet_scheduler_wait_boundary_should_unwind() -> bool {
+    JET_SCHEDULER_WAIT_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
 }
 
 static JET_SCHEDULER_PANIC_HOOK: OnceLock<()> = OnceLock::new();
@@ -102,7 +125,10 @@ where
         JET_SCHEDULER_CATCHING_PANIC.with(|catching| {
             let previous_task = in_task.replace(true);
             let previous_catching = catching.replace(true);
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+            let result = {
+                let _boundary = JetSchedulerWaitBoundary::enter();
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+            };
             catching.set(previous_catching);
             in_task.set(previous_task);
             result
