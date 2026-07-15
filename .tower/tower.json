@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 632,
-    "rev": 7450,
+    "rev": 7456,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18899,40 +18899,51 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "workOrder": 0,
-      "assignee": "root-631-builder",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "root-631-builder",
+          "text": "Correction: read_pid and is_alive wrappers remain test-only; production uses versioned PID plus start-identity authority. Commit 6df219d27. C1-C3 met; independent review and parent full gate remain."
+        },
+        {
+          "at": "2026-07-15",
+          "by": "root-631-builder",
+          "text": "[handoff] Jetpack compile restored. / wrappers remain test-only; production uses versioned PID+start-identity authority. Focused service run found Linux procfs ESRCH teardown race; 6df219d27 treats ESRCH as gone while propagating other identity errors. C1-C3 met; independent review and parent full gate remain."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "cargo check -p jetpack passes with no warning suppression or dead-code allowance.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-631-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:19:26.066Z"
+          "evidence": "nix develop -c cargo check -p jetpack passed at 6df219d27; no warning allowances or dead-code attributes added by repair. Captured prior cfg(test) wrappers are test-only convenience over stricter production identity path.",
+          "at": "2026-07-15T07:26:52.321Z"
         },
         {
           "n": 2,
           "text": "Service PID identity, liveness, stale-record, and cleanup semantics remain explicit and fail closed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-631-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:19:26.168Z"
+          "evidence": "Production up/down/health require versioned ProcessState with pid plus stable start identity before liveness or signal; legacy PID-only and identity-mismatch records are removed without signaling. Linux ESRCH during procfs teardown is classified as process gone; all other identity errors propagate/fail closed.",
+          "at": "2026-07-15T07:26:56.415Z"
         },
         {
           "n": 3,
           "text": "Targeted Jetpack service/runtime-policy tests pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-631-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:19:26.267Z"
+          "evidence": "nix develop -c cargo test -p jetpack Services::tests -- --nocapture passed 17/17; RuntimePolicy:: passed 13/13 at 6df219d27. Initial focused run exposed ESRCH teardown race; repaired and rerun green.",
+          "at": "2026-07-15T07:27:00.994Z"
         },
         {
           "n": 4,
@@ -18947,8 +18958,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T07:19:25.963Z",
-      "updated": "2026-07-15",
-      "claimedAt": "2026-07-15T07:19:26.476Z"
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -38099,6 +38109,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T07:27:25.979Z",
+      "by": "root-631-builder",
+      "action": "card.release",
+      "ref": "c0e3s4id",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T07:27:19.873Z",
+      "by": "root-631-builder",
+      "action": "card.update",
+      "ref": "c0e3s4id",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T07:27:07.188Z",
+      "by": "root-631-builder",
+      "action": "card.update",
+      "ref": "c0e3s4id",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T07:27:00.994Z",
+      "by": "root-631-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0e3s4id",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T07:26:56.416Z",
+      "by": "root-631-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0e3s4id",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T07:26:52.322Z",
+      "by": "root-631-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0e3s4id",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T07:19:26.477Z",
       "by": "root-631-builder",
       "action": "card.claim",
@@ -41555,48 +41607,6 @@
       "action": "card.claim",
       "ref": "c098lmb7",
       "note": ""
-    },
-    {
-      "at": "2026-07-15T00:09:03.570Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c098lmb7",
-      "note": "#5 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-15T00:09:03.479Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c098lmb7",
-      "note": "#4 No new syntax, diagnostic code, dependency, unsafe code, or "
-    },
-    {
-      "at": "2026-07-15T00:09:03.386Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c098lmb7",
-      "note": "#3 All 22 codemod tests pass under the default scheduler withou"
-    },
-    {
-      "at": "2026-07-15T00:09:03.294Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c098lmb7",
-      "note": "#2 Crash, journal, temp-inode, parent-directory, and hardlink a"
-    },
-    {
-      "at": "2026-07-15T00:09:03.194Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c098lmb7",
-      "note": "#1 Batch codemod planning sees every declared clean and fixture"
-    },
-    {
-      "at": "2026-07-15T00:08:53.793Z",
-      "by": "codex-orchestrator",
-      "action": "card.add",
-      "ref": "c098lmb7",
-      "note": "Full suite red: codemod batch tests lose fixture roots under parallel execution"
     }
   ],
   "nextNum": 368,
