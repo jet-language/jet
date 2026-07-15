@@ -1076,6 +1076,25 @@ fn run(args: RunArgs) {
         );
     }
 
+    for shell in ["bash", "zsh", "fish", "powershell"] {
+        let completion = Command::new(jet())
+            .args(["self", "completions", shell, "--for", "build/typed"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(
+            completion.status.success(),
+            "{shell} external completion failed: {}",
+            String::from_utf8_lossy(&completion.stderr)
+        );
+        let script = String::from_utf8(completion.stdout).unwrap();
+        for flag in ["help", "name", "retries", "verbose"] {
+            assert!(script.contains(flag), "{shell} script omitted {flag}: {script}");
+        }
+        assert!(!script.contains("Ada"), "completion queried a live value: {script}");
+        check_snapshot(&format!("shape_cli_for_{shell}.txt"), &script);
+    }
+
     fs::write(dir.join("plain.jet"), "fn run() { print(\"plain\") }\n").unwrap();
     let plain = Command::new(jet())
         .args(["run", "plain.jet"])
@@ -1088,6 +1107,33 @@ fn run(args: RunArgs) {
         String::from_utf8_lossy(&plain.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&plain.stdout), "plain\n");
+    let plain_completion = Command::new(jet())
+        .args(["self", "completions", "bash", "--for", "build/plain"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(plain_completion.status.success());
+    let plain_script = String::from_utf8(plain_completion.stdout).unwrap();
+    assert!(plain_script.contains("--help"));
+    assert!(!plain_script.contains("--name"));
+    check_snapshot("shape_cli_for_plain.txt", &plain_script);
+}
+
+#[test]
+fn external_completion_metadata_errors_fail_closed() {
+    let dir = isolated_cwd("shape_cli_metadata_error");
+    fs::write(dir.join("not-a-program"), b"not an executable").unwrap();
+    let out = Command::new(jet())
+        .args(["self", "completions", "bash", "--for", "not-a-program"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("Error [E2103]:"));
+    assert!(stderr.contains("Why:") && stderr.contains("Fix:"));
+    check_snapshot("shape_cli_metadata_error_e2103.txt", &stderr);
 }
 
 #[test]

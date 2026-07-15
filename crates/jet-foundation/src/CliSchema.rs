@@ -572,3 +572,123 @@ fn field_default(markers: &[Marker]) -> Option<CliDefault> {
         _ => CliDefault::TypeDefault,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn schema() -> CliCommandSchema {
+        CliCommandSchema {
+            entry_type: "Options".to_string(),
+            inputs: vec![CliInputSchema {
+                field: "output_file".to_string(),
+                flag: "output-file".to_string(),
+                help: "destination".to_string(),
+                metavar: Some("OUTPUT_FILE".to_string()),
+                shape: CliInputShape::Value {
+                    kind: CliValueKind::Path,
+                    optional: false,
+                    default: None,
+                },
+            }],
+        }
+    }
+
+    fn elf(record: &[u8]) -> Vec<u8> {
+        let names = b"\0.shstrtab\0.jet_command\0";
+        let names_at = 64usize;
+        let record_at = names_at + names.len();
+        let sections_at = record_at + record.len();
+        let mut bytes = vec![0u8; sections_at + 3 * 64];
+        bytes[..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 2;
+        bytes[5] = 1;
+        bytes[40..48].copy_from_slice(&(sections_at as u64).to_le_bytes());
+        bytes[58..60].copy_from_slice(&64u16.to_le_bytes());
+        bytes[60..62].copy_from_slice(&3u16.to_le_bytes());
+        bytes[62..64].copy_from_slice(&1u16.to_le_bytes());
+        bytes[names_at..record_at].copy_from_slice(names);
+        bytes[record_at..sections_at].copy_from_slice(record);
+        let strings = sections_at + 64;
+        bytes[strings..strings + 4].copy_from_slice(&1u32.to_le_bytes());
+        bytes[strings + 24..strings + 32].copy_from_slice(&(names_at as u64).to_le_bytes());
+        bytes[strings + 32..strings + 40].copy_from_slice(&(names.len() as u64).to_le_bytes());
+        let metadata = sections_at + 128;
+        bytes[metadata..metadata + 4].copy_from_slice(&11u32.to_le_bytes());
+        bytes[metadata + 24..metadata + 32].copy_from_slice(&(record_at as u64).to_le_bytes());
+        bytes[metadata + 32..metadata + 40].copy_from_slice(&(record.len() as u64).to_le_bytes());
+        bytes
+    }
+
+    fn pe(record: &[u8], duplicate: bool) -> Vec<u8> {
+        let pe = 0x80usize;
+        let count = if duplicate { 2usize } else { 1usize };
+        let table = pe + 24;
+        let raw_at = table + count * 40;
+        let mut bytes = vec![0u8; raw_at + count * record.len()];
+        bytes[..2].copy_from_slice(b"MZ");
+        bytes[0x3c..0x40].copy_from_slice(&(pe as u32).to_le_bytes());
+        bytes[pe..pe + 4].copy_from_slice(b"PE\0\0");
+        bytes[pe + 6..pe + 8].copy_from_slice(&(count as u16).to_le_bytes());
+        for index in 0..count {
+            let section = table + index * 40;
+            bytes[section..section + 7].copy_from_slice(b".jetcmd");
+            bytes[section + 16..section + 20].copy_from_slice(&(record.len() as u32).to_le_bytes());
+            let offset = raw_at + index * record.len();
+            bytes[section + 20..section + 24].copy_from_slice(&(offset as u32).to_le_bytes());
+            bytes[offset..offset + record.len()].copy_from_slice(record);
+        }
+        bytes
+    }
+
+    fn mach(record: &[u8]) -> Vec<u8> {
+        let command_size = 72 + 80;
+        let record_at = 32 + command_size;
+        let mut bytes = vec![0u8; record_at + record.len()];
+        bytes[..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]);
+        bytes[16..20].copy_from_slice(&1u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&(command_size as u32).to_le_bytes());
+        bytes[32..36].copy_from_slice(&0x19u32.to_le_bytes());
+        bytes[36..40].copy_from_slice(&(command_size as u32).to_le_bytes());
+        bytes[96..100].copy_from_slice(&1u32.to_le_bytes());
+        let section = 104usize;
+        bytes[section..section + 8].copy_from_slice(b"__jetcmd");
+        bytes[section + 40..section + 48].copy_from_slice(&(record.len() as u64).to_le_bytes());
+        bytes[section + 48..section + 52].copy_from_slice(&(record_at as u32).to_le_bytes());
+        bytes[record_at..].copy_from_slice(record);
+        bytes
+    }
+
+    #[test]
+    fn canonical_record_round_trips() {
+        let schema = schema();
+        assert_eq!(decode_record(&encode_record(&schema)).unwrap(), schema);
+    }
+
+    #[test]
+    fn reads_cross_format_section_fixtures() {
+        let schema = schema();
+        let record = encode_record(&schema);
+        assert_eq!(read_executable(&elf(&record)).unwrap(), schema);
+        assert_eq!(read_executable(&pe(&record, false)).unwrap(), schema);
+        assert_eq!(read_executable(&mach(&record)).unwrap(), schema);
+        let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+        embed_wasm_record(&mut wasm, &record).unwrap();
+        assert_eq!(read_executable(&wasm).unwrap(), schema);
+    }
+
+    #[test]
+    fn hostile_records_fail_closed() {
+        let record = encode_record(&schema());
+        assert_eq!(read_executable(b"not executable"), Err(MetadataError::UnknownFormat));
+        assert_eq!(read_executable(b"\0asm\x01\0\0\0"), Err(MetadataError::Missing));
+        assert_eq!(read_executable(&pe(&record, true)), Err(MetadataError::Duplicate));
+
+        let mut unsupported = record.clone();
+        unsupported[8..10].copy_from_slice(&2u16.to_le_bytes());
+        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(2)));
+        let mut corrupt = record;
+        *corrupt.last_mut().unwrap() ^= 1;
+        assert_eq!(decode_record(&corrupt), Err(MetadataError::Malformed("digest mismatch")));
+    }
+}
