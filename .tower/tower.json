@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 616,
-    "rev": 6972,
+    "nextNum": 617,
+    "rev": 6981,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2317,7 +2317,7 @@
     },
     {
       "milestoneId": "e3-universal-product-parity",
-      "assignee": "codex-main",
+      "assignee": null,
       "id": "caffiunify",
       "num": 180,
       "title": "Next-generation FFI: one structure for every foreign language",
@@ -2398,9 +2398,8 @@
         }
       ],
       "created": "2026-07-02T16:45:00.450Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-15",
       "workOrder": 135,
-      "claimedAt": "2026-07-06T20:24:46.214Z",
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
@@ -16869,6 +16868,80 @@
       "needsAcceptance": false,
       "created": "2026-07-14T23:26:52.446Z",
       "updated": "2026-07-14"
+    },
+    {
+      "id": "c098lmb7",
+      "num": 616,
+      "title": "Full suite red: codemod batch tests lose fixture roots under parallel execution",
+      "body": "Full verification reaches tests/codemod.rs and fails 8 of 22 tests. Batch rules report roughly half the expected matches; crash and inode-swap hooks never reach their intended exits because planning fails first. Single-operation semantic tests remain green.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Reproduce failing cases alone and together; identify shared temp/fixture/root state or command-schema drift. Write a deterministic regression, preserve transaction hardening and exact crash semantics, run codemod target under default scheduler, independent review, then parent full verification.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "codex-orchestrator",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Batch codemod planning sees every declared clean and fixture root deterministically under the default test scheduler; exact expected match counts hold.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:09:03.194Z"
+        },
+        {
+          "n": 2,
+          "text": "Crash, journal, temp-inode, parent-directory, and hardlink adversarial paths reach their intended hooks and preserve fail-closed recovery semantics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:09:03.293Z"
+        },
+        {
+          "n": 3,
+          "text": "All 22 codemod tests pass under the default scheduler without global single-thread mode or weakened transaction checks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:09:03.386Z"
+        },
+        {
+          "n": 4,
+          "text": "No new syntax, diagnostic code, dependency, unsafe code, or owner decision is introduced.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:09:03.478Z"
+        },
+        {
+          "n": 5,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:09:03.570Z"
+        }
+      ],
+      "refs": [
+        "tests/codemod.rs",
+        "Source/CmdCodemod.rs",
+        "crates/jet-cli/src/CLI.rs",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T00:08:53.793Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T00:09:03.661Z"
     }
   ],
   "decisions": [
@@ -31932,7 +32005,7 @@
           "name": "Output type variants",
           "detail": "Every output is a case of one `Output` type. Expected-type inference removes the repeated `Output` name inside an output collection.",
           "technical": "`Output` is a closed sum type. Each variant carries a checked record payload and lowers to one package-graph output node.",
-          "code": ".Executable(name: \"greeter\", entry: run)\n.Library(name: \"greeter_core\", modules: [Greeter])\n.Service(name: \"greeter_api\", entry: serve)"
+          "code": ".Executable.{ name: \"greeter\", entry: run }\n.Library.{ name: \"greeter_core\", modules: [Greeter] }\n.Service.{ name: \"greeter_api\", entry: serve }"
         },
         {
           "key": "B",
@@ -31946,7 +32019,7 @@
           "name": "Typed output binding",
           "detail": "Each output is an ordinary binding of the `Output` type. The right side uses the existing expected-type variant form.",
           "technical": "A binding becomes a package output only when the package output collection references it. No `Output.Executable` subtype is invented.",
-          "code": "greeter: Output :: .Executable(name: \"greeter\", entry: run)\ngreeter_core: Output :: .Library(name: \"greeter_core\", modules: [Greeter])\ngreeter_api: Output :: .Service(name: \"greeter_api\", entry: serve)"
+          "code": "greeter: Output :: .Executable.{ name: \"greeter\", entry: run }\ngreeter_core: Output :: .Library.{ name: \"greeter_core\", modules: [Greeter] }\ngreeter_api: Output :: .Service.{ name: \"greeter_api\", entry: serve }"
         }
       ],
       "comparisons": [
@@ -35256,6 +35329,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T00:09:10.591Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "caffiunify",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T00:09:03.661Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c098lmb7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T00:09:03.570Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c098lmb7",
+      "note": "#5 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T00:09:03.479Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c098lmb7",
+      "note": "#4 No new syntax, diagnostic code, dependency, unsafe code, or "
+    },
+    {
+      "at": "2026-07-15T00:09:03.386Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c098lmb7",
+      "note": "#3 All 22 codemod tests pass under the default scheduler withou"
+    },
+    {
+      "at": "2026-07-15T00:09:03.294Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c098lmb7",
+      "note": "#2 Crash, journal, temp-inode, parent-directory, and hardlink a"
+    },
+    {
+      "at": "2026-07-15T00:09:03.194Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c098lmb7",
+      "note": "#1 Batch codemod planning sees every declared clean and fixture"
+    },
+    {
+      "at": "2026-07-15T00:08:53.793Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c098lmb7",
+      "note": "Full suite red: codemod batch tests lose fixture roots under parallel execution"
+    },
+    {
+      "at": "2026-07-15T00:08:28.528Z",
+      "by": "terra-540-builder",
+      "action": "decision.update",
+      "ref": "D-SHAPE5b",
+      "note": ""
+    },
     {
       "at": "2026-07-15T00:03:28.318Z",
       "by": "codex-orchestrator",
@@ -38692,69 +38828,6 @@
       "action": "card.update",
       "ref": "c0zgfaml",
       "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:59:23.179Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-MATRIX-MERGE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:59:23.083Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0w907me",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:59:22.966Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-DUNDERACCESS1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:59:22.865Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0sy8a96",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:59:22.704Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-INPUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:59:22.605Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0wv3f1v",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:59:22.488Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-MATRIX1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:59:22.387Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0tocbko",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:59:22.271Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT1",
-      "note": "marked ready"
     }
   ],
   "nextNum": 368,
