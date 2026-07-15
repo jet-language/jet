@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 653,
-    "rev": 7748,
+    "rev": 7751,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16129,7 +16129,7 @@
       "priority": "P0",
       "plan": "Ratify view construction, then align slices, buffers, matrices, diagnostics, and docs.",
       "blockedBy": [
-        "#613"
+        "c08wuixb"
       ],
       "workOrder": 10,
       "assignee": null,
@@ -38274,6 +38274,13 @@
           "detail": "Use `Platform` and `platform`. The word spans applications, shared services, tooling, infrastructure, and machines.",
           "technical": "Platform often means a reusable foundation rather than one complete product graph. Small projects may sound larger than they are.",
           "code": "platform: Platform :: Platform.{ packages: { api: Package.{} } }\nDocs: The Platform contains package api.\nDiagnostic: Platform has two values for services.web."
+        },
+        {
+          "key": "I",
+          "name": "Package",
+          "detail": "Use `Package` for the complete repository-neutral semantic whole. A monorepo root lists independent member Packages by reference; a member cannot list members.",
+          "technical": "The nearest `package.jet` defines one Package. Membership depth is capped at one. A single Package needs no `members:` field, and no second Workspace noun is introduced.",
+          "code": "members: find(\"./packages\")"
         }
       ],
       "comparisons": [
@@ -38288,40 +38295,44 @@
           "code": "root module -> child modules -> resources"
         }
       ],
-      "rec": "A",
+      "rec": "I",
       "recommendation": {
-        "why": "Project is understood before Jet explains it. It fits one-file growth, typed package work, and deployed systems without teaching a metaphor or exposing graph internals.",
+        "why": "Package gives one noun from a small program through a fleet and fits Jetpack. Flat references keep monorepos explicit without recursive Package containment.",
         "whyNot": [
           {
+            "key": "A",
+            "reason": "Project duplicates Package as a second noun for the same semantic whole."
+          },
+          {
             "key": "B",
-            "reason": "Workspace usually means a checkout, editor session, or monorepo boundary. This value can have a different lifetime and boundary."
+            "reason": "Workspace introduces a checkout-oriented second noun and boundary."
           },
           {
             "key": "C",
-            "reason": "Stack is overloaded by call stacks, data structures, and informal technology lists."
+            "reason": "Stack is overloaded and does not name a distribution unit."
           },
           {
             "key": "D",
-            "reason": "Graph exposes structure instead of purpose and collides with several narrower graphs experts inspect."
+            "reason": "Graph names representation instead of the user-owned unit."
           },
           {
             "key": "E",
-            "reason": "Root says where the value sits, not what it represents, and collides with filesystem and privilege terms."
+            "reason": "Root names position and conflicts with filesystem and privilege terms."
           },
           {
             "key": "F",
-            "reason": "Configuration understates executable packages, actions, built outputs, and provenance."
+            "reason": "Configuration understates executable outputs, actions, and provenance."
           },
           {
             "key": "G",
-            "reason": "Model is generic and collides with application data, compiler, and machine-learning vocabulary."
+            "reason": "Model is generic and collides with application and compiler models."
           },
           {
             "key": "H",
-            "reason": "Platform suggests a reusable foundation and sounds inflated for a small multi-part application."
+            "reason": "Platform sounds like a reusable foundation rather than one package."
           }
         ],
-        "tradeoff": "Project can sound like one repository. The lesson must state that it names the checked semantic whole, while file and repository layout remain separate choices."
+        "tradeoff": "Package must cover both an ordinary package and a monorepo root. The depth-one members law keeps that meaning finite."
       },
       "hybrid": null,
       "checkInstructions": "This naming remains conditional on the unified graph scope owned by D-ECO1. After ratification, replace the `<Root>` placeholder without adding aliases.",
@@ -40046,6 +40057,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T20:51:59.250Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-ECO-ROOTNAME1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:51:54.114Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06vgib7",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-15T20:51:41.049Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06vgib7",
+      "note": "blockedBy"
+    },
     {
       "at": "2026-07-15T20:49:58.252Z",
       "by": "claude-main",
@@ -43524,27 +43556,6 @@
       "action": "card.criteria-verify",
       "ref": "c0izrn87",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-15T03:28:20.199Z",
-      "by": "codex-diagnostic-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0izrn87",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T03:28:15.240Z",
-      "by": "codex-diagnostic-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0izrn87",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T03:27:42.006Z",
-      "by": "terra-420-builder",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
