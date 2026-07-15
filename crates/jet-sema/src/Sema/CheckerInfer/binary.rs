@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
             BinOp::Eq | BinOp::Ne => {
                 if lt == rt {
                     if !types_comparable(&lt, self.registry) {
-                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt, self.registry) {
+                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt) {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
                                 format!("secret-bearing `{}` values cannot use `{}`", lt.name(), op.spell()),

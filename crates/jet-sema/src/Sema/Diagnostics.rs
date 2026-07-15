@@ -566,6 +566,7 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             inner: Box::new(Type::Named(name)),
         },
         Type::List(inner) => Type::List(Box::new(core_crypto_nominal(*inner))),
+        Type::Shared(inner) => Type::Shared(Box::new(core_crypto_nominal(*inner))),
         Type::Map { key, key_span, value } => Type::Map {
             key: Box::new(core_crypto_nominal(*key)),
             key_span,
@@ -587,24 +588,52 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             len,
             len_symbol,
         },
-        other => other,
+        Type::Fn { params, ret, effect_bound } => Type::Fn {
+            params: params.into_iter().map(core_crypto_nominal).collect(),
+            ret: ret.map(|ty| Box::new(core_crypto_nominal(*ty))),
+            effect_bound,
+        },
+        Type::Apply { name, args } => Type::Apply {
+            name,
+            args: args.into_iter().map(core_crypto_nominal).collect(),
+        },
+        // Already-provenanced leaves are idempotent. User flow tags remain
+        // transparent wrappers while provenance is installed below them.
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
+        {
+            Type::Tagged { marker, inner }
+        }
+        Type::Tagged { marker, inner } => Type::Tagged {
+            marker,
+            inner: Box::new(core_crypto_nominal(*inner)),
+        },
+        Type::Int => Type::Int,
+        Type::Float => Type::Float,
+        Type::Bool => Type::Bool,
+        Type::String => Type::String,
+        Type::Char => Type::Char,
+        Type::Named(name) => Type::Named(name),
+        Type::TraitObject(names) => Type::TraitObject(names),
+        Type::IntN { signed, bits } => Type::IntN { signed, bits },
+        Type::Float32 => Type::Float32,
     }
 }
 
-pub(crate) fn is_secret_bearing_crypto_type(ty: &Type, registry: &TypeRegistry) -> bool {
+pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     match ty {
         Type::Tagged { marker, inner }
             if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
         {
             matches!(inner.as_ref(), Type::Named(name) if secret_bearing_crypto_leaf(name))
         }
-        Type::Named(name) => !registry.contains(name) && secret_bearing_crypto_leaf(name),
+        Type::Tagged { inner, .. } => is_secret_bearing_crypto_type(inner),
         _ => false,
     }
 }
 
 pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
-    if is_secret_bearing_crypto_type(ty, registry) {
+    if is_secret_bearing_crypto_type(ty) {
         return false;
     }
     match ty {
@@ -629,7 +658,7 @@ pub(crate) fn is_displayable(
     type_reg: &TypeRegistry,
     trait_reg: &crate::Traits::TraitRegistry,
 ) -> bool {
-    if is_secret_bearing_crypto_type(ty, type_reg) {
+    if is_secret_bearing_crypto_type(ty) {
         return false;
     }
     match ty {
@@ -725,7 +754,7 @@ pub(crate) fn is_debuggable(
     type_reg: &TypeRegistry,
     trait_reg: &crate::Traits::TraitRegistry,
 ) -> bool {
-    if is_secret_bearing_crypto_type(ty, type_reg) {
+    if is_secret_bearing_crypto_type(ty) {
         return false;
     }
     match ty {
@@ -753,7 +782,7 @@ pub(crate) fn is_debuggable(
 }
 
 pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
-    if is_secret_bearing_crypto_type(ty, registry) {
+    if is_secret_bearing_crypto_type(ty) {
         return false;
     }
     match ty {
@@ -969,4 +998,108 @@ pub(crate) fn private_item(name: &str, span: Span) -> Diagnostic {
         ),
         Some(span),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{core_crypto_nominal, is_secret_bearing_crypto_type};
+    use crate::AST::{Type, CORE_CRYPTO_NOMINAL_MARKER};
+
+    fn count_core_crypto_markers(ty: &Type) -> usize {
+        match ty {
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+                count_core_crypto_markers(inner)
+            }
+            Type::Map { key, value, .. } => {
+                count_core_crypto_markers(key) + count_core_crypto_markers(value)
+            }
+            Type::Result { ok, err } => {
+                count_core_crypto_markers(ok) + count_core_crypto_markers(err)
+            }
+            Type::Fn { params, ret, .. } => {
+                params.iter().map(count_core_crypto_markers).sum::<usize>()
+                    + ret.as_deref().map(count_core_crypto_markers).unwrap_or(0)
+            }
+            Type::Apply { args, .. } => args.iter().map(count_core_crypto_markers).sum(),
+            Type::Tuple(fields) => fields
+                .iter()
+                .map(|(_, ty)| count_core_crypto_markers(ty))
+                .sum(),
+            Type::FixedList { elem, .. } => count_core_crypto_markers(elem),
+            Type::Tagged { marker, inner } => {
+                usize::from(marker == CORE_CRYPTO_NOMINAL_MARKER)
+                    + count_core_crypto_markers(inner)
+            }
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::Named(_)
+            | Type::TraitObject(_)
+            | Type::IntN { .. }
+            | Type::Float32 => 0,
+        }
+    }
+
+    #[test]
+    fn crypto_nominal_provenance_is_recursive_and_never_inferred_from_a_leaf_name() {
+        for leaf in ["Secret", "SigningKey", "X25519SecretKey", "SharedSecret"] {
+            let local_generic = Type::Named(leaf.to_string());
+            assert!(!is_secret_bearing_crypto_type(&local_generic));
+            assert!(is_secret_bearing_crypto_type(&core_crypto_nominal(local_generic)));
+        }
+
+        let wrapped = Type::Fn {
+            params: vec![
+                Type::Shared(Box::new(Type::Named("Secret".to_string()))),
+                Type::FixedList {
+                    elem: Box::new(Type::Named("SigningKey".to_string())),
+                    len: 1,
+                    len_symbol: None,
+                },
+                Type::Tagged {
+                    marker: "Audit".to_string(),
+                    inner: Box::new(Type::Named("X25519SecretKey".to_string())),
+                },
+                Type::Apply {
+                    name: "Holder".to_string(),
+                    args: vec![Type::Named("SharedSecret".to_string())],
+                },
+            ],
+            ret: Some(Box::new(Type::Tuple(vec![
+                (
+                    "list".to_string(),
+                    Box::new(Type::List(Box::new(Type::Named("Secret".to_string())))),
+                ),
+                (
+                    "maybe".to_string(),
+                    Box::new(Type::Option(Box::new(Type::Named("SigningKey".to_string())))),
+                ),
+                (
+                    "result".to_string(),
+                    Box::new(Type::Result {
+                        ok: Box::new(Type::Named("X25519SecretKey".to_string())),
+                        err: Box::new(Type::Named("SharedSecret".to_string())),
+                    }),
+                ),
+                (
+                    "map".to_string(),
+                    Box::new(Type::Map {
+                        key: Box::new(Type::String),
+                        key_span: None,
+                        value: Box::new(Type::Named("Secret".to_string())),
+                    }),
+                ),
+            ]))),
+            effect_bound: None,
+        };
+
+        let resolved = core_crypto_nominal(wrapped);
+        assert_eq!(count_core_crypto_markers(&resolved), 9);
+        let Type::Fn { params, .. } = &resolved else { panic!("fn wrapper") };
+        let Type::Tagged { inner, .. } = &params[2] else { panic!("flow tag") };
+        assert!(is_secret_bearing_crypto_type(inner));
+        assert!(is_secret_bearing_crypto_type(&params[2]));
+    }
 }

@@ -71,22 +71,24 @@ impl<'a> Checker<'a> {
                     Type::TraitObject(vec![n])
                 }
                 Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
-                Type::Apply { name, args } if self.registry.is_type_alias(&name) => {
-                    if let Some((params, target)) = self.registry.type_alias(&name) {
-                        let subst: std::collections::HashMap<String, Type> = params
-                            .iter()
-                            .zip(args.iter().cloned())
-                            .map(|(p, a)| (p.name.clone(), a))
-                            .collect();
-                        let expanded = substitute_type(target, &subst);
-                        return self.resolve_type(expanded);
+                Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
+                Type::Apply { name, args } => {
+                    if self.registry.is_type_alias(&name) {
+                        if let Some((params, target)) = self.registry.type_alias(&name) {
+                            let subst: std::collections::HashMap<String, Type> = params
+                                .iter()
+                                .zip(args.iter().cloned())
+                                .map(|(p, a)| (p.name.clone(), a))
+                                .collect();
+                            let expanded = substitute_type(target, &subst);
+                            return self.resolve_type(expanded);
+                        }
                     }
-                    Type::Apply { name, args }
+                    Type::Apply {
+                        name,
+                        args: args.into_iter().map(|a| self.resolve_type(a)).collect(),
+                    }
                 }
-                Type::Apply { name, args } => Type::Apply {
-                    name,
-                    args: args.into_iter().map(|a| self.resolve_type(a)).collect(),
-                },
                 Type::Option(inner) => Type::Option(Box::new(self.resolve_type(*inner))),
                 Type::Map {
                     key,
@@ -107,7 +109,29 @@ impl<'a> Checker<'a> {
                         .map(|(n, t)| (n, Box::new(self.resolve_type(*t))))
                         .collect(),
                 ),
-                other => other,
+                Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+                    elem: Box::new(self.resolve_type(*elem)),
+                    len,
+                    len_symbol,
+                },
+                Type::Fn { params, ret, effect_bound } => Type::Fn {
+                    params: params.into_iter().map(|ty| self.resolve_type(ty)).collect(),
+                    ret: ret.map(|ty| Box::new(self.resolve_type(*ty))),
+                    effect_bound,
+                },
+                Type::Tagged { marker, inner } => Type::Tagged {
+                    marker,
+                    inner: Box::new(self.resolve_type(*inner)),
+                },
+                Type::Int => Type::Int,
+                Type::Float => Type::Float,
+                Type::Bool => Type::Bool,
+                Type::String => Type::String,
+                Type::Char => Type::Char,
+                Type::Named(name) => Type::Named(name),
+                Type::TraitObject(names) => Type::TraitObject(names),
+                Type::IntN { signed, bits } => Type::IntN { signed, bits },
+                Type::Float32 => Type::Float32,
             }
         }
     
