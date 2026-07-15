@@ -137,11 +137,15 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         root: root.path.clone(),
         dev_mode: false,
     };
-    let entry = jetpack::Store::list(&roots)
-        .into_iter()
-        .find(|entry| entry.name == "hello")
-        .unwrap();
-    let meta = roots.hangar_dir().join(&entry.id).join("meta.json");
+    // Finish the parent-side read before spawning the recovery process. The
+    // child owns recovery locking; no parent store value or guard spans it.
+    let meta = {
+        let entry = jetpack::Store::list(&roots)
+            .into_iter()
+            .find(|entry| entry.name == "hello")
+            .unwrap();
+        roots.hangar_dir().join(entry.id).join("meta.json")
+    };
     fs::remove_file(&meta).unwrap();
 
     let recover = jetpack()
