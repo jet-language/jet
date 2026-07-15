@@ -6218,10 +6218,12 @@ fn run() {
 
 #[test]
 fn builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback() {
-    let registration = include_str!("../crates/jet-sema/src/Sema/Registration.rs");
+    let bundle = include_str!("../crates/jet-sema/src/Sema/Bundle.rs");
     let serde = include_str!("../crates/jet-sema/src/Sema/Registration/Serde.rs");
     let items = include_str!("../crates/jet-codegen/src/Codegen/Items.rs");
-    assert!(registration.contains("expand_builtin_serde_source(prog, &mut diags);"));
+    assert!(bundle.contains(
+        "super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);"
+    ));
     assert!(serde.contains("let (tokens, lex_diags) = crate::Lexer::lex(source);"));
     assert!(serde.contains("crate::Parser::parse(&tokens)"));
     assert!(serde.contains("Ok(generated) => Some(generated.items)"));

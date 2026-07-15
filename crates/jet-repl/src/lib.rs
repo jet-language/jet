@@ -1627,7 +1627,7 @@ fn run_sema_with_body(src: &str, fn_name: &str, body: Vec<Stmt>) -> Vec<Diagnost
         if let Some(Item::Func(f)) = prog.items.iter_mut().find(|item| matches!(item, Item::Func(f) if f.name == fn_name)) {
             f.body = body;
         }
-        return crate::Sema::check_with_mode(&mut prog, crate::Sema::CompileMode::Check)
+        return check_program(src, prog)
             .into_iter().filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error)).collect();
     }
     let tmp_path = std::env::temp_dir().join(unique_temp_name("check_ast"));
@@ -1671,21 +1671,16 @@ fn run_sema(src: &str) -> Vec<Diagnostic> {
             .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
             .collect();
     }
-    let mut prog = match crate::Parser::parse(&toks) {
+    let prog = match crate::Parser::parse(&toks) {
         Ok(p) => p,
         Err(ds) => return ds,
     };
-    // When the program has imports (a `use …` carried across the session),
-    // the single-file checker can't resolve core-module aliases — only the
-    // Loader-driven bundle path registers `core_imports`. Route through it via
-    // a temp file so e.g. `use core.math as math` makes `math.sqrt(…)` resolve
-    // (S16/D-REPL10). The common import-free path keeps the cheaper checker so
-    // existing transcript spans are unchanged.
+    // File imports need Loader resolution. Import-free programs use the same
+    // canonical one-module bundle checker as every other compile path.
     if !prog.imports.is_empty() {
         return run_sema_bundle(src);
     }
-    // CompileMode::Check: type-check without requiring `run`.
-    let all = crate::Sema::check_with_mode(&mut prog, crate::Sema::CompileMode::Check);
+    let all = check_program(src, prog);
     all.into_iter()
         .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
         .collect()
@@ -1697,10 +1692,10 @@ fn run_sema(src: &str) -> Vec<Diagnostic> {
 fn run_sema_bundle(src: &str) -> Vec<Diagnostic> {
     let tmp_path = std::env::temp_dir().join(unique_temp_name("check"));
     if std::fs::write(&tmp_path, src).is_err() {
-        // Fall back to the single-file checker if the temp write fails.
+        // Preserve a useful check when the temp file cannot be created.
         let (toks, _) = crate::Lexer::lex(src);
-        if let Ok(mut prog) = crate::Parser::parse(&toks) {
-            return crate::Sema::check_with_mode(&mut prog, crate::Sema::CompileMode::Check)
+        if let Ok(prog) = crate::Parser::parse(&toks) {
+            return check_program(src, prog)
                 .into_iter()
                 .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
                 .collect();
@@ -1717,6 +1712,41 @@ fn run_sema_bundle(src: &str) -> Vec<Diagnostic> {
         .into_iter()
         .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
         .collect()
+}
+
+fn check_program(src: &str, mut prog: crate::AST::Program) -> Vec<Diagnostic> {
+    let path = std::path::PathBuf::from("<repl>");
+    let mut bundle = crate::AST::ProgramBundle {
+        entry: 0,
+        project_root: std::path::PathBuf::from("."),
+        modules: vec![crate::AST::LoadedModule {
+            path,
+            display: "<repl>".to_string(),
+            source: src.to_string(),
+            alias: "main".to_string(),
+            imports: std::mem::take(&mut prog.imports),
+            items: std::mem::take(&mut prog.items),
+            web_target_ceiling: prog.web_target_ceiling,
+            pub_file: prog.pub_file,
+            no_prelude: prog.no_prelude,
+            html_path: prog.html_path,
+            no_alloc_policy: prog.no_alloc_policy,
+        }],
+        parse_teaching: Vec::new(),
+        used_core: std::collections::HashSet::new(),
+        ffi_callback_fns: std::collections::HashSet::new(),
+        cffi: crate::AST::CFfi::default(),
+        comptime_inputs: Vec::new(),
+        import_targets: std::collections::HashMap::new(),
+        layer_ceiling: None,
+        inferred_layer: crate::Syntax::RuntimeLayer::Core,
+        web_partitions: std::collections::HashMap::new(),
+        web_partition_enforced: false,
+        web_partition_report: None,
+        dep_roots: std::collections::HashMap::new(),
+        active_os: crate::Syntax::OsTarget::host(),
+    };
+    crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
 }
 
 /// Rebuild the func_defs table from accumulated item sources.

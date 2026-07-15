@@ -55,13 +55,6 @@ pub struct StateTable {
 }
 
 impl StateTable {
-    /// Build the table from a program's items.
-    pub fn build(items: &[Item]) -> Self {
-        let mut t = StateTable::default();
-        t.add_items(items);
-        t
-    }
-
     /// Register every typestate marker in `items` into this table. Methods key as
     /// `Type::method`; entry transitions (`_ -> To`) also register under
     /// `entry_ctors` so a constructor call can seed a local's initial state.

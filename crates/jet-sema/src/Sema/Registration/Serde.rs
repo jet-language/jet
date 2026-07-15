@@ -1,13 +1,5 @@
 use super::*;
 
-/// D-SERDE2=A: render the built-in struct field walk as the same hand-writable
-/// `Encode`/`Decode` impl a user writes, parse it, and attach the parsed methods.
-/// No AST or Rust body is synthesized here: malformed output is E2710 and every
-/// generated method proceeds through ordinary registration, sema, TIR, and codegen.
-pub(in super::super) fn expand_builtin_serde_source(prog: &mut crate::AST::Program, diags: &mut Vec<Diagnostic>) {
-    expand_builtin_serde_items(&mut prog.items, diags);
-}
-
 pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
     let mut generated_items = Vec::new();
     for item in items.iter_mut() {

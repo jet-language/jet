@@ -1,4 +1,5 @@
 use super::*;
+use crate::AST::Param;
 
 pub(super) fn qualified_effect_facts(
     modules: &[(String, HashMap<String, EffectSummary>)],
@@ -1205,21 +1206,85 @@ pub(crate) fn check_module_bodies(
                 }
             }
             Item::ErrorConv(ec) => {
-                // D-ERR-CONV: type-check the conversion body in the bundle path.
-                let st = &states[module_idx];
-                diags.extend(crate::Sema::Registration::check_error_conv_body(
-                    ec,
-                    &st.funcs,
-                    &st.registry,
-                    &st.consts,
-                    &st.trait_reg,
+                let mut synthetic = Func {
+                    span: ec.body_span,
+                    is_pub: false,
+                    is_package_pub: false,
+                    external_type: None,
+                    name: format!(
+                        "__errconv_{}_to_{}",
+                        ec.from_ty.replace('.', "_"),
+                        ec.to_ty.replace('.', "_")
+                    ),
+                    name_span: ec.from_span,
+                    meta: None,
+                    type_params: Vec::new(),
+                    params: vec![Param {
+                        name: crate::Syntax::KW_SELF.to_string(),
+                        name_span: ec.from_span,
+                        ty: Type::Named(String::new()),
+                        ty_span: ec.from_span,
+                        convention: AccessConvention::Move,
+                        default: None,
+                        variadic: false,
+                        variadic_bound_list: None,
+                    }],
+                    return_type: Some(Type::Named(ec.to_ty.clone())),
+                    return_type_span: Some(ec.to_span),
+                    is_unsafe: false,
+                    unsafe_reason: None,
+                    unsafe_span: None,
+                    is_pure: false,
+                    is_reactive: false,
+                    is_replayable: false,
+                    replayable_span: None,
+                    is_task: false,
+                    task_span: None,
+                    every: None,
+                    is_must_use: false,
+                    must_use_span: None,
+                    maturity: None,
+                    maturity_span: None,
+                    is_inline: false,
+                    is_inline_always: false,
+                    inline_span: None,
+                    is_sanitizer: false,
+                    declared_effects: None,
+                    effect_via: None,
+                    state_requires: None,
+                    state_transition: None,
+                    web_marker: None,
+                    pre: Vec::new(),
+                    post: Vec::new(),
+                    inline_foreign: None,
+                    body: std::mem::take(&mut ec.body),
+                };
+                // Error-conversion bodies are checked like functions, but they are
+                // not functions: do not publish their synthetic names or local
+                // analysis artifacts into the program-wide accumulators.
+                let mut conversion_summaries = HashMap::new();
+                let mut conversion_inputs = Vec::new();
+                let mut conversion_addr_taken = HashSet::new();
+                let mut conversion_anchors = HashMap::new();
+                diags.extend(check_func_body_bundle(
+                    &mut synthetic,
+                    module_idx,
+                    states,
+                    Some(&ec.from_ty),
                     &ct_funcs,
                     &ct_externs,
                     &ct_base_dir,
                     &ct_globals,
+                    false,
+                    false,
+                    &mut conversion_summaries,
+                    &mut conversion_inputs,
+                    &mut conversion_addr_taken,
                     no_alloc,
                     no_prelude,
+                    &mut conversion_anchors,
                 ));
+                ec.body = synthetic.body;
             }
             _ => {}
         }

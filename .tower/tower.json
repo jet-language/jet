@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 640,
-    "rev": 7711,
+    "rev": 7713,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19287,20 +19287,20 @@
         {
           "n": 5,
           "text": "Inherited deadline during async event dispatch returns exactly one typed terminal outcome without process-fatal E3003; ordinary scheduler-task deadline_context still emits exact fatal E3003 and native wait boundaries remain typed.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-event-builder",
-          "verifiedBy": null,
-          "evidence": "Commit bf13aac1 adds a nest-safe typed-deadline RAII/TLS boundary entered only by spawn_typed_deadline, AsyncEvent's sole typed-deadline task path. Exact async lifecycle, ordinary deadline_context E3003, interrupt boundary/helper, native wait, and TCP deadline/cancellation regressions pass; source-shape proves ordinary spawn lacks the boundary.",
-          "at": "2026-07-15T13:15:08.341Z"
+          "verifiedBy": "codex-630-verifier",
+          "evidence": "Independent verifier (fresh context, adversarial): spawn_typed_deadline reachable only from async-event dispatch; ordinary JetTask::spawn has no typed boundary; native wait maps deadline unwind to JetSchedulerWait::Deadline. corelib deadline 6/6; golden filtered to deadline_context.jet proves byte-exact fatal E3003 stderr + exit 70 on the compiled path.",
+          "at": "2026-07-15T16:50:04.315Z"
         },
         {
           "n": 6,
           "text": "Async event terminal phase is absorbing: a deadline catch cannot CAS TERMINAL to TERMINAL or overwrite a concurrent cancel/close winner; source-shape and behavioral regressions prove immutable queued/pending reports and zero leaked counts.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-event-builder",
-          "verifiedBy": null,
-          "evidence": "Adversarial review found run_entry catch could load TERMINAL then let complete_entry CAS TERMINAL to TERMINAL, overwriting a concurrent cancel/close report. Commit ab1b11b7 rejects terminal expected phases before CAS. async_event_terminal_transition_rejects_terminal_expected_phase, the single-worker channel-gated cancel/close winner regression, and async_event_scope_cancel_and_inherited_deadline_are_single_terminal all pass; traces remain one terminal and queued/running/blocked counts drain to zero.",
-          "at": "2026-07-15T13:45:11.819Z"
+          "verifiedBy": "codex-630-verifier",
+          "evidence": "Independent verifier: complete_entry (ReactiveEventWatch.rs:783) rejects terminal expected phase before CAS; terminal mutex spans CAS + report publication so a concurrent cancel/close winner publishes first; no overwrite path found. async_event suite 5/5 twice (race sensitivity); queued/pending reports immutable, zero leaked counts.",
+          "at": "2026-07-15T16:50:04.445Z"
         }
       ],
       "refs": [],
@@ -39334,6 +39334,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T16:50:04.445Z",
+      "by": "codex-630-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0ajdb8z",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-15T16:50:04.315Z",
+      "by": "codex-630-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0ajdb8z",
+      "note": "#5"
+    },
+    {
       "at": "2026-07-15T16:42:02.035Z",
       "by": "claude-main",
       "action": "card.update",
@@ -42818,20 +42832,6 @@
       "action": "card.release",
       "ref": "c01fj815",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T02:36:20.505Z",
-      "by": "terra-420-builder",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T02:36:20.370Z",
-      "by": "terra-420-builder",
-      "action": "card.criteria-meet",
-      "ref": "c01fj815",
-      "note": "#2"
     }
   ],
   "nextNum": 368,

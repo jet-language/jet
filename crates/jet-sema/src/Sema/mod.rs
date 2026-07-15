@@ -954,7 +954,7 @@ pub(crate) use CheckerMarkers::check_marker_vocabulary;
 pub(crate) use CheckerSchedule::check_every_marker;
 pub use Effects::{effect_covers, effect_root, parse_effect_name, show_set, Effect, EffectSet};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
-pub use Registration::{check, check_with_mode, effect_key};
+pub use Registration::effect_key;
 pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet inspect schema status` reuses the schema-migration diff.
 pub use SchemaMigration::{check_schema_migrations, desugar_migrations};

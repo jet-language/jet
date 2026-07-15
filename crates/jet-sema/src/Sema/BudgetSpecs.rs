@@ -104,10 +104,6 @@ pub fn collect_located_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec
     if diags.is_empty() { Ok(specs) } else { Err(diags) }
 }
 
-pub fn validate_program(program: &Program) -> Vec<Diagnostic> {
-    validate_items(&program.items).1
-}
-
 pub fn validate_bundle(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for module in &bundle.modules {

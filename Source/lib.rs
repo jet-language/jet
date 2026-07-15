@@ -340,6 +340,14 @@ pub fn resolve_c_links(file: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
     crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root)
 }
 
+/// Compile for `jet test`: optional `main`, at least one test block required.
+pub fn compile_tests_with_path(
+    src: &str,
+    file: &str,
+) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+    compile_tests_with_path_cov(src, file, false)
+}
+
 /// Compile for `jet test`, with optional `jet test --coverage`
 /// instrumentation. `coverage = false` produces the historical, uninstrumented
 /// harness.
@@ -466,6 +474,11 @@ fn compile_with_mode(
     Driver::compile_src(src, file, mode)
 }
 
+/// Back-compat: compile and return only Rust (drops lints).
+pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
+    compile(src).map(|o| o.rust)
+}
+
 pub use Comptime::CtValue;
 pub use Diagnostics::render_all as render_diagnostics;
 pub use Diagnostics::{render_all_colored, render_all_json, render_all_linked};
@@ -525,4 +538,67 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
     let value =
         Comptime::run_main_value(main_fn, &func_map, base_dir, &mut sink).map_err(|d| vec![d])?;
     Ok(value)
+}
+
+/// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
+/// interpreter and return its output as a stable JSON string. The program's
+/// `run()` function is interpreted using the comptime engine; any print calls
+/// are captured; the captured output is returned as a JSON string value.
+///
+/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
+pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
+    use std::collections::HashMap;
+
+    let (toks, lex_diags) = Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Err(lex_diags);
+    }
+    let prog = Parser::parse(&toks)?;
+
+    // Collect functions into a map for the comptime evaluator.
+    let func_map: HashMap<String, &AST::Func> = prog
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let AST::Item::Func(f) = item {
+                Some((f.name.clone(), f))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let main_fn = func_map.get("run").ok_or_else(|| {
+        vec![Diagnostics::Diagnostic::error(
+            "E3401",
+            "no `run` function found for `jet eval`".to_string(),
+            "pure evaluation needs a `@Pure fn run()` entry point".to_string(),
+            "add `@Pure fn run() { … }` to the program".to_string(),
+            None,
+        )]
+    })?;
+
+    // Run main() via the comptime engine with a dev sink capturing print output.
+    let base_dir = std::path::Path::new(file)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let mut sink = Comptime::DevSink::new();
+    let program = Comptime::ProgramInfo::empty();
+    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink, &program).map_err(|d| vec![d])?;
+    let text = sink.stdout;
+    // Render the captured output as a JSON string.
+    let json = if text.trim().is_empty() {
+        "null".to_string()
+    } else {
+        // Try to parse as a number or bool for cleaner output; otherwise quote it.
+        let trimmed = text.trim();
+        if trimmed == "true" || trimmed == "false" {
+            trimmed.to_string()
+        } else if trimmed.parse::<i64>().is_ok() || trimmed.parse::<f64>().is_ok() {
+            trimmed.to_string()
+        } else {
+            format!("{:?}", trimmed)
+        }
+    };
+    Ok(json)
 }
