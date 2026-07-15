@@ -1214,7 +1214,7 @@ fn ensure_network_allowed(need: &str) -> Result<(), ProviderError> {
 }
 
 /// Parse `nix build --json` output: an array of build results, each with an
-/// `outputs` object. Prefer a `bin` output, else `out`.
+/// `outputs` object. `out` is canonical primary; `bin` remains a named output.
 fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderError> {
     let json = JSON::parse(stdout.trim()).map_err(|e| ProviderError::BadOutput(e))?;
     let arr = json.as_array().map_err(ProviderError::BadOutput)?;
@@ -1244,14 +1244,15 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
     let out = outputs
-        .get("bin")
-        .or_else(|| outputs.get("out"))
+        .get("out")
+        .or_else(|| outputs.get("bin"))
         .and_then(|j| j.as_str().ok())
         .ok_or_else(|| {
             ProviderError::BadOutput("provider output had no `out`/`bin` store path".into())
         })?;
 
-    let bin = format!("{}/bin", out.trim_end_matches('/'));
+    let bin_root = named_outputs.get("bin").map(String::as_str).unwrap_or(out);
+    let bin = format!("{}/bin", bin_root.trim_end_matches('/'));
     let name = spec.short_name().to_string();
     let envelope = super::Envelope::Envelope::for_output(out, &spec.raw, "nix");
     let provisional_identity = super::Store::CacheIdentity {
@@ -1437,19 +1438,26 @@ mod tests {
     #[test]
     fn parses_good_output() {
         let spec = classify("nixpkgs:fastfetch").unwrap();
-        let stdout = r#"[{"outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
+        let stdout = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
         let r = parse_realization(&spec, stdout).unwrap();
         assert_eq!(r.out, "/nix/store/abc-fastfetch-2.0");
         assert_eq!(r.bin, "/nix/store/abc-fastfetch-2.0/bin");
         assert_eq!(r.name, "fastfetch");
+        assert_eq!(r.producer.immutable_source, "/nix/store/abc-fastfetch.drv");
+        assert_eq!(
+            r.producer.plan.facts().get("nix.output.out").map(String::as_str),
+            Some("/nix/store/abc-fastfetch-2.0")
+        );
     }
 
     #[test]
     fn prefers_bin_output() {
         let spec = classify("nixpkgs:git").unwrap();
-        let stdout = r#"[{"outputs":{"out":"/nix/store/x","bin":"/nix/store/x-bin"}}]"#;
+        let stdout = r#"[{"drvPath":"/nix/store/x.drv","outputs":{"out":"/nix/store/x","bin":"/nix/store/x-bin"}}]"#;
         let r = parse_realization(&spec, stdout).unwrap();
+        assert_eq!(r.out, "/nix/store/x");
         assert_eq!(r.bin, "/nix/store/x-bin/bin");
+        assert_eq!(r.named_outputs.len(), 2);
     }
 
     #[test]

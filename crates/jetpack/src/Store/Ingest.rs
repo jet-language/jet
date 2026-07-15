@@ -315,7 +315,6 @@ fn ingest_tree_unlocked(
             realized_at,
             last_used_at: now,
         };
-        atomic_write_meta(&dir.join("meta.json"), &entry.meta_json())?;
         register_entry_unlocked(roots, &entry)?;
         Ok(IngestedObject { entry, deduplicated })
     })();
@@ -347,26 +346,6 @@ fn valid_output_name(name: &str) -> bool {
         return false;
     };
     component == path.as_os_str() && components.next().is_none()
-}
-
-fn atomic_write_meta(path: &Path, contents: &str) -> Result<(), IngestError> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, contents)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd as _;
-        if let Ok(file) = fs::File::open(&tmp) {
-            let _ = libc_fsync(file.as_raw_fd());
-        }
-        if let Some(parent) = path.parent() {
-            let _ = fsync_dir(parent);
-        }
-    }
-    fs::rename(&tmp, path)?;
-    if let Some(parent) = path.parent() {
-        fsync_dir(parent)?;
-    }
-    Ok(())
 }
 
 #[cfg(unix)]

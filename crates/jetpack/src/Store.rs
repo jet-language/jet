@@ -379,7 +379,62 @@ fn record_verified_mode(
         };
         fs::create_dir_all(&dir)?;
         pin_nix_gc_root(&dir, &out)?;
-        fs::write(dir.join("meta.json"), entry.meta_json())?;
+        register_entry_unlocked(roots, &entry)?;
+        Ok(entry)
+    })
+}
+
+fn record_realized_mode(
+    roots: &Roots,
+    realized: &super::Provider::Realized,
+) -> std::io::Result<StoreEntry> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        ProducerRecord::decode(&realized.producer.encode()).map_err(std::io::Error::other)?;
+        let (out, bin, rlib) = canonicalize_local_output_unlocked(
+            roots,
+            &realized.out,
+            &realized.bin,
+            &realized.rlib,
+            &realized.envelope.output_hash,
+        )?;
+        let mut named_outputs = BTreeMap::new();
+        for (name, path) in &realized.named_outputs {
+            let digest = if name == "out" {
+                realized.envelope.output_hash.clone()
+            } else {
+                super::Envelope::try_output_hash_of(path).map_err(std::io::Error::other)?
+            };
+            named_outputs.insert(name.clone(), digest);
+        }
+        named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
+        let id = entry_id(
+            &realized.name,
+            &realized.version,
+            &realized.reference,
+            &out,
+        );
+        let dir = roots.hangar_dir().join(&id);
+        let now = now_secs();
+        let realized_at = read_meta(&dir).and_then(|meta| meta.realized_at).unwrap_or(now);
+        let entry = StoreEntry {
+            id,
+            name: realized.name.clone(),
+            version: realized.version.clone(),
+            reference: realized.reference.clone(),
+            out: out.clone(),
+            bin,
+            rlib,
+            envelope: realized.envelope.clone(),
+            cache_identity: realized.cache_identity.clone(),
+            references: realized.references.clone(),
+            named_outputs,
+            platform_artifact_kind: String::new(),
+            producer_record: realized.producer.encode(),
+            realized_at,
+            last_used_at: now,
+        };
+        fs::create_dir_all(&dir)?;
+        pin_nix_gc_root(&dir, &out)?;
         register_entry_unlocked(roots, &entry)?;
         Ok(entry)
     })
@@ -1234,19 +1289,7 @@ pub fn realize_verified(
             super::Provider::realize_adapter(plan, ctx).map_err(RealizeError::Provider)?
         }
     };
-    let entry = record_verified_mode(
-        roots,
-        &realized.name,
-        &realized.version,
-        &realized.reference,
-        &realized.out,
-        &realized.bin,
-        &realized.rlib,
-        &realized.envelope,
-        &realized.cache_identity,
-        true,
-    )
-    .map_err(RealizeError::Store)?;
+    let entry = record_realized_mode(roots, &realized).map_err(RealizeError::Store)?;
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     Ok(VerifiedRealization {
         entry,

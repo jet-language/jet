@@ -20,6 +20,10 @@ pub struct ClosureRecord {
     pub action_key: String,
     pub outputs: BTreeMap<String, String>,
     pub references: BTreeSet<String>,
+    /// Canonical versioned producer replay record.
+    pub producer_record: String,
+    /// Exact package metadata projection recoverable from committed WAL.
+    pub package_meta: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -131,10 +135,12 @@ struct JournalEntry {
 pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_closure_journal_unlocked(roots)?;
-        if transaction_paths(&journal_dir(roots))?.is_empty() {
-            migrate_closure_graph_unlocked(roots)?;
+        migrate_closure_graph_unlocked(roots)?;
+        let graph = load_graph(roots)?;
+        for record in graph.records.values() {
+            materialize_package_record(roots, record)?;
         }
-        load_graph(roots)
+        Ok(graph)
     })
 }
 
@@ -185,6 +191,7 @@ pub fn entry_action_key(entry: &StoreEntry) -> String {
         identity.recipe_fingerprint.as_bytes(),
         identity.policy_fingerprint.as_bytes(),
         identity.platform.as_bytes(),
+        entry.producer_record.as_bytes(),
     ] {
         push_frame(&mut canonical, field);
     }
@@ -209,13 +216,14 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
 
 fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
     recover_closure_journal_unlocked(roots)?;
-    let mut graph = load_graph(roots)?;
+    let mut graph = load_graph_mode(roots, true)?;
     let mut entries = list(roots);
     entries.sort_by(|left, right| left.id.cmp(&right.id));
     let mut seen_records = BTreeSet::new();
     let mut objects = BTreeMap::new();
     let mut records = Vec::new();
     for entry in entries {
+        let entry = normalize_legacy_entry(entry)?;
         let (descriptors, record) = descriptor_for_entry(roots, &entry)?;
         if !seen_records.insert(record.id.clone()) {
             return Err(std::io::Error::other(format!(
@@ -257,6 +265,9 @@ fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
     apply_entry(&mut graph, transaction.clone()).map_err(std::io::Error::other)?;
     validate_graph(roots, &graph).map_err(std::io::Error::other)?;
     append_entry(roots, &transaction)?;
+    for record in &transaction.records {
+        materialize_package_record(roots, record)?;
+    }
     compact_if_needed(roots)?;
     Ok(migrated)
 }
@@ -269,6 +280,7 @@ pub(crate) fn register_entry_unlocked(
         return Ok(false);
     }
     recover_closure_journal_unlocked(roots)?;
+    migrate_closure_graph_unlocked(roots)?;
     let graph = load_graph(roots)?;
     let (objects, record) = descriptor_for_entry(roots, entry)?;
     if graph.records.get(&record.id) == Some(&record)
@@ -288,6 +300,7 @@ pub(crate) fn register_entry_unlocked(
     apply_entry(&mut candidate, transaction.clone()).map_err(std::io::Error::other)?;
     validate_graph(roots, &candidate).map_err(std::io::Error::other)?;
     append_entry(roots, &transaction)?;
+    materialize_package_record(roots, &transaction.records[0])?;
     compact_if_needed(roots)?;
     Ok(true)
 }
@@ -372,6 +385,13 @@ fn descriptor_for_entry(
     for (name, digest) in &outputs {
         let path = if name == "out" {
             PathBuf::from(&entry.out)
+        } else if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+            producer
+                .facts
+                .get(&format!("nix.output.{name}"))
+                .or_else(|| producer.facts.get(&format!("output.path.{name}")))
+                .map(PathBuf::from)
+                .unwrap_or_else(|| object_root.join(digest))
         } else {
             object_root.join(digest)
         };
@@ -384,6 +404,8 @@ fn descriptor_for_entry(
     }
     objects.sort_by(|left, right| left.digest.cmp(&right.digest));
     objects.dedup_by(|left, right| left.digest == right.digest);
+    let mut package_entry = entry.clone();
+    package_entry.named_outputs = outputs.clone();
     Ok((
         objects,
         ClosureRecord {
@@ -392,11 +414,50 @@ fn descriptor_for_entry(
             action_key: entry_action_key(entry),
             outputs,
             references: entry.references.iter().cloned().collect(),
+            producer_record: entry.producer_record.clone(),
+            package_meta: package_entry.meta_json(),
         },
     ))
 }
 
+fn normalize_legacy_entry(mut entry: StoreEntry) -> std::io::Result<StoreEntry> {
+    if !entry.producer_record.is_empty() {
+        ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
+        return Ok(entry);
+    }
+    let identity = &entry.cache_identity;
+    if identity.source_fingerprint.is_empty()
+        || identity.recipe_fingerprint.is_empty()
+        || identity.policy_fingerprint.is_empty()
+        || identity.platform.is_empty()
+        || entry.envelope.output_hash.is_empty()
+    {
+        return Err(std::io::Error::other(format!(
+            "legacy package `{}` lacks immutable producer facts",
+            entry.id
+        )));
+    }
+    if entry.out.starts_with("/nix/store/") {
+        return Err(std::io::Error::other(format!(
+            "legacy Nix package `{}` lacks exact derivation facts",
+            entry.id
+        )));
+    }
+    entry.producer_record = canonical_producer(
+        "legacy-migration",
+        &format!("cas:{}", identity.source_fingerprint),
+        &identity.source_fingerprint,
+        identity,
+        BTreeMap::from([("legacy.reference".into(), entry.reference.clone())]),
+    )?;
+    Ok(entry)
+}
+
 fn load_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
+    load_graph_mode(roots, false)
+}
+
+fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<ClosureGraph> {
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
         return Ok(ClosureGraph::default());
@@ -416,7 +477,7 @@ fn load_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
             )
         })?;
         apply_entry(&mut graph, entry)
-            .and_then(|()| validate_graph(roots, &graph))
+            .and_then(|()| validate_graph_mode(roots, &graph, allow_legacy))
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     }
     Ok(graph)
@@ -449,6 +510,14 @@ fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), Stri
 }
 
 fn validate_graph(roots: &Roots, graph: &ClosureGraph) -> Result<(), String> {
+    validate_graph_mode(roots, graph, false)
+}
+
+fn validate_graph_mode(
+    roots: &Roots,
+    graph: &ClosureGraph,
+    allow_legacy: bool,
+) -> Result<(), String> {
     let hangar = roots.hangar_dir();
     for (digest, object) in &graph.objects {
         if digest.is_empty() || digest != &object.digest || object.path.is_empty() {
@@ -474,6 +543,24 @@ fn validate_graph(roots: &Roots, graph: &ClosureGraph) -> Result<(), String> {
     for (id, record) in &graph.records {
         if id.is_empty() || id != &record.id || record.action_key.is_empty() {
             return Err(format!("invalid closure record `{id}`"));
+        }
+        if allow_legacy && record.producer_record.is_empty() && record.package_meta.is_empty() {
+            continue;
+        }
+        ProducerRecord::decode(&record.producer_record).map_err(|error| {
+            format!("closure record `{id}` has invalid producer record: {error}")
+        })?;
+        let meta = parse_meta(&record.package_meta)
+            .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
+        if meta.producer_record != record.producer_record {
+            return Err(format!(
+                "closure record `{id}` package metadata disagrees with producer record"
+            ));
+        }
+        if meta.envelope.output_hash != record.primary || meta.named_outputs != record.outputs {
+            return Err(format!(
+                "closure record `{id}` package metadata disagrees with outputs"
+            ));
         }
         if record.outputs.get("out") != Some(&record.primary) {
             return Err(format!(
@@ -573,6 +660,20 @@ fn write_entry(journal: &Path, sequence: u64, entry: &JournalEntry) -> std::io::
     sync_dir(journal)
 }
 
+fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io::Result<()> {
+    let dir = roots.hangar_dir().join(&record.id);
+    fs::create_dir_all(&dir)?;
+    let path = dir.join("meta.json");
+    if fs::read_to_string(&path).ok().as_deref() == Some(record.package_meta.as_str()) {
+        return Ok(());
+    }
+    let tmp = dir.join(format!("meta.json.{}.partial", std::process::id()));
+    fs::write(&tmp, &record.package_meta)?;
+    fs::File::open(&tmp)?.sync_all()?;
+    fs::rename(&tmp, &path)?;
+    sync_dir(&dir)
+}
+
 fn render_entry(entry: &JournalEntry) -> String {
     let mut out = String::from("jet-closure-journal-v1\n");
     out.push_str(match entry.kind {
@@ -593,10 +694,12 @@ fn render_entry(entry: &JournalEntry) -> String {
     records.sort_by(|left, right| left.id.cmp(&right.id));
     for record in records {
         out.push_str(&format!(
-            "record\t{}\t{}\t{}\n",
+            "record\t{}\t{}\t{}\t{}\t{}\n",
             hex(&record.id),
             hex(&record.primary),
             hex(&record.action_key),
+            hex(&record.producer_record),
+            hex(&record.package_meta),
         ));
         for (name, digest) in record.outputs {
             out.push_str(&format!(
@@ -650,6 +753,24 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
                 path: unhex(path)?,
                 external: *external == "1",
             }),
+            ["record", id, primary, action_key, producer_record, package_meta] => {
+                let id = unhex(id)?;
+                if records.contains_key(&id) {
+                    return Err(format!("duplicate closure record `{id}`"));
+                }
+                records.insert(
+                    id.clone(),
+                    ClosureRecord {
+                        id,
+                        primary: unhex(primary)?,
+                        action_key: unhex(action_key)?,
+                        outputs: BTreeMap::new(),
+                        references: BTreeSet::new(),
+                        producer_record: unhex(producer_record)?,
+                        package_meta: unhex(package_meta)?,
+                    },
+                );
+            }
             ["record", id, primary, action_key] => {
                 let id = unhex(id)?;
                 if records.contains_key(&id) {
@@ -663,6 +784,8 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
                         action_key: unhex(action_key)?,
                         outputs: BTreeMap::new(),
                         references: BTreeSet::new(),
+                        producer_record: String::new(),
+                        package_meta: String::new(),
                     },
                 );
             }
@@ -818,6 +941,8 @@ mod integrity_tests {
             action_key: "sha256-action".to_string(),
             outputs: BTreeMap::from([("out".to_string(), digest.clone())]),
             references: BTreeSet::new(),
+            producer_record: String::new(),
+            package_meta: String::new(),
         };
         let mut graph = ClosureGraph {
             objects: BTreeMap::from([(digest.clone(), object)]),

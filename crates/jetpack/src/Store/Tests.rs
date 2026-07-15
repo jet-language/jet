@@ -527,6 +527,7 @@ mod tests {
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
+            producer_record: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -651,6 +652,7 @@ mod tests {
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
+            producer_record: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -723,6 +725,7 @@ mod tests {
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
+            producer_record: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
