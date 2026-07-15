@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 633,
-    "rev": 7479,
+    "nextNum": 634,
+    "rev": 7486,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8936,7 +8936,7 @@
         "c0c7d9qt"
       ],
       "workOrder": 78,
-      "assignee": null,
+      "assignee": "codex-root-producer-audit",
       "log": [
         {
           "at": "2026-07-15",
@@ -9132,7 +9132,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-15T07:57:26.614Z"
     },
     {
       "id": "c041flkr",
@@ -19029,6 +19030,66 @@
       "needsAcceptance": false,
       "created": "2026-07-15T07:40:03.627Z",
       "updated": "2026-07-15"
+    },
+    {
+      "id": "c0qn1s08",
+      "num": 633,
+      "title": "Closure compaction tests deadlock",
+      "body": "Targeted Jetpack closure filter stalls indefinitely in closure_journal_compacts_without_changing_graph and closure_readers_are_serialized_with_registration_and_compaction; all other 17 filtered tests pass. Diagnose closure journal/runtime-policy lock reentrancy or barrier deadlock and restore bounded compaction/read serialization.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "root-633-builder",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Both exact closure compaction/reader tests complete under 30-second external bounds and pass repeatedly.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:57:36.799Z"
+        },
+        {
+          "n": 2,
+          "text": "Closure registration, compaction, and readers serialize without reentrant lock deadlock, partial visibility, or lost graph state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:57:36.900Z"
+        },
+        {
+          "n": 3,
+          "text": "Full closure filter and targeted Jetpack store tests pass under bounded execution.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:57:37.008Z"
+        },
+        {
+          "n": 4,
+          "text": "Mandatory full verification passes on the repaired committed tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:57:37.106Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T07:57:36.696Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T07:57:37.201Z"
     }
   ],
   "decisions": [
@@ -38179,6 +38240,55 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T07:57:37.201Z",
+      "by": "root-633-builder",
+      "action": "card.claim",
+      "ref": "c0qn1s08",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T07:57:37.106Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0qn1s08",
+      "note": "#4 Mandatory full verification passes on the repaired committed"
+    },
+    {
+      "at": "2026-07-15T07:57:37.008Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0qn1s08",
+      "note": "#3 Full closure filter and targeted Jetpack store tests pass un"
+    },
+    {
+      "at": "2026-07-15T07:57:36.900Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0qn1s08",
+      "note": "#2 Closure registration, compaction, and readers serialize with"
+    },
+    {
+      "at": "2026-07-15T07:57:36.799Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0qn1s08",
+      "note": "#1 Both exact closure compaction/reader tests complete under 30"
+    },
+    {
+      "at": "2026-07-15T07:57:36.696Z",
+      "by": "root",
+      "action": "card.add",
+      "ref": "c0qn1s08",
+      "note": "Closure compaction tests deadlock"
+    },
+    {
+      "at": "2026-07-15T07:57:26.615Z",
+      "by": "codex-root-producer-audit",
+      "action": "card.claim",
+      "ref": "c01fj815",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T07:55:58.560Z",
       "by": "root-632-builder",
       "action": "card.release",
@@ -41628,55 +41738,6 @@
       "action": "card.criteria-add",
       "ref": "c0mrovih",
       "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T00:19:53.642Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0mrovih",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T00:19:53.642Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0mrovih",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T00:19:53.642Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0mrovih",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T00:18:34.669Z",
-      "by": "codex-codemod-builder",
-      "action": "card.update",
-      "ref": "c098lmb7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T00:18:28.808Z",
-      "by": "codex-codemod-builder",
-      "action": "card.criteria-meet",
-      "ref": "c098lmb7",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T00:18:27.623Z",
-      "by": "terra-539-builder",
-      "action": "card.update",
-      "ref": "c0vvxein",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T00:18:23.990Z",
-      "by": "codex-codemod-builder",
-      "action": "card.criteria-meet",
-      "ref": "c098lmb7",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
