@@ -204,44 +204,37 @@ fn ingest_tree_unlocked(
             .get("out")
             .cloned()
             .ok_or_else(|| IngestError::Invalid("missing `out` digest".into()))?;
-        let primary_stage = staged_outs
-            .get("out")
-            .cloned()
-            .ok_or_else(|| IngestError::Invalid("missing staged `out` output".into()))?;
-
         let objects = hangar.join(OBJECTS_DIR);
         fs::create_dir_all(&objects)?;
         let final_obj = objects.join(&primary);
-        let mut deduplicated = false;
-        if final_obj.is_dir() {
-            deduplicated = true;
-        } else {
-            let partial = objects.join(format!("{primary}{PARTIAL_SUFFIX}"));
+        let deduplicated = final_obj.is_dir();
+        for (name, staged) in &staged_outs {
+            let digest = named_digests.get(name).ok_or_else(|| {
+                IngestError::Invalid(format!("named output `{name}` has no digest"))
+            })?;
+            let destination = objects.join(digest);
+            if destination.is_dir() {
+                let actual = super::super::Envelope::try_output_hash_of_in_hangar(
+                    &destination.to_string_lossy(),
+                    &hangar,
+                    req.allow_semantic_xattrs(),
+                )
+                .map_err(IngestError::Invalid)?;
+                if &actual != digest {
+                    return Err(IngestError::Invalid(format!(
+                        "existing object `{digest}` re-hashed as `{actual}`"
+                    )));
+                }
+                continue;
+            }
+            let partial = objects.join(format!("{digest}{PARTIAL_SUFFIX}"));
             if partial.exists() {
                 let _ = fs::remove_dir_all(&partial);
             }
-            fs::rename(&primary_stage, &partial)?;
-            // Install remaining named outputs beside `out` content when present.
-            for (name, staged) in &staged_outs {
-                if name == "out" {
-                    continue;
-                }
-                let dest = partial.join(".named").join(name);
-                let parent = dest.parent().ok_or_else(|| {
-                    IngestError::Invalid(format!("named output `{name}` has no object parent"))
-                })?;
-                fs::create_dir_all(parent)?;
-                if staged.exists() {
-                    fs::rename(staged, &dest)?;
-                }
-            }
-            // Byte-identical trees reuse `hangar/objects/<digest>/` above.
-            // Cross-object file hardlink dedupe stays in `optimize_hangar` /
-            // `clean` so sealed objects never grow external nlink peers that
-            // would fail canonical archive verification (JP1).
+            fs::rename(staged, &partial)?;
             fsync_dir_recursive(&partial)?;
             fsync_dir(&objects)?;
-            fs::rename(&partial, &final_obj)?;
+            fs::rename(&partial, &destination)?;
             fsync_dir(&objects)?;
         }
 
@@ -291,6 +284,7 @@ fn ingest_tree_unlocked(
             last_used_at: now,
         };
         atomic_write_meta(&dir.join("meta.json"), &entry.meta_json())?;
+        register_entry_unlocked(roots, &entry)?;
         register_referrers(&hangar, &primary, &req.references)?;
         Ok(IngestedObject { entry, deduplicated })
     })();
@@ -326,6 +320,12 @@ fn valid_output_name(name: &str) -> bool {
 
 /// Referrers of `digest`: objects that list it in `references`.
 pub fn referrers_of(roots: &Roots, digest: &str) -> Vec<String> {
+    if let Ok(graph) = closure_graph(roots) {
+        let referrers = graph.referrers(digest);
+        if !referrers.is_empty() {
+            return referrers;
+        }
+    }
     let path = roots
         .hangar_dir()
         .join(REFERRERS_DIR)

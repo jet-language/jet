@@ -30,6 +30,36 @@ mod tests {
         }
     }
 
+    fn ingest_fixture(
+        roots: &Roots,
+        name: &str,
+        outputs: &[(&str, &str)],
+        references: Vec<String>,
+    ) -> IngestedObject {
+        let mut paths = BTreeMap::new();
+        for (output, bytes) in outputs {
+            let path = roots.root.join(format!("fixture-{name}-{output}"));
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("payload"), bytes).unwrap();
+            paths.insert((*output).to_string(), path);
+        }
+        ingest_tree(
+            roots,
+            &IngestRequest {
+                name: name.to_string(),
+                version: "1".to_string(),
+                reference: format!("path:{name}"),
+                cache_identity: test_identity(),
+                references,
+                outputs: paths,
+                signature: String::new(),
+                provenance: "closure-test".to_string(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap()
+    }
+
     fn verified(roots: &Roots, reference: &str, expectation: &CacheExpectation) -> bool {
         find_verified_by_reference(roots, reference, expectation)
             .unwrap()
@@ -917,7 +947,8 @@ mod tests {
             },
         )
         .unwrap();
-        let installed = Path::new(&ingested.entry.out).join(".named/dev");
+        let dev_digest = ingested.entry.named_outputs.get("dev").unwrap();
+        let installed = roots.hangar_dir().join("objects").join(dev_digest);
         assert_eq!(
             fs::read_to_string(installed.join("payload")).unwrap(),
             "development"
@@ -925,6 +956,7 @@ mod tests {
         let actual = super::super::super::Envelope::try_output_hash_of(&installed.to_string_lossy())
             .unwrap();
         assert_eq!(ingested.entry.named_outputs.get("dev"), Some(&actual));
+        verify_hangar_object(&roots, &ingested.entry).unwrap();
     }
 
     #[test]
@@ -972,6 +1004,244 @@ mod tests {
         .unwrap();
         assert_eq!(a.entry.envelope.output_hash, b.entry.envelope.output_hash);
         assert!(b.deduplicated);
+    }
+
+    #[test]
+    fn closure_graph_named_outputs_are_independent_and_queries_are_cycle_safe() {
+        let (roots, _g) = temp_roots();
+        let base = ingest_fixture(&roots, "base", &[("out", "base")], Vec::new());
+        let middle = ingest_fixture(
+            &roots,
+            "middle",
+            &[("out", "middle")],
+            vec![base.entry.envelope.output_hash.clone()],
+        );
+        let consumer = ingest_fixture(
+            &roots,
+            "consumer",
+            &[("out", "consumer-out"), ("dev", "consumer-dev")],
+            vec![middle.entry.envelope.output_hash.clone()],
+        );
+        let primary = consumer.entry.envelope.output_hash.clone();
+        let dev = consumer.entry.named_outputs.get("dev").unwrap().clone();
+
+        assert_ne!(primary, dev);
+        assert_eq!(
+            direct_references_of(&roots, &primary).unwrap(),
+            vec![middle.entry.envelope.output_hash.clone()]
+        );
+        assert_eq!(
+            direct_references_of(&roots, &dev).unwrap(),
+            vec![middle.entry.envelope.output_hash.clone()]
+        );
+        assert_eq!(
+            transitive_references_of(&roots, &dev).unwrap(),
+            vec![
+                base.entry.envelope.output_hash.clone(),
+                middle.entry.envelope.output_hash.clone(),
+            ]
+        );
+        assert_eq!(
+            referrers_of(&roots, &middle.entry.envelope.output_hash),
+            vec![dev.clone(), primary.clone()]
+        );
+        let action = entry_action_key(&consumer.entry);
+        assert_eq!(action_outputs_of(&roots, &action).unwrap().get("dev"), Some(&dev));
+        assert_eq!(actions_for_output(&roots, &primary).unwrap(), vec![action]);
+
+        ingest_fixture(
+            &roots,
+            "base",
+            &[("out", "base")],
+            vec![primary.clone()],
+        );
+        let transitive = transitive_references_of(&roots, &primary).unwrap();
+        assert!(transitive.contains(&base.entry.envelope.output_hash));
+        assert!(transitive.contains(&middle.entry.envelope.output_hash));
+        assert!(!transitive.contains(&primary));
+    }
+
+    #[test]
+    fn closure_refresh_and_delete_remove_stale_reverse_edges() {
+        let (roots, _g) = temp_roots();
+        let left = ingest_fixture(&roots, "left", &[("out", "left")], Vec::new());
+        let right = ingest_fixture(&roots, "right", &[("out", "right")], Vec::new());
+        let consumer = ingest_fixture(
+            &roots,
+            "refresh",
+            &[("out", "same")],
+            vec![left.entry.envelope.output_hash.clone()],
+        );
+        assert_eq!(
+            referrers_of(&roots, &left.entry.envelope.output_hash),
+            vec![consumer.entry.envelope.output_hash.clone()]
+        );
+
+        let refreshed = ingest_fixture(
+            &roots,
+            "refresh",
+            &[("out", "same")],
+            vec![right.entry.envelope.output_hash.clone()],
+        );
+        assert!(closure_graph(&roots)
+            .unwrap()
+            .referrers(&left.entry.envelope.output_hash)
+            .is_empty());
+        assert_eq!(
+            closure_graph(&roots)
+                .unwrap()
+                .referrers(&right.entry.envelope.output_hash),
+            vec![refreshed.entry.envelope.output_hash.clone()]
+        );
+        assert!(remove_closure_record(&roots, &refreshed.entry.id).unwrap());
+        assert!(closure_graph(&roots)
+            .unwrap()
+            .referrers(&right.entry.envelope.output_hash)
+            .is_empty());
+        assert!(!remove_closure_record(&roots, &refreshed.entry.id).unwrap());
+    }
+
+    #[test]
+    fn closure_journal_recovers_partial_and_rejects_committed_corruption() {
+        use std::io::Write as _;
+
+        let (roots, _g) = temp_roots();
+        ingest_fixture(&roots, "journal", &[("out", "journal")], Vec::new());
+        let journal = roots.hangar_dir().join("closure-db/journal");
+        fs::write(journal.join("999.partial"), "torn").unwrap();
+        assert_eq!(recover_closure_journal(&roots).unwrap(), 1);
+        assert!(!journal.join("999.partial").exists());
+
+        let transaction = fs::read_dir(&journal)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("txn"))
+            .unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(transaction)
+            .unwrap()
+            .write_all(b"corrupt")
+            .unwrap();
+        let error = closure_graph(&roots).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("checksum mismatch"));
+    }
+
+    #[test]
+    fn closure_legacy_migration_is_idempotent() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("legacy-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "legacy").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "path:legacy",
+            "legacy",
+        );
+        let entry = record_verified(
+            &roots,
+            "legacy",
+            "1",
+            "path:legacy",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        fs::remove_dir_all(roots.hangar_dir().join("closure-db")).unwrap();
+
+        assert_eq!(migrate_closure_graph(&roots).unwrap(), 1);
+        assert_eq!(migrate_closure_graph(&roots).unwrap(), 0);
+        assert!(closure_graph(&roots).unwrap().records.contains_key(&entry.id));
+    }
+
+    #[test]
+    fn provider_registration_moves_local_output_into_canonical_objects() {
+        let (roots, _g) = temp_roots();
+        let out = roots.hangar_dir().join("provider-output");
+        fs::create_dir_all(out.join("bin")).unwrap();
+        fs::write(out.join("bin/tool"), "provider").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "path:provider",
+            "provider",
+        );
+        seal_local_output(&out).unwrap();
+        let entry = record_verified_mode(
+            &roots,
+            "provider",
+            "1",
+            "path:provider",
+            &out.to_string_lossy(),
+            &out.join("bin").to_string_lossy(),
+            "",
+            &envelope,
+            &test_identity(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            Path::new(&entry.out),
+            roots
+                .hangar_dir()
+                .join("objects")
+                .join(&entry.envelope.output_hash)
+        );
+        assert!(!out.exists());
+        verify_hangar_object(&roots, &entry).unwrap();
+        snapshot_lease(&roots, &entry).unwrap();
+    }
+
+    #[test]
+    fn closure_registration_serializes_concurrent_writers() {
+        let (roots, _g) = temp_roots();
+        let root = roots.root.clone();
+        let threads = (0..8)
+            .map(|index| {
+                let root = root.clone();
+                std::thread::spawn(move || {
+                    let roots = Roots {
+                        root,
+                        dev_mode: true,
+                    };
+                    ingest_fixture(
+                        &roots,
+                        &format!("concurrent-{index}"),
+                        &[("out", &format!("bytes-{index}"))],
+                        Vec::new(),
+                    );
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(closure_graph(&roots).unwrap().records.len(), 8);
+    }
+
+    #[test]
+    fn closure_journal_compacts_without_changing_graph() {
+        let (roots, _g) = temp_roots();
+        for index in 0..70 {
+            ingest_fixture(
+                &roots,
+                &format!("compact-{index}"),
+                &[("out", &format!("compact-bytes-{index}"))],
+                Vec::new(),
+            );
+        }
+        let graph = closure_graph(&roots).unwrap();
+        assert_eq!(graph.records.len(), 70);
+        let transactions = fs::read_dir(roots.hangar_dir().join("closure-db/journal"))
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn"))
+            .count();
+        assert!(transactions < 10, "journal did not compact: {transactions}");
     }
 
     #[cfg(target_os = "linux")]

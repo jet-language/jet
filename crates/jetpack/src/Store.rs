@@ -216,8 +216,40 @@ pub fn record_verified(
     envelope: &super::Envelope::Envelope,
     cache_identity: &CacheIdentity,
 ) -> std::io::Result<StoreEntry> {
+    record_verified_mode(
+        roots,
+        name,
+        version,
+        reference,
+        out,
+        bin,
+        rlib,
+        envelope,
+        cache_identity,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_verified_mode(
+    roots: &Roots,
+    name: &str,
+    version: &str,
+    reference: &str,
+    out: &str,
+    bin: &str,
+    rlib: &str,
+    envelope: &super::Envelope::Envelope,
+    cache_identity: &CacheIdentity,
+    canonicalize_local: bool,
+) -> std::io::Result<StoreEntry> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let id = entry_id(name, version, reference, out);
+        let (out, bin, rlib) = if canonicalize_local {
+            canonicalize_local_output_unlocked(roots, out, bin, rlib, &envelope.output_hash)?
+        } else {
+            (out.to_string(), bin.to_string(), rlib.to_string())
+        };
+        let id = entry_id(name, version, reference, &out);
         let dir = roots.hangar_dir().join(&id);
         let now = now_secs();
         let realized_at = read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now);
@@ -226,9 +258,9 @@ pub fn record_verified(
             name: name.to_string(),
             version: version.to_string(),
             reference: reference.to_string(),
-            out: out.to_string(),
-            bin: bin.to_string(),
-            rlib: rlib.to_string(),
+            out: out.clone(),
+            bin,
+            rlib,
             envelope: envelope.clone(),
             cache_identity: cache_identity.clone(),
             references: Vec::new(),
@@ -238,10 +270,62 @@ pub fn record_verified(
             last_used_at: now,
         };
         fs::create_dir_all(&dir)?;
-        pin_nix_gc_root(&dir, out)?;
+        pin_nix_gc_root(&dir, &out)?;
         fs::write(dir.join("meta.json"), entry.meta_json())?;
+        register_entry_unlocked(roots, &entry)?;
         Ok(entry)
     })
+}
+
+fn canonicalize_local_output_unlocked(
+    roots: &Roots,
+    out: &str,
+    bin: &str,
+    rlib: &str,
+    digest: &str,
+) -> std::io::Result<(String, String, String)> {
+    let source = Path::new(out);
+    let objects = roots.hangar_dir().join(OBJECTS_DIR);
+    if digest.is_empty() || !source.starts_with(roots.hangar_dir()) || source.starts_with(&objects) {
+        return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
+    }
+    let destination = objects.join(digest);
+    fs::create_dir_all(&objects)?;
+    if destination.exists() {
+        let actual = super::Envelope::try_output_hash_of_in_hangar(
+            &destination.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .map_err(std::io::Error::other)?;
+        if actual != digest {
+            return Err(std::io::Error::other(format!(
+                "canonical object `{digest}` re-hashed as `{actual}`"
+            )));
+        }
+        if source != destination && source.exists() {
+            make_tree_writable_for_removal(source)?;
+            fs::remove_dir_all(source)?;
+        }
+    } else {
+        fs::rename(source, &destination)?;
+        fs::File::open(&objects)?.sync_all()?;
+    }
+    let remap = |member: &str| {
+        if member.is_empty() {
+            return String::new();
+        }
+        Path::new(member)
+            .strip_prefix(source)
+            .ok()
+            .map(|relative| destination.join(relative).to_string_lossy().into_owned())
+            .unwrap_or_else(|| member.to_string())
+    };
+    Ok((
+        destination.to_string_lossy().into_owned(),
+        remap(bin),
+        remap(rlib),
+    ))
 }
 
 const NIX_GC_ROOT: &str = "nix-gc-root";
@@ -382,12 +466,18 @@ pub fn verify_cache_entry(
         && entry.cache_identity.policy_fingerprint == expectation.identity.policy_fingerprint;
     let signature_verified = !entry.envelope.signature.is_empty()
         && verify_configured_signature(roots, entry, expectation);
+    let canonical_local = Path::new(&entry.out)
+        == roots
+            .hangar_dir()
+            .join(OBJECTS_DIR)
+            .join(&entry.envelope.output_hash);
     let unsigned_local_allowed = entry.envelope.signature.is_empty()
         && expectation.allow_unsigned_local
-        && expectation
-            .owned_output
-            .as_ref()
-            .is_some_and(|path| path == Path::new(&entry.out));
+        && (canonical_local
+            || expectation
+                .owned_output
+                .as_ref()
+                .is_some_and(|path| path == Path::new(&entry.out)));
     let closure = output_exists && closure_is_reachable(roots, entry);
     CacheVerification {
         output_exists,
@@ -984,7 +1074,7 @@ pub fn realize_verified(
             super::Provider::realize_adapter(plan, ctx).map_err(RealizeError::Provider)?
         }
     };
-    let entry = record_verified(
+    let entry = record_verified_mode(
         roots,
         &realized.name,
         &realized.version,
@@ -994,6 +1084,7 @@ pub fn realize_verified(
         &realized.rlib,
         &realized.envelope,
         &realized.cache_identity,
+        true,
     )
     .map_err(RealizeError::Store)?;
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
@@ -1537,12 +1628,47 @@ pub fn optimize_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
 pub fn verify_hangar_object(roots: &Roots, entry: &StoreEntry) -> Result<(), IngestError> {
     let hangar = roots.hangar_dir();
     let allow = !entry.platform_artifact_kind.is_empty();
-    let digest = super::Envelope::try_output_hash_of_in_hangar(&entry.out, &hangar, allow)
-        .map_err(IngestError::Invalid)?;
-    if digest != entry.envelope.output_hash {
+    let graph = closure_graph(roots).map_err(|error| IngestError::Invalid(error.to_string()))?;
+    let record = graph.records.get(&entry.id).ok_or_else(|| {
+        IngestError::Invalid(format!("closure graph has no record `{}`", entry.id))
+    })?;
+    if record.primary != entry.envelope.output_hash
+        || record.action_key != entry_action_key(entry)
+        || record.references != entry.references.iter().cloned().collect()
+    {
         return Err(IngestError::Invalid(format!(
-            "envelope records `{}`, re-hash produced `{digest}`",
-            entry.envelope.output_hash
+            "closure graph disagrees with record `{}`",
+            entry.id
+        )));
+    }
+    let mut expected_outputs = entry.named_outputs.clone();
+    expected_outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
+    if record.outputs != expected_outputs {
+        return Err(IngestError::Invalid(format!(
+            "closure graph output map disagrees with record `{}`",
+            entry.id
+        )));
+    }
+    for (name, expected) in &expected_outputs {
+        let object = graph.objects.get(expected).ok_or_else(|| {
+            IngestError::Invalid(format!("closure graph output `{name}` is missing `{expected}`"))
+        })?;
+        let digest = super::Envelope::try_output_hash_of_in_hangar(&object.path, &hangar, allow)
+            .map_err(IngestError::Invalid)?;
+        if &digest != expected {
+            return Err(IngestError::Invalid(format!(
+                "output `{name}` records `{expected}`, re-hash produced `{digest}`"
+            )));
+        }
+    }
+    if let Some(missing) = record
+        .references
+        .iter()
+        .find(|digest| !graph.objects.contains_key(*digest))
+    {
+        return Err(IngestError::Invalid(format!(
+            "closure record `{}` references missing object `{missing}`",
+            entry.id
         )));
     }
     Ok(())
@@ -1686,5 +1812,7 @@ const PARTIAL_SUFFIX: &str = ".partial";
 
 mod Ingest;
 pub use Ingest::*;
+mod Closure;
+pub use Closure::*;
 #[cfg(test)]
 mod Tests;

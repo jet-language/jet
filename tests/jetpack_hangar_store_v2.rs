@@ -142,3 +142,42 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
     assert!(recover.status.success());
     let _ = Path::new("."); // keep Path import used on all cfgs
 }
+
+#[test]
+fn real_core_provider_registers_canonical_object_and_action_relation() {
+    let (_base, project, root) = core_hello_project("hangar-v2-core-closure");
+    let built = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let roots = jetpack::Store::Roots {
+        root: root.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    assert_eq!(
+        Path::new(&entry.out).parent(),
+        Some(root.join("hangar/objects").as_path())
+    );
+    assert_eq!(
+        Path::new(&entry.out).file_name().and_then(|name| name.to_str()),
+        Some(entry.envelope.output_hash.as_str())
+    );
+    let graph = jetpack::Store::closure_graph(&roots).unwrap();
+    let record = graph.records.get(&entry.id).unwrap();
+    assert_eq!(record.primary, entry.envelope.output_hash);
+    assert_eq!(
+        graph.action_outputs(&record.action_key).get("out"),
+        Some(&record.primary)
+    );
+    jetpack::Store::verify_hangar_object(&roots, &entry).unwrap();
+}
