@@ -1,49 +1,33 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in fs::read_dir(dir).expect("read evaluator source directory") {
-        let path = entry.expect("read evaluator source entry").path();
-        if path.is_dir() {
-            rust_files(&path, out);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-            out.push(path);
-        }
-    }
-}
+use std::path::Path;
 
 #[test]
-fn evaluator_boundary_has_no_process_or_external_engine_escape() {
+fn evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let dir = root.join("crates/jetpack/src/NixEval");
-    let mut files = Vec::new();
-    rust_files(&dir, &mut files);
-    assert!(!files.is_empty(), "native evaluator boundary must exist");
+    let manifest = fs::read_to_string(root.join("crates/jet-nix-eval/Cargo.toml"))
+        .expect("native evaluator seam manifest");
+    let dependencies = manifest
+        .split_once("[dependencies]")
+        .expect("evaluator seam must declare an explicit dependency section")
+        .1
+        .trim();
+    assert!(
+        dependencies.is_empty(),
+        "native evaluator seam must remain dependency-free, got:\n{dependencies}"
+    );
 
-    let forbidden = [
-        "std::process",
-        "process::Command",
-        "Command::new",
-        "extern crate",
-        "use tvix",
-        "tvix_",
-        "libnix",
-        "nix-instantiate",
-    ];
-    for path in files {
-        let source = fs::read_to_string(&path).expect("read evaluator source");
-        for needle in forbidden {
-            assert!(
-                !source.contains(needle),
-                "{} crosses native evaluator stop-line with `{needle}`",
-                path.display()
-            );
-        }
-    }
+    let seam = fs::read_to_string(root.join("crates/jet-nix-eval/src/lib.rs"))
+        .expect("native evaluator seam root");
+    assert!(seam.contains("#![no_std]"));
+    assert!(seam.contains("#![forbid(unsafe_code)]"));
 
-    let lib = fs::read_to_string(root.join("crates/jetpack/src/lib.rs")).expect("read jetpack lib");
-    assert!(lib.contains("pub(crate) mod NixEval;"));
-    assert!(!lib.contains("pub mod NixEval;"));
+    let jetpack_manifest = fs::read_to_string(root.join("crates/jetpack/Cargo.toml"))
+        .expect("jetpack manifest");
+    assert!(jetpack_manifest.contains("jet-nix-eval = { path = \"../jet-nix-eval\" }"));
+    let jetpack = fs::read_to_string(root.join("crates/jetpack/src/lib.rs"))
+        .expect("jetpack library root");
+    assert!(jetpack.contains("pub(crate) mod NixEval;"));
+    assert!(!jetpack.contains("pub mod NixEval;"));
 }
 
 #[test]

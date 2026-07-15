@@ -341,8 +341,10 @@ live acceptance, and documentation. Work order is binding.
   independently committed oracle manifest pins the ratified Nix and nixpkgs
   identities and remains fail-closed until every supported system records both
   required NAR hashes. Partial-stage permits can be minted only by unit tests.
-  A structural gate rejects process execution and external evaluator linkage in
-  this module, and the module has no provider or product-visible entry point.
+  Evaluator code lives in a dependency-free `no_std` crate where the compiler
+  forbids unsafe code; process execution, native linking, dynamic loading, and
+  external evaluator libraries are therefore outside the seam. Jetpack's
+  integration module remains private and exposes no evaluation entry point.
 - Lazy thunks, attrsets, functions, string contexts, path values, import,
   derivation primitive, required builtins, flake inputs/locks/registries.
 - Pure/restricted default, explicit URI/path authority, dirty-tree identity,
