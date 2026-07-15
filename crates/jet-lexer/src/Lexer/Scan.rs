@@ -158,11 +158,9 @@ impl<'a> Lexer<'a> {
                 '%' => toks.push(simple(self, TokKind::Percent, 1)),
                 '^' if next == '=' => toks.push(simple(self, TokKind::CaretEq, 2)),
                 '^' => toks.push(simple(self, TokKind::Caret, 1)),
-                // D-MEM1: `~` is retired (was the D-CAP7 write sigil; `&` now
-                // carries that meaning). Still lexed as `Tilde` so it fails as an
-                // ordinary syntax error, not a lexer panic. `~~` is longest-match
-                // lexed so the parser can emit the retired external-method connector
-                // diagnostic (E0325).
+                // D-SHAPE-COPY1=A: `~` is the copy sigil. `~~` is longest-match
+                // lexed first so the parser can still emit the retired
+                // external-method connector diagnostic (E0325).
                 '~' if next == '~' => toks.push(simple(self, TokKind::TildeTilde, 2)),
                 '~' => toks.push(simple(self, TokKind::Tilde, 1)),
                 '&' if next == '&' => toks.push(simple(self, TokKind::AndAnd, 2)),

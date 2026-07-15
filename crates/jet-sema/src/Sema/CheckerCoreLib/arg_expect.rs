@@ -228,15 +228,15 @@ impl<'a> Checker<'a> {
                         // D-MEM1/S2 (was D-L0201 lint): a hard error now, regardless
                         // of liveness — no clone is ever silent. Unlike a Move-param
                         // user function, this is a fixed std read-only signature —
-                        // `^` is never accepted here (E0203), so `copy name` (D-CAP2,
-                        // D-MEM1/S4) is the only fix, not a liveness-dependent
-                        // move/reorder menu.
+                        // `^` is never accepted here (E0203), so `~name`
+                        // (D-SHAPE-COPY1, supersedes D-CAP2/S4) is the only fix,
+                        // not a liveness-dependent move/reorder menu.
                         let (what, fix) = match place {
                             Some(place) => (
                                 format!("implicit clone of `{}`", place),
                                 format!(
-                                    "write `{} {}` to copy explicitly",
-                                    Syntax::KW_COPY,
+                                    "write `{}{}` to copy explicitly",
+                                    Syntax::SIGIL_COPY,
                                     place
                                 ),
                             ),
@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
                                 "implicit clone of this consumed expression".to_string(),
                                 format!(
                                     "write `{}` before the highlighted expression to copy it explicitly",
-                                    Syntax::KW_COPY
+                                    Syntax::SIGIL_COPY
                                 ),
                             ),
                         };

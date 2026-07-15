@@ -288,10 +288,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordOther,
     },
     HighlightToken {
-        text: KW_COPY,
-        class: HighlightClass::KeywordOwnership,
-    },
-    HighlightToken {
         text: KW_UNINIT,
         class: HighlightClass::KeywordOwnership,
     },
@@ -592,6 +588,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: SIGIL_WRITE,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_COPY,
         class: HighlightClass::Sigil,
     },
     HighlightToken {
@@ -1060,7 +1060,7 @@ fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
 use super::{
     ATTR_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, CONTRACT_MARKERS, CONTRACT_PREFIX, CTX_BLOCK,
     DIRECTIVE_MARKERS, KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
-    KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_COPY, KW_DERIVE, KW_DISTINCT, KW_ELSE, KW_ENUM,
+    KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_DERIVE, KW_DISTINCT, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP,
     KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RANGE_STEP,
     KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SANITIZER, KW_SELF,
@@ -1073,7 +1073,7 @@ use super::{
     OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_PLUS_PLUS,
     OP_RANGE, OP_SHL, OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_STAR,
     OP_STAR_EQ, OP_TRY_SUFFIX, PROTO_CLIENT, PROTO_SERVER, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
-    SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE, TYPE_BIGINT, TYPE_BIT_SET, TYPE_BOOL, TYPE_BTREE_MAP,
+    SIGIL_COPY, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE, TYPE_BIGINT, TYPE_BIT_SET, TYPE_BOOL, TYPE_BTREE_MAP,
     TYPE_BUDGET, TYPE_BUDGET_APPLIES,
     TYPE_BYTE_BUFFER, TYPE_CHAR, TYPE_COMPUTED, TYPE_DATA, TYPE_DATA_CSV, TYPE_DATA_JSON,
     TYPE_DATA_TOML, TYPE_DATA_YAML, TYPE_DB_VALUE, TYPE_DECIMAL, TYPE_DEQUE, TYPE_DERIVED,

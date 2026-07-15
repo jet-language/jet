@@ -455,8 +455,8 @@ impl<'a> Checker<'a> {
                         "after a value moves somewhere else, the old name no longer holds it"
                             .to_string(),
                         format!(
-                            "give away a copy instead (`{} {}`) where it moved",
-                            Syntax::KW_COPY,
+                            "give away a copy instead (`{}{}`) where it moved",
+                            Syntax::SIGIL_COPY,
                             name
                         ),
                         Some(*span),

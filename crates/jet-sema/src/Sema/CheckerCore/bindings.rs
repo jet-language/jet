@@ -254,14 +254,14 @@ impl<'a> Checker<'a> {
                                 "this function has read access only and does not own the value"
                                     .to_string(),
                                 format!(
-                                    "copy it instead: `{} {} {} {}`",
+                                    "copy it instead: `{} {} {}{}`",
                                     b.name,
                                     if b.mutable {
                                         Syntax::SIGIL_BIND_MUT
                                     } else {
                                         Syntax::SIGIL_BIND_IMMUT
                                     },
-                                    Syntax::KW_COPY,
+                                    Syntax::SIGIL_COPY,
                                     n
                                 ),
                                 Some(*nspan),

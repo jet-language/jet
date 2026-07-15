@@ -224,21 +224,23 @@ A write through a read receiver is **E0205** ("write the receiver as
 site (**E0202**, "does not have edit access (`&`)"). Using the same name
 twice in one call while a `&` on it is active is **E0204** ("while something
 is being changed, nobody else may be looking at it") — pass `&x` once, or
-`copy x` first.
+`~x` first.
 
 **Named binding vs. temporary.** Passing a *named binding* to a `^` (take)
 parameter without `^` is **E0209** — a hard error, never a silent clone (the
 old `L0201` lint that auto-cloned is gone). A *temporary* — a literal,
-`copy x`, or a call result — passes freely with no `^`, since nothing survives
-to be used after. `copy x` (D-CAP2) is the one copy spelling — a real prefix
-expression, not a method: `.clone()` is not user-typable Jet syntax (`clone`
-falls through to the ordinary "no such method" error). `copy` on a value Jet
-can't duplicate — a function, a trait value — is **E0211**; on a scalar it's
-legal but redundant (already trivially copyable).
+`~x`, or a call result — passes freely with no `^`, since nothing survives
+to be used after. `~x` (D-SHAPE-COPY1=A, supersedes D-CAP2) is the one copy
+spelling — a real prefix expression, not a method: `.clone()` is not
+user-typable Jet syntax (`clone` falls through to the ordinary "no such
+method" error). The retired `copy x` word teaches **E0991**, pointing at
+`~x`. `~` on a value Jet can't duplicate — a function, a trait value — is
+**E0211**; on a scalar it's legal but redundant (already trivially
+copyable).
 
 ```jet
 name: String :: "vault"
-saved :: copy name    // fresh, independent value; `name` still usable after
+saved :: ~name    // fresh, independent value; `name` still usable after
 ```
 
 (examples/features/memory/copy_verb.jet)
@@ -355,7 +357,7 @@ diagnostic code.
 A bare module-level `policy no_alloc` (D-NOALLOC-SEM1) flags four
 allocation-shaped expressions written directly in that module's own function
 bodies — string interpolation with a `{…}` hole, `.push`/`.insert`, a
-struct/enum literal for a heap-owning type, `copy` of a heap-owning type —
+struct/enum literal for a heap-owning type, `~` of a heap-owning type —
 as **E0921**. The check is local only: a call into another function is that
 function's own module's problem, never followed.
 
@@ -385,11 +387,12 @@ ship in v1 (unmarked read is the default, not a sigil):
 | `&T` | write — exclusive edit access | `x: &mut T` |
 | `^T` | take — ownership moves to callee | `x: T` |
 
-`~` is not part of the v5 grammar (ordinary syntax error). Raw-pointer access
-(`p.*` postfix deref, prefix `*x`) is a separate, `#Unsafe`-gated mechanism
-(D-CAP9) — not a parameter capability; the compiler's `AccessConvention`
-enum keeps dead `Share`/`Raw` variants internally, inert until a future
-tier reactivates them.
+`~` is the copy sigil (D-SHAPE-COPY1=A, below), not a parameter capability —
+it has no arm in this table. Raw-pointer access (`p.*` postfix deref, prefix
+`*x`) is a separate, `#Unsafe`-gated mechanism (D-CAP9) — also not a
+parameter capability; the compiler's `AccessConvention` enum keeps dead
+`Share`/`Raw` variants internally, inert until a future tier reactivates
+them.
 
 ### Placement
 
@@ -1686,7 +1689,7 @@ data. Two detach-site diagnostics guard unsound cases:
 
 - **E1106**: the lambda returned or captured a `view` borrow — a detached task
   may outlive the borrow's source, so the `view` would dangle. Fix: pass an
-  owned `copy` or `share` instead.
+  owned `~` copy or `share` instead.
 - **E1103**: the lambda had a different sendability failure at spawn (E1102
   already fired); detaching an unsound task is doubly dangerous.
 
@@ -1718,7 +1721,7 @@ block; at comptime it has no scheduler effect.
 
 `tasks.channel<T>() -> (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
-tasks.channel<T>()`. A second sender is `copy tx` — there's no combined
+tasks.channel<T>()`. A second sender is `~tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (ownership semantics for non-copy values), and
 `receiver.receive() -> T ? Closed` blocks until a value arrives or all senders

@@ -33,10 +33,11 @@ impl<'a> Parser<'a> {
             )
         }
     
-        /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. `~` is
-        /// not part of the v5 grammar (no arm here — an unrecognized `~` falls
-        /// through and fails wherever the caller expects next, as an ordinary
-        /// syntax error). Returns `None` when no sigil is present.
+        /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. `~`
+        /// (D-SHAPE-COPY1=A copy sigil) has no arm here — a parameter/argument
+        /// convention position doesn't take a copy sigil (D-SHAPE-PLACE1, place
+        /// precedence at any position, is a separate pending ballot). Returns
+        /// `None` when no sigil is present.
         /// Position-disambiguated: infix `^` (xor) and `&` (BitAnd) are parsed
         /// inside expressions and never reach the start of a parameter/argument or
         /// a type. `*` (raw) is D-CAP9, handled apart.

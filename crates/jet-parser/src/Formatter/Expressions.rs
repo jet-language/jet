@@ -442,10 +442,10 @@ impl<'a> Fmt<'a> {
                 self.write("*");
                 self.fmt_expr(inner, Prec::Unary);
             }
-            // D-CAP2 (D-MEM1/S4): prefix `copy x` — the one copy verb.
+            // D-SHAPE-COPY1=A (supersedes D-CAP2/S4): prefix `~x` — the one copy
+            // sigil.
             Expr::Copy(inner, _) => {
-                self.write(Syntax::KW_COPY);
-                self.write(" ");
+                self.write(Syntax::SIGIL_COPY);
                 self.fmt_expr(inner, Prec::Unary);
             }
             Expr::Field(base, field, span) => {

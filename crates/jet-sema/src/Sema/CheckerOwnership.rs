@@ -104,7 +104,7 @@ impl<'a> Checker<'a> {
             ),
             format!(
                 "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
-                name, arena, Syntax::KW_COPY
+                name, arena, Syntax::SIGIL_COPY
             ),
             Some(span),
         ));
@@ -324,7 +324,7 @@ impl<'a> Checker<'a> {
                 "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); only chaining another `.trim()`/`.after()`/`.before()` on it works directly — other methods and calls need the full owned value",
                 name, owner
             ),
-            format!("write `{} {}` first to get an owned `String`, then use that", Syntax::KW_COPY, name),
+            format!("write `{}{}` first to get an owned `String`, then use that", Syntax::SIGIL_COPY, name),
             Some(span),
         ));
     }
@@ -499,7 +499,7 @@ impl<'a> Checker<'a> {
                     "E0121",
                     format!("`{}` is given away inside a loop that may run again", name),
                     "after a value is given away it's gone, but the next time around the loop would need it again".to_string(),
-                    format!("give away a copy instead: `{} {}`", Syntax::KW_COPY, name),
+                    format!("give away a copy instead: `{}{}`", Syntax::SIGIL_COPY, name),
                     Some(span),
                 ));
                 return;
@@ -869,8 +869,8 @@ impl<'a> Checker<'a> {
     /// cloneable carve-out is now a hard error (E0209, was `L0201`). `what`/
     /// `why` are call-site-specific; this builds the shared, liveness-aware
     /// fix menu: `^name` when this call is `name`'s last use (safe to move),
-    /// or `copy name` (D-CAP2, D-MEM1/S4)/reorder when `name` is still used
-    /// afterward (moving now would break that later use).
+    /// or `~name` (D-SHAPE-COPY1, supersedes D-CAP2/S4)/reorder when `name`
+    /// is still used afterward (moving now would break that later use).
     pub(crate) fn e0209_implicit_clone(
         &self,
         what: String,
@@ -880,16 +880,16 @@ impl<'a> Checker<'a> {
     ) -> Diagnostic {
         let fix = if self.is_name_live_after(name) {
             format!(
-                "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{} {name}` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",
+                "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{}{name}` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",
                 Syntax::SIGIL_MOVE,
-                Syntax::KW_COPY,
+                Syntax::SIGIL_COPY,
                 Syntax::SIGIL_MOVE,
             )
         } else {
             format!(
-                "write `{}{name}` to move it — this is `{name}`'s last use — or `{} {name}` to keep a copy",
+                "write `{}{name}` to move it — this is `{name}`'s last use — or `{}{name}` to keep a copy",
                 Syntax::SIGIL_MOVE,
-                Syntax::KW_COPY,
+                Syntax::SIGIL_COPY,
             )
         };
         Diagnostic::error("E0209", what, why, fix, Some(span))

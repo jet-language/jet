@@ -115,8 +115,9 @@ impl<'a> Parser<'a> {
                 return Ok((Syntax::KW_MOVE.to_string(), span));
             }
             // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
-            // is also Jet's explicit copy keyword in value position. Keep the
-            // keyword reserved everywhere else; permit it only after `.`.
+            // is also the retired copy keyword (D-SHAPE-COPY1, now `~x`) in value
+            // position. Keep the keyword reserved everywhere else; permit it only
+            // after `.`.
             if matches!(self.peek().kind, TokKind::KwCopy) {
                 let span = self.peek().span;
                 self.bump();

@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 639,
-    "rev": 7675,
+    "nextNum": 640,
+    "rev": 7681,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16723,6 +16723,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "verify-full rerun on committed tree a80e00055: 28 targets green, then tests/dev.rs red — stdin_filter left the dev default boundary set (new card #639). C4 stays open pending that fix; gate rerun after."
+        },
+        {
+          "at": "2026-07-15",
           "by": "fable-burndown",
           "text": "[handoff] 2026-07-15 full gate ran once on the committed tree and failed only on the cli ETXTBSY exec flake, fixed and verified on card 638. Every earlier target through tests/cli.rs was green; the gate stopped there, so later targets did not run. Next agent: rerun scripts/agent/verify-full.sh with a repo-local TMPDIR; a green run closes C4."
         },
@@ -19890,6 +19895,64 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T14:37:01.835Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0pj204u",
+      "num": 639,
+      "title": "Full suite red: stdin_filter left the dev default boundary set",
+      "body": "verify-full fails tests/dev.rs::dev_default_matches_compiled_binary: expected boundary set [io/stdin_filter, ui/ui_native_linux] but io/stdin_filter executed under default dev and matched the compiled binary (311 ran, 1 boundary). Two sibling tests (interpreter_matches_compiled_binary, hand_written_codec_dev_tier_stops_at_honest_boundary) fail only as PoisonError cascades from the shared dev_diff_lock. Regression window 07-10 boundary pin (939ccada7) to 07-14 dev/JIT/IO-scheduling work (a9994792a, 7261c742a, 46d0aeec8, 81225d727). Decide honestly: dev tier legitimately grew piped-stdin support (update expected boundaries without hang risk) or a masked gap (restore the boundary). The battery must never hang on ambient TTY stdin.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/dev.rs::dev_default_matches_compiled_binary passes with an exact boundary set and no masked divergence; the battery cannot hang on ambient TTY stdin.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T15:15:09.550Z"
+        },
+        {
+          "n": 2,
+          "text": "Root cause recorded: either dev-default stdin execution is proven correct with AOT parity (boundary list updated) or the honest boundary is restored; no test weakening.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T15:15:09.673Z"
+        },
+        {
+          "n": 3,
+          "text": "Full tests/dev.rs target passes including the two PoisonError cascade tests.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T15:15:09.795Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T15:15:09.918Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T15:14:53.386Z",
       "updated": "2026-07-15"
     }
   ],
@@ -39203,6 +39266,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T15:15:10.065Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0zoq183",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T15:15:09.918Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0pj204u",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T15:15:09.795Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0pj204u",
+      "note": "#3 Full tests/dev.rs target passes including the two PoisonErro"
+    },
+    {
+      "at": "2026-07-15T15:15:09.673Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0pj204u",
+      "note": "#2 Root cause recorded: either dev-default stdin execution is p"
+    },
+    {
+      "at": "2026-07-15T15:15:09.550Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0pj204u",
+      "note": "#1 tests/dev.rs::dev_default_matches_compiled_binary passes wit"
+    },
+    {
+      "at": "2026-07-15T15:14:53.387Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0pj204u",
+      "note": "Full suite red: stdin_filter left the dev default boundary set"
+    },
+    {
       "at": "2026-07-15T15:00:51.821Z",
       "by": "jet-impl-copy",
       "action": "card.claim",
@@ -42659,48 +42764,6 @@
       "action": "card.criteria-meet",
       "ref": "c0bo7bp5",
       "note": "#9"
-    },
-    {
-      "at": "2026-07-15T01:54:32.561Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-JETOS-PREVIEW1",
-      "note": "Which JetOS verb shows a machine change?"
-    },
-    {
-      "at": "2026-07-15T01:53:00.656Z",
-      "by": "codex-entropy-reviewer",
-      "action": "card.update",
-      "ref": "c0ikqqoo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T01:52:55.545Z",
-      "by": "codex-entropy-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ikqqoo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T01:52:47.342Z",
-      "by": "codex-entropy-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ikqqoo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T01:52:42.332Z",
-      "by": "codex-entropy-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ikqqoo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T01:48:38.495Z",
-      "by": "codex-entropy-builder",
-      "action": "card.update",
-      "ref": "c0ikqqoo",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

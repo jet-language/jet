@@ -159,6 +159,7 @@ renumbered, and no new `W` code may be allocated.
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
 | E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
 | E0999 | parse | teaching: stacked `#[…]` marker lines → one `#[A, B]` list or lone `#A` (D-ATTR2) |
+| E0991 | parse | teaching: retired `copy` keyword → `~` sigil (D-SHAPE-COPY1=A, supersedes D-CAP2/S4) |
 | E0101 | sema  | no `run` function                         |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -232,7 +233,7 @@ renumbered, and no new `W` code may be allocated.
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
 | E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
-| E0211 | sema  | `copy x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-CAP2/D-MEM1/S4) |
+| E0211 | sema  | `~x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-SHAPE-COPY1=A, supersedes D-CAP2/D-MEM1/S4) |
 | L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |

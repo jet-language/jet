@@ -386,10 +386,10 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_REMOVE,
     KW_CHANGE,
     KW_VIA,
-    KW_COPY,
     // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE
-    // in favor of the `&`/`^` sigils — they live only as teaching errors
-    // (E0056/E0057) now, so they are NOT in the keyword list. The retired
+    // in favor of the `&`/`^` sigils, and D-SHAPE-COPY1=A retired KW_COPY in
+    // favor of the `~` sigil — they live only as teaching errors (E0056/E0057/
+    // E0991) now, so none of them are in the keyword list. The retired
     // `ref[label]` field spelling (once taught via KW_STORED) is gone
     // outright with stored-reference fields (D-MEM1/S3) — `ref` is an
     // ordinary identifier again.
@@ -550,7 +550,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // machinery — the built-in/user line IS the plane line.
 use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
-    KW_BREAK, KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_COPY, KW_DERIVE, KW_ELSE, KW_ENUM,
+    KW_BREAK, KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_DERIVE, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MODULE,
     KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RETURN, KW_SANITIZER,
     KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASK, KW_TASKGROUP, KW_TEST,

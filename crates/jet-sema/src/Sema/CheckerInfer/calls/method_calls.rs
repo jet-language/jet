@@ -2585,8 +2585,8 @@ impl<'a> Checker<'a> {
                                 ),
                                 "this function has read access only and does not own the value".to_string(),
                                 format!(
-                                    "call it on a copy: `({} {}).{}(...)` — or take ownership with `{}: {}{}`",
-                                    Syntax::KW_COPY,
+                                    "call it on a copy: `({}{}).{}(...)` — or take ownership with `{}: {}{}`",
+                                    Syntax::SIGIL_COPY,
                                     n,
                                     method,
                                     n,

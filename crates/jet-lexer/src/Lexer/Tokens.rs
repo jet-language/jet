@@ -119,10 +119,9 @@ pub enum TokKind {
     Amp,
     Pipe,
     Caret,
-    /// D-MEM1: `~` is not part of the v5 grammar (was the D-CAP7 write sigil,
-    /// superseded by `&`). Still lexed — for `TildeTilde` longest-match and so a
-    /// lone `~` fails as an ordinary unrecognized-token syntax error rather than
-    /// panicking the lexer — but the parser has no arm for it.
+    /// D-SHAPE-COPY1=A: `~x` is the one copy sigil (supersedes D-CAP2/S4's
+    /// `copy` verb; was retired by D-MEM1 as the D-CAP7 write sigil, since
+    /// superseded by `&`).
     Tilde,
     /// Retired external-method connector. Longest-match before `~` so parser
     /// can teach E0325.

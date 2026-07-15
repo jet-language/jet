@@ -186,8 +186,8 @@ impl<'a> Checker<'a> {
                                 ),
                                 "tasks run concurrently; a `var` binding can't be shared between tasks".to_string(),
                                 format!(
-                                    "give the task its own copy (`{} {}`) or hand it over with `take({})`",
-                                    Syntax::KW_COPY, name, name
+                                    "give the task its own copy (`{}{}`) or hand it over with `take({})`",
+                                    Syntax::SIGIL_COPY, name, name
                                 ),
                                 Some(lam.span),
                             ));
@@ -249,8 +249,8 @@ impl<'a> Checker<'a> {
                             "a stored lambda owns its captures — clonable values are copied silently"
                                 .to_string(),
                             format!(
-                                "use `take({}) (…) => …` to move `{}`, or `{} {}` at the call site to copy on purpose",
-                                name, name, Syntax::KW_COPY, name
+                                "use `take({}) (…) => …` to move `{}`, or `{}{}` at the call site to copy on purpose",
+                                name, name, Syntax::SIGIL_COPY, name
                             ),
                             Some(lam.span),
                         ));

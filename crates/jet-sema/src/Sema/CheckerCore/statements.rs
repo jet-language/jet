@@ -758,11 +758,11 @@ impl<'a> Checker<'a> {
                                             "this function has read access only and does not own the value"
                                                 .to_string(),
                                             format!(
-                                                "return a copy: `return {} {};` — or take ownership with `{}: {}{}`. \
+                                                "return a copy: `return {}{};` — or take ownership with `{}: {}{}`. \
                                                  There's no borrow-return in v1 — to share the value without a full \
                                                  copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
                                                  once a real program needs shared ownership",
-                                                Syntax::KW_COPY,
+                                                Syntax::SIGIL_COPY,
                                                 n,
                                                 n,
                                                 Syntax::SIGIL_MOVE,
