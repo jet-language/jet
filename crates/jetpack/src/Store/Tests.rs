@@ -1203,7 +1203,7 @@ mod tests {
         };
         make("first-action-output", "first").unwrap();
         let error = make("second-action-output", "second").unwrap_err();
-        assert!(error.to_string().contains("maps to conflicting records"));
+        assert!(error.to_string().contains("conflicting bytes"));
         assert_eq!(closure_graph(&roots).unwrap().records.len(), 1);
     }
 
