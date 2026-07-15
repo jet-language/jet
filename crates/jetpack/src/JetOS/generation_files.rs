@@ -105,41 +105,82 @@ pub(super) fn write_generation_files(
         Some((&packages_json, &services_json, &options_json)),
     );
     fs::write(dir.join("plan.json"), &plan_text)?;
-    write_root_closure(dir, realized)?;
-    write_etc_tree(dir, system)?;
-    write_network_facts(dir, system)?;
-    write_boot_facts(dir, system, realized)?;
-    write_init_facts(dir, system, realized)?;
+    write_root_closure(dir, realized).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!("writing the owned runtime closure failed: {error}"),
+        )
+    })?;
+    generation_stage("etc tree", write_etc_tree(dir, system))?;
+    generation_stage("network facts", write_network_facts(dir, system))?;
+    generation_stage("boot facts", write_boot_facts(dir, system, realized))?;
+    generation_stage("init facts", write_init_facts(dir, system, realized))?;
     fs::write(dir.join("proof.txt"), render_proof(system, realized, plan))?;
-    write_systemd_units(dir, system)?;
-    write_systemd_timer_socket_units(dir, system)?;
-    write_terminal_environment(dir, system)?;
-    write_activation_diff(dir, published_dir, system, realized)?;
-    write_health_checks(dir, system)?;
-    write_hardware_facts(dir, system)?;
-    write_user_environment_facts(dir, system)?;
-    write_flatpak_facts(dir, system)?;
-    write_performance_facts(dir, system)?;
-    write_module_priority_facts(dir, system)?;
-    write_storage_facts(dir, system)?;
-    write_workload_facts(dir, system)?;
-    write_theme_facts(dir, system)?;
-    write_fleet_deploy_facts(dir, system, plan)?;
-    write_options_reference(dir, system)?;
-    write_image_variant_facts(dir, system, plan)?;
-    write_lifecycle_facts(dir, system)?;
-    write_service_manager_depth(dir, system)?;
-    write_app_module_facts(dir, system)?;
-    write_acceptance_fixture(dir, system)?;
-    write_desktop_facts(dir, system)?;
-    write_store_cache_facts(dir, realized)?;
-    write_compat_escape_hatches(dir, system)?;
-    write_provenance(dir, system, realized)?;
-    write_vm_proof(dir, system, &plan_text)?;
-    write_studio_app_projection(dir, published_dir, system)?;
-    write_secret_manifest(dir, system)?;
-    write_bootable_root_projection(dir, published_dir)?;
+    generation_stage("systemd units", write_systemd_units(dir, system))?;
+    generation_stage(
+        "systemd timer/socket units",
+        write_systemd_timer_socket_units(dir, system),
+    )?;
+    generation_stage("terminal environment", write_terminal_environment(dir, system))?;
+    generation_stage(
+        "activation diff",
+        write_activation_diff(dir, published_dir, system, realized),
+    )?;
+    generation_stage("health checks", write_health_checks(dir, system))?;
+    generation_stage("hardware facts", write_hardware_facts(dir, system))?;
+    generation_stage(
+        "user environment facts",
+        write_user_environment_facts(dir, system),
+    )?;
+    generation_stage("flatpak facts", write_flatpak_facts(dir, system))?;
+    generation_stage("performance facts", write_performance_facts(dir, system))?;
+    generation_stage(
+        "module priority facts",
+        write_module_priority_facts(dir, system),
+    )?;
+    generation_stage("storage facts", write_storage_facts(dir, system))?;
+    generation_stage("workload facts", write_workload_facts(dir, system))?;
+    generation_stage("theme facts", write_theme_facts(dir, system))?;
+    generation_stage("fleet deploy facts", write_fleet_deploy_facts(dir, system, plan))?;
+    generation_stage("options reference", write_options_reference(dir, system))?;
+    generation_stage(
+        "image variant facts",
+        write_image_variant_facts(dir, system, plan),
+    )?;
+    generation_stage("lifecycle facts", write_lifecycle_facts(dir, system))?;
+    generation_stage(
+        "service manager facts",
+        write_service_manager_depth(dir, system),
+    )?;
+    generation_stage("app module facts", write_app_module_facts(dir, system))?;
+    generation_stage("acceptance fixture", write_acceptance_fixture(dir, system))?;
+    generation_stage("desktop facts", write_desktop_facts(dir, system))?;
+    generation_stage("store cache facts", write_store_cache_facts(dir, realized))?;
+    generation_stage(
+        "compatibility facts",
+        write_compat_escape_hatches(dir, system),
+    )?;
+    generation_stage("provenance", write_provenance(dir, system, realized))?;
+    generation_stage("VM proof", write_vm_proof(dir, system, &plan_text))?;
+    generation_stage(
+        "Studio projection",
+        write_studio_app_projection(dir, published_dir, system),
+    )?;
+    generation_stage("secret manifest", write_secret_manifest(dir, system))?;
+    generation_stage(
+        "bootable root projection",
+        write_bootable_root_projection(dir, published_dir),
+    )?;
     Ok(())
+}
+
+fn generation_stage(stage: &str, result: std::io::Result<()>) -> std::io::Result<()> {
+    result.map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!("writing generation {stage} failed: {error}"),
+        )
+    })
 }
 
 const EVALUATOR_SEMANTICS: &str = "jet-env-model.module-eval.v1";
