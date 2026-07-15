@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 629,
-    "rev": 7414,
+    "nextNum": 630,
+    "rev": 7421,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18758,6 +18758,66 @@
       "needsAcceptance": false,
       "created": "2026-07-15T06:25:03.379Z",
       "updated": "2026-07-15"
+    },
+    {
+      "id": "c0ycodgm",
+      "num": 629,
+      "title": "Full suite fails Jetpack expect ceiling",
+      "body": "Full verification fails ban_jetpack_unwrap_expect after lifecycle and closure hardening introduced eleven production .expect calls. Replace them with explicit fail-closed handling without weakening lifecycle, nofollow, bounded-read, or closure semantics.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "root-629-builder",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Jetpack production contains zero unwrap/expect findings and the exact invariant test passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:46:08.996Z"
+        },
+        {
+          "n": 2,
+          "text": "Each removed expect preserves explicit fail-closed error handling for lifecycle directory, snapshot parsing, bounded reads, and closure actions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:46:09.090Z"
+        },
+        {
+          "n": 3,
+          "text": "Targeted Jetpack lifecycle/closure tests and cargo check pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:46:09.186Z"
+        },
+        {
+          "n": 4,
+          "text": "Mandatory full verification passes on the repaired committed tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:46:09.281Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T06:46:08.901Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T06:46:09.379Z"
     }
   ],
   "decisions": [
@@ -37049,6 +37109,73 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-15T05:32:46.263Z"
+    },
+    {
+      "id": "D-JPK-NIXPIN1",
+      "cardId": "c0xe5g33",
+      "group": "tooling",
+      "title": "Initial nixpkgs oracle revision",
+      "gist": "Choose the exact nixpkgs source revision that anchors Jetpack's first Nix 2.34 compatibility corpus.",
+      "lesson": "Nixpkgs is a Git repository containing package definitions. A commit is one exact snapshot of those definitions. Nix 2.34 is the evaluator version that interprets that snapshot. Both identities matter: changing the evaluator or the package definitions can change the expected derivation bytes and store paths.\n\nJetpack needs an oracle, meaning a trusted reference used only to create and check compatibility fixtures. The oracle record contains the Nix version, the full nixpkgs commit, and its NAR hash. A NAR hash identifies the fetched source tree's canonical archive bytes. The commit names the source; the NAR hash proves the obtained bytes match it.\n\nThis pin does not become a beginner-facing setting or change a project's dependencies. Beginners keep writing Jet and receive the native package experience. Experts can inspect the compatibility manifest, reproduce each oracle case, and see exactly which source and evaluator produced every expected value, derivation, and store path.\n\nPlatform remains a separate corpus dimension because nixpkgs can evaluate differently for each Nix `system`. Every fixture records its system. Stage A covers representative derivations; JP10 expands that into the full tier-platform inventory with a named reason for every skip. One source revision anchors all rows, so platform differences cannot be confused with source drift.\n\nThe pin is immutable after selection. Updating the repository's ordinary development shell does not move the compatibility oracle. A future re-pin needs the complete differential corpus green under the proposed revision and an amendment to D-JPK-NIXBASELINE1. The old manifest remains available for audit.",
+      "explainer": "",
+      "story": "Mara updates Jet's development shell and its ordinary flake lock moves to newer nixpkgs. A compatibility test changes on macOS. The separate oracle manifest shows whether the evaluator diverged from Nix 2.34 or only the development shell changed. Beginners see no new prompt. Mara can reproduce the exact failing source, system, expression, and expected derivation before proposing a deliberate re-pin.",
+      "inWild": "$ jetpack compatibility --json\n{\n  \"nix_version\": \"2.34\",\n  \"nixpkgs_rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n  \"nixpkgs_nar_hash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\",\n  \"systems\": [\"x86_64-linux\", \"aarch64-darwin\"],\n  \"source\": \"compatibility-corpus\"\n}\n\n$ jetpack compatibility verify\nNix 2.34 corpus: 184 exact, 0 divergent, 7 staged\nresult: compatible",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Current repository lock",
+          "detail": "Use the nixpkgs snapshot already locked by Jet's current root flake. Its full commit and NAR hash are committed local evidence. Copy both into a separate compatibility manifest, then let the development lock and oracle move independently. Beginners receive no prompt or configuration. Experts get one reproducible starting point already used by the repository, while every corpus row still records its system and expected bytes.",
+          "technical": "Pin Nix 2.34 with nixpkgs `b5aa0fbd538984f6e3d201be0005b4463d8b09f8`, `lastModified = 1782723713`, and `narHash = sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=`. The evidence is the root `flake.lock` committed by repository commit `6a01b05f0acca94b2cbdd7fddd14de315234d7ab`. The compatibility manifest copies values; it never follows later root-lock updates. Re-pinning requires the ratified green-corpus amendment law.",
+          "code": "baseline = {\n  nix = \"2.34\"\n  nixpkgs.rev = \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\"\n  nixpkgs.narHash = \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\"\n}\n\n$ jetpack compatibility verify\nsource identity: verified\ncorpus divergence: 0"
+        },
+        {
+          "key": "B",
+          "name": "Original repository lock",
+          "detail": "Use the nixpkgs snapshot from Jet's original root flake lock. Its full commit and NAR hash also survive in repository history. This gives the corpus an older repository-proven source, independent of today's development environment. Beginners still see nothing. Experts can reproduce it exactly, but the snapshot no longer has a current repository role showing that Jet's present toolchain and package examples evaluate against it.",
+          "technical": "Pin Nix 2.34 with nixpkgs `a799d3e3886da994fa307f817a6bc705ae538eeb`, `lastModified = 1780749050`, and `narHash = sha256-3av0pIjlOWQ6rDbNOmpUSvbNnJkGORQKKjb4LtCZsIY=`. The evidence is the root `flake.lock` in repository commit `baa917d6c`. Corpus systems and expected bytes remain explicit. Future movement follows the same amendment law.",
+          "code": "baseline = {\n  nix = \"2.34\"\n  nixpkgs.rev = \"a799d3e3886da994fa307f817a6bc705ae538eeb\"\n  nixpkgs.narHash = \"sha256-3av0pIjlOWQ6rDbNOmpUSvbNnJkGORQKKjb4LtCZsIY=\"\n}\n\n$ jetpack compatibility verify\nsource identity: verified\ncorpus divergence: 0"
+        },
+        {
+          "key": "C",
+          "name": "JetOS fixture revision",
+          "detail": "Use the exact nixpkgs commit already exercised by JetOS import and backend fixtures. This aligns the first evaluator corpus with those migration examples. The local fixture records only the commit, not its NAR hash. Before any corpus claim, the Nix 2.34 oracle must fetch that revision, record its canonical NAR hash, and verify every fixture against it. Until then, verification fails closed. Beginners remain unaffected; experts see the missing identity rather than an inferred hash.",
+          "technical": "Pin commit `fef9403a3e4d31b0a23f0bacebbec52c248fbb51`. Local evidence appears in `tests/support/jetpack_fixtures.rs`, `tests/jetpack_jetos.rs`, and `tests/fixtures/jetpack-config-real/config.jet`. Those synthetic locks omit `narHash` and do not establish this source as the Nix 2.34 oracle. The committed compatibility manifest must add the oracle-produced NAR hash before criteria can pass. Future movement follows the same amendment law.",
+          "code": "baseline = {\n  nix = \"2.34\"\n  nixpkgs.rev = \"fef9403a3e4d31b0a23f0bacebbec52c248fbb51\"\n  nixpkgs.narHash = \"<must be recorded by the Nix 2.34 oracle>\"\n}\n\n$ jetpack compatibility verify\nsource identity: incomplete\nresult: blocked until the canonical NAR hash is committed"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "A flake lock records both a Git revision and a NAR hash. The revision selects source history; the hash verifies canonical source bytes. Jetpack applies that identity pair to its compatibility oracle, then adds the Nix version, platform, and expected outputs.",
+          "code": "\"locked\": {\n  \"rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n  \"narHash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\"\n}"
+        },
+        {
+          "lang": "Rust toolchains",
+          "note": "A pinned Rust compiler and Cargo lock answer different questions. The compiler fixes language behavior; the lock fixes dependency sources. Nix 2.34 and the nixpkgs commit form the same two-part reference boundary here.",
+          "code": "rust-toolchain.toml + Cargo.lock"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The current root lock is the only locally evidenced candidate that combines an exact commit, canonical source hash, and a live repository role. Copying it into an immutable corpus manifest gives beginners a silent native default and experts a complete audit boundary. Separate storage prevents later development-shell updates from changing compatibility evidence.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The historical lock is byte-identifiable, but it no longer anchors any current repository environment. Selecting it would disconnect the initial corpus from the source snapshot Jet currently uses without adding a stronger identity guarantee."
+          },
+          {
+            "key": "C",
+            "reason": "The JetOS commit has useful migration coverage, but its local fixtures omit the NAR hash and are synthetic backend inputs. They do not yet prove the source identity required for a fail-closed parity oracle."
+          }
+        ],
+        "tradeoff": "The current development pin was selected for Jet's toolchain, not specifically for evaluator coverage. Accept this because corpus membership is explicit and separately reviewed; any unsupported construct is named, never hidden by changing the source pin."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-07-15T06:46:05.656Z"
     }
   ],
   "questions": [
@@ -37840,6 +37967,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T06:46:09.379Z",
+      "by": "root-629-builder",
+      "action": "card.claim",
+      "ref": "c0ycodgm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T06:46:09.282Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ycodgm",
+      "note": "#4 Mandatory full verification passes on the repaired committed"
+    },
+    {
+      "at": "2026-07-15T06:46:09.186Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ycodgm",
+      "note": "#3 Targeted Jetpack lifecycle/closure tests and cargo check pas"
+    },
+    {
+      "at": "2026-07-15T06:46:09.090Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ycodgm",
+      "note": "#2 Each removed expect preserves explicit fail-closed error han"
+    },
+    {
+      "at": "2026-07-15T06:46:08.996Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ycodgm",
+      "note": "#1 Jetpack production contains zero unwrap/expect findings and "
+    },
+    {
+      "at": "2026-07-15T06:46:08.901Z",
+      "by": "root",
+      "action": "card.add",
+      "ref": "c0ycodgm",
+      "note": "Full suite fails Jetpack expect ceiling"
+    },
+    {
+      "at": "2026-07-15T06:46:05.656Z",
+      "by": "codex-nixpin-ballot",
+      "action": "decision.add",
+      "ref": "D-JPK-NIXPIN1",
+      "note": "Initial nixpkgs oracle revision (draft)"
+    },
     {
       "at": "2026-07-15T06:43:18.149Z",
       "by": "root-628-reviewer",
@@ -41290,55 +41466,6 @@
       "action": "card.update",
       "ref": "c0c008wm",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-14T23:40:32.971Z",
-      "by": "codex-budget-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0c008wm",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-14T23:40:32.875Z",
-      "by": "codex-budget-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0c008wm",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-14T23:40:32.780Z",
-      "by": "codex-budget-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0c008wm",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-14T23:40:32.686Z",
-      "by": "codex-budget-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0c008wm",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-14T23:37:44.984Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEWMUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:44.840Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-EXTENSION1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:44.699Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SOURCE1",
-      "note": "marked ready"
     }
   ],
   "nextNum": 368,

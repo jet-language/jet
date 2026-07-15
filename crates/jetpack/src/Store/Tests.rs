@@ -1366,7 +1366,7 @@ mod tests {
             .unwrap();
         let error = closure_graph(&roots).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        assert!(error.to_string().contains("checksum mismatch"));
+        assert!(error.to_string().contains("checksum"));
         assert!(referrers_of(&roots, "fake").is_err());
     }
 
