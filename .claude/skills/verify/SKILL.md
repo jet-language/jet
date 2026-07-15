@@ -22,6 +22,22 @@ description: Verify a Jet compiler/stdlib change end-to-end in THIS repo — the
 - Do not use global `-- --test-threads=1` for completion proof. Use it only for
   a targeted race reproduction after a parallel failure.
 
+## Adversarial review gate
+
+Before claiming a meaningful change done, use a reviewer other than its
+implementer. Meaningful: compiler semantics, safety/ownership/FFI, runtime
+behavior, public contract, generated output, or more than one coherent
+implementation file. The reviewer starts fresh and receives only the diff,
+acceptance criteria, relevant invariants, and test evidence. Instruct it to
+assume the patch is wrong and seek concrete bugs, missed paths, false-green
+tests, invariant breaks, and scope drift; it must not implement.
+
+Implementer fixes every material finding. Reviewer re-checks material fixes.
+Parent inspects the review and runs final verification; reviewer green is never
+completion evidence by itself. Record reviewer identity, reviewed commit/diff,
+findings, and resolution in the card/PR handoff. Exempt only a one-file exact
+mechanical transformation with local proof; record the exemption rationale.
+
 ## Blessing snapshots and generated docs
 
 Blessing accepts a reviewed behavior change; it is never a way to make red

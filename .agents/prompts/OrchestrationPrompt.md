@@ -122,8 +122,16 @@ Every delegation brief must state:
 Require workers to stop and report when the contract is wrong, a gate appears,
 or scope must expand. After handoff, Sol inspects the evidence and diff, resolves
 overlap, runs the necessary checks, and either integrates, repairs, or reassigns
-the work. For meaningful changes, prefer an independent Terra review before
-Sol's final review.
+the work. For every meaningful change, require an independent Terra adversarial
+review before Sol's final review. Reviewer starts in a fresh context with only
+diff, acceptance criteria, invariants, and test evidence; assume patch is
+wrong; find concrete bugs, missed paths, false-green tests, invariant breaks,
+or scope drift. Reviewer does not implement. Builder fixes material findings;
+reviewer re-checks material fixes. Record reviewer, scope, findings, and
+resolution. Meaningful: compiler semantics, safety/ownership/FFI, runtime
+behavior, public contract, generated output, or more than one coherent
+implementation file. Only a one-file exact mechanical transformation with local
+proof may be exempt; Sol records why.
 
 When cavecrew roles are available, map them by task rather than using them
 ritually:

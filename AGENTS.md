@@ -180,6 +180,18 @@ Rules:
   apply, and "targeted tests only — parent runs the full suite".
 - Prefer the baked project agents in `.claude/agents/`: `jet-impl` for builds,
   `jet-verify` for independent verification, and `jet-ballot` for decisions.
+- **Adversarial review gate.** Before a meaningful change is integrated or
+  called complete, assign a different agent a fresh-context review. Give it the
+  diff, acceptance criteria, invariants, and test evidence — not the
+  implementer's reasoning — and tell it to assume the change is wrong. Its only
+  job is to find concrete bugs, missing paths, invariant violations, false-green
+  tests, and accidental scope changes; it does not implement. The implementer
+  fixes findings, then the reviewer re-checks material fixes. Parent inspects
+  both reviews and runs final verification. Meaningful means any change to
+  compiler semantics, safety/ownership/FFI, runtime behavior, public contract,
+  generated output, or more than one coherent implementation file. A one-file
+  mechanical edit with an exact, locally verified transformation is exempt;
+  parent records why. Never waive this gate because code compiles or tests pass.
 - One layer deep — sub-agents never spawn sub-agents.
 - Never spawn a sub-agent just to run a single shell command — use Bash directly.
 - Sub-agents must still follow all invariants (I1–I8) and the Nix command environment.

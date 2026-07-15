@@ -656,6 +656,13 @@ fn os_zero_hangar_generation_has_ledger_without_external_root() {
         "zero-Hangar publication must leave provider roots separate"
     );
     let retry = run();
+    if !retry.status.success() {
+        eprintln!("PRESERVED_ZERO_ROOT={}", root.path.display());
+        eprintln!("PRESERVED_ZERO_PROJECT={}", project.path.display());
+        std::mem::forget(project);
+        std::mem::forget(root);
+        panic!("stderr: {}", String::from_utf8_lossy(&retry.stderr));
+    }
     assert!(
         retry.status.success(),
         "stderr: {}",
