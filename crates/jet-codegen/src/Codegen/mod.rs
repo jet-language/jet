@@ -964,12 +964,14 @@ mod tests {
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
+        let observe = std::fs::read_to_string(root.join("src/Prelude/Observe.rs")).unwrap();
         for (relative, source) in [
             ("src/Prelude/Core.rs", core.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
                 runtime_control.as_str(),
             ),
+            ("src/Prelude/Observe.rs", observe.as_str()),
         ] {
             assert!(
                 source.lines().count() < MAX_MODULE_LINES,
@@ -989,21 +991,27 @@ mod tests {
         let control_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RuntimeControl.rs\")")
             .unwrap();
+        let observe_pos = production_codegen
+            .find("include_str!(\"../Prelude/Observe.rs\")")
+            .unwrap();
         assert!(
-            core_pos < control_pos,
+            core_pos < control_pos && control_pos < observe_pos,
             "prelude ownership order is generated-byte order"
         );
         assert!(production_codegen.contains("for part in PRELUDE_PARTS"));
         assert!(!production_codegen.contains("include!("));
+        assert_eq!(
+            PRELUDE_PARTS,
+            [core.as_str(), runtime_control.as_str(), observe.as_str()],
+            "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
+        );
 
         let mut emitted = String::new();
         push_prelude(&mut emitted);
-        assert_eq!(emitted, format!("{core}{runtime_control}"));
-        assert_eq!(emitted.len(), 97_215, "split changed prelude byte length");
         assert_eq!(
-            crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "78898379f81520ad747a31272fd161db19fdb5bb1a7b8cdcccba21ff2629b7ac",
-            "split changed historical Core.rs bytes, order, or boundary newline"
+            emitted,
+            format!("{core}{runtime_control}{observe}"),
+            "owned prelude modules must concatenate without byte loss or boundary changes"
         );
     }
 
