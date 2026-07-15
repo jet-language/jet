@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 634,
-    "rev": 7499,
+    "rev": 7504,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18996,29 +18996,29 @@
         {
           "n": 1,
           "text": "The exact core_provider_compiles_ring_package_to_rlib test builds core.archive from source and passes.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-632-builder",
-          "verifiedBy": null,
-          "evidence": "6dd09d766: exact archive core_provider_compiles_ring_package_to_rlib passed 1/1; includes source build plus post-commit mutation rejection.",
-          "at": "2026-07-15T07:55:58.357Z"
+          "verifiedBy": "root-632-reviewer",
+          "evidence": "Independent 2026-07-15: bounded cargo test --test archive passed 6/6 in 15.30s including compile. core_provider_compiles_ring_package_to_rlib built source core.archive, produced durable rlib metadata, then mutated output and observed closure_graph reject the invalidated proof.",
+          "at": "2026-07-15T08:27:11.626Z"
         },
         {
           "n": 2,
           "text": "Closure validation accepts legitimate source/store-record realizations only with cryptographically bound output identity while still rejecting incomplete, forged, and hostile closure records.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-632-builder",
-          "verifiedBy": null,
-          "evidence": "6dd09d766: vetted core/store-record proofs require exact output rehash; unknown-provider authority substitution unit passed; Nix still requires exact gc-root.",
-          "at": "2026-07-15T07:55:58.461Z"
+          "verifiedBy": "root-632-reviewer",
+          "evidence": "Independent review of 6dd09d766 and current closure authority: core proof requires exact full-output rehash anywhere; adapter/cran/luarocks remain local-only; hangar-ingest requires local+hangar-cas; store-record requires hangar-cas; Nix requires local rehash or canonical matching gc-root for /nix/store; unknown provider is rejected. Archive mutation proof passed, proving post-commit tamper rejection.",
+          "at": "2026-07-15T08:27:11.731Z"
         },
         {
           "n": 3,
           "text": "Targeted Jetpack closure/store tests and full archive target pass.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:40:03.948Z"
+          "status": "verified",
+          "metBy": "root",
+          "verifiedBy": "root-633-reviewer",
+          "evidence": "Independent sequential Nix evidence: bounded cargo test --test archive passed 6/6 in 15.30s; reused immediately preceding committed-tree cargo test -p jetpack closure_ 19/19 in 18.07s and Store::Tests::tests:: 49/49 in 18.07s; cargo check -p jetpack green. Foreign xattr test only raised Store count from 48 to 49 and passed.",
+          "at": "2026-07-15T08:27:32.289Z"
         },
         {
           "n": 4,
@@ -37467,70 +37467,70 @@
       "id": "D-JPK-SERVICEAUTH1",
       "cardId": "c01fj815",
       "group": "runtime",
-      "title": "Safe authority for dev-service processes",
-      "gist": "Choose how Jetpack can stop the exact dev service it started without ever signaling a reused process identifier.",
-      "lesson": "An operating system gives each running process a process identifier, usually called a PID. The number is temporary. After a process exits, the system may give the same number to an unrelated process. A saved PID therefore identifies a slot, not permanent ownership.\n\nA start time helps detect ordinary PID reuse. It does not make a later signal safe. The checked process can exit after Jetpack reads its start time. Another process can take that PID before Jetpack sends the signal. This gap is called a time-of-check to time-of-use race.\n\nSafe control needs authority bound to the operating system object. Linux offers process file descriptors and control groups. Windows offers process handles and Job Objects. macOS offers launchd jobs addressed by unique labels. These mechanisms keep control attached to the original process or complete process tree.\n\nA small project-local guardian can retain that authority while a declared service runs. It is not a global package daemon. `jet services up`, `health`, `logs`, and `down` remain unchanged. The guardian disappears when its service tree stops.\n\nDisk state also needs a transaction. Jetpack first writes a complete preparing record and syncs it. The service stays blocked until Jetpack atomically publishes a ready record and syncs its directory. A crash leaves one complete state, and recovery never guesses from a torn PID file.",
+      "title": "Safe authority for dev-service trees",
+      "gist": "Choose where Jetpack may run background dev services when an operating system can prove authority over the complete process tree.",
+      "lesson": "A process identifier, usually called a PID, is a reusable number. A start time can detect common reuse, but it does not bind a later signal. The checked process can exit and another process can receive that number before the signal occurs.\n\nA service is also a process tree, not one process. A child can create a new session with `setsid`, leave its parent's process group, and keep running. Safe shutdown therefore needs an operating system object that owns the changing tree, including descendants that change sessions.\n\nLinux systemd user units can own a delegated control group. A control group contains descendants independently of process groups. Windows Job Objects provide similar containment. Windows must place a suspended child into the Job before any user command runs, while a small service guardian retains the only non-inheritable Job handle.\n\nmacOS launchd identifies a main job by label, but its ordinary job and process-group control cannot contain a hostile descendant after `setsid`. A random launchd label prevents PID reuse against the main job. It does not prove complete-tree shutdown. The safe default must distinguish those two claims.\n\nStartup state is transactional. `Pending` means the command is blocked and may not run. `Ready` means containment is proved and release is authorized. `Stopping` means new starts are forbidden until the exact old authority is empty. Each record replacement and directory entry is synced before the next step.\n\nThis choice adds no Jet syntax, manifest field, command, or flag. Beginners use existing service commands where safe authority exists. Experts receive platform, generation, phase, and containment facts in existing structured output. Unsupported authority fails before the user command starts.",
       "explainer": "",
-      "story": "Mira starts a local database, closes her terminal, and later runs `jet services down`. During that interval the original shell exits and its PID becomes reusable. She expects Jetpack to stop only her database tree. A compiler crash or power loss during startup must not leave an untracked database or authorize a signal to another program.",
-      "inWild": "$ jet services up\nweb: starting\nweb: healthy\n\n$ jet services health --json\n{\"service\":\"web\",\"state\":\"healthy\",\"authority\":{\"version\":2,\"generation\":\"7cb8…\",\"backend\":\"pidfd-cgroup\"}}\n\n$ jet services down\nweb: stopped\n\nThe commands and default output stay familiar. Structured output gives experts the authority version, random generation, platform backend, lifecycle state, and last verified transition. It never exposes a control secret or raw reusable authority.",
+      "story": "Mira starts a database and later stops it after the original shell PID has been reused. A plugin inside the database also creates a new session. Jetpack must stop the exact original tree without touching the reused process. If startup crashes halfway, the next command must finish one known transition instead of guessing from a PID file.",
+      "inWild": "$ jet services up\nweb: starting\nweb: healthy\n\n$ jet services health --json\n{\"service\":\"web\",\"state\":\"healthy\",\"authority\":{\"version\":2,\"generation\":\"7cb8…\",\"phase\":\"Ready\",\"backend\":\"systemd-user-cgroup\",\"containment\":\"complete-tree\"}}\n\n$ jet services down\nweb: stopped\n\nOn unsupported macOS background control:\n\n$ jet services up\nError [E1330]: Safe service authority is unavailable for `web`.\n Why: Jetpack cannot prove atomic ownership and complete-tree containment on this host. PID, start-time, and process-name checks can race or miss escaped descendants.\n Fix: On Linux, enable a working systemd user manager with delegated control groups. On Windows, allow Job Object assignment. macOS background services remain unavailable; run the service directly.\nNo service command was started. No process was signaled.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Bound project-local authority",
-          "detail": "Keep current commands and background behavior. Each running service receives one internal, project-local authority that exists only for that declared service. Linux uses a guardian with a retained process file descriptor and dedicated control group. Windows uses a guardian with a Job Object. macOS uses a launchd job with a random generation label. A guardian or manager crash must stop the whole contained tree. No platform may fall back to a PID signal.",
-          "technical": "This narrowly amends D-JPK-NODAEMON1. It permits only per-service guardians and native managers while declared dev services run. It still forbids a global Jetpack daemon, root, package-manager background work, new CLI, and new Jet syntax. State v2 is `Preparing -> Ready -> Stopping`, keyed by a 256-bit random generation. Each transition uses create-new temp, file sync, atomic replacement, and parent-directory sync under the existing service-state lock. The service cannot execute before Ready is durable. Recovery removes Preparing only after proving containment stopped. Linux control uses pidfd_send_signal plus cgroup-wide termination; Windows uses Job Object termination and KILL_ON_JOB_CLOSE; macOS uses launchd bootstrap, kill, and bootout against the exact random label. Current start time may remain an audit fact, never signal authority. JSON reports backend, generation, phase, and transition result. Hostile platform tests must prove manager death stops descendants before support is claimed.",
-          "code": "$ jet services up\ncache: starting\ncache: healthy\n\n$ jet services down\ncache: stopped\n\n# After a forced Jetpack crash during publication:\n$ jet services up\ncache: recovered incomplete start generation 7cb8…\ncache: healthy\n\n# No new command, flag, manifest field, or policy setup is required."
+          "name": "Proved authority or fail closed",
+          "detail": "Keep current background behavior only where complete-tree authority is provable. Linux uses a transient systemd user unit and delegated control group. Windows uses a project-local guardian holding one Job Object. macOS fails before starting because launchd cannot contain hostile session escapes. Existing commands stay unchanged. Beginners get automatic safe operation on supported hosts and one actionable error elsewhere. Experts see exact generation, backend, phase, containment, and recovery facts.",
+          "technical": "This narrowly amends D-JPK-NODAEMON1 to permit a per-service Windows guardian and calls to an existing user-level system manager only while a declared dev service runs. It still forbids root, a global Jetpack daemon, package background work, new CLI, and new syntax. D-JPK-PLATFORM1 is narrowed only for background dev-service containment on macOS. E1330 is reserved with this copy: What: `Safe service authority is unavailable for {name}.` Why: `Jetpack cannot prove atomic ownership and complete-tree containment on this host. PID, start-time, and process-name checks can race or miss escaped descendants.` Fix: `On Linux, enable a working systemd user manager with delegated control groups. On Windows, allow Job Object assignment. macOS background services remain unavailable; run the service directly.` Linux creates a random transient user unit whose wrapper blocks on a generation gate. Jetpack proves the unit control group and manager authority before publishing Ready. Missing user manager, delegation, control group, or exact unit authority returns E1330 before release. Stop targets the unit and complete control group, never a PID. Jetpack loss does not claim to kill the control group; systemd remains its owner. If manager authority becomes unavailable, state stays fail-closed. Windows creates the service child suspended. The guardian creates one non-inheritable Job, omits every breakaway permission, enables KILL_ON_JOB_CLOSE, assigns the suspended child, then acknowledges containment. Jetpack publishes Ready before asking the guardian to resume. The service never inherits the Job handle. Guardian death closes the last Job handle and kills its contained tree. Down authenticates the random-generation control endpoint and asks the guardian to terminate the Job. macOS returns E1330 before spawn. Start protocol: durable Pending with generation and backend descriptor; spawn blocked; prove containment; atomically publish durable Ready; issue idempotent release. Pending recovery always stops the provisional authority, proves it empty, then removes state. Ready recovery retries the idempotent release when its acknowledgement is absent; explicit rejection moves durably to Stopping. Down publishes Stopping before termination. Stopping recovery repeats exact authority shutdown until empty, then removes state. An old generation is never replaced until its authority proves empty and its state removal is durable. Spawn or containment failure removes Pending only after proving no child ran. Publish failure stops containment and retains Pending when cleanup is uncertain. Ambiguous release retains Ready for idempotent recovery. No path signals from PID, start time, name, or legacy record.",
+          "code": "$ jet services up\ncache: starting\ncache: healthy\n\n# Crash after Ready was synced but before release acknowledgement:\n$ jet services up\ncache: recovering Ready generation 7cb8…\ncache: healthy\n\n$ jet services down\ncache: stopped\n\n# No policy setup, new flag, or manifest field is required."
         },
         {
           "key": "B",
-          "name": "Fail closed where safe authority is unavailable",
-          "detail": "Keep the no-resident-helper rule unchanged. Linux and Windows may run services only where their complete process trees have kernel-bound authority. macOS background services remain unavailable because an unprivileged one-shot Jetpack process cannot retain signal authority after it exits. Jetpack never uses the unsafe PID fallback. This preserves safety but withdraws tier-one service parity on macOS.",
-          "technical": "D-JPK-NODAEMON1 remains unchanged, while D-JPK-PLATFORM1 is amended to exclude background dev services on platforms without reusable kernel authority. Startup probes capability before spawning anything. Failure gets a reserved Jetpack E12xx diagnostic with what, why, and fixes. There is no unsafe override. Linux still requires pidfd plus complete-tree containment; Windows still requires Job Objects. State publication uses the same Preparing and Ready transaction. A platform cannot claim support from a start-time comparison or numeric process-group signal.",
-          "code": "$ jet services up\nError: Safe background service control is unavailable on this macOS host.\n Why: Current policy forbids a persistent guardian and macOS cannot signal a saved process as one bound object.\n Fix: Run the service directly, or choose foreground service ownership if that policy is ratified.\nNo service was started. No process was signaled."
+          "name": "Universal fail-closed background services",
+          "detail": "Require one complete authority contract on every tier-one platform before enabling background dev services anywhere. Linux and Windows implementations remain dormant until macOS gains equivalent containment. Every host returns the same E1330 before spawn. This preserves one uniform safety contract and no-daemon policy. It also removes the working background service default from Linux and Windows until the last platform can meet it.",
+          "technical": "D-JPK-NODAEMON1 remains unchanged. D-JPK-SERVICE1 changes from active supervision to captured-but-unavailable background service declarations. The same Pending, Ready, Stopping, generation, durability, and no-PID laws are acceptance requirements, but no backend becomes active independently. E1330 uses the exact copy in Option A on every platform, with the platform fix selected from authoritative capability facts. There is no unsafe override or cooperative exception. `jet dev` must stop before running user code when its declared service cannot start.",
+          "code": "$ jet services up\nError [E1330]: Safe service authority is unavailable for `web`.\n Why: Jetpack cannot prove atomic ownership and complete-tree containment on this host. PID, start-time, and process-name checks can race or miss escaped descendants.\n Fix: Background services remain disabled until every tier-one platform has the same complete-tree authority. Run the service directly.\nNo service command was started. No process was signaled."
         },
         {
           "key": "C",
-          "name": "Foreground session ownership",
-          "detail": "Keep the no-background-helper rule by making the invoking command retain every process handle. `jet services up` stays in the foreground until interrupted, then stops every service before returning. `jet dev` naturally owns services for its session. Safety is complete because the owning process never discards authority. Services cannot remain available between independent commands or after the terminal session ends.",
-          "technical": "The controller retains Child handles, process file descriptors, process groups, or Job Objects until shutdown and does not reap an exited leader before group cleanup. macOS keeps the original child unreaped, preventing PID reuse while group shutdown completes. State is session-scoped and contains no reusable signal authority. Crash handling uses platform containment and parent-death proof; a platform fails before start if it cannot prove controller loss stops the tree. D-JPK-NODAEMON1 remains unchanged, but D-JPK-SERVICE1 background lifecycle semantics are amended. Automation must keep the command alive.",
-          "code": "$ jet services up\nweb: healthy\ndb: healthy\nServices remain attached to this command. Press Ctrl-C to stop them.\n^C\ndb: stopped\nweb: stopped\n\n$ jet services health\nweb: not running\ndb: not running"
+          "name": "Cooperative macOS launchd scope",
+          "detail": "Use the proved Linux and Windows backends, then let macOS start a random-label launchd job with cooperative process-group cleanup. This keeps the beginner workflow available on macOS for well-behaved foreground services. A descendant can escape with `setsid`, so shutdown cannot prove complete-tree containment. This option is explicitly unsafe and ineligible under Jet's default safety ranking unless the owner removes that guarantee.",
+          "technical": "Linux, Windows, and transaction behavior match Option A. macOS writes Pending, bootstraps a blocked random-generation launchd job, publishes Ready, and releases it. Down targets the launchd label and known process group. The audit fact is `containment: cooperative`, never `complete-tree`. A hostile or accidental session escape can survive. Numeric PID signaling remains forbidden, but launchd label authority covers only the registered main job. Choosing this option explicitly accepts orphaned descendants and amends the service safety contract; no wording may present it as equivalent to control-group or Job containment.",
+          "code": "$ jet services up\nweb: starting\nweb: healthy\n\n$ jet services health --json\n{\"service\":\"web\",\"state\":\"healthy\",\"authority\":{\"backend\":\"launchd\",\"containment\":\"cooperative\",\"escaped_descendants_provable\":false}}\n\n$ jet services down\nweb: main launchd job stopped\nwarning: complete descendant shutdown could not be proved"
         }
       ],
       "comparisons": [
         {
-          "lang": "Linux",
-          "note": "A process file descriptor targets one process object, while a control group contains a changing process tree. Together they avoid numeric PID signaling and descendant-enumeration races.",
-          "code": "pidfd_send_signal(service_pidfd, SIGTERM)\ncgroup.kill = 1"
+          "lang": "systemd",
+          "note": "A transient user unit owns a control group. `KillMode=control-group` reaches descendants even after they create new sessions, while the unit name remains stable across Jetpack command invocations.",
+          "code": "systemd-run --user --unit jet-dev-<generation> --property KillMode=control-group <blocked-wrapper>"
         },
         {
           "lang": "Windows",
-          "note": "A Job Object contains the service tree. Terminating that object, or closing its last kill-on-close authority, cannot redirect termination to a later process that reused a PID.",
-          "code": "AssignProcessToJobObject(job, child)\nTerminateJobObject(job, 1)"
+          "note": "A suspended child cannot escape before Job assignment. Denying breakaway keeps descendants contained. Kill-on-close turns guardian loss into complete Job teardown.",
+          "code": "CREATE_SUSPENDED -> AssignProcessToJobObject -> durable Ready -> ResumeThread"
         },
         {
           "lang": "macOS",
-          "note": "launchd owns a registered job and addresses it by label. A random per-start label gives Jetpack stable service authority without relying on a saved PID.",
-          "code": "dev.jet.<project-hash>.<service>.<random-generation>"
+          "note": "A launchd label identifies the registered job without PID reuse. Ordinary launchd and process-group control still cannot prove ownership of a descendant after that descendant calls `setsid`.",
+          "code": "launchd label authority != hostile descendant containment"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It preserves the beginner promise that services start, survive the command, and stop later on every tier-one platform. Every stop reaches authority bound to the original service tree. Experts receive explicit generation, backend, transition, containment, and recovery facts through existing structured output.",
+        "why": "It spends availability only where the operating system lacks the required safety proof. Linux and Windows preserve ceremony-free background services with atomic complete-tree authority. macOS refuses before user code starts. Experts receive exact lifecycle and containment evidence, while no hidden fallback can signal unrelated work or abandon escaped descendants.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "It stays safe, but breaks the ratified tier-one macOS service promise and leaves a common beginner workflow unavailable without a replacement."
+            "reason": "It preserves safety and uniformity, but disables already-provable Linux and Windows behavior. Those platforms gain no stronger guarantee by waiting for an unrelated macOS primitive."
           },
           {
             "key": "C",
-            "reason": "It stays safe, but changes `services up` from a completed action into a terminal session. Independent health, logs, automation, and later shutdown lose their current lifecycle."
+            "reason": "It preserves macOS convenience by weakening the central guarantee. A service can leave launchd's controllable scope and survive a successful-looking shutdown."
           }
         ],
-        "tradeoff": "A project-local authority remains alive beside each running service. The exception is acceptable because its lifetime and power are limited to one declared service tree, and it performs no package or global background work."
+        "tradeoff": "Background dev services remain unavailable on macOS until complete-tree authority exists. This is accepted because a loud pre-start refusal is safer than false success or an unrelated signal."
       },
       "hybrid": null,
-      "checkInstructions": "Amend only the selected ratified laws. Prove no signal path accepts a PID, start time, process name, or text file as authority. Prove Preparing and Ready crash recovery at every write, file-sync, rename, directory-sync, spawn, containment, and release boundary. Force PID reuse between validation and shutdown; the unrelated process must survive. Spawn descendants during graceful and forced shutdown; the complete original tree must stop. Kill each guardian or native manager; the contained tree must stop and the next command must recover deterministically. Prove legacy PID-only and v1 PID/start records are quarantined without signaling. Run Linux, macOS, and Windows runtime tests on their native tier-one CI hosts.",
+      "checkInstructions": "Reserve E1330 exactly as specified in Option A. Add its what, why, and fix row to `docs/spec/diagnostics.md`, plus UI and CLI snapshots before implementation can claim the diagnostic exists under I4. Amend D-JPK-NODAEMON1 only for declared-service lifetime authority, and narrow D-JPK-PLATFORM1 only for macOS background service containment. Add no Jet syntax, manifest field, CLI command, or flag. Prove every Pending, spawn, containment, Ready publication, release, Stopping publication, termination, emptiness, state-removal, and directory-sync failpoint. Prove old-generation replacement cannot begin before old authority is empty. Force PID reuse between every probe and stop; unrelated processes must survive. Spawn descendants that call `setsid` during graceful and forced shutdown. Linux passes only when the transient user unit and delegated control group remain authoritative and empty after stop. Never claim Jetpack or guardian death kills a Linux control group. Windows passes only with create-suspended ordering, sole non-inheritable Job authority, no breakaway, KILL_ON_JOB_CLOSE, guardian-loss tree kill, and resume after durable Ready. macOS Option A must return E1330 before spawning any user command. Prove legacy PID-only and PID/start records are quarantined without signaling. Native Linux, Windows, and macOS CI must execute their real platform paths; source-token tests cannot substitute.",
       "draft": true,
       "status": "open",
       "created": "2026-07-15T08:02:35.286Z"
@@ -38325,6 +38325,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T08:27:32.289Z",
+      "by": "root-633-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0yt35t8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T08:27:11.915Z",
+      "by": "root",
+      "action": "card.criteria-meet",
+      "ref": "c0yt35t8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T08:27:11.731Z",
+      "by": "root-632-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0yt35t8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T08:27:11.626Z",
+      "by": "root-632-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0yt35t8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T08:27:05.474Z",
+      "by": "codex-root-producer-audit",
+      "action": "decision.update",
+      "ref": "D-JPK-SERVICEAUTH1",
+      "note": ""
+    },
     {
       "at": "2026-07-15T08:24:47.806Z",
       "by": "root-633-reviewer",
@@ -41788,41 +41823,6 @@
       "by": "owner",
       "action": "card.criteria-add",
       "ref": "c0q52kwp",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T00:21:43.348Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0q52kwp",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T00:21:26.537Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-DUNDER2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T00:21:26.537Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n183gm",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T00:21:26.537Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n183gm",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T00:21:26.537Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n183gm",
       "note": "#2 syntax-decisions.md log entry"
     }
   ],
