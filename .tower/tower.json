@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 633,
-    "rev": 7475,
+    "rev": 7476,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37322,7 +37322,7 @@
       "group": "tooling",
       "title": "Initial nixpkgs oracle revision",
       "gist": "Choose the exact nixpkgs source revision that anchors Jetpack's first Nix 2.34 compatibility corpus.",
-      "lesson": "Nixpkgs is a Git repository containing package definitions. A commit is one exact snapshot of those definitions. Nix 2.34 is the evaluator version that interprets that snapshot. A derivation is Nix's build-plan record; it describes inputs, the builder, its environment, and expected outputs. Changing the evaluator or package definitions can change derivation bytes and store paths.\n\nJetpack needs an oracle: a trusted reference used only to create and check compatibility fixtures. The oracle record contains the Nix version, the full nixpkgs commit, and its Nix Archive (NAR) hash. A NAR is Nix's canonical serialization of a filesystem tree. The hash verifies the normalized source tree Nix obtained, not the transport archive or Git commit object.\n\nThis pin does not become a beginner-facing setting or change a project's dependencies. Beginners keep writing Jet and receive the native package experience. Experts can inspect the compatibility manifest, reproduce each oracle case, and see exactly which source and evaluator produced every expected value, derivation, and store path.\n\nPlatform remains a separate corpus dimension because nixpkgs can evaluate differently for each Nix `system`. Every fixture records its system. The first evaluator stage covers representative derivations. The following full-parity stage expands coverage to every supported platform tier, with a named reason for every skip. One source revision anchors all rows, so platform differences cannot be confused with source drift.\n\nThe pin is immutable after selection. Updating the repository's ordinary development shell does not move the compatibility oracle. A future re-pin needs every comparison against reference Nix to match under the proposed revision. It also needs a new owner decision amending the existing pinned-baseline rule. The old manifest remains available for audit.",
+      "lesson": "Nixpkgs is a Git repository containing package definitions. A commit is one exact snapshot of those definitions. Nix 2.34 is the evaluator version that interprets that snapshot. A derivation is Nix's build-plan record describing inputs, the builder, its environment, and expected outputs; changing the evaluator or package definitions can change derivation bytes and store paths.\n\nJetpack needs an oracle: a trusted reference used only to create and check compatibility fixtures. The oracle record contains the Nix version, the full nixpkgs commit, and its Nix Archive (NAR) hash. A NAR is Nix's canonical serialization of a filesystem tree. The hash verifies the normalized source tree Nix obtained, not the transport archive or Git commit object.\n\nThis pin does not become a beginner-facing setting or change a project's dependencies. Beginners keep writing Jet and receive the native package experience. Experts can inspect the compatibility manifest, reproduce each oracle case, and see exactly which source and evaluator produced every expected value, derivation, and store path.\n\nPlatform remains a separate corpus dimension because nixpkgs can evaluate differently for each Nix `system`, and every fixture records its system. The first evaluator stage covers representative derivations. The following full-parity stage expands coverage to every supported platform tier, with a named reason for every skip. One source revision anchors all rows, so platform differences cannot be confused with source drift.\n\nThe pin is immutable after selection. Updating the repository's ordinary development shell does not move the compatibility oracle. A future re-pin needs every comparison against reference Nix to match under the proposed revision and a new owner decision amending the existing pinned-baseline rule. The old manifest remains available for audit.",
       "explainer": "",
       "story": "Mara updates Jet's development shell and its ordinary flake lock moves to newer nixpkgs. A compatibility test changes on macOS. The separate oracle manifest shows whether the evaluator diverged from Nix 2.34 or only the development shell changed. Beginners see no new prompt. Mara can reproduce the exact failing source, system, expression, and expected derivation before proposing a deliberate re-pin.",
       "inWild": "Proposed committed audit file: `tests/fixtures/nix-compat/oracle.json`\n\n{\n  \"nix_version\": \"2.34\",\n  \"nixpkgs_rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n  \"nixpkgs_nar_hash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\",\n  \"systems\": [\"x86_64-linux\", \"aarch64-darwin\"],\n  \"source_identity\": \"verified\",\n  \"corpus_status\": \"pending\",\n  \"acceptance_target\": \"zero divergences\"\n}\n\nUntil that file is committed, this ballot is the audit source. It proves the selected source identity only; it does not claim a completed corpus.",
@@ -38173,6 +38173,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T07:43:40.906Z",
+      "by": "codex-e4-539-review",
+      "action": "decision.update",
+      "ref": "D-JPK-NIXPIN1",
+      "note": ""
+    },
     {
       "at": "2026-07-15T07:40:04.157Z",
       "by": "root-632-builder",
@@ -41665,13 +41672,6 @@
       "action": "card.criteria-meet",
       "ref": "c0vvxein",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-15T00:18:21.542Z",
-      "by": "terra-539-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0vvxein",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
