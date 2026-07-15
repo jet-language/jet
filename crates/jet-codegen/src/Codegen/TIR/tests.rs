@@ -869,9 +869,19 @@ fn mk() {
 
     #[test]
     fn covers_map_builtin_methods() {
-        // insert/get/keys/values/contains_key/clear on a map-typed param.
-        let src = "fn f(m: [String: Int]) -> Int {\n m2 := m\n m2.insert(\"k\", 1)\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.contains_key(\"a\")\n m2.clear()\n return n\n}\n";
-        assert!(covers(src, "f"));
+        // add/len/keys/values/has_key/clear on a map-typed param. Run the full
+        // front end so this coverage proof cannot drift onto a list-only or
+        // otherwise invalid method spelling that sema would reject before TIR.
+        let src = "fn f(m: [String: Int]) -> Int {\n m2 := m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
+        assert!(covers_after_sema(src, "f"));
+    }
+
+    #[test]
+    fn rejects_unsupported_map_builtin_handoff() {
+        // `contains_key` is not Jet's Map surface. The TIR gate must hand the
+        // unsupported shape back instead of guessing from its Rust spelling.
+        let src = "fn f(m: [String: Int]) -> Bool {\n return m.contains_key(\"a\")\n}\n";
+        assert!(!covers(src, "f"));
     }
 
     #[test]
