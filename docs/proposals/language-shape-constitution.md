@@ -188,6 +188,20 @@ aliases, defaults, or entry-link rules. Those remain independently owned. It
 also introduces no package-only constructor: `.Executable.{ ... }` is the
 existing named-payload enum form.
 
+D-SHAPE-MERGEPROVENANCE1 has fixed the primary home for complete successful
+merge history. The unified `.jet/lock` keeps it beside the resolved graph. For
+each semantic field path, the lock retains the final value and every successful
+contribution or deliberate replacement in order, including source span,
+operation, input value hash, and final value hash. Failed conflicts produce a
+diagnostic and no lock.
+
+Human explanations, receipts, and audit streams are generated from that one
+history. They never become another source of truth. This result does not choose
+composition, overrides, file layout, lock serialization, retention beyond
+complete successful inputs, failed-conflict artifacts, receipt or generation
+schemas, audit transport, or inspection command spelling. #560 owns the
+implementation and views; #532, #605, and #608 remain upstream gates.
+
 ## Internal names
 
 The useful part of Python's leading underscore is discoverability, not privacy.

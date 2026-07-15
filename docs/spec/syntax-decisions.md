@@ -2398,6 +2398,38 @@ inventory are implemented by #587; language-wide shape enforcement is owned by
 #560. Aliases, default selection, and callable entry linking remain separate
 choices and are not implied by D-SHAPE5b.
 
+**D-SHAPE-MERGEPROVENANCE1=A — Complete successful merge history lives in
+`.jet/lock`**: the unified lock is the sole primary copy of that history,
+stored beside the resolved graph. For each semantic field path it retains the
+final value and an ordered edge for every successful contributor and deliberate
+replacement. Every edge carries its source span, operation, input value hash,
+and final value hash. A failed conflict produces a Jet diagnostic and no lock
+artifact.
+
+Human explanations, signed receipts, and audit streams derive from those same
+locked edges. They may render, sign, hash, or stream the history, but none is a
+second authority.
+
+The following is a conceptual generated view only. It is neither `.jet/lock`
+serialization nor command output:
+
+```text
+semantic path  policy.optimization
+final value    .Speed
+successful edges, in order
+  workspace.jet:18:5  default  input sha256:21…  final sha256:74…
+  release.jet:4:9      replace  input sha256:9c…  final sha256:74…
+```
+
+This decision does not choose composition or override behavior, the source-file
+model, exact lock serialization, retention or compaction beyond complete
+successful inputs, an artifact for failed conflicts, signature/receipt/
+generation schemas, audit transport, or inspection CLI spelling. #560 owns
+implementation and every generated view. The graph, composition, and receipt
+decisions on #532, #605, and #608 remain gates. D-SHAPE-MERGEPROVENANCE1 adds
+no `Syntax.rs` entry, parser or runtime behavior, CLI, grammar, snapshot, or
+executable example by itself.
+
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
 is **`pkg.jet`** (`payload: { name, version }` identity + `packages:` +
 `deps:` + `targets:` + `effects:`); dev shell is **`env.jet`**; monorepo
