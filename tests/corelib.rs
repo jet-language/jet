@@ -1613,7 +1613,7 @@ fn run() {{
     int_reader := cbor.reader(^int_input) ?? panic("int reader")
     if int_reader.next() == {{
         err(first) -> {{
-            print(first.byte_offset == 2 && reader_terminal(&int_reader, copy first.reason))
+            print(first.byte_offset == 2 && reader_terminal(&int_reader, ~first.reason))
         }}
         ok(_) -> print(false)
     }}
@@ -1622,7 +1622,7 @@ fn run() {{
     float_reader := cbor.reader(^float_input) ?? panic("float reader")
     if float_reader.next() == {{
         err(first) -> {{
-            print(first.byte_offset == 3 && reader_terminal(&float_reader, copy first.reason))
+            print(first.byte_offset == 3 && reader_terminal(&float_reader, ~first.reason))
         }}
         ok(_) -> print(false)
     }}
@@ -1631,7 +1631,7 @@ fn run() {{
     indef_reader := cbor.reader(^indef_input) ?? panic("indef reader")
     if indef_reader.next() == {{
         err(first) -> {{
-            print(first.byte_offset == 3 && reader_terminal(&indef_reader, copy first.reason))
+            print(first.byte_offset == 3 && reader_terminal(&indef_reader, ~first.reason))
         }}
         ok(_) -> print(false)
     }}
@@ -1641,7 +1641,7 @@ fn run() {{
     trailing_root :: trailing_reader.next() ?? panic("root")
     if trailing_reader.next() == {{
         err(first) -> {{
-            print(first.byte_offset == 1 && reader_terminal(&trailing_reader, copy first.reason))
+            print(first.byte_offset == 1 && reader_terminal(&trailing_reader, ~first.reason))
         }}
         ok(_) -> print(false)
     }}
@@ -1673,7 +1673,7 @@ fn run() {{
     array_fail_writer.write(encoding.DataEvent.Null) ?? panic("array fail null")
     if array_fail_writer.write(encoding.DataEvent.ArrayEnd) == {{
         err(first) -> {{
-            print(writer_terminal(&array_fail_writer, copy first.reason))
+            print(writer_terminal(&array_fail_writer, ~first.reason))
         }}
         ok(_) -> print(false)
     }}
@@ -1706,7 +1706,7 @@ fn run() {{
     incomplete_writer.flush() ?? panic("incomplete flush")
     if incomplete_writer.finish() == {{
         err(first) -> {{
-            print(writer_terminal(&incomplete_writer, copy first.reason))
+            print(writer_terminal(&incomplete_writer, ~first.reason))
         }}
         ok(_) -> print(false)
     }}
@@ -1777,7 +1777,7 @@ fn run() {{
     if rejected_writer.write(encoding.DataEvent.Null) == {{
         err(first) -> {{
             print(first.reason == "max_item_bytes 7 exceeded")
-            print(terminal(&rejected_writer, copy first.reason))
+            print(terminal(&rejected_writer, ~first.reason))
         }}
         ok(_) -> {{ print(false); print(false) }}
     }}
@@ -1824,14 +1824,14 @@ fn run() {{
     directory_input :: files.open("{directory}") ?? panic("directory open")
     directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
     if directory_reader.next() == {{
-        err(first) -> print(reader_terminal(&directory_reader, copy first.reason))
+        err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
         ok(_) -> print(false)
     }}
     full_output :: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
     if full_writer.flush() == {{
-        err(first) -> print(writer_terminal(&full_writer, copy first.reason))
+        err(first) -> print(writer_terminal(&full_writer, ~first.reason))
         ok(_) -> print(false)
     }}
 }}
@@ -1920,19 +1920,19 @@ use core.encoding.cbor as cbor
 
 fn run() {
     strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
-    if cbor.parse([249, 62, 0], copy strict) == {
+    if cbor.parse([249, 62, 0], ~strict) == {
         ok(value) -> print(value.float() ?? -1.0)
         err(_) -> print(-2.0)
     }
-    if cbor.parse([250, 63, 192, 0, 0], copy strict) == {
+    if cbor.parse([250, 63, 192, 0, 0], ~strict) == {
         ok(_) -> print(false)
         err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
     }
-    if cbor.parse([249, 126, 1], copy strict) == {
+    if cbor.parse([249, 126, 1], ~strict) == {
         ok(_) -> print(false)
         err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
     }
-    if cbor.parse([249, 126, 0], copy strict) == {
+    if cbor.parse([249, 126, 0], ~strict) == {
         ok(_) -> print(true)
         err(_) -> print(false)
     }
@@ -1976,11 +1976,11 @@ fn run() {
     print(packet.data)
 
     strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
-    if cbor.parse([159, 1, 255], copy strict) == {
+    if cbor.parse([159, 1, 255], ~strict) == {
         ok(_) -> print(false)
         err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
     }
-    if cbor.parse([129, 127, 97, 120, 255], copy strict) == {
+    if cbor.parse([129, 127, 97, 120, 255], ~strict) == {
         ok(_) -> print(false)
         err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
     }
@@ -2162,19 +2162,19 @@ use core.encoding.cbor as cbor
 
 fn run() {
     options := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
-    value := cbor.parse([130, 97, 120, 97, 121], copy options) ?? panic("definite parse")
-    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], copy options) ?? panic("indefinite parse")
+    value := cbor.parse([130, 97, 120, 97, 121], ~options) ?? panic("definite parse")
+    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], ~options) ?? panic("indefinite parse")
     if cbor.parse([130, 97, 120], options) == {
         ok(_) -> panic("truncated array accepted")
         err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
     }
 
     roomy := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
-    if cbor.parse([129, 130, 97, 120], copy roomy) == {
+    if cbor.parse([129, 130, 97, 120], ~roomy) == {
         ok(_) -> panic("nested truncation accepted")
         err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
     }
-    if cbor.parse([162, 97, 97, 1, 97, 97, 2], copy roomy) == {
+    if cbor.parse([162, 97, 97, 1, 97, 97, 2], ~roomy) == {
         ok(_) -> panic("duplicate key accepted")
         err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
     }
@@ -4360,14 +4360,14 @@ fn run() {
         ok(_) -> panic("address injection accepted")
         err(_) -> print("address-rejected")
     }
-    if email.message(copy sender, [copy recipient], [], "hello\nBcc: stolen@example.com", "text", "", []) == {
+    if email.message(~sender, [~recipient], [], "hello\nBcc: stolen@example.com", "text", "", []) == {
         ok(_) -> panic("header injection accepted")
         err(_) -> print("header-rejected")
     }
-    recipients := [copy recipient]
+    recipients := [~recipient]
     count := 1
-    loop count < 101 { recipients.push(copy recipient); count++ }
-    if email.message(copy sender, recipients, [], "subject", "text", "", []) == {
+    loop count < 101 { recipients.push(~recipient); count++ }
+    if email.message(~sender, recipients, [], "subject", "text", "", []) == {
         ok(_) -> panic("recipient bound ignored")
         err(_) -> print("recipient-bound")
     }
@@ -4380,7 +4380,7 @@ fn run() {
     }
     attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
     message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", "<b>html</b>", [attachment]) ?? panic("message")
-    first :: email.serialize(copy message) ?? panic("serialize")
+    first :: email.serialize(~message) ?? panic("serialize")
     second :: email.serialize(message) ?? panic("serialize twice")
     print(first == second)
     print(first.len())
@@ -4422,10 +4422,10 @@ fn run() {
     sender :: email.address("sender@example.com") ?? panic("sender")
     visible :: email.address("visible@example.net") ?? panic("visible")
     hidden :: email.address("hidden@example.org") ?? panic("hidden")
-    message :: email.message(copy sender, [copy visible], [copy hidden], "subject", "body", "", []) ?? panic("message")
-    original_bytes :: email.serialize(copy message) ?? panic("serialize original")
+    message :: email.message(~sender, [~visible], [~hidden], "subject", "body", "", []) ?? panic("message")
+    original_bytes :: email.serialize(~message) ?? panic("serialize original")
     default_envelope :: message.envelope()
-    envelope :: email.envelope(sender, [copy hidden]) ?? panic("envelope")
+    envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")
     replaced :: message.with_envelope(envelope) ?? panic("replace")
     bytes :: email.serialize(replaced) ?? panic("serialize")
     start_tls: email.SmtpSecurity := .StartTls
@@ -5621,7 +5621,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..1000 {
-        dup :: copy sender
+        dup :: ~sender
         tasks.spawn(take(dup) () => {
             dup.send(1)
         })
@@ -5660,7 +5660,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..10000 {
-        dup :: copy sender
+        dup :: ~sender
         tasks.spawn(take(dup) () => {
             dup.send(1)
         })
@@ -5700,7 +5700,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..100000 {
-        dup :: copy sender
+        dup :: ~sender
         tasks.spawn(take(dup) () => {
             dup.send(1)
         })
@@ -6545,7 +6545,7 @@ fn run() {
 }
 
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
-/// the borrowed parameter. The explicit `copy` required by E0209 must produce
+/// the borrowed parameter. The explicit `~` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
 /// run with the expected data.
 #[test]
@@ -6571,13 +6571,13 @@ fn pick() -> Int {
 }
 
 fn encoded(e: Email, i: Int) -> String {
-    shallow := DataTree.Text(copy e.addr)
-    nested := DataTree.Text(copy e.nested.text)
-    indexed := DataTree.Text(copy e.items[0].text)
-    computed := DataTree.Text(copy e.items[i + 1].text)
-    called := DataTree.Text(copy e.items[pick()].text)
-    parenthesized := DataTree.Text(copy e.items[-(-i)].text)
-    conditional := DataTree.Text(copy e.items[if i == 0 { 0 } else { 1 }].text)
+    shallow := DataTree.Text(~e.addr)
+    nested := DataTree.Text(~e.nested.text)
+    indexed := DataTree.Text(~e.items[0].text)
+    computed := DataTree.Text(~e.items[i + 1].text)
+    called := DataTree.Text(~e.items[pick()].text)
+    parenthesized := DataTree.Text(~e.items[-(-i)].text)
+    conditional := DataTree.Text(~e.items[if i == 0 { 0 } else { 1 }].text)
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
@@ -7171,7 +7171,7 @@ fn run() {
     (started_tx, started_rx) :: tasks.channel<Int>()
     (release_tx, release_rx) :: tasks.channel<Int>()
     ev.on(scope, (n: Int) => {
-        started_tx.send(copy n)
+        started_tx.send(~n)
         released :: release_rx.receive() ?? panic("release")
     })
     first :: ev.emit_async(1)
@@ -7230,7 +7230,7 @@ fn run() {
     (newest_started_tx, newest_started_rx) :: tasks.channel<Int>()
     (newest_release_tx, newest_release_rx) :: tasks.channel<Int>()
     newest.on(newest_scope, (n: Int) => {
-        newest_started_tx.send(copy n)
+        newest_started_tx.send(~n)
         released_newest :: newest_release_rx.receive() ?? panic("release")
     })
     newest_first :: newest.emit_async(1)
@@ -7250,7 +7250,7 @@ fn run() {
     (oldest_started_tx, oldest_started_rx) :: tasks.channel<Int>()
     (oldest_release_tx, oldest_release_rx) :: tasks.channel<Int>()
     oldest.on(oldest_scope, (n: Int) => {
-        oldest_started_tx.send(copy n)
+        oldest_started_tx.send(~n)
         released_oldest :: oldest_release_rx.receive() ?? panic("release")
     })
     oldest_first :: oldest.emit_async(1)
@@ -7271,7 +7271,7 @@ fn run() {
     (once_release_tx, once_release_rx) :: tasks.channel<Int>()
     once_event.on_priority(once_scope, 10, (n: Int) => {
         if n == 1 {
-            once_started_tx.send(copy n)
+            once_started_tx.send(~n)
             released_once :: once_release_rx.receive() ?? panic("release")
         }
     })
@@ -7355,8 +7355,8 @@ fn owner_teardown_task() -> Task<DispatchReport<String>> {
     (started_tx, started_rx) :: tasks.channel<Int>()
     (release_tx, release_rx) :: tasks.channel<Int>()
     ev.on(owner_scope, (n: Int) => {
-        started_tx.send(copy n)
-        held_sender :: copy release_tx
+        started_tx.send(~n)
+        held_sender :: ~release_tx
         released :: release_rx.receive() ?? panic("release")
     })
     running :: ev.emit_async(98)
@@ -7371,7 +7371,7 @@ fn run() {
     (cancel_started_tx, cancel_started_rx) :: tasks.channel<Int>()
     (cancel_release_tx, cancel_release_rx) :: tasks.channel<Int>()
     cancelled.on(cancel_scope, (n: Int) => {
-        cancel_started_tx.send(copy n)
+        cancel_started_tx.send(~n)
         released :: cancel_release_rx.receive() ?? panic("release")
     })
     cancel_running :: cancelled.emit_async(1)
@@ -7393,7 +7393,7 @@ fn run() {
     (queued_started_tx, queued_started_rx) :: tasks.channel<Int>()
     (queued_release_tx, queued_release_rx) :: tasks.channel<Int>()
     queued_deadline.on(queued_scope, (n: Int) => {
-        queued_started_tx.send(copy n)
+        queued_started_tx.send(~n)
         released :: queued_release_rx.receive() ?? panic("release")
     })
     queued_running :: queued_deadline.emit_async(10)
@@ -7411,7 +7411,7 @@ fn run() {
     (pending_started_tx, pending_started_rx) :: tasks.channel<Int>()
     (pending_release_tx, pending_release_rx) :: tasks.channel<Int>()
     pending_deadline.on(pending_scope, (n: Int) => {
-        pending_started_tx.send(copy n)
+        pending_started_tx.send(~n)
         released :: pending_release_rx.receive() ?? panic("release")
     })
     pending_running :: pending_deadline.emit_async(20)
