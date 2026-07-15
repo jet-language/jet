@@ -940,7 +940,10 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         "DkimConfig" => Some(vec![
             ("domain".to_string(), Type::String),
             ("selector".to_string(), Type::String),
-            ("private_key".to_string(), Type::Named("Secret".to_string())),
+            (
+                "private_key".to_string(),
+                crate::Sema::Diagnostics::core_crypto_nominal(Type::Named("Secret".to_string())),
+            ),
             ("signed_headers".to_string(), Type::List(Box::new(Type::String))),
         ]),
         "EncodingCause" => Some(vec![
@@ -1053,7 +1056,12 @@ pub(crate) fn core_email_variants(
         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
         variants.insert("Password".to_string(), (zero, VariantPayload::Named(vec![
             VariantField { name: "username".to_string(), name_span: zero, ty: Type::String, ty_span: zero },
-            VariantField { name: "password".to_string(), name_span: zero, ty: Type::Named("Secret".to_string()), ty_span: zero },
+            VariantField {
+                name: "password".to_string(),
+                name_span: zero,
+                ty: crate::Sema::Diagnostics::core_crypto_nominal(Type::Named("Secret".to_string())),
+                ty_span: zero,
+            },
         ])));
     } else if enum_name == "TlsTrust" {
         variants.insert("System".to_string(), (zero, VariantPayload::Unit));

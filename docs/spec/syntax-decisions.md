@@ -1104,6 +1104,12 @@ taint spreads by dataflow; `#Sanitizer fn` strips by contract (bare
 `sanitizer` E0059); tainted value reaching a `Db`/`Exec`/`Net` sink is E0721.
 Full IFC deferred post-Epoch 3.
 
+**D-TAINT2=A — Credential taint** *(ratified 2026-07-13)*:
+`#Tainted(Credential) T` attaches the existing credential kind through the one
+taint lattice. Credential taint spreads by dataflow and may not reach
+`print`, `log`, or serialization sinks (E0722); `#Sanitizer fn` is the audited
+strip point. Other taint kinds retain the D-TAINT1 injection-sink rules.
+
 **D-DET1 — Determinism** *(D-DET-CAPAPI)*: `#Pure` implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 (`now/tick/advance/wait`) and `Rng` (`int/float/bool/pick/shuffle`) are the
@@ -2069,6 +2075,12 @@ index, not a substitute for that law.
   verification. `app.auth(users: db)` is the magic default; every knob
   expert-overridable; secrets carry the `.Credential` taint kind; policy
   may require stronger factors.
+- **D-AUTH2=A** *(ratified 2026-07-13)*: token verification ships as
+  standalone typed `core.auth` functions before the application graph.
+  `auth.verify_jwt(token, key)` verifies HS256 signatures and an optional
+  `exp` claim, then returns `Result<Claims>`; callers validate expected
+  audience from the typed claim. Future `app.auth` reuses this function rather
+  than creating a second verification mechanism.
 - **D-SYNC1=A**: `core.sync` CRDT value types — `SyncText`,
   `SyncMap<K,V>`, `SyncList<T>`, `SyncCounter`; `@Codable`,
   deterministic merge, ride the live-query channel via

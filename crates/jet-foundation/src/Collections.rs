@@ -83,6 +83,9 @@ pub fn builtin_method_return(
     arg_count: usize,
     is_static_on_type: bool,
 ) -> Option<Option<Type>> {
+    if let Type::Tagged { inner, .. } = recv_ty {
+        return builtin_method_return(inner, method, arg_count, is_static_on_type);
+    }
     if is_static_on_type {
         return builtin_static_return(recv_ty, method, arg_count);
     }
@@ -1112,6 +1115,9 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
 
 /// Expected argument types for built-in methods (excluding receiver).
 pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type>> {
+    if let Type::Tagged { inner, .. } = recv_ty {
+        return builtin_method_arg_types(inner, method);
+    }
     match recv_ty {
         Type::Named(n) if n == "Secret" && method == "from_text" => Some(vec![Type::String]),
         Type::Named(n) if matches!(n.as_str(), "Secret" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey") && method == "from_bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),

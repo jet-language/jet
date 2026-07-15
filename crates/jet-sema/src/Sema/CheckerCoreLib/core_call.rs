@@ -23,6 +23,26 @@ fn is_string_literal_expr(expr: &crate::AST::Expr) -> bool {
     }
 }
 
+fn resolved_core_fixed_sig(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    let (params, ret) = core_fixed_sig(module, name)?;
+    if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert") {
+        Some((
+            params
+                .into_iter()
+                .map(|(access, ty)| {
+                    (access, crate::Sema::Diagnostics::core_crypto_nominal(ty))
+                })
+                .collect(),
+            ret.map(crate::Sema::Diagnostics::core_crypto_nominal),
+        ))
+    } else {
+        Some((params, ret))
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn infer_core_call(
             &mut self,
@@ -80,7 +100,7 @@ impl<'a> Checker<'a> {
                     self.infer(&mut a.expr);
                 }
                 // Return the declared type so the call site doesn't cascade.
-                return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+                return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
             }
             // D-STDIN1=A / E3401: `pure fn` cannot read from stdin.
             if self.in_pure && self.det_suppress == 0 && is_impure_core(module, name) {
@@ -90,7 +110,7 @@ impl<'a> Checker<'a> {
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
-                return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+                return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
             }
             // D-EFF1: `@Pure` is the empty effect set, so any effectful Core call —
             // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `@Pure fn`.
@@ -103,7 +123,7 @@ impl<'a> Checker<'a> {
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
-                return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+                return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
             }
             // D-A11YGATE1=B (c134 Phase 6): E2930 (empty accessible label on an
             // interactive-role node) is checked here, on the raw call-site args,
@@ -114,7 +134,7 @@ impl<'a> Checker<'a> {
             if module == "core.ui" && name == "node_role" {
                 self.check_a11y_node_role_label(args, span);
             }
-            let sig = core_fixed_sig(module, name);
+            let sig = resolved_core_fixed_sig(module, name);
             match (module, name) {
                 ("core.encoding.cbor", "parse") => {
                     if !(1..=2).contains(&args.len()) {

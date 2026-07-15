@@ -5,6 +5,18 @@ use std::collections::HashMap;
 impl<'a> Checker<'a> {
         pub(crate) fn resolve_type(&self, ty: Type) -> Type {
             match ty {
+                // Core crypto nominal provenance survives alias resolution so a
+                // local struct with the same leaf name remains a distinct type.
+                Type::Named(n)
+                    if n.split_once('.').is_some_and(|(alias, leaf)| {
+                        self.core_imports.get(alias).is_some_and(|module| {
+                            matches!(module.as_str(), "jet.crypto" | "core.crypto")
+                                && matches!(leaf, "Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret")
+                        })
+                    }) => {
+                        let leaf = n.split_once('.').unwrap().1.to_string();
+                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf))
+                    }
                 // D-ENC-DYN1=A+: `Json`/`Toml`/`Yaml`/`Csv` are type aliases over the one
                 // dynamic `Data` value — canonicalize every alias to `Data` so they unify.
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {

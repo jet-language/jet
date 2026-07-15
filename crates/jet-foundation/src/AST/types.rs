@@ -1,5 +1,9 @@
 use crate::Diagnostics::Span;
 
+/// Internal-only provenance tag for purpose-bound `core.crypto` nominal types.
+/// The NUL prefix cannot be written as a Jet marker identifier.
+pub const CORE_CRYPTO_NOMINAL_MARKER: &str = "\0core.crypto";
+
 /// The access capability of a parameter / argument / receiver (D-MEM1, was
 /// D-CAP7/8/9/10).
 ///
@@ -198,7 +202,15 @@ impl PartialEq for Type {
                     bits: b2,
                 },
             ) => s1 == s2 && b1 == b2,
-            // D-QUAL4: tagged types are transparent — identity is on the inner type.
+            // Internal core nominal provenance is identity-bearing. User-written
+            // D-QUAL4 tags remain transparent flow annotations.
+            (Tagged { marker: ma, inner: a }, Tagged { marker: mb, inner: b })
+                if ma == CORE_CRYPTO_NOMINAL_MARKER || mb == CORE_CRYPTO_NOMINAL_MARKER =>
+            {
+                ma == mb && a == b
+            }
+            (Tagged { marker, .. }, _) | (_, Tagged { marker, .. })
+                if marker == CORE_CRYPTO_NOMINAL_MARKER => false,
             (Tagged { inner: a, .. }, Tagged { inner: b, .. }) => a == b,
             (Tagged { inner, .. }, other) | (other, Tagged { inner, .. }) => {
                 inner.as_ref() == other
@@ -315,6 +327,7 @@ impl Type {
                 )
             }
             Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
+            Type::Tagged { marker, inner } if marker == CORE_CRYPTO_NOMINAL_MARKER => inner.show(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.show()),
         }
     }
@@ -364,6 +377,7 @@ impl Type {
             Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", elem.name(), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::Float32 => "F32".to_string(),
+            Type::Tagged { marker, inner } if marker == CORE_CRYPTO_NOMINAL_MARKER => inner.name(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
         }
     }

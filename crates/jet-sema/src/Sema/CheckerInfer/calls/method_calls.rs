@@ -194,6 +194,11 @@ impl<'a> Checker<'a> {
                             let ty = Type::Named(type_name.clone());
                             if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true) {
                                 let ret = self.finish_builtin_method(receiver, method, &ty, args, span, ret);
+                                let ret = if matches!(ns.as_str(), "jet.crypto" | "core.crypto") {
+                                    ret.map(crate::Sema::Diagnostics::core_crypto_nominal)
+                                } else {
+                                    ret
+                                };
                                 *resolved_ret_out = ret.clone();
                                 return ret;
                             }
@@ -2318,9 +2323,21 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
-                if let Type::Named(name) = &recv_ty {
-                    if matches!(name.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash") {
-                        *recv_type_out = Some(name.clone());
+                let nominal_recv = match &recv_ty {
+                    Type::Named(name) => Some(name.as_str()),
+                    Type::Tagged { marker, inner }
+                        if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
+                    {
+                        match inner.as_ref() {
+                            Type::Named(name) => Some(name.as_str()),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(name) = nominal_recv {
+                    if matches!(name, "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash") {
+                        *recv_type_out = Some(name.to_string());
                     }
                 }
                 // D-NUMOPS1: hand codegen the receiver's numeric width so it picks the

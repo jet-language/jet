@@ -5,7 +5,7 @@
 mod types;
 pub use types::{
     AccessConvention, Type, int_spelling, numeric_type_from_name, int_range,
-    canonicalize_tuple_fields,
+    canonicalize_tuple_fields, CORE_CRYPTO_NOMINAL_MARKER,
 };
 
 #[path = "AST/program_imports.rs"]

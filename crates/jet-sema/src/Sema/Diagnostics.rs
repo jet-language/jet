@@ -555,13 +555,58 @@ pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String>
     best.map(|(s, _)| s)
 }
 
+fn secret_bearing_crypto_leaf(name: &str) -> bool {
+    matches!(name, "Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret")
+}
+
+pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
+    match ty {
+        Type::Named(name) if secret_bearing_crypto_leaf(&name) => Type::Tagged {
+            marker: crate::AST::CORE_CRYPTO_NOMINAL_MARKER.to_string(),
+            inner: Box::new(Type::Named(name)),
+        },
+        Type::List(inner) => Type::List(Box::new(core_crypto_nominal(*inner))),
+        Type::Map { key, key_span, value } => Type::Map {
+            key: Box::new(core_crypto_nominal(*key)),
+            key_span,
+            value: Box::new(core_crypto_nominal(*value)),
+        },
+        Type::Option(inner) => Type::Option(Box::new(core_crypto_nominal(*inner))),
+        Type::Result { ok, err } => Type::Result {
+            ok: Box::new(core_crypto_nominal(*ok)),
+            err: Box::new(core_crypto_nominal(*err)),
+        },
+        Type::Tuple(fields) => Type::Tuple(
+            fields
+                .into_iter()
+                .map(|(name, ty)| (name, Box::new(core_crypto_nominal(*ty))))
+                .collect(),
+        ),
+        Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+            elem: Box::new(core_crypto_nominal(*elem)),
+            len,
+            len_symbol,
+        },
+        other => other,
+    }
+}
+
 pub(crate) fn is_secret_bearing_crypto_type(ty: &Type, registry: &TypeRegistry) -> bool {
-    matches!(ty, Type::Named(name)
-        if !registry.contains(name)
-            && matches!(name.as_str(), "Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret"))
+    match ty {
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
+        {
+            matches!(inner.as_ref(), Type::Named(name) if secret_bearing_crypto_leaf(name))
+        }
+        Type::Named(name) => !registry.contains(name) && secret_bearing_crypto_leaf(name),
+        _ => false,
+    }
 }
 
 pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
+    if is_secret_bearing_crypto_type(ty, registry) {
+        return false;
+    }
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
@@ -569,7 +614,6 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
         Type::List(inner) => is_printable(inner, registry),
         Type::Map { value, .. } => is_printable(value, registry),
-        Type::Named(_) if is_secret_bearing_crypto_type(ty, registry) => false,
         Type::Named(n) => registry.contains(n) || core_type_known(n),
         Type::Apply { args, .. } => args.iter().all(|a| is_printable(a, registry)),
         Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
@@ -585,6 +629,9 @@ pub(crate) fn is_displayable(
     type_reg: &TypeRegistry,
     trait_reg: &crate::Traits::TraitRegistry,
 ) -> bool {
+    if is_secret_bearing_crypto_type(ty, type_reg) {
+        return false;
+    }
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
@@ -595,7 +642,6 @@ pub(crate) fn is_displayable(
         }
         Type::List(inner) => is_displayable(inner, type_reg, trait_reg),
         Type::Map { value, .. } => is_displayable(value, type_reg, trait_reg),
-        Type::Named(_) if is_secret_bearing_crypto_type(ty, type_reg) => false,
         Type::Named(n) => {
             trait_reg.implements_trait(n, Generics::DISPLAY)
                 || matches!(
@@ -679,6 +725,9 @@ pub(crate) fn is_debuggable(
     type_reg: &TypeRegistry,
     trait_reg: &crate::Traits::TraitRegistry,
 ) -> bool {
+    if is_secret_bearing_crypto_type(ty, type_reg) {
+        return false;
+    }
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
@@ -688,7 +737,6 @@ pub(crate) fn is_debuggable(
         }
         Type::List(inner) => is_debuggable(inner, type_reg, trait_reg),
         Type::Map { value, .. } => is_debuggable(value, type_reg, trait_reg),
-        Type::Named(_) if is_secret_bearing_crypto_type(ty, type_reg) => false,
         Type::Named(n) => {
             type_reg.contains(n)
                 || core_type_known(n)
@@ -705,6 +753,9 @@ pub(crate) fn is_debuggable(
 }
 
 pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
+    if is_secret_bearing_crypto_type(ty, registry) {
+        return false;
+    }
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
