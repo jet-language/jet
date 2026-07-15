@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 628,
-    "rev": 7397,
+    "nextNum": 629,
+    "rev": 7404,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18678,6 +18678,72 @@
       "needsAcceptance": false,
       "created": "2026-07-15T05:51:18.759Z",
       "updated": "2026-07-15"
+    },
+    {
+      "id": "c0kxhaqh",
+      "num": 628,
+      "title": "Full suite hangs: env overlay child snapshot deadlocks",
+      "body": "env_overlay::mutation_enumeration_and_child_snapshot_run does not complete; full gate exceeded four minutes and exact timeout 60s exited 124 after test start. Diagnose generated core.env/core.process lock or child-capture deadlock and restore bounded completion without mutating the host environment.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "root-628-builder",
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "root-628-builder",
+          "text": "Full gate stopped after >4m. Exact timeout 60s reproduced exit 124 after test began; compile completed in 7s, so built program/test path hangs."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The exact mutation/enumeration/child-snapshot test completes under a 30-second external bound and preserves its exact eight-line output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:25:12.540Z"
+        },
+        {
+          "n": 2,
+          "text": "Root deadlock is removed while D-ENV-MUTATE1 remains raw-value-safe, snapshot-atomic, host-isolated, and free of new generated unsafe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:25:12.643Z"
+        },
+        {
+          "n": 3,
+          "text": "Full env_overlay target and its codegen/host/raw/concurrency assertions pass under bounded execution.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:25:12.748Z"
+        },
+        {
+          "n": 4,
+          "text": "Mandatory full verification passes on the repaired committed tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T06:25:12.853Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T06:25:03.379Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T06:25:12.958Z"
     }
   ],
   "decisions": [
@@ -37761,6 +37827,55 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T06:25:13.084Z",
+      "by": "root-628-builder",
+      "action": "card.update",
+      "ref": "c0kxhaqh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T06:25:12.958Z",
+      "by": "root-628-builder",
+      "action": "card.claim",
+      "ref": "c0kxhaqh",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T06:25:12.854Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0kxhaqh",
+      "note": "#4 Mandatory full verification passes on the repaired committed"
+    },
+    {
+      "at": "2026-07-15T06:25:12.749Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0kxhaqh",
+      "note": "#3 Full env_overlay target and its codegen/host/raw/concurrency"
+    },
+    {
+      "at": "2026-07-15T06:25:12.643Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0kxhaqh",
+      "note": "#2 Root deadlock is removed while D-ENV-MUTATE1 remains raw-val"
+    },
+    {
+      "at": "2026-07-15T06:25:12.540Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0kxhaqh",
+      "note": "#1 The exact mutation/enumeration/child-snapshot test completes"
+    },
+    {
+      "at": "2026-07-15T06:25:03.379Z",
+      "by": "root",
+      "action": "card.add",
+      "ref": "c0kxhaqh",
+      "note": "Full suite hangs: env overlay child snapshot deadlocks"
+    },
+    {
       "at": "2026-07-15T06:23:51.521Z",
       "by": "terra-541-builder",
       "action": "card.update",
@@ -41209,55 +41324,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-ECO-DECL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:43.150Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:32.906Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEWMUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:32.696Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-EXTENSION1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:32.484Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:32.275Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:32.071Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-RECEIPT2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:31.873Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-COMPOSE2",
       "note": "marked ready"
     }
   ],
