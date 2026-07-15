@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 653,
-    "rev": 7751,
+    "nextNum": 657,
+    "rev": 7787,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5601,8 +5601,8 @@
     {
       "id": "c0nlrm12",
       "num": 322,
-      "title": "jetos: fleet/remote deployment — push generations with proof-gated rollback",
-      "body": "deploy-rs/colmena/NixOps parity, first-party. Roadmap already names fleet rollout as future Epoch 7 — this card tracks it. Scope: build closures locally (or on a builder), push to remote hosts over SSH, activate with proof-before-switch (#236) on the remote, health-check window with automatic rollback, multi-host rollout ordering with dependency graph, secrets delivery at deploy time, no daemon/root beyond what activation needs (U28), offline-capable (U29). Reconcile with U15 (fleet parse/capture, done) for the config side.\n\nBeat-NixOS axes: proof-gated activation per host and typed rollout plans with explainable failure. Coordinate with jetos agent; blocked conceptually on #262's activation contract.",
+      "title": "jetos: jet deploy staged Fleet rollout",
+      "body": "Implement `jet deploy <fleet>` over typed Fleet Outputs: plan, stage, verify, canary activation, health observation, cohort ordering, bounded concurrency, failure rollback, secrets delivery, audit, and per-host rollback. Build closures locally or on declared builders; remote activation remains proof-gated and uses no resident daemon.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e7",
@@ -5664,10 +5664,67 @@
         }
       ],
       "created": "2026-07-07T17:23:34.695Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-15",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet deploy <fleet>` resolves one typed Fleet Output and prints a deterministic no-change plan before any remote mutation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:02:13.483Z"
+        },
+        {
+          "n": 2,
+          "text": "Stage-only, cohort, max-parallel, JSON, and per-host controls use the same rollout plan and receipt identities as the beginner command.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:02:13.483Z"
+        },
+        {
+          "n": 3,
+          "text": "Each host builds or receives the exact closure, verifies proof, activates by cohort, observes every health gate for the declared window, and records immutable evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:02:13.483Z"
+        },
+        {
+          "n": 4,
+          "text": "Failure applies the declared rollback-and-stop policy without activating later cohorts; explicit per-host rollback remains available and auditable.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:02:13.483Z"
+        },
+        {
+          "n": 5,
+          "text": "Remote bindings and credentials stay local, secret delivery is activation-scoped, and no resident privileged daemon or repository credential authority is introduced.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:02:13.483Z"
+        },
+        {
+          "n": 6,
+          "text": "Hostile multi-host tests cover partial transfer, disconnect, failed proof, failed health, concurrent rollout, resume, idempotency, and complete rollback.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:02:13.483Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/proposals/ecosystem-shape.md"
+      ],
       "workOrder": 110
     },
     {
@@ -8962,7 +9019,7 @@
       "id": "c01fj815",
       "num": 420,
       "title": "E4-JP4 Closure DB, roots, leases, GC, verify, repair",
-      "body": "Implement transitive references/referrers; project/profile/process/build/toolchain/JetOS roots; atomic leases; why-live/dead; crash-safe GC; verify, quarantine, repair, and deterministic rebuild. Owner gate: optional secure multi-user sharing.",
+      "body": "Implement transitive references/referrers; Package, profile, process, build, toolchain, System, Generation, and external roots; immutable connected receipts; atomic leases; why-live/dead; crash-safe GC; verify, quarantine, repair, and deterministic rebuild. Manual root surface is exactly `register-external-root`, `unregister-external-root`, and `list-external-roots`. Optional secure multi-user sharing remains gated by D-ECO-BROKERBOUNDARY1.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -9204,10 +9261,48 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-07-15T02:07:13.791Z"
+        },
+        {
+          "n": 10,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T20:56:09.770Z"
+        },
+        {
+          "n": 11,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T20:56:09.770Z"
+        },
+        {
+          "n": 12,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T20:56:09.770Z"
+        },
+        {
+          "n": 13,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T20:56:09.770Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/proposals/ecosystem-shape.md"
+      ]
     },
     {
       "id": "c041flkr",
@@ -14427,12 +14522,16 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "Ratify one file-placement law, then make one-file packages and split workspaces follow it without translation.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-15",
           "by": "codex-root",
@@ -15922,7 +16021,7 @@
       "id": "c0q35155",
       "num": 560,
       "title": "Implement and enforce the ratified atomic language-shape laws",
-      "body": "After the owner decides each atomic ballot, update the syntax registry, parser, semantics, formatter, diagnostics, examples, editor grammars, package graph, inspection views, and conformance tests. Unknown fields fail. Inferred facts remain revealable and pinnable.",
+      "body": "Reconcile and implement the ratified ecosystem-shape law across syntax registry, parser, semantics, formatter, diagnostics, examples, editor grammars, Package graph, inspection, and Canvas. Record Package, Config, flat membership, split/fold, deploy, and external-root rulings. Unknown fields fail; inferred facts remain inspectable and pinnable.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -15965,51 +16064,61 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every user-typeable form is classified in the conformance matrix by semantic job, grammatical slot, canonical expansion, inference rule, and owning decision.",
+          "text": "Every ecosystem user-typeable form is classified by semantic job, grammar slot, canonical expansion, inference rule, and owning decision.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-14T15:34:36.229Z"
+          "at": "2026-07-15T21:00:43.472Z"
         },
         {
           "n": 2,
-          "text": "Package parsing uses one closed typed graph; unknown or misspelled fields fail with Jet-owned diagnostics instead of being ignored.",
+          "text": "All 2026-07-15 rulings and every superseded file, noun, and command law are recorded in syntax-decisions.md with no conflicting current-law entry.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-14T15:34:36.443Z"
+          "at": "2026-07-15T21:00:43.472Z"
         },
         {
           "n": 3,
-          "text": "D-ECO2–19 each have a recorded keep, reopen, or supersede result against ratified shape law; genuine owner choices are ballot-ready.",
+          "text": "Syntax.rs, parser, sema, formatter, diagnostics, examples, snapshots, editor grammars, inspect, and Canvas use Package, Config, flat members, split/fold, deploy, and register-external-root consistently.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-14T15:34:36.644Z"
+          "at": "2026-07-15T21:00:43.472Z"
         },
         {
           "n": 4,
-          "text": "One-file and split-file packages produce identical typed graphs, conflict behavior, provenance, formatter output, and lock data.",
+          "text": "One-file and split-file Packages produce identical typed graphs, conflict behavior, provenance, formatter output, and lock data.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-14T15:34:36.842Z"
+          "at": "2026-07-15T21:00:43.472Z"
         },
         {
           "n": 5,
-          "text": "Syntax.rs, syntax-decisions.md, parser, sema, formatter, diagnostics, examples, snapshots, editor grammars, inspect, and Canvas agree.",
+          "text": "Old role-file and retired-spelling behavior matches the ratified migration law; no permanent alias or second authority remains.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-14T15:34:37.038Z"
+          "at": "2026-07-15T21:00:43.472Z"
+        },
+        {
+          "n": 6,
+          "text": "Targeted conformance tests and full verification pass with regenerated grammars and re-blessed snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:00:43.472Z"
         }
       ],
       "refs": [
+        "docs/proposals/ecosystem-shape.md",
         "docs/proposals/language-shape-constitution.md",
         "docs/proposals/language-shape-research.md",
         "docs/spec/syntax-decisions.md",
@@ -16017,7 +16126,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T15:34:30.215Z",
-      "updated": "2026-07-14"
+      "updated": "2026-07-15"
     },
     {
       "id": "c0c9vzub",
@@ -16701,8 +16810,8 @@
     {
       "id": "c0qj346l",
       "num": 587,
-      "title": "Choose the package output model",
-      "body": "Define one representation for libraries, commands, services, checks, and development environments.",
+      "title": "Implement the unified Package Output model",
+      "body": "After its ballots ratify, implement thin typed Output projections, the closed kind set, checked function entries, role-specific callable contracts, deterministic default selection, and complete `jet inspect output` reconstruction over Package facts stored once.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
@@ -16723,11 +16832,66 @@
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:05.924Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:05.924Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:05.924Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:05.924Z"
+        },
+        {
+          "n": 5,
+          "text": "Output implements the ratified closed kind set, thin single-copy Package facts, checked function references, role contracts, selection order, and Jet-owned diagnostics before codegen.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:05.924Z"
+        },
+        {
+          "n": 6,
+          "text": "`jet inspect output`, examples, formatter tests, UI snapshots, semantic-index checks, and end-to-end AOT/dev tests prove exact reconstructed facts and behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:05.924Z"
+        }
+      ],
       "refs": [
+        "docs/proposals/ecosystem-shape.md",
         "docs/spec/philosophy.md",
         "docs/spec/syntax-decisions.md",
-        "docs/proposals/package-ecosystem-frameworks.md",
         "docs/plans/epoch-4/world-class-package-manager.md"
       ],
       "needsAcceptance": false,
@@ -17572,8 +17736,8 @@
     {
       "id": "c0kxss7s",
       "num": 609,
-      "title": "What should changing a JetOS machine feel like?",
-      "body": "Decide whether systems reuse the project graph and how files, users, services, images, generations, proof, switch, and rollback fit.",
+      "title": "Implement System and Fleet Outputs on the Package graph",
+      "body": "After D-ECO-JETOS2 and D-ECO-JETOS-PREVIEW1 ratify, re-home System and Fleet facts as typed Package Outputs over Jetpack's resolver, sandbox, Hangar, cache, closure, and receipt substrate while keeping JetOS assembly and activation separate.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -17595,11 +17759,66 @@
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:50.991Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:50.991Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:50.991Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:50.991Z"
+        },
+        {
+          "n": 5,
+          "text": "System and Fleet Outputs close over all ratified machine and rollout facts while `jet build`, `jet os plan`, and inspect share one locked Package identity, policy, toolchain, cache, receipt, and provenance model.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:50.991Z"
+        },
+        {
+          "n": 6,
+          "text": "User, theme, VM-test, and disk facts migrate without a parallel OS graph; plan/proof preserve captured deltas and activation evidence; System/Fleet examples, diagnostics, rollback, and AOT/dev tests pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:50.991Z"
+        }
+      ],
       "refs": [
+        "docs/proposals/ecosystem-shape.md",
         "docs/spec/philosophy.md",
         "docs/spec/syntax-decisions.md",
-        "docs/proposals/package-ecosystem-frameworks.md",
         "docs/spec/architecture.md"
       ],
       "needsAcceptance": false,
@@ -17609,8 +17828,8 @@
     {
       "id": "c0m1zysi",
       "num": 610,
-      "title": "How should one file grow into many?",
-      "body": "Decide whether current pkg.jet, env.jet, and workspace.jet roles collapse into one root that still splits cleanly.",
+      "title": "Implement package.jet growth, jet split, and jet fold",
+      "body": "After D-ECO-FILEROOT1 and D-ECO-SPLITPOLICY1 ratify, implement the single Package root, Config discovery, retired-role-file teaching migration, and graph-preserving split/fold transitions for environments, flat member Packages, and Fleet host extraction.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -17632,12 +17851,68 @@
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:28.429Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:28.429Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:28.429Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:28.429Z"
+        },
+        {
+          "n": 5,
+          "text": "The nearest `package.jet` supplies Package context; Config discovery, explicit imports, flat members, underscore disable, role-file teaching, `jet init` fold, and byte-identical restore implement the ratified migration law.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:28.429Z"
+        },
+        {
+          "n": 6,
+          "text": "`jet split` and `jet fold` preserve graph fingerprints and source bytes across environment, member-Package, and System-to-Fleet transitions; previews, refusal paths, crash safety, examples, formatter tests, and diagnostics pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:01:28.429Z"
+        }
+      ],
       "refs": [
+        "docs/proposals/ecosystem-shape.md",
         "docs/spec/philosophy.md",
         "docs/spec/syntax-decisions.md",
-        "docs/proposals/package-ecosystem-frameworks.md",
-        "docs/spec/architecture.md"
+        "docs/spec/architecture.md",
+        "docs/spec/diagnostics.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T23:05:57.851Z",
@@ -20390,6 +20665,287 @@
       "created": "2026-07-15T20:49:25.697Z",
       "updated": "2026-07-15",
       "claimedAt": "2026-07-15T20:49:58.096Z"
+    },
+    {
+      "id": "c0d06bh8",
+      "num": 653,
+      "title": "Implement Config merge law and explain provenance",
+      "body": "Add the ratified Config type as the sole layout-neutral Package contribution. Merge equal scalars, named collections, sets, and ordered values by their declared field law; reject unequal ecosystem scalars with complete source provenance; expose every successful contributor through lock and explain views.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Config values type-check independently, may live in any discovered `.jet` file, and cannot contribute `members:`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:03:42.511Z"
+        },
+        {
+          "n": 2,
+          "text": "Field-law merge coalesces equal scalars, combines named collections, unions sets, and applies each ordered type's declared law deterministically.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:03:42.511Z"
+        },
+        {
+          "n": 3,
+          "text": "Unequal ordinary scalars fail before realization with every contributing path, span, tier, and value; ordinary functions remain the one way to construct a chosen final value.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:03:42.511Z"
+        },
+        {
+          "n": 4,
+          "text": "`.jet/lock`, `jet explain`, semantic index, and Canvas retain every successful contributor and produce stable provenance output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:03:42.511Z"
+        },
+        {
+          "n": 5,
+          "text": "One-file and multi-file Config examples, conflict snapshots, formatter stability, and graph-fingerprint tests pass across AOT and dev.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:03:42.511Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/ecosystem-shape.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T21:02:58.856Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0pro7ct",
+      "num": 654,
+      "title": "Implement flat Package membership and depth diagnostics",
+      "body": "Replace workspace-shaped membership with root-only flat Package references. A root Package may list members; a member cannot list members; a single Package needs no membership field. Reuse the E0995-E0997 workspace lineage for migrated discovery and add the depth-cap diagnostic with full source paths and spans.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root `members:` accepts deterministic relative Package references and `find` discovery while preserving sparse-checkout and lock identity requirements.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:04:49.374Z"
+        },
+        {
+          "n": 2,
+          "text": "A member Package containing `members:` is rejected with the root and member paths, both source spans, depth-cap reason, and lift-to-root fix.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:04:49.375Z"
+        },
+        {
+          "n": 3,
+          "text": "Legacy `workspace.jet` E0995-E0997 behavior migrates to Package membership without duplicate authority or stale permanent diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:04:49.375Z"
+        },
+        {
+          "n": 4,
+          "text": "Resolution rejects cycles, duplicate physical members, escaping paths, identity collisions, and ambiguous nearest roots before build actions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:04:49.375Z"
+        },
+        {
+          "n": 5,
+          "text": "Single Package, flat monorepo, invalid nested member, and sparse-checkout examples have UI snapshots, lock/golden tests, and docs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:04:49.375Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/ecosystem-shape.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T21:04:04.931Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0gvkibe",
+      "num": 655,
+      "title": "Implement connected Hangar receipts and lock references",
+      "body": "After D-ECO-RECEIPTSTORE1 ratifies, store each build or activation receipt as an immutable Hangar object. Keep digest references in `.jet/lock` or generation records, point receipts back to locked inputs, and export the complete evidence closure without copying merge history.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [
+        "D-ECO-RECEIPTSTORE1"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Build and activation receipts canonically encode locked inputs, planned action, output digest, parent generation, predicted delta, readiness, activation observation, and rollback evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:05:56.604Z"
+        },
+        {
+          "n": 2,
+          "text": "Receipt bytes are immutable content-addressed Hangar objects; lock and generation records store only verified digest references.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:05:56.604Z"
+        },
+        {
+          "n": 3,
+          "text": "Receipt graphs retain, export, sign, deduplicate, verify, and garbage-collect through the same closure/root engine as other Hangar objects.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:05:56.604Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet inspect output`, `jet os proof`, and JSON output detect missing, corrupt, mismatched, or unauthorized receipt objects with coded Jet diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:05:56.604Z"
+        },
+        {
+          "n": 5,
+          "text": "Repeated realization, historical generation, export/import, corruption, and clean tests prove the lock remains the sole merge-history authority.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:05:56.604Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/ecosystem-shape.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T21:05:11.873Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0e4nuy5",
+      "num": 656,
+      "title": "Move Hangar to per-user paths and add optional transient broker",
+      "body": "After D-ECO-HANGARPATH1 and D-ECO-BROKERBOUNDARY1 ratify, make native per-user storage the default on Linux, macOS, and Windows. Retire `/etc/jet/hangar` as a default. Add the optional administrator-installed socket-activated verifier with user-Hangar fallback and no source evaluation.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "D-ECO-HANGARPATH1",
+        "D-ECO-BROKERBOUNDARY1"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Default paths exactly follow XDG fallback, macOS Application Support, and Windows LOCALAPPDATA laws; `jet hangar path` reports the resolved location.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:07:03.197Z"
+        },
+        {
+          "n": 2,
+          "text": "First use needs no administrator action, existing supported stores migrate crash-safely, and `/etc/jet/hangar` is never silently adopted as the new default.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:07:03.197Z"
+        },
+        {
+          "n": 3,
+          "text": "Shared-store install is administrator-only and creates a socket-activated process that exits idle, never evaluates source, and rebuilds only under ephemeral sandbox identities.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:07:03.197Z"
+        },
+        {
+          "n": 4,
+          "text": "Promotion re-verifies bytes, signatures, provenance, writer authority, and object closure; failure leaves both shared and user stores unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:07:03.197Z"
+        },
+        {
+          "n": 5,
+          "text": "Missing or failed broker falls back honestly to the user Hangar; cross-platform, multi-user, hostile-socket, concurrent-promotion, and upgrade tests pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T21:07:03.197Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/ecosystem-shape.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T21:06:19.188Z",
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -35866,56 +36422,38 @@
       "id": "D-SHAPE-INTERNAL1",
       "cardId": "c0zh74hs",
       "group": "syntax",
-      "title": "What should `_helper` tell me?",
-      "gist": "Decide whether `pub fn _helper` is callable outside its package without becoming a compatibility promise.",
-      "lesson": "Glossary. A package is a library or app released as one unit. Package-only means callable only by code shipped with that package.\n\nA public API is the set of names outside code may call. Autocomplete is the editor list shown after typing `parser.`. Documentation is the generated reference for users. Semantic versioning promises that minor releases will not break supported public API. A lint is a compiler warning about risky code. A dossier is Jet's audit report for one file or name. Supported means the library promises compatibility. Unsupported means callable, but allowed to change without a major release. Soft-public means callable outside, but unsupported.\n\nReadiness says how tested an item is. Support says whether callers may rely on its name and behavior across minor releases. Existing `#Meta(maturity: ...)` reports readiness in documentation only. It never changes access, warnings, or version promises.\n\nJet is private by default. `pub` makes a name callable outside its package. This decision asks whether a leading underscore adds one separate fact: callable, but unsupported. It never grants access by itself. If A wins, the underscore becomes Jet's sole support-contract signal. Maturity remains docs-only.\n\nUnder the soft-public design, completion and docs hide unsupported names behind a collapsed section. Outside calls remain possible for experts, but produce a warning. Jet's publish check ignores unsupported names when judging minor-release compatibility.\n\nUnder the smaller design, Jet has no soft-public tier. Every public name carries the same compatibility promise. Helpers stay private or package-only, so outside tools cannot call them.\n\nBare `_` still means discard this value. `_temporary` still receives normal unused-name warnings. This ballot does not decide `__name`, module discovery, access rules, or replacement rights.",
+      "title": "Meaning of public underscore names",
+      "gist": "Decide whether a public underscore name is callable without becoming a compatibility promise.",
+      "lesson": "`pub` controls outside access. A leading underscore can separately mark a callable name as unsupported, or it can have no public-contract meaning. Soft-public means outside calls work with an unsuppressible warning, default docs and completion de-emphasize the name, and semantic-version checks permit its removal. Package-internal calls do not warn.",
       "explainer": "",
-      "story": "Lena maintains the `jet-json` parser. A debugger plugin calls `json._scan_token` after malformed UTF-8 causes `jet debug app.jet` to stop before showing the bad token. Lena later renames that helper in version 1.5.0. The choice decides whether Jet warned the plugin author and whether the minor release may publish.",
-      "inWild": "Python uses one leading underscore as a weak internal-use signal. The name remains directly callable. A `from parser import *` statement omits it by default. Python attaches no compiler-enforced compatibility promise.\n\n```python\ntoken = parser._scan_token(source)  # deliberate access still works\n```\n\nRust makes access explicit with `pub`. Rustdoc can separately hide a public item with `#[doc(hidden)]`, so reachability and documentation are distinct facts. Rust itself does not derive a compatibility tier from an underscore.\n\n```rust\n#[doc(hidden)]\npub fn scan_token(source: &str) -> Token { ... }\n```\n\nGo uses capitalization as access control. `ScanToken` is exported and `_scanToken` is not. That design offers no callable-but-unsupported middle ground.\n\n```go\nfunc ScanToken(source string) Token { ... } // callable outside package\nfunc scanToken(source string) Token { ... } // package-only\n```\n\nJet must choose one clear contract. Copying Python's social hint without deciding lint and version behavior would leave authors and callers with different promises.",
+      "story": "Lena exposes `_scan_token` so a debugger plugin can inspect malformed input. She later removes it in a minor release and needs publish checks to follow the contract callers were shown.",
+      "inWild": "The proposal keeps one semantic support flag across docs, completion, policy, dossier, and semver. `pub(package)` remains the hard package-only boundary.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Soft-public underscore",
-          "detail": "A public `_name` stays callable, but Jet marks it unsupported. Default completion and docs put supported names first. Each outside call site warns once. Warnings do not block by default. Source and command-line flags cannot silence this warning. Team policy may deny the lint, with no local override. Removing the name does not require a major release.",
-          "technical": "Access, readiness, and support are separate facts. `pub` controls who may call. Maturity metadata remains docs-only. The leading underscore alone controls support status. Jet's saved public-interface record excludes public `_name` items from E1218 and E2601 compatibility failures. Package-internal calls do not warn. Each outside call site emits one unsupported-API lint. No suppression form is added because the default warning already permits expert use. Team denial can only be changed by the policy owner. `jet inspect dossier` records every outside use. `_name` never suppresses unused-name warnings.",
-          "code": "// Library source\npub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\n\n// Editor after typing `json.`\nparse(text: String) -> Tree\n────────\nShow 1 unsupported name\n\n// After expanding that row\n_scan_token(text: String) -> Token\nUnsupported. May change in a minor release.\n\n// Outside package\ntoken :: json._scan_token(source)\nwarning: `_scan_token` is unsupported API\n  Why: The library may change or remove this name in a minor release.\n  Fix: Prefer `json.parse`. Deliberate expert use may continue.\n\n$ jet check plugin.jet\nFinished with 1 warning.\n\n$ jet inspect dossier plugin.jet\nunsupported API use: plugin.jet:4 -> json._scan_token\n\n$ jet doc json\nSupported\n  parse(text: String) -> Tree\nUnsupported — collapsed\n  _scan_token(text: String) -> Token\n\n# Library 1.5.0 removes `_scan_token`\n$ jet registry publish\nsemver: ok — supported public API is compatible with 1.4.0\nnote: removed unsupported name `_scan_token`"
+          "name": "Soft-public",
+          "detail": "A public `_name` remains callable with one unsuppressible outside warning and no minor-version compatibility promise.",
+          "code": "pub fn _scan_token() {}\n// outside call works with one unsuppressible warning\n$ jet registry publish\nsemver ok; removed unsupported name _scan_token."
         },
         {
           "key": "B",
-          "name": "No soft-public tier",
-          "detail": "A leading underscore has no support meaning. Every `pub` name appears normally, produces no use warning, and receives the same version promise. Helpers that should not become promises must stay private or package-only.",
-          "technical": "Jet's saved public-interface record includes every public function, including `_name`. Completion, docs, lint, and semantic-version checks treat it like any other public spelling. `pub`, `pub(package)`, and private-by-default remain the only library boundaries. No unsupported-API state exists.",
-          "code": "// Library source\npub fn parse(text: String) -> Tree { ... }\npub fn _scan_token(text: String) -> Token { ... }\n\n// Editor after typing `json.`\n_scan_token(text: String) -> Token\nparse(text: String) -> Tree\n\n// Outside package: ordinary supported call\ntoken :: json._scan_token(source)\n$ jet check plugin.jet\nOK\n\n$ jet doc json\n_scan_token(text: String) -> Token\nparse(text: String) -> Tree\n\n# Library 1.5.0 removes `_scan_token`\n$ jet registry publish\nError [E1218]: Publishing `1.5.0` after `1.4.0` breaks `_scan_token`.\n Why: A minor release promises callers no public API break.\n Fix: Restore `_scan_token`, or publish the next major version.\n\n// Author avoids that promise by keeping helper inside package\npub(package) fn scan_token(text: String) -> Token { ... }\n\ntoken :: json.scan_token(source)\nerror: `scan_token` is only available inside package `jet-json`"
+          "name": "All public is supported",
+          "detail": "Every public name carries the same compatibility promise, including names beginning with underscore.",
+          "code": "pub fn _scan_token() {}\n$ jet registry publish\nError: breaking change; restore _scan_token or publish a major version."
         }
       ],
-      "comparisons": [
-        {
-          "lang": "Python",
-          "note": "Python's underscore is a social internal-use signal. Direct access works. A `from module import *` statement omits the name by default. No compiler lint or compatibility rule completes the promise.",
-          "code": "token = parser._scan_token(source)  # allowed"
-        },
-        {
-          "lang": "Rust",
-          "note": "Rust uses visibility for access and `doc(hidden)` for documentation. A hidden public item remains callable. Stability policy comes from library practice or separate tooling, not its spelling.",
-          "code": "#[doc(hidden)]\npub fn scan_token(source: &str) -> Token { ... }"
-        },
-        {
-          "lang": "Go",
-          "note": "Go offers a hard exported-or-package-only split through capitalization. This is closest to Option B because outsiders cannot deliberately reach an unexported helper.",
-          "code": "func ScanToken(source string) Token { ... }\nfunc scanToken(source string) Token { ... }"
-        }
-      ],
+      "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "Tool authors sometimes need a library's internal helper. A gives them an honest escape hatch while keeping beginners, docs, completion, warnings, and version promises aligned. One underscore supplies the whole contract without new declarations or settings.",
+        "why": "Expert integrations can call a clearly unsupported hook while beginner discovery and semantic-version promises remain focused on supported API.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "It forces useful expert hooks into a false choice. Making one public creates a support promise until the next major release. Keeping it package-only blocks deliberate outside use entirely."
+            "reason": "Authors must either make an expert hook a permanent supported promise or block all outside use."
           }
         ],
-        "tradeoff": "Jet gains a second promise level for public names. Authors and users must understand that callable does not mean supported. Intentional callers keep one warning per outside call site because this lint is not suppressible. Consistent completion, docs, lint, dossier, and publish output make the distinction visible."
+        "tradeoff": "Intentional outside callers always retain a warning and must understand that callable does not mean supported."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -37923,67 +38461,48 @@
       "id": "D-SHAPE-OUTPUT-CALLABLE1",
       "cardId": "c04x8do3",
       "group": "syntax",
-      "title": "How a runnable output links to its function",
-      "gist": "When `pkg.jet` declares a runnable output, should it point to code with a checked function reference, a module's conventional `run`, or a text name?",
-      "lesson": "Glossary. An output is one named result a package exposes, such as `todo.admin`. An output address is its official package name. An entry function is the Jet function that starts that output. A function reference points directly to a known function. A module is a named group of Jet code. A symbol graph is Jet's map of declarations and references.\n\nA lone Jet file already runs through `fn run`. Nothing in this decision changes `jet run app.jet`, and that path never needs `pkg.jet`.\n\nThe choice appears when one package exposes several runnable results. The manifest must connect each result to code without creating another task system.\n\nA direct function reference makes the manifest part of Jet's symbol graph. Renaming or deleting the function breaks the link during checking. Editor navigation can follow the same link.\n\nA module convention links to a module instead. Jet starts the function named `run` inside that module. This removes an entry field, but every runnable output must organize its code around that name.\n\nA text name stores a path such as `\"Admin.start\"`. It is easy to print and serialize, but it sits outside ordinary symbol references until package checking resolves it.\n\nThe separate callable-contract decision still controls allowed parameters, returns, failure, and service lifetime. This decision chooses only how the manifest identifies the function.",
+      "title": "How a runnable Output links to code",
+      "gist": "Choose the one checked relationship between a runnable Output and ordinary Jet code.",
+      "lesson": "A lone `fn run` remains a complete program with no Output declaration. An explicit runnable Output needs a stable link when a Package exposes more than one result. A function reference uses normal name resolution, visibility, rename, navigation, provenance, and role validation. This decision chooses the link; D-ECO-OUTPUT-CALLCONTRACT1 chooses the function signature.",
       "explainer": "",
-      "story": "Maya's TodoCloud package already runs its customer command through `fn run`. She adds `todo.admin`, then renames its startup function during an incident. The manifest must either follow normal symbol checks or leave a stale link.",
-      "inWild": "Rust's Cargo manifest normally points a binary at a source file. That file must contain `main`, so target selection uses a path while startup uses a convention. Renaming the file requires changing Cargo metadata.\n\nGo goes further toward convention. A runnable command is a `package main` containing `func main()`. Multiple commands usually live in separate directories, each with that same function name.\n\nnpm uses text commands in `package.json`. A script such as `node src/admin.js` is flexible, but editors cannot treat the whole string as one language-level symbol. Shell quoting and stale paths remain script concerns.\n\nJet already has the zero-config `fn run` convention. This ballot asks whether explicit additional outputs keep using convention, enter the symbol graph, or become text.\n\n```text\nCargo.toml: [[bin]] name = \"todo-admin\" path = \"src/admin.rs\"\nGo:         cmd/admin/main.go contains package main and func main()\nnpm:        \"admin\": \"node src/admin.js --port 9090\"\n```",
+      "story": "Maya adds an administrator command to a Package and later renames its startup function. Package checking must identify the stale link at the source reference.",
+      "inWild": "The proposal's Outputs store `entry: run`, `entry: serve`, and `entry: verify_release`. Each is an ordinary symbol reference, not a file convention or string path.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Checked function reference",
-          "detail": "Each explicit output stores an ordinary function reference in `entry`. Jet checks it with normal name resolution. Users get editor navigation and immediate failures after a bad rename. The existing `fn run` shortcut remains unchanged.",
-          "technical": "Package checking resolves `entry` to one function definition before applying the separately chosen callable contract. The reference uses normal visibility, semantic indexing, rename, and provenance rules. It adds no effect or authority. Output addresses and function names remain different identities.",
-          "code": "// src/admin.jet\nfn admin(port: Int = 9090) -> Void ? {\n    serve_admin(port)?\n}\n\n// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            admin: Output :: .Executable.{\n                name: \"todo-admin\",\n                entry: admin,\n            },\n        },\n    },\n}\n\n$ jet run todo.admin --port 9191\nAdmin listening on http://127.0.0.1:9191\n\n# Maya changes only `fn admin` to `fn serve_admin`.\n$ jet check\nerror: output `todo.admin` links to missing function `admin`\nfix: change `entry` to `serve_admin`, or restore `admin`"
+          "name": "Function reference",
+          "detail": "Store an ordinary checked function reference in `entry`.",
+          "code": "admin: Output :: .Executable.{ name: \"todo-admin\", entry: admin }\n$ jet check\nentry admin no longer exists; update the reference or restore the function."
         },
         {
           "key": "B",
-          "name": "Module with conventional run",
-          "detail": "Each output points to a module, and Jet starts that module's `run` function. Manifests carry no function name. Projects gain predictable entry modules, but adding outputs pushes code toward one module per runnable result.",
-          "technical": "Package checking resolves `module` through normal module lookup, then requires exactly one eligible `fn run` in that module. The separate callable contract checks that function. Output linkage stays independent from `#Task`. A module rename is checked; the inner function name is fixed.",
-          "code": "// src/admin.jet\nmodule Admin {\n    fn run(port: Int = 9090) -> Void ? {\n        serve_admin(port)?\n    }\n}\n\n// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            admin: Output :: .Executable.{\n                name: \"todo-admin\",\n                module: Admin,\n            },\n        },\n    },\n}\n\n$ jet run todo.admin --port 9191\nAdmin listening on http://127.0.0.1:9191\n\n# Maya changes `fn run` to `fn start`.\n$ jet check\nerror: module `Admin` has no entry function named `run`\nfix: name the entry `run`"
+          "name": "Module with run",
+          "detail": "Store a module reference and require its conventional `run` function.",
+          "code": "admin: Output :: .Executable.{ name: \"todo-admin\", module: Admin }\nmodule Admin { fn run() {} }"
         },
         {
           "key": "C",
-          "name": "Qualified name as text",
-          "detail": "Each output stores a qualified function name as text. The manifest is portable data and can name distant code. Editors cannot guarantee that ordinary symbol renames update the string before package checking runs.",
-          "technical": "Package checking resolves the text against the package source graph, then applies the separate callable contract. The text is not a normal Jet reference. Lock and receipt records may copy the resolved identity, but the source string remains the user's link.",
-          "code": "// src/admin.jet\nmodule Admin {\n    pub fn start(port: Int = 9090) -> Void ? {\n        serve_admin(port)?\n    }\n}\n\n// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            admin: Output :: .Executable.{\n                name: \"todo-admin\",\n                entry: \"Admin.start\",\n            },\n        },\n    },\n}\n\n$ jet run todo.admin --port 9191\nAdmin listening on http://127.0.0.1:9191\n\n# An editor rename changes `start` to `serve`, but misses the string.\n$ jet check\nerror: output `todo.admin` cannot resolve `Admin.start`\nfix: change `entry` to `\"Admin.serve\"`"
+          "name": "Text name",
+          "detail": "Store a qualified function name as text and resolve it during Package checking.",
+          "code": "entry: \"Admin.start\"\n$ jet check\ncannot resolve Admin.start; change text to Admin.serve."
         }
       ],
-      "comparisons": [
-        {
-          "lang": "Rust and Cargo",
-          "note": "Cargo selects a source path, then Rust requires `main` inside that target. This combines file linkage with a fixed function convention.",
-          "code": "[[bin]]\nname = \"todo-admin\"\npath = \"src/admin.rs\"\n\nfn main() { /* starts command */ }"
-        },
-        {
-          "lang": "Go",
-          "note": "Go commands use a package and function convention. Teams usually create one `cmd/<name>` directory per command, making layout part of entry selection.",
-          "code": "// cmd/admin/main.go\npackage main\nfunc main() { /* starts command */ }"
-        },
-        {
-          "lang": "npm",
-          "note": "npm scripts store runnable commands as text. They can start anything, but refactoring and argument meaning belong to shells and called tools.",
-          "code": "{ \"scripts\": { \"admin\": \"node src/admin.js --port 9090\" } }"
-        }
-      ],
+      "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "The manifest names the real function directly, so packaging reuses Jet's existing symbol checks and editor model. Zero-config `fn run` stays untouched, and explicit outputs add only one field.",
+        "why": "Package linkage reuses Jet's symbol checks and editor model while preserving the unchanged zero-config `fn run` path.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "A fixed `run` inside every entry module makes source organization part of packaging. Multiple outputs then pressure users into extra modules even when ordinary functions would be clearer."
+            "reason": "A fixed run function makes source module organization part of packaging and requires extra modules for multiple outputs."
           },
           {
             "key": "C",
-            "reason": "A text path discards normal reference safety at the manifest boundary. Users discover missed renames during package checking instead of at the edited symbol."
+            "reason": "A text path loses normal reference safety and can remain stale after a symbol rename."
           }
         ],
-        "tradeoff": "The manifest depends directly on function visibility and name. That coupling is desirable for correctness, but moving a function requires updating the checked link at the same time."
+        "tradeoff": "Function and Output references must change together when code is renamed or moved."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -37995,67 +38514,48 @@
       "id": "D-ECO-OUTPUT-CALLCONTRACT1",
       "cardId": "c0qj346l",
       "group": "syntax",
-      "title": "What contract must a runnable output's function satisfy?",
-      "gist": "Should commands, services, and checks use role-specific ordinary functions, one permissive function shape, or dedicated tool-facing result types?",
-      "lesson": "Glossary. An output is one named result a package exposes. An entry function starts that output. A function signature lists parameters and a return type. A parameter is an input supplied when a function starts. A command is a user-invoked program. A service stays active until shutdown. A check passes or reports failure. An effect is an outside-world action, such as file or network access.\n\nA callable contract is the rule that decides whether an output can start a linked function. A valid reference can still point to the wrong kind of function.\n\nJet already turns typed entry parameters into command flags. `fn export(path: Path)` can therefore produce a required `--path` flag without a second command schema.\n\nJet also has ordinary completion and reported failure. A function returning `Void` completes normally. A function returning `Void ?` may report a top-level error.\n\nServices and checks usually run without a person answering questions. Their configuration can live in checked output values, environment values, or policy. Command-line parameters would create another configuration path.\n\nA service can stay alive by remaining inside its entry call. Returning ends the service. A check can pass by returning and fail through its ordinary error path.\n\nThe options differ in how much packaging enters function bodies. Examples use `entry` for clarity, but the callable-link ballot chooses the final link spelling. Linking never grants permissions or changes the function's effects.",
+      "title": "Callable contracts for runnable Outputs",
+      "gist": "Choose how commands, services, and checks use ordinary functions.",
+      "lesson": "Executable Outputs are user-invoked commands, so typed parameters can become checked flags through the ratified entry-parameter model. Services and checks run unattended; their settings belong in checked Package values. Every callable returns `Void` or `Void ?`. A service lives while its call lives. A check passes on normal return and fails on error.",
       "explainer": "",
-      "story": "Maya packages TodoCloud's export command, HTTP service, and license check. Continuous integration must run the same check as her laptop. Deployment must know when the service actually stops, without special wrapper objects in application code.",
-      "inWild": "Rust gives binaries and tests different contracts. A binary has `main`, which may return a termination result. A `#[test]` function takes no arguments, and the test harness treats return or panic as the outcome.\n\nGo also separates roles. Commands use parameterless `main`; flags are read through a library. Tests receive a harness value such as `*testing.T`, which makes test behavior explicitly tool-facing.\n\nSystemd starts a process from text and treats the process lifetime as service lifetime. Configuration comes from unit fields, environment files, or command arguments. Exit status reports failure.\n\nnpm scripts use one universal process contract. Any script may consume arbitrary trailing arguments and returns an exit code. This is flexible, but package metadata cannot describe typed inputs or distinguish a service from a check.\n\nJet can keep ordinary functions while giving each output role one checked meaning, or it can expose more of the tool protocol in user code.",
+      "story": "Maya packages an export command, API service, and release check. CI and deployment must run the same service and check configuration as her laptop.",
+      "inWild": "The proposal uses `fn export(path: Path)`, parameterless `fn serve()`, and parameterless `fn verify_release()`. Output values carry service and check settings rather than invocation flags.",
       "detail": "",
       "options": [
         {
           "key": "A",
           "name": "Role-specific ordinary functions",
-          "detail": "Commands may take typed parameters. Services and checks take none. All three return `Void` or `Void ?`. A service lives while its call remains active, and a check passes when its call returns normally.",
-          "technical": "Executable entries accept `fn(labels...) -> Void` or `fn(labels...) -> Void ?`; D-SHAPE-CLI1 derives command inputs. Service entries accept the parameterless forms and end on return. Check entries accept the same parameterless forms; normal return passes and error return fails. Existing effect rows remain unchanged.",
-          "code": "// src/outputs.jet\nfn export(path: Path, pretty: Bool = false) -> Void ? {\n    write_export(path, pretty)?\n}\n\nfn serve() -> Void ? {\n    api.serve()? // stays here until shutdown\n}\n\nfn verify_release() -> Void ? {\n    require(licenses_ok(), \"unapproved license\")\n}\n\n// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            export:  Output :: .Executable.{ name: \"todo-export\", entry: export },\n            api:     Output :: .Service.{ name: \"todo-api\", entry: serve },\n            release: Output :: .Check.{ name: \"release\", entry: verify_release },\n        },\n    },\n}\n\n$ jet run todo.export --path backup.json --pretty\nWrote backup.json\n$ jet test todo.release\nPASS todo.release\n$ jet run todo.api\nTodo API listening on http://127.0.0.1:8080\n^C\nTodo API stopped\n\n# Wrong role: the service points at `export`.\n$ jet check\nerror: service output `todo.api` needs an entry with no parameters\nfix: link it to `serve`, or put settings in the Service value"
+          "detail": "Commands may take typed parameters. Services and checks take none. Each returns `Void` or `Void ?`.",
+          "code": "fn export(path: Path) -> Void ?\n$ jet run export --path out.json\nfn serve() -> Void ?\nfn verify() -> Void ?\n$ jet test verify\nPASS verify"
         },
         {
           "key": "B",
-          "name": "One permissive function shape",
-          "detail": "Every runnable output may take typed parameters and return `Void` or `Void ?`. Users learn one rule. Services and checks gain command flags, so automation can silently choose different invocations.",
-          "technical": "Every callable output accepts `fn(labels...) -> Void` or `fn(labels...) -> Void ?`. Each command derives inputs from its linked function. Service and check parameters become public command inputs. Return still ends a service or decides a check. Existing effect rows remain unchanged.",
-          "code": "// src/outputs.jet\nfn serve(port: Int = 8080) -> Void ? {\n    api.serve(port)?\n}\n\nfn verify_release(channel: String = \"stable\") -> Void ? {\n    require(licenses_ok(channel), \"unapproved license\")\n}\n\n// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            api:     Output :: .Service.{ name: \"todo-api\", entry: serve },\n            release: Output :: .Check.{ name: \"release\", entry: verify_release },\n        },\n    },\n}\n\n$ jet run todo.api --port 9090\nTodo API listening on http://127.0.0.1:9090\n$ jet test todo.release --channel nightly\nPASS todo.release\n\n# CI omits the flag and checks stable instead.\n$ jet test todo.release\nPASS todo.release\n# Both passed, but they checked different release inputs."
+          "name": "One permissive shape",
+          "detail": "Every runnable Output may take typed parameters, including services and checks.",
+          "code": "fn verify(channel: String = \"stable\") -> Void ?\n$ jet test verify\nPASS verify\n$ jet test verify --channel nightly\nPASS verify"
         },
         {
           "key": "C",
-          "name": "Dedicated lifecycle results",
-          "detail": "Each role uses tool-facing result types. Commands return `CommandResult`, services return an owned `ServiceHandle`, and checks return `CheckResult`. Tools gain structured outcomes, but ordinary functions must construct packaging objects.",
-          "technical": "Executable entries return `CommandResult`; service entries return `ServiceHandle`; check entries return `CheckResult`. Parameter rules remain role-specific. The runner owns a service handle until shutdown and then performs deterministic cleanup. Handles cannot borrow function-local data. Existing effect rows remain unchanged.",
-          "code": "// src/outputs.jet\nfn export(path: Path) -> CommandResult {\n    write_export(path)\n    return .Done\n}\n\nfn serve() -> ServiceHandle {\n    return api.start()\n}\n\nfn verify_release() -> CheckResult {\n    if licenses_ok() { return .Pass }\n    return .Fail(\"unapproved license\")\n}\n\n// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            export:  Output :: .Executable.{ name: \"todo-export\", entry: export },\n            api:     Output :: .Service.{ name: \"todo-api\", entry: serve },\n            release: Output :: .Check.{ name: \"release\", entry: verify_release },\n        },\n    },\n}\n\n$ jet test todo.release\nFAIL todo.release: unapproved license\n\n# Maya writes an ordinary `fn verify_release() -> Void ?`.\n$ jet check\nerror: check output `todo.release` must return `CheckResult`\nfix: return `.Pass` or `.Fail(message)`"
+          "name": "Lifecycle result types",
+          "detail": "Each role returns a tool-facing result type instead of ordinary completion or failure.",
+          "code": "fn verify() -> CheckResult { return .Pass }\n$ jet test verify\nPASS verify"
         }
       ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Rust uses ordinary `main` completion for binaries and a separate test harness contract. Test functions stay parameterless unless another framework adds fixtures.",
-          "code": "fn main() -> Result<(), Error> { ... }\n\n#[test]\nfn release_is_licensed() { ... }"
-        },
-        {
-          "lang": "Go",
-          "note": "Go commands use parameterless `main`, while tests accept `*testing.T`. The test parameter exposes harness controls directly inside test code.",
-          "code": "func main() { ... }\nfunc TestRelease(t *testing.T) { ... }"
-        },
-        {
-          "lang": "npm",
-          "note": "npm gives every script the same process model. Exit status is universal, but arguments and lifecycle meaning remain conventions outside the package schema.",
-          "code": "npm run api -- --port 9090\nnpm run check -- --channel nightly"
-        }
-      ],
+      "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "Each role gets one predictable user contract while functions remain ordinary Jet code. Typed flags stay where people expect them, and unattended roles receive reproducible configuration elsewhere.",
+        "why": "Typed command flags remain ergonomic while unattended service and check configuration has one checked source in the Package graph.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Service and check flags create a second configuration path beside their checked output values. Local and automated runs can then exercise different settings without changing source."
+            "reason": "Service and check flags create alternate configurations that local runs and automation may select differently."
           },
           {
             "key": "C",
-            "reason": "Dedicated result objects make ordinary business functions speak a package-runner protocol. `Void`, top-level errors, and call lifetime already express the required outcomes."
+            "reason": "Business code must construct tool protocol values instead of using normal return and error flow."
           }
         ],
-        "tradeoff": "Services and checks cannot accept ad hoc command flags. Users must place their settings in the checked service, check, environment, or policy values that automation also sees."
+        "tradeoff": "Services and checks cannot accept ad hoc invocation flags; their settings must be represented in checked graph values."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -38067,67 +38567,48 @@
       "id": "D-ECO-OUTPUT-DEFAULT1",
       "cardId": "c0qj346l",
       "group": "tooling",
-      "title": "How does a command choose an output when none is named?",
-      "gist": "After a package gains several outputs, what should `jet run todo`, `jet test todo`, and `jet dev todo` choose when the user omits an output name?",
-      "lesson": "Glossary. An output is one named package result. An output address is its full official name, such as `todo.cli`. A capability is an action an output supports, such as run or check. A candidate is an output supporting the requested capability. A default is a recorded choice used when the command omits an output address.\n\nA zero-address command names only the package. `jet run todo` is shorter than `jet run todo.cli`. The short form is obvious while only one runnable output exists.\n\nAmbiguity begins when several outputs support the same command. Declaration order, filesystem order, and last-built state cannot express intent. They may change without a source review.\n\nJet first filters by capability. `jet run` considers runnable outputs, while `jet test` considers check outputs. An explicit address always selects exactly that output.\n\nThe remaining choice is how the short command records intent. Jet can use explicit defaults, give special meaning to output keys, or refuse the short form after outputs become ambiguous.\n\nA default never creates another output or alias. It resolves to the same official address shown by explicit commands, logs, and audit views.\n\nProjects with only a lone `fn run` keep today's zero-configuration behavior. This ballot governs packages that declare explicit outputs.",
+      "title": "Default Output selection",
+      "gist": "Choose the deterministic selection rule for singular Output intents while plural test runs every Check.",
+      "lesson": "`jet test` is plural and runs every Check Output. `run`, `enter`, `publish`, and activation need one Output. The ordered selection rule can use an explicit address, the unchanged function-only `fn run` path, a sole capable Output, or a checked `defaults:` entry. Adding a second candidate must never silently retarget automation.",
       "explainer": "",
-      "story": "Maya's TodoCloud package starts with one customer command. She later adds an admin command, quick checks, release checks, and a development environment. Her laptop and continuous integration must make the same short commands choose the same outputs.",
-      "inWild": "Cargo runs the only binary automatically. With several binaries, users pass `--bin`, or the package records `default-run`. Tests use a separate command and usually run the package's whole test set.\n\nNix flakes use special `default` keys inside separate namespaces. `nix run .` selects `apps.default`, while `nix develop` selects `devShells.default`. The convention is compact, but every namespace has magic naming.\n\nnpm uses named scripts. `npm test` and `npm start` are special script names, while other scripts require `npm run <name>`. Ordinary object keys therefore carry hidden command behavior.\n\nGo relies mainly on package position and command conventions. `go run .` runs the current main package, while `go test ./...` selects packages by path pattern instead of a declared output default.\n\nJet has typed output capabilities, so it can make defaults explicit per command without inventing a separate namespace or silently using order.",
+      "story": "Maya's Package begins with one command, so `jet run` needs no extra configuration. After she adds an administrator command, Jet must stop and ask for an explicit default rather than choosing a different command by accident.",
+      "inWild": "The proposal's hobby Package declares `defaults: .{ run: app, check: unit, enter: dev }`. Explicit addresses always win, and plural `jet test` still runs every Check.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Unique candidate, then explicit defaults",
-          "detail": "Jet selects the only capable output automatically. When several remain, a package records one default per capability. Without that record, Jet stops and lists exact output addresses. Explicit addresses always win.",
-          "technical": "Selection order is explicit address, unchanged function-only entry, sole capable output, configured capability default, then ambiguity. Default fields are `build`, `run`, `check`, `publish`, and `enter`. Checking rejects missing addresses and capability mismatches. Ambiguity lists canonical addresses in sorted order.",
-          "code": "// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            cli:     Output :: .Executable.{ name: \"todo\", entry: run },\n            admin:   Output :: .Executable.{ name: \"todo-admin\", entry: admin },\n            quick:   Output :: .Check.{ name: \"quick\", entry: quick_checks },\n            release: Output :: .Check.{ name: \"release\", entry: release_checks },\n            dev:     Output :: .Environment.{ name: \"dev\", tools: [Jet, Git] },\n        },\n        defaults: .{\n            run: cli,\n            check: quick,\n            enter: dev,\n        },\n    },\n}\n\n$ jet run todo\nTodoCloud\n$ jet test todo\nPASS todo.quick\n$ jet dev todo\nEntered todo.dev\n$ jet run todo.admin\nTodoCloud admin\n\n# Delete `defaults.run` while both commands remain.\n$ jet run todo\nerror: `todo` has two runnable outputs: `todo.admin`, `todo.cli`\nfix: run `jet run todo.<name>`, or set `defaults.run`"
+          "name": "Plural all; ordered singular rule",
+          "detail": "Use explicit address, unchanged `fn run`, sole capable Output, checked default, then sorted candidate error.",
+          "code": "$ jet test\nPASS unit\nPASS release\n\n$ jet run\nSelected sole Executable `cli`.\n\n# after adding admin\n$ jet run\nChoose one Output: admin, cli\nFix: add defaults: .{ run: cli } or run an explicit address."
         },
         {
           "key": "B",
-          "name": "Conventional output keys",
-          "detail": "Jet selects the only capable output first. Otherwise, fixed keys such as `run`, `check`, and `dev` receive special meaning. The key remains the canonical address, but users must reserve those names for defaults.",
-          "technical": "After unique-candidate selection, commands recognize fixed canonical keys for their capabilities. Proposed keys are `build`, `run`, `check`, `publish`, and `dev`. A special key with the wrong capability is rejected. No defaults record exists.",
-          "code": "// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            run:     Output :: .Executable.{ name: \"todo\", entry: run },\n            admin:   Output :: .Executable.{ name: \"todo-admin\", entry: admin },\n            check:   Output :: .Check.{ name: \"quick\", entry: quick_checks },\n            release: Output :: .Check.{ name: \"release\", entry: release_checks },\n            dev:     Output :: .Environment.{ name: \"dev\", tools: [Jet, Git] },\n        },\n    },\n}\n\n$ jet run todo\nTodoCloud\n# The short command means the output whose address is `todo.run`.\n\n$ jet test todo\nPASS todo.check\n$ jet dev todo\nEntered todo.dev\n\n# Maya wants an ordinary output named `run` that is not the default.\n# She cannot use that key without changing short-command behavior."
+          "name": "Conventional keys",
+          "detail": "Reserve Output keys such as `run` and `check` as implicit defaults.",
+          "code": "outputs: .{ run: .Executable.{ name: \"todo\", entry: start }, check: .Check.{ name: \"unit\", entry: verify } }\n$ jet run\nSelected outputs.run."
         },
         {
           "key": "C",
-          "name": "Require explicit addresses after declaration",
-          "detail": "A lone `fn run` keeps the short command. Once a package declares outputs, lifecycle commands require a full output address. No defaults or special names exist, and daily commands remain explicit.",
-          "technical": "Zero-address lifecycle commands remain legal only for the unchanged function-only path. Any explicit output collection requires a canonical output address for build, run, test, publish, and dev. Capability filtering validates the named output but never selects one.",
-          "code": "// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        outputs: {\n            cli:   Output :: .Executable.{ name: \"todo\", entry: run },\n            quick: Output :: .Check.{ name: \"quick\", entry: quick_checks },\n            dev:   Output :: .Environment.{ name: \"dev\", tools: [Jet, Git] },\n        },\n    },\n}\n\n$ jet run todo\nerror: `todo` declares outputs, so name one\nfix: run `jet run todo.cli`\n\n$ jet run todo.cli\nTodoCloud\n$ jet test todo.quick\nPASS todo.quick\n$ jet dev todo.dev\nEntered todo.dev\n\n# These full addresses remain required even though each capability has one candidate."
+          "name": "Always explicit after Outputs",
+          "detail": "Require an Output address whenever any Outputs are declared, even when only one can satisfy the command.",
+          "code": "$ jet run\nname an Output; use jet run cli"
         }
       ],
-      "comparisons": [
-        {
-          "lang": "Cargo",
-          "note": "Cargo automatically chooses one binary and offers `default-run` when several exist. Explicit `--bin` remains available for every binary.",
-          "code": "[package]\ndefault-run = \"todo\"\n\n$ cargo run\n$ cargo run --bin todo-admin"
-        },
-        {
-          "lang": "Nix flakes",
-          "note": "Nix uses a `default` key separately inside apps, packages, checks, and development shells. Users learn the same convention in several namespaces.",
-          "code": "apps.default = apps.todo;\nchecks.default = checks.quick;\ndevShells.default = devShells.dev;"
-        },
-        {
-          "lang": "npm",
-          "note": "npm gives names such as `start` and `test` special command behavior. Other script names require the longer `npm run <name>` form.",
-          "code": "{ \"scripts\": { \"start\": \"node app.js\", \"test\": \"node check.js\" } }"
-        }
-      ],
+      "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "Small packages stay automatic, while larger packages record each intentional short command in checked source. Output names remain ordinary, and every selection resolves to one visible canonical address.",
+        "why": "Small Packages stay automatic, larger Packages record checked intent, and a new Output cannot silently retarget an existing command.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Special keys hide command policy inside ordinary output names. Users must reserve vocabulary and rename outputs to change defaults, even though naming and selection are separate jobs."
+            "reason": "Conventional keys turn ordinary Output names into reserved policy vocabulary."
           },
           {
             "key": "C",
-            "reason": "Requiring a full address when only one output has the needed capability adds typing without adding information. Package adoption would make the beginner path worse immediately."
+            "reason": "Naming a sole capable Output adds typing without adding information."
           }
         ],
-        "tradeoff": "Packages with several same-capability outputs gain a short defaults record. That record is another reviewed package fact, but it prevents silent changes when outputs are added or renamed."
+        "tradeoff": "A Package with several Outputs for one singular capability carries a small `defaults:` record."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -38139,67 +38620,48 @@
       "id": "D-ECO-OUTPUT-PAYLOAD1",
       "cardId": "c0qj346l",
       "group": "syntax",
-      "title": "Which facts belong inside each output value?",
-      "gist": "Should each output contain only facts unique to its kind, an explicit slice of the shared graph, or separate sections for build, run, check, publish, and enter?",
-      "lesson": "Glossary. An output key is its official package address, such as `todo.cli`. An output payload is the checked record inside an `Output` variant. A variant is one allowed kind, such as executable or image. A closed sum has a fixed list of variants. The package graph records sources, actions, dependencies, and policy once.\n\nA projection is a small value pointing to useful graph results. Provenance records where a fact came from. A capability request names authority an output may need. Authority is approved permission to affect the outside world. An OCI image is a standard container image.\n\nJet already chose a closed `Output` sum with named record payloads. It also chose one graph for resolution, build, cache, audit, editors, profiles, and JetOS. This ballot cannot create a second graph.\n\nThe output key is the official address used by commands. The required `name` field has a different job: it labels the produced artifact or presentation. D-SHAPE5b already fixed that field in examples.\n\nKind-specific facts differ. A library exposes modules. A runnable output links code. A bundle lists members. An image describes its input and image settings. An environment lists tools, services, variables, paths, requested authority, and audited actions.\n\nShared sources, dependencies, build actions, policy, and provenance can remain outside payloads. Outputs may also cite the relevant graph slice explicitly, or group those references by command capability.\n\nThe authority law stays fixed in every option. An environment requests capabilities. Runtime authority is the intersection of that request and approved policy, and policy cannot add an unrequested power.\n\nExamples use direct `entry` references so the payload differences stay visible. The callable-link ballot may replace that field without changing this choice.",
+      "title": "Facts stored in each Output value",
+      "gist": "Decide whether Output values are thin typed projections or repeat graph slices.",
+      "lesson": "An Output is a named result selected from one Package graph. Thin projection means the Output stores only its name and kind-specific facts. Sources, dependencies, actions, effects, policy, target facts, and provenance stay single-copy on the graph. `jet inspect output` reconstructs the complete path for audit.",
       "explainer": "",
-      "story": "Maya's TodoCloud package builds one command, runs it as a service, checks its release, places it in an image, and bundles the result. She needs one build truth without seven copies of sources or policy.",
-      "inWild": "Nix flakes expose outputs such as packages, apps, checks, and development shells. An app often wraps a package by pointing at its executable path. Users may repeat wiring across output namespaces and systems.\n\nBazel models one action graph. Named targets declare inputs and dependencies, while typed providers expose consumable results to other targets. An image can consume a binary target without copying the binary's compile actions.\n\nCargo stores shared package metadata once and declares target-specific paths in `[[bin]]`, `[lib]`, and examples. It has no single typed output value spanning binaries, services, checks, images, and environments.\n\nnpm stores package identity and dependencies once, then scripts provide text entry points. Container, service, environment, and release facts usually move into other files, so users trace several unrelated schemas.\n\nJet's opportunity is one typed graph with small output values. The choice is how much graph structure each output repeats for visibility.",
+      "story": "Maya publishes a command and an image built from that command. She changes the command's source set once and expects both outputs and their audit views to use the same fact.",
+      "inWild": "The proposal shows `todo.cli` as a small Executable value. `jet inspect output todo.cli` expands its source set, dependencies, action digest, target, effects, policy, and provenance from the Package graph.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Thin typed projections",
-          "detail": "Each payload contains `name` plus facts unique to its output kind. Shared sources, dependencies, actions, policy, and provenance remain in the package graph. Users read short outputs and inspect the resolved graph when they need full detail.",
-          "technical": "Runnable payloads are `Executable { name, callable-link }`, `Service { name, callable-link }`, and `Check { name, callable-link }`. Other payloads are `Library { name, modules }`, `Environment { name, tools, services, variables, paths, capabilities, actions }`, and `Bundle { name, members }`. Image is `{ name, from, kind?, expose?, env_vars?, files?, base? }`. Unknown fields fail. Environment actions use only requested and approved authority.",
-          "code": "// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        sources: .{ roots: [\"src\"] },\n        outputs: {\n            core: Output :: .Library.{\n                name: \"todo-core\", modules: [Todo],\n            },\n            cli: Output :: .Executable.{\n                name: \"todo\", entry: run,\n            },\n            api: Output :: .Service.{\n                name: \"todo-api\", entry: serve,\n            },\n            release_check: Output :: .Check.{\n                name: \"release\", entry: verify_release,\n            },\n            dev: Output :: .Environment.{\n                name: \"dev\",\n                tools: [Jet, Git],\n                services: [database],\n                variables: [\"TODO_DB\": \"./todo.db\"],\n                paths: [\"bin\"],\n                capabilities: [Process, Files],\n                actions: [prepare_database],\n            },\n            image: Output :: .Image.{\n                name: \"todo-image\",\n                from: cli,\n                kind: .Oci,\n                expose: [8080],\n                env_vars: [\"MODE\": \"release\"],\n                files: [\"public\"],\n            },\n            release: Output :: .Bundle.{\n                name: \"todo-release\", members: [cli, image],\n            },\n        },\n    },\n}\n\n$ jet run todo.cli\nTodoCloud\n$ jet test todo.release_check\nPASS todo.release_check\n$ jet dev todo.dev\nEntered todo.dev\n$ jet build todo.release\nBuilt todo.cli\nBuilt todo.image\nBuilt todo.release"
+          "name": "Thin projections",
+          "detail": "Outputs hold only name and kind-specific facts. Inspection reconstructs the complete path from the Package graph.",
+          "code": "cli: Output :: .Executable.{ name: \"todo\", entry: run }\n$ jet inspect output cli\nExecutable `todo`: sources, deps, action, target, policy, and provenance from Package graph"
         },
         {
           "key": "B",
-          "name": "Explicit graph slice per output",
-          "detail": "Each payload names its relevant source, dependency, action, and policy references. Definitions still live once in the graph, so outputs do not copy them. Every output is self-describing, but repeated reference lists dominate larger manifests.",
-          "technical": "Every variant adds typed `sources`, `deps`, `actions`, and `policy` reference fields to its kind-specific payload. These fields may reference only existing graph nodes. They never contain duplicate declarations. Environment retains its setup actions and capability request. Image retains its image fields. Unknown or incompatible references fail during package checking.",
-          "code": "// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        graph: .{\n            sources: [app: SourceTree.{ root: \"src\" }],\n            actions: [compile: compile_todo, image: build_image, db: prepare_database],\n            policies: [release: release_policy, dev: dev_policy],\n        },\n        outputs: {\n            cli: Output :: .Executable.{\n                name: \"todo\", entry: run,\n                sources: [graph.sources.app], deps: [],\n                actions: [graph.actions.compile], policy: graph.policies.release,\n            },\n            api: Output :: .Service.{\n                name: \"todo-api\", entry: serve,\n                sources: [graph.sources.app], deps: [],\n                actions: [graph.actions.compile], policy: graph.policies.release,\n            },\n            release_check: Output :: .Check.{\n                name: \"release\", entry: verify_release,\n                sources: [graph.sources.app], deps: [],\n                actions: [graph.actions.compile], policy: graph.policies.release,\n            },\n            dev: Output :: .Environment.{\n                name: \"dev\", tools: [Jet, Git], services: [database],\n                variables: [\"TODO_DB\": \"./todo.db\"], paths: [\"bin\"],\n                capabilities: [Process, Files], actions: [graph.actions.db],\n                sources: [graph.sources.app], deps: [], policy: graph.policies.dev,\n            },\n            image: Output :: .Image.{\n                name: \"todo-image\", from: cli, kind: .Oci, expose: [8080],\n                sources: [graph.sources.app], deps: [],\n                actions: [graph.actions.compile, graph.actions.image],\n                policy: graph.policies.release,\n            },\n        },\n    },\n}\n\n$ jet run todo.cli\nTodoCloud\n$ jet dev todo.dev\nEntered todo.dev\n$ jet build todo.image\nBuilt todo.image\n\n# Audit can read each payload alone, but four outputs repeat the same graph references."
+          "name": "Explicit slice per Output",
+          "detail": "Every Output repeats its source, dependency, action, and policy references.",
+          "code": "cli: Output :: .Executable.{ name: \"todo\", entry: run, sources: [app], deps: [textkit], actions: [compile], policy: release }"
         },
         {
           "key": "C",
-          "name": "Capability sections inside outputs",
-          "detail": "Each payload groups references under `build`, `run`, `check`, `publish`, or `enter`. The structure mirrors commands and audit views. Reading one output requires opening several nested sections, even when each section contains one fact.",
-          "technical": "Output variants stay closed. Their payloads gain only capability sections supported by that variant. Sections reference existing graph actions and policy. Runnable sections carry the separately chosen callable link. Environment's `enter` section contains tools, services, variables, paths, capabilities, and actions. Image keeps its image facts outside capability sections.",
-          "code": "// pkg.jet\npayload: { name: \"todocloud\", version: \"1.4.0\" }\npackages: {\n    todo: Package :: .{\n        sources: .{ roots: [\"src\"] },\n        outputs: {\n            cli: Output :: .Executable.{\n                name: \"todo\",\n                build: .{ actions: [compile_todo] },\n                run: .{ entry: run },\n                publish: .{ policy: release_policy },\n            },\n            api: Output :: .Service.{\n                name: \"todo-api\",\n                build: .{ actions: [compile_todo] },\n                run: .{ entry: serve },\n            },\n            release_check: Output :: .Check.{\n                name: \"release\",\n                check: .{ entry: verify_release },\n            },\n            dev: Output :: .Environment.{\n                name: \"dev\",\n                enter: .{\n                    tools: [Jet, Git], services: [database],\n                    variables: [\"TODO_DB\": \"./todo.db\"], paths: [\"bin\"],\n                    capabilities: [Process, Files], actions: [prepare_database],\n                },\n            },\n            image: Output :: .Image.{\n                name: \"todo-image\", from: cli, kind: .Oci, expose: [8080],\n                build: .{ actions: [build_image] },\n                publish: .{ policy: release_policy },\n            },\n        },\n    },\n}\n\n$ jet run todo.cli\nTodoCloud\n$ jet test todo.release_check\nPASS todo.release_check\n$ jet dev todo.dev\nEntered todo.dev\n$ jet build todo.image\nBuilt todo.image\n\n# To understand `todo.cli`, Maya reads three nested capability sections."
+          "name": "Verb sections",
+          "detail": "Each Output divides repeated facts into build, run, and publish sections.",
+          "code": "cli: Output :: .Executable.{ name: \"todo\", build: .{ actions: [compile] }, run: .{ entry: run }, publish: .{ policy: release } }"
         }
       ],
-      "comparisons": [
-        {
-          "lang": "Bazel",
-          "note": "Bazel targets point into one action graph and expose typed providers. Consumers reference target results rather than copying the actions that produced them.",
-          "code": "cc_binary(name = \"todo\", deps = [\":core\"])\noci_image(name = \"image\", binary = \":todo\")"
-        },
-        {
-          "lang": "Nix flakes",
-          "note": "A flake often exposes the same derivation through package and app outputs. The derivation stays shared, but projection wiring repeats across namespaces and systems.",
-          "code": "packages.todo = todo;\napps.todo.program = \"${todo}/bin/todo\";"
-        },
-        {
-          "lang": "Cargo",
-          "note": "Cargo keeps package metadata and dependencies shared, while each target adds only its own name, kind, and source path. Other deployment roles live elsewhere.",
-          "code": "[package]\nname = \"todo\"\n\n[[bin]]\nname = \"todo-admin\"\npath = \"src/admin.rs\""
-        }
-      ],
+      "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "Outputs remain small checked views over one auditable graph. Each kind shows only facts users need to distinguish it, while graph inspection can reveal sources, actions, policy, and provenance once.",
+        "why": "Facts remain single-copy and Output declarations stay readable while one inspect view supplies the full audit path.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Repeated graph-reference lists add review noise without adding new truth. The same shared action remains shared whether four payloads cite it or one resolved graph view shows it."
+            "reason": "Every Output repeats references that can disagree with the Package graph or another Output."
           },
           {
             "key": "C",
-            "reason": "Capability sections organize data around tool verbs instead of the output's meaning. Small records gain nesting, and one output's stable facts become scattered across several headings."
+            "reason": "Stable facts become scattered by command verb and still repeat across Outputs."
           }
         ],
-        "tradeoff": "A payload does not show its complete build path by itself. Users seeking that detail must inspect the resolved graph, which must render the output, policy, actions, and provenance together."
+        "tradeoff": "An isolated Output literal does not display its whole build path; users read that path through `jet inspect output`."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -38337,58 +38799,47 @@
       "hybrid": null,
       "checkInstructions": "This naming remains conditional on the unified graph scope owned by D-ECO1. After ratification, replace the `<Root>` placeholder without adding aliases.",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-15T01:39:39.593Z"
+      "status": "ratified",
+      "created": "2026-07-15T01:39:39.593Z",
+      "outcome": "I",
+      "ratifiedAt": "2026-07-15"
     },
     {
       "id": "D-ECO-JETOS-PREVIEW1",
       "cardId": "c0kxss7s",
       "group": "syntax",
-      "title": "Should built proof include exact machine differences?",
-      "gist": "Choose whether `plan` only predicts differences or `proof` also preserves the exact delta from the captured baseline.",
-      "lesson": "System: one named description of the machine JetOS should create.\nGeneration: one complete built version of that system.\nBaseline: the active generation used for comparison when a new generation is built.\nPlan: a checked prediction made before building.\nProof: saved evidence from one exact built generation.\nDelta: the added, changed, and removed items between two generations.\nProvenance: the recorded inputs and tools that produced a generation.\n\nJetOS already has `plan` and `proof`. Plan can predict changes without touching the machine. It cannot know final output hashes or whether build and readiness checks pass.\n\nProof reads immutable evidence after a build. If the build captures its baseline, proof can show an exact delta after another generation becomes active.\n\nRatified syntax already gives preview to `plan` and built evidence to `proof`. This ballot does not add `diff` or rename `plan`. It decides whether proof includes the exact built delta.",
+      "title": "JetOS plan and historical proof",
+      "gist": "Decide whether proof preserves the exact built delta from a captured parent generation.",
+      "lesson": "`jet os plan` predicts changes from checked Package source and the active baseline before a machine changes. Build captures the parent generation. `jet os proof` records what was built and observed. Historical proof can store that exact baseline-relative delta, or omit it and leave only the current prediction path.",
       "explainer": "",
-      "story": "Rin changes Halcyon's API port during an incident. Before switching, Rin needs a safe preview. Two days later, an auditor asks exactly what `gen-42` changed from `gen-41`.",
-      "inWild": "NixOS users run `nixos-rebuild dry-activate` to build a candidate and preview activation actions, such as restarted services. Terraform users save a prediction with `terraform plan -out=change.plan`, review it, then apply it. Neither workflow turns the prediction into JetOS-style immutable generation proof. JetOS has both stages: plan for the immediate preview and proof for the later audit.",
+      "story": "Rin changes Halcyon's API port during an incident. Before activation Rin needs a preview; later an auditor needs the exact change from gen-41 to gen-42 after newer generations are active.",
+      "inWild": "The proposal's Package graph produces System Output `halcyon`. Plan predicts `gen-41 -> candidate`; proof for `gen-42` preserves baseline, built changes, output digests, readiness, activation, provenance, and rollback.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Plan predicts; proof confirms changes",
-          "detail": "`plan` shows the checked pre-build prediction. After `build`, `proof` shows the exact delta from the captured baseline beside readiness and provenance.",
-          "technical": "Build stores baseline generation identity and typed delta. Proof never recomputes against current active state. JSON includes candidate, baseline, deltas, output digests, checks, and provenance. No `diff` command exists.",
-          "code": "$ jet os plan halcyon\nPlan: halcyon\nbaseline: gen-41 (active)\ncandidate: not built\n  + service api\n  ~ package curl 8.9 -> 8.10\nNo machine changed.\n\n$ jet os build halcyon\nBuilt: halcyon generation gen-42\nBaseline captured: gen-41\n\n$ jet os proof halcyon --name gen-42\nProof: halcyon generation gen-42\nbaseline: gen-41\n  + service api\n  ~ package curl 8.9 -> 8.10\nchanges: 1 added, 1 changed, 0 removed\nreadiness: passed (12/12 checks)\nprovenance: complete"
+          "name": "Plan predicts, proof confirms",
+          "detail": "Plan shows the checked prediction. Proof stores the exact built delta from the captured baseline with evidence.",
+          "code": "$ jet os plan halcyon\nPlan: halcyon\nbaseline: gen-41 (active)\ncandidate: not built\n\n$ jet os proof halcyon --name gen-42\nProof: halcyon generation gen-42\nbaseline: gen-41\nchanges: 1 added, 1 changed, 0 removed\nreadiness: passed (12/12 checks)\nprovenance: complete"
         },
         {
           "key": "B",
-          "name": "Plan is the only change view",
-          "detail": "`plan` predicts changes before build. `proof` records readiness, hashes, and provenance, but no baseline delta. This keeps proof narrower but loses a durable exact change report.",
-          "technical": "Plan compares desired state with active query-time state. Build records provenance but no typed delta. Proof cannot reconstruct historical changes after active state advances.",
-          "code": "$ jet os plan halcyon\nPlan: halcyon\nbaseline: gen-41 (active)\n  + service api\n  ~ package curl 8.9 -> 8.10\nNo machine changed.\n\n$ jet os proof halcyon --name gen-42\nProof: halcyon generation gen-42\nreadiness: passed (12/12 checks)\nprovenance: complete\nchanges: not recorded\n\n$ jet os switch halcyon --name gen-42\nActive: halcyon generation gen-42\n\n$ jet os plan halcyon\nNo changes from active generation gen-42."
+          "name": "Plan is the only delta",
+          "detail": "Plan predicts current changes, while proof stores readiness and provenance without a baseline delta.",
+          "code": "$ jet os plan halcyon\nbaseline: gen-41 (active)\n  + service api\n\n$ jet os proof halcyon --name gen-42\nreadiness: passed (12/12 checks)\nprovenance: complete\nchanges: not recorded"
         }
       ],
-      "comparisons": [
-        {
-          "lang": "NixOS",
-          "note": "`dry-activate` previews activation actions after building a candidate. It does not preserve one full generation-linked change report.",
-          "code": "$ sudo nixos-rebuild dry-activate\nwould restart the following units: api.service"
-        },
-        {
-          "lang": "Terraform",
-          "note": "A saved plan preserves predicted resource actions for later apply. Provider results and post-apply evidence remain separate.",
-          "code": "$ terraform plan -out=change.plan\nPlan: 1 to add, 1 to change, 0 to destroy.\n$ terraform apply change.plan\nApply complete!"
-        }
-      ],
+      "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "One short workflow serves beginners and auditors. Plan gives the safe preview. Proof preserves exact built changes after active state moves, without inventing another command.",
+        "why": "Plan gives the immediate safe preview, and proof answers the later historical question after active state changes without adding another command.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "A later plan compares against current state, not the baseline used by an older build. It cannot answer what that generation changed."
+            "reason": "A later plan compares against current state and cannot reconstruct what an older generation changed from its captured parent."
           }
         ],
-        "tradeoff": "Proof carries more information than readiness alone. A short summary keeps normal output readable, while `--json` exposes the full audit record."
+        "tradeoff": "Each generation retains a compact typed delta and activation observation record."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -38449,6 +38900,13 @@
           "detail": "Use `Nacelle`. A nacelle is a distinct aircraft housing integrated into a larger craft.",
           "technical": "Nacelle is unfamiliar to many beginners and more naturally names a housing than its contents. It also names an active commerce platform.",
           "code": "pub deployment :: Nacelle.{ services: { api: Service.{ port: 8080 } } }\nDocs: deployment is a Nacelle that contributes the API service.\nDiagnostic: Nacelle deployment and Nacelle monitoring disagree at services.api.port."
+        },
+        {
+          "key": "G",
+          "name": "Config",
+          "detail": "Use `Config` for one layout-neutral typed value that contributes Package facts.",
+          "technical": "Config is distinct from a code module and from a distributable Package. Configs merge by the ratified field law and cannot declare member Packages.",
+          "code": "app :: Config.{\n    source: \"Source/api\"\n    deps: .{ http: \"4.2\" }\n    outputs: .{ api: .Service.{ name: \"api\", entry: run_api } }\n}"
         }
       ],
       "comparisons": [
@@ -38463,88 +38921,81 @@
           "code": "module \"network\" { source = \"./network\" }"
         }
       ],
-      "rec": "B",
+      "rec": "G",
       "recommendation": {
-        "why": "Wing is immediately pronounceable, memorable, and natural in documentation and errors. It preserves Jet's aviation product family without requiring aircraft knowledge.",
+        "why": "Config is plain English and separates settings contributions from code namespaces and distribution units.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "Rib has exact programming-language and graphics-format collisions, while its common meanings are anatomical or culinary."
+            "reason": "Rib is themed and collides with language and graphics names."
+          },
+          {
+            "key": "B",
+            "reason": "Wing is themed and collides with Winglang."
           },
           {
             "key": "C",
-            "reason": "Bay sounds like a location containing the contribution, not the contribution value itself."
+            "reason": "Bay sounds like a location rather than contributed facts."
           },
           {
             "key": "D",
-            "reason": "Section is generic, heavily overloaded, and provides little Jet product identity."
+            "reason": "Section is heavily overloaded and does not state configuration purpose."
           },
           {
             "key": "E",
-            "reason": "Cell collides with Jet internals and Rust's public `Cell` type."
+            "reason": "Cell collides with memory and runtime vocabulary."
           },
           {
             "key": "F",
-            "reason": "Nacelle needs vocabulary teaching and names a container around a subsystem more naturally than the contributed facts."
+            "reason": "Nacelle requires aviation vocabulary and names a housing."
           }
         ],
-        "tradeoff": "Wing is also an active cloud programming language. Jet-qualified documentation and search results must handle that collision without taxing every source file and diagnostic."
+        "tradeoff": "Config is a common word. Type context and Package-qualified documentation must keep it distinct from ad hoc configuration files."
       },
       "hybrid": null,
       "checkInstructions": "Replace contribution placeholders only after ratification. Source discovery and split behavior remain separate decisions. Do not add aliases for rejected names.",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-15T05:03:22.834Z"
+      "status": "ratified",
+      "created": "2026-07-15T05:03:22.834Z",
+      "outcome": "G",
+      "ratifiedAt": "2026-07-15"
     },
     {
       "id": "D-ECO-SPLITPOLICY1",
       "cardId": "c0m1zysi",
       "group": "tooling",
-      "title": "Should `jet split env` work on an inline environment?",
-      "gist": "When `env` still lives in the root, choose whether split extracts it automatically or requires an authored contribution first.",
-      "lesson": "Root: the one value that describes the complete project.\nContribution: one exported typed value that adds a named piece to the root.\nModule: a source grouping that does not change project meaning.\nGraph fingerprint: a hash proving the complete project means the same thing before and after a move.\nLedger: Jet's private record of where moved source came from.\n\nSmall projects keep `env` directly in the root. Larger projects can use contributions discovered from other files. Both forms describe the same typed project graph.\n\n`jet split env` is a reversible source refactor. It previews the move, refuses unsafe boundaries, and records the original file and position. `jet fold env` reverses only a recorded move.\n\nAn immediate split then fold must restore identical bytes. The graph fingerprint must stay unchanged throughout.\n\nThis choice decides who performs the step from inline field to contribution. Jet can perform it during split, or require the author to do it first. Contributions remain the only modular composition mechanism.",
+      "title": "What jet split does with inline Package facts",
+      "gist": "Decide whether `jet split` extracts inline facts or only moves an already-authored Config.",
+      "lesson": "A Config is a typed value contributing facts to one Package. `jet split` is a source refactor that must preserve Package identity and graph fingerprint. The command previews its generated binding, refuses non-closed extraction before writes, and records a ledger that `jet fold` can reverse. This decision controls whether split may create the Config a beginner has not written yet.",
       "explainer": "",
-      "story": "Maya starts Atlas in `project.jet`. Months later its development environment crowds the file. She runs `jet split env`, reviews the preview, then folds it back after a teammate objects.",
-      "inWild": "Rust separates extracting a public item from moving an existing module file. Go ties package identity to directories, so moving a file can change program structure. Nix configurations use explicit imports, which users update when files move. npm workspaces usually require another manifest. Jet promises less ceremony and no file-order meaning. This ballot decides whether split also performs the required extraction refactor.",
+      "story": "Maya starts with a development environment inline in `package.jet`. When the file grows, she asks Jet to move the environment into `package/env.jet` without first learning the manual Config extraction steps.",
+      "inWild": "The proposal's S3 transition extracts `package.environments` into `package/env.jet::development`, adds a `Config`, and proves the Package graph hash is unchanged. Experts may author that same Config directly.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Split performs the extraction",
-          "detail": "`jet split env` turns the inline `env` field into one exported contribution and moves it to `project/env.jet`. The graph stays unchanged. Fold restores the original bytes.",
-          "technical": "Jet records a generated-contribution entry with tier, stable identity, origin path, origin ordinal, destination, and complete graph fingerprint. The public type follows D-ECO-SLICENAME1. Shared bindings, collisions, or non-closed fields refuse before writes. Fold consumes only this generated entry and preserves author-added siblings.",
-          "code": "// project.jet — before\nproject :: Project.{\n    env: Env.{ packages: [pkgs.ripgrep] }\n    image: Image.{ tools: [] }\n}\n\n$ jet split env --check\nWould extract: project.env\nWould create: project/env.jet::development\nProject graph: unchanged\nNo files changed.\n\n$ jet split env\nExtracted: project.env -> project/env.jet::development\nProject graph: unchanged\n\n$ jet fold env\nRestored: project/env.jet::development -> project.env\nRound trip: project.jet is byte-identical"
+          "name": "Extract and move",
+          "detail": "Split creates the closed Config needed to move inline facts and records a reversible ledger.",
+          "code": "$ jet split env --check\nWould extract: package.environments\nWould create: package/env.jet::development\nWould add: Config `development`\npackage graph before: sha256:39df…\npackage graph after:  sha256:39df…\nNo files changed."
         },
         {
           "key": "B",
-          "name": "Split moves authored modules only",
-          "detail": "`jet split env` moves a complete module that already contains an exported contribution. Inline root fields are not movable. Users extract the contribution and module themselves first.",
-          "technical": "Jet records each authored module's stable identity, exact origin, destination, owned tiers, and complete graph fingerprint. It never generates or removes public declarations. Fold returns each module to its recorded origin. Inline fields fail before writes.",
-          "code": "// project/source.jet — authored first\npub module deployment {\n    pub development :: Nacelle.{\n        env: Env.{ packages: [pkgs.ripgrep] }\n    }\n}\n\n$ jet split env --check\nWould move: module deployment\nFrom: project/source.jet\nTo: project/env.jet\nProject graph: unchanged\nNo files changed.\n\n// Inline root instead:\n$ jet split env\nError [E1327]: No exported `Nacelle` contribution owns tier `env`.\n Fix: extract `env` into an exported contribution, then retry."
+          "name": "Move Configs only",
+          "detail": "Split moves only an exported Config the author already created. Inline facts fail with a direct prerequisite.",
+          "code": "$ jet split env\nError: no exported Config owns tier env.\nFix: extract it, then retry."
         }
       ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Rust can move an existing module between inline and file forms. Extracting a new public abstraction is normally a separate editor refactor.",
-          "code": "mod deployment; // deployment.rs"
-        },
-        {
-          "lang": "npm",
-          "note": "Turning code into a workspace package usually adds a package manifest and workspace membership. Jet's typed contributions need no member manifest.",
-          "code": "packages:\n  - packages/*"
-        }
-      ],
+      "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "Split does what a beginner asks: grow one file into several without a manual refactor first. The result still uses the same canonical contribution model experts author directly.",
+        "why": "The command fulfills the requested growth step and produces the same Config experts write directly.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "It makes the common one-file growth path require a manual extraction before the refactoring command can help."
+            "reason": "It requires the common one-file growth path to perform a manual extraction before the refactor command can help."
           }
         ],
-        "tradeoff": "Split introduces one exported contribution name. Its preview must show that public source change clearly, while the ledger and byte-identical fold keep it reversible."
+        "tradeoff": "Preview must name the generated binding and split must refuse shared bindings, collisions, and open fields before any write."
       },
       "hybrid": null,
       "checkInstructions": "Preserve exact ledger, refusal, precedence, graph-fingerprint, crash-safety, and round-trip laws in technical acceptance. Substitute the type ratified by D-ECO-SLICENAME1 in executable fixtures.",
@@ -38622,8 +39073,10 @@
       "hybrid": null,
       "checkInstructions": "Ratify exactly one three-action family with no aliases. Do not infer or reopen lifecycle semantics from this naming ballot.",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-15T05:32:46.263Z"
+      "status": "ratified",
+      "created": "2026-07-15T05:32:46.263Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-15"
     },
     {
       "id": "D-JPK-NIXPIN1",
@@ -39253,6 +39706,456 @@
       "created": "2026-07-15T19:59:10.706Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-15"
+    },
+    {
+      "id": "D-ECO-MEMBERS1",
+      "cardId": "c002osb3",
+      "group": "syntax",
+      "title": "How Packages relate in a monorepo",
+      "gist": "Decide whether a monorepo Package refers to independent member Packages or contains recursive Package definitions.",
+      "lesson": "A Package is the complete checked unit defined by its nearest `package.jet`. A member reference points from a monorepo root to another Package. Depth cap 1 means a member Package cannot list members. This decision controls only Package membership. Config composition, source imports, and repository layout remain separate.",
+      "explainer": "",
+      "story": "Mara keeps an API and billing tool in one repository. The root must name both without letting billing define another hidden Package tree that changes discovery and lock identity.",
+      "inWild": "The proposal's enterprise monorepo uses one root `members:` list. A nested member is rejected with a diagnostic naming both `package.jet` files and telling the user to lift the inner references.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Flat member references",
+          "detail": "The root lists member Packages by reference. Members cannot have members, and a single Package needs no membership field.",
+          "code": "members: find(\"./packages\")\n\n$ jet check\nError: member package `packages/api/package.jet` lists members from `packages/api/modules/package.jet`\n What: root `package.jet` references `packages/api/package.jet`, which also has a `members:` field\n Why: package membership has depth cap 1; members cannot have members\n Fix: remove the inner `members:` field and lift its references into root `package.jet`"
+        },
+        {
+          "key": "B",
+          "name": "Recursive Packages",
+          "detail": "Every Package may contain more Packages through `members:`. Discovery and lock identity follow the full tree.",
+          "code": "// root package.jet\nmembers: [\"packages/api/package.jet\"]\n\n// packages/api/package.jet\nmembers: [\"modules/auth/package.jet\"]\n\n$ jet check\nOK: package depth 2"
+        },
+        {
+          "key": "C",
+          "name": "Workspace root plus Packages",
+          "detail": "A separate Workspace type owns Package membership. Individual Packages never have `members:`.",
+          "code": "// workspace.jet\npackages: [\"packages/api/package.jet\", \"packages/billing/package.jet\"]\n\n// packages/api/package.jet\nname: \"api\""
+        },
+        {
+          "key": "D",
+          "name": "Named sub-units",
+          "detail": "The root contains differently named sub-units instead of member Packages.",
+          "code": "components: .{\n    api: SubPackage.{ path: \"packages/api\" }\n    billing: SubPackage.{ path: \"packages/billing\" }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Flat references keep one Package noun, one membership boundary, and one deterministic depth rule while supporting monorepos.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Recursive membership makes discovery, identity, and diagnostics depend on an unbounded Package tree."
+          },
+          {
+            "key": "C",
+            "reason": "A Workspace type restores the second root noun the Package choice removed."
+          },
+          {
+            "key": "D",
+            "reason": "A renamed sub-unit creates another distribution concept beside Package."
+          }
+        ],
+        "tradeoff": "Large monorepos must list every member from the root instead of grouping them through nested Package membership."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-15T20:56:32.565Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-15"
+    },
+    {
+      "id": "D-ECO-TRANSITION1",
+      "cardId": "c0m1zysi",
+      "group": "tooling",
+      "title": "Commands for Package growth and reversal",
+      "gist": "Choose the commands that extract Package facts and reverse a recorded extraction.",
+      "lesson": "A split moves or extracts facts without changing the checked Package graph. A fold reverses a split through Jet's private provenance ledger. Both commands preview before writing, refuse unsafe boundaries, and preserve the graph fingerprint. This decision names the two commands; D-ECO-SPLITPOLICY1 separately decides whether split may create a Config from inline facts.",
+      "explainer": "",
+      "story": "Maya's development environment outgrows `package.jet`. She extracts it, reviews the new Config, then restores the original file after a teammate asks for the earlier layout.",
+      "inWild": "The proposal uses the same verbs for extracting an environment, a flat member Package, and a System-to-Fleet host map. Reversal always names the generated member file and consumes the recorded split ledger.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet split and jet fold",
+          "detail": "Use one extraction verb and one explicit reversal verb for every supported Package tier.",
+          "code": "$ jet split env\nCreated package/env.jet.\npackage graph unchanged: sha256:39df…\nReverse with: jet fold package/env.jet"
+        },
+        {
+          "key": "B",
+          "name": "jet split with reverse flag",
+          "detail": "Use `jet split` for extraction and `jet split --reverse` for reversal.",
+          "code": "$ jet split env\nCreated package/env.jet.\n\n$ jet split --reverse package/env.jet\nRestored package.jet."
+        },
+        {
+          "key": "C",
+          "name": "Intent-specific verbs",
+          "detail": "Use different verbs for environments, member Packages, and Fleets.",
+          "code": "$ jet extract-env\n$ jet extract-package billing\n$ jet make-fleet halcyon\n$ jet restore package/env.jet"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "One split/fold pair applies to every graph-preserving extraction and keeps reversal visible as its own operation.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A reverse flag hides a distinct destructive direction behind the extraction command."
+          },
+          {
+            "key": "C",
+            "reason": "Tier-specific verbs create several mechanisms for the same graph-preserving refactor."
+          }
+        ],
+        "tradeoff": "Users must learn that fold is source-layout reversal, not graph aggregation or runtime behavior."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-15T20:57:18.456Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-15"
+    },
+    {
+      "id": "D-ECO-FLEETVERB1",
+      "cardId": "c0kxss7s",
+      "group": "tooling",
+      "title": "Fleet rollout command",
+      "gist": "Choose the command for planning, staging, observing, and rolling back a Fleet rollout.",
+      "lesson": "A Fleet maps host names to System Outputs plus rollout policy. Deployment builds and verifies generations, activates hosts by cohort, observes health, and rolls back according to that policy. This decision names the top-level intent. It does not change the Fleet schema or per-host activation proof.",
+      "explainer": "",
+      "story": "Rin rolls a production Fleet through one canary and one later host. The command must read clearly in an interactive prompt, CI, and audit logs.",
+      "inWild": "The proposal's beginner path runs `jet deploy prod`. Expert flags stage without activation, choose a cohort, set concurrency, emit JSON, or roll back one host without changing Fleet declarations.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet deploy",
+          "detail": "Use the standard deployment verb at the top level.",
+          "code": "$ jet deploy prod\nPlan fleet `prod`\n  hosts: web1, web2\n  canary: web1\n  then: web2\n  failure: rollback changed host and stop\nPush this plan? [y/N]"
+        },
+        {
+          "key": "B",
+          "name": "jet fleet push",
+          "detail": "Group Fleet operations under a fleet noun and use push for rollout.",
+          "code": "$ jet fleet push prod\nPlan fleet `prod`\nPush this plan? [y/N]"
+        },
+        {
+          "key": "C",
+          "name": "jet os push",
+          "detail": "Keep rollout under the JetOS command group.",
+          "code": "$ jet os push prod\nPlan fleet `prod`\nPush this plan? [y/N]"
+        },
+        {
+          "key": "D",
+          "name": "jet push",
+          "detail": "Use the shortest top-level verb.",
+          "code": "$ jet push prod\nPlan fleet `prod`\nPush this plan? [y/N]"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Deploy is the established word for staged rollout and leaves push available for transfer operations.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Fleet grouping adds a noun before the primary user intent and keeps the ambiguous push verb."
+          },
+          {
+            "key": "C",
+            "reason": "OS grouping hides that one deployment spans Fleet policy, packages, services, and remote targets."
+          },
+          {
+            "key": "D",
+            "reason": "Bare push does not state whether Jet transfers source, artifacts, or activates hosts."
+          }
+        ],
+        "tradeoff": "Deploy becomes a top-level Jet command and must route to Fleet rollout without conflicting with package publication."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-15T20:58:04.091Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-15"
+    },
+    {
+      "id": "D-ECO-FILEROOT1",
+      "cardId": "c0m1zysi",
+      "group": "syntax",
+      "title": "Reserved Package source-file law",
+      "gist": "Decide whether one reserved `package.jet` replaces permanent package, environment, workspace, and OS role files.",
+      "lesson": "A script remains complete without any reserved file. When a Package root exists, its reserved filename can supply the expected `Package` type so top-level fields construct it directly. This bare-fields root and inferred construction reuse already-ratified D-DOTCTOR2; they do not create another constructor syntax. Configs may move to discovered `.jet` files, and a leading underscore disables a discovered file. Generated state remains under `.jet/`.",
+      "explainer": "",
+      "story": "Maya grows a script into a Package, then adds an environment and a System. She needs one place to find the Package root without learning four permanent authority files.",
+      "inWild": "The proposal replaces `pkg.jet`, `env.jet`, `workspace.jet`, and JetOS `config.jet`. During one migration epoch, `jet init --check` previews a reversible fold and `jet init --restore-role-files` restores byte-identical originals.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One package.jet",
+          "detail": "Use `package.jet` as the sole reserved ecosystem file. Other `.jet` files contribute Configs.",
+          "code": "// package.jet\nsystems: .{ halcyon: .System.{ packages: [cli] } }\n\n$ jet os plan halcyon\nPlan: halcyon\nNo machine changed.\n\n$ jet check\nWarning [L1320]: this Package uses four retired ecosystem filenames\n What: `pkg.jet`, `env.jet`, `workspace.jet`, and `config.jet` describe one Package\n Why: `package.jet` is now the one reserved ecosystem source file\n Fix: run `jet init --check`, review the fold, then run `jet init`"
+        },
+        {
+          "key": "B",
+          "name": "Keep role files",
+          "detail": "Keep `pkg.jet`, `env.jet`, `workspace.jet`, and `config.jet` as permanent authorities.",
+          "code": "pkg.jet\nenv.jet\nworkspace.jet\nconfig.jet\n\n$ jet explain services.db.port\nservices.db.port = 5432\nwinning role file: env.jet"
+        },
+        {
+          "key": "C",
+          "name": "No reserved file",
+          "detail": "Require users to select an arbitrary Package root file when one cannot be inferred.",
+          "code": "$ jet --package config/root.jet build\nBuilt Package.\n\n$ jet build\nNo Package root selected."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "One root file makes later file growth organizational, removes competing identities, and leaves the single-file script path ceremony-free.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Permanent role files preserve several authorities and require provenance to explain which file identity won."
+          },
+          {
+            "key": "C",
+            "reason": "The first multi-file Package adds permanent root-selection ceremony to normal commands."
+          }
+        ],
+        "tradeoff": "One migration epoch must teach and reversibly fold four previously ratified filenames."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T20:58:50.066Z"
+    },
+    {
+      "id": "D-ECO-OUTPUT-KINDS1",
+      "cardId": "c0qj346l",
+      "group": "syntax",
+      "title": "Closed v1 Output kind set",
+      "gist": "Decide whether v1 has one closed Output kind set spanning packages and JetOS results.",
+      "lesson": "An Output is a named typed projection from one Package graph. A closed kind set lets selection, inspection, proof, defaults, and lifecycle commands check every case. The proposed kinds are Library, Executable, Service, Check, Environment, Image, Bundle, System, and Fleet. Adding another kind would require a later owner decision.",
+      "explainer": "",
+      "story": "Maya's Package produces a library, command, release check, image, System, and Fleet. Tooling must know which outputs are runnable, testable, enterable, deployable, and publishable without interpreting plugin strings.",
+      "inWild": "The proposal declares all nine kinds beside each other and rejects `.Wheel.{}` with a diagnostic pointing to Bundle or a future ratified kind.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Nine closed kinds",
+          "detail": "Use Library, Executable, Service, Check, Environment, Image, Bundle, System, and Fleet as the closed v1 set.",
+          "code": ".Environment.{…}\n.System.{…}\n.Fleet.{…}\n// beside Library, Executable, Service, Check, Image, and Bundle\n\n.Wheel.{}\nunknown Output kind; add a ratified kind or use Bundle."
+        },
+        {
+          "key": "B",
+          "name": "Package-only closure",
+          "detail": "Keep package result kinds closed while System and Fleet use separate root node types.",
+          "code": "system: System :: .{ packages: [cli] }\n$ jet inspect output halcyon\nhalcyon is not an Output"
+        },
+        {
+          "key": "C",
+          "name": "Extensible text kinds",
+          "detail": "Allow plugins to introduce arbitrary Output kind strings and payloads.",
+          "code": ".Custom.{ kind: \"wheel\", payload: wheel_facts }\n$ jet inspect output wheel\nplugin kind: wheel"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "One closed capability model makes build, selection, inspection, proof, and defaults exhaustive from Package through Fleet.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "System and Fleet would split selection, inspection, and lifecycle rules from the Output model."
+          },
+          {
+            "key": "C",
+            "reason": "Arbitrary strings prevent exhaustive tools and precise beginner diagnostics."
+          }
+        ],
+        "tradeoff": "A genuinely new output kind requires an owner decision instead of a local plugin string."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T20:59:12.793Z"
+    },
+    {
+      "id": "D-ECO-RECEIPTSTORE1",
+      "cardId": "c01fj815",
+      "group": "tooling",
+      "title": "Storage location for connected receipts",
+      "gist": "Choose where action and activation evidence lives without creating a second merge authority.",
+      "lesson": "`.jet/lock` is the reviewable Package graph index and sole merge-history authority. A receipt connects locked input, action, output digest, parent generation, readiness, activation observation, and rollback evidence. Receipt storage must preserve immutable identity, retention, export, and signatures without copying graph merge history.",
+      "explainer": "",
+      "story": "Rin builds `todo.cli` and activates Halcyon generation 42 several times while the Package source stays unchanged. The lock must remain reviewable while each realization keeps durable evidence.",
+      "inWild": "The proposal stores immutable receipt objects in Hangar and records their digests in the lock or generation. `jet os proof` loads the receipt and follows its locked-input reference.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Hangar objects referenced by lock or generation",
+          "detail": "Store receipts as immutable Hangar objects and keep only digest references in graph and generation records.",
+          "code": ".jet/lock contains `receipt sha256:91b8…`\n$ jet os proof halcyon --name gen-42\nreceipt: sha256:91b8…\nlocked inputs: sha256:20f1…\nExport copies the receipt closure."
+        },
+        {
+          "key": "B",
+          "name": "Inline every receipt in .jet/lock",
+          "detail": "Append action, log, output, readiness, and activation evidence directly to the Package lock.",
+          "code": ".jet/lock\n  build todo.cli action: ...\n  build todo.cli logs: ...\n  system gen-42 readiness: ...\n  system gen-42 activation: ..."
+        },
+        {
+          "key": "C",
+          "name": "Package-local receipt directory",
+          "detail": "Store mutable-path JSON receipt files beside generated Package state.",
+          "code": ".jet/receipts/gen-42.json\n$ jet os proof halcyon --name gen-42\nloaded .jet/receipts/gen-42.json"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Hangar already owns content identity, deduplication, signatures, retention, export, and generation roots while the lock remains the one graph index.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Local realization logs and observations would grow source resolution state and obscure reviewable merge changes."
+          },
+          {
+            "key": "C",
+            "reason": "Mutable paths require another identity and tamper model for evidence already suited to content-addressed storage."
+          }
+        ],
+        "tradeoff": "Human review uses `jet proof`, `jet inspect`, or an exported receipt rather than opening one source-adjacent receipt file."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T20:59:35.466Z"
+    },
+    {
+      "id": "D-ECO-HANGARPATH1",
+      "cardId": "c01fj815",
+      "group": "tooling",
+      "title": "Default Hangar ownership and path",
+      "gist": "Choose the default physical Hangar ownership model across Linux, macOS, and Windows.",
+      "lesson": "Hangar stores verified immutable objects, closures, and receipts. The default path determines whether first use needs administrator setup and whether objects can be shared across a user's Packages. Shared organization storage remains a separate optional broker decision.",
+      "explainer": "",
+      "story": "Asha installs Jet without administrator rights and runs her first Package on Linux, macOS, and Windows. The same workflow must work without a setup prompt.",
+      "inWild": "The proposal uses each platform's native per-user data location and exposes the resolved value through `jet hangar path`. `/etc/jet/hangar` stops being the default.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Native per-user data path",
+          "detail": "Use platform user-data directories and allow an optional shared broker.",
+          "code": "Linux:  $XDG_DATA_HOME/jet/hangar, fallback ~/.local/share/jet/hangar\nmacOS:  ~/Library/Application Support/Jet/Hangar\nWindows: %LOCALAPPDATA%\\Jet\\Hangar\n\n$ jet hangar path\n/home/asha/.local/share/jet/hangar"
+        },
+        {
+          "key": "B",
+          "name": "/etc/jet/hangar where possible",
+          "detail": "Keep a root-owned shared path as the default on systems that provide it.",
+          "code": "$ jet run\npermission denied: /etc/jet/hangar\nrerun installer as root or configure a store"
+        },
+        {
+          "key": "C",
+          "name": "Package-local .jet/hangar",
+          "detail": "Store objects inside each Package's generated state directory.",
+          "code": "weather/.jet/hangar/sha256-...\ntodo/.jet/hangar/sha256-...\n# identical object stored once per Package"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Per-user storage gives rootless first use, native cross-platform behavior, and sharing across one user's Packages.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A root-owned default breaks first use without administrator setup and has no native Windows equivalent."
+          },
+          {
+            "key": "C",
+            "reason": "Package-local stores duplicate verified bytes and prevent user-wide cleanup and reuse."
+          }
+        ],
+        "tradeoff": "Each user initially owns a separate physical cache unless an administrator installs the optional shared broker."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T20:59:58.196Z"
+    },
+    {
+      "id": "D-ECO-BROKERBOUNDARY1",
+      "cardId": "c01fj815",
+      "group": "safety",
+      "title": "Optional shared Hangar broker boundary",
+      "gist": "State the privilege and lifetime boundary that keeps a shared Hangar optional and non-resident.",
+      "lesson": "Jet's no-daemon rule prohibits a required resident privileged build service. An optional shared Hangar still needs a narrow authority that can verify and promote objects across users. A socket-activated process can start per request, exit when idle, refuse source evaluation, rebuild under ephemeral sandbox identities, and re-check bytes, signatures, provenance, and writer authority.",
+      "explainer": "",
+      "story": "An administrator wants deduplicated verified objects across a build lab. Developers must still build with their own Hangars when the shared socket is absent, and the privileged component must never execute repository source.",
+      "inWild": "The proposal's installer creates an optional socket. A build reports verified promotions, then the broker exits idle. Missing socket falls back to the per-user Hangar without changing Package behavior.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Socket-activated transient verifier",
+          "detail": "Install an administrator-controlled request-bounded verifier that never evaluates source.",
+          "code": "$ jetpack shared-store install\nInstalled socket-activated shared-store verifier.\n\n$ jet build\nshared broker verified 3 objects; broker idle exit.\n\n# missing socket\nusing user Hangar"
+        },
+        {
+          "key": "B",
+          "name": "Resident build daemon",
+          "detail": "Run a root service continuously and submit source evaluation and builds to it.",
+          "code": "$ jetpack shared-store install\nEnabled root build daemon.\n$ jet build\nsubmitted Package source to resident daemon"
+        },
+        {
+          "key": "C",
+          "name": "No privileged process ever",
+          "detail": "Forbid all shared-store promotion and keep every Hangar per user.",
+          "code": "$ jetpack shared-store install\nunsupported"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Request-bounded lifetime, independent verification, ephemeral builders, and no source evaluation preserve the no-daemon promise while enabling explicit shared storage.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A resident privileged build service overturns the no-daemon and source-evaluation boundary."
+          },
+          {
+            "key": "C",
+            "reason": "A complete ban removes the already-ratified narrow path for secure cross-user promotion and canonical Nix projection."
+          }
+        ],
+        "tradeoff": "Administrators who opt in must maintain the broker socket and promotion policy."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T21:00:20.897Z"
     }
   ],
   "questions": [
@@ -40057,6 +40960,314 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T21:07:03.197Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "title,body,track,epoch,phase,priority,blockedBy,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:06:19.188Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0e4nuy5",
+      "note": "Move Hangar to per-user paths and add optional transient broker"
+    },
+    {
+      "at": "2026-07-15T21:05:56.604Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "title,body,track,epoch,phase,priority,blockedBy,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:05:11.874Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0gvkibe",
+      "note": "Implement connected Hangar receipts and lock references"
+    },
+    {
+      "at": "2026-07-15T21:04:49.375Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0pro7ct",
+      "note": "title,body,track,epoch,phase,priority,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:04:04.931Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0pro7ct",
+      "note": "Implement flat Package membership and depth diagnostics"
+    },
+    {
+      "at": "2026-07-15T21:03:42.511Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0d06bh8",
+      "note": "title,body,track,epoch,phase,priority,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:02:58.856Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0d06bh8",
+      "note": "Implement Config merge law and explain provenance"
+    },
+    {
+      "at": "2026-07-15T21:02:36.191Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "body,refs"
+    },
+    {
+      "at": "2026-07-15T21:02:13.483Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0nlrm12",
+      "note": "title,body,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:01:50.991Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0kxss7s",
+      "note": "title,body,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:01:28.429Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0m1zysi",
+      "note": "title,body,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:01:05.924Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0qj346l",
+      "note": "title,body,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:00:43.472Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0q35155",
+      "note": "body,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T21:00:20.897Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-BROKERBOUNDARY1",
+      "note": "Optional shared Hangar broker boundary"
+    },
+    {
+      "at": "2026-07-15T20:59:58.196Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-HANGARPATH1",
+      "note": "Default Hangar ownership and path"
+    },
+    {
+      "at": "2026-07-15T20:59:35.466Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-RECEIPTSTORE1",
+      "note": "Storage location for connected receipts"
+    },
+    {
+      "at": "2026-07-15T20:59:12.793Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-OUTPUT-KINDS1",
+      "note": "Closed v1 Output kind set"
+    },
+    {
+      "at": "2026-07-15T20:58:50.067Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-FILEROOT1",
+      "note": "Reserved Package source-file law"
+    },
+    {
+      "at": "2026-07-15T20:58:27.068Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ECO-FLEETVERB1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-15T20:58:04.092Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-FLEETVERB1",
+      "note": "Fleet rollout command"
+    },
+    {
+      "at": "2026-07-15T20:57:41.244Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ECO-TRANSITION1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-15T20:57:18.456Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-TRANSITION1",
+      "note": "Commands for Package growth and reversal"
+    },
+    {
+      "at": "2026-07-15T20:56:55.624Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ECO-MEMBERS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-15T20:56:32.565Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-MEMBERS1",
+      "note": "How Packages relate in a monorepo"
+    },
+    {
+      "at": "2026-07-15T20:56:09.770Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-MANUALROOT1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-15T20:56:09.770Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c01fj815",
+      "note": "#13 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-15T20:56:09.770Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c01fj815",
+      "note": "#12 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-15T20:56:09.770Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c01fj815",
+      "note": "#11 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-15T20:56:09.770Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c01fj815",
+      "note": "#10 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-15T20:55:46.792Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ECO-SLICENAME1",
+      "note": "G"
+    },
+    {
+      "at": "2026-07-15T20:55:46.791Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0m1zysi",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-15T20:55:46.791Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0m1zysi",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-15T20:55:46.791Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0m1zysi",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-15T20:55:46.791Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0m1zysi",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-15T20:55:23.819Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ECO-ROOTNAME1",
+      "note": "I"
+    },
+    {
+      "at": "2026-07-15T20:55:01.151Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-ECO-SPLITPOLICY1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:54:38.398Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-ECO-JETOS-PREVIEW1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:54:15.647Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-ECO-OUTPUT-PAYLOAD1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:53:52.742Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-ECO-OUTPUT-DEFAULT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:53:29.956Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-ECO-OUTPUT-CALLCONTRACT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:53:06.996Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-SHAPE-OUTPUT-CALLABLE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:52:43.965Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T20:52:21.200Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-ECO-SLICENAME1",
+      "note": ""
+    },
     {
       "at": "2026-07-15T20:51:59.250Z",
       "by": "fable-orchestrator",
@@ -43248,314 +44459,6 @@
       "action": "card.update",
       "ref": "c0nton9x",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T04:30:35.208Z",
-      "by": "root-624-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nton9x",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T04:30:35.108Z",
-      "by": "root-624-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nton9x",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T04:27:24.439Z",
-      "by": "root-624-builder",
-      "action": "card.update",
-      "ref": "c0nton9x",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T04:27:24.330Z",
-      "by": "root-624-builder",
-      "action": "card.claim",
-      "ref": "c0nton9x",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T04:27:24.236Z",
-      "by": "root",
-      "action": "card.criteria-add",
-      "ref": "c0nton9x",
-      "note": "#3 Mandatory full verification passes on the repaired committed"
-    },
-    {
-      "at": "2026-07-15T04:27:24.141Z",
-      "by": "root",
-      "action": "card.criteria-add",
-      "ref": "c0nton9x",
-      "note": "#2 Crypto nominal collision regression still proves flow-tag tr"
-    },
-    {
-      "at": "2026-07-15T04:27:24.047Z",
-      "by": "root",
-      "action": "card.criteria-add",
-      "ref": "c0nton9x",
-      "note": "#1 Compiler seam contains no bare panic! outside the vetted all"
-    },
-    {
-      "at": "2026-07-15T04:27:13.365Z",
-      "by": "root",
-      "action": "card.add",
-      "ref": "c0nton9x",
-      "note": "Full suite red: crypto provenance uses bare panics"
-    },
-    {
-      "at": "2026-07-15T04:25:08.070Z",
-      "by": "luna-623-final-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0mwjrp1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T04:24:11.111Z",
-      "by": "luna-623-final-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0mwjrp1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T04:24:00.675Z",
-      "by": "luna-623-final-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0mwjrp1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T04:23:49.834Z",
-      "by": "luna-623-final-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0mwjrp1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T04:16:48.856Z",
-      "by": "luna-623-followup",
-      "action": "card.release",
-      "ref": "c0mwjrp1",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T04:16:48.751Z",
-      "by": "luna-623-followup",
-      "action": "card.criteria-meet",
-      "ref": "c0mwjrp1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T04:16:48.651Z",
-      "by": "luna-623-followup",
-      "action": "card.criteria-meet",
-      "ref": "c0mwjrp1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T04:13:21.438Z",
-      "by": "luna-623-followup",
-      "action": "card.claim",
-      "ref": "c0mwjrp1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T04:06:11.795Z",
-      "by": "codex-budget-collision-reviewer",
-      "action": "card.update",
-      "ref": "c0c008wm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T04:06:06.047Z",
-      "by": "codex-budget-collision-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0c008wm",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-15T04:05:57.539Z",
-      "by": "codex-budget-collision-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0c008wm",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T04:01:41.501Z",
-      "by": "terra-420-producer",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T04:01:18.740Z",
-      "by": "terra-420-producer",
-      "action": "card.claim",
-      "ref": "c01fj815",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T03:55:17.560Z",
-      "by": "terra-623-builder",
-      "action": "card.update",
-      "ref": "c0mwjrp1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T03:55:14.176Z",
-      "by": "codex-budget-investigator",
-      "action": "card.update",
-      "ref": "c0c008wm",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T03:54:54.121Z",
-      "by": "codex-budget-investigator",
-      "action": "card.criteria-meet",
-      "ref": "c0c008wm",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T03:54:54.023Z",
-      "by": "codex-budget-investigator",
-      "action": "card.criteria-meet",
-      "ref": "c0c008wm",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-15T03:53:33.021Z",
-      "by": "terra-623-readback",
-      "action": "card.release",
-      "ref": "c0mwjrp1",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T03:53:31.013Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c0c008wm",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T03:53:27.761Z",
-      "by": "terra-623-readback",
-      "action": "card.claim",
-      "ref": "c0mwjrp1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T03:53:21.080Z",
-      "by": "terra-623-builder",
-      "action": "card.release",
-      "ref": "c0mwjrp1",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T03:53:20.982Z",
-      "by": "terra-623-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0mwjrp1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T03:53:20.885Z",
-      "by": "terra-623-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0mwjrp1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T03:53:20.787Z",
-      "by": "terra-623-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0mwjrp1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T03:53:20.684Z",
-      "by": "terra-623-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0mwjrp1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T03:41:08.277Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0c008wm",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T03:41:08.157Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0c008wm",
-      "note": "#6 CLI fixture directories are unique across repeated/concurren"
-    },
-    {
-      "at": "2026-07-15T03:34:14.570Z",
-      "by": "terra-623-builder",
-      "action": "card.update",
-      "ref": "c0mwjrp1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T03:33:58.970Z",
-      "by": "terra-623-builder",
-      "action": "card.claim",
-      "ref": "c0mwjrp1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T03:32:35.283Z",
-      "by": "luna-420-closure-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c01fj815",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T03:29:17.754Z",
-      "by": "terra-420-builder",
-      "action": "card.release",
-      "ref": "c01fj815",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T03:29:17.657Z",
-      "by": "terra-420-builder",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T03:29:17.541Z",
-      "by": "terra-420-builder",
-      "action": "card.criteria-meet",
-      "ref": "c01fj815",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T03:28:37.047Z",
-      "by": "codex-diagnostic-reviewer",
-      "action": "card.update",
-      "ref": "c0izrn87",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T03:28:31.416Z",
-      "by": "codex-diagnostic-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0izrn87",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T03:28:25.927Z",
-      "by": "codex-diagnostic-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0izrn87",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
