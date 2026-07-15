@@ -98,24 +98,40 @@ impl From<std::io::Error> for IngestError {
 
 /// Sweep abandoned staging / `.partial` object dirs left by a crash.
 pub fn recover_hangar_staging(roots: &Roots) -> std::io::Result<usize> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        recover_hangar_staging_unlocked(roots)
+    })
+}
+
+pub(super) fn recover_hangar_staging_unlocked(roots: &Roots) -> std::io::Result<usize> {
     let hangar = roots.hangar_dir();
     let mut swept = 0usize;
     let stage = hangar.join(STAGE_DIR);
     if stage.is_dir() {
-        for ent in fs::read_dir(&stage)?.flatten() {
+        for ent in fs::read_dir(&stage)? {
+            let ent = ent?;
             let path = ent.path();
             if path.is_dir() {
-                let _ = fs::remove_dir_all(&path);
+                fs::remove_dir_all(&path)?;
+                swept += 1;
+            } else {
+                fs::remove_file(&path)?;
                 swept += 1;
             }
         }
     }
     let objects = hangar.join(OBJECTS_DIR);
     if objects.is_dir() {
-        for ent in fs::read_dir(&objects)?.flatten() {
+        for ent in fs::read_dir(&objects)? {
+            let ent = ent?;
             let name = ent.file_name().to_string_lossy().into_owned();
             if name.ends_with(PARTIAL_SUFFIX) {
-                let _ = fs::remove_dir_all(ent.path());
+                let path = ent.path();
+                if path.is_dir() {
+                    fs::remove_dir_all(path)?;
+                } else {
+                    fs::remove_file(path)?;
+                }
                 swept += 1;
             }
         }
@@ -152,7 +168,7 @@ fn ingest_tree_unlocked(
     }
     let hangar = roots.hangar_dir();
     fs::create_dir_all(&hangar)?;
-    recover_hangar_staging(roots)?;
+    recover_hangar_staging_unlocked(roots)?;
 
     let stamp = format!("{}-{}", now_secs(), std::process::id());
     let stage = hangar.join(STAGE_DIR).join(&stamp);

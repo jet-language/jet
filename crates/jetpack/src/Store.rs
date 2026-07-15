@@ -42,6 +42,13 @@ fn list_unlocked(roots: &Roots) -> Vec<StoreEntry> {
     jet_pkg_model::Store::list(roots)
 }
 
+/// Inspect package projections without taking a lock or replaying journals.
+/// Health/reporting paths use this so observation cannot create or repair
+/// store state.
+pub(crate) fn list_read_only(roots: &Roots) -> Vec<StoreEntry> {
+    list_unlocked(roots)
+}
+
 pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         Closure::recover_closure_journal_unlocked(roots)?;
@@ -65,6 +72,7 @@ fn canonical_producer(
     mut facts: BTreeMap<String, String>,
 ) -> std::io::Result<String> {
     facts.insert("action.recipe".into(), identity.recipe_fingerprint.clone());
+    facts.insert("closure.authority".into(), "hangar-cas".into());
     let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
         .map_err(std::io::Error::other)?;
     ProducerRecord::new(
@@ -193,6 +201,20 @@ fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
 
 pub(super) fn sync_store_directory_handle(directory: &fs::File) -> std::io::Result<()> {
     directory.sync_all()
+}
+
+pub(super) fn sync_store_directory(path: &Path) -> std::io::Result<()> {
+    sync_store_node(path, true)
+}
+
+/// Recover every Hangar crash surface under one advisory-lock ownership
+/// interval. The unlocked helpers are also used by already-locked operations.
+pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let staging = Ingest::recover_hangar_staging_unlocked(roots)?;
+        let closure = Closure::recover_closure_journal_unlocked(roots)?;
+        Ok(staging + closure)
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

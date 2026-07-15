@@ -53,9 +53,42 @@ pub fn run(project: &Path, online: bool) -> Report {
 
 fn check_hangar(roots: &Store::Roots) -> Check {
     let hangar = roots.hangar_dir();
-    if !hangar.exists() { return ok("hangar", "empty; created on first realization"); }
+    if !hangar.exists() {
+        return degraded(
+            "hangar",
+            "absent; no package store has been initialized",
+            "realize a package to initialize the Hangar",
+        );
+    }
+    match super::RuntimePolicy::lock_state(&roots.root.join(".locks/hangar.lock")) {
+        Ok(super::RuntimePolicy::LockState::Held) => {
+            return degraded(
+                "hangar",
+                "busy; another process owns the Hangar lock",
+                "wait for the active Hangar operation, then rerun `jetpack doctor`",
+            );
+        }
+        Ok(super::RuntimePolicy::LockState::Absent | super::RuntimePolicy::LockState::Idle) => {}
+        Err(error) => {
+            return degraded(
+                "hangar",
+                format!("lock state could not be inspected ({})", error.kind()),
+                "restore read access to the Hangar lock",
+            );
+        }
+    }
     let rd = match fs::read_dir(&hangar) { Ok(rd) => rd, Err(e) => return broken("hangar", format!("unreadable ({})", e.kind()), "restore read access to the Jetpack root") };
-    let entries = Store::list(roots);
+    let graph = match Store::closure_graph_read_only(roots) {
+        Ok(graph) => graph,
+        Err(error) => {
+            return degraded(
+                "hangar",
+                format!("closure journal needs recovery ({error})"),
+                "run `jetpack hangar recover`, then rerun `jetpack doctor`",
+            );
+        }
+    };
+    let entries = Store::list_read_only(roots);
     let known: BTreeMap<_, _> = entries.iter().map(|e| (e.id.as_str(), e)).collect();
     let mut objects = 0usize;
     for next in rd {
@@ -74,13 +107,24 @@ fn check_hangar(roots: &Store::Roots) -> Check {
         objects += 1;
         let file_name = ent.file_name();
         let id = file_name.to_string_lossy();
-        if !path.join("meta.json").is_file() { return broken("hangar", format!("object `{id}` has no metadata"), "remove the incomplete object with `jetpack clean`, then realize it again") }
-        let Some(entry) = known.get(id.as_ref()) else { return broken("hangar", format!("object `{id}` has malformed metadata"), "run `jetpack clean`, then realize the package again") };
-        if !Path::new(&entry.out).exists() { return broken("hangar", format!("object `{id}` points to a missing output"), "realize the package again") }
+        let meta_path = path.join("meta.json");
+        if !meta_path.is_file() { return degraded("hangar", format!("object `{id}` has no metadata"), "run `jetpack hangar recover`, then realize it again if no committed record exists") }
+        let Some(entry) = known.get(id.as_ref()) else { return degraded("hangar", format!("object `{id}` has malformed metadata"), "run `jetpack hangar recover`, then realize the package again") };
+        if let Some(record) = graph.records.get(id.as_ref()) {
+            match fs::read_to_string(&meta_path) {
+                Ok(actual) if actual == record.package_meta => {}
+                Ok(_) | Err(_) => return degraded(
+                    "hangar",
+                    format!("object `{id}` has a stale or corrupt metadata projection"),
+                    "run `jetpack hangar recover` to restore the committed projection",
+                ),
+            }
+        }
+        if !Path::new(&entry.out).exists() { return degraded("hangar", format!("object `{id}` points to a missing output"), "realize the package again") }
         match Envelope::try_output_hash_of(&entry.out) {
             Ok(actual) if !entry.envelope.output_hash.is_empty() && actual == entry.envelope.output_hash => {}
-            Ok(_) => return broken("hangar", format!("object `{id}` failed its content digest"), "remove the corrupt object with `jetpack clean`, then realize it again"),
-            Err(_) => return broken("hangar", format!("object `{id}` cannot be hashed safely"), "remove the corrupt object with `jetpack clean`, then realize it again"),
+            Ok(_) => return degraded("hangar", format!("object `{id}` failed its content digest"), "remove the corrupt object with `jetpack clean`, then realize it again"),
+            Err(_) => return degraded("hangar", format!("object `{id}` cannot be hashed safely"), "remove the corrupt object with `jetpack clean`, then realize it again"),
         }
     }
     ok("hangar", format!("{objects} object(s) readable and content-verified"))
@@ -171,6 +215,7 @@ fn base64(bytes: &[u8]) -> String {
 fn check_locks(project: &Path, roots: &Store::Roots) -> Check {
     let dirs = [roots.root.join(".locks"), Store::managed_dir(project).join(".locks")];
     let mut unknown = BTreeSet::new();
+    let mut held = BTreeSet::new();
     for dir in dirs {
         let rd = match fs::read_dir(&dir) {
             Ok(rd) => rd,
@@ -181,17 +226,19 @@ fn check_locks(project: &Path, roots: &Store::Roots) -> Check {
         let ent = match next { Ok(ent) => ent, Err(_) => { unknown.insert("directory entry unreadable".to_string()); continue; } };
         let path = ent.path(); if path.extension().and_then(|s| s.to_str()) != Some("lock") { continue; }
         match super::RuntimePolicy::lock_state(&path) {
-            Ok(super::RuntimePolicy::LockState::Absent | super::RuntimePolicy::LockState::Held | super::RuntimePolicy::LockState::Idle) => {}
+            Ok(super::RuntimePolicy::LockState::Held) => { held.insert(ent.file_name().to_string_lossy().into_owned()); }
+            Ok(super::RuntimePolicy::LockState::Absent | super::RuntimePolicy::LockState::Idle) => {}
             Err(_) => { unknown.insert(ent.file_name().to_string_lossy().into_owned()); }
         }
     }}
     if !unknown.is_empty() { degraded("locks", format!("{} lock(s) could not be probed: {}", unknown.len(), unknown.into_iter().collect::<Vec<_>>().join(", ")), "restore lock-file access and filesystem advisory-lock support") }
+    else if !held.is_empty() { degraded("locks", format!("{} lock(s) currently held: {}", held.len(), held.into_iter().collect::<Vec<_>>().join(", ")), "wait for active Jetpack operations, then rerun `jetpack doctor`") }
     else { ok("locks", "kernel advisory locks readable") }
 }
 
 fn check_cache(roots: &Store::Roots) -> Check {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    let stale = Store::list(roots).into_iter().filter(|e| e.last_used_at == 0 || now.saturating_sub(e.last_used_at) > STALE_AFTER).count();
+    let stale = Store::list_read_only(roots).into_iter().filter(|e| e.last_used_at == 0 || now.saturating_sub(e.last_used_at) > STALE_AFTER).count();
     if stale == 0 { ok("cache", "no objects unused for more than 30 days") }
     else { degraded("cache", format!("{stale} object(s) unused for more than 30 days"), "run `jetpack clean` to review and collect stale objects") }
 }
@@ -259,6 +306,26 @@ mod tests {
         path
     }
 
+    fn tree(root: &Path) -> Vec<(PathBuf, String, Vec<u8>)> {
+        fn walk(root: &Path, path: &Path, out: &mut Vec<(PathBuf, String, Vec<u8>)>) {
+            let Ok(meta) = fs::symlink_metadata(path) else { return };
+            let relative = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+            if meta.file_type().is_symlink() {
+                out.push((relative, "symlink".into(), fs::read_link(path).unwrap().to_string_lossy().as_bytes().to_vec()));
+            } else if meta.is_dir() {
+                out.push((relative, "dir".into(), Vec::new()));
+                let mut children = fs::read_dir(path).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+                children.sort();
+                for child in children { walk(root, &child, out); }
+            } else {
+                out.push((relative, "file".into(), fs::read(path).unwrap()));
+            }
+        }
+        let mut out = Vec::new();
+        if root.exists() { walk(root, root, &mut out); }
+        out
+    }
+
     #[test]
     fn hangar_enumeration_rejects_missing_and_malformed_metadata() {
         let root = scratch("enumeration");
@@ -280,7 +347,7 @@ mod tests {
         let roots = Store::Roots { root: root.clone(), dev_mode: false };
         assert_eq!(check_locks(&root, &roots).health, Health::Healthy);
         let guard = super::super::RuntimePolicy::acquire_lock(&root, "held").unwrap();
-        assert_eq!(check_locks(&root, &roots).health, Health::Healthy);
+        assert_eq!(check_locks(&root, &roots).health, Health::Degraded);
         drop(guard);
 
         let policy_root = scratch("lock-read-errors");
@@ -296,5 +363,40 @@ mod tests {
         }
         fs::remove_dir_all(policy_root).unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn doctor_hangar_check_is_byte_for_byte_read_only() {
+        let root = scratch("read-only");
+        let roots = Store::Roots { root: root.clone(), dev_mode: false };
+        fs::create_dir_all(roots.hangar_dir()).unwrap();
+        let before = tree(&root);
+        let _ = check_hangar(&roots);
+        assert_eq!(tree(&root), before);
+        assert!(!root.join(".locks").exists());
+
+        fs::create_dir_all(root.join(".locks")).unwrap();
+        let guard = super::super::RuntimePolicy::acquire_lock(&root, "hangar").unwrap();
+        let before = tree(&root);
+        assert_eq!(check_hangar(&roots).health, Health::Degraded);
+        assert_eq!(tree(&root), before);
+        drop(guard);
+
+        let journal = roots.hangar_dir().join("closure-db/journal");
+        fs::create_dir_all(&journal).unwrap();
+        fs::write(journal.join("00000000000000000001-corrupt.txn"), "corrupt").unwrap();
+        let before = tree(&root);
+        assert_eq!(check_hangar(&roots).health, Health::Degraded);
+        assert_eq!(tree(&root), before);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn absent_hangar_check_does_not_initialize_store() {
+        let root = std::env::temp_dir().join(format!("doctor-absent-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let roots = Store::Roots { root: root.clone(), dev_mode: false };
+        assert_eq!(check_hangar(&roots).health, Health::Degraded);
+        assert!(!root.exists());
     }
 }

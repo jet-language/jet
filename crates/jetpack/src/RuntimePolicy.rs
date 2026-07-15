@@ -8,7 +8,7 @@
 use super::Output::Theme;
 use super::JSON;
 use crate::Syntax;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -61,7 +61,7 @@ pub fn all_verb_policies() -> Vec<VerbPolicy> {
 }
 
 pub struct FileLock {
-    file: File,
+    file: lock_platform::LockFile,
 }
 
 impl Drop for FileLock {
@@ -522,15 +522,20 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn replacement_makes_waiter_and_new_opener_fail_closed() {
-        let root = scratch("replace-fail-closed");
+    fn dual_name_replacement_cannot_split_canonical_root_lock() {
+        let root = scratch("dual-replace-fail-closed");
         let first = acquire_lock(&root, "hangar").unwrap();
         let path = root.join(LOCK_DIR).join("hangar.lock");
-        let displaced = root.join(LOCK_DIR).join("displaced");
+        let anchor = root.join(LOCK_DIR).join("hangar.lock.anchor");
+        fs::hard_link(&path, &anchor).unwrap();
+        let displaced = root.join(LOCK_DIR).join("displaced.lock");
+        let displaced_anchor = root.join(LOCK_DIR).join("displaced.anchor");
         let waiter_file = lock_platform::open(&path).unwrap();
 
         fs::rename(&path, &displaced).unwrap();
+        fs::rename(&anchor, &displaced_anchor).unwrap();
         fs::write(&path, "replacement").unwrap();
+        fs::hard_link(&path, &anchor).unwrap();
         assert!(
             acquire_lock_with_timing(
                 &root,
@@ -539,26 +544,15 @@ mod tests {
                 Duration::from_millis(5),
             )
             .is_err(),
-            "fresh opener must reject an inode different from the anchor"
+            "fresh opener must contend on canonical root despite replacing both old names"
         );
 
         drop(first);
         assert!(lock_platform::try_lock(&waiter_file).unwrap());
         assert!(lock_platform::validate_path(&waiter_file, &path).is_err());
         lock_platform::unlock(&waiter_file).unwrap();
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn unexpected_hard_link_is_rejected() {
-        let root = scratch("hard-link-fail-closed");
-        let first = acquire_lock(&root, "hangar").unwrap();
-        let path = root.join(LOCK_DIR).join("hangar.lock");
-        fs::hard_link(&path, root.join("extra-link")).unwrap();
-        assert!(lock_platform::validate_path(&first.file, &path).is_err());
-        drop(first);
-        assert!(acquire_lock(&root, "hangar").is_err());
+        let replacement = acquire_lock(&root, "hangar").unwrap();
+        drop(replacement);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -653,9 +647,13 @@ mod tests {
             "LOCKFILE_FAIL_IMMEDIATELY",
             "LOCKFILE_EXCLUSIVE_LOCK",
             "SetHandleInformation",
+            "GetFileInformationByHandle",
             "HANDLE_FLAG_INHERIT",
+            "FILE_FLAG_OPEN_REPARSE_POINT",
+            "FILE_ATTRIBUTE_REPARSE_POINT",
             ".share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)",
-            "lockfileex_runtime_serializes_when_run_on_windows",
+            "lockfileex_runtime_serializes_and_pins_file_identity",
+            "reparse_points_fail_closed_when_creation_is_permitted",
         ] {
             assert!(source.contains(required), "missing Windows lock law: {required}");
         }
@@ -668,8 +666,9 @@ mod tests {
             "FD_CLOEXEC",
             "LOCK_EX | LOCK_NB",
             "O_NOFOLLOW",
+            "canonical_owner",
             "symlink_metadata",
-            "nlink() != 2",
+            "Authority lives on canonical managed-root directory inode",
         ] {
             assert!(unix.contains(required), "missing Unix lock law: {required}");
         }

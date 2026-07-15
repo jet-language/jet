@@ -1,14 +1,16 @@
 use std::ffi::c_void;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::windows::fs::OpenOptionsExt as _;
+use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::AsRawHandle as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 type Handle = *mut c_void;
 
 const FILE_SHARE_READ: u32 = 0x0000_0001;
 const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
 const LOCKFILE_FAIL_IMMEDIATELY: u32 = 0x0000_0001;
 const LOCKFILE_EXCLUSIVE_LOCK: u32 = 0x0000_0002;
@@ -22,8 +24,45 @@ struct Overlapped {
     event: Handle,
 }
 
+#[repr(C)]
+struct FileTime {
+    low: u32,
+    high: u32,
+}
+
+#[repr(C)]
+struct ByHandleFileInformation {
+    attributes: u32,
+    creation_time: FileTime,
+    last_access_time: FileTime,
+    last_write_time: FileTime,
+    volume_serial: u32,
+    size_high: u32,
+    size_low: u32,
+    links: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    volume_serial: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+pub(super) struct LockFile {
+    file: File,
+    path: PathBuf,
+    identity: FileIdentity,
+}
+
 unsafe extern "system" {
     fn SetHandleInformation(handle: Handle, mask: u32, flags: u32) -> i32;
+    fn GetFileInformationByHandle(
+        handle: Handle,
+        information: *mut ByHandleFileInformation,
+    ) -> i32;
     fn LockFileEx(
         handle: Handle,
         flags: u32,
@@ -50,61 +89,92 @@ fn overlapped() -> Overlapped {
     }
 }
 
-pub(super) fn open(path: &Path) -> io::Result<File> {
+pub(super) fn open(path: &Path) -> io::Result<LockFile> {
     open_with_create(path, true)
 }
 
-pub(super) fn open_existing(path: &Path) -> io::Result<File> {
+pub(super) fn open_existing(path: &Path) -> io::Result<LockFile> {
     open_with_create(path, false)
 }
 
-fn open_with_create(path: &Path, create: bool) -> io::Result<File> {
+fn open_with_create(path: &Path, create: bool) -> io::Result<LockFile> {
+    let file = open_raw(path, create)?;
+    let identity = file_identity(&file)?;
+    let lock = LockFile {
+        file,
+        path: path.to_path_buf(),
+        identity,
+    };
+    validate_path(&lock, path)?;
+    Ok(lock)
+}
+
+fn open_raw(path: &Path, create: bool) -> io::Result<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(create)
-        // Denying FILE_SHARE_DELETE pins the one persistent path/inode while
-        // any contender has it open. No process may split waiters by unlinking.
+        // Open reparse object itself, never its target. Validation below
+        // rejects every reparse-point attribute before lock use.
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        // Deny delete sharing: path cannot be replaced while any contender
+        // holds its handle.
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .open(path)?;
-    // SAFETY: raw handle belongs to live `file`; clearing inheritance changes
-    // handle metadata only and prevents lock leakage into child processes.
+    // SAFETY: raw handle belongs to live file; inheritance metadata only.
+    if unsafe { SetHandleInformation(file.as_raw_handle().cast(), HANDLE_FLAG_INHERIT, 0) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::Error::other(format!(
+            "jetpack lock path `{}` is a reparse point",
+            path.display()
+        )));
+    }
+    Ok(file)
+}
+
+fn file_identity(file: &File) -> io::Result<FileIdentity> {
+    let mut information = std::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
+    // SAFETY: live handle; Windows initializes complete output on success.
     if unsafe {
-        SetHandleInformation(
-            file.as_raw_handle().cast(),
-            HANDLE_FLAG_INHERIT,
-            0,
-        )
+        GetFileInformationByHandle(file.as_raw_handle().cast(), information.as_mut_ptr())
     } == 0
     {
         return Err(io::Error::last_os_error());
     }
-    validate_path(&file, path)?;
-    Ok(file)
+    // SAFETY: call above succeeded and initialized output.
+    let information = unsafe { information.assume_init() };
+    Ok(FileIdentity {
+        volume_serial: information.volume_serial,
+        file_index_high: information.file_index_high,
+        file_index_low: information.file_index_low,
+    })
 }
 
-pub(super) fn validate_path(file: &File, path: &Path) -> io::Result<()> {
-    let path_metadata = fs::symlink_metadata(path)?;
-    let file_metadata = file.metadata()?;
-    if path_metadata.file_type().is_symlink()
-        || !path_metadata.file_type().is_file()
-        || !file_metadata.file_type().is_file()
-    {
+pub(super) fn validate_path(lock: &LockFile, path: &Path) -> io::Result<()> {
+    if path != lock.path {
+        return Err(io::Error::other("jetpack lock validation path changed"));
+    }
+    if lock.file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::Error::other("jetpack lock handle became a reparse point"));
+    }
+    let reopened = open_raw(path, false)?;
+    if file_identity(&reopened)? != lock.identity {
         return Err(io::Error::other(format!(
-            "jetpack lock path `{}` is not a regular file",
+            "jetpack lock path `{}` changed file identity",
             path.display()
         )));
     }
     Ok(())
 }
 
-pub(super) fn try_lock(file: &File) -> io::Result<bool> {
+pub(super) fn try_lock(lock: &LockFile) -> io::Result<bool> {
     let mut state = overlapped();
-    // SAFETY: raw handle is live; `state` is initialized, writable, and lives
-    // through this synchronous fail-immediately call. Lock range is byte 0.
+    // SAFETY: handle live; initialized state lives through synchronous call.
     if unsafe {
         LockFileEx(
-            file.as_raw_handle().cast(),
+            lock.file.as_raw_handle().cast(),
             LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
             0,
             1,
@@ -123,11 +193,10 @@ pub(super) fn try_lock(file: &File) -> io::Result<bool> {
     }
 }
 
-pub(super) fn unlock(file: &File) -> io::Result<()> {
+pub(super) fn unlock(lock: &LockFile) -> io::Result<()> {
     let mut state = overlapped();
-    // SAFETY: raw handle is live; initialized OVERLAPPED identifies same byte
-    // range used by LockFileEx and lives through synchronous unlock.
-    if unsafe { UnlockFileEx(file.as_raw_handle().cast(), 0, 1, 0, &mut state) } != 0 {
+    // SAFETY: handle live; range matches LockFileEx above.
+    if unsafe { UnlockFileEx(lock.file.as_raw_handle().cast(), 0, 1, 0, &mut state) } != 0 {
         Ok(())
     } else {
         Err(io::Error::last_os_error())
@@ -139,20 +208,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lockfileex_runtime_serializes_when_run_on_windows() {
-        let root = std::env::temp_dir().join(format!(
-            "jetpack-lockfileex-{}",
-            std::process::id()
-        ));
+    fn lockfileex_runtime_serializes_and_pins_file_identity() {
+        let root = std::env::temp_dir().join(format!("jetpack-lockfileex-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("lock");
         let first = open(&path).unwrap();
         let second = open(&path).unwrap();
         assert!(try_lock(&first).unwrap());
         assert!(!try_lock(&second).unwrap());
+        assert!(std::fs::rename(&path, root.join("replacement")).is_err());
         unlock(&first).unwrap();
         assert!(try_lock(&second).unwrap());
         unlock(&second).unwrap();
+        drop(first);
+        drop(second);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reparse_points_fail_closed_when_creation_is_permitted() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-lockfileex-reparse-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("target");
+        let link = root.join("lock");
+        std::fs::write(&target, "target").unwrap();
+        match std::os::windows::fs::symlink_file(&target, &link) {
+            Ok(()) => assert!(open(&link).is_err()),
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {}
+            Err(error) => panic!("couldn't create reparse fixture: {error}"),
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 }

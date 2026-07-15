@@ -185,17 +185,34 @@ pub fn actions_for_output(
 
 pub fn entry_action_key(entry: &StoreEntry) -> String {
     let identity = &entry.cache_identity;
-    let mut canonical = b"jet.action-store.v4\0".to_vec();
-    for field in [
-        entry.reference.as_bytes(),
-        identity.source_fingerprint.as_bytes(),
-        identity.recipe_fingerprint.as_bytes(),
-        identity.policy_fingerprint.as_bytes(),
-        identity.platform.as_bytes(),
-    ] {
-        push_frame(&mut canonical, field);
+    let producer = ProducerRecord::decode(&entry.producer_record);
+    let nix = producer.as_ref().is_ok_and(|record| record.provider == "nix");
+    let mut canonical = b"jet.action-store.v5\0".to_vec();
+    if nix {
+        // A Nix derivation path is the canonical input/action identity. Output
+        // paths and output-derived cache fingerprints are consequences; using
+        // them here would let the same action silently map to different bytes.
+        let producer = producer.as_ref().expect("checked above");
+        push_frame(&mut canonical, producer.immutable_source.as_bytes());
+        for field in [
+            identity.recipe_fingerprint.as_bytes(),
+            identity.policy_fingerprint.as_bytes(),
+            identity.platform.as_bytes(),
+        ] {
+            push_frame(&mut canonical, field);
+        }
+    } else {
+        for field in [
+            entry.reference.as_bytes(),
+            identity.source_fingerprint.as_bytes(),
+            identity.recipe_fingerprint.as_bytes(),
+            identity.policy_fingerprint.as_bytes(),
+            identity.platform.as_bytes(),
+        ] {
+            push_frame(&mut canonical, field);
+        }
     }
-    if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+    if let Ok(producer) = producer {
         for field in [
             producer.provider.as_bytes(),
             producer.toolchain_facts.as_bytes(),
@@ -203,12 +220,9 @@ pub fn entry_action_key(entry: &StoreEntry) -> String {
         ] {
             push_frame(&mut canonical, field);
         }
-        for (key, value) in producer
-            .plan
-            .facts()
-            .iter()
-            .filter(|(key, _)| action_replay_fact(key))
-        {
+        for (key, value) in producer.plan.facts().iter().filter(|(key, _)| {
+            action_replay_fact(key) && !(nix && key.as_str() == "nix.reference")
+        }) {
             push_frame(&mut canonical, key.as_bytes());
             push_frame(&mut canonical, value.as_bytes());
         }
@@ -367,7 +381,8 @@ pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result
         return Ok(0);
     };
     let mut recovered = 0;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.ends_with(PARTIAL_SUFFIX) {
@@ -392,7 +407,7 @@ pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result
         .values()
         .filter(|record| !record.package_meta.is_empty())
     {
-        recovered += usize::from(materialize_missing_package_record(roots, record)?);
+        recovered += usize::from(materialize_package_record(roots, record)?);
     }
     for id in &graph.deleted_records {
         recovered += usize::from(remove_package_record(roots, id)?);
@@ -498,6 +513,34 @@ fn load_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     load_graph_mode(roots, false)
 }
 
+/// Validate committed closure state without locking, replaying, compacting, or
+/// repairing its package projection.
+pub(crate) fn closure_graph_read_only(roots: &Roots) -> std::io::Result<ClosureGraph> {
+    let journal = journal_dir(roots);
+    match fs::read_dir(&journal) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(PARTIAL_SUFFIX)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "closure journal contains an incomplete transaction",
+                    ));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ClosureGraph::default());
+        }
+        Err(error) => return Err(error),
+    }
+    load_graph_mode(roots, true)
+}
+
 pub(super) fn lifecycle_inputs_unlocked(
     roots: &Roots,
 ) -> std::io::Result<(BTreeSet<String>, String)> {
@@ -529,11 +572,13 @@ fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<Closure
     let Ok(entries) = fs::read_dir(&journal) else {
         return Ok(ClosureGraph::default());
     };
-    let mut paths = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("txn"))
-        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("txn") {
+            paths.push(path);
+        }
+    }
     paths.sort();
     let mut graph = ClosureGraph::default();
     for path in paths {
@@ -646,9 +691,19 @@ fn validate_graph_mode(
         }
         let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
         if !allow_legacy || !legacy {
-            ProducerRecord::decode(&record.producer_record).map_err(|error| {
+            let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
                 format!("closure record `{id}` has invalid producer record: {error}")
             })?;
+            if record.references.is_empty()
+                && !matches!(
+                    producer.facts.get("closure.authority").map(String::as_str),
+                    Some("hangar-cas" | "embedded-output" | "external-nix-gc-root")
+                )
+            {
+                return Err(format!(
+                    "closure record `{id}` has no dependency references or explicit closure authority"
+                ));
+            }
             let meta = parse_meta(&record.package_meta)
                 .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
             if meta.producer_record != record.producer_record {
@@ -703,7 +758,7 @@ fn reject_action_conflict(graph: &ClosureGraph, candidate: &ClosureRecord) -> Re
 
 fn append_entry(roots: &Roots, entry: &JournalEntry) -> std::io::Result<()> {
     let journal = journal_dir(roots);
-    fs::create_dir_all(&journal)?;
+    ensure_directory_durable(&journal)?;
     let sequence = next_sequence(&journal)?;
     write_entry(&journal, sequence, entry)
 }
@@ -754,21 +809,6 @@ fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io:
     fs::rename(&tmp, &path)?;
     sync_dir(&dir)?;
     Ok(true)
-}
-
-fn materialize_missing_package_record(
-    roots: &Roots,
-    record: &ClosureRecord,
-) -> std::io::Result<bool> {
-    if roots
-        .hangar_dir()
-        .join(&record.id)
-        .join("meta.json")
-        .exists()
-    {
-        return Ok(false);
-    }
-    materialize_package_record(roots, record)
 }
 
 fn remove_package_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
@@ -837,7 +877,16 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
     let Some((body, checksum_line)) = raw.rsplit_once("checksum\t") else {
         return Err("missing checksum".to_string());
     };
-    let checksum = checksum_line.trim();
+    let checksum = checksum_line
+        .strip_suffix('\n')
+        .ok_or_else(|| "truncated checksum frame".to_string())?;
+    if checksum.len() != 64
+        || !checksum
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
+        return Err("invalid checksum frame".to_string());
+    }
     if SHA256::sha256_hex(body.as_bytes()) != checksum {
         return Err("checksum mismatch".to_string());
     }
@@ -947,11 +996,14 @@ fn transaction_paths(journal: &Path) -> std::io::Result<Vec<PathBuf>> {
     let Ok(entries) = fs::read_dir(journal) else {
         return Ok(Vec::new());
     };
-    Ok(entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("txn"))
-        .collect())
+    let mut paths = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("txn") {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
 }
 
 fn journal_dir(roots: &Roots) -> PathBuf {
@@ -959,7 +1011,25 @@ fn journal_dir(roots: &Roots) -> PathBuf {
 }
 
 fn sync_dir(path: &Path) -> std::io::Result<()> {
-    fs::File::open(path)?.sync_all()
+    super::sync_store_directory(path)
+}
+
+fn ensure_directory_durable(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("closure database path has no parent"))?;
+    ensure_directory_durable(parent)?;
+    match fs::create_dir(path) {
+        Ok(()) => {
+            sync_dir(path)?;
+            sync_dir(parent)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn hex(value: &str) -> String {
@@ -1021,6 +1091,23 @@ mod integrity_tests {
         assert!(parse_entry(&duplicate_output)
             .unwrap_err()
             .contains("duplicate output"));
+    }
+
+    #[test]
+    fn parser_requires_exact_checksum_framing() {
+        let valid = checked("jet-closure-journal-v1\nkind\tdelta\n".to_string());
+        assert!(parse_entry(&valid).is_ok());
+        assert!(parse_entry(valid.trim_end()).unwrap_err().contains("truncated"));
+
+        let mut trailing = valid.clone();
+        trailing.push('\n');
+        assert!(parse_entry(&trailing).unwrap_err().contains("invalid checksum frame"));
+
+        let upper = valid.rsplit_once("checksum\t").unwrap().1.to_ascii_uppercase();
+        let body = valid.rsplit_once("checksum\t").unwrap().0;
+        assert!(parse_entry(&format!("{body}checksum\t{upper}"))
+            .unwrap_err()
+            .contains("invalid checksum frame"));
     }
 
     #[test]

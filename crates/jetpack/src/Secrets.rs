@@ -129,11 +129,7 @@ pub fn add_recipient(project_dir: &Path, recipient: &str) -> Result<bool, String
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("couldn't create `{}`: {e}", parent.display()))?;
     }
-    let mut existing = match std::fs::read_to_string(&path) {
-        Ok(existing) => existing,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(format!("couldn't read `{}`: {error}", path.display())),
-    };
+    let mut existing = read_text_or_absent(&path)?;
     if existing
         .lines()
         .map(str::trim)
@@ -186,30 +182,63 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 /// `jetpack secrets recipients list` — every recipient line (comments/blanks
 /// stripped).
-pub fn list_recipients(project_dir: &Path) -> Vec<String> {
-    std::fs::read_to_string(recipients_path(project_dir))
-        .unwrap_or_default()
+pub fn list_recipients(project_dir: &Path) -> Result<Vec<String>, String> {
+    let path = recipients_path(project_dir);
+    let contents = read_text_or_absent(&path)?;
+    Ok(contents
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(str::to_string)
-        .collect()
+        .collect())
+}
+
+fn read_text_or_absent(path: &Path) -> Result<String, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => return Err(format!("`{}` is not a regular file", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => return Err(format!("couldn't inspect `{}`: {error}", path.display())),
+    }
+    std::fs::read_to_string(path).map_err(|error| format!("couldn't read `{}`: {error}", path.display()))
 }
 
 /// Read + decrypt the whole store. An absent store is an empty one (a fresh
 /// project, not an error) — the *first* `set` creates it. A present store
 /// with no local identity, or one that fails to decrypt, is an error.
 pub fn read_store(project_dir: &Path) -> Result<Vec<(String, String)>, String> {
+    read_store_unlocked(project_dir)
+}
+
+fn read_store_unlocked(project_dir: &Path) -> Result<Vec<(String, String)>, String> {
     let path = store_path(project_dir);
-    if !path.is_file() {
-        return Ok(Vec::new());
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => {
+            return Err(format!(
+                "secrets store `{}` is not a regular file",
+                path.display()
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("couldn't inspect `{}`: {error}", path.display())),
     }
-    let identity = std::fs::read_to_string(identity_path()).map_err(|_| {
-        format!(
-            "no local secrets identity at `{}` — run `jetpack secrets keygen`",
-            identity_path().display()
-        )
-    })?;
+    let identity_path = identity_path();
+    let identity = match std::fs::read_to_string(&identity_path) {
+        Ok(identity) => identity,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "no local secrets identity at `{}` — run `jetpack secrets keygen`",
+                identity_path.display()
+            ))
+        }
+        Err(error) => {
+            return Err(format!(
+                "couldn't read secrets identity `{}`: {error}",
+                identity_path.display()
+            ))
+        }
+    };
     let ciphertext =
         std::fs::read(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
     let helper = ensure_bridge_helper()?;
@@ -227,7 +256,11 @@ pub fn write_store(project_dir: &Path, pairs: &[(String, String)]) -> Result<(),
     let _guard =
         super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets")
             .map_err(|e| e.to_string())?;
-    let recipients = list_recipients(project_dir);
+    write_store_unlocked(project_dir, pairs)
+}
+
+fn write_store_unlocked(project_dir: &Path, pairs: &[(String, String)]) -> Result<(), String> {
+    let recipients = list_recipients(project_dir)?;
     if recipients.is_empty() {
         return Err(
             "no recipients declared — run `jetpack secrets recipients add <age1...>` first \
@@ -257,12 +290,15 @@ pub fn write_store(project_dir: &Path, pairs: &[(String, String)]) -> Result<(),
 /// `jetpack secrets set <name> <value>` — upsert one entry and re-encrypt the
 /// whole store.
 pub fn set(project_dir: &Path, name: &str, value: &str) -> Result<(), String> {
-    let mut pairs = read_store(project_dir)?;
+    let _guard =
+        super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets")
+            .map_err(|e| format!("couldn't lock secrets store: {e}"))?;
+    let mut pairs = read_store_unlocked(project_dir)?;
     match pairs.iter_mut().find(|(k, _)| k == name) {
         Some((_, v)) => *v = value.to_string(),
         None => pairs.push((name.to_string(), value.to_string())),
     }
-    write_store(project_dir, &pairs)
+    write_store_unlocked(project_dir, &pairs)
 }
 
 /// `jetpack secrets get <name>` — `Ok(None)` is "no such entry" (E1263 at the
@@ -437,7 +473,10 @@ mod tests {
             !add_recipient(&dir, "age1exampleexampleexample").unwrap(),
             "idempotent"
         );
-        assert_eq!(list_recipients(&dir), vec!["age1exampleexampleexample"]);
+        assert_eq!(
+            list_recipients(&dir).unwrap(),
+            vec!["age1exampleexampleexample"]
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -467,7 +506,22 @@ mod tests {
         std::fs::create_dir_all(recipients_path(&dir)).unwrap();
         let error = add_recipient(&dir, "age1failure")
             .expect_err("recipient path directory must make the write fail");
-        assert!(error.contains("couldn't read"), "{error}");
+        assert!(error.contains("not a regular file"), "{error}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn non_file_secret_inputs_are_errors_not_absence() {
+        let dir = std::env::temp_dir().join(format!(
+            "jet_secrets_nonfile_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(recipients_path(&dir)).unwrap();
+        assert!(list_recipients(&dir).unwrap_err().contains("not a regular file"));
+        std::fs::remove_dir_all(recipients_path(&dir)).unwrap();
+        std::fs::create_dir_all(store_path(&dir)).unwrap();
+        assert!(read_store(&dir).unwrap_err().contains("not a regular file"));
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -501,6 +555,40 @@ mod tests {
 
         std::env::remove_var("JET_KEYS_DIR");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn concurrent_sets_preserve_both_updates() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "jet_secrets_concurrent_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let keys_dir = dir.join("keys");
+        std::fs::create_dir_all(&keys_dir).unwrap();
+        std::env::set_var("JET_KEYS_DIR", &keys_dir);
+        let (_, recipient) = keygen(true).unwrap();
+        add_recipient(&dir, &recipient).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let spawn = |name: &'static str, value: &'static str| {
+            let dir = dir.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                set(&dir, name, value).unwrap();
+            })
+        };
+        let left = spawn("left", "one");
+        let right = spawn("right", "two");
+        barrier.wait();
+        left.join().unwrap();
+        right.join().unwrap();
+        let pairs = read_store(&dir).unwrap();
+        assert!(pairs.contains(&("left".to_string(), "one".to_string())));
+        assert!(pairs.contains(&("right".to_string(), "two".to_string())));
+        std::env::remove_var("JET_KEYS_DIR");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

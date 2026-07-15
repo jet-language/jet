@@ -16,7 +16,7 @@ use std::fs::{self, File};
 use std::io::Read as _;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use jet_env_model::ModuleEval::DevServicePlan;
@@ -153,28 +153,57 @@ fn read_pid(dir: &Path) -> Option<u32> {
 /// other way for an arbitrary (non-child) pid, so this shells out to `kill
 /// -0` (the POSIX "is it there" no-op signal), same rationale as `down`.
 fn is_alive(pid: u32) -> bool {
+    process_alive(pid).unwrap_or(false)
+}
+
+fn process_alive(pid: u32) -> Result<bool, String> {
     #[cfg(windows)]
     {
         let filter = format!("PID eq {pid}");
-        return Command::new("tasklist")
+        let output = Command::new("tasklist")
             .args(["/FI", &filter, "/FO", "CSV", "/NH"])
             .output()
-            .map(|o| {
-                o.status.success()
-                    && String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\""))
-            })
-            .unwrap_or(false);
+            .map_err(|e| format!("couldn't probe service process {pid}: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "service process probe for {pid} exited with {}",
+                output.status
+            ));
+        }
+        return Ok(String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\"")));
     }
     #[cfg(not(windows))]
     {
-        Command::new("kill")
+        let output = Command::new("kill")
             .args(["-0", &pid.to_string()])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+            .output()
+            .map_err(|e| format!("couldn't probe service process {pid}: {e}"))?;
+        if output.status.success() {
+            return Ok(true);
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("not permitted") || stderr.contains("Permission denied") {
+            return Err(format!("couldn't probe service process {pid}: {}", stderr.trim()));
+        }
+        Ok(false)
     }
+}
+
+fn publish_pid(child: &mut Child, path: &Path) -> Result<(), String> {
+    if let Err(error) = fs::write(path, child.id().to_string()) {
+        let kill_error = child.kill().err();
+        let wait_error = child.wait().err();
+        let cleanup = match (kill_error, wait_error) {
+            (None, None) => String::new(),
+            (kill, wait) => format!("; child cleanup failed (kill: {kill:?}, wait: {wait:?})"),
+        };
+        return Err(format!(
+            "couldn't publish service pid to `{}`: {error}{cleanup}",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Start `plan` if it isn't already running (idempotent). `env` composes the
@@ -214,10 +243,10 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
     // hitting jetpack's own process group.
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("couldn't start `{}`: {e}", plan.name))?;
-    fs::write(pid_path(&resolved.dir), child.id().to_string()).map_err(|e| e.to_string())?;
+    publish_pid(&mut child, &pid_path(&resolved.dir))?;
     // Not `.wait()`-ed on this thread — it's a supervised background process
     // meant to outlive this command, and `wait()` would block for as long as
     // it runs. But an un-`wait()`-ed `Child` never gets reaped *by this
@@ -245,7 +274,7 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
     .map_err(|e| format!("couldn't lock service state: {e}"))?;
     let dir = service_dir(project_dir, &plan.name);
     let Some(pid) = read_pid(&dir) else { return Ok(()) };
-    if !is_alive(pid) {
+    if !process_alive(pid)? {
         match fs::remove_file(pid_path(&dir)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -253,43 +282,93 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         }
         return Ok(());
     }
-    if let Some(shutdown) = &plan.shutdown {
-        let _ = super::Platform::shell_command(shutdown).status();
-    } else {
-        #[cfg(windows)]
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status();
-        #[cfg(not(windows))]
-        // Negative pid = the whole process group `up_one` created (pgid ==
-        // the leader's own pid), so a multi-statement `init` script's
-        // eventual child (e.g. `redis-server`, after some setup steps) is
-        // signaled too, not just the shell leader. The `--` is load-bearing:
-        // without it some `kill` implementations (procps) mis-parse a
-        // negative-pid argument as another option and silently no-op.
-        let _ = Command::new("kill")
-            .args(["-TERM", "--", &format!("-{pid}")])
-            .status();
-    }
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && is_alive(pid) {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    if is_alive(pid) {
-        #[cfg(windows)]
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status();
-        #[cfg(not(windows))]
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{pid}")])
-            .status();
-    }
+    stop_process(pid, plan.shutdown.as_deref())?;
     match fs::remove_file(pid_path(&dir)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("couldn't remove service state: {error}")),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StopAction {
+    Shutdown(String),
+    Term,
+    Kill,
+}
+
+fn stop_process(pid: u32, shutdown: Option<&str>) -> Result<(), String> {
+    stop_process_with(
+        pid,
+        shutdown,
+        Duration::from_secs(3),
+        |action| run_stop_action(pid, action),
+        || process_alive(pid),
+    )
+}
+
+fn stop_process_with(
+    pid: u32,
+    shutdown: Option<&str>,
+    grace: Duration,
+    mut run: impl FnMut(StopAction) -> Result<(), String>,
+    mut alive: impl FnMut() -> Result<bool, String>,
+) -> Result<(), String> {
+    run(match shutdown {
+        Some(command) => StopAction::Shutdown(command.to_string()),
+        None => StopAction::Term,
+    })?;
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline && alive()? {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if alive()? {
+        run(StopAction::Kill)?;
+        let deadline = Instant::now() + grace.min(Duration::from_secs(1));
+        while Instant::now() < deadline && alive()? {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    if alive()? {
+        return Err(format!("service process {pid} is still alive after shutdown"));
+    }
+    Ok(())
+}
+
+fn run_stop_action(pid: u32, action: StopAction) -> Result<(), String> {
+    let (label, status) = match action {
+        StopAction::Shutdown(command) => (
+            "shutdown command",
+            super::Platform::shell_command(&command).status(),
+        ),
+        StopAction::Term => {
+            #[cfg(windows)]
+            let status = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T"])
+                .status();
+            #[cfg(not(windows))]
+            let status = Command::new("kill")
+                .args(["-TERM", "--", &format!("-{pid}")])
+                .status();
+            ("TERM", status)
+        }
+        StopAction::Kill => {
+            #[cfg(windows)]
+            let status = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
+            #[cfg(not(windows))]
+            let status = Command::new("kill")
+                .args(["-KILL", "--", &format!("-{pid}")])
+                .status();
+            ("KILL", status)
+        }
+    };
+    let status = status.map_err(|e| format!("couldn't run service {label}: {e}"))?;
+    if !status.success() {
+        return Err(format!("service {label} exited with {status}"));
+    }
+    Ok(())
 }
 
 /// A `services: health` result for one service.
@@ -546,6 +625,76 @@ mod tests {
         fs::rename(displaced, locks).unwrap();
         down_one(&dir, &p).unwrap();
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn failed_shutdown_keeps_live_pid_state() {
+        let dir = scratch("down-shutdown-failure");
+        let mut p = plan("fixture", "sleep 30");
+        up_one(&dir, &env(), &p).unwrap();
+        let state_dir = service_dir(&dir, "fixture");
+        let pid = read_pid(&state_dir).unwrap();
+        p.shutdown = Some("exit 7".to_string());
+        let error = down_one(&dir, &p).expect_err("nonzero shutdown must fail");
+        assert!(error.contains("exited with"), "{error}");
+        assert_eq!(read_pid(&state_dir), Some(pid));
+        assert!(is_alive(pid));
+        p.shutdown = None;
+        down_one(&dir, &p).unwrap();
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn term_kill_and_final_liveness_failures_propagate() {
+        let term = stop_process_with(
+            42,
+            None,
+            Duration::ZERO,
+            |action| match action {
+                StopAction::Term => Err("TERM failed".to_string()),
+                _ => Ok(()),
+            },
+            || Ok(true),
+        )
+        .unwrap_err();
+        assert_eq!(term, "TERM failed");
+
+        let kill = stop_process_with(
+            42,
+            None,
+            Duration::ZERO,
+            |action| match action {
+                StopAction::Kill => Err("KILL failed".to_string()),
+                _ => Ok(()),
+            },
+            || Ok(true),
+        )
+        .unwrap_err();
+        assert_eq!(kill, "KILL failed");
+
+        let alive = stop_process_with(
+            42,
+            None,
+            Duration::ZERO,
+            |_| Ok(()),
+            || Ok(true),
+        )
+        .unwrap_err();
+        assert!(alive.contains("still alive"), "{alive}");
+    }
+
+    #[test]
+    fn pid_publication_failure_kills_and_reaps_child() {
+        let dir = scratch("pid-publication-failure");
+        let bad_path = dir.join("pid-as-directory");
+        fs::create_dir_all(&bad_path).unwrap();
+        let mut child = super::super::Platform::shell_command("sleep 30")
+            .spawn()
+            .unwrap();
+        let error = publish_pid(&mut child, &bad_path).unwrap_err();
+        assert!(error.contains("couldn't publish service pid"), "{error}");
+        assert!(child.try_wait().unwrap().is_some(), "child must be reaped");
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

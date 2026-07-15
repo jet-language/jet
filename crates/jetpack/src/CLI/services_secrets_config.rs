@@ -354,8 +354,16 @@ pub(super) fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
                     0
                 }
                 v if v == Syntax::SECRETS_RECIPIENTS_VERB_LIST => {
-                    for r in Secrets::list_recipients(&project_dir) {
-                        println!("{r}");
+                    match Secrets::list_recipients(&project_dir) {
+                        Ok(recipients) => {
+                            for recipient in recipients {
+                                println!("{recipient}");
+                            }
+                        }
+                        Err(error) => {
+                            theme.error("couldn't list secrets recipients", &error, "");
+                            return 2;
+                        }
                     }
                     0
                 }

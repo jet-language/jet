@@ -68,8 +68,17 @@ pub(super) fn producer_record(
     plan_facts: BTreeMap<String, String>,
     toolchain_facts: &str,
     identity: &super::Store::CacheIdentity,
-    facts: BTreeMap<String, String>,
+    mut facts: BTreeMap<String, String>,
 ) -> Result<super::Store::ProducerRecord, ProviderError> {
+    facts.insert(
+        "closure.authority".into(),
+        if provider == "nix" {
+            "external-nix-gc-root"
+        } else {
+            "embedded-output"
+        }
+        .into(),
+    );
     let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
         .map_err(ProviderError::CoreBuild)?;
     super::Store::ProducerRecord::new(
@@ -995,7 +1004,10 @@ pub(crate) fn realize_adapter(
         replay,
         format!("declared-tools:{:?}", build_ctx.tools),
         format!("policy={}\nplatform={}", identity.policy_fingerprint, identity.platform),
-        BTreeMap::from([("adapter.source".into(), plan.source.clone())]),
+        BTreeMap::from([
+            ("adapter.source".into(), plan.source.clone()),
+            ("closure.authority".into(), "embedded-output".into()),
+        ]),
     )
     .map_err(ProviderError::Adapter)?;
     Ok(Realized {
@@ -1274,9 +1286,9 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         replay_facts.insert(format!("nix.output.{name}"), path.clone());
         facts.insert(format!("nix.output.{name}"), path.clone());
     }
-    let derivation_digest = SHA256::sha256_hex(
-        format!("{drv_path}\n{:?}", named_outputs).as_bytes(),
-    );
+    // The `.drv` path is Nix's canonical input/action identity. Realized
+    // outputs are consequences and must never enter the derivation digest.
+    let derivation_digest = SHA256::sha256_hex(drv_path.as_bytes());
     let producer = producer_record(
         "nix",
         drv_path,
@@ -1451,6 +1463,14 @@ mod tests {
         assert_eq!(r.bin, "/nix/store/abc-fastfetch-2.0/bin");
         assert_eq!(r.name, "fastfetch");
         assert_eq!(r.producer.immutable_source, "/nix/store/abc-fastfetch.drv");
+        assert_eq!(
+            r.producer.source_digest,
+            SHA256::sha256_hex(b"/nix/store/abc-fastfetch.drv")
+        );
+        assert_eq!(
+            r.producer.facts.get("closure.authority").map(String::as_str),
+            Some("external-nix-gc-root")
+        );
         assert_eq!(
             r.producer.plan.facts().get("nix.output.out").map(String::as_str),
             Some("/nix/store/abc-fastfetch-2.0")

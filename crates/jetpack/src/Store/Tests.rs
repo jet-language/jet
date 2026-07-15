@@ -1266,6 +1266,43 @@ mod tests {
     }
 
     #[test]
+    fn nix_action_key_is_input_derivation_only() {
+        let (roots, _g) = temp_roots();
+        let mut first = ingest_fixture(&roots, "nix-action", &[("out", "bytes")], Vec::new()).entry;
+        let nix_record = |drv: &str, output: &str, reference: &str| {
+            ProducerRecord::new(
+                "nix",
+                drv,
+                crate::SHA256::sha256_hex(drv.as_bytes()),
+                crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+                    ("nix.drv_path".into(), drv.into()),
+                    ("nix.reference".into(), reference.into()),
+                    ("nix.output.out".into(), output.into()),
+                ])).unwrap(),
+                format!("nix-derivation:{drv}"),
+                "policy=test\nplatform=test",
+                BTreeMap::from([
+                    ("closure.authority".into(), "external-nix-gc-root".into()),
+                    ("nix.output.out".into(), output.into()),
+                ]),
+            ).unwrap().encode()
+        };
+        first.reference = "nixpkgs:first".into();
+        first.cache_identity.source_fingerprint = "sha256-first-output".into();
+        first.producer_record = nix_record("/nix/store/action.drv", "/nix/store/first", "nixpkgs:first");
+        let action = entry_action_key(&first);
+
+        let mut second = first.clone();
+        second.reference = "alias:second".into();
+        second.cache_identity.source_fingerprint = "sha256-second-output".into();
+        second.producer_record = nix_record("/nix/store/action.drv", "/nix/store/second", "alias:second");
+        assert_eq!(entry_action_key(&second), action);
+
+        second.producer_record = nix_record("/nix/store/other.drv", "/nix/store/second", "alias:second");
+        assert_ne!(entry_action_key(&second), action);
+    }
+
+    #[test]
     fn closure_rejects_named_out_that_disagrees_with_primary() {
         let (roots, _g) = temp_roots();
         let primary = ingest_fixture(&roots, "named-out-primary", &[("out", "primary")], Vec::new());
@@ -1365,12 +1402,36 @@ mod tests {
         assert_eq!(record.outputs.len(), 2);
         assert_eq!(fs::read_to_string(&meta).unwrap(), expected);
 
+        fs::write(&meta, "stale but parseable projection").unwrap();
+        assert_eq!(recover_closure_journal(&roots).unwrap(), 1);
+        assert_eq!(fs::read_to_string(&meta).unwrap(), expected);
+
+        fs::write(&meta, [0xff, 0xfe, 0xfd]).unwrap();
+        assert_eq!(recover_closure_journal(&roots).unwrap(), 1);
+        assert_eq!(fs::read_to_string(&meta).unwrap(), expected);
+
         fs::remove_file(&meta).unwrap();
         let changed = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
             register_entry_unlocked(&roots, &ingested.entry)
         })
         .unwrap();
         assert!(!changed);
+        assert_eq!(fs::read_to_string(meta).unwrap(), expected);
+    }
+
+    #[test]
+    fn combined_recovery_sweeps_staging_and_repairs_wal_projection() {
+        let (roots, _g) = temp_roots();
+        let ingested = ingest_fixture(&roots, "combined-recovery", &[("out", "bytes")], Vec::new());
+        let abandoned = roots.hangar_dir().join(".stage/abandoned");
+        fs::create_dir_all(&abandoned).unwrap();
+        fs::write(abandoned.join("payload"), "partial").unwrap();
+        let meta = roots.hangar_dir().join(&ingested.entry.id).join("meta.json");
+        let expected = ingested.entry.meta_json();
+        fs::write(&meta, "stale").unwrap();
+
+        assert_eq!(recover_hangar(&roots).unwrap(), 2);
+        assert!(!abandoned.exists());
         assert_eq!(fs::read_to_string(meta).unwrap(), expected);
     }
 
