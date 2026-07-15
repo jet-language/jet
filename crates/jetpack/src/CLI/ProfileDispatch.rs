@@ -781,54 +781,66 @@ fn sha256_open_file_hex(file: &mut fs::File) -> io::Result<String> {
         .collect())
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn freeze_unix_projection(source: &mut fs::File, expected: &str) -> io::Result<fs::File> {
+    use std::os::fd::{AsRawFd as _, FromRawFd as _};
     use std::os::unix::fs::PermissionsExt as _;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
-    static NEXT_PRIVATE: AtomicU64 = AtomicU64::new(0);
-    let base = std::env::temp_dir();
-    let private_dir = (0..64)
-        .find_map(|_| {
-            let serial = NEXT_PRIVATE.fetch_add(1, Ordering::Relaxed);
-            let path = base.join(format!(
-                ".jet-profile-exec-{}-{serial}",
-                std::process::id()
-            ));
-            match fs::create_dir(&path) {
-                Ok(()) => Some(Ok(path)),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
-                Err(error) => Some(Err(error)),
-            }
-        })
-        .transpose()?
-        .ok_or_else(|| invalid("could not reserve private profile executable"))?;
-    fs::set_permissions(&private_dir, fs::Permissions::from_mode(0o700))?;
-    let path = private_dir.join("image");
-    let result = (|| {
-        let mut frozen = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
-        fs::remove_file(&path)?;
-        fs::remove_dir(&private_dir)?;
-        source.seek(std::io::SeekFrom::Start(0))?;
-        io::copy(source, &mut frozen)?;
-        frozen.sync_all()?;
-        frozen.set_permissions(fs::Permissions::from_mode(0o500))?;
-        let actual = format!("sha256-{}", sha256_open_file_hex(&mut frozen)?);
-        if actual != expected {
-            return Err(invalid("profile projection changed while freezing"));
-        }
-        ensure_open_executable(&frozen)?;
-        Ok(frozen)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&path);
-        let _ = fs::remove_dir(&private_dir);
+    const MFD_CLOEXEC: u32 = 0x0001;
+    const MFD_ALLOW_SEALING: u32 = 0x0002;
+    const MFD_EXEC: u32 = 0x0010;
+    const F_ADD_SEALS: std::os::raw::c_int = 1033;
+    const F_SEAL_SEAL: std::os::raw::c_int = 0x0001;
+    const F_SEAL_SHRINK: std::os::raw::c_int = 0x0002;
+    const F_SEAL_GROW: std::os::raw::c_int = 0x0004;
+    const F_SEAL_WRITE: std::os::raw::c_int = 0x0008;
+    const EINVAL: i32 = 22;
+    unsafe extern "C" {
+        fn memfd_create(name: *const std::os::raw::c_char, flags: u32) -> std::os::raw::c_int;
+        fn fcntl(fd: std::os::raw::c_int, command: std::os::raw::c_int, ...) -> std::os::raw::c_int;
     }
-    result
+    let name = b"jet-profile-exec\0";
+    let mut descriptor = unsafe {
+        memfd_create(
+            name.as_ptr().cast(),
+            MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_EXEC,
+        )
+    };
+    if descriptor < 0 && io::Error::last_os_error().raw_os_error() == Some(EINVAL) {
+        // Kernels predating MFD_EXEC create executable memfds by default.
+        descriptor = unsafe {
+            memfd_create(name.as_ptr().cast(), MFD_CLOEXEC | MFD_ALLOW_SEALING)
+        };
+    }
+    if descriptor < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut frozen = unsafe { fs::File::from_raw_fd(descriptor) };
+    source.seek(std::io::SeekFrom::Start(0))?;
+    io::copy(source, &mut frozen)?;
+    frozen.sync_all()?;
+    frozen.set_permissions(fs::Permissions::from_mode(0o500))?;
+    let seals = F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+    if unsafe { fcntl(frozen.as_raw_fd(), F_ADD_SEALS, seals) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let actual = format!("sha256-{}", sha256_open_file_hex(&mut frozen)?);
+    if actual != expected {
+        return Err(invalid("profile projection changed while freezing"));
+    }
+    ensure_open_executable(&frozen)?;
+    Ok(frozen)
+}
+
+#[cfg(all(
+    unix,
+    not(any(target_os = "linux", target_os = "android"))
+))]
+fn freeze_unix_projection(_source: &mut fs::File, _expected: &str) -> io::Result<fs::File> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "profile dispatch needs a born-anonymous executable image on this platform",
+    ))
 }
 
 #[cfg(windows)]
@@ -1267,7 +1279,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(unix)]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn frozen_projection_never_accepts_concurrent_mutation() {
         use std::io::{Seek as _, Write as _};
@@ -1310,6 +1322,8 @@ mod tests {
         if let Ok(mut frozen) = frozen {
             use std::os::unix::fs::MetadataExt as _;
             assert_eq!(frozen.metadata().unwrap().nlink(), 0);
+            let mut write_attempt = frozen.try_clone().unwrap();
+            assert!(write_attempt.write_all(b"mutate sealed image").is_err());
             fs::write(&projection, vec![b'c'; original.len()]).unwrap();
             assert_eq!(
                 format!("sha256-{}", sha256_open_file_hex(&mut frozen).unwrap()),
@@ -1317,5 +1331,22 @@ mod tests {
             );
         }
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(
+        unix,
+        not(any(target_os = "linux", target_os = "android"))
+    ))]
+    #[test]
+    fn unsupported_unix_dispatch_fails_closed_without_named_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-profile-unsupported-{}",
+            std::process::id()
+        ));
+        fs::write(&root, b"executable").unwrap();
+        let mut source = fs::File::open(&root).unwrap();
+        let error = freeze_unix_projection(&mut source, &digest('a')).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        fs::remove_file(root).unwrap();
     }
 }
