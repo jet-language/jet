@@ -122,7 +122,10 @@ pub fn quarantine_invalid_entry(
         if proof.trusted() {
             return Ok(());
         }
-        let quarantine_output = proof.output_exists && !proof.output_digest;
+        let quarantine_output = !current.envelope.output_hash.is_empty()
+            && try_entry_output_hash(roots, &current).is_ok_and(|actual| {
+                actual.as_str() != current.envelope.output_hash.as_str()
+            });
         let hangar = roots.hangar_dir();
         let mut permissions = MovePathPermissions::default();
         let operation = (|| {

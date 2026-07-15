@@ -62,7 +62,8 @@ mod tests {
 
     fn verified(roots: &Roots, reference: &str, expectation: &CacheExpectation) -> bool {
         find_verified_by_reference(roots, reference, expectation)
-            .is_ok_and(|hit| hit.is_some())
+            .unwrap()
+            .is_some()
     }
 
     #[test]
@@ -375,38 +376,51 @@ mod tests {
     #[test]
     fn verified_cache_rejects_deleted_and_tampered_outputs() {
         let (roots, _g) = temp_roots();
-        let out = roots.root.join("owned-output");
-        fs::create_dir_all(&out).unwrap();
-        fs::write(out.join("payload"), "trusted").unwrap();
-        let envelope = super::super::super::Envelope::Envelope::for_output(
-            &out.to_string_lossy(),
-            "mine:demo",
-            "core-source",
-        );
-        record_verified(
+        let ingested = ingest_fixture(
             &roots,
-            "demo",
-            "1.0",
-            "mine:demo",
-            &out.to_string_lossy(),
-            "",
-            "",
-            &envelope,
-            &test_identity(),
-        )
-        .unwrap();
+            "verified-cache",
+            &[("out", "trusted")],
+            Vec::new(),
+        );
+        let entry = ingested.entry;
+        let out = PathBuf::from(&entry.out);
+        let reference = entry.reference.as_str();
         let expectation = test_expectation(&out);
-        let entry = find_by_reference(&roots, "mine:demo").unwrap();
-        let proof = verify_cache_entry(&roots, &entry, "mine:demo", &expectation);
+        let proof = verify_cache_entry(&roots, &entry, reference, &expectation);
         assert!(!proof.signature_verified);
         assert!(proof.unsigned_local_allowed);
-        assert!(verified(&roots, "mine:demo", &expectation));
+        assert!(verified(&roots, reference, &expectation));
 
-        fs::write(out.join("payload"), "tampered").unwrap();
-        assert!(!verified(&roots, "mine:demo", &expectation));
+        let payload = out.join("payload");
+        let mut permissions = fs::metadata(&payload).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(&payload, permissions).unwrap();
+        fs::write(&payload, "tampered").unwrap();
+        let error = find_verified_by_reference(&roots, reference, &expectation)
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "closure record `{}` has no dependency references or store-validated closure proof",
+                entry.id
+            )
+        );
 
+        let mut permissions = fs::metadata(&out).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(&out, permissions).unwrap();
         fs::remove_dir_all(&out).unwrap();
-        assert!(!verified(&roots, "mine:demo", &expectation));
+        let error = find_verified_by_reference(&roots, reference, &expectation)
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "closure record `{}` has no dependency references or store-validated closure proof",
+                entry.id
+            )
+        );
     }
 
     #[test]
@@ -616,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn quarantine_moves_sealed_owned_output() {
+    fn proven_digest_mismatch_still_quarantines_object() {
         let (roots, _g) = temp_roots();
         let ingested = ingest_fixture(&roots, "sealed", &[("out", "tampered")], Vec::new());
         let entry = ingested.entry;
@@ -658,6 +672,49 @@ mod tests {
             &roots,
             &survivor.entry.reference,
             &test_expectation(Path::new(&survivor.entry.out)),
+        )
+        .unwrap()
+        .unwrap()
+        .lease
+        .validate()
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_shared_cas_object_survives_quarantine() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (roots, _g) = temp_roots();
+        let stale = ingest_fixture(&roots, "unreadable-stale", &[("out", "same")], Vec::new());
+        let survivor = ingest_fixture(
+            &roots,
+            "unreadable-survivor",
+            &[("out", "same")],
+            Vec::new(),
+        );
+        assert_eq!(stale.entry.out, survivor.entry.out);
+
+        let object = PathBuf::from(&stale.entry.out);
+        let payload = object.join("payload");
+        let original_permissions = fs::metadata(&payload).unwrap().permissions();
+        fs::set_permissions(&payload, fs::Permissions::from_mode(0o000)).unwrap();
+        assert!(try_entry_output_hash(&roots, &stale.entry).is_err());
+        let mut mismatch = test_expectation(&object);
+        mismatch.identity.source_fingerprint = "wrong-source".into();
+
+        quarantine_invalid_entry(&roots, &stale.entry, &mismatch).unwrap();
+
+        assert!(object.exists());
+        assert!(find_by_reference(&roots, &stale.entry.reference).is_none());
+        fs::set_permissions(&payload, original_permissions).unwrap();
+        let graph = closure_graph(&roots).unwrap();
+        assert!(!graph.records.contains_key(&stale.entry.id));
+        assert!(graph.deleted_records.contains(&stale.entry.id));
+        find_verified_by_reference(
+            &roots,
+            &survivor.entry.reference,
+            &test_expectation(&object),
         )
         .unwrap()
         .unwrap()
