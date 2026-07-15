@@ -1495,6 +1495,18 @@ mod tests {
     }
 
     #[test]
+    fn missing_exact_derivation_is_bad() {
+        let spec = classify("nixpkgs:x").unwrap();
+        assert!(matches!(
+            parse_realization(
+                &spec,
+                r#"[{"outputs":{"out":"/nix/store/x"}}]"#
+            ),
+            Err(ProviderError::BadOutput(_))
+        ));
+    }
+
+    #[test]
     fn fixture_missing_errors() {
         let spec = classify("nixpkgs:nope").unwrap();
         let dir = std::env::temp_dir();
@@ -2058,24 +2070,19 @@ mod tests {
             root: base.clone(),
             dev_mode: true,
         };
-        let entry = Store::record_verified(
-            &roots,
-            &r.name,
-            &r.version,
-            &r.reference,
-            &r.out,
-            &r.bin,
-            &r.rlib,
-            &r.envelope,
-            &r.cache_identity,
-        )
-        .unwrap();
+        let entry = Store::record_realized_mode(&roots, &r).unwrap();
         assert_eq!(entry.envelope, r.envelope);
         let listed = Store::list(&roots);
         let found = listed.iter().find(|e| e.id == entry.id).unwrap();
         assert_eq!(found.envelope.output_hash, r.envelope.output_hash);
         assert_eq!(found.envelope.platform, r.envelope.platform);
         assert_eq!(found.envelope.provenance, r.envelope.provenance);
+        assert_eq!(
+            Store::ProducerRecord::decode(&found.producer_record)
+                .unwrap()
+                .provider,
+            "core"
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 

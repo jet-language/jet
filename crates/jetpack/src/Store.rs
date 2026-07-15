@@ -387,7 +387,7 @@ fn record_verified_mode(
     })
 }
 
-fn record_realized_mode(
+pub(crate) fn record_realized_mode(
     roots: &Roots,
     realized: &super::Provider::Realized,
 ) -> std::io::Result<StoreEntry> {
