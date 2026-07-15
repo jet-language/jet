@@ -65,7 +65,12 @@ fn check_hangar(roots: &Store::Roots) -> Check {
         };
         let path = ent.path();
         if !path.is_dir() { continue; }
-        if ent.file_name() == "build-scratch" { continue; }
+        if matches!(
+            ent.file_name().to_str(),
+            Some("build-scratch" | "objects" | ".stage" | "cas" | "referrers" | "closure-db" | "quarantine")
+        ) {
+            continue;
+        }
         objects += 1;
         let file_name = ent.file_name();
         let id = file_name.to_string_lossy();

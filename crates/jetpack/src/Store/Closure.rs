@@ -544,24 +544,6 @@ fn validate_graph_mode(
         if id.is_empty() || id != &record.id || record.action_key.is_empty() {
             return Err(format!("invalid closure record `{id}`"));
         }
-        if allow_legacy && record.producer_record.is_empty() && record.package_meta.is_empty() {
-            continue;
-        }
-        ProducerRecord::decode(&record.producer_record).map_err(|error| {
-            format!("closure record `{id}` has invalid producer record: {error}")
-        })?;
-        let meta = parse_meta(&record.package_meta)
-            .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
-        if meta.producer_record != record.producer_record {
-            return Err(format!(
-                "closure record `{id}` package metadata disagrees with producer record"
-            ));
-        }
-        if meta.envelope.output_hash != record.primary || meta.named_outputs != record.outputs {
-            return Err(format!(
-                "closure record `{id}` package metadata disagrees with outputs"
-            ));
-        }
         if record.outputs.get("out") != Some(&record.primary) {
             return Err(format!(
                 "closure record `{id}` primary is not its `out` output"
@@ -586,8 +568,29 @@ fn validate_graph_mode(
                 "closure record `{id}` references missing object `{missing}`"
             ));
         }
+        let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
+        if !allow_legacy || !legacy {
+            ProducerRecord::decode(&record.producer_record).map_err(|error| {
+                format!("closure record `{id}` has invalid producer record: {error}")
+            })?;
+            let meta = parse_meta(&record.package_meta)
+                .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
+            if meta.producer_record != record.producer_record {
+                return Err(format!(
+                    "closure record `{id}` package metadata disagrees with producer record"
+                ));
+            }
+            if meta.envelope.output_hash != record.primary || meta.named_outputs != record.outputs {
+                return Err(format!(
+                    "closure record `{id}` package metadata disagrees with outputs"
+                ));
+            }
+        }
         if let Some(existing) = actions.insert(&record.action_key, record) {
-            if existing.outputs != record.outputs || existing.references != record.references {
+            if existing.outputs != record.outputs
+                || existing.references != record.references
+                || existing.producer_record != record.producer_record
+            {
                 return Err(format!(
                     "action `{}` maps to conflicting records `{}` and `{}`",
                     record.action_key, existing.id, record.id
@@ -610,7 +613,9 @@ fn valid_output_name(name: &str) -> bool {
 fn reject_action_conflict(graph: &ClosureGraph, candidate: &ClosureRecord) -> Result<(), String> {
     if let Some(existing) = graph.records.values().find(|record| {
         record.action_key == candidate.action_key
-            && (record.outputs != candidate.outputs || record.references != candidate.references)
+            && (record.outputs != candidate.outputs
+                || record.references != candidate.references
+                || record.producer_record != candidate.producer_record)
     }) {
         return Err(format!(
             "action `{}` maps to conflicting records `{}` and `{}`",
