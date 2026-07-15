@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 636,
-    "rev": 7574,
+    "rev": 7577,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14523,12 +14523,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P0",
       "plan": "Ratify the copy-at-take spelling, then align ownership checks, fix-its, examples, and formatter output.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "Owner directive: back to enhanced-rust-borrow-checker baseline (D-MEM1 v5). Minted D-SHAPE-COPY1 — settles the one copy spelling and reconciles the S4 copy-x / LIFECYCLE-B ^^ contradiction. ^^ implementation paused until the owner picks."
+        },
         {
           "at": "2026-07-14",
           "text": "All decisions ratified; advanced out of deciding."
@@ -14580,7 +14585,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T14:02:47.690Z",
-      "updated": "2026-07-14",
+      "updated": "2026-07-15",
       "workOrder": 14
     },
     {
@@ -17552,7 +17557,13 @@
       "blockedBy": [],
       "workOrder": 11,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "Owner reset to enhanced-rust-borrow-checker baseline: audited this ballot — it is the &mut-slice complement of ratified D-SHAPE-VIEW1, no v5 conflict, stays in the decide queue unchanged."
+        }
+      ],
       "criteria": [],
       "refs": [
         "docs/spec/philosophy.md",
@@ -17562,7 +17573,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T23:05:59.233Z",
-      "updated": "2026-07-14"
+      "updated": "2026-07-15"
     },
     {
       "id": "c0c008wm",
@@ -37889,6 +37900,89 @@
       "created": "2026-07-15T08:02:35.286Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-15"
+    },
+    {
+      "id": "D-SHAPE-COPY1",
+      "cardId": "c0we378g",
+      "group": "syntax",
+      "title": "What is the one way to write a copy?",
+      "gist": "Pick the single way to write a copy: prefix copy x, method x.copy(), the ^^ shorthand, or Rust's .clone().",
+      "lesson": "Jet's memory model is a borrow checker in plain clothes. A bare name reads a value, & writes it, ^ takes ownership away. A taking parameter receives ownership: after f(^x) the name x is gone. A copy makes an independent duplicate, so the original survives. This ballot decides only how you write that copy. It does not touch the read, write, or take sigils.\n\nTwo shipped decisions now disagree. D-CAP2 and S4 made copy x the one copy spelling and deliberately deleted .clone(). D-SHAPE-LIFECYCLE then added ^^x as a second copy spelling at taking arguments. That is two ways to write one job, which invariant I8 forbids. This vote picks a single spelling and retires the rest.\n\nIn real code the prefix keyword lands mid-argument: ops.transform(pool, copy input, 5000). Nothing on input signals the copy, and the keyword breaks the left-to-right read of the argument list. The question is whether the copy marker belongs before the value, on the value, or as call-site punctuation.",
+      "explainer": "",
+      "story": "Maya loads a grid and calls transform, which takes ownership of its input. She still needs the grid for the next step, so she must hand transform an independent copy while keeping her own. She autocompletes on input, expecting the copy to appear there. She wants one spelling she can reuse in a chain and on its own line.",
+      "inWild": "input := load_grid()\n\n// four ways to copy the same value at a taking call:\nops.transform(pool, copy input, 5000)     // A  prefix verb\nops.transform(pool, input.copy(), 5000)   // B  method\nops.transform(pool, ^^input, 5000)        // C  taking-call shorthand\nops.transform(pool, input.clone(), 5000)  // D  rust spelling",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Prefix verb only",
+          "detail": "Write copy x before the value in every position. One searchable word, already the general spelling today. The ^^ shorthand is removed, so there is a single copy marker everywhere.",
+          "technical": "copy x stays the prefix-verb expression Expr::Copy, parsing on any expression. ^^ is deleted from the grammar. A chain needs parentheses because the verb binds looser than a method call. On a non-cloneable type it is E0211.",
+          "code": "// taking call\nops.transform(pool, copy input, 5000)\n// method chain\ngrid := (copy input).rotate().scale(2)\n// standalone\nbackup := copy input"
+        },
+        {
+          "key": "B",
+          "name": "Method only",
+          "detail": "Write x.copy() as a method in every position. The copy marker sits on the value, next to the shipped .drop(). Autocomplete on input offers it. Both the copy keyword and ^^ are removed.",
+          "technical": "copy becomes a built-in method: input.copy() lowers to the same independent duplicate. The keyword copy and ^^ leave the grammar. On a non-cloneable type it is E0211. Chains and standalone lines use the identical form.",
+          "code": "// taking call\nops.transform(pool, input.copy(), 5000)\n// method chain\ngrid := input.copy().rotate().scale(2)\n// standalone\nbackup := input.copy()"
+        },
+        {
+          "key": "C",
+          "name": "Keep the ratified pair",
+          "detail": "Keep both ratified spellings. General code writes copy x; a taking argument may use the compact ^^x. Two spellings, but the call-site form stays short. This is the status quo after D-SHAPE-LIFECYCLE.",
+          "technical": "copy x (Expr::Copy) works anywhere. ^^x is legal only in a taking argument, lowering to copy-then-transfer. Outside a taking call ^^ is a syntax error, so chains still use (copy x).",
+          "code": "// taking call\nops.transform(pool, ^^input, 5000)\n// method chain  (^^ not allowed here)\ngrid := (copy input).rotate().scale(2)\n// standalone\nbackup := copy input"
+        },
+        {
+          "key": "D",
+          "name": "Rust directly",
+          "detail": "Use Rust's own spelling, x.clone(), verbatim. Anyone coming from Rust reads it instantly. Both the copy keyword and ^^ are removed, and .clone() becomes user-typable again.",
+          "technical": "clone becomes a real method in the grammar. S4 had deliberately deleted .clone(); this re-admits it. On a non-cloneable type it is E0211. Chains and standalone lines use the identical form.",
+          "code": "// taking call\nops.transform(pool, input.clone(), 5000)\n// method chain\ngrid := input.clone().rotate().scale(2)\n// standalone\nbackup := input.clone()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust moves most values implicitly and writes .clone() for an explicit copy. Users often criticize .clone() because its cost and identity vary silently by type.",
+          "code": "ops.transform(pool, input.clone(), 5000);"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift added an explicit copy word for consuming contexts. The community still warns that copying a class reference keeps identity rather than duplicating the object.",
+          "code": "ops.transform(pool, copy input, 5000)"
+        },
+        {
+          "lang": "C++",
+          "note": "C++ copies implicitly through copy constructors. Call sites read clean, but an expensive deep copy can hide behind a plain variable pass.",
+          "code": "ops.transform(pool, input, 5000);"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "B puts the copy marker on the value, so the call site signals the copy where the eye already is. input.copy() reads left-to-right, chains without parentheses, and autocompletes beside .drop(). One spelling covers every position, satisfying I8 and serving LSP discoverability.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A keeps one searchable word, but the marker sits before the value with no signal on input, and a chain still needs wrapping parentheses."
+          },
+          {
+            "key": "C",
+            "reason": "C is the status quo, yet it keeps two spellings for one job, the exact I8 conflict this ballot exists to end."
+          },
+          {
+            "key": "D",
+            "reason": "D reads instantly for Rust users, but it re-admits .clone(), which S4 deleted on purpose, and imports Rust's cost-and-identity criticism along with the spelling."
+          }
+        ],
+        "tradeoff": "B supersedes the D-CAP2 and S4 copy x spelling and retires D-SHAPE-LIFECYCLE's ^^. Fix-its and diagnostics that say copy name must move to input.copy(), and E0211 stays the non-cloneable error."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T12:57:55.341Z"
     }
   ],
   "questions": [
@@ -38691,6 +38785,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T12:59:34.548Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c08wuixb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T12:58:27.447Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0we378g",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T12:57:55.341Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-SHAPE-COPY1",
+      "note": "What is the one way to write a copy?"
+    },
     {
       "at": "2026-07-15T12:56:28.837Z",
       "by": "root",
@@ -42169,27 +42284,6 @@
       "action": "card.criteria-add",
       "ref": "c07p1xxq",
       "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-15T01:04:19.040Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07p1xxq",
-      "note": "#3 Both exact failing corelib tests and the full corelib target"
-    },
-    {
-      "at": "2026-07-15T01:04:18.811Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07p1xxq",
-      "note": "#2 Canonical Core reference lists core.auth with accurate modul"
-    },
-    {
-      "at": "2026-07-15T01:04:18.576Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07p1xxq",
-      "note": "#1 Codec truth probe proves generated Encode/Decode source reen"
     }
   ],
   "nextNum": 368,
