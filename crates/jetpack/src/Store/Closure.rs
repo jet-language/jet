@@ -809,6 +809,14 @@ fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io:
     let tmp = dir.join(format!("meta.json.{}.partial", std::process::id()));
     fs::write(&tmp, &record.package_meta)?;
     fs::File::open(&tmp)?.sync_all()?;
+    #[cfg(windows)]
+    if path.exists() {
+        // std rename does not replace on Windows. The committed WAL remains
+        // authoritative if a crash lands between removal and publication;
+        // the next recovery recreates the exact projection.
+        fs::remove_file(&path)?;
+        sync_dir(&dir)?;
+    }
     fs::rename(&tmp, &path)?;
     sync_dir(&dir)?;
     Ok(true)
