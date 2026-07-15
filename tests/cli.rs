@@ -11,9 +11,9 @@
 //! Snapshots live in `tests/cli/*.txt`; bless with `UPDATE_EXPECT=1`.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -85,10 +85,79 @@ fn scrub(s: &str, file: &Path) -> String {
 /// test harness's cwd (the repo root). Giving each such test its own cwd
 /// removes the shared namespace entirely, regardless of stem.
 fn isolated_cwd(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("jet_cli_cwd_{tag}_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
+    static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    loop {
+        let sequence = NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "jet_cli_cwd_{tag}_{}_{sequence}",
+            std::process::id()
+        ));
+        match fs::create_dir(&dir) {
+            Ok(()) => return dir,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("cannot create isolated CLI fixture {}: {error}", dir.display()),
+        }
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn isolated_cwd_child_holds_executable() {
+    let Some(ready) = std::env::var_os("JET_CLI_EXECUTABLE_HOLDER_READY") else {
+        return;
+    };
+    fs::write(ready, "ready").unwrap();
+    let mut release = [0];
+    std::io::stdin().read_exact(&mut release).unwrap();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn isolated_cwd_never_reuses_executing_fixture_path() {
+    let first = isolated_cwd("executing_fixture_collision");
+    let executable = first.join("cli-test-holder");
+    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    let ready = first.join("ready");
+    let mut child = Command::new(&executable)
+        .args(["--exact", "isolated_cwd_child_holds_executable"])
+        .env("JET_CLI_EXECUTABLE_HOLDER_READY", &ready)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let ready_seen = loop {
+        if ready.is_file() {
+            break true;
+        }
+        if child.try_wait().unwrap().is_some() || std::time::Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    };
+
+    let second = ready_seen.then(|| isolated_cwd("executing_fixture_collision"));
+    let copy_result = second
+        .as_ref()
+        .map(|dir| fs::copy(std::env::current_exe().unwrap(), dir.join("cli-test-holder")));
+    let release_result = child.stdin.as_mut().unwrap().write_all(&[1]);
+    drop(child.stdin.take());
+    let output = child.wait_with_output().unwrap();
+
+    let _ = fs::remove_dir_all(&first);
+    if let Some(second) = &second {
+        let _ = fs::remove_dir_all(second);
+    }
+
+    assert!(ready_seen, "holder exited or timed out: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "holder failed: {}", String::from_utf8_lossy(&output.stderr));
+    release_result.unwrap();
+    let second = second.unwrap();
+    assert_ne!(first, second, "fixture path reused while stale executable was running");
+    copy_result.unwrap().unwrap();
 }
 
 fn budget_project(tag: &str, limit: u64) -> PathBuf {
