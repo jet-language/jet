@@ -166,18 +166,61 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
             .map_err(|e| format!("couldn't write `{}`: {e}", temp.display()))?;
         file.sync_all()
             .map_err(|e| format!("couldn't sync `{}`: {e}", temp.display()))?;
-        std::fs::rename(&temp, path)
-            .map_err(|e| format!("couldn't finalize `{}`: {e}", path.display()))?;
-        #[cfg(unix)]
-        std::fs::File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|e| format!("couldn't sync `{}`: {e}", parent.display()))?;
+        finalize_atomic_write(&temp, path, parent)?;
         Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+#[cfg(windows)]
+fn finalize_atomic_write(temp: &Path, path: &Path, _parent: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let mut existing = temp.as_os_str().encode_wide().collect::<Vec<_>>();
+    existing.push(0);
+    let mut replacement = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    replacement.push(0);
+    // The temp file was sync_all'd before this call. REPLACE_EXISTING gives
+    // Windows its native same-volume atomic replacement when the destination
+    // already exists; WRITE_THROUGH does not return until the move's file and
+    // directory metadata reach durable storage.
+    if unsafe {
+        MoveFileExW(
+            existing.as_ptr(),
+            replacement.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(format!(
+            "couldn't finalize `{}`: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn finalize_atomic_write(temp: &Path, path: &Path, parent: &Path) -> Result<(), String> {
+    std::fs::rename(temp, path)
+        .map_err(|e| format!("couldn't finalize `{}`: {e}", path.display()))?;
+    #[cfg(unix)]
+    std::fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|e| format!("couldn't sync `{}`: {e}", parent.display()))?;
+    Ok(())
 }
 
 /// `jetpack secrets recipients list` — every recipient line (comments/blanks
@@ -589,6 +632,42 @@ mod tests {
         assert!(pairs.contains(&("right".to_string(), "two".to_string())));
         std::env::remove_var("JET_KEYS_DIR");
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_target_repeatedly() {
+        let dir = std::env::temp_dir().join(format!(
+            "jet_secrets_atomic_replace_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secrets.age");
+        for generation in 0..32 {
+            let bytes = format!("ciphertext-generation-{generation}");
+            atomic_write(&path, bytes.as_bytes()).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), bytes.as_bytes());
+        }
+        let names = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec![std::ffi::OsString::from("secrets.age")]);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn windows_atomic_replacement_contract_is_explicit() {
+        let source = include_str!("Secrets.rs");
+        for required in [
+            "MoveFileExW",
+            "MOVEFILE_REPLACE_EXISTING",
+            "MOVEFILE_WRITE_THROUGH",
+            "file.sync_all()",
+            "directory.sync_all()",
+        ] {
+            assert!(source.contains(required), "missing atomic-write law: {required}");
+        }
     }
 
     #[test]

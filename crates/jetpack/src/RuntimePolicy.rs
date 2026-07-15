@@ -650,8 +650,13 @@ mod tests {
             "GetFileInformationByHandle",
             "HANDLE_FLAG_INHERIT",
             "FILE_FLAG_OPEN_REPARSE_POINT",
+            "FILE_FLAG_BACKUP_SEMANTICS",
             "FILE_ATTRIBUTE_REPARSE_POINT",
             ".share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)",
+            "pin_parent_components",
+            "open_directory_raw",
+            "parent_junction_is_rejected_before_lock_leaf_open",
+            "parent_replacement_is_blocked_while_component_identity_is_pinned",
             "lockfileex_runtime_serializes_and_pins_file_identity",
             "reparse_points_fail_closed_when_creation_is_permitted",
         ] {

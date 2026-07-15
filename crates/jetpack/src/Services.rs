@@ -85,6 +85,21 @@ fn service_dir(project_dir: &Path, name: &str) -> PathBuf {
 fn pid_path(dir: &Path) -> PathBuf {
     dir.join("pid")
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessState {
+    pid: u32,
+    start_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PersistedProcessState {
+    Verified(ProcessState),
+    /// State written by Jetpack versions that persisted only a PID. A PID
+    /// can be reused, so this state may be removed but must never authorize a
+    /// liveness claim or signal.
+    LegacyPid(u32),
+}
 fn stdout_path(dir: &Path) -> PathBuf {
     dir.join("stdout.log")
 }
@@ -143,10 +158,50 @@ fn resolve(project_dir: &Path, plan: &DevServicePlan) -> Result<Resolved, String
     })
 }
 
+fn read_process_state(dir: &Path) -> Result<Option<PersistedProcessState>, String> {
+    let path = pid_path(dir);
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "couldn't read service process state `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    let trimmed = text.trim();
+    if let Ok(pid) = trimmed.parse::<u32>() {
+        return Ok(Some(PersistedProcessState::LegacyPid(pid)));
+    }
+    let mut version = None;
+    let mut pid = None;
+    let mut start_identity = None;
+    for line in trimmed.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(format!("service process state `{}` is invalid", path.display()));
+        };
+        match key {
+            "version" => version = Some(value),
+            "pid" => pid = value.parse::<u32>().ok(),
+            "start" if !value.is_empty() => start_identity = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    if version != Some("1") || pid.is_none() || start_identity.is_none() {
+        return Err(format!("service process state `{}` is invalid", path.display()));
+    }
+    Ok(Some(PersistedProcessState::Verified(ProcessState {
+        pid: pid.unwrap(),
+        start_identity: start_identity.unwrap(),
+    })))
+}
+
 fn read_pid(dir: &Path) -> Option<u32> {
-    fs::read_to_string(pid_path(dir))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
+    match read_process_state(dir).ok().flatten()? {
+        PersistedProcessState::Verified(state) => Some(state.pid),
+        PersistedProcessState::LegacyPid(pid) => Some(pid),
+    }
 }
 
 /// Whether `pid` names a live process — the only signal std can't get any
@@ -159,18 +214,8 @@ fn is_alive(pid: u32) -> bool {
 fn process_alive(pid: u32) -> Result<bool, String> {
     #[cfg(windows)]
     {
-        let filter = format!("PID eq {pid}");
-        let output = Command::new("tasklist")
-            .args(["/FI", &filter, "/FO", "CSV", "/NH"])
-            .output()
-            .map_err(|e| format!("couldn't probe service process {pid}: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "service process probe for {pid} exited with {}",
-                output.status
-            ));
-        }
-        return Ok(String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\"")));
+        return windows_process::is_alive(pid)
+            .map_err(|e| format!("couldn't probe service process {pid}: {e}"));
     }
     #[cfg(not(windows))]
     {
@@ -190,20 +235,299 @@ fn process_alive(pid: u32) -> Result<bool, String> {
     }
 }
 
-fn publish_pid(child: &mut Child, path: &Path) -> Result<(), String> {
-    if let Err(error) = fs::write(path, child.id().to_string()) {
-        let kill_error = child.kill().err();
-        let wait_error = child.wait().err();
-        let cleanup = match (kill_error, wait_error) {
-            (None, None) => String::new(),
-            (kill, wait) => format!("; child cleanup failed (kill: {kill:?}, wait: {wait:?})"),
+#[cfg(target_os = "linux")]
+fn process_start_identity(pid: u32) -> Result<Option<String>, String> {
+    let path = PathBuf::from(format!("/proc/{pid}/stat"));
+    let stat = match fs::read_to_string(&path) {
+        Ok(stat) => stat,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "couldn't read service process identity `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    // Field 2 (`comm`) may contain spaces and parentheses. Everything after
+    // its final `)` begins at field 3; starttime is field 22, index 19 here.
+    let fields = stat
+        .rsplit_once(')')
+        .map(|(_, rest)| rest.split_whitespace().collect::<Vec<_>>())
+        .ok_or_else(|| format!("service process identity for {pid} is malformed"))?;
+    let start = fields
+        .get(19)
+        .ok_or_else(|| format!("service process identity for {pid} is incomplete"))?;
+    start
+        .parse::<u64>()
+        .map_err(|_| format!("service process identity for {pid} has an invalid start time"))?;
+    Ok(Some(format!("linux-proc-start:{start}")))
+}
+
+#[cfg(target_os = "macos")]
+fn process_start_identity(pid: u32) -> Result<Option<String>, String> {
+    macos_process::start_identity(pid)
+        .map_err(|e| format!("couldn't probe service process identity {pid}: {e}"))
+}
+
+#[cfg(target_os = "macos")]
+mod macos_process {
+    use std::ffi::c_int;
+    use std::io;
+
+    const PROC_PIDTBSDINFO: c_int = 3;
+    const ESRCH: i32 = 3;
+
+    #[repr(C)]
+    struct ProcBsdInfo {
+        flags: u32,
+        status: u32,
+        xstatus: u32,
+        pid: u32,
+        ppid: u32,
+        uid: u32,
+        gid: u32,
+        ruid: u32,
+        rgid: u32,
+        svuid: u32,
+        svgid: u32,
+        reserved: u32,
+        comm: [u8; 16],
+        name: [u8; 32],
+        nfiles: u32,
+        pgid: u32,
+        pjobc: u32,
+        tty_device: u32,
+        tty_pgid: u32,
+        nice: i32,
+        start_seconds: u64,
+        start_microseconds: u64,
+    }
+
+    #[link(name = "proc")]
+    unsafe extern "C" {
+        fn proc_pidinfo(
+            pid: c_int,
+            flavor: c_int,
+            arg: u64,
+            buffer: *mut std::ffi::c_void,
+            buffer_size: c_int,
+        ) -> c_int;
+    }
+
+    pub(super) fn start_identity(pid: u32) -> io::Result<Option<String>> {
+        let mut info = std::mem::MaybeUninit::<ProcBsdInfo>::uninit();
+        let size = std::mem::size_of::<ProcBsdInfo>() as c_int;
+        // SAFETY: output points to `size` writable bytes; flavor requires the
+        // ProcBsdInfo layout declared by libproc.h.
+        let written = unsafe {
+            proc_pidinfo(
+                pid as c_int,
+                PROC_PIDTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
         };
+        if written == 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(ESRCH) {
+                return Ok(None);
+            }
+            return Err(error);
+        }
+        if written != size {
+            return Err(io::Error::other(format!(
+                "proc_pidinfo returned {written} of {size} bytes"
+            )));
+        }
+        // SAFETY: exact expected byte count was returned.
+        let info = unsafe { info.assume_init() };
+        Ok(Some(format!(
+            "macos-proc-start:{}:{}",
+            info.start_seconds, info.start_microseconds
+        )))
+    }
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn process_start_identity(pid: u32) -> Result<Option<String>, String> {
+    // Other BSDs expose stable long-start output through ps. Persist the
+    // normalized full timestamp, never elapsed time.
+    let output = Command::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .map_err(|e| format!("couldn't probe service process identity {pid}: {e}"))?;
+    let start = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() && !start.is_empty() {
+        return Ok(Some(format!("bsd-ps-lstart:{start}")));
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
         return Err(format!(
-            "couldn't publish service pid to `{}`: {error}{cleanup}",
+            "couldn't probe service process identity {pid}: {}",
+            stderr.trim()
+        ));
+    }
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn process_start_identity(pid: u32) -> Result<Option<String>, String> {
+    windows_process::start_identity(pid)
+        .map_err(|e| format!("couldn't probe service process identity {pid}: {e}"))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_start_identity(_pid: u32) -> Result<Option<String>, String> {
+    Err("service process identity is unsupported on this platform".to_string())
+}
+
+#[cfg(windows)]
+mod windows_process {
+    use std::ffi::c_void;
+    use std::io;
+
+    type Handle = *mut c_void;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const ERROR_INVALID_PARAMETER: i32 = 87;
+    const STILL_ACTIVE: u32 = 259;
+
+    #[repr(C)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, process_id: u32) -> Handle;
+        fn GetProcessTimes(
+            process: Handle,
+            creation: *mut FileTime,
+            exit: *mut FileTime,
+            kernel: *mut FileTime,
+            user: *mut FileTime,
+        ) -> i32;
+        fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
+    }
+
+    struct OwnedHandle(Handle);
+
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            // SAFETY: handle was returned by OpenProcess and is closed once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    fn open(pid: u32) -> io::Result<Option<OwnedHandle>> {
+        // SAFETY: scalar arguments; returned handle is owned on success.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER) {
+                return Ok(None);
+            }
+            return Err(error);
+        }
+        Ok(Some(OwnedHandle(handle)))
+    }
+
+    pub(super) fn start_identity(pid: u32) -> io::Result<Option<String>> {
+        let Some(handle) = open(pid)? else { return Ok(None) };
+        let mut creation = FileTime { low: 0, high: 0 };
+        let mut exit = FileTime { low: 0, high: 0 };
+        let mut kernel = FileTime { low: 0, high: 0 };
+        let mut user = FileTime { low: 0, high: 0 };
+        // SAFETY: live process handle and initialized writable outputs.
+        if unsafe {
+            GetProcessTimes(
+                handle.0,
+                &mut creation,
+                &mut exit,
+                &mut kernel,
+                &mut user,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let ticks = (u64::from(creation.high) << 32) | u64::from(creation.low);
+        Ok(Some(format!("windows-filetime:{ticks}")))
+    }
+
+    pub(super) fn is_alive(pid: u32) -> io::Result<bool> {
+        let Some(handle) = open(pid)? else { return Ok(false) };
+        let mut exit_code = 0;
+        // SAFETY: live process handle and writable scalar output.
+        if unsafe { GetExitCodeProcess(handle.0, &mut exit_code) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(exit_code == STILL_ACTIVE)
+    }
+}
+
+fn process_matches_start_with(
+    expected: &str,
+    mut identity: impl FnMut() -> Result<Option<String>, String>,
+    mut alive: impl FnMut() -> Result<bool, String>,
+) -> Result<bool, String> {
+    let Some(actual) = identity()? else { return Ok(false) };
+    if actual != expected {
+        return Ok(false);
+    }
+    alive()
+}
+
+fn process_matches_start(state: &ProcessState) -> Result<bool, String> {
+    process_matches_start_with(
+        &state.start_identity,
+        || process_start_identity(state.pid),
+        || process_alive(state.pid),
+    )
+}
+
+fn cleanup_child(child: &mut Child) -> String {
+    let kill_error = child.kill().err();
+    let wait_error = child.wait().err();
+    match (kill_error, wait_error) {
+        (None, None) => String::new(),
+        (kill, wait) => format!("; child cleanup failed (kill: {kill:?}, wait: {wait:?})"),
+    }
+}
+
+fn publish_process_state(child: &mut Child, path: &Path) -> Result<ProcessState, String> {
+    let start_identity = match process_start_identity(child.id()) {
+        Ok(Some(identity)) => identity,
+        Ok(None) => {
+            let cleanup = cleanup_child(child);
+            return Err(format!(
+                "couldn't capture service process identity for {}{cleanup}",
+                child.id()
+            ));
+        }
+        Err(error) => {
+            let cleanup = cleanup_child(child);
+            return Err(format!("{error}{cleanup}"));
+        }
+    };
+    let state = ProcessState {
+        pid: child.id(),
+        start_identity,
+    };
+    let encoded = format!(
+        "version=1\npid={}\nstart={}\n",
+        state.pid, state.start_identity
+    );
+    if let Err(error) = fs::write(path, encoded) {
+        let cleanup = cleanup_child(child);
+        return Err(format!(
+            "couldn't publish service process state to `{}`: {error}{cleanup}",
             path.display()
         ));
     }
-    Ok(())
+    Ok(state)
 }
 
 /// Start `plan` if it isn't already running (idempotent). `env` composes the
@@ -221,9 +545,17 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
     let resolved = resolve(project_dir, plan)?;
     fs::create_dir_all(&resolved.dir).map_err(|e| e.to_string())?;
     fs::create_dir_all(&resolved.data_dir).map_err(|e| e.to_string())?;
-    if let Some(pid) = read_pid(&resolved.dir) {
-        if is_alive(pid) {
-            return Ok(()); // already up
+    if let Some(state) = read_process_state(&resolved.dir)? {
+        match state {
+            PersistedProcessState::Verified(state) if process_matches_start(&state)? => {
+                return Ok(()); // already up
+            }
+            PersistedProcessState::Verified(_) | PersistedProcessState::LegacyPid(_) => {
+                // A dead/reused verified PID and a PID-only legacy record are
+                // both stale authority. Remove state; never signal either.
+                fs::remove_file(pid_path(&resolved.dir))
+                    .map_err(|e| format!("couldn't remove stale service state: {e}"))?;
+            }
         }
     }
     let stdout = File::create(stdout_path(&resolved.dir)).map_err(|e| e.to_string())?;
@@ -246,7 +578,7 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("couldn't start `{}`: {e}", plan.name))?;
-    publish_pid(&mut child, &pid_path(&resolved.dir))?;
+    publish_process_state(&mut child, &pid_path(&resolved.dir))?;
     // Not `.wait()`-ed on this thread — it's a supervised background process
     // meant to outlive this command, and `wait()` would block for as long as
     // it runs. But an un-`wait()`-ed `Child` never gets reaped *by this
@@ -273,8 +605,17 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
     )
     .map_err(|e| format!("couldn't lock service state: {e}"))?;
     let dir = service_dir(project_dir, &plan.name);
-    let Some(pid) = read_pid(&dir) else { return Ok(()) };
-    if !process_alive(pid)? {
+    let Some(state) = read_process_state(&dir)? else { return Ok(()) };
+    let PersistedProcessState::Verified(state) = state else {
+        // Legacy PID-only state cannot prove which process owns the PID.
+        // Migrate by dropping only the unverifiable record.
+        return match fs::remove_file(pid_path(&dir)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!("couldn't remove legacy service state: {error}")),
+        };
+    };
+    if !process_matches_start(&state)? {
         match fs::remove_file(pid_path(&dir)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -282,7 +623,7 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         }
         return Ok(());
     }
-    stop_process(pid, plan.shutdown.as_deref())?;
+    stop_process(&state, plan.shutdown.as_deref())?;
     match fs::remove_file(pid_path(&dir)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -297,14 +638,36 @@ enum StopAction {
     Kill,
 }
 
-fn stop_process(pid: u32, shutdown: Option<&str>) -> Result<(), String> {
+fn stop_process(state: &ProcessState, shutdown: Option<&str>) -> Result<(), String> {
+    let pid = state.pid;
     stop_process_with(
         pid,
         shutdown,
         Duration::from_secs(3),
-        |action| run_stop_action(pid, action),
-        || process_alive(pid),
+        |action| run_verified_stop_action(state, action),
+        || process_matches_start(state),
     )
+}
+
+fn run_if_start_identity_matches(
+    expected: &str,
+    mut identity: impl FnMut() -> Result<Option<String>, String>,
+    action: impl FnOnce() -> Result<(), String>,
+) -> Result<bool, String> {
+    if identity()?.as_deref() != Some(expected) {
+        return Ok(false);
+    }
+    action()?;
+    Ok(true)
+}
+
+fn run_verified_stop_action(state: &ProcessState, action: StopAction) -> Result<(), String> {
+    let _ran = run_if_start_identity_matches(
+        &state.start_identity,
+        || process_start_identity(state.pid),
+        || run_stop_action(state.pid, action),
+    )?;
+    Ok(())
 }
 
 fn stop_process_with(
@@ -387,10 +750,10 @@ pub fn health_one(project_dir: &Path, plan: &DevServicePlan) -> Health {
         return Health::Disabled;
     }
     let dir = service_dir(project_dir, &plan.name);
-    let Some(pid) = read_pid(&dir) else {
+    let Ok(Some(PersistedProcessState::Verified(state))) = read_process_state(&dir) else {
         return Health::NotRunning;
     };
-    if !is_alive(pid) {
+    if !process_matches_start(&state).unwrap_or(false) {
         return Health::NotRunning;
     }
     let Ok(resolved) = resolve(project_dir, plan) else {
@@ -684,6 +1047,120 @@ mod tests {
     }
 
     #[test]
+    fn process_state_round_trips_and_pid_only_state_stays_legacy() {
+        let dir = scratch("process-state");
+        let state = ProcessState {
+            pid: 42,
+            start_identity: "linux-proc-start:9001".to_string(),
+        };
+        fs::write(
+            pid_path(&dir),
+            format!(
+                "version=1\npid={}\nstart={}\n",
+                state.pid, state.start_identity
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            read_process_state(&dir).unwrap(),
+            Some(PersistedProcessState::Verified(state))
+        );
+        fs::write(pid_path(&dir), "42\n").unwrap();
+        assert_eq!(
+            read_process_state(&dir).unwrap(),
+            Some(PersistedProcessState::LegacyPid(42))
+        );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn legacy_pid_state_is_removed_without_running_shutdown_or_signaling() {
+        let dir = scratch("legacy-pid");
+        let mut p = plan("fixture", "unused");
+        p.shutdown = Some("exit 99".to_string());
+        let state_dir = service_dir(&dir, "fixture");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::write(pid_path(&state_dir), std::process::id().to_string()).unwrap();
+        down_one(&dir, &p).expect("legacy state must be safely discarded");
+        assert!(!pid_path(&state_dir).exists());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn pid_reuse_identity_mismatch_never_reaches_liveness_or_signal() {
+        let liveness_called = std::cell::Cell::new(false);
+        assert!(!process_matches_start_with(
+            "linux-proc-start:old",
+            || Ok(Some("linux-proc-start:reused".to_string())),
+            || {
+                liveness_called.set(true);
+                Ok(true)
+            },
+        )
+        .unwrap());
+        assert!(!liveness_called.get());
+
+        let signaled = std::cell::Cell::new(false);
+        assert!(!run_if_start_identity_matches(
+            "linux-proc-start:old",
+            || Ok(Some("linux-proc-start:reused".to_string())),
+            || {
+                signaled.set(true);
+                Ok(())
+            },
+        )
+        .unwrap());
+        assert!(!signaled.get());
+    }
+
+    #[test]
+    fn process_identity_probe_errors_propagate_before_liveness() {
+        let error = process_matches_start_with(
+            "expected",
+            || Err("identity probe failed".to_string()),
+            || panic!("liveness must not run after an identity probe error"),
+        )
+        .unwrap_err();
+        assert_eq!(error, "identity probe failed");
+    }
+
+    #[test]
+    fn current_process_start_identity_is_stable() {
+        let pid = std::process::id();
+        let first = process_start_identity(pid).unwrap().unwrap();
+        let second = process_start_identity(pid).unwrap().unwrap();
+        assert_eq!(first, second);
+        assert!(
+            process_matches_start(&ProcessState {
+                pid,
+                start_identity: first,
+            })
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn platform_start_identity_contracts_are_explicit() {
+        let source = include_str!("Services.rs");
+        for required in [
+            "target_os = \"linux\"",
+            "/proc/{pid}/stat",
+            "linux-proc-start",
+            "target_os = \"macos\"",
+            "proc_pidinfo",
+            "PROC_PIDTBSDINFO",
+            "macos-proc-start",
+            "lstart=",
+            "OpenProcess",
+            "GetProcessTimes",
+            "GetExitCodeProcess",
+            "windows-filetime",
+        ] {
+            assert!(source.contains(required), "missing process identity law: {required}");
+        }
+    }
+
+    #[test]
     fn pid_publication_failure_kills_and_reaps_child() {
         let dir = scratch("pid-publication-failure");
         let bad_path = dir.join("pid-as-directory");
@@ -691,8 +1168,11 @@ mod tests {
         let mut child = super::super::Platform::shell_command("sleep 30")
             .spawn()
             .unwrap();
-        let error = publish_pid(&mut child, &bad_path).unwrap_err();
-        assert!(error.contains("couldn't publish service pid"), "{error}");
+        let error = publish_process_state(&mut child, &bad_path).unwrap_err();
+        assert!(
+            error.contains("couldn't publish service process state"),
+            "{error}"
+        );
         assert!(child.try_wait().unwrap().is_some(), "child must be reaped");
         fs::remove_dir_all(dir).ok();
     }

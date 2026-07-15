@@ -10,6 +10,7 @@ type Handle = *mut c_void;
 const FILE_SHARE_READ: u32 = 0x0000_0001;
 const FILE_SHARE_WRITE: u32 = 0x0000_0002;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
 const LOCKFILE_FAIL_IMMEDIATELY: u32 = 0x0000_0001;
@@ -52,6 +53,13 @@ struct FileIdentity {
 }
 
 pub(super) struct LockFile {
+    file: File,
+    path: PathBuf,
+    identity: FileIdentity,
+    parents: Vec<PinnedComponent>,
+}
+
+struct PinnedComponent {
     file: File,
     path: PathBuf,
     identity: FileIdentity,
@@ -98,15 +106,44 @@ pub(super) fn open_existing(path: &Path) -> io::Result<LockFile> {
 }
 
 fn open_with_create(path: &Path, create: bool) -> io::Result<LockFile> {
+    // Pin each existing directory from the filesystem root through the lock
+    // parent before opening the leaf. Denying delete sharing on every handle
+    // prevents a junction or directory replacement from changing what later
+    // path validation names.
+    let parents = pin_parent_components(path)?;
     let file = open_raw(path, create)?;
     let identity = file_identity(&file)?;
     let lock = LockFile {
         file,
         path: path.to_path_buf(),
         identity,
+        parents,
     };
     validate_path(&lock, path)?;
     Ok(lock)
+}
+
+fn pin_parent_components(path: &Path) -> io::Result<Vec<PinnedComponent>> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "jetpack lock path has no parent")
+    })?;
+    let mut paths = parent
+        .ancestors()
+        .filter(|component| !component.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    paths.reverse();
+    let mut pinned = Vec::with_capacity(paths.len());
+    for component in paths {
+        let file = open_directory_raw(&component)?;
+        let identity = file_identity(&file)?;
+        pinned.push(PinnedComponent {
+            file,
+            path: component,
+            identity,
+        });
+    }
+    Ok(pinned)
 }
 
 fn open_raw(path: &Path, create: bool) -> io::Result<File> {
@@ -128,6 +165,29 @@ fn open_raw(path: &Path, create: bool) -> io::Result<File> {
     if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(io::Error::other(format!(
             "jetpack lock path `{}` is a reparse point",
+            path.display()
+        )));
+    }
+    Ok(file)
+}
+
+fn open_directory_raw(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new()
+        // Metadata/identity access only. Do not request data read access from
+        // directories whose ACL permits traversal but not listing.
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        // No FILE_SHARE_DELETE: every component name remains pinned while
+        // the lock participates in acquisition or validation.
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(path)?;
+    // SAFETY: raw handle belongs to live directory; inheritance metadata only.
+    if unsafe { SetHandleInformation(file.as_raw_handle().cast(), HANDLE_FLAG_INHERIT, 0) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::Error::other(format!(
+            "jetpack lock parent `{}` is a reparse point",
             path.display()
         )));
     }
@@ -158,6 +218,21 @@ pub(super) fn validate_path(lock: &LockFile, path: &Path) -> io::Result<()> {
     }
     if lock.file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(io::Error::other("jetpack lock handle became a reparse point"));
+    }
+    for component in &lock.parents {
+        if component.file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(io::Error::other(format!(
+                "jetpack lock parent `{}` became a reparse point",
+                component.path.display()
+            )));
+        }
+        let reopened = open_directory_raw(&component.path)?;
+        if file_identity(&reopened)? != component.identity {
+            return Err(io::Error::other(format!(
+                "jetpack lock parent `{}` changed file identity",
+                component.path.display()
+            )));
+        }
     }
     let reopened = open_raw(path, false)?;
     if file_identity(&reopened)? != lock.identity {
@@ -240,6 +315,50 @@ mod tests {
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {}
             Err(error) => panic!("couldn't create reparse fixture: {error}"),
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn parent_junction_is_rejected_before_lock_leaf_open() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-lockfileex-parent-junction-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("target");
+        let junction = root.join("junction");
+        std::fs::create_dir_all(&target).unwrap();
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .output()
+            .unwrap();
+        if output.status.success() {
+            assert!(
+                open(&junction.join("lock")).is_err(),
+                "a junction in any parent component must fail closed"
+            );
+            std::fs::remove_dir(&junction).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn parent_replacement_is_blocked_while_component_identity_is_pinned() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-lockfileex-parent-replace-{}",
+            std::process::id()
+        ));
+        let parent = root.join("state");
+        let displaced = root.join("state-displaced");
+        std::fs::create_dir_all(&parent).unwrap();
+        let path = parent.join("lock");
+        let lock = open(&path).unwrap();
+        assert!(std::fs::rename(&parent, &displaced).is_err());
+        validate_path(&lock, &path).unwrap();
+        drop(lock);
+        std::fs::rename(&parent, &displaced).unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -165,6 +165,36 @@ fn secrets_keygen_set_get_roundtrip_no_plaintext_on_disk() {
         PLAINTEXT,
         "decrypted value must round-trip exactly"
     );
+
+    // Updating an existing store exercises Windows replacement semantics:
+    // rename-on-top is not supported there without an explicit atomic
+    // replacement operation.
+    const UPDATED: &str = "second-super-secret-value";
+    let update_out = jetpack()
+        .current_dir(&proj.path)
+        .args(["secrets", "set", "db_password", UPDATED])
+        .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
+        .output()
+        .expect("update existing secret");
+    assert!(
+        update_out.status.success(),
+        "update failed: {}",
+        String::from_utf8_lossy(&update_out.stderr)
+    );
+    let updated_get = jetpack()
+        .current_dir(&proj.path)
+        .args(["secrets", "get", "db_password"])
+        .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
+        .output()
+        .expect("read updated secret");
+    assert!(updated_get.status.success());
+    assert_eq!(String::from_utf8_lossy(&updated_get.stdout).trim(), UPDATED);
+    for entry in walk(&proj.path) {
+        let bytes = fs::read(&entry).unwrap_or_default();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains(PLAINTEXT), "old plaintext leaked into `{}`", entry.display());
+        assert!(!text.contains(UPDATED), "updated plaintext leaked into `{}`", entry.display());
+    }
 }
 
 /// `jetpack secrets get <name>` on a name that isn't in the store is a clean
