@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 617,
-    "rev": 7043,
+    "nextNum": 618,
+    "rev": 7049,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17341,6 +17341,70 @@
       "created": "2026-07-15T00:08:53.793Z",
       "updated": "2026-07-15",
       "claimedAt": "2026-07-15T00:09:03.661Z"
+    },
+    {
+      "id": "c0rm2c52",
+      "num": 617,
+      "title": "Full suite red: comptime parity harness assumes single-line values",
+      "body": "tests/comptime_diff.rs reaches CSV module parity and fails because the harness expects exactly two output lines. Canonical CSV output legitimately contains embedded newlines, producing eight lines even when comptime and runtime values are identical.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Replace line-count comparison with unambiguous framing that preserves arbitrary multiline bytes, add hostile delimiter/newline coverage, keep compiler/runtime semantics unchanged, run comptime_diff, independent review, then parent full verification.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "codex-orchestrator",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Comptime/runtime parity comparison accepts arbitrary multiline and delimiter-like output without ambiguity or lossy normalization.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:34:47.994Z"
+        },
+        {
+          "n": 2,
+          "text": "CSV multiline module case and an adversarial framing case prove byte-exact equality while still detecting unequal values.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:34:48.096Z"
+        },
+        {
+          "n": 3,
+          "text": "All comptime_diff tests pass without product, syntax, diagnostic, dependency, or unsafe changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:34:48.199Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T00:34:48.293Z"
+        }
+      ],
+      "refs": [
+        "tests/comptime_diff.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Csv.rs",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T00:34:40.419Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T00:34:48.383Z"
     }
   ],
   "decisions": [
@@ -35818,6 +35882,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T00:34:48.383Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c0rm2c52",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T00:34:48.293Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rm2c52",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T00:34:48.199Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rm2c52",
+      "note": "#3 All comptime_diff tests pass without product, syntax, diagno"
+    },
+    {
+      "at": "2026-07-15T00:34:48.096Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rm2c52",
+      "note": "#2 CSV multiline module case and an adversarial framing case pr"
+    },
+    {
+      "at": "2026-07-15T00:34:47.994Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rm2c52",
+      "note": "#1 Comptime/runtime parity comparison accepts arbitrary multili"
+    },
+    {
+      "at": "2026-07-15T00:34:40.422Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c0rm2c52",
+      "note": "Full suite red: comptime parity harness assumes single-line values"
+    },
+    {
       "at": "2026-07-15T00:29:39.348Z",
       "by": "owner",
       "action": "idea.delete",
@@ -39274,48 +39380,6 @@
       "action": "card.criteria-add",
       "ref": "c0ckmp1o",
       "note": "#1 Serde source-reentry acceptance reads the canonical Registra"
-    },
-    {
-      "at": "2026-07-14T21:45:26.997Z",
-      "by": "codex-orchestrator",
-      "action": "card.add",
-      "ref": "c0ckmp1o",
-      "note": "Full suite red: capability acceptance probes drifted from source"
-    },
-    {
-      "at": "2026-07-14T21:38:33.262Z",
-      "by": "luna-canvas-verifier",
-      "action": "card.criteria-verify",
-      "ref": "c06k81ci",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-14T21:38:33.168Z",
-      "by": "luna-canvas-verifier",
-      "action": "card.criteria-verify",
-      "ref": "c06k81ci",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-14T21:38:33.068Z",
-      "by": "luna-canvas-verifier",
-      "action": "card.criteria-verify",
-      "ref": "c06k81ci",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-14T21:35:46.880Z",
-      "by": "terra-canvas-boundary",
-      "action": "card.criteria-meet",
-      "ref": "c06k81ci",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-14T21:35:46.778Z",
-      "by": "terra-canvas-boundary",
-      "action": "card.criteria-meet",
-      "ref": "c06k81ci",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
