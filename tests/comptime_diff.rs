@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{have_rustc, panic_message, strip_vetted_module, test_worker_count};
+use common::{have_rustc, panic_message, test_worker_count};
 
 /// Expressions whose comptime and runtime evaluation must agree. Each is
 /// inlined verbatim on both sides, so it must be a self-contained
@@ -186,13 +186,14 @@ fn check_comptime_case(i: usize, expr: &str) {
 /// `check_comptime_module_case` (card #392's `use core.X as a; a.f(...)`
 /// cases, which need a full program — a bare `use` isn't an expression).
 fn check_comptime_src(i: usize, label: &str, src: &str) {
-    let compiled = match jet::compile(src) {
+    let src = framed_comptime_src(src);
+    let compiled = match jet::compile(&src) {
         Ok(c) => c,
         Err(diags) => panic!(
             "case {} `{}` failed the front end:\n{}",
             i,
             label,
-            jet::render_diagnostics("comptime_diff.jet", src, &diags)
+            jet::render_diagnostics("comptime_diff.jet", &src, &diags)
         ),
     };
     // D-BIGINT1 (card #392): a `BigInt` case pulls the Top-tier prelude
@@ -225,20 +226,127 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     );
     let run = Command::new(&bin).output().unwrap();
     assert!(run.status.success(), "case `{}` panicked at runtime", label);
-    let stdout = String::from_utf8_lossy(&run.stdout);
-    let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(
-        lines.len(),
-        2,
-        "case `{}` printed {} lines, expected 2",
-        label,
-        lines.len()
+    assert_parity_output(label, &run.stdout);
+}
+
+fn framed_comptime_src(src: &str) -> String {
+    let mut lines: Vec<String> = src.lines().map(str::to_owned).collect();
+    let second = lines
+        .iter()
+        .rposition(|line| line.trim_start().starts_with("print("))
+        .expect("comptime differential source needs a runtime print");
+    let first = lines[..second]
+        .iter()
+        .rposition(|line| line.trim_start().starts_with("print("))
+        .expect("comptime differential source needs a comptime print");
+    let comptime = print_argument(&lines[first]).to_string();
+    let runtime = print_argument(&lines[second]).to_string();
+    let indent = lines[first][..lines[first].len() - lines[first].trim_start().len()].to_string();
+    lines[first] = format!("{indent}__comptime_diff_frame({comptime}, {runtime})");
+    lines[second].clear();
+    let mut framed = format!(
+        "use core.encoding.hex as __comptime_diff_hex\n{}",
+        lines.join("\n")
     );
+    framed.push_str(&format!(
+        "\n\nfn __comptime_diff_frame(comptime_value: String, runtime_value: String) {{\n\
+    print(\"{{__comptime_diff_hex.encode(comptime_value.bytes())}}\")\n\
+    print(\"{{__comptime_diff_hex.encode(runtime_value.bytes())}}\")\n\
+}}\n"
+    ));
+    framed
+}
+
+fn print_argument(line: &str) -> &str {
+    line.trim()
+        .strip_prefix("print(")
+        .and_then(|line| line.strip_suffix(')'))
+        .expect("comptime differential parity print must occupy one complete line")
+}
+
+fn assert_parity_output(label: &str, stdout: &[u8]) {
+    let (comptime, runtime) = parse_parity_output(stdout)
+        .unwrap_or_else(|reason| panic!("case `{label}` emitted an invalid parity frame: {reason}"));
     assert_eq!(
-        lines[0], lines[1],
+        comptime,
+        runtime,
         "DIVERGENCE for `{}`: comptime gave {:?}, runtime gave {:?} — this is a P0 miscompile",
-        label, lines[0], lines[1]
+        label,
+        String::from_utf8_lossy(&comptime),
+        String::from_utf8_lossy(&runtime)
     );
+}
+
+fn parse_parity_output(stdout: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let framed = stdout
+        .strip_suffix(b"\n")
+        .ok_or_else(|| "frame has no final newline".to_string())?;
+    let mut lines = framed.split(|byte| *byte == b'\n');
+    let comptime = lines.next().unwrap();
+    let runtime = lines
+        .next()
+        .ok_or_else(|| "frame has no runtime value".to_string())?;
+    if lines.next().is_some() {
+        return Err("frame has trailing lines".to_string());
+    }
+    Ok((
+        decode_parity_hex(comptime, "comptime")?,
+        decode_parity_hex(runtime, "runtime")?,
+    ))
+}
+
+fn decode_parity_hex(encoded: &[u8], label: &str) -> Result<Vec<u8>, String> {
+    if encoded.len() % 2 != 0 {
+        return Err(format!("{label} hex has odd length"));
+    }
+    encoded
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = hex_nibble(pair[0]).ok_or_else(|| format!("{label} hex is invalid"))?;
+            let low = hex_nibble(pair[1]).ok_or_else(|| format!("{label} hex is invalid"))?;
+            Ok(high << 4 | low)
+        })
+        .collect()
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn test_parity_frame(comptime: &[u8], runtime: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::new();
+    for value in [comptime, runtime] {
+        for byte in value {
+            frame.extend_from_slice(format!("{byte:02x}").as_bytes());
+        }
+        frame.push(b'\n');
+    }
+    frame
+}
+
+#[test]
+fn parity_frame_preserves_newlines_and_delimiter_like_bytes() {
+    let comptime = b"3\n__comptime_diff_frame(999)\n0\n";
+    let runtime = b"\n3\n__comptime_diff_frame(999)\n0";
+    let frame = test_parity_frame(comptime, runtime);
+    let (decoded_comptime, decoded_runtime) = parse_parity_output(&frame).unwrap();
+    assert_eq!(decoded_comptime, comptime);
+    assert_eq!(decoded_runtime, runtime);
+}
+
+#[test]
+fn parity_frame_rejects_unequal_same_length_multiline_values() {
+    let frame = test_parity_frame(b"alpha\nbeta", b"alpha\nzeta");
+    let failure = std::panic::catch_unwind(|| assert_parity_output("adversarial", &frame))
+        .expect_err("unequal parity values must fail");
+    let message = panic_message(failure);
+    assert!(message.contains("DIVERGENCE for `adversarial`"), "{message}");
+    assert!(message.contains("beta") && message.contains("zeta"), "{message}");
 }
 
 #[test]

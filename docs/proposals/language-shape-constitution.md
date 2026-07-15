@@ -117,6 +117,23 @@ separate error, ownership, effect, or scheduling behavior.
 
 Whether Jet admits `|>` and which input receives its value are separate votes.
 
+## Interface lenses
+
+D-SHAPE-EXPOSE1 has fixed one invariant for CLI, HTTP, GUI, and tool lenses.
+Every lens preserves the exact application input, output, declared failure,
+inferred or pinned effects, and function identity. A lens only parses wire data
+into that input and renders the callable result for its transport.
+
+Policy may narrow access but cannot change the callable. Authentication,
+cancellation, streaming, protocol, and version failures stay as typed layers
+around the contract. This result does not choose exposure spelling, transport
+mapping, wire types, boundary policy, or access-policy spelling. Those need
+later owner ballots before any new surface ships; #560 owns enforcement of the
+shared law.
+
+Architecture arrows and pipes used to explain this rule are diagrams, not Jet
+syntax. D-SHAPE-EXPOSE1 creates no marker, token, parser form, or grammar rule.
+
 ## Effects and resources
 
 The effect model, its source location, omission, denial, and generic rows are

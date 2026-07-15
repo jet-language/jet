@@ -2975,6 +2975,37 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
 
 ### CLI & tooling
 
+**D-SHAPE-EXPOSE1=A — Every interface lens preserves the exact callable
+contract**: CLI, HTTP, GUI, and tool lenses use the same application input,
+output, declared failure, inferred or pinned effects, and function identity. A
+lens may parse wire data into the application input and render the application
+result back to its transport. It may not replace or alter the callable.
+
+Access policy may narrow who can reach the function, never change what function
+is called or what contract it has. Authentication, cancellation, streaming,
+protocol, and version failures are typed boundary layers around the application
+contract; they do not become alternate application failures.
+
+The arrows below form an architecture diagram, not Jet source:
+
+```text
+CLI wire  -> GreetingRequest -> same greet -> Greeting | GreetError -> CLI wire
+HTTP wire -> GreetingRequest -> same greet -> Greeting | GreetError -> HTTP wire
+GUI event -> GreetingRequest -> same greet -> Greeting | GreetError -> GUI state
+Tool wire -> GreetingRequest -> same greet -> Greeting | GreetError -> Tool wire
+```
+
+These diagram glyphs do not change any token's existing Jet meaning and
+authorize no `|>` pipe, marker, or exposure declaration. D-SHAPE-EXPOSE1 does
+not choose exposure spelling, transport mapping, wire types, authentication/
+streaming/cancellation/version policy, or access-policy spelling. Each new
+user-facing surface still requires its own owner ballot. #560 owns enforcement
+of the shared law.
+
+Because this decision adds no user-typeable token or form, it adds no
+`Syntax.rs` entry, parser or runtime behavior, grammar rule, diagnostic,
+snapshot, or executable example.
+
 **S15 — Binary profile**: default build unwinds; `jet build --small` =
 `opt-level="z"` + LTO + `panic=abort`.
 
