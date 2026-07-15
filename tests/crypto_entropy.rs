@@ -30,6 +30,8 @@ name = "jet-crypto-entropy-proof"
 version = "0.0.0"
 edition = "2021"
 
+[workspace]
+
 [dependencies]
 aes-gcm = "0.10"
 argon2 = "0.5"

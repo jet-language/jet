@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 621,
-    "rev": 7187,
+    "rev": 7191,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17846,40 +17846,46 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Make the generated fixture explicitly standalone, keep the real compile/run and entropy assertions intact, run the exact target and independent review, then resume the parent full gate.",
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "codex-orchestrator",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "codex-entropy-builder",
+          "text": "Fixture-only repair complete: baseline exact test passed only because current TMPDIR was outside the checkout, confirming environment masking. Empty [workspace] makes isolation explicit. Post-fix exact bridge and full 13-test target pass. Criteria 1-3 met; parent full gate remains."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Generated entropy bridge Cargo fixture is explicitly standalone and never depends on root workspace membership or exclusion state.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-entropy-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T01:44:57.603Z"
+          "evidence": "Generated bridge Cargo.toml now contains an explicit empty [workspace], so Cargo treats the fixture as standalone regardless of whether TMPDIR is inside the Jet checkout.",
+          "at": "2026-07-15T01:48:38.167Z"
         },
         {
           "n": 2,
           "text": "The real bridge fixture compiles and runs, preserving live entropy, zeroization, retry, bounds, and fail-closed assertions; all 13 crypto_entropy tests pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-entropy-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T01:44:57.704Z"
+          "evidence": "Real offline Cargo bridge fixture compiles and runs in 7.09s. Full crypto_entropy target passes 13/13 in 7.24s, including live entropy, zeroization, interruption retry cap, bounds, concurrency, process independence, and fail-closed cases.",
+          "at": "2026-07-15T01:48:38.269Z"
         },
         {
           "n": 3,
           "text": "No product, syntax, diagnostic, dependency, unsafe, or owner decision changes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-entropy-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T01:44:57.806Z"
+          "evidence": "Diff changes only the generated test fixture manifest in tests/crypto_entropy.rs plus Tower evidence. No product, syntax, diagnostic, dependency, unsafe, or owner-gated change.",
+          "at": "2026-07-15T01:48:38.372Z"
         },
         {
           "n": 4,
@@ -36683,6 +36689,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T01:48:38.495Z",
+      "by": "codex-entropy-builder",
+      "action": "card.update",
+      "ref": "c0ikqqoo",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T01:48:38.372Z",
+      "by": "codex-entropy-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ikqqoo",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T01:48:38.270Z",
+      "by": "codex-entropy-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ikqqoo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T01:48:38.168Z",
+      "by": "codex-entropy-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ikqqoo",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T01:47:36.155Z",
       "by": "luna-608-reviewer",
       "action": "card.update",
@@ -40153,34 +40187,6 @@
       "action": "card.release",
       "ref": "c086i4qv",
       "note": ""
-    },
-    {
-      "at": "2026-07-14T22:41:01.986Z",
-      "by": "terra-foreign-root-probe",
-      "action": "card.update",
-      "ref": "c086i4qv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-14T22:40:23.950Z",
-      "by": "terra-foreign-root-probe",
-      "action": "card.criteria-meet",
-      "ref": "c086i4qv",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-14T22:40:23.853Z",
-      "by": "terra-foreign-root-probe",
-      "action": "card.criteria-meet",
-      "ref": "c086i4qv",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-14T22:40:23.754Z",
-      "by": "terra-foreign-root-probe",
-      "action": "card.criteria-meet",
-      "ref": "c086i4qv",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
