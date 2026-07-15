@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 617,
-    "rev": 7026,
+    "rev": 7027,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34855,6 +34855,73 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-15T00:03:28.318Z"
+    },
+    {
+      "id": "D-SHAPE-OUTPUT-CALLABLE1",
+      "cardId": "c04x8do3",
+      "group": "syntax",
+      "title": "How a runnable output links to its function",
+      "gist": "Choose the one checked relationship between a runnable package output and the ordinary Jet function it starts.",
+      "lesson": "A runnable output is a packaged program or service. Its output record describes the artifact. An ordinary Jet function contains the behavior that starts when someone runs it. An explicit output needs one checked way to point to that function.\n\nJet already treats `fn run` as the zero-config entry. Custom tool tasks remain governed by D-SHAPE9=C: built-in lifecycle names work by name, while custom tasks use `#Task`. This ballot does not reopen that rule. A project containing only `fn run` still needs no package wiring.\n\nThis ballot chooses only the link written on an explicit output. It does not choose how outputs are collected or which callable signature each output kind accepts. Those contracts remain separate.\n\nAn explicit link can use an ordinary function reference, require a D-SHAPE9 runnable function, or store a function name as text. The choice changes refactoring safety and whether packaging becomes coupled to tool-task discovery.",
+      "explainer": "",
+      "story": "Maya begins with `fn run`, and Greeter runs without package wiring. Later she adds an admin executable backed by `fn admin`. She needs one explicit link for that additional output without changing the original zero-config rule.",
+      "inWild": "// Zero-config case stays unchanged.\nfn run() { greet() }\n\n// Later, another ordinary function exists.\nfn admin(args: AdminArgs) { serve_admin(args) }\n\n// An explicit admin Output must point to `admin` somehow.\n// This ballot chooses that relationship; output collection stays separate.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Direct checked function reference",
+          "detail": "An explicit output writes `entry: admin`, using an ordinary function reference. The link participates in normal symbol lookup, references, and rename tooling. The untouched `fn run` project still needs no output declaration.",
+          "technical": "Package checking resolves the referenced function definition. The callable contract for each output kind remains owned by the separate output-capability decision; this option requires the resolved function to satisfy that later contract. D-SHAPE9 task discovery remains independent.",
+          "code": "fn admin(args: AdminArgs) { serve_admin(args) }\n\nadmin_app: Output :: .Executable.{\n    name: \"greeter-admin\",\n    entry: admin,\n}"
+        },
+        {
+          "key": "B",
+          "name": "Link only through runnable tasks",
+          "detail": "An explicit output may link only to a function D-SHAPE9 already classifies as runnable. A custom function therefore needs `#Task`. This reuses tool discovery, but it makes packaged entries and interactive tool tasks the same category.",
+          "technical": "The link resolves a D-SHAPE9 runnable-function identity. Built-in lifecycle names retain name-based classification; custom entries retain `#Task` classification. The separate output-capability decision still defines the callable contract.",
+          "code": "#Task fn admin(args: AdminArgs) { serve_admin(args) }\n\nadmin_app: Output :: .Executable.{\n    name: \"greeter-admin\",\n    task: admin,\n}"
+        },
+        {
+          "key": "C",
+          "name": "Qualified function name text",
+          "detail": "An explicit output stores a qualified function name as text, such as `entry: \"Admin.start\"`. Package checking resolves it later. The text is easy to serialize, but ordinary rename and reference tooling cannot protect it before package checking.",
+          "technical": "Package checking resolves the text against the package source graph, then applies the callable contract chosen separately for that output kind. Lock and receipt representation remain outside this decision.",
+          "code": "module Admin {\n    pub fn start(args: AdminArgs) { serve_admin(args) }\n}\n\nadmin_app: Output :: .Executable.{\n    name: \"greeter-admin\",\n    entry: \"Admin.start\",\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "Cargo links a binary target to a source-file path. The link is declarative text outside Rust's symbol system, which resembles option C's refactoring boundary.",
+          "code": "[[bin]]\nname = \"greeter\"\npath = \"src/main.rs\""
+        },
+        {
+          "lang": "Go",
+          "note": "Go uses a package named `main` with a function named `main`. This resembles Jet's zero-config `fn run` convention, but it does not directly solve multiple outputs.",
+          "code": "package main\nfunc main() { ... }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A preserves the untouched `fn run` project and gives every explicit output a direct, checked, refactor-safe function link. It reuses Jet's symbol graph without coupling packaging to task discovery or adding string references.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Task reuse looks uniform, but a packaged entry and an interactive tool task are different jobs. Requiring `#Task` makes normal application structure depend on tool discoverability."
+          },
+          {
+            "key": "C",
+            "reason": "Text is easy to serialize, but it abandons the language's symbol graph at the source boundary. Renames and moves can silently leave stale package declarations until a later check."
+          }
+        ],
+        "tradeoff": "Changing a linked function's visibility or signature can invalidate the package declaration immediately. That tighter source-level coupling is acceptable because it exposes breakage where the link is written."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T00:25:27.334Z"
     }
   ],
   "questions": [
@@ -35655,6 +35722,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T00:25:27.334Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-SHAPE-OUTPUT-CALLABLE1",
+      "note": "How a runnable output links to its function"
+    },
     {
       "at": "2026-07-15T00:24:48.892Z",
       "by": "codex-orchestrator",
@@ -39147,13 +39221,6 @@
       "action": "card.criteria-meet",
       "ref": "c0zoq183",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-14T20:59:32.594Z",
-      "by": "terra-unwrap-regression",
-      "action": "card.criteria-meet",
-      "ref": "c0zoq183",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
