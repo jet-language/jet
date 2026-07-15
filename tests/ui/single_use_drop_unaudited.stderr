@@ -1,7 +1,7 @@
 Error [E0143]: `t` is `#SingleUse` — discarding it with `drop` needs an audited reason
-  --> tests/ui/single_use_drop_unaudited.jet:11:10
+  --> tests/ui/single_use_drop_unaudited.jet:11:13
     |
- 11 |     drop(t)
-    |          ^
+ 11 |     consume(t)
+    |             ^
  Why: this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down
- Fix: wrap it in an audited region: `#Unsafe("why discarding this is fine") { drop(t) }`
+ Fix: wrap it in an audited region: `#Unsafe("why discarding this is fine") { consume(t) }`
