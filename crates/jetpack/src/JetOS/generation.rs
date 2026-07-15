@@ -315,7 +315,7 @@ pub(super) fn build_generation(
     if !validate_boot_payloads(theme, &boot, &realized) {
         return None;
     }
-    if let Err(e) = write_generation_files(&dir, system, &realized, plan) {
+    if let Err(e) = write_generation_files(&dir, &final_dir, system, &realized, plan) {
         theme.error(
             "could not write the jetos generation",
             &format!("writing `{}` failed: {e}.", dir.display()),
@@ -359,6 +359,7 @@ pub(super) fn build_generation(
     }
     let parent = final_dir.parent()?;
     if let Some(existing) = published_proof {
+        let _ = fs::remove_dir_all(&dir);
         if existing != root_proof {
             immutable_generation_error(
                 theme,
@@ -367,7 +368,6 @@ pub(super) fn build_generation(
             );
             return None;
         }
-        let _ = fs::remove_dir_all(&dir);
     } else if let Err(e) = fs::rename(&dir, &final_dir) {
         if !final_dir.is_dir() {
             theme.error(

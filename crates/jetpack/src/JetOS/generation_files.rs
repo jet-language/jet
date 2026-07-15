@@ -63,6 +63,7 @@ pub(super) fn generations_log() -> PathBuf {
 
 pub(super) fn write_generation_files(
     dir: &Path,
+    published_dir: &Path,
     system: &SystemPlan,
     realized: &[RealizedPackage],
     plan: &EnvPlan,
@@ -113,7 +114,7 @@ pub(super) fn write_generation_files(
     write_systemd_units(dir, system)?;
     write_systemd_timer_socket_units(dir, system)?;
     write_terminal_environment(dir, system)?;
-    write_activation_diff(dir, system, realized)?;
+    write_activation_diff(dir, published_dir, system, realized)?;
     write_health_checks(dir, system)?;
     write_hardware_facts(dir, system)?;
     write_user_environment_facts(dir, system)?;
@@ -135,9 +136,9 @@ pub(super) fn write_generation_files(
     write_compat_escape_hatches(dir, system)?;
     write_provenance(dir, system, realized)?;
     write_vm_proof(dir, system, &plan_text)?;
-    write_studio_app_projection(dir, system)?;
+    write_studio_app_projection(dir, published_dir, system)?;
     write_secret_manifest(dir, system)?;
-    write_bootable_root_projection(dir)?;
+    write_bootable_root_projection(dir, published_dir)?;
     Ok(())
 }
 
@@ -1086,7 +1087,7 @@ fn rewrite_store_symlinks(root: &Path, path: &Path, store: &Path) -> std::io::Re
     Ok(())
 }
 
-fn relative_path(from: &Path, to: &Path) -> std::io::Result<PathBuf> {
+pub(super) fn relative_path(from: &Path, to: &Path) -> std::io::Result<PathBuf> {
     let from = from.components().collect::<Vec<_>>();
     let to = to.components().collect::<Vec<_>>();
     let common = from

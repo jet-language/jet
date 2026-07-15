@@ -3,7 +3,15 @@ use crate::JSON;
 use std::fs;
 use std::path::Path;
 
-pub(super) fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_studio_app_projection(
+    dir: &Path,
+    published_dir: &Path,
+    system: &SystemPlan,
+) -> std::io::Result<()> {
+    let generation = published_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unrecorded");
     let studio_dir = dir.join("studio");
     let bin_dir = dir.join("sw/bin");
     let desktop_dir = dir.join("share/applications");
@@ -25,11 +33,17 @@ pub(super) fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> st
         ("first_boot_role", "os-control-center"),
     ]);
     fs::write(studio_dir.join("app.json"), app)?;
-    fs::write(studio_dir.join("data.json"), studio_data_json(dir, system))?;
-    fs::write(studio_dir.join("index.html"), studio_index_html(dir, system))?;
+    fs::write(
+        studio_dir.join("data.json"),
+        studio_data_json(dir, generation, system),
+    )?;
+    fs::write(
+        studio_dir.join("index.html"),
+        studio_index_html(dir, generation, system),
+    )?;
     fs::write(
         studio_dir.join("first-boot.json"),
-        studio_first_boot_json(dir, system),
+        studio_first_boot_json(dir, generation, system),
     )?;
     fs::write(studio_dir.join("first-boot.pending"), "1\n")?;
 
@@ -55,11 +69,7 @@ pub(super) fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> st
     )
 }
 
-fn studio_first_boot_json(dir: &Path, system: &SystemPlan) -> String {
-    let generation = dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+fn studio_first_boot_json(dir: &Path, generation: &str, system: &SystemPlan) -> String {
     let proof_present = dir.join("proof.txt").is_file();
     let health_present = dir.join("health").exists() || dir.join("acceptance").exists();
     format!(
@@ -92,7 +102,7 @@ const STUDIO_PAGES: &[(&str, &str, &str, &str, &str, &str, bool)] = &[
     ),
 ];
 
-fn studio_data_json(dir: &Path, system: &SystemPlan) -> String {
+fn studio_data_json(dir: &Path, generation: &str, system: &SystemPlan) -> String {
     let pages = studio_pages_json();
     let packages = system
         .packages
@@ -143,11 +153,7 @@ fn studio_data_json(dir: &Path, system: &SystemPlan) -> String {
         JSON::quote(&system.name),
         JSON::quote(&system.target),
         JSON::quote(&system.name),
-        JSON::quote(
-            dir.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("unrecorded")
-        ),
+        JSON::quote(generation),
         pages,
         packages,
         services,
@@ -188,12 +194,8 @@ pub(crate) fn studio_pages_json() -> String {
         .join(",")
 }
 
-fn studio_index_html(dir: &Path, system: &SystemPlan) -> String {
+fn studio_index_html(dir: &Path, generation: &str, system: &SystemPlan) -> String {
     let enabled_services = system.services.iter().filter(|svc| svc.enable).count();
-    let generation = dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unrecorded");
     let proof_status = if dir.join("proof.txt").is_file() {
         "proof artifact present"
     } else {

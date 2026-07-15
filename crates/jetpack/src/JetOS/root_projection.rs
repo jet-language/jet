@@ -1,8 +1,11 @@
-use super::generation_files::{copy_runtime_file_filtered, copy_runtime_symlink};
+use super::generation_files::{copy_runtime_file_filtered, copy_runtime_symlink, relative_path};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(super) fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> {
+pub(super) fn write_bootable_root_projection(
+    dir: &Path,
+    published_dir: &Path,
+) -> std::io::Result<()> {
     let root = dir.join("root");
     if root.exists() {
         fs::remove_dir_all(&root)?;
@@ -71,14 +74,18 @@ pub(super) fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> 
     }
     fs::write(
         root.join("var/lib/jetos/generations/current"),
-        format!("{}\n", dir.display()),
+        format!("{}\n", published_dir.display()),
     )
 }
 
 #[cfg(unix)]
 fn link_or_copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     let _ = fs::remove_file(dst);
-    match std::os::unix::fs::symlink(src, dst) {
+    let parent = dst
+        .parent()
+        .ok_or_else(|| std::io::Error::other("root projection link has no parent"))?;
+    let target = relative_path(parent, src)?;
+    match std::os::unix::fs::symlink(target, dst) {
         Ok(()) => Ok(()),
         Err(_) => fs::copy(src, dst).map(|_| ()),
     }

@@ -13,6 +13,7 @@ use std::path::Path;
 
 pub(super) fn write_activation_diff(
     dir: &Path,
+    published_dir: &Path,
     system: &SystemPlan,
     realized: &[RealizedPackage],
 ) -> std::io::Result<()> {
@@ -23,7 +24,7 @@ pub(super) fn write_activation_diff(
     let mut diff = String::new();
     diff.push_str(&format!("host: {}\n", system.name));
     diff.push_str(&format!("previous: {previous}\n"));
-    diff.push_str(&format!("next: {}\n", dir.display()));
+    diff.push_str(&format!("next: {}\n", published_dir.display()));
     diff.push_str(&format!("packages: {}\n", realized.len()));
     diff.push_str(&format!("services: {enabled_services}\n"));
     diff.push_str(&format!("options: {}\n", system.options.len()));
