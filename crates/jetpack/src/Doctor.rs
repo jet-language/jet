@@ -181,7 +181,7 @@ fn check_locks(project: &Path, roots: &Store::Roots) -> Check {
         let ent = match next { Ok(ent) => ent, Err(_) => { unknown.insert("directory entry unreadable".to_string()); continue; } };
         let path = ent.path(); if path.extension().and_then(|s| s.to_str()) != Some("lock") { continue; }
         match super::RuntimePolicy::lock_state(&path) {
-            Ok(super::RuntimePolicy::LockState::Held | super::RuntimePolicy::LockState::Idle) => {}
+            Ok(super::RuntimePolicy::LockState::Absent | super::RuntimePolicy::LockState::Held | super::RuntimePolicy::LockState::Idle) => {}
             Err(_) => { unknown.insert(ent.file_name().to_string_lossy().into_owned()); }
         }
     }}

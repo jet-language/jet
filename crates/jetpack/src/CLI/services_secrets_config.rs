@@ -188,7 +188,10 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         v if v == Syntax::SERVICES_VERB_DOWN => {
             for svc in &targets {
-                Services::down_one(&project_dir, svc);
+                if let Err(error) = Services::down_one(&project_dir, svc) {
+                    theme.error(&format!("couldn't stop service `{}`", svc.name), &error, "");
+                    return 2;
+                }
                 theme.ok(&format!("service `{}` is down", svc.name));
             }
             0
@@ -338,10 +341,15 @@ pub(super) fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
                         );
                         return 2;
                     };
-                    if Secrets::add_recipient(&project_dir, recipient) {
-                        theme.ok(&format!("added recipient `{recipient}`"));
-                    } else {
-                        theme.detail(&format!("recipient `{recipient}` already present"));
+                    match Secrets::add_recipient(&project_dir, recipient) {
+                        Ok(true) => theme.ok(&format!("added recipient `{recipient}`")),
+                        Ok(false) => {
+                            theme.detail(&format!("recipient `{recipient}` already present"))
+                        }
+                        Err(error) => {
+                            theme.error("couldn't add secrets recipient", &error, "");
+                            return 2;
+                        }
                     }
                     0
                 }

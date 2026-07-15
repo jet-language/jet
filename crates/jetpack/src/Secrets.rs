@@ -117,30 +117,71 @@ pub fn keygen(force: bool) -> Result<(PathBuf, String), String> {
 }
 
 /// `jetpack secrets recipients add <age1...>` — appends to
-/// [`recipients_path`] if not already present. Returns `false` if already
-/// there (idempotent, same shape as `Trust::add_pattern`).
-pub fn add_recipient(project_dir: &Path, recipient: &str) -> bool {
-    let Ok(_guard) =
+/// [`recipients_path`] if not already present. `Ok(false)` means already
+/// present; lock and filesystem failures remain errors.
+pub fn add_recipient(project_dir: &Path, recipient: &str) -> Result<bool, String> {
+    let _guard =
         super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets")
-    else {
-        return false;
-    };
+            .map_err(|e| format!("couldn't lock secrets recipients: {e}"))?;
     let path = recipients_path(project_dir);
     let recipient = recipient.trim();
-    if list_recipients(project_dir).iter().any(|r| r == recipient) {
-        return false;
-    }
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("couldn't create `{}`: {e}", parent.display()))?;
     }
-    let mut existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut existing = match std::fs::read_to_string(&path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("couldn't read `{}`: {error}", path.display())),
+    };
+    if existing
+        .lines()
+        .map(str::trim)
+        .any(|line| !line.starts_with('#') && line == recipient)
+    {
+        return Ok(false);
+    }
     if !existing.is_empty() && !existing.ends_with('\n') {
         existing.push('\n');
     }
     existing.push_str(recipient);
     existing.push('\n');
-    let _ = std::fs::write(&path, existing);
-    true
+    atomic_write(&path, existing.as_bytes())?;
+    Ok(true)
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("`{}` has no parent directory", path.display()))?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("secret");
+    let temp = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|e| format!("couldn't create `{}`: {e}", temp.display()))?;
+        file.write_all(bytes)
+            .map_err(|e| format!("couldn't write `{}`: {e}", temp.display()))?;
+        file.sync_all()
+            .map_err(|e| format!("couldn't sync `{}`: {e}", temp.display()))?;
+        std::fs::rename(&temp, path)
+            .map_err(|e| format!("couldn't finalize `{}`: {e}", path.display()))?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|e| format!("couldn't sync `{}`: {e}", parent.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 /// `jetpack secrets recipients list` — every recipient line (comments/blanks
@@ -210,12 +251,7 @@ pub fn write_store(project_dir: &Path, pairs: &[(String, String)]) -> Result<(),
     // Write via a temp file + rename so a killed process never leaves a
     // half-written store — the temp file holds ciphertext only, same as the
     // final path.
-    let tmp = path.with_extension("age.tmp");
-    std::fs::write(&tmp, &ciphertext)
-        .map_err(|e| format!("couldn't write `{}`: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
-        .map_err(|e| format!("couldn't finalize `{}`: {e}", path.display()))?;
-    Ok(())
+    atomic_write(&path, &ciphertext)
 }
 
 /// `jetpack secrets set <name> <value>` — upsert one entry and re-encrypt the
@@ -396,13 +432,43 @@ mod tests {
             std::thread::current().id()
         ));
         let _ = std::fs::create_dir_all(&dir);
-        assert!(add_recipient(&dir, "age1exampleexampleexample"));
+        assert!(add_recipient(&dir, "age1exampleexampleexample").unwrap());
         assert!(
-            !add_recipient(&dir, "age1exampleexampleexample"),
+            !add_recipient(&dir, "age1exampleexampleexample").unwrap(),
             "idempotent"
         );
         assert_eq!(list_recipients(&dir), vec!["age1exampleexampleexample"]);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn recipient_lock_failure_is_not_already_present() {
+        let dir = std::env::temp_dir().join(format!(
+            "jet_secrets_lock_failure_{}_{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(dir.join(".jet")).unwrap();
+        std::fs::write(dir.join(".jet/.locks"), "not a directory").unwrap();
+        let error = add_recipient(&dir, "age1failure")
+            .expect_err("lock failure must remain an error");
+        assert!(error.contains("couldn't lock"), "{error}");
+        assert!(!recipients_path(&dir).exists());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn recipient_write_failure_is_not_success() {
+        let dir = std::env::temp_dir().join(format!(
+            "jet_secrets_write_failure_{}_{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(recipients_path(&dir)).unwrap();
+        let error = add_recipient(&dir, "age1failure")
+            .expect_err("recipient path directory must make the write fail");
+        assert!(error.contains("couldn't read"), "{error}");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     /// Full round trip through the real age-style crypto FFI bridge: keygen,
@@ -424,7 +490,7 @@ mod tests {
         std::env::set_var("JET_KEYS_DIR", &keys_dir);
 
         let (_, recipient) = keygen(true).expect("keygen should succeed");
-        assert!(add_recipient(&dir, &recipient));
+        assert!(add_recipient(&dir, &recipient).unwrap());
 
         set(&dir, "db_password", "hunter2").expect("set should succeed");
         let got = get(&dir, "db_password").expect("get should succeed");

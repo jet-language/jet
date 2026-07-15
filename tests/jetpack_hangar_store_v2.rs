@@ -150,7 +150,11 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
-    assert!(recover.status.success());
+    assert!(
+        recover.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
     assert!(
         meta.is_file(),
         "CLI recovery must replay committed package metadata"

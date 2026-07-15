@@ -1,5 +1,5 @@
 use std::ffi::c_void;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::AsRawHandle as _;
@@ -51,10 +51,18 @@ fn overlapped() -> Overlapped {
 }
 
 pub(super) fn open(path: &Path) -> io::Result<File> {
+    open_with_create(path, true)
+}
+
+pub(super) fn open_existing(path: &Path) -> io::Result<File> {
+    open_with_create(path, false)
+}
+
+fn open_with_create(path: &Path, create: bool) -> io::Result<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
-        .create(true)
+        .create(create)
         // Denying FILE_SHARE_DELETE pins the one persistent path/inode while
         // any contender has it open. No process may split waiters by unlinking.
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
@@ -71,7 +79,23 @@ pub(super) fn open(path: &Path) -> io::Result<File> {
     {
         return Err(io::Error::last_os_error());
     }
+    validate_path(&file, path)?;
     Ok(file)
+}
+
+pub(super) fn validate_path(file: &File, path: &Path) -> io::Result<()> {
+    let path_metadata = fs::symlink_metadata(path)?;
+    let file_metadata = file.metadata()?;
+    if path_metadata.file_type().is_symlink()
+        || !path_metadata.file_type().is_file()
+        || !file_metadata.file_type().is_file()
+    {
+        return Err(io::Error::other(format!(
+            "jetpack lock path `{}` is not a regular file",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn try_lock(file: &File) -> io::Result<bool> {

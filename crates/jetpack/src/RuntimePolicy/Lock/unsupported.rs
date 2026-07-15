@@ -13,6 +13,14 @@ pub(super) fn open(_path: &Path) -> io::Result<File> {
     Err(unsupported())
 }
 
+pub(super) fn open_existing(_path: &Path) -> io::Result<File> {
+    Err(unsupported())
+}
+
+pub(super) fn validate_path(_file: &File, _path: &Path) -> io::Result<()> {
+    Err(unsupported())
+}
+
 pub(super) fn try_lock(_file: &File) -> io::Result<bool> {
     Err(unsupported())
 }

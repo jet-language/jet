@@ -237,17 +237,21 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
 
 /// Stop `plan` if a supervised pid is on record — `SIGTERM`, a short grace
 /// wait, then `SIGKILL` if it's still alive.
-pub fn down_one(project_dir: &Path, plan: &DevServicePlan) {
+pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String> {
     let _guard = super::RuntimePolicy::acquire_lock(
         &super::Store::managed_dir(project_dir),
         "services-state",
     )
-    .ok();
+    .map_err(|e| format!("couldn't lock service state: {e}"))?;
     let dir = service_dir(project_dir, &plan.name);
-    let Some(pid) = read_pid(&dir) else { return };
+    let Some(pid) = read_pid(&dir) else { return Ok(()) };
     if !is_alive(pid) {
-        let _ = fs::remove_file(pid_path(&dir));
-        return;
+        match fs::remove_file(pid_path(&dir)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("couldn't remove stale service state: {error}")),
+        }
+        return Ok(());
     }
     if let Some(shutdown) = &plan.shutdown {
         let _ = super::Platform::shell_command(shutdown).status();
@@ -281,7 +285,11 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) {
             .args(["-KILL", "--", &format!("-{pid}")])
             .status();
     }
-    let _ = fs::remove_file(pid_path(&dir));
+    match fs::remove_file(pid_path(&dir)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("couldn't remove service state: {error}")),
+    }
 }
 
 /// A `services: health` result for one service.
@@ -375,7 +383,7 @@ pub fn measure_readiness(
     trials: usize,
 ) -> Result<Vec<u64>, String> {
     // Bring any leftover instance down before the first trial.
-    down_one(project_dir, plan);
+    down_one(project_dir, plan)?;
     let timeout = Duration::from_secs(10);
     let mut samples = Vec::with_capacity(trials);
     for trial in 0..trials {
@@ -383,14 +391,14 @@ pub fn measure_readiness(
         up_one(project_dir, env, plan)
             .map_err(|e| format!("ServiceProbe trial {trial}: failed to start: {e}"))?;
         if !wait_healthy(project_dir, plan, timeout) {
-            down_one(project_dir, plan);
+            down_one(project_dir, plan)?;
             return Err(format!(
                 "ServiceProbe trial {trial}: service did not become ready within {}s",
                 timeout.as_secs()
             ));
         }
         samples.push(t0.elapsed().as_nanos() as u64);
-        down_one(project_dir, plan);
+        down_one(project_dir, plan)?;
     }
     Ok(samples)
 }
@@ -462,7 +470,7 @@ mod tests {
         up_one(&dir, &env(), &p).unwrap();
         let pid = read_pid(&service_dir(&dir, "fixture")).unwrap();
         assert!(is_alive(pid), "fixture daemon should be running after up");
-        down_one(&dir, &p);
+        down_one(&dir, &p).unwrap();
         assert!(!is_alive(pid), "fixture daemon should be gone after down");
         fs::remove_dir_all(&dir).ok();
     }
@@ -476,7 +484,7 @@ mod tests {
         up_one(&dir, &env(), &p).unwrap();
         let pid2 = read_pid(&service_dir(&dir, "fixture")).unwrap();
         assert_eq!(pid1, pid2, "a second `up` must not spawn a duplicate");
-        down_one(&dir, &p);
+        down_one(&dir, &p).unwrap();
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -501,7 +509,7 @@ mod tests {
         let p = plan("fixture", "sleep 30");
         up_one(&dir, &env(), &p).unwrap();
         assert!(matches!(health_one(&dir, &p), Health::Healthy));
-        down_one(&dir, &p);
+        down_one(&dir, &p).unwrap();
 
         let mut unreachable = plan("fixture2", "sleep 30");
         unreachable.ports = vec![1]; // reserved port, never accepts
@@ -510,7 +518,33 @@ mod tests {
             !wait_healthy(&dir, &unreachable, Duration::from_millis(500)),
             "a port that never accepts must time out, not hang"
         );
-        down_one(&dir, &unreachable);
+        down_one(&dir, &unreachable).unwrap();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn down_fails_closed_when_service_lock_cannot_open() {
+        let dir = scratch("down-lock-failure");
+        let p = plan("fixture", "sleep 30");
+        up_one(&dir, &env(), &p).unwrap();
+        let state_dir = service_dir(&dir, "fixture");
+        let state_path = pid_path(&state_dir);
+        let pid = read_pid(&state_dir).unwrap();
+        let managed = super::super::Store::managed_dir(&dir);
+        let locks = managed.join(".locks");
+        let displaced = managed.join("locks-displaced");
+        fs::rename(&locks, &displaced).unwrap();
+        fs::write(&locks, "not a directory").unwrap();
+
+        let error = down_one(&dir, &p).expect_err("lock failure must stop down");
+        assert!(error.contains("couldn't lock"), "{error}");
+        assert_eq!(read_pid(&state_dir), Some(pid));
+        assert!(state_path.exists());
+        assert!(is_alive(pid), "service must not be signaled without the lock");
+
+        fs::remove_file(&locks).unwrap();
+        fs::rename(displaced, locks).unwrap();
+        down_one(&dir, &p).unwrap();
         fs::remove_dir_all(&dir).ok();
     }
 

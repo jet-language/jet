@@ -35,6 +35,17 @@ use std::os::fd::AsRawFd as _;
     target_os = "netbsd"
 ))]
 use std::os::unix::fs::MetadataExt as _;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+use std::os::unix::fs::OpenOptionsExt as _;
 
 #[cfg(any(
     target_os = "linux",
@@ -55,6 +66,17 @@ mod supported {
     const LOCK_EX: i32 = 2;
     const LOCK_NB: i32 = 4;
     const LOCK_UN: i32 = 8;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))]
+    const O_NOFOLLOW: i32 = 0x00000100;
 
     unsafe extern "C" {
         fn fcntl(fd: i32, command: i32, ...) -> i32;
@@ -62,30 +84,79 @@ mod supported {
     }
 
     pub(super) fn open(path: &Path) -> io::Result<File> {
-        if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("jetpack lock path `{}` is a symlink", path.display()),
-            ));
+        let file = open_file(path, true)?;
+        validate_direct(&file, path)?;
+        let anchor = anchor_path(path);
+        match fs::hard_link(path, &anchor) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
         }
+        validate_path(&file, path)?;
+        Ok(file)
+    }
+
+    pub(super) fn open_existing(path: &Path) -> io::Result<File> {
+        let file = open_file(path, false)?;
+        validate_direct(&file, path)?;
+        if anchor_path(path).exists() {
+            validate_path(&file, path)?;
+        }
+        Ok(file)
+    }
+
+    fn open_file(path: &Path, create: bool) -> io::Result<File> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
-            .create(true)
+            .create(create)
+            // One atomic kernel operation: a symlink can never be followed
+            // between a user-space preflight and open.
+            .custom_flags(O_NOFOLLOW)
             .open(path)?;
         set_close_on_exec(&file)?;
+        Ok(file)
+    }
 
-        // A path swap between preflight and open must fail closed. Holding the
-        // returned descriptor then pins this inode until unlock/close.
-        let path_metadata = fs::metadata(path)?;
+    fn anchor_path(path: &Path) -> std::path::PathBuf {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(".anchor");
+        std::path::PathBuf::from(name)
+    }
+
+    fn validate_direct(file: &File, path: &Path) -> io::Result<()> {
+        let path_metadata = fs::symlink_metadata(path)?;
         let file_metadata = file.metadata()?;
-        if path_metadata.dev() != file_metadata.dev() || path_metadata.ino() != file_metadata.ino() {
+        if !path_metadata.file_type().is_file()
+            || !file_metadata.file_type().is_file()
+            || path_metadata.dev() != file_metadata.dev()
+            || path_metadata.ino() != file_metadata.ino()
+        {
             return Err(io::Error::other(format!(
-                "jetpack lock path `{}` changed while opening",
+                "jetpack lock path `{}` is not the opened regular file",
                 path.display()
             )));
         }
-        Ok(file)
+        Ok(())
+    }
+
+    pub(super) fn validate_path(file: &File, path: &Path) -> io::Result<()> {
+        validate_direct(file, path)?;
+        let anchor = anchor_path(path);
+        let anchor_metadata = fs::symlink_metadata(&anchor)?;
+        let file_metadata = file.metadata()?;
+        if !anchor_metadata.file_type().is_file()
+            || anchor_metadata.dev() != file_metadata.dev()
+            || anchor_metadata.ino() != file_metadata.ino()
+            || anchor_metadata.nlink() != 2
+            || file_metadata.nlink() != 2
+        {
+            return Err(io::Error::other(format!(
+                "jetpack lock path `{}` was linked or replaced",
+                path.display()
+            )));
+        }
+        Ok(())
     }
 
     fn set_close_on_exec(file: &File) -> io::Result<()> {
@@ -152,6 +223,34 @@ pub(super) fn open(path: &Path) -> io::Result<File> {
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
+pub(super) fn open_existing(path: &Path) -> io::Result<File> {
+    supported::open_existing(path)
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub(super) fn validate_path(file: &File, path: &Path) -> io::Result<()> {
+    supported::validate_path(file, path)
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
 pub(super) fn try_lock(file: &File) -> io::Result<bool> {
     supported::try_lock(file)
 }
@@ -198,6 +297,34 @@ fn unsupported() -> io::Error {
     target_os = "netbsd"
 )))]
 pub(super) fn open(_path: &Path) -> io::Result<File> {
+    Err(unsupported())
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
+pub(super) fn open_existing(_path: &Path) -> io::Result<File> {
+    Err(unsupported())
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
+pub(super) fn validate_path(_file: &File, _path: &Path) -> io::Result<()> {
     Err(unsupported())
 }
 

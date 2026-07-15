@@ -85,14 +85,31 @@ fn acquire_lock_with_timing(
     wait: Duration,
     poll: Duration,
 ) -> io::Result<FileLock> {
+    acquire_lock_with_timing_and_hook(root, scope, wait, poll, |_| Ok(()))
+}
+
+fn acquire_lock_with_timing_and_hook(
+    root: &Path,
+    scope: &str,
+    wait: Duration,
+    poll: Duration,
+    before_open: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<FileLock> {
     let dir = root.join(LOCK_DIR);
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.lock", sanitize_scope(scope)));
+    before_open(&path)?;
     let file = lock_platform::open(&path)?;
     let deadline = Instant::now() + wait;
     loop {
         match lock_platform::try_lock(&file) {
-            Ok(true) => return Ok(FileLock { file }),
+            Ok(true) => {
+                if let Err(error) = lock_platform::validate_path(&file, &path) {
+                    let _ = lock_platform::unlock(&file);
+                    return Err(error);
+                }
+                return Ok(FileLock { file });
+            }
             Ok(false) if Instant::now() < deadline => {
                 std::thread::sleep(poll.min(deadline.saturating_duration_since(Instant::now())));
             }
@@ -109,6 +126,7 @@ fn acquire_lock_with_timing(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LockState {
+    Absent,
     Held,
     Idle,
 }
@@ -116,7 +134,18 @@ pub(crate) enum LockState {
 /// Probe one persistent lock inode using kernel state. File contents, PID
 /// reuse, timestamps, and path existence are never liveness evidence.
 pub(crate) fn lock_state(path: &Path) -> io::Result<LockState> {
-    let file = lock_platform::open(path)?;
+    let file = match lock_platform::open_existing(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(LockState::Absent),
+        Err(error) => return Err(error),
+    };
+    if let Err(error) = lock_platform::validate_path(&file, path) {
+        return if error.kind() == ErrorKind::NotFound {
+            Ok(LockState::Absent)
+        } else {
+            Err(error)
+        };
+    }
     if lock_platform::try_lock(&file)? {
         lock_platform::unlock(&file)?;
         Ok(LockState::Idle)
@@ -472,6 +501,67 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn swap_before_open_is_rejected_atomically() {
+        let root = scratch("swap-before-open");
+        let target = root.join("attacker-target");
+        fs::write(&target, "not a lock").unwrap();
+        let error = acquire_lock_with_timing_and_hook(
+            &root,
+            "hangar",
+            Duration::from_millis(50),
+            Duration::from_millis(5),
+            |path| std::os::unix::fs::symlink(&target, path),
+        )
+        .err()
+        .expect("O_NOFOLLOW must reject a last-moment symlink swap");
+        assert_ne!(error.kind(), ErrorKind::TimedOut);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_makes_waiter_and_new_opener_fail_closed() {
+        let root = scratch("replace-fail-closed");
+        let first = acquire_lock(&root, "hangar").unwrap();
+        let path = root.join(LOCK_DIR).join("hangar.lock");
+        let displaced = root.join(LOCK_DIR).join("displaced");
+        let waiter_file = lock_platform::open(&path).unwrap();
+
+        fs::rename(&path, &displaced).unwrap();
+        fs::write(&path, "replacement").unwrap();
+        assert!(
+            acquire_lock_with_timing(
+                &root,
+                "hangar",
+                Duration::from_millis(50),
+                Duration::from_millis(5),
+            )
+            .is_err(),
+            "fresh opener must reject an inode different from the anchor"
+        );
+
+        drop(first);
+        assert!(lock_platform::try_lock(&waiter_file).unwrap());
+        assert!(lock_platform::validate_path(&waiter_file, &path).is_err());
+        lock_platform::unlock(&waiter_file).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unexpected_hard_link_is_rejected() {
+        let root = scratch("hard-link-fail-closed");
+        let first = acquire_lock(&root, "hangar").unwrap();
+        let path = root.join(LOCK_DIR).join("hangar.lock");
+        fs::hard_link(&path, root.join("extra-link")).unwrap();
+        assert!(lock_platform::validate_path(&first.file, &path).is_err());
+        drop(first);
+        assert!(acquire_lock(&root, "hangar").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn stale_pid_text_and_file_age_are_not_liveness() {
         let root = scratch("stale-text");
@@ -490,6 +580,16 @@ mod tests {
         drop(guard);
         assert_eq!(lock_state(&path).unwrap(), LockState::Idle);
         assert!(path.exists(), "persistent lock inode must never be unlinked");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn absent_lock_probe_is_read_only() {
+        let root = scratch("absent-probe");
+        let path = root.join(LOCK_DIR).join("missing.lock");
+        assert_eq!(lock_state(&path).unwrap(), LockState::Absent);
+        assert!(!path.exists());
+        assert!(!root.join(LOCK_DIR).exists());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -562,7 +662,15 @@ mod tests {
         assert!(!source.contains("const FILE_SHARE_DELETE"));
 
         let unix = include_str!("RuntimePolicy/Lock/unix.rs");
-        for required in ["F_GETFD", "F_SETFD", "FD_CLOEXEC", "LOCK_EX | LOCK_NB"] {
+        for required in [
+            "F_GETFD",
+            "F_SETFD",
+            "FD_CLOEXEC",
+            "LOCK_EX | LOCK_NB",
+            "O_NOFOLLOW",
+            "symlink_metadata",
+            "nlink() != 2",
+        ] {
             assert!(unix.contains(required), "missing Unix lock law: {required}");
         }
     }

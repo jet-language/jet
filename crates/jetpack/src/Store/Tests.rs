@@ -123,17 +123,28 @@ mod tests {
     #[test]
     fn record_and_list_roundtrip() {
         let (roots, _g) = temp_roots();
-        let e = record(
+        let out = roots.root.join("fastfetch-output");
+        fs::create_dir_all(out.join("bin")).unwrap();
+        fs::write(out.join("bin/fastfetch"), "fixture").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "nixpkgs:fastfetch",
+            "nix",
+        );
+        let mut e = record_verified(
             &roots,
             "fastfetch",
             "2.1.0",
             "nixpkgs:fastfetch",
-            "/nix/store/x",
-            "/nix/store/x/bin",
+            &out.to_string_lossy(),
+            &out.join("bin").to_string_lossy(),
             "",
-            &super::super::super::Envelope::Envelope::default(),
+            &envelope,
+            &test_identity(),
         )
         .unwrap();
+        e.named_outputs
+            .insert("out".to_string(), envelope.output_hash.clone());
         // Name-and-version first, fingerprint last (D-PM1).
         assert!(e.id.starts_with("fastfetch-2.1.0-"));
         let listed = list(&roots);
@@ -144,28 +155,29 @@ mod tests {
     #[test]
     fn clean_keeps_fresh_entries() {
         let (roots, _g) = temp_roots();
-        record(
-            &roots,
-            "a",
-            "1.0",
-            "nixpkgs:a",
-            "/nix/store/a",
-            "/nix/store/a/bin",
-            "",
-            &super::super::super::Envelope::Envelope::default(),
-        )
-        .unwrap();
-        record(
-            &roots,
-            "b",
-            "1.0",
-            "nixpkgs:b",
-            "/nix/store/b",
-            "/nix/store/b/bin",
-            "",
-            &super::super::super::Envelope::Envelope::default(),
-        )
-        .unwrap();
+        for name in ["a", "b"] {
+            let reference = format!("nixpkgs:{name}");
+            let out = roots.root.join(format!("{name}-output"));
+            fs::create_dir_all(out.join("bin")).unwrap();
+            fs::write(out.join("bin").join(name), name).unwrap();
+            let envelope = super::super::super::Envelope::Envelope::for_output(
+                &out.to_string_lossy(),
+                &reference,
+                "nix",
+            );
+            record_verified(
+                &roots,
+                name,
+                "1.0",
+                &reference,
+                &out.to_string_lossy(),
+                &out.join("bin").to_string_lossy(),
+                "",
+                &envelope,
+                &test_identity(),
+            )
+            .unwrap();
+        }
         let report = clean(&roots).unwrap();
         assert_eq!(report.removed_objects, 0);
         assert_eq!(list(&roots).len(), 2);
