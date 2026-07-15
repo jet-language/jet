@@ -1,12 +1,12 @@
 //! Pure authority seam for Jetpack's native Nix evaluator.
 //!
-//! `no_std`, no dependencies, and forbidden unsafe code make process execution,
-//! native linking, and dynamic loading unavailable inside evaluator stages.
+//! The dependency-free `no_std` baseline is reinforced by mandatory
+//! resolved-symbol lints against process and network authority. Forbidden
+//! unsafe code prevents native FFI and dynamic loading.
 
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(warnings)]
-#![deny(clippy::disallowed_macros)]
 #![deny(clippy::disallowed_methods)]
 #![deny(clippy::disallowed_types)]
 #![deny(clippy::std_instead_of_alloc)]

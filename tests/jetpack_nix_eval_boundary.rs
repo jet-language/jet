@@ -15,6 +15,8 @@ fn evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden() {
         dependencies.is_empty(),
         "native evaluator seam must remain dependency-free, got:\n{dependencies}"
     );
+    assert!(manifest.lines().any(|line| line.trim() == "build = false"));
+    assert!(!root.join("crates/jet-nix-eval/build.rs").exists());
 
     let seam = fs::read_to_string(root.join("crates/jet-nix-eval/src/lib.rs"))
         .expect("native evaluator seam root");
@@ -33,6 +35,14 @@ fn evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden() {
     .expect("native evaluator authority escape fixture");
     assert!(escape.contains("extern crate std as host;"));
     assert!(escape.contains("host::process::Command::new"));
+    assert!(escape.contains("host::net::TcpStream as Wire"));
+    assert!(escape.contains("host::net::ToSocketAddrs as Resolve"));
+    assert!(escape.contains("host::os::unix::net::UnixStream as Wire"));
+    let build_escape = fs::read_to_string(
+        root.join("tests/fixtures/nix-compat/build-script-escape/build.rs"),
+    )
+    .expect("native evaluator build-script escape fixture");
+    assert!(build_escape.contains("std::process::Command::new"));
 
     let jetpack_manifest = fs::read_to_string(root.join("crates/jetpack/Cargo.toml"))
         .expect("jetpack manifest");

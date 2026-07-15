@@ -342,12 +342,15 @@ live acceptance, and documentation. Work order is binding.
   identities and remains fail-closed until every supported system records both
   required NAR hashes. Partial-stage permits can be minted only by unit tests.
   Evaluator code lives in a dependency-free `no_std` crate where the compiler
-  forbids unsafe code. Full verification also applies resolved-symbol Clippy
-  denials for host process, filesystem, network, environment, I/O, thread, and
-  time authority; an alias-based `extern crate std` escape must fail that lane.
-  Native linking and dynamic loading require forbidden unsafe code or a denied
-  dependency. Jetpack's integration remains private, exposes no evaluation
-  entry point, and partial-stage permits are minted inside seam tests only.
+  forbids unsafe code and Cargo disables build scripts. Full verification also
+  applies resolved-symbol Clippy denials for host processes, TCP/UDP, Unix and
+  Windows local sockets, and DNS; alias-based `extern crate std` escapes must
+  fail that lane. Native linking and dynamic loading require forbidden unsafe
+  code or a denied dependency. Filesystem and time authority are not claimed
+  absent: later evaluator slices must introduce them through explicit
+  capability stages. Jetpack's integration remains private, exposes no
+  evaluation entry point, and partial-stage permits are minted inside seam
+  tests only.
 - Lazy thunks, attrsets, functions, string contexts, path values, import,
   derivation primitive, required builtins, flake inputs/locks/registries.
 - Pure/restricted default, explicit URI/path authority, dirty-tree identity,

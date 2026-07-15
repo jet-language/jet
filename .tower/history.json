@@ -43320,81 +43320,6 @@
       "retiredAt": "2026-07-13T00:06:39.726Z"
     },
     {
-      "id": "c0av6fpb",
-      "num": 483,
-      "title": "interrupt panic boundary erases scheduler E3003 diagnostic",
-      "body": "#292 panic isolation reused JET_IN_SCHEDULER_TASK as the interrupt-handler unwind boundary. Runtime diagnostic helpers now unwind inside ordinary scheduler tasks, so concurrency/deadline_context no longer emits its exact E3003 What/Why/Fix diagnostic; the scheduler catches it and prints generic panic: a task panicked. Separate interrupt-handler unwind state from scheduler-task state. Preserve exact scheduler deadline diagnostics and process-fatal behavior outside interrupt handlers while still letting an interrupt handler panic without killing later handlers.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": "Add failing exact golden/targeted proof first. Introduce a distinct RAII interrupt-handler panic boundary visible to central runtime fatal helpers; do not use scheduler-task TLS as its proxy. Central helpers unwind for interrupt boundary where later handlers must continue, but preserve existing scheduler deadline E3003 and ordinary process-fatal laws. Re-run #292 panic-first/later-handler, scheduler fatal-boundary, deadline_context exact golden, stripping/source ratchets, full suite.",
-      "blockedBy": [],
-      "assignee": "terra-483-builder",
-      "log": [
-        {
-          "at": "2026-07-10",
-          "by": "codex-main",
-          "text": "Closed after independent focused review and final uninterrupted nix develop -c scripts/agent/verify-full.sh exit 0. Preexisting root .jet/lock was isolated for the run and restored; Tower lint remains clean."
-        },
-        {
-          "at": "2026-07-10",
-          "by": "codex-main",
-          "text": "Parent full suite now passes restored deadline golden and proceeds through later targets. Remaining failure is unrelated flaky JetOS Studio test arbitrary proof-generation selection, tracked #484. #483 focused criteria remain green; global criterion waits #484."
-        },
-        {
-          "at": "2026-07-10",
-          "by": "codex-main",
-          "text": "Commit 8ef88c6a independently reviewed with no findings. Criteria 1-2 verified; focused core_os 5/5, scheduler 8/8, exact deadline golden and stripping green. Awaiting parent full-suite criterion 3."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "deadline_context emits exact E3003 What/Why/Fix golden under scheduler task execution.",
-          "status": "verified",
-          "metBy": "terra-483-builder",
-          "verifiedBy": "sol-483-review",
-          "evidence": "Independent Sol reran exact golden and confirmed distinct scheduler-vs-interrupt predicate behavior.",
-          "at": "2026-07-10T22:08:37.089Z"
-        },
-        {
-          "n": 2,
-          "text": "Interrupt handler Jet/runtime panic unwinds only that handler and later handlers still run; scheduler-task and outside-boundary fatal laws remain unchanged.",
-          "status": "verified",
-          "metBy": "terra-483-builder",
-          "verifiedBy": "sol-483-review",
-          "evidence": "Independent audit found no boundary leakage; nested depth, Drop cleanup, central predicates, and process-fatal defaults correct.",
-          "at": "2026-07-10T22:08:37.402Z"
-        },
-        {
-          "n": 3,
-          "text": "Focused core_os, scheduler, deadline golden, stripping, and full-suite gates pass.",
-          "status": "verified",
-          "metBy": "terra-483-builder",
-          "verifiedBy": "sol-483-review",
-          "evidence": "Independent focused no-findings review plus final parent full-suite exit 0.",
-          "at": "2026-07-10T23:08:03.586Z"
-        }
-      ],
-      "refs": [
-        "crates/jet-codegen/src/Prelude/Core.rs",
-        "crates/jet-codegen/src/Prelude/CoreLib/Top/FsIoEnvOsTesting.rs",
-        "crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs",
-        "crates/jet-codegen/src/Prelude/Scheduler.rs",
-        "tests/corelib.rs",
-        "tests/golden.rs"
-      ],
-      "needsAcceptance": false,
-      "created": "2026-07-10T22:02:17.897Z",
-      "updated": "2026-07-10",
-      "claimedAt": "2026-07-10T22:02:27.606Z",
-      "questions": [],
-      "retiredAt": "2026-07-13T00:06:39.726Z"
-    },
-    {
       "id": "c0fprfjw",
       "num": 484,
       "title": "JetOS Studio test chooses arbitrary proof generation",
@@ -92064,6 +91989,27 @@
       "action": "card.criteria-meet",
       "ref": "c0nec3bh",
       "note": "#4"
+    },
+    {
+      "at": "2026-07-15T00:55:47.498Z",
+      "by": "terra-586-builder",
+      "action": "card.update",
+      "ref": "c0nec3bh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T01:02:41.445Z",
+      "by": "luna-586-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0nec3bh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T01:02:41.545Z",
+      "by": "luna-586-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0nec3bh",
+      "note": "#2"
     }
   ]
 }
