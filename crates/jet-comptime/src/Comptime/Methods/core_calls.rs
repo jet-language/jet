@@ -1048,20 +1048,11 @@ pub(super) fn apply_core_call(
             }
         }
         ("core.encoding.json", "decode") => {
-            // D-JSON3: lenient decode — same tree as `.parse()`, but a `Text`
-            // leaf that looks like a number or a boolean coerces to that type
-            // (a wire value from a source that only has strings, e.g. a form
-            // post or a CSV cell, still lands as the type the rest of the tree
-            // expects). The coercion log line D-JSON3 also specifies is
-            // stderr-only and not part of any golden comparison, so it's not
-            // reproduced here.
-            let text = as_string(one(0)?, span)?;
-            match super::super::JsonInterp::parse_json(text) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(super::super::JsonInterp::coerce_json(v)))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(
-                    super::super::JsonInterp::json_error_value(e),
-                ))),
-            }
+            // D-JSON3's lenient coercions emit structured audit records. The
+            // comptime interpreter has no runtime log-effect seam, so claiming
+            // this call would silently drop observable behavior. Stop at the
+            // honest boundary; default dev transparently executes the AOT TIR.
+            Err(unsupported("JSON lenient decode coercion audit effects", span))
         }
         ("core.encoding.json", "to_string") => {
             let v = one(0)?;

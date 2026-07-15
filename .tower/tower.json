@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 622,
-    "rev": 7226,
+    "rev": 7230,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18024,40 +18024,46 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Reproduce exact parity first; trace core.encoding.json decode_lenient/coercion lowering and interpreter support. Route through shared executable TIR or an honest AOT fallback so structured audit effects match byte-semantically after timestamp normalization. Run exact parity/dev target, independent review, then resume full gate.",
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "codex-orchestrator",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "codex-json-builder",
+          "text": "Regression-first repair complete. New narrow test failed on the old interpreter silently running without audit stderr, then passed after the comptime core-call became an honest E2201 boundary. Removed the obsolete coercion walker. Exact regression passes in 7.34s; full dev passes 65/65 in 227.18s. Criteria 1-3 met; parent full gate remains."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Interpreter/default-dev and AOT produce identical normalized stdout, structured coercion audit stderr, and exit code for serde/json_coerce; no observable coercion event is dropped or duplicated.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-json-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T02:23:30.873Z"
+          "evidence": "Narrow regression proves interpreter mode returns E2201 instead of dropping audit effects, while default dev transparently AOT-runs and exactly matches separately compiled AOT after timestamp-only normalization: stdout 8081/api/true, exit 0, and exactly two stderr records.",
+          "at": "2026-07-15T02:35:21.492Z"
         },
         {
           "n": 2,
           "text": "JSON lenient coercion execution follows shared executable TIR or an explicit honest fallback; sema owns validity and codegen remains dumb.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-json-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T02:23:30.977Z"
+          "evidence": "The comptime core-call capability seam now rejects effectful untyped JSON lenient decode because the interpreter has no runtime log-effect semantics. Default dev uses its existing explicit AOT fallback and shared sema-checked executable TIR; codegen is unchanged and no logs are synthesized or dropped.",
+          "at": "2026-07-15T02:35:21.589Z"
         },
         {
           "n": 3,
           "text": "A regression proves boolean and numeric coercion records, exact field names/order, and timestamp-only normalization; full dev target passes without syntax, diagnostic, dependency, unsafe, or owner decision changes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-json-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T02:23:31.080Z"
+          "evidence": "Regression pins enabled string-to-boolean then port string-to-number records, exact level/body/ts field order, stdout, exit code, and only normalizes numeric ts values. Full dev target passes 65/65 in 227.18s; interpreter battery reports 0 divergences and default battery reports 0 divergences. No syntax, diagnostic, dependency, unsafe, or owner choice changed.",
+          "at": "2026-07-15T02:35:21.684Z"
         },
         {
           "n": 4,
@@ -36936,6 +36942,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T02:35:21.798Z",
+      "by": "codex-json-builder",
+      "action": "card.update",
+      "ref": "c02ahrf4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T02:35:21.684Z",
+      "by": "codex-json-builder",
+      "action": "card.criteria-meet",
+      "ref": "c02ahrf4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T02:35:21.590Z",
+      "by": "codex-json-builder",
+      "action": "card.criteria-meet",
+      "ref": "c02ahrf4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T02:35:21.492Z",
+      "by": "codex-json-builder",
+      "action": "card.criteria-meet",
+      "ref": "c02ahrf4",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T02:23:31.287Z",
       "by": "codex-orchestrator",
       "action": "card.claim",
@@ -40406,34 +40440,6 @@
       "action": "card.add",
       "ref": "c0kxss7s",
       "note": "Choose JetOS graph and activation lifecycle"
-    },
-    {
-      "at": "2026-07-14T23:00:05.051Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-ECO-RECEIPT2",
-      "note": "What is locked, explained, and updated?"
-    },
-    {
-      "at": "2026-07-14T23:00:04.955Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0hsphd7",
-      "note": "Choose semantic receipts and selective updates"
-    },
-    {
-      "at": "2026-07-14T23:00:04.857Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-ECO-RESOLVE2",
-      "note": "How are inputs resolved and shared?"
-    },
-    {
-      "at": "2026-07-14T23:00:04.764Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0enf8e9",
-      "note": "Choose dependency identity and sharing"
     }
   ],
   "nextNum": 368,

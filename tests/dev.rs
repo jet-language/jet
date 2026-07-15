@@ -1212,6 +1212,52 @@ fn dev_default_runs_env_program_via_aot_fallback() {
     assert_eq!(got, expected);
 }
 
+#[test]
+fn json_coerce_audit_uses_transparent_aot_fallback() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_json_coerce_fallback_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let stem = "serde/json_coerce";
+    let file = example_path(stem);
+
+    match dev_iteration_with_timeout(stem, &file, true) {
+        RunOutcome::Problems(diags) => assert!(
+            diags.iter().any(|d| d.code == "E2201"),
+            "interpreter must name the coercion-audit boundary: {diags:?}"
+        ),
+        RunOutcome::Ran { .. } => {
+            panic!("interpreter dropped the coercion audit effect instead of deferring to native")
+        }
+    }
+
+    let expected = normalize_for_parity(
+        stem,
+        compiled_binary_output(&dir, "json_coerce_fallback", 0, stem, &file),
+    );
+    let got = match dev_iteration_with_timeout(stem, &file, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => normalize_for_parity(stem, ProgramOutput::ran(stdout, stderr, exit_code)),
+        RunOutcome::Problems(diags) => {
+            panic!("default dev should AOT-fallback-run JSON coercion: {diags:?}")
+        }
+    };
+    assert_eq!(got, expected);
+    assert_eq!(got.stdout, "8081\napi\ntrue\n");
+    assert_eq!(got.exit_code, 0);
+    assert_eq!(
+        got.stderr.lines().collect::<Vec<_>>(),
+        [
+            r#"{"level":"info","body":"json coerce: field "enabled" string → boolean","ts":<ts>}"#,
+            r#"{"level":"info","body":"json coerce: field "port" string → number","ts":<ts>}"#,
+        ]
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn dev_default_aot_fallback_matches_socket_echo() {

@@ -284,50 +284,6 @@ pub(super) fn parse_json(text: &str) -> Result<CtValue, JsonError> {
     Ok(v)
 }
 
-/// D-JSON3: lenient-decode coercion — walk a parsed `Json`-tagged tree and
-/// promote a `Text` leaf that reads as a number or a boolean to that type.
-/// Applied only by `core.encoding.json.decode` (untyped); `.parse()` stays
-/// literal.
-pub(super) fn coerce_json(v: CtValue) -> CtValue {
-    let CtValue::Enum {
-        type_name,
-        variant,
-        args,
-    } = v
-    else {
-        return v;
-    };
-    if type_name != "Json" {
-        return CtValue::Enum {
-            type_name,
-            variant,
-            args,
-        };
-    }
-    match (variant.as_str(), args.into_iter().next()) {
-        ("Text", Some((_, CtValue::Str(s)))) => {
-            if let Ok(n) = s.parse::<i64>() {
-                json_variant("Int", Some(CtValue::Int(n)))
-            } else if s == "true" || s == "false" {
-                json_variant("Bool", Some(CtValue::Bool(s == "true")))
-            } else {
-                json_variant("Text", Some(CtValue::Str(s)))
-            }
-        }
-        ("Array", Some((_, CtValue::List(xs)))) => json_variant(
-            "Array",
-            Some(CtValue::List(xs.into_iter().map(coerce_json).collect())),
-        ),
-        ("Object", Some((_, CtValue::Map(m)))) => json_variant(
-            "Object",
-            Some(CtValue::Map(
-                m.into_iter().map(|(k, v)| (k, coerce_json(v))).collect(),
-            )),
-        ),
-        (variant, payload) => json_variant(variant, payload.map(|(_, v)| v)),
-    }
-}
-
 pub(super) fn json_error_value(e: JsonError) -> CtValue {
     CtValue::Struct {
         type_name: "JsonError".to_string(),
