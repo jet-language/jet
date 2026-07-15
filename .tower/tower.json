@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 637,
-    "rev": 7583,
+    "rev": 7587,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19486,26 +19486,32 @@
       "priority": "P0",
       "plan": "Trace the exact unsupported handoff, write or tighten the failing proof, repair frontend/TIR coverage rather than masking it, run the exact test and full jet-codegen target, independent review, then parent full gate.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "map-coverage-builder",
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "map-coverage-builder",
+          "text": "Scoped fix committed as 5a7e592d. Exact canonical-map and retired-spelling handoff proofs pass. Full jet-codegen reached 147 passed/1 ignored, then unrelated concurrent core_prelude_stays_split_by_runtime_ownership source-shape failure; criterion 3 remains open pending integrated-tree repair."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "The exact covers_map_builtin_methods unit passes because every map builtin in its valid fixture reaches complete TIR coverage, with no assertion weakening or fixture deletion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "map-coverage-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T13:16:45.308Z"
+          "evidence": "Commit 5a7e592d replaces retired map spellings with full-sema-valid add/has_key fixture; exact covers_map_builtin_methods passes without weakening the coverage assertion.",
+          "at": "2026-07-15T13:26:23.557Z"
         },
         {
           "n": 2,
           "text": "The repaired path preserves map semantics and rejects unsupported shapes through frontend-owned diagnostics or handoff assertions; no rustc-as-checker fallback.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "map-coverage-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T13:16:45.405Z"
+          "evidence": "Commit 5a7e592d preserves canonical Map semantics and adds rejects_unsupported_map_builtin_handoff, proving retired contains_key returns to the AST path instead of guessed Rust lowering; exact test passes.",
+          "at": "2026-07-15T13:26:23.656Z"
         },
         {
           "n": 3,
@@ -19532,7 +19538,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T13:16:37.333Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T13:21:17.845Z"
     }
   ],
   "decisions": [
@@ -38847,6 +38854,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T13:26:23.782Z",
+      "by": "map-coverage-builder",
+      "action": "card.update",
+      "ref": "c0ts6uv1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T13:26:23.657Z",
+      "by": "map-coverage-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ts6uv1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T13:26:23.557Z",
+      "by": "map-coverage-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ts6uv1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T13:21:17.845Z",
+      "by": "map-coverage-builder",
+      "action": "card.claim",
+      "ref": "c0ts6uv1",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T13:16:45.606Z",
       "by": "root",
       "action": "card.criteria-add",
@@ -42317,34 +42352,6 @@
       "action": "decision.add",
       "ref": "D-ECO-OUTPUT-DEFAULT1",
       "note": "How does a command choose an output when none is named?"
-    },
-    {
-      "at": "2026-07-15T01:08:21.814Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-OUTPUT-CALLCONTRACT1",
-      "note": "What contract must a runnable output's function satisfy?"
-    },
-    {
-      "at": "2026-07-15T01:07:19.659Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0bo7bp5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T01:04:29.167Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c05t6xnx",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T01:04:28.946Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05t6xnx",
-      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
     }
   ],
   "nextNum": 368,
