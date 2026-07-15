@@ -110,7 +110,7 @@ surfaces, don't silence it.
 parser→sema→codegen wired and reachable from real `.jet` source; every new
 diagnostic has a code in `docs/spec/diagnostics.md` **and** a `tests/ui`
 snapshot (I4); runnable example with golden output where user-visible (I5);
-`nix develop -c scripts/agent/verify-full.sh` fully green; docs match behavior. A ratified
+`scripts/agent/jet-env full scripts/agent/verify-full.sh` fully green; docs match behavior. A ratified
 decision may sit unbuilt **only** while gated on an unratified upstream
 decision — the owner's answer on an unblocked decision IS the "go".
 

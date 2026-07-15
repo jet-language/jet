@@ -103,7 +103,50 @@
           program = "${jet}/bin/jetpack";
         };
 
+        # Fast everyday shell. Keep normal compiler work independent from the
+        # foreign-runtime, browser, graphics, and VM toolchain fleet below.
         devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.cargo
+            pkgs.clippy
+            pkgs.rustc
+            pkgs.gcc
+            pkgs.lld
+            pkgs.nodejs_22
+            pkgs.nixfmt
+            pkgs.ripgrep
+            pkgs.jq
+            pkgs.gh
+            pkgs.fd
+            pkgs.bashInteractive
+            pkgs.zsh
+            pkgs.fish
+            pkgs.util-linux
+            pkgs.wasm-tools
+            pkgs.tree-sitter
+            jetDev
+            jetpackDev
+            pkgs.pkg-config
+          ];
+
+          shellHook = ''
+            if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+              export JET_ROOT="$repo_root"
+            else
+              export JET_ROOT="$PWD"
+            fi
+            export TZDIR="${jetTzdb}"
+
+            if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
+              "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
+            fi
+            export JET_NIX_TMP_CLEANED=1
+          '';
+        };
+
+        # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
+        # OS-image work. Use `nix develop .#full` / `jet-env full …` explicitly.
+        devShells.full = pkgs.mkShell {
           packages = [
             pkgs.cargo
             # E4-JP9: resolved-symbol native evaluator authority stop-line.
@@ -190,7 +233,7 @@
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
 
             if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
-              "${self}/scripts/agent/clean-nix-tmp.sh"
+              "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
             fi
             export JET_NIX_TMP_CLEANED=1
 

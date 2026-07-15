@@ -9,14 +9,14 @@ description: Verify a Jet compiler/stdlib change end-to-end in THIS repo — the
 
 - `df -h /tmp` — if near full, `rm -rf /tmp/nix-shell.*` and re-run; a full
   tmpfs causes phantom ENOSPC failures unrelated to your change.
-- `nix develop -c` prints a dev-shell banner; filter it before grepping
-  captured output.
+- Use `scripts/agent/jet-env`; it uses nix-direnv's cached environment when
+  available. `full` selects browser/FFI/VM tooling.
 
 ## Test strategy
 
-- **Iterating:** targeted only — `nix develop -c cargo test --test <name>`.
+- **Iterating:** targeted only — `scripts/agent/jet-env cargo test --test <name>`.
 - **Claiming done:** the FULL suite once —
-  `nix develop -c scripts/agent/verify-full.sh`. It runs `cargo test` with a
+  `scripts/agent/jet-env full scripts/agent/verify-full.sh`. It runs `cargo test` with a
   repo-local `TMPDIR` and normal test parallelism. Run it yourself; never accept
   a sub-agent's "green".
 - Do not use global `-- --test-threads=1` for completion proof. Use it only for
@@ -45,12 +45,12 @@ tests disappear.
 
 1. Run the focused test without an update variable and read the complete diff.
    Confirm every changed byte follows the ratified behavior and diagnostic voice.
-2. Build a fresh binary before using devtools: `nix develop -c cargo build`.
+2. Build a fresh binary before using devtools: `scripts/agent/jet-env cargo build`.
 3. Preview supported snapshot targets with
-   `nix develop -c jet devtools bless <target> --dry-run`. Then update only the
-   named target with `nix develop -c jet devtools bless <target>`.
+   `scripts/agent/jet-env jet devtools bless <target> --dry-run`. Then update only the
+   named target with `scripts/agent/jet-env jet devtools bless <target>`.
    For generated error pages, use
-   `nix develop -c env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`.
+   `scripts/agent/jet-env env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`.
 4. Inspect `git diff` immediately. Revert unrelated churn; never bulk-accept a
    diagnostic code, wording, path, span, or generated grammar you cannot explain.
 5. Re-run the same focused test with no update variable. Snapshot output and
@@ -63,9 +63,9 @@ nothing. Keep the test name in the command so an error-fixture selector does not
 also invoke the lint-fixture test, or vice versa.
 
 ```sh
-nix develop -c env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
+scripts/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
   cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
-nix develop -c env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
+scripts/agent/jet-env env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
   UPDATE_EXPECT=tests/ui/arg_type_mismatch.jet \
   cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
 ```
@@ -78,9 +78,9 @@ every printed diff. Lint snapshots use the same workflow with a
 Golden examples use their own filter and update switch:
 
 ```sh
-nix develop -c env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
+scripts/agent/jet-env env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
   cargo test --test golden examples_compile_and_run -- --nocapture
-nix develop -c env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
+scripts/agent/jet-env env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
   JET_UPDATE_GOLDEN=1 \
   cargo test --test golden examples_compile_and_run -- --nocapture
 ```
@@ -103,8 +103,8 @@ expected runtime failure. It never creates a new expectation channel.
 4. Extend formatter coverage with a **STABILITY** assertion that formatting once
    preserves every new token and formatting twice is byte-identical. Idempotence
    alone can bless a formatter that dropped the syntax on its first pass.
-5. Run `nix develop -c cargo build`, then
-   `nix develop -c jet devtools grammars`; inspect every generated editor section.
+5. Run `scripts/agent/jet-env cargo build`, then
+   `scripts/agent/jet-env jet devtools grammars`; inspect every generated editor section.
 6. Update `docs/spec/spec.md` and the implementation/log entry in
    `syntax-decisions.md`. Run focused parser, formatter, UI, golden, and grammar
    tests before final project verification.
@@ -117,10 +117,10 @@ expected runtime failure. It never creates a new expectation channel.
    diagnostic; only generated-code rejection or an impossible compiler state is
    an ICE.
 2. Minimize while preserving the same oracle:
-   `nix develop -c jet devtools reduce <file.jet>` (or `--code EXXXX` for a
+   `scripts/agent/jet-env jet devtools reduce <file.jet>` (or `--code EXXXX` for a
    diagnostic regression). Re-run the minimized file to confirm it still fails.
 3. Bundle durable evidence with
-   `nix develop -c jet devtools ice-report <minimized.jet>`. Keep the original
+   `scripts/agent/jet-env jet devtools ice-report <minimized.jet>`. Keep the original
    source when minimization removes context needed to understand the bug.
 4. Find the first broken invariant: front-end acceptance (sema), TIR lowering,
    Rust emission, or build/ICE classification. Fix the owning layer; never teach
@@ -132,9 +132,9 @@ expected runtime failure. It never creates a new expectation channel.
 
 ## Runtime smoke test (always, for compiler changes)
 
-1. `nix develop -c cargo build` — the dev-shell `jet` execs
+1. `scripts/agent/jet-env cargo build` — the dev-shell `jet` execs
    `target/debug/jet`, so a stale build silently tests old code.
-2. Run a real program: `nix develop -c jet run examples/features/basics/hello.jet`
+2. Run a real program: `scripts/agent/jet-env jet run examples/features/basics/hello.jet`
    plus an example exercising the changed feature. Check actual output, not
    just exit code.
 

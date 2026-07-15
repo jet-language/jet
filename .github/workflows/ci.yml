@@ -111,7 +111,7 @@ jobs:
       - name: Full verify suite (D-CI3)
         env:
           JET_REQUIRE_RUSTC: "1"
-        run: nix develop -c scripts/agent/verify-full.sh
+        run: nix develop .#full -c scripts/agent/verify-full.sh
 
       - name: Install aarch64 cross tools
         run: |
@@ -120,7 +120,7 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
 
       - name: aarch64 freestanding QEMU smoke
-        run: nix develop -c bash tools/ci/aarch64-qemu-freestanding.sh
+        run: nix develop .#full -c bash tools/ci/aarch64-qemu-freestanding.sh
 
   nightly-fuzz:
     name: Nightly rotating-seed fuzz + perf ratchet

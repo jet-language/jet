@@ -65,12 +65,11 @@ For each persona, identify one to three representative examples from `examples/`
 and run them one at a time:
 
 ```bash
-nix develop -c jet run <path>
+scripts/agent/jet-env jet run <path>
 ```
 
-Do not parallelize `nix develop`. Strip the dev-shell startup banner before quoting
-program output. Quote actual stdout or error output in notes, labeled with the file
-path. Every Pull/Push verdict must cite this evidence.
+Do not parallelize shell launches. Quote actual stdout or error output in notes,
+labeled with the file path. Every Pull/Push verdict must cite this evidence.
 
 Do not assert that something works or fails from memory. Verify it. Grep docs and
 source to check whether claimed gaps have shipped.

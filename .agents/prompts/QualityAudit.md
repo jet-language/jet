@@ -59,9 +59,9 @@ Work plan:
 
 1. Establish baseline:
    - `df -h /tmp`
-   - `nix develop -c cargo build`
+   - `scripts/agent/jet-env cargo build`
    - targeted status/test commands needed for current failures
-   - `nix develop -c cargo test` when ready for final verification
+   - `scripts/agent/jet-env full scripts/agent/verify-full.sh` when ready for final verification
 
 2. Produce a durable audit doc:
    - Create `docs/reviews/jet-holistic-review-2026-07-07.md`.
@@ -87,7 +87,7 @@ Work plan:
 5. Verify:
    - Run targeted tests for touched areas.
    - Rebuild `jet` before runtime/example smoke tests.
-   - Run full `nix develop -c cargo test` before claiming done.
+   - Run full `scripts/agent/jet-env full scripts/agent/verify-full.sh` before claiming done.
    - If full suite fails from unrelated pre-existing issues, isolate with focused repro and record clearly.
 
 Final response must include:

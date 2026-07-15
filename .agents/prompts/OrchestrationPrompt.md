@@ -299,13 +299,13 @@ targeted checks while iterating and the required full suite once at the end of a
 completed card or equivalent change. Sol runs final verification; delegated
 results are supporting evidence only.
 
-For Jet, use the Nix development shell and avoid parallel `nix develop`
-invocations. Typical commands:
+For Jet, use `scripts/agent/jet-env`; it reuses the nix-direnv cache when
+available. Avoid parallel shell launches. Typical commands:
 
-- `nix develop -c cargo build`
-- `nix develop -c cargo test --test <name>`
-- `nix develop -c jet run examples/features/basics/hello.jet`
-- `nix develop -c scripts/agent/verify-full.sh`
+- `scripts/agent/jet-env cargo build`
+- `scripts/agent/jet-env cargo test --test <name>`
+- `scripts/agent/jet-env jet run examples/features/basics/hello.jet`
+- `scripts/agent/jet-env full scripts/agent/verify-full.sh`
 
 For compiler changes, rebuild before smoke testing because the dev-shell `jet`
 wrapper executes `target/debug/jet`. If a check cannot run, report the exact

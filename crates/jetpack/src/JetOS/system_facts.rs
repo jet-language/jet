@@ -1,4 +1,5 @@
 use super::etc_boot_facts::{boot_artifact, kernel_package_json};
+use super::generation_files::relative_path;
 use super::identity::jetos_release_label;
 use super::options_rendering::{
     collect_names, option_rows_json, option_value, parse_list_items, prefixed_options,
@@ -122,7 +123,11 @@ fn write_minimal_systemd_units(unit_dir: &Path) -> std::io::Result<()> {
 #[cfg(unix)]
 fn link_or_copy_unit(src: &Path, dst: &Path) -> std::io::Result<()> {
     let _ = fs::remove_file(dst);
-    match std::os::unix::fs::symlink(src, dst) {
+    let parent = dst
+        .parent()
+        .ok_or_else(|| std::io::Error::other("system unit link has no parent"))?;
+    let target = relative_path(parent, src)?;
+    match std::os::unix::fs::symlink(target, dst) {
         Ok(()) => Ok(()),
         Err(_) => fs::copy(src, dst).map(|_| ()),
     }

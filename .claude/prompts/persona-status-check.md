@@ -68,10 +68,9 @@ Record all 9 at the top of your working notes before proceeding to Step 3.
 ## Step 3 — Verify representative examples
 
 For each persona, identify 1–3 representative examples from `examples/` and run them.
-Use `nix develop -c jet run <path>` — one at a time, never parallel (Nix serializes eval
-and parallel runs produce noisy output). The dev-shell prints a banner to stdout on startup;
-strip it before quoting output (the banner is not program output — quoting it as if it were
-is a misread).
+Use `scripts/agent/jet-env jet run <path>` — one at a time, never parallel.
+The launcher uses the cached nix-direnv environment when available; quote only
+the program output, never launcher diagnostics.
 
 Quote the actual stdout or error output in your notes. Label each run with the file path and
 the output you observed. This is your evidence base; every Pull/Push verdict must cite it.

@@ -8,13 +8,12 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"
 
 echo "pre-push: capability-claim ledger check"
-nix develop -c node scripts/agent/check-capability-ledger.mjs --check
-
-echo "pre-push: truthfulness"
-nix develop -c cargo test --test truthfulness
-
-echo "pre-push: decisions"
-nix develop -c cargo test --test decisions
-
-echo "pre-push: diagnostics coverage"
-nix develop -c cargo test --test diagnostics_coverage
+scripts/agent/jet-env sh -c '
+  node scripts/agent/check-capability-ledger.mjs --check
+  echo "pre-push: truthfulness"
+  cargo test --test truthfulness
+  echo "pre-push: decisions"
+  cargo test --test decisions
+  echo "pre-push: diagnostics coverage"
+  cargo test --test diagnostics_coverage
+'

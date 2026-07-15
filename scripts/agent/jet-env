@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Run one command in Jet's core shell, reusing nix-direnv's cache when present.
+# `jet-env full <cmd>` selects FFI/browser/VM integration tooling.
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+profile="core"
+if [ "${1:-}" = "full" ]; then
+  profile="full"
+  shift
+fi
+if [ "$#" -eq 0 ]; then
+  echo "usage: scripts/agent/jet-env [full] <command> [args...]" >&2
+  exit 64
+fi
+
+# `direnv export` returns cached environment assignments when `.envrc` has
+# been allowed. Execute the requested command once; never fall back after its
+# own failure, which would duplicate writes/tests.
+if command -v direnv >/dev/null 2>&1; then
+  if env_dump="$(cd "$repo" && JET_DEV_SHELL="$profile" direnv export bash 2>/dev/null)"; then
+    eval "$env_dump"
+    exec "$@"
+  fi
+fi
+
+if [ "$profile" = "full" ]; then
+  exec nix develop "$repo#full" -c "$@"
+fi
+exec nix develop "$repo" -c "$@"

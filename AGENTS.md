@@ -20,24 +20,28 @@ has final say on all user-facing syntax.
 
 ## Command environment
 
-Run project commands through the Nix dev shell every time so all agents use
-the same Rust, C toolchain, Node, Jet wrapper, and repo utilities:
+Run project commands through `scripts/agent/jet-env` every time. It uses the
+cached nix-direnv environment when available and otherwise enters the Nix shell;
+all agents still use the same Rust, C toolchain, Node, Jet wrapper, and repo
+utilities:
 
 ```
-nix develop -c cargo build
-nix develop -c cargo test
-nix develop -c jet run examples/features/basics/hello.jet
-nix develop -c rg "pattern" docs Source crates tests
+scripts/agent/jet-env cargo build
+scripts/agent/jet-env cargo test
+scripts/agent/jet-env jet run examples/features/basics/hello.jet
+scripts/agent/jet-env rg "pattern" docs Source crates tests
 ```
 
-Do not rely on host-installed `cargo`, `rustc`, `jet`, `node`, or search
-tools unless you are explicitly testing host-shell independence. Avoid
-parallel `nix develop` invocations; Nix serializes eval/cache work and the
-output becomes noisy. If several checks are needed, run them one at a time
-or enter a single shell with `nix develop`.
+`direnv allow` enables the cache for interactive work. Default shell is the
+fast core compiler shell. Use `scripts/agent/jet-env full <command>` only for
+FFI, Canvas/browser, graphics, VM/image, or full verification work. Do not rely
+on host-installed `cargo`, `rustc`, `jet`, `node`, or search tools unless you
+are explicitly testing host-shell independence. Avoid parallel shell launches;
+group dependent checks in one `jet-env sh -c '…'` invocation where practical.
 
 Known traps:
-- `nix develop -c` leaves large `/tmp/nix-shell.*` dirs; a full `/tmp`
+- Shell launches can leave large `/tmp/nix-shell.*` dirs; the launcher clears
+  exited ones before starting. A full `/tmp`
   causes phantom ENOSPC test failures. Check `df -h /tmp` before trusting
   a weird failure; `rm -rf /tmp/nix-shell.*` clears it (a SessionStart
   hook does this for Claude Code).
@@ -111,7 +115,7 @@ invariant bent.
 
 While iterating, run targeted tests (`cargo test --test <name>`); run the
 full suite once at the end of a card, before claiming done:
-`nix develop -c scripts/agent/verify-full.sh`. This keeps the suite parallel
+`scripts/agent/jet-env full scripts/agent/verify-full.sh`. This keeps the suite parallel
 and uses a repo-local `TMPDIR`; do not add global `-- --test-threads=1`
 unless you are reproducing a specific race. Never trust a sub-agent's "green"
 — re-run yourself.
