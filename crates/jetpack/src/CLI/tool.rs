@@ -747,7 +747,8 @@ fn migrate_legacy_generations_locked() -> io::Result<()> {
             .map(|tool| tool.output_hash.clone())
             .collect::<std::collections::BTreeSet<_>>();
         let witness = profile_generation_witness(&metadata, &digests);
-        if read_bounded(&path.join(PROFILE_COMPLETE_FILE))? != format!("{witness}\n") {
+        let marker = read_bounded(&path.join(PROFILE_COMPLETE_FILE))?;
+        if marker != "complete\n" && marker != format!("{witness}\n") {
             return Err(io::Error::other(format!(
                 "legacy profile generation {generation} witness mismatch; remove only after auditing `{}`",
                 path.display()
@@ -839,8 +840,12 @@ fn ensure_generation_roots(
         }
     }
     profile_failpoint("after-root-prepare")?;
-    for (roots, receipt) in prepared {
+    let commit_count = prepared.len();
+    for (index, (roots, receipt)) in prepared.into_iter().enumerate() {
         Store::commit_profile_generation_root(&roots, &receipt, now_secs())?;
+        if index + 1 != commit_count {
+            profile_failpoint("between-root-commits")?;
+        }
     }
     Ok(())
 }

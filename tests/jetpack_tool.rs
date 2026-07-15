@@ -9,6 +9,7 @@
 //! convention (see `tests/jetpack_tasks.rs`); shared fixtures/helpers come
 //! from `tests/support/jetpack_fixtures.rs` (see `tests/jetpack_engine.rs`).
 
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -19,8 +20,9 @@ mod common;
 mod jetpack_fixtures;
 use jetpack_fixtures::*;
 
-fn write_tool_bin_fixture(fixtures: &Path, out_dir: &Path, pkg: &str, bin: &str, script: &str) {
+fn write_tool_bin_fixture(root: &Path, fixtures: &Path, pkg: &str, bin: &str, script: &str) {
     fs::create_dir_all(fixtures).unwrap();
+    let out_dir = root.join("hangar").join(format!("provider-fixture-{pkg}"));
     let bin_dir = out_dir.join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     let path = bin_dir.join(bin);
@@ -28,7 +30,9 @@ fn write_tool_bin_fixture(fixtures: &Path, out_dir: &Path, pkg: &str, bin: &str,
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+        fs::set_permissions(&bin_dir, fs::Permissions::from_mode(0o555)).unwrap();
+        fs::set_permissions(&out_dir, fs::Permissions::from_mode(0o555)).unwrap();
     }
     let json = format!(
         "[{{\"drvPath\":\"/nix/store/fixture-{pkg}.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
@@ -114,10 +118,9 @@ fn tool_run_ephemeral_execs_builtin_provider_fixture() {
     let root = Scratch::new("tool-run-root");
     let proj = Scratch::new("tool-run-proj");
     let fixtures = Scratch::new("tool-run-fx");
-    let out = Scratch::new("tool-run-out");
     write_tool_bin_fixture(
+        &root.path,
         &fixtures.path,
-        &out.path,
         "greet",
         "greet",
         "#!/bin/sh\necho hello from tool run\n",
@@ -185,11 +188,10 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
     let root = Scratch::new("tool-inst-root");
     let proj = Scratch::new("tool-inst-proj");
     let fixtures = Scratch::new("tool-inst-fx");
-    let out = Scratch::new("tool-inst-out");
     let home = Scratch::new("tool-inst-home");
     write_tool_bin_fixture(
+        &root.path,
         &fixtures.path,
-        &out.path,
         "greet",
         "greet",
         "#!/bin/sh\necho installed greet\n",
@@ -227,8 +229,25 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
             "install must create a stable dispatcher"
         );
     }
-    let invoked = Command::new(&link).output().unwrap();
-    assert!(invoked.status.success());
+    let path = env::join_paths(
+        std::iter::once(link.parent().unwrap().to_path_buf()).chain(
+            env::var_os("PATH")
+                .into_iter()
+                .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>()),
+        ),
+    )
+    .unwrap();
+    let invoked = Command::new(&link)
+        .env("HOME", &home.path)
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    assert!(
+        invoked.status.success(),
+        "status={:?}, stderr={}",
+        invoked.status.code(),
+        String::from_utf8_lossy(&invoked.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&invoked.stdout).trim(), "installed greet");
     let meta = home.join(".jet/tools/generations/1/meta.json");
     assert!(meta.is_file(), "missing generation metadata {}", meta.display());
@@ -277,6 +296,16 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
 
     let projection = home.join(".jet/tools/generations/1/bin/greet");
     let original_projection = fs::read(&projection).unwrap();
+    let original_permissions = fs::metadata(&projection).unwrap().permissions();
+    let mut writable_permissions = original_permissions.clone();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        writable_permissions.set_mode(writable_permissions.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    writable_permissions.set_readonly(false);
+    fs::set_permissions(&projection, writable_permissions).unwrap();
     fs::write(&projection, b"#!/bin/sh\necho corrupted\n").unwrap();
     let rejected = jetpack()
         .args(["tool", "list", "--no-color"])
@@ -292,6 +321,7 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
         String::from_utf8_lossy(&rejected.stderr)
     );
     fs::write(&projection, original_projection).unwrap();
+    fs::set_permissions(&projection, original_permissions).unwrap();
 
     let removed = jetpack()
         .args(["tool", "uninstall", "greet", "--no-color"])
@@ -326,19 +356,17 @@ fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
     let right_root = Scratch::new("tool-concurrent-right-root");
     let proj = Scratch::new("tool-concurrent-proj");
     let fixtures = Scratch::new("tool-concurrent-fx");
-    let left_out = Scratch::new("tool-concurrent-left-out");
-    let right_out = Scratch::new("tool-concurrent-right-out");
     let home = Scratch::new("tool-concurrent-home");
     write_tool_bin_fixture(
+        &left_root.path,
         &fixtures.path,
-        &left_out.path,
         "left",
         "left",
         "#!/bin/sh\necho left\n",
     );
     write_tool_bin_fixture(
+        &right_root.path,
         &fixtures.path,
-        &right_out.path,
         "right",
         "right",
         "#!/bin/sh\necho right\n",
@@ -413,15 +441,62 @@ fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
 }
 
 #[test]
+fn multi_store_root_commit_crash_recovers_before_pointer_switch() {
+    let left_root = Scratch::new("tool-multiroot-left");
+    let right_root = Scratch::new("tool-multiroot-right");
+    let proj = Scratch::new("tool-multiroot-proj");
+    let fixtures = Scratch::new("tool-multiroot-fx");
+    let home = Scratch::new("tool-multiroot-home");
+    write_tool_bin_fixture(&left_root.path, &fixtures.path, "left", "left", "#!/bin/sh\necho left\n");
+    write_tool_bin_fixture(&right_root.path, &fixtures.path, "right", "right", "#!/bin/sh\necho right\n");
+    let left = tool_install_command(
+        &left_root.path,
+        &proj.path,
+        &fixtures.path,
+        &home.path,
+        "left",
+    )
+    .output()
+    .unwrap();
+    assert!(left.status.success(), "{}", String::from_utf8_lossy(&left.stderr));
+
+    let interrupted = tool_install_command(
+        &right_root.path,
+        &proj.path,
+        &fixtures.path,
+        &home.path,
+        "right",
+    )
+    .env("JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT", "between-root-commits")
+    .output()
+    .unwrap();
+    assert_eq!(interrupted.status.code(), Some(2));
+    assert!(home.join(".jet/tools/generations/2/complete").is_file());
+    assert!(fs::read_to_string(home.join(".jet/tools/current")).unwrap().contains("generation\t1"));
+
+    let recovered = jetpack()
+        .args(["tool", "list", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &left_root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(recovered.status.success(), "{}", String::from_utf8_lossy(&recovered.stderr));
+    assert!(fs::read_to_string(home.join(".jet/tools/current")).unwrap().contains("generation\t2"));
+    let generation_two = ascii_hex("profile-generation:user:tools:2");
+    assert!(lifecycle_wire(&left_root.path).contains(&generation_two));
+    assert!(lifecycle_wire(&right_root.path).contains(&generation_two));
+}
+
+#[test]
 fn legacy_generation_is_verified_and_migrated_to_owned_projection() {
     let root = Scratch::new("tool-legacy-root");
     let proj = Scratch::new("tool-legacy-proj");
     let fixtures = Scratch::new("tool-legacy-fx");
-    let out = Scratch::new("tool-legacy-out");
     let home = Scratch::new("tool-legacy-home");
     write_tool_bin_fixture(
+        &root.path,
         &fixtures.path,
-        &out.path,
         "greet",
         "greet",
         "#!/bin/sh\necho migrated greet\n",
@@ -454,21 +529,8 @@ fn legacy_generation_is_verified_and_migrated_to_owned_projection() {
     let legacy = format!(
         "{{\n  \"generation\": 1,\n  \"profile\": \"tools\",\n  \"created_at\": 1,\n  \"tools\": [\n    {{\n      \"name\": \"greet\",\n      \"version\": \"\",\n      \"source\": \"nixpkgs\",\n      \"reference\": \"nixpkgs:greet\",\n      \"output_hash\": {output_hash:?},\n      \"bins\": [\"greet\"],\n      \"targets\": [{target:?}]\n    }}\n  ]\n}}\n"
     );
-    let witness_input = format!(
-        "jet-profile-generation-witness-v1\nmetadata\t{}\ntarget\t{}\n",
-        jetpack::SHA256::sha256_hex(legacy.as_bytes()),
-        output_hash
-    );
-    let witness = format!(
-        "sha256-{}",
-        jetpack::SHA256::sha256_hex(witness_input.as_bytes())
-    );
     fs::write(home.join(".jet/tools/generations/1/meta.json"), legacy).unwrap();
-    fs::write(
-        home.join(".jet/tools/generations/1/complete"),
-        format!("{witness}\n"),
-    )
-    .unwrap();
+    fs::write(home.join(".jet/tools/generations/1/complete"), "complete\n").unwrap();
     fs::remove_file(home.join(".jet/tools/current")).unwrap();
     fs::remove_file(home.join(".jet/tools/profile.json")).unwrap();
 
@@ -502,11 +564,10 @@ fn profile_failpoints_recover_conservatively_around_root_and_pointer_publish() {
         let root = Scratch::new(&format!("tool-fail-{phase}-root"));
         let proj = Scratch::new(&format!("tool-fail-{phase}-proj"));
         let fixtures = Scratch::new(&format!("tool-fail-{phase}-fx"));
-        let out = Scratch::new(&format!("tool-fail-{phase}-out"));
         let home = Scratch::new(&format!("tool-fail-{phase}-home"));
         write_tool_bin_fixture(
+            &root.path,
             &fixtures.path,
-            &out.path,
             "greet",
             "greet",
             "#!/bin/sh\necho failpoint greet\n",
@@ -573,11 +634,10 @@ fn tool_install_task_collision_is_e1297_snapshot() {
     let root = Scratch::new("tool-collide-root");
     let proj = Scratch::new("tool-collide-proj");
     let fixtures = Scratch::new("tool-collide-fx");
-    let out = Scratch::new("tool-collide-out");
     let home = Scratch::new("tool-collide-home");
     write_tool_bin_fixture(
+        &root.path,
         &fixtures.path,
-        &out.path,
         "serve",
         "serve",
         "#!/bin/sh\necho serve tool\n",

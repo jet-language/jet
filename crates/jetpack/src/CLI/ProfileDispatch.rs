@@ -8,9 +8,10 @@
 
 use crate::{JSON, SHA256, Store, Syntax};
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(any(windows, test))]
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const CURRENT_SCHEMA: &str = "jet-profile-current-v1";
@@ -277,11 +278,23 @@ pub(crate) fn install_dispatcher(bin_dir: &Path, bin: &str) -> io::Result<PathBu
 #[doc(hidden)]
 pub fn dispatch_current_process() -> Option<i32> {
     let executable = std::env::current_exe().ok()?;
-    let bin_dir = user_bin_dir();
-    if !same_directory(executable.parent()?, &bin_dir).ok()? {
+    let invoked = std::env::args_os().next()?;
+    let bin = Path::new(&invoked).file_name()?.to_str()?;
+    if bin == "jetpack" {
         return None;
     }
-    let bin = executable.file_name()?.to_str()?;
+    validate_bin_name(bin).ok()?;
+    let installed = resolve_invoked_entry(Path::new(&invoked))?;
+    let bin_dir = installed.parent()?.to_path_buf();
+    let mut installed_file = open_pinned_regular(&installed).ok()?;
+    if executable != installed {
+        let mut executable_file = fs::File::open(&executable).ok()?;
+        if sha256_open_file_hex(&mut installed_file).ok()?
+            != sha256_open_file_hex(&mut executable_file).ok()?
+        {
+            return None;
+        }
+    }
     Some(match resolve_dispatch_target(&bin_dir, bin) {
         Ok(target) => execute_target(&target),
         Err(error) if error.kind() == io::ErrorKind::NotFound => MISSING_DISPATCH_EXIT,
@@ -289,7 +302,42 @@ pub fn dispatch_current_process() -> Option<i32> {
     })
 }
 
-fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<PathBuf> {
+fn resolve_invoked_entry(invoked: &Path) -> Option<PathBuf> {
+    let entry = if invoked.is_absolute() {
+        invoked.to_path_buf()
+    } else {
+        let mut components = invoked.components();
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+            return None;
+        }
+        std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+            .filter_map(|directory| {
+                if directory.is_absolute() {
+                    Some(directory.join(invoked))
+                } else {
+                    Some(std::env::current_dir().ok()?.join(directory).join(invoked))
+                }
+            })
+            .find(|candidate| fs::symlink_metadata(candidate).is_ok())?
+    };
+    let bin_dir = entry.parent()?;
+    if bin_dir.file_name()? != Syntax::TOOL_BIN_DIR
+        || bin_dir.parent()?.file_name()? != Syntax::CONFIG_DEFAULT_DIR
+    {
+        return None;
+    }
+    Some(entry)
+}
+
+struct DispatchTarget {
+    #[cfg(windows)]
+    path: PathBuf,
+    file: fs::File,
+}
+
+fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<DispatchTarget> {
     validate_bin_name(bin)?;
     ensure_directory_chain(bin_dir)?;
     let tools = bin_dir
@@ -313,14 +361,18 @@ fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<PathBuf> {
     }
     let (tool, slot) = find_bin(&metadata, bin)?;
     let projection = generation_dir.join("bin").join(bin);
-    validate_regular_file(&projection)?;
-    let actual = format!("sha256-{}", SHA256::sha256_file_hex(&projection)?);
+    let mut projection_file = open_pinned_regular(&projection)?;
+    let actual = format!("sha256-{}", sha256_open_file_hex(&mut projection_file)?);
     if actual != tool.projection_hashes[slot] {
         return Err(invalid("profile projection digest mismatch"));
     }
     validate_original_authority(tool, slot, &actual)?;
-    ensure_executable(&projection)?;
-    Ok(projection)
+    ensure_open_executable(&projection_file)?;
+    Ok(DispatchTarget {
+        #[cfg(windows)]
+        path: projection,
+        file: projection_file,
+    })
 }
 
 fn find_bin<'a>(
@@ -345,25 +397,71 @@ fn validate_original_authority(tool: &GenerationTool, slot: usize, digest: &str)
         .find(|entry| entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash)
         .ok_or_else(|| invalid("profile Store authority is unavailable"))?;
     let member = Path::new(&entry.bin).join(&tool.members[slot]);
-    validate_regular_file(&member)?;
-    let member_digest = format!("sha256-{}", SHA256::sha256_file_hex(&member)?);
+    let mut member_file = open_pinned_regular(&member)?;
+    let member_digest = format!("sha256-{}", sha256_open_file_hex(&mut member_file)?);
     if member_digest != digest {
         return Err(invalid("profile projection disagrees with Store member"));
     }
-    ensure_executable(&member)
+    ensure_open_executable(&member_file)
 }
 
 #[cfg(unix)]
-fn execute_target(target: &Path) -> i32 {
-    use std::os::unix::process::CommandExt as _;
-    let error = target_command(target, std::env::args_os().skip(1)).exec();
-    let _ = error;
+fn execute_target(target: &DispatchTarget) -> i32 {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    unsafe extern "C" {
+        fn dup(fd: std::os::raw::c_int) -> std::os::raw::c_int;
+        fn close(fd: std::os::raw::c_int) -> std::os::raw::c_int;
+        fn fexecve(
+            fd: std::os::raw::c_int,
+            argv: *const *const std::os::raw::c_char,
+            envp: *const *const std::os::raw::c_char,
+        ) -> std::os::raw::c_int;
+    }
+    let argv = std::env::args_os()
+        .map(|argument| CString::new(argument.as_os_str().as_bytes()))
+        .collect::<Result<Vec<_>, _>>();
+    let environment = std::env::vars_os()
+        .map(|(key, value)| {
+            let mut wire = key.as_os_str().as_bytes().to_vec();
+            wire.push(b'=');
+            wire.extend_from_slice(value.as_os_str().as_bytes());
+            CString::new(wire)
+        })
+        .collect::<Result<Vec<_>, _>>();
+    let (Ok(argv), Ok(environment)) = (argv, environment) else {
+        return INVALID_DISPATCH_EXIT;
+    };
+    let mut argv_pointers = argv.iter().map(|value| value.as_ptr()).collect::<Vec<_>>();
+    argv_pointers.push(std::ptr::null());
+    let mut environment_pointers = environment
+        .iter()
+        .map(|value| value.as_ptr())
+        .collect::<Vec<_>>();
+    environment_pointers.push(std::ptr::null());
+    // The held no-follow file was hashed and remains open across this call.
+    // dup clears CLOEXEC so shebang interpreters can reopen the script fd.
+    // fexecve resolves the executable from that descriptor, never the path.
+    let descriptor = unsafe { dup(target.file.as_raw_fd()) };
+    if descriptor < 0 {
+        return INVALID_DISPATCH_EXIT;
+    }
+    unsafe {
+        fexecve(
+            descriptor,
+            argv_pointers.as_ptr(),
+            environment_pointers.as_ptr(),
+        );
+        close(descriptor);
+    }
     INVALID_DISPATCH_EXIT
 }
 
 #[cfg(windows)]
-fn execute_target(target: &Path) -> i32 {
-    target_command(target, std::env::args_os().skip(1))
+fn execute_target(target: &DispatchTarget) -> i32 {
+    target_command(&target.path, std::env::args_os().skip(1))
         .status()
         .ok()
         .and_then(|status| status.code())
@@ -371,10 +469,11 @@ fn execute_target(target: &Path) -> i32 {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn execute_target(_target: &Path) -> i32 {
+fn execute_target(_target: &DispatchTarget) -> i32 {
     INVALID_DISPATCH_EXIT
 }
 
+#[cfg(any(windows, test))]
 fn target_command(
     target: &Path,
     arguments: impl IntoIterator<Item = OsString>,
@@ -462,6 +561,9 @@ pub(crate) fn validate_bin_name(value: &str) -> io::Result<()> {
             .is_some_and(|value| (1..=9).contains(&value));
     if reserved {
         return Err(invalid("profile bin name is reserved on Windows"));
+    }
+    if value.eq_ignore_ascii_case("jetpack") {
+        return Err(invalid("profile bin name collides with the package engine"));
     }
     Ok(())
 }
@@ -557,6 +659,46 @@ fn validate_regular_file(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn open_pinned_regular(path: &Path) -> io::Result<fs::File> {
+    validate_regular_file(path)?;
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const FILE_SHARE_READ: u32 = 1;
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(path)?
+    };
+    #[cfg(not(windows))]
+    let file = fs::File::open(path)?;
+    let before = fs::symlink_metadata(path)?;
+    let opened = file.metadata()?;
+    if !same_file_metadata(&before, &opened) {
+        return Err(invalid("profile file changed while opening"));
+    }
+    Ok(file)
+}
+
+fn sha256_open_file_hex(file: &mut fs::File) -> io::Result<String> {
+    file.seek(std::io::SeekFrom::Start(0))?;
+    let mut hasher = SHA256::StreamingSha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    file.seek(std::io::SeekFrom::Start(0))?;
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 #[cfg(windows)]
 fn is_windows_reparse(metadata: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt as _;
@@ -564,31 +706,17 @@ fn is_windows_reparse(metadata: &fs::Metadata) -> bool {
     metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
-fn ensure_executable(path: &Path) -> io::Result<()> {
+fn ensure_open_executable(file: &fs::File) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        if fs::metadata(path)?.permissions().mode() & 0o111 == 0 {
+        if file.metadata()?.permissions().mode() & 0o111 == 0 {
             return Err(invalid("profile projection is not executable"));
         }
     }
-    #[cfg(windows)]
-    {
-        let extension = path
-            .extension()
-            .and_then(std::ffi::OsStr::to_str)
-            .unwrap_or("");
-        if !matches!(extension.to_ascii_lowercase().as_str(), "exe" | "com") {
-            return Err(invalid("profile projection is not a native Windows executable"));
-        }
-    }
+    #[cfg(not(unix))]
+    let _ = file;
     Ok(())
-}
-
-fn same_directory(left: &Path, right: &Path) -> io::Result<bool> {
-    ensure_directory_chain(left)?;
-    ensure_directory_chain(right)?;
-    Ok(fs::canonicalize(left)? == fs::canonicalize(right)?)
 }
 
 fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
@@ -663,13 +791,6 @@ fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
-}
-
-fn user_bin_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(Syntax::CONFIG_DEFAULT_DIR).join(Syntax::TOOL_BIN_DIR)
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -819,7 +940,7 @@ mod tests {
 
     #[test]
     fn names_reject_traversal_windows_reserved_and_case_collisions() {
-        for invalid in ["", "../x", "a/b", "a\\b", "CON", "com1.exe", "nul.txt"] {
+        for invalid in ["", "../x", "a/b", "a\\b", "CON", "com1.exe", "nul.txt", "jetpack"] {
             assert!(validate_bin_name(invalid).is_err(), "accepted {invalid:?}");
         }
         let mut metadata = metadata();
@@ -903,6 +1024,23 @@ mod tests {
         let projection = root.join("projection");
         symlink(&target, &projection).unwrap();
         assert!(validate_regular_file(&projection).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pinned_projection_handle_survives_path_replacement() {
+        let root = std::env::temp_dir().join(format!("jet-profile-pin-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let projection = root.join("projection");
+        fs::write(&projection, b"verified").unwrap();
+        let mut pinned = open_pinned_regular(&projection).unwrap();
+        fs::rename(&projection, root.join("old")).unwrap();
+        fs::write(&projection, b"replacement").unwrap();
+        assert_eq!(
+            sha256_open_file_hex(&mut pinned).unwrap(),
+            SHA256::sha256_hex(b"verified")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
