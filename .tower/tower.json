@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 638,
-    "rev": 7598,
+    "rev": 7601,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18995,6 +18995,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "codex-event-builder",
+          "text": "[review resolved] Adversarial P1: deadline catch could overwrite an existing cancel/close terminal via TERMINAL-to-TERMINAL CAS. ab1b11b7 makes terminal absorbing centrally; exact source-shape guard plus synchronized prior-winner and lifecycle regressions pass."
+        },
+        {
+          "at": "2026-07-15",
           "by": "root",
           "text": "Reopened: full gate at moving HEAD 2b4dbf40/9bd0175e exposes inherited async event dispatch deadline as process-fatal E3003 instead of one typed terminal."
         },
@@ -19054,6 +19059,15 @@
           "verifiedBy": null,
           "evidence": "Commit bf13aac1 adds a nest-safe typed-deadline RAII/TLS boundary entered only by spawn_typed_deadline, AsyncEvent's sole typed-deadline task path. Exact async lifecycle, ordinary deadline_context E3003, interrupt boundary/helper, native wait, and TCP deadline/cancellation regressions pass; source-shape proves ordinary spawn lacks the boundary.",
           "at": "2026-07-15T13:15:08.341Z"
+        },
+        {
+          "n": 6,
+          "text": "Async event terminal phase is absorbing: a deadline catch cannot CAS TERMINAL to TERMINAL or overwrite a concurrent cancel/close winner; source-shape and behavioral regressions prove immutable queued/pending reports and zero leaked counts.",
+          "status": "met",
+          "metBy": "codex-event-builder",
+          "verifiedBy": null,
+          "evidence": "Adversarial review found run_entry catch could load TERMINAL then let complete_entry CAS TERMINAL to TERMINAL, overwriting a concurrent cancel/close report. Commit ab1b11b7 rejects terminal expected phases before CAS. async_event_terminal_transition_rejects_terminal_expected_phase, the single-worker channel-gated cancel/close winner regression, and async_event_scope_cancel_and_inherited_deadline_are_single_terminal all pass; traces remain one terminal and queued/running/blocked counts drain to zero.",
+          "at": "2026-07-15T13:45:11.819Z"
         }
       ],
       "refs": [],
@@ -38916,6 +38930,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T13:45:11.941Z",
+      "by": "codex-event-builder",
+      "action": "card.update",
+      "ref": "c0ajdb8z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T13:45:11.819Z",
+      "by": "codex-event-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ajdb8z",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-15T13:43:23.873Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ajdb8z",
+      "note": "#6 Async event terminal phase is absorbing: a deadline catch ca"
+    },
+    {
       "at": "2026-07-15T13:41:45.914Z",
       "by": "claude-main",
       "action": "card.update",
@@ -42393,27 +42428,6 @@
       "action": "card.criteria-meet",
       "ref": "c07p1xxq",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-15T01:15:05.935Z",
-      "by": "codex-csv-builder",
-      "action": "card.update",
-      "ref": "c05t6xnx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T01:15:05.811Z",
-      "by": "codex-csv-builder",
-      "action": "card.criteria-meet",
-      "ref": "c05t6xnx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T01:15:05.712Z",
-      "by": "codex-csv-builder",
-      "action": "card.criteria-meet",
-      "ref": "c05t6xnx",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
