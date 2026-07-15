@@ -313,6 +313,7 @@ fn canonicalize_local_output_unlocked(
                 source.display()
             )));
         }
+        seal_node(&destination)?;
         let actual = super::Envelope::try_output_hash_of_in_hangar(
             &destination.to_string_lossy(),
             &roots.hangar_dir(),
@@ -324,12 +325,12 @@ fn canonicalize_local_output_unlocked(
                 "canonical object `{digest}` re-hashed as `{actual}`"
             )));
         }
-        seal_local_output(&destination)?;
         fsync_tree(&destination)?;
         fs::File::open(&objects)?.sync_all()?;
         return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
     }
     if destination.exists() {
+        seal_node(&destination)?;
         let actual = super::Envelope::try_output_hash_of_in_hangar(
             &destination.to_string_lossy(),
             &roots.hangar_dir(),
@@ -341,7 +342,6 @@ fn canonicalize_local_output_unlocked(
                 "canonical object `{digest}` re-hashed as `{actual}`"
             )));
         }
-        seal_local_output(&destination)?;
         fsync_tree(&destination)?;
         fs::File::open(&objects)?.sync_all()?;
         if source != destination && source.exists() {
@@ -359,7 +359,18 @@ fn canonicalize_local_output_unlocked(
         fs::rename(source, &destination).map_err(|error| {
             std::io::Error::new(error.kind(), format!("publishing canonical provider output: {error}"))
         })?;
-        seal_local_output(&destination)?;
+        seal_node(&destination)?;
+        let actual = super::Envelope::try_output_hash_of_in_hangar(
+            &destination.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .map_err(std::io::Error::other)?;
+        if actual != digest {
+            return Err(std::io::Error::other(format!(
+                "canonical object `{digest}` re-hashed as `{actual}`"
+            )));
+        }
         fsync_tree(&destination)?;
         fs::File::open(&objects)?.sync_all().map_err(|error| {
             std::io::Error::new(error.kind(), format!("syncing canonical object directory: {error}"))
@@ -1634,11 +1645,16 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
             let Ok(bytes) = fs::read(&file) else {
                 continue;
             };
-            let digest = SHA256::sha256_hex(&bytes);
+            let digest = format!(
+                "{}-{:08x}",
+                SHA256::sha256_hex(&bytes),
+                permission_identity(&meta)
+            );
             let cas_file = cas.join(&digest);
             if !cas_file.exists() {
                 let tmp = cas.join(format!("{digest}.partial"));
                 fs::write(&tmp, &bytes)?;
+                fs::set_permissions(&tmp, meta.permissions())?;
                 fs::rename(&tmp, &cas_file)?;
             }
             if same_file_inode(&file, &cas_file) {
@@ -1654,6 +1670,17 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
     }
     fs::File::open(&objects)?.sync_all()?;
     Ok(report)
+}
+
+#[cfg(unix)]
+fn permission_identity(meta: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt as _;
+    meta.permissions().mode() & 0o7777
+}
+
+#[cfg(not(unix))]
+fn permission_identity(meta: &fs::Metadata) -> u32 {
+    u32::from(meta.permissions().readonly())
 }
 
 fn same_file_inode(a: &Path, b: &Path) -> bool {

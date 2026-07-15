@@ -229,6 +229,8 @@ fn ingest_tree_unlocked(
                 }
                 fsync_tree(&destination)?;
                 fsync_dir(&objects)?;
+                make_tree_writable_for_removal(staged)?;
+                fs::remove_dir_all(staged)?;
                 continue;
             }
             let partial = objects.join(format!("{digest}{PARTIAL_SUFFIX}"));
