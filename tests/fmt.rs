@@ -174,6 +174,29 @@ fn run() {
 }
 
 #[test]
+fn fmt_keeps_call_comment_outside_lambda_block() {
+    let src = r#"fn transfer(from: Shared<Account>, amount: Int) {
+    #Transact(tx) {
+        from.edit(a => { a.balance -= amount })  // both land, or neither
+    }
+}
+"#;
+    let out = jet::format_source(src).expect("lambda call with trailing comment should format");
+    let lambda_close = out
+        .find("})")
+        .expect("formatted call should close the lambda and call before its comment");
+    let comment = out
+        .find("// both land, or neither")
+        .expect("formatter should preserve the trailing comment");
+    assert!(
+        lambda_close < comment,
+        "trailing call comment moved inside its lambda block:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("formatted lambda call should re-format");
+    assert_eq!(out, twice, "lambda-call comment formatting must be stable");
+}
+
+#[test]
 fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
     let src = r#"fn parse_count(raw: String) -> Int? {
     return err("empty");

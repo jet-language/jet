@@ -10,7 +10,7 @@ mod Items;
 mod Statements;
 
 use crate::Diagnostics::Span;
-use crate::Lexer::{comments, TokKind, Token};
+use crate::Lexer::{TokKind, Token};
 use crate::Syntax;
 use crate::AST::{BinOp, ElseBranch, Func, IfStmt, Item, LValue, Program, Stmt};
 
@@ -39,6 +39,16 @@ fn is_simple_stmt(stmt: &Stmt) -> bool {
 
 /// Format a parsed program back to canonical Jet source.
 pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> String {
+    let (source_toks, _) = crate::Lexer::lex(src);
+    format_program_with_tokens(prog, src, comment_toks, &source_toks)
+}
+
+fn format_program_with_tokens(
+    prog: &Program,
+    src: &str,
+    comment_toks: &[Token],
+    source_toks: &[Token],
+) -> String {
     let comments: Vec<Comment> = comment_toks
         .iter()
         .map(|t| Comment {
@@ -51,6 +61,7 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         .collect();
     let mut f = Fmt {
         src,
+        source_toks,
         comments,
         comment_i: 0,
         out: String::new(),
@@ -58,6 +69,7 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         at_line_start: true,
         indent: 0,
         pending_blank: false,
+        trailing_comment_limit: usize::MAX,
         pub_file: prog.pub_file,
     };
     let mut first = true;
@@ -166,6 +178,7 @@ struct Comment {
 
 struct Fmt<'a> {
     src: &'a str,
+    source_toks: &'a [Token],
     comments: Vec<Comment>,
     comment_i: usize,
     out: String,
@@ -173,6 +186,10 @@ struct Fmt<'a> {
     at_line_start: bool,
     indent: usize,
     pending_blank: bool,
+    /// Exclusive source boundary for trailing comments while formatting a
+    /// nested construct. Prevents an inner statement from claiming a comment
+    /// that trails its enclosing expression on the same line.
+    trailing_comment_limit: usize,
     /// D-VISDEFAULT2=A: file uses `#PubFile` public-by-default visibility.
     pub_file: bool,
 }
@@ -501,6 +518,9 @@ impl<'a> Fmt<'a> {
                 let c = &self.comments[self.comment_i];
                 (c.text.clone(), c.span)
             };
+            if span.start >= self.trailing_comment_limit {
+                break;
+            }
             if span.start >= end && line_of(self.src, span.start) == line_of(self.src, end) {
                 self.write("  ");
                 self.emit_comment_inline(&text);
@@ -584,6 +604,54 @@ impl<'a> Fmt<'a> {
         let r = f(self);
         self.indent -= 1;
         r
+    }
+
+    fn with_trailing_comment_limit<R>(
+        &mut self,
+        limit: usize,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = self.trailing_comment_limit;
+        self.trailing_comment_limit = previous.min(limit);
+        let result = f(self);
+        self.trailing_comment_limit = previous;
+        result
+    }
+
+    /// The AST intentionally stores only the name span for calls and method
+    /// calls. Comment attachment needs the whole source statement, including
+    /// call/lambda closing delimiters. Walk lexer tokens to the first
+    /// top-level terminator instead of mistaking an inner expression span for
+    /// the statement end.
+    fn statement_source_end(&self, stmt: &Stmt) -> usize {
+        if !matches!(
+            stmt,
+            Stmt::Expr(_) | Stmt::Val(_) | Stmt::Assign { .. } | Stmt::Return(..) | Stmt::Yield(..)
+        ) {
+            return stmt_end(stmt);
+        }
+
+        let start = stmt_start(stmt);
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        let mut braces = 0usize;
+        let mut last_end = stmt_end(stmt);
+        for token in self.source_toks.iter().filter(|token| token.span.start >= start) {
+            match token.kind {
+                TokKind::LineComment(_) | TokKind::BlockComment(_) => continue,
+                TokKind::Semi if parens == 0 && brackets == 0 && braces == 0 => return last_end,
+                TokKind::Eof => return last_end,
+                TokKind::LParen => parens += 1,
+                TokKind::RParen => parens = parens.saturating_sub(1),
+                TokKind::LBracket => brackets += 1,
+                TokKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokKind::LBrace => braces += 1,
+                TokKind::RBrace => braces = braces.saturating_sub(1),
+                _ => {}
+            }
+            last_end = token.span.end;
+        }
+        last_end
     }
 
     /// S69 (D-SG3): did the author put a line break before this chain step's
@@ -888,9 +956,18 @@ pub fn format_source(src: &str) -> Result<String, Vec<crate::Diagnostics::Diagno
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let comments = comments(&toks);
     let prog = crate::Parser::parse_for_fmt(&toks)?;
-    Ok(format_program(&prog, src, &comments))
+    let comment_toks: Vec<_> = toks
+        .iter()
+        .filter(|token| {
+            matches!(
+                token.kind,
+                TokKind::LineComment(_) | TokKind::BlockComment(_)
+            )
+        })
+        .cloned()
+        .collect();
+    Ok(format_program_with_tokens(&prog, src, &comment_toks, &toks))
 }
 
 /// Simple unified diff for `jet fmt --check`.
@@ -933,4 +1010,29 @@ pub fn unified_diff(path: &str, old: &str, new: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_source;
+
+    #[test]
+    fn trailing_call_comment_stays_outside_lambda_block() {
+        let source = r#"fn transfer(from: Shared<Account>, amount: Int) {
+    #Transact(tx) {
+        from.edit(a => { a.balance -= amount })  // both land, or neither
+    }
+}
+"#;
+        let formatted = format_source(source).expect("source should format");
+        let close = formatted.find("})").expect("lambda call should close");
+        let comment = formatted
+            .find("// both land, or neither")
+            .expect("trailing comment should survive");
+        assert!(close < comment, "comment moved into lambda:\n{formatted}");
+        assert_eq!(
+            formatted,
+            format_source(&formatted).expect("formatted source should re-format")
+        );
+    }
 }

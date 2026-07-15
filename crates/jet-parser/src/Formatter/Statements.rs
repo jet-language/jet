@@ -24,7 +24,7 @@ impl<'a> Fmt<'a> {
             }
             self.emit_leading(stmt_start(stmt));
             self.fmt_stmt(stmt);
-            self.emit_trailing(stmt_end(stmt));
+            self.emit_trailing(self.statement_source_end(stmt));
         }
     }
 

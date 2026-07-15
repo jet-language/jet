@@ -702,7 +702,9 @@ impl<'a> Fmt<'a> {
             crate::AST::LambdaBody::Block(stmts) => {
                 self.write("{");
                 self.newline();
-                self.with_indent(|f| f.fmt_block_stmts(stmts));
+                self.with_trailing_comment_limit(lam.span.end, |f| {
+                    f.with_indent(|f| f.fmt_block_stmts(stmts))
+                });
                 self.end_block();
             }
         }
@@ -942,7 +944,9 @@ impl<'a> Fmt<'a> {
                     if let crate::AST::LambdaBody::Block(stmts) = &lam.body {
                         self.write("{");
                         self.newline();
-                        self.with_indent(|f| f.fmt_block_stmts(stmts));
+                        self.with_trailing_comment_limit(lam.span.end, |f| {
+                            f.with_indent(|f| f.fmt_block_stmts(stmts))
+                        });
                         self.end_block();
                         return;
                     }

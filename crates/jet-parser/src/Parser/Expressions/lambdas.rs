@@ -1,5 +1,5 @@
 use super::super::{
-    Diagnostic, Lambda, LambdaBody, LambdaMeta, LambdaParam, Parser, Span, Stmt, TokKind,
+    Diagnostic, Lambda, LambdaBody, LambdaMeta, LambdaParam, Parser, Span, TokKind,
 };
 
 impl<'a> Parser<'a> {
@@ -115,61 +115,20 @@ impl<'a> Parser<'a> {
             &mut self,
             fallback_end: usize,
         ) -> Result<(LambdaBody, usize), Diagnostic> {
-            let body = if matches!(self.peek().kind, TokKind::LBrace) {
+            if matches!(self.peek().kind, TokKind::LBrace) {
                 self.expect(TokKind::LBrace, "to open the lambda body")?;
-                LambdaBody::Block(self.block_stmts())
+                let statements = self.block_stmts();
+                // `block_stmts` consumes the closing brace. Keep it in the
+                // lambda span: formatter comment ownership must distinguish a
+                // comment inside the lambda from one trailing the enclosing
+                // call on the same source line.
+                let end = self.toks[self.pos - 1].span.end;
+                Ok((LambdaBody::Block(statements), end))
             } else {
-                LambdaBody::Expr(Box::new(self.expr()?))
-            };
-            let end = match &body {
-                LambdaBody::Expr(e) => e.span().end,
-                LambdaBody::Block(stmts) => {
-                    if let Some(last) = stmts.last() {
-                        match last {
-                            Stmt::Expr(e) => e.span().end,
-                            Stmt::Return(_, s) => s.end,
-                            Stmt::Break(s)
-                            | Stmt::Continue(s)
-                            | Stmt::BreakLabel(_, s)
-                            | Stmt::ContinueLabel(_, s) => s.end,
-                            Stmt::If(i) => i.span.end,
-                            Stmt::While { span, .. }
-                            | Stmt::For { span, .. }
-                            | Stmt::Switch { span, .. } => span.end,
-                            Stmt::Val(b) => b.init.span().end,
-                            Stmt::Assign { value, .. } => value.span().end,
-                            Stmt::Loop { span: s, .. } | Stmt::CountedLoop { span: s, .. } => s.end,
-                            Stmt::Unsafe { span, .. } => span.end,
-                            Stmt::Impure { span, .. } => span.end,
-                            Stmt::Reactive { span, .. } => span.end,
-                            Stmt::Shield { span, .. } => span.end,
-                            Stmt::Off { span, .. } => span.end,
-                            Stmt::DebugOnly { span, .. } => span.end,
-                            Stmt::Region { span, .. } => span.end,
-                            Stmt::TaskGroup { span, .. } => span.end,
-                            Stmt::Layout { span, .. } => span.end,
-                            Stmt::Caps { span, .. } => span.end,
-                            Stmt::Grant { span, .. } => span.end,
-                            Stmt::ComptimeBlock { span, .. } => span.end,
-                            Stmt::ComptimeIf { span, .. } => span.end,
-                            Stmt::ComptimeSwitch { span, .. } => span.end,
-                            Stmt::ContextBlock { span, .. } => span.end,
-                            // D-TERM1 (ratified 2026-06-22): live block span end.
-                            Stmt::Live { span, .. } => span.end,
-                            // D-DOTSCOPE1: `.name { … }` scope member span end.
-                            Stmt::ScopeMember { span, .. } => span.end,
-                            // D-DET1: assume_deterministic block span end.
-                            Stmt::AssumeDet { span, .. } => span.end,
-                            // D-TXN1–D-TXN4: transaction block span end.
-                            Stmt::Transact { span, .. } => span.end,
-                            Stmt::Yield(e, _) => e.span().end,
-                        }
-                    } else {
-                        fallback_end
-                    }
-                }
-            };
-            Ok((body, end))
+                let expression = self.expr()?;
+                let end = expression.span().end.max(fallback_end);
+                Ok((LambdaBody::Expr(Box::new(expression)), end))
+            }
         }
     
         /// D-TASKSCOPE1=A: `{ stmts }` after `.task` → `() => { stmts }`.
