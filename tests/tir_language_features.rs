@@ -165,7 +165,7 @@ fn run() {
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
 /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).user_x`;
-/// destructure `(a, b) :: copy p` → the borrow-temp + per-field `.clone()` form;
+/// destructure `(a, b) :: ~p` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
 fn named_tuples() {
@@ -180,7 +180,7 @@ fn run() {
     p :: (x: 1, y: 2)
     q :: (y: 3, x: 4)
     same_shape :: (p == q)
-    (a, b) :: copy p
+    (a, b) :: ~p
     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
     pair :: bounds()
     print(\"{pair.min} {pair.max}\")

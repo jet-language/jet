@@ -149,7 +149,7 @@ fn run() {
 
 /// E0209 liveness gate (was D-L0201): when the value is still used after the
 /// call, `^` would break that later use — E0209 still fires (hard error), but
-/// the fix menu offers `copy name`/reorder instead of `^`.
+/// the fix menu offers `~name`/reorder instead of `^`.
 #[test]
 fn implicit_clone_errors_with_reorder_menu_when_live_after_call() {
     let src = r#"

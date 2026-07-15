@@ -180,7 +180,7 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     ),
     (
         "capability-sigils",
-        &["^T", "&T", "copy x", "p.*", "edit", "share"],
+        &["^T", "&T", "~x", "p.*", "edit", "share"],
     ),
     (
         "maturity-markers",

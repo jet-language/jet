@@ -22,7 +22,7 @@ fn count_lines(text: String) -> Int {
 }
 
 fn scan_one(path: String) -> String {
-    text :: fs.read(copy path) ?? return "{path}: unreadable"
+    text :: fs.read(~path) ?? return "{path}: unreadable"
     lines :: count_lines(text)
     return "{path}: {lines} lines, {text.len()} chars"
 }
@@ -48,7 +48,7 @@ fn paths_from_prompt() -> [String] {
     print("Enter file paths (blank line when done):")
     out: [String] := []
     loop true {
-        raw :: io.input("> ") ?? return copy out
+        raw :: io.input("> ") ?? return ~out
         if raw == "" {
             break
         }
@@ -74,8 +74,8 @@ fn scan_parallel(paths: [String]) -> [String] {
     i := 0
     loop i < paths.len() {
         if paths.get(i) == Val(path) {
-            tx :: copy sender
-            file :: copy path
+            tx :: ~sender
+            file :: ~path
             workers.push(tasks.spawn(take(tx, file) () => {
                 tx.send(scan_one(file))
             }))

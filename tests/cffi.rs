@@ -927,7 +927,7 @@ fn load(id: U64) -> Record ? String {
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = store.store_load(id, p)
-        if status.to_int() == 0 { slot = copy p.* }
+        if status.to_int() == 0 { slot = ~p.* }
     }
     if status.to_int() != 0 { return err("status {status}") }
     return ok(slot)

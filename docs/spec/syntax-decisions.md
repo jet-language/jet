@@ -1002,7 +1002,7 @@ receiver-type check — capacity headroom isn't provable statically); a
 struct/enum literal for a type that owns heap data directly or transitively
 (`String`/`[T]`/`[K,V]`/`Shared<T>`/`Pool<T>`, walked through struct fields
 and enum variant payloads — `Id<T>` is plain `Copy` data, never flagged);
-`copy` of a heap-owning type. A bare list/map literal outside those four
+`~` of a heap-owning type. A bare list/map literal outside those four
 shapes (`xs := [1, 2, 3]`) is NOT checked — a deliberate, ratified-text-exact
 scope cut, not silently expanded. **S8 shipped (2026-07-04)**: docs sweep —
 diagnostics.md retired-code stubs for every deleted S1-S7 mechanism,
@@ -1010,6 +1010,19 @@ spec.md's memory chapter rewritten to v5 end to end, this file's
 D-CAP7/D-CAP8/D-CAP4-5-6/D-REF-SHORTHAND1/2 supersession notes, stale
 `~`/`.clone()`/`api:` sweep across docs/reference. S9 (final verification
 gate) remains.
+
+**D-SHAPE-COPY1=A — the one copy sigil, `~x`** *(ratified 2026-07-15,
+card #535)*: supersedes D-CAP2/S4's `copy x` word. `~x` is a prefix-verb
+expression producing an independent duplicate, legal in any position;
+chained on a method call it needs parentheses (`(~input).rotate()`); on a
+non-cloneable type it is still E0211. The `copy` keyword is retired to a
+teaching error, E0991, pointing at `~`, mirroring how D-MEM1/S10 retired
+`mut`/`take` to E0056/E0057. This also reopens D-MEM1's "`~` is not part of
+the v5 grammar" decree for the copy sigil specifically — `~` still has no
+role as a parameter-position capability (that stays `&`/`^` only; a `~`
+parameter/place sigil is D-SHAPE-PLACE1, a separate, still-open ballot).
+D-SHAPE-LIFECYCLE's `^^` (never implemented — zero code hits, paused
+pending this ballot) is superseded and retired outright, never shipping.
 
 **D-MUTSELF1 — Receiver mutation**: a `&self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
@@ -1031,7 +1044,7 @@ borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 *(ratified/implemented 2026-07-04)*: `tasks.channel<T>()` returns
 `(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
 `.sender()` method. Destructure with the existing S74 tuple form:
-`(tx, rx) := tasks.channel<T>()`; a second sender is `copy tx`. A
+`(tx, rx) := tasks.channel<T>()`; a second sender is `~tx`. A
 `Receiver<T>` is what `g.select().recv(rx)` takes.
 
 **D-STM1=A — atomic memory transactions** *(ratified by owner

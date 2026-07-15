@@ -94,7 +94,7 @@ fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
     let src = r#"
 module Boxed<T, size: Int> {
     struct Box { value: T }
-    fn identity(value: Box) -> Box { return copy value }
+    fn identity(value: Box) -> Box { return ~value }
 }
 
 module Other<T, size: Int> { struct Box { value: T } }
@@ -104,9 +104,9 @@ module Forward = Equivalent
 module DifferentType = Boxed<String, 3>
 module DifferentValue = Boxed<Int, 4>
 module DifferentTemplate = Other<Int, 3>
-fn accepts_first(value: First__Box) -> First__Box { return copy value }
-fn accepts_projection(value: Equivalent__Box) -> First__Box { return copy value }
-fn accepts_chain(value: Forward__Box) -> First__Box { return copy value }
+fn accepts_first(value: First__Box) -> First__Box { return ~value }
+fn accepts_projection(value: Equivalent__Box) -> First__Box { return ~value }
+fn accepts_chain(value: Forward__Box) -> First__Box { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -148,7 +148,7 @@ use templates.{Boxed, Other}
 module Second = Boxed<Int, 3>
 module DifferentArg = Boxed<Int, 4>
 module DifferentTemplate = Other<Int, 3>
-fn accepts_projection(value: Second__Box) -> First__Box { return copy value }
+fn accepts_projection(value: Second__Box) -> First__Box { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check_modules(&[
@@ -215,7 +215,7 @@ fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph()
     let src = r#"
 module Laws<T> {
     tag Audited;
-    fn audited(value: #Audited T) -> #Audited T { return copy value }
+    fn audited(value: #Audited T) -> #Audited T { return ~value }
     trait Reveal { type Output; fn reveal(self) -> T }
     struct Wrapped { value: T }
     impl Wrapped.Reveal { type Output = T; fn reveal(self) -> T { return self.value } }

@@ -506,7 +506,7 @@ fn channel_send_receive() {
 use core.tasks as tasks
 fn run() {
 (s1, ch) :: tasks.channel<Int>()
-    s2 :: copy s1
+    s2 :: ~s1
     t1 :: tasks.spawn(take(s1) () => {
         s1.send(30)
     })

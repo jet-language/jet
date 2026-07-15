@@ -18,6 +18,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/chained_comparison_mixed_direction.jet",
     "tests/ui/context_eq_rejected.jet",
     "tests/ui/context_unknown_field.jet",
+    "tests/ui/copy_keyword_retired_e0991.jet",
     "tests/ui/core_reserved_shadow/scoring.jet",
     "tests/ui/core_selective_import.jet",
     "tests/ui/debug_unknown_selector.jet",

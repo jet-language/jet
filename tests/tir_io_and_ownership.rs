@@ -78,7 +78,7 @@ use core.io as io
 fn collect() -> [String] {
     out: [String] := []
     loop true {
-        line :: io.input(\"> \") ?? return copy out
+        line :: io.input(\"> \") ?? return ~out
         if line == \"\" {
             break
         }

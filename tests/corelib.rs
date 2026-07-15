@@ -1554,7 +1554,7 @@ fn run() {{
     if tight_first == {{
         ok(_) -> panic("combined key/chunk budget missed")
         err(first) -> {{
-            print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, copy first.reason))
+            print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, ~first.reason))
         }}
     }}
 
@@ -1582,7 +1582,7 @@ fn run() {{
     duplicate_first :: duplicate_reader.next()
     if duplicate_first == {{
         err(first) -> {{
-            print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, copy first.reason))
+            print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, ~first.reason))
         }}
         ok(_) -> print(false)
     }}
@@ -6069,7 +6069,7 @@ struct Email { addr: String }
 
 impl Email.Encode {
     fn encode(self) -> DataTree {
-        m: [String: DataTree] :: ["email": DataTree.Text(copy self.addr)]
+        m: [String: DataTree] :: ["email": DataTree.Text(~self.addr)]
         return DataTree.Object(m)
     }
 }

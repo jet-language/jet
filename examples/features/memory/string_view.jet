@@ -14,16 +14,16 @@ fn run() {
     // still works (this is a read, not a move) — proving the view didn't
     // take ownership away from its owner.
     print("padded still readable: {padded}")
-    // `email` is itself a view (`padded.trim()`); only `copy` can carry a
+    // `email` is itself a view (`padded.trim()`); only `~` can carry a
     // view past its own scope — into another call, a struct field, another
     // binding, or a return (E2307 otherwise; see
     // tests/ui/string_view_outlives_owner.jet).
-    print("escaped copy={domain_of(copy email)}")
+    print("escaped copy={domain_of(~email)}")
 }
 
 fn domain_of(s: String) -> String {
     d :: s.after("@")
-    return copy d
+    return ~d
 }
 
 #Bench("string view: after/before/trim, no owning materialization") {

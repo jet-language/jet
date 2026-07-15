@@ -1410,9 +1410,10 @@ fn run() {
 }
 
 #[test]
-fn fmt_copy_verb_d_cap2_stability() {
-    // D-CAP2 (D-MEM1/S4): `copy x` is a prefix-verb expression — must survive
-    // fmt unchanged in binding position, call-arg position, and on a field.
+fn fmt_copy_sigil_d_shape_copy1_stability() {
+    // D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `~x` is a prefix-verb
+    // expression — must survive fmt unchanged in binding position, call-arg
+    // position, and on a field.
     let src = "\
 struct Ticket {
     id: Int
@@ -1425,20 +1426,20 @@ fn archive(t: ^Ticket) -> String {
 
 fn run() {
     name: String :: \"vault\"
-    saved :: copy name
+    saved :: ~name
     t :: Ticket.{id: 1, label: \"root\"}
-    print(archive(copy t))
-    print(copy t.label)
+    print(archive(~t))
+    print(~t.label)
 }
 ";
     assert_fmt_keeps(
         src,
         &[
-            "saved :: copy name",
-            "print(archive(copy t))",
-            "print(copy t.label)",
+            "saved :: ~name",
+            "print(archive(~t))",
+            "print(~t.label)",
         ],
-        "D-CAP2 copy verb",
+        "D-SHAPE-COPY1 copy sigil",
     );
 }
 
@@ -2256,7 +2257,7 @@ fn fmt_preserves_per_function_c_abi() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module Ring<T, capacity: Int> {
 pub struct Buffer { slots: [T#capacity] }
-module Nested<U> { pub fn keep(value: U) -> U { return copy value } }
+module Nested<U> { pub fn keep(value: U) -> U { return ~value } }
 module Inner = Nested<T>
 pub fn adjusted() -> Int { return capacity + 1 }
 }

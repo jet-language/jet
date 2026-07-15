@@ -165,6 +165,7 @@ impl<'a> Parser<'a> {
                     | TokKind::LParen
                     | TokKind::Minus
                     | TokKind::Bang
+                    | TokKind::Tilde
                     | TokKind::KwCopy
             )
         }

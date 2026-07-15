@@ -2121,7 +2121,7 @@ checker enforces both:
 - using a view after `reset()`/`free()` → **E0632**.
 
 Both are compile errors, so a dangling arena pointer can never run. Copy what you
-need out (`copy x`) before it leaves the region.
+need out (`~x`) before it leaves the region.
 
 For the cases scope-inference is too coarse — a region spanning two allocators, or
 narrower than the function — write an explicit **`region r { … }`** block:

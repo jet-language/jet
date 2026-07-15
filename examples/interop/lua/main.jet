@@ -10,8 +10,8 @@ struct Payload {
 fn run() #(Lua, Io) {
     session :: ops.open() ?? panic("Lua open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Null]), "scalar": DataTree.Float(3.5)])
-    print(json.canonical(ops.transform(session, copy input, 5000) ?? panic("first call failed")))
-    print(json.canonical(ops.transform(session, copy input, 5000) ?? panic("second call failed")))
+    print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("first call failed")))
+    print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("second call failed")))
     payload :: Payload.{ name: "typed", values: [2, 4, 8] }
     echoed :: ops.echo_typed<Payload>(session, payload, 5000) ?? panic("typed call failed")
     print("{echoed.name}:{echoed.values.len()}")

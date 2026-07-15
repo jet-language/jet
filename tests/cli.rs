@@ -2521,8 +2521,8 @@ use core.encoding.json as json
 fn run() #(PowerShell, Io) {
     session :: ops.open() ?? panic("PowerShell open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
-    first :: ops.Get_Stateful(session, copy input, 5000) ?? panic("first call failed")
-    second :: ops.Get_Stateful(session, copy input, 5000) ?? panic("second call failed")
+    first :: ops.Get_Stateful(session, ~input, 5000) ?? panic("first call failed")
+    second :: ops.Get_Stateful(session, ~input, 5000) ?? panic("second call failed")
     print(json.canonical(first))
     print(json.canonical(second))
     failed :: ops.Fail(session, DataTree.Null, 5000) ?? DataTree.Text("failed")

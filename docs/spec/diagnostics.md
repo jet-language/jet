@@ -159,7 +159,7 @@ renumbered, and no new `W` code may be allocated.
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
 | E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
 | E0999 | parse | teaching: stacked `#[…]` marker lines → one `#[A, B]` list or lone `#A` (D-ATTR2) |
-| E0991 | parse | teaching: retired `copy` keyword → `~` sigil (D-SHAPE-COPY1=A, supersedes D-CAP2/S4) |
+| E0991 | parse | teaching: the old `copy` keyword → `~` sigil (D-SHAPE-COPY1=A, supersedes D-CAP2/S4) |
 | E0101 | sema  | no `run` function                         |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -851,7 +851,7 @@ named cell.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`copy x`) before crossing. |
+| E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`~x`) before crossing. |
 | E2305 | A `View<T>` (`list.view(a..b)`) escapes the scope of the list it borrows from — returned from a function that owns the list, rebound to another local, or stored in a struct field. | `.view(a..b)` is a zero-copy window into the list's own backing storage, not a copy; if the list is made and freed inside this function (or scope), a window into it would outlive what owns it — there'd be nothing left to look at. | Return/store an owned copy instead (`list[a..b]` for a copying slice, or `.map(...)` the window into an owned list), or accept the list as a parameter so the caller keeps owning it. |
 | E2307 | A string view (`s.trim()`/`s.after(sep)`/`s.before(sep)` bound to a local) escapes the scope of the `String` it borrows from — returned, rebound to another local, or stored in a struct field. | These calls return a zero-copy `&str` window into `s`'s own buffer when sema can prove it stays inside `s`'s scope (D-MEM1 S5); if `s` is made and freed inside this function (or scope), the window would outlive what owns it. | Keep the view inside the owner's scope, or materialize an owned `String` with `copy` before it leaves. |
 
