@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 622,
-    "rev": 7233,
+    "rev": 7237,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18042,6 +18042,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "codex-json-reviewer",
+          "text": "Independent verifier confirmed conservative untyped JSON core-call boundary, existing E2201 translation, and exact default/AOT parity with timestamp-only normalization. Narrow regression passes in 7.36s; full dev passes 65/65 in 242.70s. Criteria 1-3 verified; criterion 4 remains open for parent full-suite gate."
+        },
+        {
+          "at": "2026-07-15",
           "by": "codex-json-builder",
           "text": "Regression-first repair complete. New narrow test failed on the old interpreter silently running without audit stderr, then passed after the comptime core-call became an honest E2201 boundary. Removed the obsolete coercion walker. Exact regression passes in 7.34s; full dev passes 65/65 in 227.18s. Criteria 1-3 met; parent full gate remains."
         }
@@ -18050,29 +18055,29 @@
         {
           "n": 1,
           "text": "Interpreter/default-dev and AOT produce identical normalized stdout, structured coercion audit stderr, and exit code for serde/json_coerce; no observable coercion event is dropped or duplicated.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-json-builder",
-          "verifiedBy": null,
-          "evidence": "Narrow regression proves interpreter mode returns E2201 instead of dropping audit effects, while default dev transparently AOT-runs and exactly matches separately compiled AOT after timestamp-only normalization: stdout 8081/api/true, exit 0, and exactly two stderr records.",
-          "at": "2026-07-15T02:35:21.492Z"
+          "verifiedBy": "codex-json-reviewer",
+          "evidence": "Independent exact regression passes in 7.36s: forced interpreter stops at named E2201 rather than dropping effects; default dev AOT-fallback output equals separate AOT after timestamp-only normalization, with stdout 8081/api/true, exit 0, and exactly two ordered structured coercion records. Full dev passes 65/65 in 242.70s, including both parity batteries.",
+          "at": "2026-07-15T02:44:01.203Z"
         },
         {
           "n": 2,
           "text": "JSON lenient coercion execution follows shared executable TIR or an explicit honest fallback; sema owns validity and codegen remains dumb.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-json-builder",
-          "verifiedBy": null,
-          "evidence": "The comptime core-call capability seam now rejects effectful untyped JSON lenient decode because the interpreter has no runtime log-effect semantics. Default dev uses its existing explicit AOT fallback and shared sema-checked executable TIR; codegen is unchanged and no logs are synthesized or dropped.",
-          "at": "2026-07-15T02:35:21.589Z"
+          "verifiedBy": "codex-json-reviewer",
+          "evidence": "Independent dispatch trace confirms typed decode<T> routes earlier through eval_typed_decode; only untyped lenient core.encoding.json.decode reaches the effectful core-call arm. That authoritative interpreter seam returns E0956, existing dev translation emits honest E2201, and default Cranelift/AOT ladder executes the sema-checked native TIR. Codegen and sema are unchanged; no audit synthesis or semantic checking moved downstream.",
+          "at": "2026-07-15T02:44:09.516Z"
         },
         {
           "n": 3,
           "text": "A regression proves boolean and numeric coercion records, exact field names/order, and timestamp-only normalization; full dev target passes without syntax, diagnostic, dependency, unsafe, or owner decision changes.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-json-builder",
-          "verifiedBy": null,
-          "evidence": "Regression pins enabled string-to-boolean then port string-to-number records, exact level/body/ts field order, stdout, exit code, and only normalizes numeric ts values. Full dev target passes 65/65 in 227.18s; interpreter battery reports 0 divergences and default battery reports 0 divergences. No syntax, diagnostic, dependency, unsafe, or owner choice changed.",
-          "at": "2026-07-15T02:35:21.684Z"
+          "verifiedBy": "codex-json-reviewer",
+          "evidence": "Regression is non-vacuous: it requires E2201 in forced-interpreter mode, exact stdout/exit, exactly two stderr lines in boolean-then-number field order, and exact JSON field/body text. normalize_json_log_timestamps replaces only consecutive digits immediately after the ts key; every other byte remains pinned. Commit changes comptime behavior plus test/Tower evidence only, removing obsolete silent coercion walker; no syntax, diagnostic code, dependency, unsafe, or owner decision change. Full dev passes 65/65.",
+          "at": "2026-07-15T02:44:15.988Z"
         },
         {
           "n": 4,
@@ -36951,6 +36956,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T02:44:22.166Z",
+      "by": "codex-json-reviewer",
+      "action": "card.update",
+      "ref": "c02ahrf4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T02:44:15.988Z",
+      "by": "codex-json-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c02ahrf4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T02:44:09.516Z",
+      "by": "codex-json-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c02ahrf4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T02:44:01.203Z",
+      "by": "codex-json-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c02ahrf4",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T02:36:20.610Z",
       "by": "terra-420-builder",
       "action": "card.release",
@@ -40421,34 +40454,6 @@
       "action": "card.delete",
       "ref": "c0bkb5ik",
       "note": "Choose build and target variation"
-    },
-    {
-      "at": "2026-07-14T23:05:56.877Z",
-      "by": "codex-main",
-      "action": "decision.delete",
-      "ref": "D-ECO-VARIANT2",
-      "note": "How does one graph express build variants?"
-    },
-    {
-      "at": "2026-07-14T23:04:47.065Z",
-      "by": "codex-cli-builder",
-      "action": "card.update",
-      "ref": "c0x3pi8i",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-14T23:04:46.938Z",
-      "by": "codex-cli-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0x3pi8i",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-14T23:04:46.842Z",
-      "by": "codex-cli-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0x3pi8i",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
