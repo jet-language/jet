@@ -17,6 +17,9 @@
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
 // stays valid. D-SHAPE6 adds no Jet source token; grouped tool commands remain
 // owned by the single registry in crates/jet-cli/src/CLI.rs.
+// D-ECO-DECL1=A adds no spelling: ecosystem entries reuse ordinary named
+// fields and D-DOTCTOR1 `Type.{ ... }` construction. D-ECO-ROOTNAME1 still
+// owns the root noun; #560 owns executable source and tooling behavior.
 
 mod core_surface;
 pub use core_surface::*;

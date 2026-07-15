@@ -2410,6 +2410,44 @@ inventory are implemented by #587; language-wide shape enforcement is owned by
 #560. Aliases, default selection, and callable entry linking remain separate
 choices and are not implied by D-SHAPE5b.
 
+**D-ECO-DECL1=A — Ecosystem entries are normal named typed values**
+*(ratified 2026-07-15, card #615)*: each package, environment, check, service,
+image, fleet, and system is an ordinary named field whose value uses the
+existing D-DOTCTOR1 `Type.{ field: value }` constructor. The root value has
+typed sections; section-qualified names such as `packages.api`,
+`services.web`, and `images.server` are stable references within that root.
+The root type remains written here as `<Root>` until D-ECO-ROOTNAME1 chooses
+its noun.
+
+```text
+root: <Root> :: <Root>.{
+    packages: {
+        api: Package.{ source: "apps/api" }
+    }
+    checks: {
+        unit: Check.{ run: packages.api.tests }
+    }
+    services: {
+        web: Service.{ run: packages.api }
+    }
+    images: {
+        server: Image.{ services: [services.web] }
+    }
+    systems: {
+        home: System.{ image: images.server }
+    }
+}
+```
+
+This is normative future source behavior, not an executable spelling today.
+There is no per-kind parser or evaluator. Package and role declarations are
+replaced only after #560 lands the source gate; ordinary Jet modules remain
+ordinary modules and are unchanged. #560 owns parser, sema, TIR, formatter,
+hover, inspection, Canvas, templates, migration, editor support, and acceptance
+for this shape. D-ECO-DECL1 adds no keyword, sigil, `Syntax.rs` constant,
+parser production, grammar form, diagnostic, snapshot, or executable example
+by itself.
+
 **D-ECO-EXTENSION1=A — Extensions are ordinary typed Jet functions**: an
 extension accepts typed settings and returns a closed typed graph value. The
 returned value follows the same validation, authority checks, composition law,
@@ -3804,7 +3842,6 @@ implementation milestone is pending.
 | ID | Question | Needed by |
 | --- | -------- | --------- |
 | D-ECO1 | which project concepts share one semantic graph | **Epoch 4** — Tower #532 |
-| D-ECO-DECL1 | one source shape for packages through JetOS systems | **Epoch 4** — Tower #615 |
 | D-ECO-SOURCE1 | whether one `project.jet` replaces the current role-file division | **Epoch 4** — Tower #610 |
 | D-ECO-JETOS2 | how the project graph becomes JetOS and activates safely | **Epoch 4** — Tower #609 |
 | D-SHAPE-INTERNAL1 | whether public `_name` marks unsupported API | **Epoch 3** — Tower #551 |

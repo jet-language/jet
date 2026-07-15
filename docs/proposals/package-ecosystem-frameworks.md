@@ -4,21 +4,28 @@
 > ballots are archived research. D-ECO-COMPOSE2=A now fixes order-independent
 > typed composition, and D-ECO-EXTENSION1=A fixes ordinary typed Jet functions
 > as the extension contract. D-ECO-RECEIPT2=A fixes one connected record from
-> exact inputs through activation proof and parent generation. Four focused live
-> ballots still decide graph scope, declaration shape, source control, and
-> JetOS lifecycle.
+> exact inputs through activation proof and parent generation.
+> D-ECO-DECL1=A fixes every ecosystem entry as an ordinary named typed value
+> using the existing `Type.{ ... }` constructor and stable section-qualified
+> references. That source shape is ratified but not executable: #560 owns its
+> source gate and tooling, while D-ECO-ROOTNAME1 still owns the root noun.
+> Remaining ballots decide graph scope, the root noun, source control, and JetOS
+> lifecycle.
 > `project.jet` is an option only in D-ECO-SOURCE1; current
 > `pkg.jet` / `env.jet` / `workspace.jet` law remains until that vote. Nothing
 > below authorizes syntax.
 
 ## Archived three-framework comparison
 
-## Current architecture under decision
+## Ratified direction and remaining architecture decisions
 
 The new ballots test one coherent model, not unrelated syntax samples:
 
 1. D-ECO1 chooses whether package through JetOS share one semantic graph.
-2. D-ECO-DECL1 chooses one ordinary Jet shape for every project part.
+2. D-ECO-DECL1=A fixes ordinary named typed values for every ecosystem part.
+   Each root section provides stable qualified references; there is no per-kind
+   parser. This is normative future behavior, not executable today; #560 owns
+   the source gate and tooling, and D-ECO-ROOTNAME1 still chooses `<Root>`.
 3. D-ECO-SOURCE1 alone may replace the current role-file division.
 4. D-ECO-EXTENSION1=A fixes ordinary Jet functions returning closed typed
    graph values. Those values use normal validation, authority, composition,
