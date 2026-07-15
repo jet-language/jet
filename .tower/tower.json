@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 620,
-    "rev": 7130,
+    "rev": 7133,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17643,6 +17643,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "codex-csv-reviewer",
+          "text": "Independent verifier traced sema-owned Result<List<T>,DecodeError> through TIR to canonical CSV row-target projection. Compile-only regression passes in 0.06s; exact typed CSV runtime passes in 3.26s. Criteria 1-2 verified. Criteria 3-4 remain open for parent corelib/full-suite verification."
+        },
+        {
+          "at": "2026-07-15",
           "by": "codex-csv-builder",
           "text": "Regression-first trace: old compile-only test failed on generated jet_enc_csv_decode::<Vec<user_Ticket>>, proving nested Vec construction. After TIR repair, compile-only test passes in 0.06s and exact core_data runtime passes in 3.40s. Full corelib could not start: unrelated crates/jet-foundation/src/CliSchema.rs references missing elf_sections, pe_sections, wasm_sections, is_mach, and mach_sections. Criteria 3-4 remain open; card stays building pending upstream repair and parent verification."
         }
@@ -17651,20 +17656,20 @@
         {
           "n": 1,
           "text": "Typed CSV decoding of [Ticket] and [Budget] yields one list layer (Vec<T>), never Vec<Vec<T>>; scalar and nested-field decoding remain correct.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-csv-builder",
-          "verifiedBy": null,
-          "evidence": "Compile-only regression proves core.data.csv<Ticket> emits jet_enc_csv_decode::<Ticket>, never jet_enc_csv_decode::<Vec<Ticket>>. Exact core_data runtime decodes Ticket and Budget to one Vec layer and preserves String/Float fields plus nested join-field access; test passes in 3.40s.",
-          "at": "2026-07-15T01:15:05.712Z"
+          "verifiedBy": "codex-csv-reviewer",
+          "evidence": "Independent source trace confirms sema resolves core.data.csv<T> to Result<List<T>,DecodeError>; TIR carries resolved_ret; emission reuses enc_row_target_rust to instantiate jet_enc_csv_decode::<T>. Regression asserts Ticket positively and rejects Vec<Ticket>; exact compile-only passes in 0.06s and runtime Ticket/Budget decode passes in 3.26s, preserving scalar and nested-field behavior.",
+          "at": "2026-07-15T01:26:47.917Z"
         },
         {
           "n": 2,
           "text": "Sema/TIR owns and validates the exact decode result shape before codegen; no user-visible rustc diagnostic can escape for the regression.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-csv-builder",
-          "verifiedBy": null,
-          "evidence": "Sema already resolves core.data.csv<T> as Result<List<T>,DecodeError>. TIR emitter now consumes that resolved list element through enc_row_target_rust, matching core.encoding.csv; codegen performs no inference. Compile-only front-end regression passes and exact runtime reaches rustc successfully.",
-          "at": "2026-07-15T01:15:05.810Z"
+          "verifiedBy": "codex-csv-reviewer",
+          "evidence": "Independent review confirms resolved return shape originates in CheckerCoreLib and flows through polymorphic-special TIR lowering into CoreCall TExpr.ty. Emitter only projects sema-owned List element; no rustc feedback or codegen semantic checking. Exact compile and runtime regressions pass without user-visible rustc diagnostics.",
+          "at": "2026-07-15T01:26:52.646Z"
         },
         {
           "n": 3,
@@ -36373,6 +36378,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T01:26:58.423Z",
+      "by": "codex-csv-reviewer",
+      "action": "card.update",
+      "ref": "c05t6xnx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T01:26:52.646Z",
+      "by": "codex-csv-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c05t6xnx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T01:26:47.917Z",
+      "by": "codex-csv-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c05t6xnx",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T01:23:50.821Z",
       "by": "codex-corelib-reviewer",
       "action": "card.update",
@@ -39850,27 +39876,6 @@
       "action": "card.delete",
       "ref": "c0za7t6n",
       "note": "Choose how commands nest into subcommands"
-    },
-    {
-      "at": "2026-07-14T22:11:52.051Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0u71s8l",
-      "note": "Choose how command fields map to shell inputs"
-    },
-    {
-      "at": "2026-07-14T22:11:51.954Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0g2m4qi",
-      "note": "Choose how an output alias is represented"
-    },
-    {
-      "at": "2026-07-14T22:11:51.864Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c014fl27",
-      "note": "Open effect-row spelling"
     }
   ],
   "nextNum": 368,
