@@ -2445,6 +2445,24 @@ lockfile is the single **`.jet/lock`** (U2); `.jet/` holds only generated
 state; shared store is the hangar at `/etc/jet/hangar/`. `pack.jet`,
 `payload.jet`, `jet.toml` are dead names.
 
+**D-ECO-ENV1=A — One typed environment output is the source of truth**: an
+`Environment` is a package output. `jet dev`, tasks, editors, and CI are
+projections of that same checked value rather than separate setup recipes.
+Imperative environment actions remain possible only when capability-scoped and
+audited inside the same graph.
+
+The structural `env.jet` model described above is a stopgap. Its current
+existence does not mean the environment is already unified with the typed
+package graph. #587 owns the typed output collection and capability mapping;
+#560 owns language-wide enforcement. Their implementation remains gated by the
+project graph, composition, and receipt decisions on #532, #605, and #608.
+
+D-ECO-ENV1 does not choose the tool inventory or `Environment` field schema,
+service/task/CI mappings, hook or shell spelling, source placement or
+composition, receipts, or lifecycle behavior. It adds no token, `Syntax.rs`
+entry, parser or runtime behavior, grammar rule, diagnostic, snapshot, or
+executable example by itself.
+
 **U10 — payload → packages → modules**: a payload (one `pkg.jet`) lists its
 packages in `packages: { name: … }`; a package **is** a top-level `module` —
 its module name is its identity, its file is discovered by walking the tree
