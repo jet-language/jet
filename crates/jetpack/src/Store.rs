@@ -85,6 +85,31 @@ fn fsync_tree(path: &Path) -> std::io::Result<()> {
     sync_store_node(path, meta.is_dir())
 }
 
+#[cfg(any(test, windows))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowsDirectorySyncContract {
+    read: bool,
+    write: bool,
+    share_mode: u32,
+    custom_flags: u32,
+}
+
+#[cfg(any(test, windows))]
+fn windows_directory_sync_contract() -> WindowsDirectorySyncContract {
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+    WindowsDirectorySyncContract {
+        read: true,
+        write: true,
+        share_mode: FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        custom_flags: FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+    }
+}
+
 fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
     if !directory {
         return fs::File::open(path)?.sync_all();
@@ -97,18 +122,15 @@ fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
     {
         use std::os::windows::fs::OpenOptionsExt as _;
 
-        const FILE_SHARE_READ: u32 = 0x0000_0001;
-        const FILE_SHARE_WRITE: u32 = 0x0000_0002;
-        const FILE_SHARE_DELETE: u32 = 0x0000_0004;
-        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        let contract = windows_directory_sync_contract();
 
         // BACKUP_SEMANTICS is the Win32 directory-open contract. sync_all is
         // std's durable FlushFileBuffers-equivalent for the resulting handle.
         return fs::OpenOptions::new()
-            .read(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .read(contract.read)
+            .write(contract.write)
+            .share_mode(contract.share_mode)
+            .custom_flags(contract.custom_flags)
             .open(path)?
             .sync_all();
     }

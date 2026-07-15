@@ -1378,28 +1378,12 @@ mod tests {
     }
 
     #[test]
-    fn store_tree_sync_has_platform_directory_contracts() {
-        let source = include_str!("../Store.rs");
-        let function = source
-            .split("fn sync_store_node")
-            .nth(1)
-            .unwrap()
-            .split("#[derive(Debug, Clone, PartialEq, Eq)]")
-            .next()
-            .unwrap();
-        for required in [
-            "#[cfg(unix)]",
-            "#[cfg(windows)]",
-            "std::os::windows::fs::OpenOptionsExt",
-            "FILE_FLAG_BACKUP_SEMANTICS",
-            "FILE_FLAG_OPEN_REPARSE_POINT",
-            ".share_mode(",
-            ".custom_flags(",
-            ".sync_all()",
-        ] {
-            assert!(function.contains(required), "missing directory sync law: {required}");
-        }
-        assert!(!function.contains("unsafe"));
+    fn windows_directory_sync_contract_requests_flushable_handle() {
+        let contract = windows_directory_sync_contract();
+        assert!(contract.read);
+        assert!(contract.write, "FlushFileBuffers requires GENERIC_WRITE");
+        assert_eq!(contract.share_mode, 0x0000_0001 | 0x0000_0002 | 0x0000_0004);
+        assert_eq!(contract.custom_flags, 0x0200_0000 | 0x0020_0000);
     }
 
     #[cfg(windows)]
