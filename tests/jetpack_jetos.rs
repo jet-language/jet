@@ -395,8 +395,8 @@ fn os_build_realizes_selected_system_offline() {
         String::from_utf8_lossy(&cached.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&cached.stderr).contains("cached"),
-        "second generation must exercise leased cache paths: {}",
+        !String::from_utf8_lossy(&cached.stderr).contains("resolving"),
+        "an exact published retry must validate in place without rebuilding: {}",
         String::from_utf8_lossy(&cached.stderr)
     );
     // A generation directory was assembled under the managed system store.
@@ -460,6 +460,8 @@ fn os_build_realizes_selected_system_offline() {
 #[test]
 fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
     let root = Scratch::new("os-generation-root-recovery");
+    let project = Scratch::new("os-generation-root-project");
+    copy_dir_recursive(&config_example_dir(), &project.path);
     let run = |failpoint: Option<&str>| {
         let mut command = jet();
         command
@@ -472,7 +474,7 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
                 "--no-color",
                 "--offline",
             ])
-            .current_dir(config_example_dir())
+            .current_dir(&project.path)
             .env("JETPACK_ROOT", &root.path)
             .env("PATH", "/usr/bin:/bin");
         if let Some(failpoint) = failpoint {
@@ -481,10 +483,27 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
         command.output().unwrap()
     };
 
-    let interrupted = run(Some("after-ledger"));
-    assert_eq!(interrupted.status.code(), Some(2));
-    let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
-    assert_eq!(ledger.lines().count(), 1, "ledger must be durable before root commit");
+    for failpoint in [
+        "after-root-prepare",
+        "after-ledger-partial",
+        "after-ledger-append",
+        "after-ledger-durable",
+        "after-ledger",
+        "after-commit",
+    ] {
+        let interrupted = run(Some(failpoint));
+        assert_eq!(
+            interrupted.status.code(),
+            Some(2),
+            "failpoint {failpoint} did not stop publication: {}",
+            String::from_utf8_lossy(&interrupted.stderr)
+        );
+        let generation = root.join("systems/generations/root-recovery");
+        assert!(
+            generation.join("generation-root.json").is_file(),
+            "{failpoint} exposed a ledger/root before the immutable directory"
+        );
+    }
 
     let recovered = run(None);
     assert!(
@@ -494,6 +513,11 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
     );
     let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
     assert_eq!(ledger.lines().count(), 1, "recovery must reuse exact ledger row");
+    assert_eq!(
+        ledger.split('\t').count(),
+        5,
+        "ledger row must bind the immutable root witness: {ledger}"
+    );
     let journal = root.join("hangar/lifecycle-db/journal");
     let lifecycle = fs::read_dir(journal)
         .unwrap()
@@ -503,6 +527,47 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
     assert!(
         lifecycle.contains("commit"),
         "retry must commit the exact prepared root: {lifecycle}"
+    );
+
+    let source = project.join("config.jet");
+    let original_source = fs::read(&source).unwrap();
+    let mut changed_source = original_source.clone();
+    changed_source.extend_from_slice(b"\n// changed after immutable publication\n");
+    fs::write(&source, changed_source).unwrap();
+    let changed = run(None);
+    assert_eq!(changed.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&changed.stderr).contains("already published"),
+        "changed source must not replace a retained generation: {}",
+        String::from_utf8_lossy(&changed.stderr)
+    );
+    fs::write(&source, original_source).unwrap();
+
+    let generation = root.join("systems/generations/root-recovery");
+    let sealed = generation.join("proof.txt");
+    let original_sealed = fs::read(&sealed).unwrap();
+    fs::write(&sealed, b"tampered\n").unwrap();
+    let tampered = run(None);
+    assert_eq!(tampered.status.code(), Some(2));
+    assert_eq!(fs::read(&sealed).unwrap(), b"tampered\n");
+    fs::write(&sealed, original_sealed).unwrap();
+
+    let extra = generation.join("unproved-extra");
+    fs::write(&extra, b"extra").unwrap();
+    assert_eq!(run(None).status.code(), Some(2));
+    fs::remove_file(extra).unwrap();
+
+    let files_proof = generation.join("generation-files.proof");
+    let original_files_proof = fs::read(&files_proof).unwrap();
+    fs::write(&files_proof, b"tampered-proof").unwrap();
+    assert_eq!(run(None).status.code(), Some(2));
+    fs::write(files_proof, original_files_proof).unwrap();
+
+    let committed_retry = run(None);
+    assert!(
+        committed_retry.status.success(),
+        "exact committed-name retry must validate without mutation: {}",
+        String::from_utf8_lossy(&committed_retry.stderr)
     );
 }
 
@@ -2582,6 +2647,32 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
+    assert!(
+        !root
+            .join("systems/generations/second/activation-proof.txt")
+            .exists(),
+        "activation must never mutate a sealed generation"
+    );
+    let sealed_retry = jet()
+        .args([
+            "os",
+            "build",
+            "halcyon",
+            "--name",
+            "second",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        sealed_retry.status.success(),
+        "activation left the sealed proof stale: {}",
+        String::from_utf8_lossy(&sealed_retry.stderr)
+    );
     for name in ["first", "second"] {
         let proof = fs::read_to_string(
             root.path
@@ -2630,7 +2721,7 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
     );
     let proof = fs::read_to_string(
         root.path
-            .join("systems/generations/second/activation-proof.txt"),
+            .join("systems/activation-proofs/halcyon/second.txt"),
     )
     .unwrap();
     assert!(proof.contains("service-risk"), "proof: {proof}");

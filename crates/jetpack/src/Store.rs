@@ -1846,9 +1846,9 @@ pub(crate) struct PreparedExternalConsumerRoot {
     witness: Lifecycle::RootWitness,
 }
 
-/// Prepare or resume one external consumer root. A changed witness advances
-/// the incarnation and protects old union new until commit. An exact committed
-/// retry is already complete and returns `None`.
+/// Prepare or resume one immutable external consumer root. An exact committed
+/// retry is already complete and returns `None`; the stable key can never be
+/// rebound to another witness or target set.
 pub(crate) fn reconcile_external_consumer_root(
     roots: &Roots,
     consumer: &str,
@@ -1859,6 +1859,26 @@ pub(crate) fn reconcile_external_consumer_root(
 ) -> std::io::Result<Option<PreparedExternalConsumerRoot>> {
     targets.sort();
     targets.dedup();
+    if targets.is_empty() {
+        return Err(std::io::Error::other(
+            "external consumer root requires at least one Hangar object",
+        ));
+    }
+    let objects = roots.hangar_dir().join(OBJECTS_DIR);
+    for target in &targets {
+        let metadata = fs::symlink_metadata(objects.join(target));
+        if target.len() != 71
+            || !target.starts_with("sha256-")
+            || !target[7..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            || !matches!(metadata, Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink())
+        {
+            return Err(std::io::Error::other(
+                "external consumer target is not a canonical Hangar object",
+            ));
+        }
+    }
     let id = Lifecycle::RootId::new(format!(
         "external-consumer:{consumer}:{}",
         SHA256::sha256_hex(key.as_bytes())
@@ -1881,14 +1901,9 @@ pub(crate) fn reconcile_external_consumer_root(
                 }
                 (root.identity.incarnation.get(), true)
             } else {
-                if root.phase != Lifecycle::RootPhase::Committed {
-                    return Err(std::io::Error::other(
-                        "external consumer root has an unfinished different replacement",
-                    ));
-                }
-                (root.identity.incarnation.get().checked_add(1).ok_or_else(|| {
-                    std::io::Error::other("external consumer root incarnation overflow")
-                })?, false)
+                return Err(std::io::Error::other(
+                    "external consumer root cannot replace an immutable publication",
+                ));
             }
         }
         None => (1, false),

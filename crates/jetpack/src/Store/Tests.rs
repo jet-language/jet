@@ -275,18 +275,19 @@ mod tests {
     }
 
     #[test]
-    fn external_consumer_root_resumes_and_replaces_with_union_protection() {
+    fn external_consumer_root_resumes_exactly_and_never_rebinds() {
         let (roots, _g) = temp_roots();
         let first = ingest_fixture(&roots, "external-first", &[("out", "first")], Vec::new());
         let second = ingest_fixture(&roots, "external-second", &[("out", "second")], Vec::new());
         let first_hash = first.entry.envelope.output_hash.clone();
         let second_hash = second.entry.envelope.output_hash.clone();
+        let witness = format!("sha256-{}", "1".repeat(64));
 
         let prepared = reconcile_external_consumer_root(
             &roots,
             "jetos-generation",
             "host\0generation",
-            &format!("sha256-{}", "1".repeat(64)),
+            &witness,
             vec![first_hash.clone()],
             1,
         )
@@ -296,7 +297,7 @@ mod tests {
             &roots,
             "jetos-generation",
             "host\0generation",
-            &format!("sha256-{}", "1".repeat(64)),
+            &witness,
             vec![first_hash.clone()],
             9,
         )
@@ -307,7 +308,7 @@ mod tests {
             &roots,
             "jetos-generation",
             "host\0generation",
-            &format!("sha256-{}", "1".repeat(64)),
+            &witness,
             vec![first_hash.clone()],
             11,
         )
@@ -315,7 +316,7 @@ mod tests {
         .is_none());
         drop(prepared);
 
-        let replacement = reconcile_external_consumer_root(
+        assert!(reconcile_external_consumer_root(
             &roots,
             "jetos-generation",
             "host\0generation",
@@ -323,19 +324,38 @@ mod tests {
             vec![second_hash.clone()],
             12,
         )
-        .unwrap()
-        .unwrap();
+        .is_err());
+        assert!(reconcile_external_consumer_root(
+            &roots,
+            "jetos-generation",
+            "other-host\0generation",
+            &witness,
+            vec!["/nix/store/not-a-hangar-object".to_string()],
+            12,
+        )
+        .is_err());
+        assert!(reconcile_external_consumer_root(
+            &roots,
+            "jetos-generation",
+            "host\0generation",
+            &witness,
+            vec![second_hash],
+            12,
+        )
+        .is_err());
         let snapshot = Lifecycle::snapshot(&roots).unwrap();
         let root = snapshot.roots.values().next().unwrap();
         assert_eq!(root.identity.kind, Lifecycle::RootKind::ExternalConsumer);
-        assert_eq!(root.identity.incarnation.get(), 2);
-        assert_eq!(
-            root.protected_targets,
-            BTreeSet::from([first_hash, second_hash.clone()])
-        );
-        commit_external_consumer_root(&roots, &replacement, 13).unwrap();
-        let committed = Lifecycle::snapshot(&roots).unwrap();
-        assert_eq!(committed.protected_targets, BTreeSet::from([second_hash]));
+        assert_eq!(root.identity.id.as_str(), format!(
+            "external-consumer:jetos-generation:{}",
+            SHA256::sha256_hex(b"host\0generation")
+        ));
+        assert_eq!(root.identity.producer.as_str(), "jetos-generation");
+        assert_eq!(root.identity.incarnation.get(), 1);
+        assert_eq!(root.identity.witness.as_str(), witness);
+        assert_eq!(root.targets, BTreeSet::from([first_hash.clone()]));
+        assert_eq!(root.protected_targets, BTreeSet::from([first_hash]));
+        assert_eq!(root.phase, Lifecycle::RootPhase::Committed);
     }
 
     #[test]

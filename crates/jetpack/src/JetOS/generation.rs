@@ -1,8 +1,10 @@
 use super::generation_files::{
-    generation_dir, write_generation_files, write_generation_root_proof,
-    write_generation_source_proof,
+    GenerationRootProof, generation_dir, sync_generation_tree, validate_generation_root_proof,
+    write_generation_files, write_generation_root_proof, write_generation_source_proof,
 };
-use super::generations_activation::{append_generation, now_secs};
+use super::generations_activation::{
+    append_generation, generation_ledger_timestamp, now_secs,
+};
 use super::kernel_bootstrap::{run_kernel_bootstrap_builder, validate_boot_payloads};
 use super::nixos_backend::is_nixpkgs_source;
 use super::options_rendering::{boot_profile, option_value};
@@ -16,7 +18,10 @@ use crate::Output::Theme;
 use crate::RefSpec;
 use crate::Store;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static GENERATION_STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn build_generation(
     theme: &Theme,
@@ -26,15 +31,19 @@ pub(super) fn build_generation(
     source_config: &Path,
 ) -> Option<Generation> {
     let roots = Store::resolve();
-    let dir = generation_dir(system, flags.name.as_deref());
-    if dir.exists() && fs::remove_dir_all(&dir).is_err() {
-        theme.error(
-            "could not prepare the jetos generation",
-            &format!("removing stale generation `{}` failed.", dir.display()),
-            "check permissions on the Jetpack root, or choose a different generation name.",
+    let final_dir = generation_dir(system, flags.name.as_deref());
+    let generation_name = final_dir.file_name()?.to_string_lossy().into_owned();
+    if final_dir.exists() {
+        return resume_published_generation(
+            theme,
+            &roots,
+            system,
+            source_config,
+            &final_dir,
+            &generation_name,
         );
-        return None;
     }
+    let dir = generation_staging_dir(&final_dir);
     fs::create_dir_all(dir.join("packages")).ok()?;
     let name_w = system
         .packages
@@ -315,12 +324,12 @@ pub(super) fn build_generation(
         );
         return None;
     }
-    let generation_name = dir.file_name()?.to_string_lossy().into_owned();
     let root_proof = match write_generation_root_proof(
         &dir,
         &system.name,
         &generation_name,
         &realized,
+        &roots,
     ) {
         Ok(proof) => proof,
         Err(e) => {
@@ -332,54 +341,176 @@ pub(super) fn build_generation(
             return None;
         }
     };
-    let created_at = now_secs();
-    let prepared = match Store::reconcile_external_consumer_root(
-        &roots,
-        "jetos-generation",
-        &format!("{}\0{}", system.name, generation_name),
-        &root_proof.witness,
-        root_proof.output_digests,
-        created_at,
-    ) {
-        Ok(prepared) => prepared,
-        Err(e) => {
+    if let Err(e) = sync_generation_tree(&dir) {
+        theme.error(
+            "could not seal the jetos generation",
+            &format!("durably syncing the complete generation failed: {e}."),
+            "check generation storage integrity, then retry with the same generation name.",
+        );
+        return None;
+    }
+    let parent = final_dir.parent()?;
+    if let Err(e) = fs::rename(&dir, &final_dir) {
+        if !final_dir.is_dir() {
             theme.error(
-                "could not prepare the jetos generation root",
-                &format!("recording its Hangar output roots failed: {e}."),
-                "verify the Hangar, then rebuild the generation; no ledger entry was committed.",
+                "could not publish the jetos generation",
+                &format!("atomically installing `{}` failed: {e}.", final_dir.display()),
+                "check generation storage permissions, then retry with the same name.",
             );
             return None;
         }
+        let _ = fs::remove_dir_all(&dir);
+        let existing = match validate_generation_root_proof(
+            &final_dir,
+            &system.name,
+            &generation_name,
+            source_config,
+            &roots,
+        ) {
+            Ok(proof) => proof,
+            Err(error) => {
+                immutable_generation_error(theme, &final_dir, &error);
+                return None;
+            }
+        };
+        if existing != root_proof {
+            immutable_generation_error(
+                theme,
+                &final_dir,
+                &std::io::Error::other("concurrent publication has a different witness"),
+            );
+            return None;
+        }
+    } else if let Err(e) = fs::File::open(parent).and_then(|dir| dir.sync_all()) {
+        theme.error(
+            "could not publish the jetos generation",
+            &format!("syncing the generation directory after atomic publication failed: {e}."),
+            "check generation storage integrity, then retry with the same generation name.",
+        );
+        return None;
+    }
+    let gen = publish_generation(
+        theme,
+        &roots,
+        &system.name,
+        generation_name,
+        final_dir,
+        root_proof,
+    )?;
+    // Tier 2 close: erase any leftover pinned status and leave one ledger
+    // summary, matching jetpack build's region→ledger settle (D-FE-CLI1).
+    live.collapse(&format!(
+        "generation ready · {} package(s) {}",
+        realized.len(),
+        theme.green("✓")
+    ));
+    Some(gen)
+}
+
+fn resume_published_generation(
+    theme: &Theme,
+    roots: &Store::Roots,
+    system: &SystemPlan,
+    source_config: &Path,
+    dir: &Path,
+    name: &str,
+) -> Option<Generation> {
+    let proof = match validate_generation_root_proof(
+        dir,
+        &system.name,
+        name,
+        source_config,
+        roots,
+    ) {
+        Ok(proof) => proof,
+        Err(error) => {
+            immutable_generation_error(theme, dir, &error);
+            return None;
+        }
     };
-    if cfg!(debug_assertions)
-        && std::env::var_os("JET_TEST_GENERATION_FAILPOINT").as_deref()
-            == Some(std::ffi::OsStr::new("after-root-prepare"))
-    {
+    publish_generation(
+        theme,
+        roots,
+        &system.name,
+        name.to_string(),
+        dir.to_path_buf(),
+        proof,
+    )
+}
+
+fn publish_generation(
+    theme: &Theme,
+    roots: &Store::Roots,
+    host: &str,
+    name: String,
+    path: PathBuf,
+    root_proof: GenerationRootProof,
+) -> Option<Generation> {
+    let created_at = now_secs();
+    let mut gen = Generation {
+        name,
+        host: host.to_string(),
+        path,
+        created_at,
+    };
+    let ledger_at = match generation_ledger_timestamp(&gen, &root_proof.witness) {
+        Ok(timestamp) => timestamp,
+        Err(error) => {
+            immutable_generation_error(theme, &gen.path, &error);
+            return None;
+        }
+    };
+    let has_hangar_targets = !root_proof.output_digests.is_empty();
+    let prepared = if !has_hangar_targets {
+        None
+    } else {
+        match Store::reconcile_external_consumer_root(
+            roots,
+            "jetos-generation",
+            &format!("{}\0{}", gen.host, gen.name),
+            &root_proof.witness,
+            root_proof.output_digests,
+            created_at,
+        ) {
+            Ok(prepared) => prepared,
+            Err(e) => {
+                theme.error(
+                    "could not prepare the jetos generation root",
+                    &format!("recording its Hangar output roots failed: {e}."),
+                    "verify the Hangar, then retry the exact published generation.",
+                );
+                return None;
+            }
+        }
+    };
+    if prepared.is_none() && has_hangar_targets && ledger_at.is_none() {
+        immutable_generation_error(
+            theme,
+            &gen.path,
+            &std::io::Error::other("committed lifecycle root has no generation ledger entry"),
+        );
+        return None;
+    }
+    if generation_failpoint("after-root-prepare") {
         theme.error(
             "jetos generation test failpoint stopped publication",
-            "the external-consumer root is prepared and the generation ledger is still absent.",
+            "the immutable generation is durable and its external-consumer root is prepared.",
             "rerun the same build without JET_TEST_GENERATION_FAILPOINT to exercise recovery.",
         );
         return None;
     }
-    let gen = Generation {
-        name: generation_name,
-        host: system.name.clone(),
-        path: dir,
-        created_at,
+    gen.created_at = match append_generation(&gen, &root_proof.witness) {
+        Ok(created_at) => created_at,
+        Err(e) => {
+            theme.error(
+                "could not record the jetos generation",
+                &format!("writing the generation ledger failed: {e}."),
+                "retry the exact published generation; partial ledger writes are recovered.",
+            );
+            return None;
+        }
     };
-    if append_generation(&gen).is_err() {
-        theme.error(
-            "could not record the jetos generation",
-            "writing the generation ledger failed.",
-            "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-        );
-        return None;
-    }
-    if cfg!(debug_assertions)
-        && std::env::var_os("JET_TEST_GENERATION_FAILPOINT").as_deref()
-            == Some(std::ffi::OsStr::new("after-ledger"))
-    {
+    if generation_failpoint("after-ledger") {
         theme.error(
             "jetos generation test failpoint stopped publication",
             "the generation ledger is durable and the external-consumer root remains prepared.",
@@ -397,12 +528,40 @@ pub(super) fn build_generation(
             return None;
         }
     }
-    // Tier 2 close: erase any leftover pinned status and leave one ledger
-    // summary, matching jetpack build's region→ledger settle (D-FE-CLI1).
-    live.collapse(&format!(
-        "generation ready · {} package(s) {}",
-        realized.len(),
-        theme.green("✓")
-    ));
+    if generation_failpoint("after-commit") {
+        theme.error(
+            "jetos generation test failpoint stopped publication",
+            "the immutable generation, ledger, and external-consumer root are committed.",
+            "rerun the same build without JET_TEST_GENERATION_FAILPOINT to exercise recovery.",
+        );
+        return None;
+    }
     Some(gen)
+}
+
+fn generation_staging_dir(final_dir: &Path) -> PathBuf {
+    let sequence = GENERATION_STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let name = final_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    final_dir.with_file_name(format!(
+        ".{name}.{}.{}.partial",
+        std::process::id(),
+        sequence
+    ))
+}
+
+fn generation_failpoint(name: &str) -> bool {
+    cfg!(debug_assertions)
+        && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
+}
+
+fn immutable_generation_error(theme: &Theme, dir: &Path, error: &std::io::Error) {
+    theme.error_coded(
+        "E1278",
+        "jetos generation name is already published",
+        &format!("immutable generation `{}` cannot be reused: {error}.", dir.display()),
+        "choose a new generation name, or restore the exact sealed generation and retry.",
+    );
 }

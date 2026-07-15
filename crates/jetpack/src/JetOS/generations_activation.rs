@@ -107,7 +107,18 @@ pub(super) fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemP
         activation.push_str(&format!("vm-proof: pass plan-sha256={plan_hash}\n"));
     }
     activation.push_str(&format!("rollback-proof: {rollback}\n"));
-    if let Err(e) = fs::write(gen.path.join("activation-proof.txt"), activation) {
+    let activation_path = systems_dir()
+        .join("activation-proofs")
+        .join(&gen.host)
+        .join(format!("{}.txt", gen.name));
+    let activation_parent = activation_path.parent().unwrap_or_else(|| Path::new("."));
+    let write_activation = || -> std::io::Result<()> {
+        fs::create_dir_all(activation_parent)?;
+        fs::write(&activation_path, activation.as_bytes())?;
+        fs::File::open(&activation_path)?.sync_all()?;
+        fs::File::open(activation_parent)?.sync_all()
+    };
+    if let Err(e) = write_activation() {
         theme.error_coded(
             "E1278",
             "jetos activation proof could not be recorded",
@@ -141,7 +152,7 @@ fn rollback_proof_for(host: &str, current: &Path) -> String {
     }
 }
 
-pub(super) fn append_generation(gen: &Generation) -> std::io::Result<()> {
+pub(super) fn append_generation(gen: &Generation, witness: &str) -> std::io::Result<u64> {
     let roots = Store::resolve();
     crate::RuntimePolicy::with_lock(&roots.root, "jetos-generations", || {
         let log = generations_log();
@@ -149,33 +160,112 @@ pub(super) fn append_generation(gen: &Generation) -> std::io::Result<()> {
             .parent()
             .ok_or_else(|| std::io::Error::other("generation ledger has no parent"))?;
         fs::create_dir_all(parent)?;
-        let existing = fs::read_to_string(&log).unwrap_or_default();
-        let already_recorded = existing.lines().any(|line| {
-            let parts = line.split('\t').collect::<Vec<_>>();
-            parts.len() == 4
-                && parts[1] == gen.host
-                && parts[2] == gen.name
-                && Path::new(parts[3]) == gen.path
-        });
-        if already_recorded {
-            return Ok(());
+        let mut existing = match fs::read(&log) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(error),
+        };
+        if !existing.is_empty() && !existing.ends_with(b"\n") {
+            let recovered_len = existing
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map(|offset| offset + 1)
+                .unwrap_or(0);
+            let file = fs::OpenOptions::new().write(true).open(&log)?;
+            file.set_len(recovered_len as u64)?;
+            file.sync_all()?;
+            existing.truncate(recovered_len);
+        }
+        if let Some(created_at) = ledger_timestamp_in(&existing, gen, witness)? {
+            let file = fs::OpenOptions::new().read(true).open(&log)?;
+            file.sync_all()?;
+            if generation_failpoint("after-ledger-durable") {
+                return Err(std::io::Error::other("generation ledger durability failpoint"));
+            }
+            fs::File::open(parent)?.sync_all()?;
+            return Ok(created_at);
         }
         let line = format!(
-            "{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\n",
             gen.created_at,
             gen.host,
             gen.name,
-            gen.path.display()
+            gen.path.display(),
+            witness,
         );
         use std::io::Write;
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log)?;
+        if generation_failpoint("after-ledger-partial") {
+            file.write_all(&line.as_bytes()[..line.len() / 2])?;
+            file.sync_all()?;
+            return Err(std::io::Error::other("generation ledger partial-write failpoint"));
+        }
         file.write_all(line.as_bytes())?;
+        if generation_failpoint("after-ledger-append") {
+            return Err(std::io::Error::other("generation ledger append failpoint"));
+        }
         file.sync_all()?;
-        fs::File::open(parent)?.sync_all()
+        if generation_failpoint("after-ledger-durable") {
+            return Err(std::io::Error::other("generation ledger durability failpoint"));
+        }
+        fs::File::open(parent)?.sync_all()?;
+        Ok(gen.created_at)
     })
+}
+
+pub(super) fn generation_ledger_timestamp(
+    gen: &Generation,
+    witness: &str,
+) -> std::io::Result<Option<u64>> {
+    let bytes = match fs::read(generations_log()) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error),
+    };
+    let complete = if bytes.ends_with(b"\n") {
+        bytes.as_slice()
+    } else {
+        let len = bytes
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map(|offset| offset + 1)
+            .unwrap_or(0);
+        &bytes[..len]
+    };
+    ledger_timestamp_in(complete, gen, witness)
+}
+
+fn ledger_timestamp_in(
+    bytes: &[u8],
+    gen: &Generation,
+    witness: &str,
+) -> std::io::Result<Option<u64>> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| std::io::Error::other("generation ledger is not UTF-8"))?;
+    for line in text.lines() {
+        let parts = line.split('\t').collect::<Vec<_>>();
+        if parts.len() < 3 || parts[1] != gen.host || parts[2] != gen.name {
+            continue;
+        }
+        if parts.len() != 5 || Path::new(parts[3]) != gen.path || parts[4] != witness {
+            return Err(std::io::Error::other(
+                "generation ledger cannot replace an immutable publication",
+            ));
+        }
+        let created_at = parts[0]
+            .parse::<u64>()
+            .map_err(|_| std::io::Error::other("generation ledger timestamp is invalid"))?;
+        return Ok(Some(created_at));
+    }
+    Ok(None)
+}
+
+fn generation_failpoint(name: &str) -> bool {
+    cfg!(debug_assertions)
+        && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
 }
 
 pub(super) fn read_generations() -> Vec<Generation> {
@@ -185,7 +275,7 @@ pub(super) fn read_generations() -> Vec<Generation> {
     let mut out = Vec::new();
     for line in text.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() != 4 {
+        if parts.len() != 4 && parts.len() != 5 {
             continue;
         }
         let Ok(created_at) = parts[0].parse::<u64>() else {

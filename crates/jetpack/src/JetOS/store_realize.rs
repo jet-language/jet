@@ -61,21 +61,34 @@ impl RealizedPackage {
 
     /// Hangar identities only. Provider-native paths such as `/nix/store/...`
     /// remain provider roots and never enter Jetpack lifecycle target sets.
-    pub(super) fn output_digests(&self) -> Vec<String> {
+    pub(super) fn output_digests(&self, roots: &Store::Roots) -> Vec<String> {
+        let objects = roots.hangar_dir().join("objects");
         let mut digests = self
             .entry
             .named_outputs
             .values()
-            .filter(|digest| !digest.is_empty())
+            .filter(|digest| canonical_hangar_digest(digest) && objects.join(digest).is_dir())
             .cloned()
             .collect::<Vec<_>>();
-        if digests.is_empty() && !self.entry.envelope.output_hash.is_empty() {
+        if digests.is_empty()
+            && !self.entry.envelope.output_hash.is_empty()
+            && canonical_hangar_digest(&self.entry.envelope.output_hash)
+            && objects.join(&self.entry.envelope.output_hash).is_dir()
+        {
             digests.push(self.entry.envelope.output_hash.clone());
         }
         digests.sort();
         digests.dedup();
         digests
     }
+}
+
+fn canonical_hangar_digest(digest: &str) -> bool {
+    digest.len() == 71
+        && digest.starts_with("sha256-")
+        && digest[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 pub(super) fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Option<String> {

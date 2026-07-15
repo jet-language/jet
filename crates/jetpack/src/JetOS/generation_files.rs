@@ -36,6 +36,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct GenerationRootProof {
     pub(super) witness: String,
     pub(super) output_digests: Vec<String>,
@@ -158,6 +159,7 @@ pub(super) fn write_generation_root_proof(
     host: &str,
     name: &str,
     realized: &[RealizedPackage],
+    roots: &Store::Roots,
 ) -> std::io::Result<GenerationRootProof> {
     let manifest = generation_files_manifest(dir)?;
     fs::write(dir.join("generation-files.proof"), &manifest)?;
@@ -165,26 +167,138 @@ pub(super) fn write_generation_root_proof(
     let plan = fs::read(dir.join("plan.json"))?;
     let mut output_digests = realized
         .iter()
-        .flat_map(RealizedPackage::output_digests)
+        .flat_map(|package| package.output_digests(roots))
         .collect::<Vec<_>>();
     output_digests.sort();
     output_digests.dedup();
-    if output_digests.is_empty() {
-        return Err(std::io::Error::other(
-            "jetos generation has no Hangar output digests",
-        ));
+    let witness = generation_root_witness(
+        host,
+        name,
+        &source_proof,
+        &plan,
+        &manifest,
+        &output_digests,
+    );
+    write_generation_root_metadata(
+        dir,
+        host,
+        name,
+        &witness,
+        &source_proof,
+        &plan,
+        &manifest,
+        &output_digests,
+    )?;
+    Ok(GenerationRootProof {
+        witness,
+        output_digests,
+    })
+}
+
+pub(super) fn validate_generation_root_proof(
+    dir: &Path,
+    host: &str,
+    name: &str,
+    source_config: &Path,
+    roots: &Store::Roots,
+) -> std::io::Result<GenerationRootProof> {
+    let root_metadata = fs::symlink_metadata(dir)?;
+    if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
+        return Err(invalid_generation("published generation root is not an owned directory"));
     }
+    let stored_manifest = fs::read(dir.join("generation-files.proof"))?;
+    let manifest = generation_files_manifest(dir)?;
+    if manifest != stored_manifest {
+        return Err(invalid_generation("generation files proof does not match the sealed tree"));
+    }
+    let source_proof = fs::read(dir.join("source-proof.json"))?;
+    let plan = fs::read(dir.join("plan.json"))?;
+    validate_source_proof(&source_proof, &plan, source_config)?;
+    let root_text = fs::read_to_string(dir.join("generation-root.json"))?;
+    let root = JSON::parse(&root_text).map_err(invalid_generation)?;
+    for (key, expected) in [
+        ("kind", "jetos.generation-root.v1"),
+        ("host", host),
+        ("generation", name),
+    ] {
+        if json_string(&root, key)? != expected {
+            return Err(invalid_generation("generation root identity does not match its path"));
+        }
+    }
+    for (key, expected) in [
+        ("source_proof_sha256", crate::SHA256::sha256_hex(&source_proof)),
+        ("plan_sha256", crate::SHA256::sha256_hex(&plan)),
+        ("files_proof_sha256", crate::SHA256::sha256_hex(&manifest)),
+    ] {
+        if json_string(&root, key)? != expected {
+            return Err(invalid_generation("generation root hash does not match its durable proof"));
+        }
+    }
+    let mut output_digests = root
+        .get("output_digests")
+        .map_err(invalid_generation)?
+        .as_array()
+        .map_err(invalid_generation)?
+        .iter()
+        .map(|value| value.as_str().map(str::to_string).map_err(invalid_generation))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let original = output_digests.clone();
+    output_digests.sort();
+    output_digests.dedup();
+    if output_digests != original {
+        return Err(invalid_generation("generation Hangar targets are not canonical and sorted"));
+    }
+    for digest in &output_digests {
+        validate_hangar_digest(roots, digest)?;
+    }
+    let witness = generation_root_witness(
+        host,
+        name,
+        &source_proof,
+        &plan,
+        &manifest,
+        &output_digests,
+    );
+    if json_string(&root, "witness")? != witness {
+        return Err(invalid_generation("generation root witness does not match its proofs"));
+    }
+    Ok(GenerationRootProof {
+        witness,
+        output_digests,
+    })
+}
+
+fn generation_root_witness(
+    host: &str,
+    name: &str,
+    source_proof: &[u8],
+    plan: &[u8],
+    manifest: &[u8],
+    output_digests: &[String],
+) -> String {
     let mut canonical = Vec::new();
     frame(&mut canonical, b"jetos-generation-root-v1");
     frame(&mut canonical, host.as_bytes());
     frame(&mut canonical, name.as_bytes());
-    frame(&mut canonical, &source_proof);
-    frame(&mut canonical, &plan);
-    frame(&mut canonical, &manifest);
-    for digest in &output_digests {
+    frame(&mut canonical, source_proof);
+    frame(&mut canonical, plan);
+    frame(&mut canonical, manifest);
+    for digest in output_digests {
         frame(&mut canonical, digest.as_bytes());
     }
-    let witness = format!("sha256-{}", crate::SHA256::sha256_hex(&canonical));
+    format!("sha256-{}", crate::SHA256::sha256_hex(&canonical))
+}
+
+fn write_generation_root_metadata(
+    dir: &Path,
+    host: &str,
+    name: &str,
+    witness: &str,
+    source_proof: &[u8],
+    plan: &[u8],
+    manifest: &[u8],
+    output_digests: &[String],
+) -> std::io::Result<()> {
     let digests = output_digests
         .iter()
         .map(|digest| JSON::quote(digest))
@@ -194,17 +308,94 @@ pub(super) fn write_generation_root_proof(
         "{{\"kind\":\"jetos.generation-root.v1\",\"host\":{},\"generation\":{},\"witness\":{},\"source_proof_sha256\":{},\"plan_sha256\":{},\"files_proof_sha256\":{},\"output_digests\":[{}]}}",
         JSON::quote(host),
         JSON::quote(name),
-        JSON::quote(&witness),
+        JSON::quote(witness),
         JSON::quote(&crate::SHA256::sha256_hex(&source_proof)),
         JSON::quote(&crate::SHA256::sha256_hex(&plan)),
         JSON::quote(&crate::SHA256::sha256_hex(&manifest)),
         digests,
     );
-    fs::write(dir.join("generation-root.json"), root)?;
-    Ok(GenerationRootProof {
-        witness,
-        output_digests,
-    })
+    fs::write(dir.join("generation-root.json"), root)
+}
+
+fn validate_source_proof(
+    source_proof: &[u8],
+    plan: &[u8],
+    source_config: &Path,
+) -> std::io::Result<()> {
+    let proof_text = std::str::from_utf8(source_proof).map_err(invalid_generation)?;
+    let proof = JSON::parse(proof_text).map_err(invalid_generation)?;
+    let source = fs::read(source_config)?;
+    let expected_input = std::env::var("JETOS_STUDIO_INPUT_PLAN_SHA256").unwrap_or_default();
+    for (key, expected) in [
+        ("kind", "jetos.generation-source-proof".to_string()),
+        ("source_sha256", crate::SHA256::sha256_hex(&source)),
+        ("input_plan_sha256", expected_input),
+        ("plan_sha256", crate::SHA256::sha256_hex(plan)),
+    ] {
+        if json_string(&proof, key)? != expected {
+            return Err(invalid_generation("generation source proof does not match current input"));
+        }
+    }
+    Ok(())
+}
+
+fn json_string(value: &JSON::Json, key: &str) -> std::io::Result<String> {
+    value
+        .get(key)
+        .map_err(invalid_generation)?
+        .as_str()
+        .map(str::to_string)
+        .map_err(invalid_generation)
+}
+
+fn validate_hangar_digest(roots: &Store::Roots, digest: &str) -> std::io::Result<()> {
+    if digest.len() != 71
+        || !digest.starts_with("sha256-")
+        || !digest[7..].bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(invalid_generation("generation contains a non-canonical Hangar digest"));
+    }
+    let object_root = roots.hangar_dir().join("objects");
+    let object = object_root.join(digest);
+    let metadata = fs::symlink_metadata(&object)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(invalid_generation("generation Hangar target is not an owned object"));
+    }
+    let canonical_root = fs::canonicalize(&object_root)?;
+    let canonical_object = fs::canonicalize(&object)?;
+    if !canonical_object.starts_with(&canonical_root) || !canonical_object.is_dir() {
+        return Err(invalid_generation("generation Hangar target is not an owned object"));
+    }
+    Ok(())
+}
+
+fn invalid_generation(error: impl std::fmt::Display) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+}
+
+pub(super) fn sync_generation_tree(root: &Path) -> std::io::Result<()> {
+    let mut entries = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| path_bytes(&entry.path()));
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            sync_generation_tree(&path)?;
+        } else if metadata.is_file() {
+            fs::File::open(&path)?.sync_all()?;
+        }
+    }
+    sync_directory(root)
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> std::io::Result<()> {
+    fs::File::open(path)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_directory(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn frame(out: &mut Vec<u8>, bytes: &[u8]) {
