@@ -31,7 +31,7 @@ fn write_tool_bin_fixture(fixtures: &Path, out_dir: &Path, pkg: &str, bin: &str,
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let json = format!(
-        "[{{\"outputs\":{{\"out\":{:?}}}}}]",
+        "[{{\"drvPath\":\"/nix/store/fixture-{pkg}.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join(format!("nixpkgs-{pkg}.json")), json).unwrap();
