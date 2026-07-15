@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 652,
-    "rev": 7743,
+    "nextNum": 653,
+    "rev": 7746,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20313,12 +20313,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "Pattern 3 landed and committed (4176a6d1b): fixture outputs are sealed content-addressed hangar objects; nix JSON points at hangar/objects/<digest>. Re-ran all four targets myself: dispatch 6/6, env_dev_trust 14/14, offline tamper test green, engine fixture reds all flipped. 7 remaining engine/offline reds are a distinct production defect (cache verifier vs cas hardlinks) carded #652 — not fixture debt. Card scope (Pattern 3 + Pattern 5) complete."
+        },
         {
           "at": "2026-07-15",
           "by": "claude-main",
@@ -20356,6 +20361,27 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T20:01:44.200Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0sucg7f",
+      "num": 652,
+      "title": "Cache verifier rejects CAS-hardlinked hangar objects",
+      "body": "Exposed by #650's hangar-seeded fixtures: after opportunistic clean --optimize hardlinks duplicate payloads into the cas pool (nlink>1, peers in-hangar), cache verification fail-closes with E2604 'hardlink X has 2 link(s), but only 1 are inside the output'. Root cause: Store.rs cache paths hash entry.out with plain Envelope::try_output_hash_of (rejects ALL external peers) instead of try_output_hash_of_in_hangar (tolerates in-hangar cas/sibling peers, still rejects outside-hangar peers) already used by Ingest.rs:270/297 and Closure.rs:1088. Affected sites: verify_cache_expectation (Store.rs:722 output_digest), integrity failure reason (Store.rs:1539), lease revalidate (Store.rs:921), private-lease snapshot digest (Store.rs:1166) if snapshot preserves peers. Red tests: jetpack_engine::{jet_build_never_reports_deleted_output_as_cached, jet_build_never_reports_tampered_output_as_cached, jet_build_rejects_cache_after_manifest_semantics_change, jet_build_reports_source_states, typed_env_copy_adapter_realizes_local_source, two_process_reverse_package_order_does_not_deadlock}, jetpack_offline::offline_build_and_run_use_hangar_cache_with_network_denied. Fix must NOT weaken the external-hardlink law for peers outside the hangar. Secondary finding: quarantine of a sealed object dir hits Permission denied (os error 13) — verify quarantine works on sealed trees while fixing.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T20:49:25.697Z",
       "updated": "2026-07-15"
     }
   ],
@@ -40014,6 +40040,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T20:49:36.499Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06qg7a2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-15T20:49:36.339Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06qg7a2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T20:49:25.697Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0sucg7f",
+      "note": "Cache verifier rejects CAS-hardlinked hangar objects"
+    },
+    {
       "at": "2026-07-15T20:14:45.914Z",
       "by": "claude-main",
       "action": "card.claim",
@@ -43491,27 +43538,6 @@
       "action": "card.update",
       "ref": "c0izrn87",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T03:25:19.557Z",
-      "by": "codex-diagnostic-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0izrn87",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T03:25:11.081Z",
-      "by": "codex-diagnostic-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0izrn87",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T03:24:57.703Z",
-      "by": "codex-diagnostic-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0izrn87",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
