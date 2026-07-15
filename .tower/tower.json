@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 657,
-    "rev": 7806,
+    "nextNum": 660,
+    "rev": 7820,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20797,6 +20797,11 @@
         {
           "at": "2026-07-15",
           "by": "claude-main",
+          "text": "Reviewer re-check: F1/F3 FIXED clean, F4 fixed with LOW residual (partial-quarantine WAL resurrection is fail-closed for verified consumers, duplicate evidence retained — acceptable). BLOCKING: F2 conflates hash errors with proven mismatch (unreadable-but-intact shared CAS object would be moved); plus MEDIUM Tests.rs helper is_ok_and hides error-vs-miss. Fix round 2 dispatched: object move only on proven recomputed mismatch, strict test helper restored, unreadable-object + proven-mismatch regression tests."
+        },
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
           "text": "Fix round landed (cbc91e225): F1 closure_graph restored + structure variant deleted (no red had motivated the weakening), F2 object move gated on content-digest failure only (shared CAS object survives identity-only quarantine), F3 under-lock record re-check before tombstone, F4 permission ledger with exact-mode restore + renames-first-tombstone-last. Orchestrator re-ran: jetpack crate 390 green (2 known host/TMPDIR fails), integration green except known doctor host red. Reviewer re-check in flight; verify-full started on committed tree."
         },
         {
@@ -21096,6 +21101,251 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T21:06:19.188Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0bfdd1e",
+      "num": 657,
+      "title": "Implement common marker scoping and provenance",
+      "body": "Implement D-MARK-SCOPE1 after ratification. Define one compiler-owned applicability matrix for marker placement at block, function, module, and package levels. Preserve I1: package or module declarations may tighten unsafe policy but never authorize unsafe operations outside a user-written #Unsafe block or function. Keep site-specific value, authority, function-proof, and field-wire markers at their exact legal sites. Effective marker facts must carry source provenance through sema, diagnostics, tooling, AOT, and dev execution.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every registered marker has a checked applicability entry for block, function, module, and package, including inheritance, same-key override, merge, and prohibited-scope behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:55:47.842Z"
+        },
+        {
+          "n": 2,
+          "text": "Parser and sema implement ratified placements and preserve effective-value provenance; #Unsafe authorization, #Grant, #Tainted, #Sanitizer, and field wire attributes cannot widen past their sound sites.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:55:47.842Z"
+        },
+        {
+          "n": 3,
+          "text": "Every new or changed diagnostic is registered in docs/spec/diagnostics.md and pinned by tests/ui snapshots, including invalid wide scope and conflicting override cases, as required by I4.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:55:47.842Z"
+        },
+        {
+          "n": 4,
+          "text": "jet fmt round-trips single and grouped markers at every legal echelon without moving declarations or changing attachment.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:55:47.842Z"
+        },
+        {
+          "n": 5,
+          "text": "Executable examples and expected output cover inherited memory facts, sound effect scoping, #Unsafe policy interaction, and jet explain provenance at package, module, function, and block levels.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:55:47.842Z"
+        },
+        {
+          "n": 6,
+          "text": "Targeted parser, sema, formatter, UI, golden, and dev/AOT parity tests pass; scripts/agent/jet-env full scripts/agent/verify-full.sh passes before close.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:55:47.842Z"
+        }
+      ],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/proposals/ecosystem-shape.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T22:55:00.664Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c02rqnrd",
+      "num": 658,
+      "title": "GC scope opt-in: package, module, function, block",
+      "body": "Implement D-OPTGC1's `gc` key in the existing `#Policy(…)` family across package, module, function, and block scope through D-MARK-SCOPE1's shared applicability matrix. Do not build GC-specific inheritance. A package opt-in gives Go, TypeScript, and Python replacement projects automatic traced storage without `Gc<T>` ceremony. Narrower scopes support embedded GC subsystems. D-MEM1 read, `&` write, `^` take, and second-class-borrow safety remain enforced. Outside opted scopes, ownership stays the default. This card owns GC semantics, sema, TIR, AOT, dev parity, diagnostics, docs, and examples. GC trace/report behavior is tracked separately.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [
+        "D-OPTGC1",
+        "D-MARK-SCOPE1"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Register the ratified `gc` policy key in Syntax.rs, parser, formatter, generated grammars, package model, and D-MARK-SCOPE1's shared applicability matrix without a GC-only inheritance path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:59:02.767Z"
+        },
+        {
+          "n": 2,
+          "text": "Sema gives opted heap values traced identity: bare stores create same-identity edges, `&` gates mutation, `^` transfers roots, `~` deep-copies, and unproven escape to ownership-only code is rejected.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:59:02.767Z"
+        },
+        {
+          "n": 3,
+          "text": "TIR, Rust emission, and jet dev execute the same GC-scoped program behavior; the D-DEP-GC1=A std-only collector remains the only backend and adds no external dependency.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:59:02.767Z"
+        },
+        {
+          "n": 4,
+          "text": "Every new rejection has a registered diagnostic with what, why, fix text and a tests/ui snapshot; package and nested-scope inheritance errors name the effective scope.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:59:02.767Z"
+        },
+        {
+          "n": 5,
+          "text": "Golden examples cover package, module, function, and block opt-ins plus an ownership-default neighbor, with exact expected output under examples/features per I5.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:59:02.767Z"
+        },
+        {
+          "n": 6,
+          "text": "spec.md and syntax-decisions.md describe magic-in-scope behavior and D-MEM1 interaction; targeted tests and scripts/agent/jet-env full scripts/agent/verify-full.sh pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T22:59:02.767Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/ecosystem-shape.md",
+        "D-OPTGC1",
+        "D-MARK-SCOPE1"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T22:58:13.874Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0kn6oul",
+      "num": 659,
+      "title": "GC trace and report: migration back to ownership",
+      "body": "Implement D-OPTGC1 observability as a supported GC-to-ownership migration workflow. Trace mode records every allocation the ownership checker could not prove, its source span, effective GC scope, reason, and runtime counts. `jet gc report` groups those sites and gives concrete fixes that remove traced storage. Human and JSON output support local debugging, CI trend tracking, and a clear empty-report gate before removing `#Policy(gc)`. This command is memory analysis; `jet clean` remains Hangar cleanup.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [
+        "D-OPTGC1",
+        "D-MARK-SCOPE1"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Trace mode records every automatic GC-backed allocation with stable source span, effective package/module/function/block scope, proof-failure reason, allocation count, and retained count.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T23:00:15.151Z"
+        },
+        {
+          "n": 2,
+          "text": "Tracing is off by default, adds no cost outside an explicit report/trace run, and preserves equivalent AOT and jet dev behavior when enabled.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T23:00:15.151Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet gc report` emits deterministic TTY-aware text and versioned `--json`; `jet clean` remains the sole Hangar garbage-collection and optimization command.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T23:00:15.151Z"
+        },
+        {
+          "n": 4,
+          "text": "Each report site gives an actionable ownership fix using ordinary owned values, D-MEM1 access, or Pool<T>/Id<T>; an empty report explicitly says `#Policy(gc)` can be removed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T23:00:15.151Z"
+        },
+        {
+          "n": 5,
+          "text": "Golden examples show a cyclic GC-backed program, its report, the Pool<T>/Id<T> rewrite, and the final empty report with exact expected output per I5.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T23:00:15.151Z"
+        },
+        {
+          "n": 6,
+          "text": "CLI transcripts, diagnostics snapshots, docs, and migration guidance cover text/JSON/NO_COLOR behavior and malformed trace data; scripts/agent/jet-env full scripts/agent/verify-full.sh passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T23:00:15.151Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/ecosystem-shape.md",
+        "D-OPTGC1",
+        "D-MARK-SCOPE1"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T22:59:26.789Z",
       "updated": "2026-07-15"
     }
   ],
@@ -39637,51 +39887,51 @@
       "id": "D-MEM-FACTS1",
       "cardId": "c0zdv8vm",
       "group": "syntax",
-      "title": "Transitive fact vocabulary — allocation, RC, arena bounds",
-      "gist": "Whether no_alloc and related memory guarantees stay local per-function lints or become transitive facts checked through the whole call graph.",
-      "lesson": "This option may supersede the ratified local-only scope of D-NOALLOC-SEM1=A. The owner said audit closure likely overrides that scope cut; choosing B or C replaces policy no_alloc's local-only guarantee with a transitive one.",
+      "title": "Transitive memory facts across block, function, module, and package scopes",
+      "gist": "Choose whether scoped memory facts check lexical bodies, reachable calls, or named memory profiles.",
+      "lesson": "All options use one four-level placement rule. Block, function, module, and package declarations remove repetition; this ballot still decides what each memory fact proves.",
       "explainer": "",
-      "story": "A transitive fact is a promise about a function AND everything it calls; local means only the function's own body. Priya writes firmware for a battery gauge on a heap-less Cortex-M0. She marks her sensor loop no_alloc. A helper three calls deep builds a temporary list. Today the build passes and the allocation ships to a device that cannot serve it.",
-      "inWild": "A no-heap embedded package: read_sensor() is declared no_alloc but calls decode(), which runs buf.push(raw). The same team wants arena_bounded(N) and zero_rc (proof no reference-counted value survives) facts on those functions for a real-time audit.",
+      "story": "Priya writes firmware for a heap-less Cortex-M0. She sets memory facts at the smallest useful scope, then calls a dependency whose decode function grows a list. She needs the compiler to say whether her declaration covers only local source or the full reachable call graph.",
+      "inWild": "The firmware uses #Policy(no_alloc, zero_rc, arena_bounded(65536)). The same declaration can govern one block, one function, one module, or every source file owned by the nearest package.jet. A dependency helper calls List.push.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Keep local-only lints (status quo)",
-          "detail": "policy no_alloc walks only the marked function's own body against a four-shape denylist and never follows a call. It is fast and honest that it is local, but any allocation one call away is invisible.",
-          "technical": "Ratified D-NOALLOC-SEM1=A, code E0921. Denylist: interpolation holes, .push/.insert, heap-owning literals, ~ of a heap type. No arena or reference-count facts exist. No transitive walk.",
-          "code": "# sensor.jet — no-heap battery-gauge firmware\npolicy no_alloc\n\nfn read_sensor() -> Int {\n    let raw := hw_fetch()\n    return decode(raw)\n}\n\nfn decode(raw: Int) -> Int {\n    var buf := List<Int>.new()\n    buf.push(raw)            # heap growth\n    return buf.sum()\n}\n\n$ jet build --target embedded\n   Compiling firmware v0.1.0\n    Finished — 0 errors\n\n# read_sensor is no_alloc, but the check only walks read_sensor's\n# own body. It never follows the call into decode, so buf.push is\n# invisible. The allocation compiles and ships to a heap-less chip."
+          "name": "Scoped local checks",
+          "detail": "Each fact checks bodies lexically covered by its block, function, module, or package declaration. Calls outside that lexical scope are not followed, so dependency allocations remain unseen.",
+          "technical": "This preserves D-NOALLOC-SEM1=A. The nearest declaration of each memory-fact key wins, but the checker never computes call-graph closure.",
+          "code": "# Shared dependency for every placement below\n# vendor/decode.jet\npub fn decode(raw: Int) -> Int {\n    var buf := List<Int>.new()\n    buf.push(raw)\n    return buf.sum()\n}\n\n# 1. Block\nfn read_sensor() -> Int {\n    #Policy(no_alloc, zero_rc, arena_bounded(65536)) {\n        return vendor.decode(hw_fetch())\n    }\n}\n\n# 2. Function\n#Policy(no_alloc, zero_rc, arena_bounded(65536))\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n# 3. Module\n#Policy(no_alloc, zero_rc, arena_bounded(65536))\nmodule sensor\n\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n# 4. Package\n# package.jet\n#Policy(no_alloc, zero_rc, arena_bounded(65536))\nname: \"firmware\"\n\n# Source/sensor.jet\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n$ jet build --target embedded\n   Compiling firmware v0.1.0\n    Finished — 0 errors\n\n# Every placement checks its covered Jet bodies only. None follows\n# the call into vendor.decode, so List.push remains invisible."
         },
         {
           "key": "B",
-          "name": "Transitive facts as checked contracts",
-          "detail": "no_alloc, arena_bounded(N), and zero_rc become facts on a function, propagated through the call graph the way @Pure fn already is. Any reachable violation is reported at its source with the transitive path back to the declaring function.",
-          "technical": "Dynamic-dispatch honesty rule: an open-world call site cannot be proven, so a strict package must seal its target set or consume a signed dependency summary, else E0922. Reuses the @Pure whole-program fixpoint machinery.",
-          "code": "# same sensor.jet — no_alloc is now a transitive fact\n\n$ jet build --target embedded\nerror[E0921]: heap allocation reached under no_alloc\n   ┌─ sensor.jet:11:5\n   │\n11 │     buf.push(raw)\n   │     ^^^^^^^^^^^^^ List.push may grow the heap\n   │\nnote: reached from read_sensor, declared no_alloc\n   ┌─ sensor.jet:6:12\n   │\n 6 │     return decode(raw)\n   │            ^^^^^^^^^^^^ transitive call into decode\n   = help: mark decode no_alloc, or move buf into an arena\n\n# If read_sensor dispatched through an open-world handler value:\nerror[E0922]: no_alloc cannot see through dynamic dispatch\n   = help: seal the target set (sealed handlers) or supply a signed\n           dependency summary; open-world code cannot be proven\n\n# The same vocabulary carries arena_bounded(N) and zero_rc facts,\n# each reported the same way at the first reachable violation."
+          "name": "Scoped transitive facts",
+          "detail": "Each fact checks every call reachable from the marked block, function, module, or package. A violation reports its source, call path, effective declaration, and declaration provenance.",
+          "technical": "Open-world dispatch cannot be proven. Strict code must seal the target set or consume a signed dependency summary, else E0922; this replaces D-NOALLOC-SEM1=A's local-only scope.",
+          "code": "# Shared dependency for every placement below\n# vendor/decode.jet\npub fn decode(raw: Int) -> Int {\n    var buf := List<Int>.new()\n    buf.push(raw)\n    return buf.sum()\n}\n\n# 1. Block\nfn read_sensor() -> Int {\n    #Policy(no_alloc, zero_rc, arena_bounded(65536)) {\n        return vendor.decode(hw_fetch())\n    }\n}\n\n# 2. Function\n#Policy(no_alloc, zero_rc, arena_bounded(65536))\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n# 3. Module\n#Policy(no_alloc, zero_rc, arena_bounded(65536))\nmodule sensor\n\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n# 4. Package\n# package.jet\n#Policy(no_alloc, zero_rc, arena_bounded(65536))\nname: \"firmware\"\n\n# Source/sensor.jet\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n$ jet build --target embedded\nerror[E0921]: heap allocation reached under no_alloc\n   ┌─ vendor/decode.jet:4:5\n   │\n 4 │     buf.push(raw)\n   │     ^^^^^^^^^^^^^ List.push may grow the heap\n   │\n   = note: reached through vendor.decode from read_sensor\n   = note: no_alloc declared for the effective scope at package.jet:1\n   = help: move buf into an arena or remove this call from the marked scope\n\n# Block, function, and module placements report the same violation.\n# Their final note points to that placement instead of package.jet."
         },
         {
           "key": "C",
-          "name": "Per-target profiles",
-          "detail": "Facts attach to a build target profile (no_heap, realtime), not to individual functions. Selecting the target checks the whole reachable graph for that build. A beginner picks one target and every guarantee follows from that choice.",
-          "technical": "Profile declared once in workspace.jet/pkg.jet. jet build --target embedded runs the transitive check; per-function annotations become redundant. A debug target keeps the heap. New code E3120.",
-          "code": "# sensor.jet has NO per-function policy line.\n# The build target carries the fact instead:\n\n# workspace.jet\ntarget embedded {\n    profile: no_heap        # denies heap across the whole build\n}\n\n$ jet build --target embedded\nerror[E3120]: target embedded profile no_heap violated\n   ┌─ sensor.jet:11:5\n   │\n11 │     buf.push(raw)\n   │     ^^^^^^^^^^^^^ List.push may grow the heap\n   = note: every function reachable in target embedded is checked\n   = help: no per-function no_alloc needed — the target owns the\n           guarantee; a debug target keeps the heap"
+          "name": "Scoped named memory profiles",
+          "detail": "A named profile bundles memory facts, and the same profile can be placed on a block, function, module, or package. The selected bundle is checked transitively.",
+          "technical": "NoHeap expands to no_alloc, zero_rc, and its configured arena bound. Targets may select a package default, while a nearer declaration of the same profile key wins.",
+          "code": "# Shared dependency for every placement below\n# vendor/decode.jet\npub fn decode(raw: Int) -> Int {\n    var buf := List<Int>.new()\n    buf.push(raw)\n    return buf.sum()\n}\n\n# 1. Block\nfn read_sensor() -> Int {\n    #Policy(memory: .NoHeap(arena: 65536)) {\n        return vendor.decode(hw_fetch())\n    }\n}\n\n# 2. Function\n#Policy(memory: .NoHeap(arena: 65536))\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n# 3. Module\n#Policy(memory: .NoHeap(arena: 65536))\nmodule sensor\n\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n# 4. Package\n# package.jet\n#Policy(memory: .NoHeap(arena: 65536))\nname: \"firmware\"\n\n# Source/sensor.jet\nfn read_sensor() -> Int {\n    return vendor.decode(hw_fetch())\n}\n\n$ jet build --target embedded\nerror[E3120]: memory profile NoHeap violated\n   ┌─ vendor/decode.jet:4:5\n   │\n 4 │     buf.push(raw)\n   │     ^^^^^^^^^^^^^ NoHeap includes no_alloc\n   │\n   = note: reached through vendor.decode from read_sensor\n   = note: NoHeap declared for the effective scope at package.jet:1\n   = help: move buf into an arena or choose a profile that permits heap use\n\n# Block, function, and module placements report the same violation.\n# Their final note points to that placement instead of package.jet."
         }
       ],
       "comparisons": [],
       "rec": "B",
       "recommendation": {
-        "why": "One vocabulary (no_alloc, arena_bounded, zero_rc) reuses the @Pure whole-program fixpoint already in the compiler and reports the exact transitive path to each violation. The fact then means what it says, with no silent miss like Priya's.",
+        "why": "B keeps each fact explicit and gives every placement the same reachable-call guarantee. One package declaration covers defaults, while a function or block can state a narrower contract.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "Keeps shipping the silent transitive allocation Priya's audit must catch, so the guarantee is not real."
+            "reason": "A still misses the dependency allocation reached by read_sensor. Wider placement reduces repetition but does not make the memory guarantee transitive."
           },
           {
             "key": "C",
-            "reason": "Removes per-function control: a library author cannot promise no_alloc on one exported function unless the whole target opts in."
+            "reason": "C hides the exact facts behind a profile name. Library contracts and diagnostics should state no_alloc, zero_rc, and arena_bounded directly."
           }
         ],
-        "tradeoff": "B requires the dynamic-dispatch honesty rule: an open-world call site cannot be proven. Strict packages must seal their target set or consume a signed dependency summary, and library authors annotate each exported contract."
+        "tradeoff": "B must reject unprovable open-world dispatch unless sealed targets or signed dependency summaries close the graph. It also records the effective scope and call path in diagnostics."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -39693,54 +39943,65 @@
       "id": "D-UNSAFE-OBLIG1",
       "cardId": "c01gqgxn",
       "group": "syntax",
-      "title": "Typed unsafe obligations — per-operation review inside audited regions",
-      "gist": "Whether an #Unsafe region stays one binary reason string or records typed per-operation obligations the compiler tracks and audits.",
-      "lesson": "This extends the D-LL1/D-UNSAFE2 unsafe surface and does not weaken I1. Safe-by-default is unchanged; obligations add structure only inside the region a user already opted into with #Unsafe.",
-      "explainer": "",
-      "story": "An obligation is a safety condition the compiler cannot prove, which the author asserts holds — pointer non-null, aligned, not aliased. Sam maintains a 300-line #Unsafe GPIO driver. A review must confirm every pointer operation is sound. Today the region carries one reason sentence for all of it, so an unaudited new operation looks the same as a proven one.",
-      "inWild": "A driver region does mem.volatile_read and mem.volatile_write against MMIO registers. Each operation demands a valid, aligned pointer and no aliasing. The team wants the audit to show, per operation, which of those conditions the author has actually asserted.",
-      "detail": "",
+      "title": "Unsafe review policy — gate-only default and optional typed obligations",
+      "gist": "Which unsafe checks apply by default, and which package policy may add or remove inside an #Unsafe gate.",
+      "lesson": "The #Unsafe gate and typed obligations do different jobs. The ratified gate marks where memory safety is the author's responsibility; typed obligations are extra review records such as valid_ptr, aligned, and no_alias. This decision may make those extra records optional or required by team policy. It may also make the gate's reason optional. Removing the gate itself is a separate amendment to I1 and D-UNSAFE2, represented only by option D.",
+      "explainer": "Today D-LL1 and D-UNSAFE2 require every low-level memory operation to be inside a user-written #Unsafe region or #Unsafe fn. #Unsafe(\"reason\") is preferred; bare #Unsafe already compiles with L3101. Ordinary Jet outside those gates remains memory-safe and emits no generated Rust unsafe. Options A through C preserve that boundary. Option D deliberately changes it.",
+      "story": "Sam writes a GPIO driver. Sam wants one explicit #Unsafe region and no per-operation paperwork. Sam's employer later requires each pointer operation to record valid_ptr, aligned, and no_alias so code review and CI can audit what remains unproved. The same source model must serve both without making the employer's strict policy the default for every expert.",
+      "inWild": "The package contains volatile reads and writes against memory-mapped registers. A solo expert wants the ratified #Unsafe gate only. A regulated team wants CI to reject an operation whose typed obligation is missing and wants jet inspect unsafe to report the effective package or organization policy and its source.",
+      "detail": "All policy modes live under the existing pkg.jet policy namespace. Organization policy may require a stricter mode than the package requests and audit output names both sources. A package may never silently weaken organization policy.",
       "options": [
         {
           "key": "A",
-          "name": "Keep the binary gate (status quo)",
-          "detail": "#Unsafe(\"reason\") opens every memory-unsafe operation in the region, and the reason string is the whole audit record. There is no per-operation breakdown; one sentence covers the entire block however large.",
-          "technical": "Ratified D-LL1/D-UNSAFE2. Region lowers straight to Rust unsafe { }. Gates: E3101-E3104, lint L3101. No obligation tracking; audit output lists the region and its reason only.",
-          "code": "use core.mem\n\n#Unsafe(\"MMIO GPIO access, single-threaded boot\") {\n    let status := mem.volatile_read(gpio_base + 0x18)\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n\n$ jet inspect unsafe sensor.jet\nregion sensor.jet:3  \"MMIO GPIO access, single-threaded boot\"\n  2 low-level operations, all covered by the one region reason\n\n# The reason string is the whole audit record. In a 300-line\n# driver region a reviewer cannot tell which pointer op still\n# lacks a checked condition — every op shares one sentence."
+          "name": "Gate-only default; obligations opt in",
+          "detail": "With no unsafe policy, experts write the ratified #Unsafe gate and nothing else. policy.unsafe = .Obligations makes typed per-operation obligations mandatory and auditable for teams. policy.unsafe = .Relaxed keeps the gate but permits bare #Unsafe without L3101, so one package line removes repeated reason strings. Team or organization policy may require .Obligations and reject either weaker mode. No mode in this option permits a low-level operation outside #Unsafe.",
+          "technical": "Default is D-LL1/D-UNSAFE2 gate checking with no obligation tracking. .Obligations adds the typed obligation checker and makes an undischarged obligation an error. .Relaxed suppresses the existing missing-reason lint only. jet inspect unsafe reports effective mode, policy source, each gated region, and per-operation state when obligations are enabled.",
+          "code": "// pkg.jet — normal expert package\npayload: { name: \"sensor\", version: \"0.1.0\" }\n// No unsafe policy: the #Unsafe gate alone is enough.\n\n// src/driver.jet\nuse core.mem\n#Unsafe(\"GPIO registers from the board map\") {\n    let status := mem.volatile_read(gpio_base + 0x18)\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n\n// pkg.jet — team package\npayload: { name: \"sensor\", version: \"0.1.0\" }\npolicy: { unsafe: .Obligations }\n\n#Unsafe(\"GPIO registers from the board map\") {\n    let status := mem.volatile_read(gpio_base + 0x18)\n        assert valid_ptr, aligned\n    mem.volatile_write(gpio_base + 0x1C, 1)\n        assert valid_ptr, aligned, no_alias\n}\n\n$ jet inspect unsafe\neffective policy: .Obligations\npolicy source: pkg.jet\nvolatile_read  driver.jet:3  valid_ptr ✓  aligned ✓\nvolatile_write driver.jet:5  valid_ptr ✓  aligned ✓  no_alias ✓\n\n// pkg.jet — one-line reduced ceremony\npayload: { name: \"sensor\", version: \"0.1.0\" }\npolicy: { unsafe: .Relaxed }\n\n#Unsafe {\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n// No reason and no L3101. The #Unsafe gate is still required."
         },
         {
           "key": "B",
-          "name": "Typed obligations per operation",
-          "detail": "Each low-level operation carries the specific conditions it demands; the author discharges them inline with an assert clause. The compiler tracks undischarged obligations per region and reports them at the operation, and audit diffs show only what changed.",
-          "technical": "New assert obligation clause on volatile/pointer ops (valid_ptr, aligned, no_alias). An undischarged obligation is a lint the author clears with an assert or an explicit waiver. jet inspect unsafe lists each op and its state.",
-          "code": "use core.mem\n\n#Unsafe(\"MMIO GPIO, single-threaded boot\") {\n    let status := mem.volatile_read(gpio_base + 0x18)\n        assert valid_ptr, aligned\n    mem.volatile_write(gpio_base + 0x1C, 1)\n        assert valid_ptr, aligned\n}\n\n$ jet inspect unsafe sensor.jet\nregion sensor.jet:3  \"MMIO GPIO, single-threaded boot\"\n  volatile_read  @4   valid_ptr ✓   aligned ✓\n  volatile_write @6   valid_ptr ✓   aligned ✓   no_alias ✗ UNDISCHARGED\n  1 remaining obligation\n\n$ git diff — audit shows only the changed obligation:\n  volatile_write @6   + no_alias  (new, needs an assert or waiver)"
+          "name": "Obligations by default; package opt-out",
+          "detail": "Every package requires typed per-operation obligations unless pkg.jet selects .GateOnly. .Relaxed selects gate-only checking and also permits a missing reason without L3101. Organization policy may forbid either opt-out. This gives teams strict behavior without configuration, but makes every solo expert opt out before writing ordinary gated low-level code.",
+          "technical": "The absence of policy means .Obligations. .GateOnly disables obligation checking but retains #Unsafe and the existing reason lint. .Relaxed disables obligation checking and the reason lint but retains #Unsafe. Audit output records any package opt-out and whether organization policy allowed it.",
+          "code": "// pkg.jet — no policy means typed obligations are required\npayload: { name: \"sensor\", version: \"0.1.0\" }\n\n#Unsafe(\"GPIO registers from the board map\") {\n    mem.volatile_write(gpio_base + 0x1C, 1)\n        assert valid_ptr, aligned, no_alias\n}\n\n// pkg.jet — opt out of typed obligations\npayload: { name: \"sensor\", version: \"0.1.0\" }\npolicy: { unsafe: .GateOnly }\n\n#Unsafe(\"GPIO registers from the board map\") {\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n\n// pkg.jet — opt out of obligations and reason lint\npayload: { name: \"sensor\", version: \"0.1.0\" }\npolicy: { unsafe: .Relaxed }\n\n#Unsafe {\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n// The gate remains mandatory in both opt-out modes."
         },
         {
           "key": "C",
-          "name": "Region-level obligation manifest",
-          "detail": "Obligations are declared once in a manifest block at the region head, each with a justifying note. The compiler checks the manifest covers all operations. A reviewer reads the manifest instead of the body, and diffs track manifest changes.",
-          "technical": "obligations { } block after the #Unsafe reason. Covers the region as a whole, not per operation. An operation with no matching manifest entry is an error; the binding is region-wide, not per op.",
-          "code": "use core.mem\n\n#Unsafe(\"MMIO GPIO, single-threaded boot\")\n    obligations {\n        valid_ptr:     \"gpio_base from linker script, never null\"\n        aligned:       \"registers are 4-byte aligned by the chip spec\"\n        single_thread: \"runs only in boot, before the scheduler starts\"\n    }\n{\n    let status := mem.volatile_read(gpio_base + 0x18)\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n\n$ jet inspect unsafe sensor.jet\nregion sensor.jet:3  \"MMIO GPIO, single-threaded boot\"\n  manifest: valid_ptr, aligned, single_thread  (3 documented)\n  operations covered: 2/2\n\n# Review reads the manifest, not the body. A newly added\n# volatile op inherits the manifest without the author\n# re-confirming those conditions apply to it."
+          "name": "Choose obligations at each unsafe site",
+          "detail": "pkg.jet selects .PerSite, then every #Unsafe region or function says whether it tracks or skips typed obligations. This lets one package mix regulated driver code with short expert-only regions, but it cannot reduce ceremony for the whole package with one line. Every site still has a #Unsafe gate.",
+          "technical": ".PerSite requires an obligations argument on each #Unsafe marker. .Track enables typed checking for that site; .Skip uses the ratified gate alone. Audit output records each site's choice. Organization policy may reject .Skip. Missing site mode is an error so the choice is never inferred.",
+          "code": "// pkg.jet\npayload: { name: \"sensor\", version: \"0.1.0\" }\npolicy: { unsafe: .PerSite }\n\n// src/driver.jet\nuse core.mem\n#Unsafe(\"shared GPIO driver\", obligations: .Track) {\n    mem.volatile_write(gpio_base + 0x1C, 1)\n        assert valid_ptr, aligned, no_alias\n}\n\n#Unsafe(\"one boot-time probe\", obligations: .Skip) {\n    let status := mem.volatile_read(gpio_base + 0x18)\n}\n\n$ jet inspect unsafe\ndriver.jet:3  .Track  all obligations discharged\ndriver.jet:8  .Skip   gate reason recorded\n\n// Both sites require #Unsafe; pkg.jet does not suppress site markings."
+        },
+        {
+          "key": "D",
+          "name": "Invariant amendment: package-wide gate suppression",
+          "detail": "policy.unsafe = .Unchecked is an explicit package opt-in that permits low-level operations without any #Unsafe region or function. Audit output records the package-wide choice and every low-level operation. Organization policy may deny .Unchecked. This option amends I1's required user-written audited regions and D-UNSAFE2's #Unsafe audit gate; it is not a relaxation allowed by current law.",
+          "technical": "The compiler treats the whole package as an unsafe authority region after reading .Unchecked. use core.mem remains the discovery gate, but lexical #Unsafe gates and reason strings are not required. Generated Rust unsafe may therefore arise from source locations not enclosed by a user-written #Unsafe marker. Ratifying D must explicitly amend I1 and D-UNSAFE2 before implementation.",
+          "code": "// pkg.jet — explicit invariant amendment\npayload: { name: \"sensor\", version: \"0.1.0\" }\npolicy: { unsafe: .Unchecked }\n\n// src/driver.jet\nuse core.mem\nlet status := mem.volatile_read(gpio_base + 0x18)\nmem.volatile_write(gpio_base + 0x1C, 1)\n// No #Unsafe marker is required anywhere in this package.\n\n$ jet inspect unsafe\neffective policy: .Unchecked\npolicy source: pkg.jet\nwarning: package-wide #Unsafe gate suppression is active\nvolatile_read  driver.jet:2  no lexical gate\nvolatile_write driver.jet:3  no lexical gate\n\n// A team policy that forbids .Unchecked rejects this package before build."
         }
       ],
       "comparisons": [],
-      "rec": "B",
+      "rec": "A",
       "recommendation": {
-        "why": "In Sam's 300-line region, B surfaces each still-unproven condition at the exact operation that needs it, and audit diffs show only newly added obligations. A discharged operation is visibly distinct from an unaudited one.",
+        "why": "A keeps ratified expert behavior as the default, gives teams one enforceable obligations policy, and lets packages remove repeated reason strings without weakening safety outside #Unsafe.",
         "whyNot": [
           {
-            "key": "A",
-            "reason": "Gives the whole region one reason string, so a reviewer cannot tell a discharged operation from an unaudited one."
+            "key": "B",
+            "reason": "B makes every expert opt out of the additional obligation system even though the existing #Unsafe gate already records deliberate entry into the low-level tier."
           },
           {
             "key": "C",
-            "reason": "Documents obligations but does not bind each one to the operation that needs it, so a new unsafe op inherits an old manifest unchecked."
+            "reason": "C repeats the policy choice at every site and does not provide the requested package-wide reduction in ceremony."
+          },
+          {
+            "key": "D",
+            "reason": "D removes the ratified lexical audit boundary, allows generated unsafe outside user-written gated regions, and therefore requires a conscious amendment to I1 and D-UNSAFE2."
           }
         ],
-        "tradeoff": "B adds an assert obligation clause on low-level operations, so expert authors write the specific condition each pointer op relies on. An undischarged obligation is a lint the author must clear with an assert or an explicit waiver."
+        "tradeoff": "Under A, teams that want typed obligations must set package or organization policy. The effective policy and its source are included in audit output, so that opt-in is visible and enforceable."
       },
       "hybrid": null,
-      "checkInstructions": null,
+      "checkInstructions": "Confirm A through C always reject low-level operations outside #Unsafe. Confirm .Relaxed only suppresses L3101. Confirm organization policy can require .Obligations and audit output names the effective mode and source. Treat D as blocked until I1 and D-UNSAFE2 are explicitly amended.",
       "draft": false,
       "status": "open",
       "created": "2026-07-15T19:57:04.095Z"
@@ -39748,58 +40009,63 @@
     {
       "id": "D-OPTGC1",
       "cardId": "c03lc2y3",
-      "group": "stdlib",
-      "title": "Expose the opt-in Gc<T> cycle collector — resolve the I6 gate",
-      "gist": "Whether `use core.gc` and `Gc<T>` are public now, kept behind an experimental gate, or pulled until a later ballot.",
-      "lesson": "Terms. A cycle is two values that point at each other. A leak is memory a refcounted value never frees because its count never reaches zero. `Shared<T>` is Jet's many-owners handle; two `Shared` in a cycle leak. `Pool<T>`/`Id<T>` stores nodes in one table and links them by plain copyable ids, so a cycle never leaks. A traced heap scans from live roots and frees whatever it cannot reach, cycles included; `Gc<T>` is that heap and `gc.collect()` runs the scan.\n\nThe shipped collector is pure Rust in crates/jet-codegen/src/Prelude/Gc.rs — a mark-sweep with zero external crates, so the I6 external-dep concern does not apply here. Ownership stays the default for everyone; `use core.gc` is an expert opt-in for the rare cyclic graph. Note the read path is unfinished: `Gc.get()` currently returns nothing, and only `.with`/`.with_mut` read a node today. This ballot decides whether that opt-in is public.",
-      "explainer": "",
-      "story": "Priya models a folder tree. Each folder owns its files, and each file keeps a link back to its parent folder. With refcounted handles the parent holds the child and the child holds the parent, so dropping the root frees nothing. She wants the cycle to clean itself up.",
-      "inWild": "A scene graph in examples/features/memory/: `Node.{ children: [Gc<Node>], parent: Gc<Node>? }` where each child points back at its parent; dropping the root should reclaim the whole cycle on the next `gc.collect()`.",
-      "detail": "",
+      "group": "syntax",
+      "title": "Choose the opt-in GC scope and migration workflow",
+      "gist": "Choose whether `#Policy(gc)` is an inherited package-to-block setting with automatic traced values, a package-only setting, or absent in favor of explicit `Gc<T>` values.",
+      "lesson": "D-MEM1 is Jet's default memory law. A bare parameter is read-only, `&` grants exclusive write access, and `^` transfers ownership. Borrows are second-class, so they cannot be stored in fields or returned.\n\nA tracing garbage collector, or GC, keeps a graph of live heap values and reclaims unreachable cycles. Inside `#Policy(gc)`, each heap-owning value gains stable traced identity without a `Gc<T>` wrapper. Storing a bare read into another GC-managed field or collection creates an edge to that same identity. It does not move or copy the value.\n\nThe access law still applies. `&` is required for mutation, `^` transfers a root, and `~` remains an independent deep copy. A traced edge is an owned runtime handle, not a borrow. If a GC-managed value may escape into ownership-only code, the compiler rejects the boundary until ownership is proven or the receiving scope opts in.\n\nD-MARK-SCOPE1 is the common ladder being raised from #644 for eligible markers: package, module, function, and block. A setting inherits inward, while a narrower scope lets one subsystem opt in without changing its neighbors. GC registers in that shared applicability matrix instead of creating another inheritance mechanism.\n\nTrace mode is the exit path. It records each allocation the ownership checker could not prove, including the source site and reason. `jet gc report` turns those records into fixes for moving back to owned values or `Pool<T>`/`Id<T>`.\n\nD-DEP-GC1=A already chose the pure-Rust, std-only mark-sweep collector. This ballot does not approve an external collector or runtime bridge. Either would require its own I6 ballot.",
+      "explainer": "This decides both the opt-in boundary and whether opting in changes ordinary values automatically. It also makes GC reporting part of the supported workflow, not an optional debugging extra.",
+      "story": "Maya is moving a TypeScript service to Jet. The service has request graphs, caches, and callbacks that share cyclic state. She wants one package setting while porting, then a report that shows how to remove GC one source site at a time.",
+      "inWild": "A service package opts into GC once. Most code uses ordinary `Node` and `Request` values. A low-level parser module stays ownership-only, while one embedded plugin uses a function or block opt-in. CI runs `jet gc report --json` and tracks the remaining GC-backed allocation sites until the report is empty.",
+      "detail": "The package and source spelling below is the existing `#Policy(…)` family with a `gc` key. `jet clean` remains Hangar cleanup; `jet gc report` is memory analysis.",
       "options": [
         {
           "key": "A",
-          "name": "Public expert module now",
-          "detail": "`use core.gc` resolves; `Gc.new`, `.clone()`, `.with`/`.with_mut`, and `gc.collect()` are documented and supported. It is Jet's blessed traced-home answer for cycles, beside `Pool`/`Id`. No external dependency, so I6 is satisfied.",
-          "technical": "$ jet run scene.jet\n# runs clean, exits 0 — the a<->b cycle is reclaimed by gc.collect()\n\n# contrast: the same two-node cycle built from Shared<Node> never frees.\n# each handle keeps a refcount of 1, so dropping the root leaks both nodes.",
-          "code": "use core.gc\n\nNode :: { name: String, link: Gc<Node>? }\n\n// two nodes that point at each other — a cycle\na :: Gc.new(Node.{ name: \"a\", link: None })\nb :: Gc.new(Node.{ name: \"b\", link: Val(a.clone()) })\na.with_mut(n => n.link = Val(b.clone()))\n\n// drop both handles, then reclaim the whole cycle at once\ngc.collect()   // frees a and b together"
+          "name": "Package-to-block ladder with magic and reports",
+          "detail": "`#Policy(gc)` is one inherited setting at package, module, function, and block scope. Heap-owning values gain traced identity, and bare stores create traced edges. `jet gc report` lists every allocation ownership cannot prove and gives a concrete fix.",
+          "technical": "The `gc` policy key uses D-MARK-SCOPE1's applicability matrix. A bare store between GC-managed values preserves identity instead of moving. `&` still gates mutation, `^` transfers a root, and `~` deep-copies. Unproven escape into ownership-only code is rejected.",
+          "code": "// package.jet — one line opts in the whole package\n#Policy(gc)\npayload: { name: \"scene-service\", version: \"1.0.0\" }\n\n// Source/scene.jet — no Gc<T> type ceremony\nNode :: { name: String, links: [Node] }\n\nfn run() {\n    a := Node.{ name: \"a\", links: [] }\n    b := Node.{ name: \"b\", links: [] }\n    a.links.push(b)  // bare store creates a traced edge to b\n    b.links.push(a)  // bare store creates a traced edge to a\n    print(a.name)\n}\n\n// The same policy can be narrower when package.jet omits it:\n#Policy(gc) module importer { /* GC-managed module */ }\n#Policy(gc) fn load_graph() { /* GC-managed function */ }\nfn embed() { #Policy(gc) { /* GC-managed block */ } }\n\n$ jet run Source/scene.jet\na\n\n$ jet gc report\nGC-backed allocations: 2 sites\nSource/scene.jet:5:10  Node  1 allocation\n  reason: value participates in cycle a.links -> b.links -> a\n  fix: store nodes in Pool<Node> and links as Id<Node>\nSource/scene.jet:6:10  Node  1 allocation\n  reason: value participates in cycle b.links -> a.links -> b\n  fix: store nodes in Pool<Node> and links as Id<Node>\nRemove #Policy(gc) when this report is empty."
         },
         {
           "key": "B",
-          "name": "Ship it behind an experimental gate",
-          "detail": "The module stays, but `use core.gc` needs an explicit `#Experimental(\"gc\")` marker (same attribute shape as `#Unsafe`) and prints a one-time \"APIs may move\" note. Beginners never reach it by accident; the default cycle answer stays `Pool`/`Id`.",
-          "technical": "# without the marker:\n$ jet run scene.jet\nerror[E0461]: `core.gc` is experimental and not enabled here\n  |\n2 | use core.gc\n  |     ^^^^^^^ opt in with `#Experimental(\"gc\")` at the top of the file\n  = note: the collector read path is still changing; APIs may move\n\n# with the marker:\n$ jet run scene.jet\nnote: using experimental module `core.gc`",
-          "code": "#Experimental(\"gc\")   // required to reach core.gc\nuse core.gc\n\nNode :: { name: String, link: Gc<Node>? }\na :: Gc.new(Node.{ name: \"a\", link: None })\nb :: Gc.new(Node.{ name: \"b\", link: Val(a.clone()) })\na.with_mut(n => n.link = Val(b.clone()))\ngc.collect()"
+          "name": "Package-only magic",
+          "detail": "Only `package.jet` may opt into automatic GC. Every ordinary heap value in that package uses the GC rules. Source modules, functions, and blocks cannot opt in independently, but `jet gc report` still provides the migration list.",
+          "technical": "The same identity, access, copy, root-transfer, and escape laws as option A apply. Package boundaries are the smallest GC boundary, so one traced subsystem makes the whole package GC-managed.",
+          "code": "// package.jet — the only legal opt-in site\n#Policy(gc)\npayload: { name: \"scene-service\", version: \"1.0.0\" }\n\n// Source/scene.jet — ordinary values use package GC\nNode :: { name: String, links: [Node] }\nfn run() {\n    a := Node.{ name: \"a\", links: [] }\n    b := Node.{ name: \"b\", links: [] }\n    a.links.push(b)  // traced edge to b\n    b.links.push(a)  // traced edge to a\n    print(a.name)\n}\n\n#Policy(gc) fn local_only() { }\n// error: the gc policy is package-only under this option\n\n$ jet gc report\nGC-backed allocations: 2 sites\nSource/scene.jet:4:10  Node  1 allocation\n  reason: value participates in cycle a.links -> b.links -> a\n  fix: move the graph to Pool<Node>/Id<Node>, then remove package.jet:#Policy(gc)\nSource/scene.jet:5:10  Node  1 allocation\n  reason: value participates in cycle b.links -> a.links -> b\n  fix: move the graph to Pool<Node>/Id<Node>, then remove package.jet:#Policy(gc)"
         },
         {
           "key": "C",
-          "name": "Pull it until a later ballot",
-          "detail": "`use core.gc` stops resolving. The answer to cycles becomes `Pool`/`Id` (built) or a `Weak` back-edge (not yet built). Re-expose `Gc<T>` after a dedicated ballot when the collector read path is finished.",
-          "technical": "$ jet run scene.jet\nerror[E0412]: unknown module `core.gc`\n  |\n1 | use core.gc\n  |     ^^^^^^^ no module named `gc`\n  = help: for cycles use `Pool<T>`/`Id<T>` — nodes in one table, edges as ids\n\n# ids are plain data, so no id-graph can leak; the pool frees on scope exit.",
-          "code": "// no `use core.gc` — cycles use an id-graph instead\nNode :: { name: String, link: Id<Node>? }\n\nworld := Pool<Node>.new()\na :: world.add(Node.{ name: \"a\", link: None })\nb :: world.add(Node.{ name: \"b\", link: Val(a) })\nworld[a].link = Val(b)     // a <-> b via ids — plain data, no leak"
+          "name": "Explicit Gc<T> values only",
+          "detail": "There is no GC scope setting. Users import `core.gc` and wrap each traced value in `Gc<T>`. Ordinary values always follow D-MEM1 ownership. `jet gc report` can list explicit GC construction sites, but it cannot offer a package-wide migration mode.",
+          "technical": "This preserves the current explicit handle model. D-DEP-GC1=A remains the backend. No automatic promotion occurs, and module, function, or block markers do not exist.",
+          "code": "// package.jet — no GC setting exists\npayload: { name: \"scene-service\", version: \"1.0.0\" }\n\n// Source/scene.jet — every traced value names its wrapper\nuse core.gc as gc\nNode :: { name: String, links: [gc.Gc<Node>] }\n\nfn run() {\n    a :: gc.Gc.new<Node>(Node.{ name: \"a\", links: [] })\n    b :: gc.Gc.new<Node>(Node.{ name: \"b\", links: [] })\n    a.with_mut(n => n.links.push(~b))\n    b.with_mut(n => n.links.push(~a))\n    gc.collect()\n    print(\"a\")\n}\n\n$ jet gc report\nExplicit GC allocations: 2 sites\nSource/scene.jet:6:10  gc.Gc.new<Node>\n  reason: value participates in cycle a.links -> b.links -> a\n  fix: store nodes in Pool<Node> and links as Id<Node>\nSource/scene.jet:7:10  gc.Gc.new<Node>\n  reason: value participates in cycle b.links -> a.links -> b\n  fix: store nodes in Pool<Node> and links as Id<Node>\nNo implicit GC allocations can be reported because no GC scopes exist."
         }
       ],
       "comparisons": [
         {
-          "lang": "Rust",
-          "note": "`Rc<T>` cycles leak; `Weak<T>` breaks the back-edge, but you must pick which edge is weak by hand.",
-          "code": "let a = Rc::new(RefCell::new(Node { link: None }));\nlet b = Rc::new(RefCell::new(Node { link: Some(a.clone()) }));\na.borrow_mut().link = Some(b.clone()); // Rc cycle -> both leak\n// fix: make one edge Weak<Node> so the count can reach zero"
+          "lang": "Go",
+          "note": "Go traces heap values for the whole program. It gives migration projects no per-value wrapper, but it has no module, function, or block opt-out ladder.",
+          "code": "type Node struct { Links []*Node }\n// Ordinary pointers participate in the program-wide tracing GC."
+        },
+        {
+          "lang": "Rust GC libraries",
+          "note": "Library collectors normally expose wrapper types such as Gc<T>. That resembles option C and makes each traced edge visible in the type.",
+          "code": "let node: Gc<Node> = Gc::new(Node { links: vec![] });"
         }
       ],
-      "rec": "B",
+      "rec": "A",
       "recommendation": {
-        "why": "B keeps the working escape hatch for experts, and the default cycle answer stays `Pool`/`Id`. It does not publish the collector's unfinished `.get()` read path as a supported API.",
+        "why": "A gives migration projects one package line while preserving the same setting at module, function, and block scope. Its report provides a direct path back to D-MEM1 ownership.",
         "whyNot": [
           {
-            "key": "A",
-            "reason": "A blesses the collector as supported now, but its `.get()` read path currently returns nothing, and it adds a second cycle mechanism beside `Pool`/`Id` on the default surface."
+            "key": "B",
+            "reason": "B cannot embed GC in one subsystem. A library must opt in its entire package or split the package, even when only one function owns the cyclic graph."
           },
           {
             "key": "C",
-            "reason": "C removes a working expert escape the owner named as a valid answer — an explicit traced home — forcing every cycle onto id-graphs even where tracing reads clearer."
+            "reason": "C requires `Gc<T>` ceremony throughout a migration and does not provide the package-level magic the owner requested. Its report also sees only sites users already wrapped explicitly."
           }
         ],
-        "tradeoff": "B adds one marker line (`#Experimental(\"gc\")`) and a one-time note experts must accept before the module resolves."
+        "tradeoff": "A makes storage representation depend on an inherited scope setting. Tooling must show that inheritance and report every automatic GC allocation so no hidden site blocks migration."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -40335,6 +40601,73 @@
       "created": "2026-07-15T21:00:20.897Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-15"
+    },
+    {
+      "id": "D-MARK-SCOPE1",
+      "cardId": "c0bfdd1e",
+      "group": "syntax",
+      "title": "Common scope ladder for eligible markers",
+      "gist": "Choose whether eligible markers share block, function, module, and package placement.",
+      "lesson": "Placement and meaning are separate. A common ladder can remove repeated declarations, while each marker still needs an applicability rule that rejects scopes where its proof or authority is site-specific.",
+      "explainer": "",
+      "story": "Alex maintains firmware with a package memory limit, a tighter sensor-module limit, one constrained function, and one smaller calibration block. Alex also needs the compiler to reject a package-wide unsafe authorization and show where each effective setting came from.",
+      "inWild": "An embedded package uses arena_bounded at four levels. Memory facts and sound effect restrictions may inherit. Unsafe authorization, lexical grants, taint origins, sanitizer claims, and field wire attributes stay at the exact sites their proofs describe.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Four-level ladder for eligible markers",
+          "detail": "Eligible markers may attach to a block, function, module, or package. For the same marker key, the nearest declaration wins; unmentioned keys remain inherited, and jet explain shows provenance.",
+          "technical": "A compiler-owned applicability matrix defines legal levels and override rules per marker. Wide #Unsafe authorization, #Grant, #Tainted, #Sanitizer, and field wire attributes remain rejected where their proofs are site-specific.",
+          "code": "# package.jet — package level\n#Policy(arena_bounded(65536))\n#Policy(unsafe: .Forbid)               # wide policy may only tighten\nname: \"meter\"\n\n# Source/sensor.jet — module level\n#Policy(arena_bounded(8192))\nmodule sensor\n\n# function level\n#Policy(arena_bounded(2048))\nfn calibrate() -> Reading {\n    #Policy(arena_bounded(512)) {       # block level\n        return sample_window()\n    }\n}\n\n$ jet explain marker Source/sensor.jet:9 arena_bounded\neffective value: 512 bytes\ndeclared at: Source/sensor.jet:8 (block)\noverrides: Source/sensor.jet:6 (function), Source/sensor.jet:2 (module), package.jet:1 (package)\n\n# Unsafe authorization remains site-bound.\n#Unsafe(\"all package code\")\nname: \"meter\"\n\nerror[E0350]: #Unsafe cannot authorize a package\n What: package scope would authorize raw operations without a written audited region\n Why: each unsafe operation must be inside a user-written #Unsafe block or function\n Fix: use #Policy(unsafe: .Forbid) at package scope, or move\n      #Unsafe(\"reason\") to the exact block or function"
+        },
+        {
+          "key": "B",
+          "name": "Function and package only",
+          "detail": "Eligible markers may set a package default or one function value. Modules and blocks cannot override them, so intermediate and narrow scopes require repeated function declarations.",
+          "technical": "The applicability matrix has two inherited levels. Existing site-specific markers keep their current sites, and wide #Unsafe authorization remains rejected.",
+          "code": "# package.jet — package level\n#Policy(arena_bounded(65536))\nname: \"meter\"\n\n# Source/sensor.jet\n#Policy(arena_bounded(8192))\nmodule sensor\n\nerror[E0351]: #Policy cannot be placed on a module\n Fix: place it on package.jet or repeat it on each function\n\n# function level\n#Policy(arena_bounded(2048))\nfn calibrate() -> Reading {\n    #Policy(arena_bounded(512)) {\n        return sample_window()\n    }\n}\n\nerror[E0352]: #Policy cannot be placed on a block\n Fix: split the block into a marked function\n\n# Every other function needing 8192 repeats the declaration.\n#Policy(arena_bounded(8192))\nfn read_sensor() -> Reading { ... }\n\n#Policy(arena_bounded(8192))\nfn read_backup_sensor() -> Reading { ... }\n\n# Unsafe authorization remains site-bound.\n#Unsafe(\"all package code\")\nname: \"meter\"\n\nerror[E0350]: #Unsafe cannot authorize a package\n Fix: move #Unsafe(\"reason\") to the exact block or function"
+        },
+        {
+          "key": "C",
+          "name": "Leave current per-site rules",
+          "detail": "Each marker keeps its current attachment sites. There is no common inheritance rule, so users repeat declarations or reorganize code around each marker's existing grammar.",
+          "technical": "#Policy(no_alloc) remains module-only. #Unsafe remains block/function, effect bounds remain signature or region forms, and field attributes remain field-only.",
+          "code": "# package.jet — no package marker placement\nname: \"meter\"\n\n#Policy(arena_bounded(65536))\nname: \"meter\"\n\nerror[E0353]: #Policy is not valid in package.jet\n Fix: repeat the policy in each source module\n\n# Source/sensor.jet — current module site\n#Policy(arena_bounded(8192))\nmodule sensor\n\n# No common function or block form exists.\n#Policy(arena_bounded(2048))\nfn calibrate() -> Reading {\n    #Policy(arena_bounded(512)) {\n        return sample_window()\n    }\n}\n\nerror[E0354]: this #Policy form is only valid at module level\n Fix: move it to the module header\n\n# Unsafe keeps its separate current sites.\n#Unsafe(\"device register access\") {\n    register.* = 1\n}\n\n# To apply the memory rule across ten modules, write ten module declarations."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust lint attributes inherit through the item tree. Crate or module inner attributes set defaults, item attributes refine them, and forbid prevents a child from weakening the rule.",
+          "code": "#![deny(unsafe_code)]\n\nmod parser {\n    #![allow(dead_code)]\n\n    #[deny(unused_variables)]\n    fn parse(input: &str) { ... }\n}"
+        },
+        {
+          "lang": "C#",
+          "note": "C# pragma warning directives cover a source range until restore or end of file. They support narrow lexical control, but they do not form a package and module inheritance tree.",
+          "code": "#pragma warning disable CS0168\nvoid Parse() {\n    int unused;\n}\n#pragma warning restore CS0168"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A lets one rule cover the needed code at any project size. The applicability matrix preserves site-specific proof boundaries, and provenance makes inherited behavior inspectable.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B cannot express a module default or a narrow block override. Users must repeat function declarations or split code only to place a marker."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps different placement rules for each marker and repeats package policy across modules. The effective rule cannot be explained through one inheritance model."
+          }
+        ],
+        "tradeoff": "A requires one explicit applicability and override entry for every marker. A marker gains only the levels whose semantics remain sound; rejected levels receive normal Jet diagnostics."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T22:56:10.739Z"
     }
   ],
   "questions": [
@@ -40873,9 +41206,11 @@
       "by": "owner",
       "kind": "question",
       "text": "For all/most of the “marker/attributes”, or at least the ones for which this is appropriate like memory, why not have the ability to mark individual scopes/blocks, functions, modules, AND packages. This way the user can define in one place based on where they want the given “marker” to be relevant insteead of tons of repetition. This also keeps consistency throughout various echelons. Please update this ballot accordingly and open another ballot/card to allow that type of scoping everywhere as appropriate",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-15T22:07:18.381Z"
+      "status": "answered",
+      "answer": "Yes. Adopt one scoping ladder for eligible markers: block, function, module, and package. One declaration applies below that point; the innermost declaration of the same marker key wins, while unrelated inherited keys remain. `jet explain` should show the effective value and every contributing or overridden declaration.\n\nMemory facts are eligible: `#Policy(no_alloc)`, `zero_rc`, and `arena_bounded(N)`. Effect bounds and prohibitions can inherit where their semantics remain sound. `#Unsafe` needs split treatment: block and function forms may authorize audited unsafe operations, while module and package forms may only tighten policy, such as forbidding unsafe code or requiring audit evidence. A wide `#Unsafe` authorization would violate the user-written audited-region requirement.\n\nKeep per-site claims narrow when the proof depends on the exact site. `#Grant` creates a lexical authority handle that must not escape. `#Tainted` marks a specific value origin. `#Sanitizer` vouches for one function. Serde field attributes change one field's wire shape. Those cannot safely become implicit package-wide claims.",
+      "created": "2026-07-15T22:07:18.381Z",
+      "answeredAt": "2026-07-15",
+      "answeredBy": "fable-orchestrator"
     },
     {
       "id": "q1migw8o",
@@ -40884,9 +41219,11 @@
       "by": "owner",
       "kind": "question",
       "text": "This seems excessive if it is the default requirement. We want to treat experts like adults, not baby them. If we need to enforce stricter rules, then that should be enforceable and auditable for enterprises/teams, but should not be forced for EVERY user unless they opt in and need the safety. We need to allow ignoring/bypassing things like unsafe as opt in at package level. That way if a new user (who is an expert) wants to do some unsafe work, they can just use a single flag or add a single line to the package file to suppress/ignore/ skip need for unsafe markings",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-15T22:10:58.721Z"
+      "status": "answered",
+      "answer": "You're right about the additional typed obligation layer. I reworked option A so normal packages keep the current D-LL1/D-UNSAFE2 behavior: the `#Unsafe` gate alone. Teams opt into `policy: { unsafe: .Obligations }`; audit output records the effective policy and each operation's obligations. Experts can write `policy: { unsafe: .Relaxed }` once, which makes the reason optional and removes L3101, but still requires a `#Unsafe` region or function for low-level operations.\n\nBoundary: under current I1 and D-UNSAFE2, no package setting may permit raw operations outside `#Unsafe`. Memory and type safety remain enforced outside every gate.\n\nYour request to “skip need for unsafe markings” could instead mean removing `#Unsafe` itself. That conflicts with current I1 and D-UNSAFE2 and requires an explicit invariant-amendment ballot. I added that as separate option D: `policy: { unsafe: .Unchecked }` permits package-wide ungated unsafe and records that choice. I recommend A: adult default, optional enterprise obligations, one-line reduced ceremony, and the ratified boundary intact.",
+      "created": "2026-07-15T22:10:58.721Z",
+      "answeredAt": "2026-07-15",
+      "answeredBy": "fable-orchestrator"
     },
     {
       "id": "q26ita4z",
@@ -40895,9 +41232,11 @@
       "by": "owner",
       "kind": "question",
       "text": "My idea for opt in GC is that it could be supported as a package level setting or potentially smaller scope depending on user config. This way for things like go-project replacements in jet or typescript or python project replacements, the user could just opt into using the GC once and not worry about it. We should allow finer control and open up the GC to be usable on a lower mechanical level for embedding into modules/functions/etc, but should be magic by default. Also I want it to have a logging capability which could serve as a way to track/tool/debug where memory isn’t properly traced so that we have a clear way for the user to remove the GC and be fully borrow checker based. Update this card accordingly and make a new set of cards/ballots as needed to meet this goal",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-15T22:15:21.144Z"
+      "status": "answered",
+      "answer": "Yes. The updated ballot proposes GC opt-in on the four-echelon ladder being opened by D-MARK-SCOPE1 from #644. One `package.jet` line can cover a whole Go, TypeScript, or Python replacement. The same setting can narrow to a module, function, or block.\n\nUnder the recommended option, GC is magic inside an opted scope. Heap values gain traced identity with no `Gc<T>` ceremony. Bare storage creates a traced edge; `&` still gates writes, `^` transfers a root, and `~` stays a deep copy. Outside the scope, D-MEM1 remains unchanged.\n\nGC observability is also a required migration path. Trace mode records every allocation the ownership checker could not prove, its source site, and the reason. `jet gc report` groups those sites and gives concrete fixes, such as owned restructuring or `Pool<T>`/`Id<T>`. The target end state is an empty report, after which the scope opt-in can be removed.\n\nD-DEP-GC1=A already chose the std-only native collector, so this does not reopen I6. Any later external collector or runtime bridge needs its own I6 ballot. Two implementation cards cover scope semantics and trace/report tooling.",
+      "created": "2026-07-15T22:15:21.144Z",
+      "answeredAt": "2026-07-15",
+      "answeredBy": "fable-orchestrator"
     }
   ],
   "ideas": [
@@ -41172,6 +41511,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T23:00:39.159Z",
+      "by": "fable-orchestrator",
+      "action": "question.answer",
+      "ref": "q26ita4z",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T23:00:15.151Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0kn6oul",
+      "note": "title,body,kind,track,epoch,phase,priority,blockedBy,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T22:59:26.789Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0kn6oul",
+      "note": "GC trace and report: migration back to ownership"
+    },
+    {
+      "at": "2026-07-15T22:59:02.767Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c02rqnrd",
+      "note": "title,body,kind,track,epoch,phase,priority,blockedBy,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T22:58:13.875Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c02rqnrd",
+      "note": "GC scope opt-in: package, module, function, block"
+    },
+    {
+      "at": "2026-07-15T22:57:50.759Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-OPTGC1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T22:56:58.603Z",
+      "by": "fable-orchestrator",
+      "action": "question.answer",
+      "ref": "q1migw8o",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T22:56:34.733Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-UNSAFE-OBLIG1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T22:56:10.739Z",
+      "by": "fable-orchestrator",
+      "action": "decision.add",
+      "ref": "D-MARK-SCOPE1",
+      "note": "Common scope ladder for eligible markers"
+    },
+    {
+      "at": "2026-07-15T22:55:47.842Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0bfdd1e",
+      "note": "title,body,kind,track,epoch,phase,priority,blockedBy,refs,criteria"
+    },
+    {
+      "at": "2026-07-15T22:55:00.664Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0bfdd1e",
+      "note": "Implement common marker scoping and provenance"
+    },
+    {
+      "at": "2026-07-15T22:54:37.911Z",
+      "by": "fable-orchestrator",
+      "action": "decision.update",
+      "ref": "D-MEM-FACTS1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T22:54:13.571Z",
+      "by": "fable-orchestrator",
+      "action": "question.answer",
+      "ref": "q0ehvoge",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T22:35:23.058Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0sucg7f",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-15T22:18:40.850Z",
       "by": "owner",
@@ -44573,104 +45010,6 @@
       "action": "card.update",
       "ref": "c01fj815",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T05:21:59.284Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-SPLITPOLICY1",
-      "note": "What should split and fold move after typed contributions exist?"
-    },
-    {
-      "at": "2026-07-15T05:09:16.996Z",
-      "by": "root-625-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ru610a",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T05:09:16.894Z",
-      "by": "root-625-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ru610a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T05:08:27.108Z",
-      "by": "terra-420-lock",
-      "action": "card.claim",
-      "ref": "c01fj815",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T05:07:19.580Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0x3pi8i",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-15T05:06:44.470Z",
-      "by": "terra-541-builder",
-      "action": "card.release",
-      "ref": "c01fj815",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T05:06:36.943Z",
-      "by": "terra-541-builder",
-      "action": "card.criteria-meet",
-      "ref": "c01fj815",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T05:06:25.042Z",
-      "by": "terra-541-builder",
-      "action": "card.criteria-meet",
-      "ref": "c01fj815",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T05:06:15.610Z",
-      "by": "terra-541-builder",
-      "action": "card.claim",
-      "ref": "c01fj815",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T05:04:25.524Z",
-      "by": "root-625-builder",
-      "action": "card.release",
-      "ref": "c0ru610a",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T05:04:25.425Z",
-      "by": "root-625-builder",
-      "action": "card.update",
-      "ref": "c0ru610a",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T05:04:25.311Z",
-      "by": "root-625-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0ru610a",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T05:04:25.213Z",
-      "by": "root-625-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0ru610a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T05:03:22.834Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-SLICENAME1",
-      "note": "What should one modular graph contribution be called?"
     }
   ],
   "nextNum": 368,
