@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 626,
-    "rev": 7353,
+    "rev": 7357,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8940,6 +8940,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "terra-541-builder",
+          "text": "[handoff] Criterion 1 corrective build landed in 2abe0529c and remains met, not self-verified. Independent reviewer must audit action-store-v4 output-fact projection, missing-only WAL metadata replay, durable deletion tombstones, exact ProducerRecord suffix rejection, and fresh-binary CLI/doctor proofs. Targeted closure 17/17, hangar-v2 4/4, doctor 1/1 plus provider/replay/legacy gates green. Criteria 3-9 remain open; criterion 2 stays independently verified. Parent runs full suite."
+        },
+        {
+          "at": "2026-07-15",
           "text": "[handoff] Criterion 1 met, not self-verified. Commits 3361cb43, 5267856bb, dde5be4b2, 8352768f1, 7c6b74d2. Independent reviewer should audit WAL commit-before-projection/recovery, producer strictness and legacy fail-closed behavior, then rerun exact criterion tests. Criteria 3-9 remain open; criterion 2 already independently verified. Parent runs full suite."
         },
         {
@@ -9024,10 +9029,10 @@
           "n": 1,
           "text": "Every production producer registers canonical object descriptors, named outputs, references, action/output relations, and package records through one crash-recoverable transaction; legacy migration is idempotent.",
           "status": "met",
-          "metBy": "terra-420-producer",
+          "metBy": "terra-541-builder",
           "verifiedBy": null,
-          "evidence": "Canonical producer path landed in 3361cb43, 5267856bb, 8352768f1, and 7c6b74d2: deterministic BuildPlanReplay and versioned checksummed ProducerRecord; core, adapter, CRAN, LuaRocks, Nix, and ingest persist immutable source/toolchain/policy/action facts; Nix requires exact drvPath and records every named output. Closure WAL commits object descriptors, outputs, refs, action relation, producer record, and exact package metadata before projection, then recovers deleted projection. Legacy migration idempotently synthesizes only complete immutable non-Nix facts and rejects incomplete/Nix-without-derivation state. Production record bypasses removed. Targeted hostile/truncation, crash recovery, corrupt journal, conflict, concurrent, retry, legacy, Nix, core, and fresh-binary doctor proofs green.",
-          "at": "2026-07-15T04:40:52.324Z"
+          "evidence": "Corrective builder commit 2abe0529c fixes independent C1 rejection: action-store-v4 hashes canonical source, recipe, policy, platform, reference, provider, toolchain, and non-output replay facts while preserving exact producer output facts; same-action/different-output now rejects. WAL recovery replays missing package projections on retry, list_checked/list, find_verified, startup migration, and fresh-binary hangar recover; present corrupt metadata remains untouched for read-only doctor. Durable WAL tombstones survive compaction, remove stale projections, and block legacy resurrection. ProducerRecord requires exact lowercase 64-hex checksum suffix and final newline with no trailing bytes. Targeted proofs: closure_ 17/17; producer, replay, recovery, legacy, ingest, provider, Nix, core, CRAN, and LuaRocks green; hangar-v2 4/4; fresh-binary doctor read-only 1/1.",
+          "at": "2026-07-15T05:06:36.943Z"
         },
         {
           "n": 2,
@@ -37472,6 +37477,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T05:06:44.470Z",
+      "by": "terra-541-builder",
+      "action": "card.release",
+      "ref": "c01fj815",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T05:06:36.943Z",
+      "by": "terra-541-builder",
+      "action": "card.criteria-meet",
+      "ref": "c01fj815",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T05:06:25.042Z",
+      "by": "terra-541-builder",
+      "action": "card.criteria-meet",
+      "ref": "c01fj815",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T05:06:15.610Z",
+      "by": "terra-541-builder",
+      "action": "card.claim",
+      "ref": "c01fj815",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T05:04:25.524Z",
       "by": "root-625-builder",
       "action": "card.release",
@@ -40942,34 +40975,6 @@
       "action": "card.update",
       "ref": "c002osb3",
       "note": "title"
-    },
-    {
-      "at": "2026-07-14T23:30:49.129Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEWMUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:30:48.992Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-EXTENSION1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:30:48.852Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:30:48.676Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS2",
-      "note": "marked ready"
     }
   ],
   "nextNum": 368,
