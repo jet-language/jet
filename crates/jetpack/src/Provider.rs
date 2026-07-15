@@ -1220,7 +1220,10 @@ fn ensure_network_allowed(need: &str) -> Result<(), ProviderError> {
 /// Parse `nix build --json` output: an array of build results, each with an
 /// `outputs` object. `out` is canonical primary; `bin` remains a named output.
 fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderError> {
-    let json = JSON::parse(stdout.trim()).map_err(|e| ProviderError::BadOutput(e))?;
+    // parse_lenient (card #641): tolerates a `nix` store-optimise warning
+    // ("has maximum number of links") glued to the JSON on hosts whose store
+    // hit the hard-link ceiling — benign noise, not a real provider bug.
+    let json = JSON::parse_lenient(stdout).map_err(ProviderError::BadOutput)?;
     let arr = json.as_array().map_err(ProviderError::BadOutput)?;
     let first = arr
         .first()
@@ -1460,6 +1463,20 @@ mod tests {
             r.producer.plan.facts().get("nix.output.out").map(String::as_str),
             Some("/nix/store/abc-fastfetch-2.0")
         );
+    }
+
+    /// Card #641: `nix build --json` output wrapped in the host's own
+    /// store-optimise noise (hard-link ceiling hit) must still realize —
+    /// this used to die with `ProviderError::BadOutput`, "likely a Jetpack
+    /// bug", for any user on a large optimised store.
+    #[test]
+    fn tolerates_nix_store_noise_around_output() {
+        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let stdout = "\"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n\
+             [{\"drvPath\":\"/nix/store/abc-fastfetch.drv\",\"outputs\":{\"out\":\"/nix/store/abc-fastfetch-2.0\"}}]\n\
+             \"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n";
+        let r = parse_realization(&spec, stdout).unwrap();
+        assert_eq!(r.out, "/nix/store/abc-fastfetch-2.0");
     }
 
     #[test]

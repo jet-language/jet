@@ -244,6 +244,44 @@ impl Parser {
     }
 }
 
+/// Parse JSON that may have noise lines glued to it by an external tool —
+/// e.g. `nix`'s store-optimise warning (`` "/nix/store/.links/<hash>" has
+/// maximum number of links ``) landing next to a `nix build --json`/`nix eval
+/// --json` payload on hosts whose store has hit the hard-link ceiling. Tries
+/// a strict whole-text `parse` first, so clean output is unaffected; only on
+/// failure does it look for a line that opens a JSON value and parse from
+/// there, ignoring any noise before or after. Uses the same `Parser` and the
+/// same rules on the extracted span — it never loosens what counts as valid
+/// JSON or what the caller's field checks accept, only where the scan starts.
+pub fn parse_lenient(input: &str) -> Result<Json, String> {
+    let trimmed = input.trim();
+    if let Ok(v) = parse(trimmed) {
+        return Ok(v);
+    }
+    for (idx, ch) in trimmed.char_indices() {
+        if ch != '{' && ch != '[' {
+            continue;
+        }
+        let at_line_start = trimmed[..idx]
+            .rfind('\n')
+            .map(|nl| trimmed[nl + 1..idx].trim().is_empty())
+            .unwrap_or_else(|| trimmed[..idx].trim().is_empty());
+        if !at_line_start {
+            continue;
+        }
+        let mut p = Parser {
+            chars: trimmed[idx..].chars().collect(),
+            pos: 0,
+        };
+        if let Ok(v) = p.value() {
+            return Ok(v);
+        }
+    }
+    // No candidate line parsed either; surface the strict whole-text error,
+    // same message a caller got before this fallback existed.
+    parse(trimmed)
+}
+
 // ── writing (for Jetpack's own small state files) ────────────────────────
 
 /// Serialize a string as a JSON string literal (quotes + escapes).
@@ -299,5 +337,35 @@ mod tests {
     #[test]
     fn roundtrips_quote() {
         assert_eq!(quote("a\"b\\c"), "\"a\\\"b\\\\c\"");
+    }
+
+    /// Card #641: `nix`'s store-optimise warning can land on the same stream
+    /// as a `nix build --json`/`nix eval --json` payload on a host whose
+    /// store hit the hard-link ceiling. Strict `parse` must still reject the
+    /// combined text (documents the bug); `parse_lenient` must recover the
+    /// payload untouched.
+    #[test]
+    fn lenient_tolerates_noise_lines_around_payload() {
+        let payload = r#"[{"drvPath":"/nix/store/x.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
+        let noisy = format!(
+            "\"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n{payload}\n\"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n"
+        );
+        assert!(parse(noisy.trim()).is_err(), "strict parse should still reject noise");
+        let j = parse_lenient(&noisy).unwrap();
+        let first = &j.as_array().unwrap()[0];
+        let out = first.get("outputs").unwrap().get("out").unwrap();
+        assert_eq!(out.as_str().unwrap(), "/nix/store/abc-fastfetch-2.0");
+    }
+
+    #[test]
+    fn lenient_still_rejects_garbage_only() {
+        assert!(parse_lenient("not json, no payload anywhere").is_err());
+    }
+
+    #[test]
+    fn lenient_still_rejects_malformed_payload() {
+        // A noise-wrapped but genuinely broken payload must not be papered
+        // over — forged/corrupt output stays rejected.
+        assert!(parse_lenient("noise\n[1,2\nmore noise").is_err());
     }
 }

@@ -88,7 +88,9 @@ fn run_nix_eval(flake_dir: &Path) -> Result<String, ProviderError> {
 }
 
 fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
-    let json = JSON::parse(text.trim()).map_err(ProviderError::BadOutput)?;
+    // parse_lenient (card #641): tolerates the same nix store-optimise noise
+    // `Provider::parse_realization` guards against — see its comment.
+    let json = JSON::parse_lenient(text).map_err(ProviderError::BadOutput)?;
     let obj = json.as_object().map_err(ProviderError::BadOutput)?;
 
     let mut packages: Vec<String> = obj
