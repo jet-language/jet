@@ -20,6 +20,14 @@ mod common;
 mod jetpack_fixtures;
 use jetpack_fixtures::*;
 
+fn physical_bin(name: &str) -> String {
+    if cfg!(windows) && !name.to_ascii_lowercase().ends_with(".exe") {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    }
+}
+
 fn write_tool_bin_fixture(root: &Path, fixtures: &Path, pkg: &str, bin: &str, script: &str) {
     fs::create_dir_all(fixtures).unwrap();
     let out_dir = root.join("hangar").join(format!("provider-fixture-{pkg}"));
@@ -157,7 +165,7 @@ fn tool_run_ephemeral_execs_builtin_provider_fixture() {
     );
     // Nothing projected onto ~/.jet/bin for a one-shot run.
     assert!(
-        !home.join(".jet/bin/greet").exists(),
+        !home.join(".jet/bin").join(physical_bin("greet")).exists(),
         "tool run must not leave PATH projection"
     );
 }
@@ -216,7 +224,7 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let link = home.join(".jet/bin/greet");
+    let link = home.join(".jet/bin").join(physical_bin("greet"));
     assert!(
         link.exists() || link.is_symlink(),
         "missing PATH projection at {}",
@@ -294,7 +302,9 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
     let stdout = String::from_utf8_lossy(&listed.stdout);
     assert!(stdout.contains("greet"), "stdout: {stdout}");
 
-    let projection = home.join(".jet/tools/generations/1/bin/greet");
+    let projection = home
+        .join(".jet/tools/generations/1/bin")
+        .join(physical_bin("greet"));
     let original_projection = fs::read(&projection).unwrap();
     let original_permissions = fs::metadata(&projection).unwrap().permissions();
     let mut writable_permissions = original_permissions.clone();
@@ -348,6 +358,57 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
         !roots_after_empty.contains(&ascii_hex("profile-generation:user:tools:2")),
         "empty generation must not create a root: {roots_after_empty}"
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_logical_alias_executes_native_exe_with_exact_arguments_and_exit() {
+    let root = Scratch::new("tool-win-root");
+    let proj = Scratch::new("tool-win-proj");
+    let fixtures = Scratch::new("tool-win-fx");
+    let home = Scratch::new("tool-win-home");
+    fs::create_dir_all(&fixtures.path).unwrap();
+    let out_dir = root.path.join("hangar/provider-fixture-native");
+    let bin_dir = out_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let system_root = env::var_os("SystemRoot").unwrap();
+    fs::copy(
+        Path::new(&system_root).join("System32/cmd.exe"),
+        bin_dir.join("cmd.exe"),
+    )
+    .unwrap();
+    let json = format!(
+        "[{{\"drvPath\":\"C:\\\\fixture-native.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+        out_dir.to_string_lossy()
+    );
+    fs::write(fixtures.join("nixpkgs-native.json"), json).unwrap();
+    let output = tool_install_command(
+        &root.path,
+        &proj.path,
+        &fixtures.path,
+        &home.path,
+        "native",
+    )
+    .args(["--as", "native-alias"])
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let alias = home.join(".jet/bin/native-alias.exe");
+    let status = Command::new(alias)
+        .args([
+            "/d",
+            "/s",
+            "/c",
+            "if \"a&b\"==\"a&b\" (exit /b 23) else (exit /b 9)",
+        ])
+        .env("HOME", &home.path)
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(23));
 }
 
 #[test]
@@ -543,10 +604,16 @@ fn legacy_generation_is_verified_and_migrated_to_owned_projection() {
         .unwrap();
     assert!(migrated.status.success(), "{}", String::from_utf8_lossy(&migrated.stderr));
     assert!(home.join(".jet/tools/legacy-generations/generation-1").is_dir());
-    assert!(home.join(".jet/tools/generations/2/bin/greet").is_file());
+    assert!(
+        home.join(".jet/tools/generations/2/bin")
+            .join(physical_bin("greet"))
+            .is_file()
+    );
     let current = fs::read_to_string(home.join(".jet/tools/current")).unwrap();
     assert!(current.contains("generation\t2"), "{current}");
-    let invoked = Command::new(home.join(".jet/bin/greet")).output().unwrap();
+    let invoked = Command::new(home.join(".jet/bin").join(physical_bin("greet")))
+        .output()
+        .unwrap();
     assert!(invoked.status.success());
     assert_eq!(String::from_utf8_lossy(&invoked.stdout).trim(), "migrated greet");
 }
@@ -674,5 +741,10 @@ fn tool_install_task_collision_is_e1297_snapshot() {
         .map(|idx| &stderr[idx..])
         .unwrap_or(&stderr);
     assert_jetos_stderr_snapshot("tool_task_collide", diagnostic);
-    assert!(!home.join(".jet/bin/serve").exists());
+    assert!(
+        !home
+            .join(".jet/bin")
+            .join(physical_bin("serve"))
+            .exists()
+    );
 }

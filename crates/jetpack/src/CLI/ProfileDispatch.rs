@@ -246,14 +246,18 @@ pub(crate) fn install_dispatcher(bin_dir: &Path, bin: &str) -> io::Result<PathBu
     ensure_directory_chain(bin_dir)?;
     let source = std::env::current_exe()?;
     validate_regular_file(&source)?;
-    let destination = bin_dir.join(bin);
+    let physical = physical_bin_name(bin);
+    let destination = bin_dir.join(&physical);
     match fs::symlink_metadata(&destination) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
         Ok(_) => return Err(invalid("dispatcher destination is not an owned regular file")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let partial = bin_dir.join(format!(".dispatcher-{bin}-{}.partial", std::process::id()));
+    let partial = bin_dir.join(format!(
+        ".dispatcher-{physical}-{}.partial",
+        std::process::id()
+    ));
     remove_regular_partial(&partial)?;
 
     if fs::hard_link(&source, &partial).is_err() {
@@ -307,10 +311,21 @@ fn resolve_invoked_entry(
     if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
         return None;
     }
-    for directory in std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-    {
+    resolve_path_entry(
+        invoked,
+        executable_identity,
+        std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>()),
+    )
+}
+
+fn resolve_path_entry(
+    invoked: &Path,
+    executable_identity: &fs::Metadata,
+    directories: impl IntoIterator<Item = PathBuf>,
+) -> Option<(PathBuf, fs::File)> {
+    for directory in directories {
         let entry = if directory.is_absolute() {
             directory.join(invoked)
         } else {
@@ -325,9 +340,8 @@ fn resolve_invoked_entry(
         if same_file_identity(executable_identity, &file.metadata().ok()?) {
             return validate_dispatcher_layout(entry).map(|entry| (entry, file));
         }
-        // First OS-eligible PATH entry is authoritative. A later same-byte
-        // executable must never impersonate it through argv[0].
-        return None;
+        // argv[0] can be preserved across a launcher's own PATH resolution.
+        // Bind the entry that is the running file, not an earlier shadow.
     }
     None
 }
@@ -545,7 +559,7 @@ fn validate_generation(metadata: &GenerationMetadata) -> io::Result<()> {
     }
     let mut identities = BTreeSet::new();
     let mut bins = BTreeSet::new();
-    let mut folded_bins = BTreeSet::new();
+    let mut physical_bins = BTreeSet::new();
     for tool in &metadata.tools {
         for value in [
             &tool.name,
@@ -576,7 +590,9 @@ fn validate_generation(metadata: &GenerationMetadata) -> io::Result<()> {
             validate_bin_name(bin)?;
             validate_bin_name(member)?;
             validate_digest(digest)?;
-            if !bins.insert(bin) || !folded_bins.insert(bin.to_ascii_lowercase()) {
+            if !bins.insert(bin)
+                || !physical_bins.insert(physical_bin_name_for(bin, true).to_ascii_lowercase())
+            {
                 return Err(invalid("duplicate profile bin"));
             }
             if bins.len() > MAX_BINS {
@@ -618,7 +634,7 @@ pub(crate) fn validate_bin_name(value: &str) -> io::Result<()> {
     if reserved {
         return Err(invalid("profile bin name is reserved on Windows"));
     }
-    if value.eq_ignore_ascii_case("jetpack") {
+    if value.eq_ignore_ascii_case("jetpack") || value.eq_ignore_ascii_case("jetpack.exe") {
         return Err(invalid("profile bin name collides with the package engine"));
     }
     Ok(())
@@ -755,6 +771,57 @@ fn sha256_open_file_hex(file: &mut fs::File) -> io::Result<String> {
         .collect())
 }
 
+#[cfg(unix)]
+fn freeze_unix_projection(source: &mut fs::File, expected: &str) -> io::Result<fs::File> {
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_PRIVATE: AtomicU64 = AtomicU64::new(0);
+    let base = std::env::temp_dir();
+    let private_dir = (0..64)
+        .find_map(|_| {
+            let serial = NEXT_PRIVATE.fetch_add(1, Ordering::Relaxed);
+            let path = base.join(format!(
+                ".jet-profile-exec-{}-{serial}",
+                std::process::id()
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => Some(Ok(path)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| invalid("could not reserve private profile executable"))?;
+    fs::set_permissions(&private_dir, fs::Permissions::from_mode(0o700))?;
+    let path = private_dir.join("image");
+    let result = (|| {
+        let mut writer = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        source.seek(std::io::SeekFrom::Start(0))?;
+        io::copy(source, &mut writer)?;
+        writer.sync_all()?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o500))?;
+        let mut frozen = open_pinned_regular(&path)?;
+        drop(writer);
+        let actual = format!("sha256-{}", sha256_open_file_hex(&mut frozen)?);
+        if actual != expected {
+            return Err(invalid("profile projection changed while freezing"));
+        }
+        ensure_open_executable(&frozen)?;
+        fs::remove_file(&path)?;
+        fs::remove_dir(&private_dir)?;
+        Ok(frozen)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&private_dir);
+    }
+    result
+}
+
 #[cfg(windows)]
 fn is_windows_reparse(metadata: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt as _;
@@ -788,6 +855,24 @@ fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     #[cfg(not(unix))]
     {
         left.len() == right.len() && left.modified().ok() == right.modified().ok()
+    }
+}
+
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        return left.dev() == right.dev() && left.ino() == right.ino();
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        return left.volume_serial_number() == right.volume_serial_number()
+            && left.file_index() == right.file_index();
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        same_file_metadata(left, right)
     }
 }
 
@@ -1012,6 +1097,36 @@ mod tests {
             projection_hashes: vec![digest('d')],
         });
         assert!(format_generation_metadata(&metadata).is_err());
+
+        let mut physical_collision = metadata();
+        physical_collision.tools[0].bins = vec!["foo".into()];
+        physical_collision.tools.push(GenerationTool {
+            name: "other".into(),
+            version: "1".into(),
+            source: "path".into(),
+            reference: "path:other".into(),
+            output_hash: digest('c'),
+            store_root: physical_collision.tools[0].store_root.clone(),
+            bins: vec!["foo.exe".into()],
+            members: vec!["other".into()],
+            projection_hashes: vec![digest('d')],
+        });
+        assert!(format_generation_metadata(&physical_collision).is_err());
+        assert!(validate_bin_name("jetpack.exe").is_err());
+    }
+
+    #[test]
+    fn windows_physical_alias_mapping_is_exact_first() {
+        assert_eq!(physical_bin_name_for("foo", true), "foo.exe");
+        assert_eq!(physical_bin_name_for("foo.exe", true), "foo.exe");
+        assert_eq!(physical_bin_name_for("foo.EXE", true), "foo.EXE");
+        assert_eq!(physical_bin_name_for("foo", false), "foo");
+
+        let mut metadata = metadata();
+        metadata.tools[0].bins = vec!["foo".into()];
+        assert_eq!(find_bin(&metadata, "foo").unwrap().1, 0);
+        #[cfg(windows)]
+        assert_eq!(find_bin(&metadata, "foo.exe").unwrap().1, 0);
     }
 
     #[test]
@@ -1097,6 +1212,90 @@ mod tests {
             sha256_open_file_hex(&mut pinned).unwrap(),
             SHA256::sha256_hex(b"verified")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_resolution_binds_inode_not_same_bytes_or_earlier_shadow() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-profile-path-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let shadow_dir = root.join("shadow");
+        let managed_dir = root.join(".jet/bin");
+        fs::create_dir_all(&shadow_dir).unwrap();
+        fs::create_dir_all(&managed_dir).unwrap();
+        let shadow = shadow_dir.join("sample-tool");
+        let managed = managed_dir.join("sample-tool");
+        fs::write(&shadow, b"same bytes").unwrap();
+        fs::write(&managed, b"same bytes").unwrap();
+        fs::set_permissions(&shadow, fs::Permissions::from_mode(0o500)).unwrap();
+        fs::set_permissions(&managed, fs::Permissions::from_mode(0o500)).unwrap();
+        let identity = fs::File::open(&managed).unwrap().metadata().unwrap();
+        let resolved = resolve_path_entry(
+            Path::new("sample-tool"),
+            &identity,
+            vec![shadow_dir, managed_dir],
+        )
+        .unwrap();
+        assert_eq!(resolved.0, managed);
+        assert!(eligible_dispatcher_entry(&shadow, &identity).is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn frozen_projection_never_accepts_concurrent_mutation() {
+        use std::io::{Seek as _, Write as _};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-profile-freeze-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let projection = root.join("projection");
+        let original = vec![b'a'; 8 * 1024 * 1024];
+        fs::write(&projection, &original).unwrap();
+        let expected = format!("sha256-{}", SHA256::sha256_hex(&original));
+        let mut pinned = open_pinned_regular(&projection).unwrap();
+        let start = Arc::new(Barrier::new(2));
+        let running = Arc::new(AtomicBool::new(true));
+        let writer_start = Arc::clone(&start);
+        let writer_running = Arc::clone(&running);
+        let writer_path = projection.clone();
+        let writer = std::thread::spawn(move || {
+            let mut file = fs::OpenOptions::new().write(true).open(writer_path).unwrap();
+            writer_start.wait();
+            let changed = [b'b'; 64 * 1024];
+            while writer_running.load(Ordering::Relaxed) {
+                file.seek(std::io::SeekFrom::Start(2 * 1024 * 1024)).unwrap();
+                file.write_all(&changed).unwrap();
+                file.flush().unwrap();
+            }
+        });
+        start.wait();
+        let frozen = freeze_unix_projection(&mut pinned, &expected);
+        running.store(false, Ordering::Relaxed);
+        writer.join().unwrap();
+        if let Ok(mut frozen) = frozen {
+            assert_eq!(
+                format!("sha256-{}", sha256_open_file_hex(&mut frozen).unwrap()),
+                expected
+            );
+        }
         fs::remove_dir_all(root).unwrap();
     }
 }

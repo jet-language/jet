@@ -866,10 +866,11 @@ fn materialize_generation_bins(
         for (bin, member) in tool.bins.iter().zip(&tool.members) {
             validate_bin_name(bin).map_err(io::Error::other)?;
             validate_bin_name(member).map_err(io::Error::other)?;
-            if !projected.insert(bin.clone()) {
+            let physical = ProfileDispatch::physical_bin_name(bin);
+            if !projected.insert(physical.to_ascii_lowercase()) {
                 return Err(io::Error::other(format!("duplicate profile bin `{bin}`")));
             }
-            let destination = bin_dir.join(bin);
+            let destination = bin_dir.join(physical);
             let proof = if let Some((_receipt, lease)) = live.filter(|(receipt, _)| {
                 receipt.reference == tool.reference
                     && receipt.output_hash == tool.output_hash
@@ -923,7 +924,7 @@ fn validate_generation_bins(generation: u64, tools: &[InstalledTool]) -> io::Res
     let bin_dir = generations_dir().join(generation.to_string()).join("bin");
     let expected = tools
         .iter()
-        .flat_map(|tool| tool.bins.iter().cloned())
+        .flat_map(|tool| tool.bins.iter().map(|bin| ProfileDispatch::physical_bin_name(bin)))
         .collect::<std::collections::BTreeSet<_>>();
     let actual = fs::read_dir(&bin_dir)?
         .map(|entry| {
@@ -944,7 +945,9 @@ fn validate_generation_bins(generation: u64, tools: &[InstalledTool]) -> io::Res
             let _ = validated_store_member(tool, member)?;
         }
         for (bin, digest) in tool.bins.iter().zip(&tool.member_digests) {
-            let proof = Store::profile_file_proof(&bin_dir.join(bin))?;
+            let proof = Store::profile_file_proof(
+                &bin_dir.join(ProfileDispatch::physical_bin_name(bin)),
+            )?;
             if &proof.digest != digest {
                 return Err(io::Error::other(format!(
                     "profile projection proof mismatch for `{bin}`"
