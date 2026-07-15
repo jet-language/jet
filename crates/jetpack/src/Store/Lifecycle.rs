@@ -684,6 +684,10 @@ fn next_sequence(journal: &Path) -> io::Result<u64> {
 }
 
 fn ensure_journal_dir(roots: &Roots) -> io::Result<PathBuf> {
+    // Root resolution may point at a path that no earlier Store operation has
+    // materialized. The Hangar itself is still checked component-by-component
+    // below so a hostile lifecycle-db symlink is never followed.
+    fs::create_dir_all(&roots.root)?;
     let hangar = roots.hangar_dir();
     ensure_directory(&hangar)?;
     let db = hangar.join(DB_DIR);
@@ -991,6 +995,14 @@ mod tests {
         let journal = roots.hangar_dir().join(DB_DIR).join(JOURNAL_DIR);
         let path = validated_transaction_paths(&roots).unwrap().pop().unwrap();
         let original = fs::read(&path).unwrap();
+        let mut bad_checksum = original.clone();
+        bad_checksum[0] = b'X';
+        fs::write(&path, bad_checksum).unwrap();
+        assert_eq!(
+            snapshot(&roots).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        fs::write(&path, &original).unwrap();
         fs::write(&path, &original[..original.len() / 2]).unwrap();
         let error = snapshot(&roots).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
@@ -1000,6 +1012,30 @@ mod tests {
             std::os::unix::fs::symlink(&path, journal.join("hostile.txn")).unwrap();
             assert_eq!(snapshot(&roots).unwrap_err().kind(), io::ErrorKind::InvalidData);
         }
+        cleanup(&roots);
+    }
+
+    #[test]
+    fn fresh_store_snapshot_is_durable_and_deterministic() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lifecycle-fresh-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let roots = Roots {
+            root,
+            dev_mode: true,
+        };
+        let first = snapshot(&roots).unwrap();
+        let second = snapshot(&roots).unwrap();
+        assert!(first.roots.is_empty());
+        assert!(first.protected_targets.is_empty());
+        assert_eq!(first, second);
+        assert!(roots
+            .hangar_dir()
+            .join(DB_DIR)
+            .join(JOURNAL_DIR)
+            .is_dir());
         cleanup(&roots);
     }
 
