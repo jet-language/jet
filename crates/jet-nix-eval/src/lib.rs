@@ -6,11 +6,59 @@
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(warnings)]
+#![deny(clippy::disallowed_macros)]
+#![deny(clippy::disallowed_methods)]
+#![deny(clippy::disallowed_types)]
+#![deny(clippy::std_instead_of_alloc)]
+#![deny(clippy::std_instead_of_core)]
+#![deny(unused_extern_crates)]
 #![allow(non_snake_case)]
 
 extern crate alloc;
 
 mod Json;
+
+mod Authority {
+    #![allow(dead_code)] // Ordered slices B-F consume this authority.
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum InternalStage {
+        Syntax,
+        Values,
+        Evaluation,
+        Authority,
+        Derivation,
+        Flakes,
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct InternalTestHarness {
+        private: (),
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct InternalStagePermit {
+        stage: InternalStage,
+    }
+
+    impl InternalStagePermit {
+        pub(crate) fn stage(&self) -> InternalStage {
+            self.stage
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_harness() -> InternalTestHarness {
+        InternalTestHarness { private: () }
+    }
+
+    pub(crate) fn authorize_internal(
+        _harness: &InternalTestHarness,
+        stage: InternalStage,
+    ) -> InternalStagePermit {
+        InternalStagePermit { stage }
+    }
+}
 
 use alloc::collections::BTreeMap;
 use alloc::format;

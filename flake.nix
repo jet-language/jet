@@ -106,6 +106,8 @@
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.cargo
+            # E4-JP9: resolved-symbol native evaluator authority stop-line.
+            pkgs.clippy
             pkgs.rustc
             pkgs.gcc
             # D-FFI-ADA1=A: provision GNAT for C-ABI Ada binder compilation.

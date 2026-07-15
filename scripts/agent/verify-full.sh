@@ -88,4 +88,6 @@ if [ "${JET_VERIFY_CANVAS_PREREQUISITES_ONLY:-}" = "1" ]; then
   exit 0
 fi
 
+"$repo/scripts/agent/verify-nix-eval-stopline.sh"
+
 exec cargo test "$@"

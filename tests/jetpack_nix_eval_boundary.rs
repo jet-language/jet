@@ -20,6 +20,19 @@ fn evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden() {
         .expect("native evaluator seam root");
     assert!(seam.contains("#![no_std]"));
     assert!(seam.contains("#![forbid(unsafe_code)]"));
+    assert!(seam.contains("#![deny(clippy::disallowed_types)]"));
+
+    let clippy = fs::read_to_string(root.join("clippy.toml")).expect("workspace Clippy policy");
+    assert!(clippy.contains("std::process::Command"));
+    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
+        .expect("full verification entry point");
+    assert!(verify.contains("verify-nix-eval-stopline.sh"));
+    let escape = fs::read_to_string(
+        root.join("tests/fixtures/nix-compat/authority-escape/lib.rs"),
+    )
+    .expect("native evaluator authority escape fixture");
+    assert!(escape.contains("extern crate std as host;"));
+    assert!(escape.contains("host::process::Command::new"));
 
     let jetpack_manifest = fs::read_to_string(root.join("crates/jetpack/Cargo.toml"))
         .expect("jetpack manifest");

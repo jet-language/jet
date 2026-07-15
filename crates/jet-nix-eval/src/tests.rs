@@ -3,6 +3,21 @@ use alloc::string::String;
 
 const ZERO_SRI: &str = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
+#[test]
+fn partial_stage_authority_is_minted_inside_seam_tests() {
+    let harness = Authority::test_harness();
+    for stage in [
+        Authority::InternalStage::Syntax,
+        Authority::InternalStage::Values,
+        Authority::InternalStage::Evaluation,
+        Authority::InternalStage::Authority,
+        Authority::InternalStage::Derivation,
+        Authority::InternalStage::Flakes,
+    ] {
+        assert_eq!(Authority::authorize_internal(&harness, stage).stage(), stage);
+    }
+}
+
 fn manifest_with_identities(status: &str, corpus_status: &str) -> String {
     ORACLE_JSON
         .replace(
