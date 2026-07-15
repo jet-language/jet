@@ -266,9 +266,9 @@ pub(super) fn kernel_package_json(entry: &RealizedPackage) -> String {
 }
 
 fn kernel_source_json(entry: &RealizedPackage) -> String {
-    let out = entry
-        .consumption_path(&entry.out)
-        .unwrap_or_else(|_| PathBuf::from(&entry.out));
+    // Provenance names the durable provider output, never the process-scoped
+    // lease projection used while copying runtime files into a generation.
+    let out = entry.original_output();
     let facts = [
         ("recipe", "source/recipe.jet"),
         ("builder", "source/build.sh"),

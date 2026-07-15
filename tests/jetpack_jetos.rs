@@ -428,16 +428,14 @@ fn os_build_realizes_selected_system_offline() {
         1,
         "exact retry must not duplicate a generation ledger row"
     );
-    let journal = root.join("store/lifecycle-db/journal");
+    let journal = root.join("hangar/lifecycle-db/journal");
     let lifecycle = fs::read_dir(&journal)
         .unwrap()
         .filter_map(Result::ok)
         .filter_map(|entry| fs::read_to_string(entry.path()).ok())
         .collect::<String>();
     assert!(
-        lifecycle.contains("external-consumer")
-            && lifecycle.contains("jetos-generation")
-            && lifecycle.contains("commit"),
+        lifecycle.contains("external-consumer") && lifecycle.contains("commit"),
         "generation must own a committed typed ExternalConsumer root: {lifecycle}"
     );
     let kernel = fs::read_to_string(generation.join("boot/kernel")).unwrap();
@@ -496,7 +494,7 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
     );
     let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
     assert_eq!(ledger.lines().count(), 1, "recovery must reuse exact ledger row");
-    let journal = root.join("store/lifecycle-db/journal");
+    let journal = root.join("hangar/lifecycle-db/journal");
     let lifecycle = fs::read_dir(journal)
         .unwrap()
         .filter_map(Result::ok)
@@ -2584,6 +2582,39 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
+    for name in ["first", "second"] {
+        let proof = fs::read_to_string(
+            root.path
+                .join("systems/generations")
+                .join(name)
+                .join("generation-root.json"),
+        )
+        .unwrap();
+        assert!(
+            proof.contains("\"kind\":\"jetos.generation-root.v1\"")
+                && proof.contains("\"output_digests\":[\"sha256-"),
+            "retained generation {name} must keep its typed Hangar root proof: {proof}"
+        );
+    }
+    let journal = root.join("hangar/lifecycle-db/journal");
+    let read_journal = || {
+        let mut entries = fs::read_dir(&journal)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| (entry.file_name(), fs::read(entry.path()).unwrap()))
+            .collect::<Vec<_>>();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries
+    };
+    let lifecycle_before_rollback = read_journal();
+    let lifecycle_text = lifecycle_before_rollback
+        .iter()
+        .map(|(_, bytes)| String::from_utf8_lossy(bytes))
+        .collect::<String>();
+    assert!(
+        lifecycle_text.matches("external-consumer").count() >= 2,
+        "both retained generations must remain lifecycle roots: {lifecycle_text}"
+    );
     let list = jet()
         .args(["os", "generations", "halcyon", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
@@ -2622,6 +2653,11 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
         String::from_utf8_lossy(&rollback.stderr).contains("rolled back"),
         "stderr: {}",
         String::from_utf8_lossy(&rollback.stderr)
+    );
+    assert_eq!(
+        read_journal(),
+        lifecycle_before_rollback,
+        "rollback changes activation pointers, never lifecycle roots"
     );
     let same = jet()
         .args(["os", "rollback", "halcyon", "first", "--no-color"])
@@ -3614,4 +3650,3 @@ fn os_init_writes_guided_ext4_config() {
     assert!(config.contains("filesystem.layout"), "config: {config}");
     assert!(config.contains("network.hostName"), "config: {config}");
 }
-
