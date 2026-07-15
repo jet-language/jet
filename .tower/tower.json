@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 629,
-    "rev": 7410,
+    "rev": 7414,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18697,6 +18697,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "root-628-reviewer",
+          "text": "Independent review: fa4503e1f fixes capture backpressure without changing env snapshot semantics. Official exact and full env_overlay targets green under bounds. C1-C3 verified; C4 awaits parent full gate."
+        },
+        {
+          "at": "2026-07-15",
           "by": "root-628-builder",
           "text": "Official root tests at checkpoint 20edc3b4: exact pipe-pressure regression passed 1/1 in 3.25s inside a 30s external bound; full tests/env_overlay.rs passed 7/7 in 4.19s inside a 120s bound."
         },
@@ -18715,29 +18720,29 @@
         {
           "n": 1,
           "text": "The exact mutation/enumeration/child-snapshot test completes under a 30-second external bound and preserves its exact eight-line output.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-628-builder",
-          "verifiedBy": null,
-          "evidence": "fa4503e1f: exact 96 KiB pipe-pressure fixture completed with exact eight-line output; isolated driver-backed full target finished all seven tests in 4.08s under 120s, exact probe under 30s.",
-          "at": "2026-07-15T06:37:30.642Z"
+          "verifiedBy": "root-628-reviewer",
+          "evidence": "Independent official Nix run: exact mutation_enumeration_and_child_snapshot_run passed 1/1 with preserved assertion-backed eight-line output in 3.35s inside timeout 30s.",
+          "at": "2026-07-15T06:43:17.821Z"
         },
         {
           "n": 2,
           "text": "Root deadlock is removed while D-ENV-MUTATE1 remains raw-value-safe, snapshot-atomic, host-isolated, and free of new generated unsafe.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-628-builder",
-          "verifiedBy": null,
-          "evidence": "fa4503e1f starts independent stdout/stderr drain threads before status polling, then joins after exit/timeout. Existing raw OsString RwLock snapshot, env_clear/env overrides, host isolation, and generated unsafe boundaries unchanged; raw/host/concurrency tests green.",
-          "at": "2026-07-15T06:37:30.745Z"
+          "verifiedBy": "root-628-reviewer",
+          "evidence": "Reviewed fa4503e1f: stdout/stderr readers are taken and drained on independent threads before try_wait; timeout kill/wait closes pipes before join; consumed streaming handles remain absent; env raw OsString lock/snapshot/env_clear paths unchanged; no unsafe added.",
+          "at": "2026-07-15T06:43:17.923Z"
         },
         {
           "n": 3,
           "text": "Full env_overlay target and its codegen/host/raw/concurrency assertions pass under bounded execution.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-628-builder",
-          "verifiedBy": null,
-          "evidence": "Bounded isolated Cargo target compiled and ran the repository tests/env_overlay.rs unchanged: 7 passed, 0 failed in 4.08s, including codegen ordering, raw non-Unicode, host isolation, and atomic child snapshot assertions. jet-codegen package check also green.",
-          "at": "2026-07-15T06:37:30.848Z"
+          "verifiedBy": "root-628-reviewer",
+          "evidence": "Independent official Nix run under timeout 120s: tests/env_overlay.rs passed 7/7 in 4.28s, covering codegen drain ordering, host isolation, raw non-Unicode values, atomic concurrent snapshots, and runtime hooks.",
+          "at": "2026-07-15T06:43:18.019Z"
         },
         {
           "n": 4,
@@ -37836,6 +37841,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T06:43:18.149Z",
+      "by": "root-628-reviewer",
+      "action": "card.update",
+      "ref": "c0kxhaqh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T06:43:18.019Z",
+      "by": "root-628-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0kxhaqh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T06:43:17.923Z",
+      "by": "root-628-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0kxhaqh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T06:43:17.821Z",
+      "by": "root-628-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0kxhaqh",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T06:39:43.227Z",
       "by": "root-628-builder",
       "action": "card.update",
@@ -41305,34 +41338,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-ECO-SOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:44.555Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:44.418Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-RECEIPT2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:44.275Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-COMPOSE2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:44.138Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-MODULEINTERNAL1",
       "note": "marked ready"
     }
   ],
