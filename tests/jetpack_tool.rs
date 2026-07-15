@@ -11,6 +11,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Output, Stdio};
 
 mod common;
 
@@ -34,6 +35,70 @@ fn write_tool_bin_fixture(fixtures: &Path, out_dir: &Path, pkg: &str, bin: &str,
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join(format!("nixpkgs-{pkg}.json")), json).unwrap();
+}
+
+fn tool_install_command(
+    root: &Path,
+    project: &Path,
+    fixtures: &Path,
+    home: &Path,
+    package: &str,
+) -> Command {
+    let mut command = jetpack();
+    command
+        .args([
+            "tool",
+            "install",
+            &format!("nixpkgs:{package}"),
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(fixtures)
+        .current_dir(project)
+        .env("JETPACK_ROOT", root)
+        .env("HOME", home);
+    command
+}
+
+fn install_tool(
+    root: &Path,
+    project: &Path,
+    fixtures: &Path,
+    home: &Path,
+    package: &str,
+) -> Output {
+    tool_install_command(root, project, fixtures, home, package)
+        .output()
+        .unwrap()
+}
+
+fn lifecycle_wire(root: &Path) -> String {
+    let journal = root.join("hangar/lifecycle-db/journal");
+    let mut paths = fs::read_dir(journal)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+        .into_iter()
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .collect()
+}
+
+fn ascii_hex(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn metadata_output_hash(metadata: &str) -> String {
+    metadata
+        .split_once("\"output_hash\": \"")
+        .and_then(|(_, tail)| tail.split_once('"'))
+        .map(|(digest, _)| digest.to_string())
+        .unwrap()
 }
 
 #[test]
@@ -170,9 +235,32 @@ fn tool_install_projects_real_bin_symlink_with_generation() {
     let meta_text = fs::read_to_string(&meta).unwrap();
     assert!(meta_text.contains("\"generation\": 1"), "{meta_text}");
     assert!(meta_text.contains("nixpkgs:greet"), "{meta_text}");
+    let output_hash = metadata_output_hash(&meta_text);
+    assert!(output_hash.starts_with("sha256-"), "{meta_text}");
+    assert!(home.join(".jet/tools/generations/1/complete").is_file());
     let profile = fs::read_to_string(home.join(".jet/tools/profile.json")).unwrap();
     assert!(profile.contains("\"current\": 1"), "{profile}");
     assert!(profile.contains("tools"), "{profile}");
+    let rooted = lifecycle_wire(&root.path);
+    assert!(rooted.contains(&output_hash), "{rooted}");
+    assert!(
+        rooted.contains(&ascii_hex("profile-generation:user:tools:1")),
+        "{rooted}"
+    );
+
+    let cleaned = jetpack()
+        .args(["clean", "--no-color", "--yes"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        cleaned.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&cleaned.stderr)
+    );
+    assert!(link.exists(), "lease teardown and clean must preserve rooted tool");
 
     let listed = jetpack()
         .args(["tool", "list", "--no-color"])
@@ -198,6 +286,182 @@ fn tool_install_projects_real_bin_symlink_with_generation() {
         String::from_utf8_lossy(&removed.stderr)
     );
     assert!(!link.exists(), "uninstall must remove PATH projection");
+    let empty_meta = fs::read_to_string(home.join(".jet/tools/generations/2/meta.json")).unwrap();
+    assert!(empty_meta.contains("\"tools\": [\n  ]"), "{empty_meta}");
+    assert!(home.join(".jet/tools/generations/2/complete").is_file());
+    let profile = fs::read_to_string(home.join(".jet/tools/profile.json")).unwrap();
+    assert!(profile.contains("\"current\": 2"), "{profile}");
+    let roots_after_empty = lifecycle_wire(&root.path);
+    assert!(
+        !roots_after_empty.contains(&ascii_hex("profile-generation:user:tools:2")),
+        "empty generation must not create a root: {roots_after_empty}"
+    );
+}
+
+#[test]
+fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
+    let root = Scratch::new("tool-concurrent-root");
+    let proj = Scratch::new("tool-concurrent-proj");
+    let fixtures = Scratch::new("tool-concurrent-fx");
+    let left_out = Scratch::new("tool-concurrent-left-out");
+    let right_out = Scratch::new("tool-concurrent-right-out");
+    let home = Scratch::new("tool-concurrent-home");
+    write_tool_bin_fixture(
+        &fixtures.path,
+        &left_out.path,
+        "left",
+        "left",
+        "#!/bin/sh\necho left\n",
+    );
+    write_tool_bin_fixture(
+        &fixtures.path,
+        &right_out.path,
+        "right",
+        "right",
+        "#!/bin/sh\necho right\n",
+    );
+
+    let left = tool_install_command(
+        &root.path,
+        &proj.path,
+        &fixtures.path,
+        &home.path,
+        "left",
+    )
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .unwrap();
+    let right = tool_install_command(
+        &root.path,
+        &proj.path,
+        &fixtures.path,
+        &home.path,
+        "right",
+    )
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .unwrap();
+    let left = left.wait_with_output().unwrap();
+    let right = right.wait_with_output().unwrap();
+    assert!(
+        left.status.success(),
+        "left stderr: {}",
+        String::from_utf8_lossy(&left.stderr)
+    );
+    assert!(
+        right.status.success(),
+        "right stderr: {}",
+        String::from_utf8_lossy(&right.stderr)
+    );
+
+    let profile = fs::read_to_string(home.join(".jet/tools/profile.json")).unwrap();
+    assert!(profile.contains("\"current\": 2"), "{profile}");
+    let first = fs::read_to_string(home.join(".jet/tools/generations/1/meta.json")).unwrap();
+    let second = fs::read_to_string(home.join(".jet/tools/generations/2/meta.json")).unwrap();
+    assert!(first.contains("left") || first.contains("right"), "{first}");
+    assert!(second.contains("left") && second.contains("right"), "{second}");
+    assert!(home.join(".jet/tools/generations/1/complete").is_file());
+    assert!(home.join(".jet/tools/generations/2/complete").is_file());
+    let roots = lifecycle_wire(&root.path);
+    for generation in [1, 2] {
+        assert!(
+            roots.contains(&ascii_hex(&format!(
+                "profile-generation:user:tools:{generation}"
+            ))),
+            "missing retained generation {generation}: {roots}"
+        );
+    }
+
+    let listed = jetpack()
+        .args(["tool", "list", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    let stdout = String::from_utf8_lossy(&listed.stdout);
+    assert!(stdout.contains("left") && stdout.contains("right"), "{stdout}");
+}
+
+#[test]
+fn profile_failpoints_recover_conservatively_around_root_and_pointer_publish() {
+    for phase in ["after-generation", "after-root-commit", "after-pointer"] {
+        let root = Scratch::new(&format!("tool-fail-{phase}-root"));
+        let proj = Scratch::new(&format!("tool-fail-{phase}-proj"));
+        let fixtures = Scratch::new(&format!("tool-fail-{phase}-fx"));
+        let out = Scratch::new(&format!("tool-fail-{phase}-out"));
+        let home = Scratch::new(&format!("tool-fail-{phase}-home"));
+        write_tool_bin_fixture(
+            &fixtures.path,
+            &out.path,
+            "greet",
+            "greet",
+            "#!/bin/sh\necho failpoint greet\n",
+        );
+
+        let failed = tool_install_command(
+            &root.path,
+            &proj.path,
+            &fixtures.path,
+            &home.path,
+            "greet",
+        )
+        .env("JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT", phase)
+        .output()
+        .unwrap();
+        assert_eq!(
+            failed.status.code(),
+            Some(2),
+            "phase {phase}: {}",
+            String::from_utf8_lossy(&failed.stderr)
+        );
+        assert!(home.join(".jet/tools/generations/1/complete").is_file());
+        let pointer = home.join(".jet/tools/profile.json");
+        if phase == "after-pointer" {
+            assert!(
+                fs::read_to_string(&pointer).unwrap().contains("\"current\": 1"),
+                "phase {phase}"
+            );
+        } else {
+            assert!(!pointer.exists(), "phase {phase}");
+        }
+
+        let retried = install_tool(
+            &root.path,
+            &proj.path,
+            &fixtures.path,
+            &home.path,
+            "greet",
+        );
+        assert!(
+            retried.status.success(),
+            "phase {phase}: {}",
+            String::from_utf8_lossy(&retried.stderr)
+        );
+        let pointer = fs::read_to_string(&pointer).unwrap();
+        assert!(pointer.contains("\"current\": 2"), "phase {phase}: {pointer}");
+        assert!(home.join(".jet/tools/generations/1").is_dir());
+        assert!(home.join(".jet/tools/generations/2/complete").is_file());
+        let roots = lifecycle_wire(&root.path);
+        assert!(
+            roots.contains(&ascii_hex("profile-generation:user:tools:2")),
+            "phase {phase}: {roots}"
+        );
+        if phase == "after-generation" {
+            assert!(
+                !roots.contains(&ascii_hex("profile-generation:user:tools:1")),
+                "unpublished unrooted generation gained a root: {roots}"
+            );
+        } else {
+            assert!(
+                roots.contains(&ascii_hex("profile-generation:user:tools:1")),
+                "durable pre-pointer root was lost: {roots}"
+            );
+        }
+    }
 }
 
 #[test]

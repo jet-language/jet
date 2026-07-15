@@ -319,6 +319,20 @@ pub(crate) fn snapshot(roots: &Roots) -> io::Result<LifecycleSnapshot> {
     snapshot_with_legacy(roots, &[])
 }
 
+/// Caller already owns the Hangar lock. Clean uses this exact protected set
+/// so dropping a short-lived verification lease cannot expose durable roots.
+pub(super) fn protected_targets_unlocked(roots: &Roots) -> io::Result<BTreeSet<String>> {
+    recover_unlocked(roots)?;
+    let (known, _) = Closure::lifecycle_inputs_unlocked(roots)?;
+    let state = load_state(roots, &known)?;
+    validate_state_bounds(&state)?;
+    Ok(state
+        .values()
+        .filter(|root| root.phase != RootPhase::Tombstoned)
+        .flat_map(|root| root.protected_targets.iter().cloned())
+        .collect())
+}
+
 pub(crate) fn snapshot_with_legacy(
     roots: &Roots,
     legacy: &[LegacyRoot],

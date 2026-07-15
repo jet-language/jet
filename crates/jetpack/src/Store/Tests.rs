@@ -184,6 +184,56 @@ mod tests {
     }
 
     #[test]
+    fn committed_profile_generation_survives_lease_teardown_and_clean() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("profile-root-output");
+        fs::create_dir_all(out.join("bin")).unwrap();
+        fs::write(out.join("bin/tool"), "profile bytes").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "path:profile-tool",
+            "path",
+        );
+        let mut entry = record_verified(
+            &roots,
+            "profile-tool",
+            "1",
+            "path:profile-tool",
+            &out.to_string_lossy(),
+            &out.join("bin").to_string_lossy(),
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        let prepared = prepare_profile_generation_root(
+            &roots,
+            "user",
+            "tools",
+            1,
+            &format!("sha256-{}", "f".repeat(64)),
+            vec![entry.envelope.output_hash.clone()],
+            1,
+        )
+        .unwrap();
+        commit_profile_generation_root(&roots, &prepared, 2).unwrap();
+
+        entry.last_used_at = 1;
+        let record = roots.hangar_dir().join(&entry.id).join("meta.json");
+        fs::write(&record, entry.meta_json()).unwrap();
+        assert_eq!(clean_plan(&roots).unwrap().removed_objects, 0);
+        assert_eq!(clean(&roots).unwrap().removed_objects, 0);
+        assert!(record.is_file());
+
+        let snapshot = Lifecycle::snapshot(&roots).unwrap();
+        assert_eq!(snapshot.protected_targets.len(), 1);
+        let root = snapshot.roots.values().next().unwrap();
+        assert_eq!(root.identity.kind, Lifecycle::RootKind::ProfileGeneration);
+        assert_eq!(root.identity.id.as_str(), "profile-generation:user:tools:1");
+        assert_eq!(root.phase, Lifecycle::RootPhase::Committed);
+    }
+
+    #[test]
     fn ids_differ_by_ref() {
         let a = entry_id("x", "1.0", "nixpkgs:x", "/o");
         let b = entry_id("x", "1.0", "github:o/x", "/o");

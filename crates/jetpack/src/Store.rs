@@ -1613,6 +1613,70 @@ impl CleanReport {
     }
 }
 
+/// Opaque receipt for one prepared profile-generation root. Profile producers
+/// can commit only the exact incarnation and witness they prepared.
+pub(crate) struct PreparedProfileGenerationRoot {
+    id: Lifecycle::RootId,
+    incarnation: Lifecycle::Incarnation,
+    witness: Lifecycle::RootWitness,
+}
+
+pub(crate) fn prepare_profile_generation_root(
+    roots: &Roots,
+    owner: &str,
+    profile: &str,
+    generation: u64,
+    witness: &str,
+    targets: Vec<String>,
+    at: u64,
+) -> std::io::Result<PreparedProfileGenerationRoot> {
+    let id = Lifecycle::RootId::new(format!(
+        "profile-generation:{owner}:{profile}:{generation}"
+    ))?;
+    let incarnation = Lifecycle::Incarnation::new(1)?;
+    let witness = Lifecycle::RootWitness::new(witness)?;
+    let identity = Lifecycle::RootIdentity::new(
+        Lifecycle::RootKind::ProfileGeneration,
+        id.clone(),
+        Lifecycle::ProducerId::new("jetpack-profile-generation")?,
+        incarnation,
+        witness.clone(),
+    );
+    Lifecycle::prepare(
+        roots,
+        identity,
+        targets,
+        Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    )?;
+    Ok(PreparedProfileGenerationRoot {
+        id,
+        incarnation,
+        witness,
+    })
+}
+
+pub(crate) fn commit_profile_generation_root(
+    roots: &Roots,
+    prepared: &PreparedProfileGenerationRoot,
+    at: u64,
+) -> std::io::Result<()> {
+    Lifecycle::commit(
+        roots,
+        &prepared.id,
+        prepared.incarnation,
+        &prepared.witness,
+        Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    )?;
+    Ok(())
+}
+
+fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
+    let mut live = current_lock_roots();
+    live.output_hashes
+        .extend(Lifecycle::protected_targets_unlocked(roots)?);
+    Ok(live)
+}
+
 /// D-JPK-GC1=B / U22: collect only unreferenced stale hangar objects, sweep
 /// orphan build scratch, then optimize duplicate Jet-owned files. Lockfile
 /// reachable entries and unknown legacy records are retained.
@@ -1621,7 +1685,12 @@ pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
     if !store.exists() {
         return Ok(CleanReport::default());
     }
-    let live = current_lock_roots();
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || clean_plan_unlocked(roots))
+}
+
+fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
+    let store = roots.hangar_dir();
+    let live = live_roots_unlocked(roots)?;
     let mut report = sweep_build_scratch_plan(&store)?;
     let now = now_secs();
 
@@ -1655,7 +1724,7 @@ pub fn clean(roots: &Roots) -> std::io::Result<CleanReport> {
 fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
     fs::create_dir_all(&store)?;
-    let live = current_lock_roots();
+    let live = live_roots_unlocked(roots)?;
     let mut report = sweep_build_scratch(&store)?;
     let now = now_secs();
 
