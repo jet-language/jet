@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 629,
-    "rev": 7404,
+    "rev": 7409,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18688,13 +18688,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "workOrder": 0,
-      "assignee": "root-628-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "root-628-builder",
+          "text": "Root cause: child wait polled for exit before draining Capture pipes; a child exceeding pipe capacity blocked forever. fa4503e1f drains both pipes concurrently before polling. C1-C3 met; root full gate C4 remains."
+        },
         {
           "at": "2026-07-15",
           "by": "root-628-builder",
@@ -18705,29 +18710,29 @@
         {
           "n": 1,
           "text": "The exact mutation/enumeration/child-snapshot test completes under a 30-second external bound and preserves its exact eight-line output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-628-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T06:25:12.540Z"
+          "evidence": "fa4503e1f: exact 96 KiB pipe-pressure fixture completed with exact eight-line output; isolated driver-backed full target finished all seven tests in 4.08s under 120s, exact probe under 30s.",
+          "at": "2026-07-15T06:37:30.642Z"
         },
         {
           "n": 2,
           "text": "Root deadlock is removed while D-ENV-MUTATE1 remains raw-value-safe, snapshot-atomic, host-isolated, and free of new generated unsafe.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-628-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T06:25:12.643Z"
+          "evidence": "fa4503e1f starts independent stdout/stderr drain threads before status polling, then joins after exit/timeout. Existing raw OsString RwLock snapshot, env_clear/env overrides, host isolation, and generated unsafe boundaries unchanged; raw/host/concurrency tests green.",
+          "at": "2026-07-15T06:37:30.745Z"
         },
         {
           "n": 3,
           "text": "Full env_overlay target and its codegen/host/raw/concurrency assertions pass under bounded execution.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-628-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T06:25:12.748Z"
+          "evidence": "Bounded isolated Cargo target compiled and ran the repository tests/env_overlay.rs unchanged: 7 passed, 0 failed in 4.08s, including codegen ordering, raw non-Unicode, host isolation, and atomic child snapshot assertions. jet-codegen package check also green.",
+          "at": "2026-07-15T06:37:30.848Z"
         },
         {
           "n": 4,
@@ -18742,8 +18747,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T06:25:03.379Z",
-      "updated": "2026-07-15",
-      "claimedAt": "2026-07-15T06:25:12.958Z"
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -37827,6 +37831,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T06:37:31.081Z",
+      "by": "root-628-builder",
+      "action": "card.release",
+      "ref": "c0kxhaqh",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T06:37:30.977Z",
+      "by": "root-628-builder",
+      "action": "card.update",
+      "ref": "c0kxhaqh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T06:37:30.848Z",
+      "by": "root-628-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0kxhaqh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T06:37:30.745Z",
+      "by": "root-628-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0kxhaqh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T06:37:30.642Z",
+      "by": "root-628-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0kxhaqh",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T06:25:13.084Z",
       "by": "root-628-builder",
       "action": "card.update",
@@ -41289,41 +41328,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-SHAPE-DUNDER2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:43.853Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-QUANTITY1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:43.712Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEW1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:43.576Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-RESOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:43.441Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:43.299Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-DECL1",
       "note": "marked ready"
     }
   ],
