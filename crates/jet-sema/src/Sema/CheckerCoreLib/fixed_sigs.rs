@@ -293,9 +293,9 @@ pub fn core_fixed_sig(
             Some(Type::Option(Box::new(Type::String))),
         )),
         // D-AUTH2=A (ratified 2026-07-13): `auth.verify_jwt(token, key) -> Result<Claims>`.
-        // Verifies the JWT's HMAC-SHA256 signature with the given key bytes, checks expiry
-        // and audience. Returns typed `Claims` (subject, audience, expires_at, issued_at)
-        // on success, `AuthError` on any failure (signature mismatch, expired, malformed).
+        // Verifies the JWT's HMAC-SHA256 signature and optional expiry. Returns typed
+        // `Claims` (subject, audience, expires_at, issued_at), but does not validate an
+        // expected audience. Failures cover signature mismatch, expiry, and malformed data.
         // core.auth calls core.crypto primitives; no new deps (I6).
         ("core.auth", "verify_jwt") => Some((
             vec![

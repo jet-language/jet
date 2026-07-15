@@ -196,10 +196,10 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // via an age-style crypto FFI bridge. D-CORE-SECRETS1=A also places
     // secret lifecycle (`Rotting<T>`) here; generic TTL remains core.time.expiring.
     "core.vault",
-    // D-AUTH2=A (ratified 2026-07-13): standalone JWT/PASETO token verification.
-    // `auth.verify_jwt(token, key)` returns `Result<Claims>` with expiry and
-    // audience already checked. When `app.auth` (card #438) lands it calls these
-    // same functions — one mechanism, two entrypoints.
+    // D-AUTH2=A (ratified 2026-07-13): standalone HS256 JWT verification.
+    // `auth.verify_jwt(token, key)` checks the signature and optional expiry,
+    // then returns `Claims` with audience claim data; it does not validate an
+    // expected audience. `app.auth` (card #438) will reuse this mechanism.
     "core.auth",
 ];
 

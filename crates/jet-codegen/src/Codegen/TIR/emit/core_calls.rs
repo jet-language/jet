@@ -1352,8 +1352,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto.expert", "x25519_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_x25519_secret_bytes_impl"), arg(0)),
         ("core.crypto.expert", "shared_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_shared_secret_bytes_impl"), arg(0)),
         // D-AUTH2=A (ratified 2026-07-13): `auth.verify_jwt(token, key)` —
-        // HMAC-SHA256 JWT verification. Checks signature, expiry, and audience;
-        // returns `Result<Claims, AuthError>`. No new deps (I6): uses the
+        // HMAC-SHA256 JWT verification. Checks the signature and optional expiry;
+        // returns audience claim data without validating an expected audience.
+        // Returns `Result<Claims, AuthError>`. No new deps (I6): uses the
         // HMAC-SHA256 and base64url primitives already in the prelude.
         ("core.auth", "verify_jwt") => {
             format!(
