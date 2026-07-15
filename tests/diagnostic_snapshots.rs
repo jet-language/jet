@@ -269,37 +269,44 @@ fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {
     let scratch = unique_tmp("jet_ui_hangar_digest_mismatch");
     let root = scratch.join("root");
     let project = scratch.join("project");
+    let dependency = scratch.join("dependency");
     let source = scratch.join("source");
     fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&dependency).unwrap();
     fs::create_dir_all(&source).unwrap();
+    fs::write(dependency.join("payload"), "dependency bytes\n").unwrap();
     fs::write(source.join("payload"), "trusted bytes\n").unwrap();
 
-    let ingest = Command::new(jetpack_bin())
-        .args([
-            "hangar",
-            "ingest",
-            source.to_str().unwrap(),
-            "--name",
-            "ui-e1315",
-            "--no-color",
-        ])
-        .current_dir(&project)
-        .env("JETPACK_ROOT", &root)
-        .output()
-        .expect("seed real Hangar object for diagnostic fixture");
-    assert!(
-        ingest.status.success(),
-        "seeding Hangar object failed: {}",
-        String::from_utf8_lossy(&ingest.stderr)
+    let roots = jetpack::Store::Roots {
+        root: root.clone(),
+        dev_mode: false,
+    };
+    let ingest = |name: &str, output: PathBuf, references| {
+        jetpack::Store::ingest_tree(
+            &roots,
+            &jetpack::Store::IngestRequest {
+                name: name.to_string(),
+                version: String::new(),
+                reference: format!("path:{}", output.display()),
+                cache_identity: jetpack::Store::CacheIdentity::default(),
+                references,
+                outputs: std::collections::BTreeMap::from([("out".to_string(), output)]),
+                signature: String::new(),
+                provenance: String::new(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .expect("seed valid Hangar closure for diagnostic fixture")
+    };
+    let dependency = ingest("ui-e1315-dependency", dependency, Vec::new());
+    let ingested = ingest(
+        "ui-e1315",
+        source,
+        vec![dependency.entry.envelope.output_hash],
     );
-    let ingest_stderr =
-        String::from_utf8(ingest.stderr).expect("Jetpack status is UTF-8");
-    let digest = ingest_stderr
-        .split_whitespace()
-        .find(|token| token.starts_with("sha256-"))
-        .expect("ingest status contains output digest");
+    let digest = ingested.entry.envelope.output_hash;
 
-    let object = root.join("hangar/objects").join(digest);
+    let object = root.join("hangar/objects").join(&digest);
     let payload = object.join("payload");
     for path in [&object, &payload] {
         let mut permissions = fs::metadata(path).unwrap().permissions();
@@ -309,7 +316,7 @@ fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {
     fs::write(&payload, "tampered bytes\n").unwrap();
 
     let output = Command::new(jetpack_bin())
-        .args(["hangar", "verify", digest, "--no-color"])
+        .args(["hangar", "verify", &digest, "--no-color"])
         .current_dir(&project)
         .env("JETPACK_ROOT", &root)
         .output()
