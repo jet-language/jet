@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 632,
-    "rev": 7456,
+    "rev": 7461,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18839,40 +18839,46 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "workOrder": 0,
-      "assignee": "root-630-builder",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "root-630-builder",
+          "text": "[handoff] Fixture race repaired in 26e20cc7. Root cause: zero-handler dispatch could validly deliver before owner Drop. Regression now blocks one running handler behind a real channel barrier, queues second task, and keeps channel open via handler-captured sender until lexical owner/scope teardown cancels both. Exact 10x green; full corelib 137/137 green, 2 ignored. C1-C3 met; C4 waits parent full gate. Reviewer must verify C1-C3 independently."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "The exact owner-teardown regression passes repeatedly and always reports queued -> terminal:Cancelled with teardown=true.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-630-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:08:54.583Z"
+          "evidence": "Commit 26e20cc7; exact regression passed 10 consecutive bounded runs, each reporting teardown=true and queued -> terminal:Cancelled.",
+          "at": "2026-07-15T07:29:32.188Z"
         },
         {
           "n": 2,
           "text": "Owner teardown deterministically cancels queued scoped events exactly once without weakening running, pending, deadline, or delivery semantics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-630-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:08:54.687Z"
+          "evidence": "Fixture now waits for a running handler barrier, keeps its release channel open through a sender captured by that handler, then enqueues the returned task before lexical event/scope teardown. D-EVENT2 owner cancellation wins deterministically for the queued entry; existing pending/running/deadline assertions remain unchanged and green.",
+          "at": "2026-07-15T07:29:32.289Z"
         },
         {
           "n": 3,
           "text": "Full corelib target passes under bounded execution, including event scope and scheduler tests.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-630-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:08:54.789Z"
+          "evidence": "Bounded cargo test --test corelib passed: 137 passed, 0 failed, 2 ignored in 43.46s.",
+          "at": "2026-07-15T07:29:32.389Z"
         },
         {
           "n": 4,
@@ -18887,8 +18893,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T07:08:54.481Z",
-      "updated": "2026-07-15",
-      "claimedAt": "2026-07-15T07:08:54.992Z"
+      "updated": "2026-07-15"
     },
     {
       "id": "c0e3s4id",
@@ -38109,6 +38114,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T07:29:40.492Z",
+      "by": "root-630-builder",
+      "action": "card.release",
+      "ref": "c0ajdb8z",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T07:29:40.386Z",
+      "by": "root-630-builder",
+      "action": "card.update",
+      "ref": "c0ajdb8z",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T07:29:32.390Z",
+      "by": "root-630-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ajdb8z",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T07:29:32.289Z",
+      "by": "root-630-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ajdb8z",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T07:29:32.189Z",
+      "by": "root-630-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ajdb8z",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T07:27:25.979Z",
       "by": "root-631-builder",
       "action": "card.release",
@@ -41572,41 +41612,6 @@
       "action": "card.criteria-verify",
       "ref": "c0xqkis5",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-15T00:13:33.594Z",
-      "by": "luna-540-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0xqkis5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T00:09:16.324Z",
-      "by": "terra-540-builder",
-      "action": "card.update",
-      "ref": "c0xqkis5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T00:09:16.086Z",
-      "by": "terra-540-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0xqkis5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T00:09:10.591Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "caffiunify",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T00:09:03.661Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c098lmb7",
-      "note": ""
     }
   ],
   "nextNum": 368,
