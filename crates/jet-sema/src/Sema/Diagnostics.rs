@@ -1097,9 +1097,17 @@ mod tests {
 
         let resolved = core_crypto_nominal(wrapped);
         assert_eq!(count_core_crypto_markers(&resolved), 9);
-        let Type::Fn { params, .. } = &resolved else { panic!("fn wrapper") };
-        let Type::Tagged { inner, .. } = &params[2] else { panic!("flow tag") };
-        assert!(is_secret_bearing_crypto_type(inner));
-        assert!(is_secret_bearing_crypto_type(&params[2]));
+        let (flow_inner_is_secret, flow_tag_is_secret) = match &resolved {
+            Type::Fn { params, .. } => match params.get(2) {
+                Some(tag @ Type::Tagged { inner, .. }) => (
+                    is_secret_bearing_crypto_type(inner),
+                    is_secret_bearing_crypto_type(tag),
+                ),
+                _ => (false, false),
+            },
+            _ => (false, false),
+        };
+        assert!(flow_inner_is_secret, "flow tag must preserve inner provenance");
+        assert!(flow_tag_is_secret, "flow tag must remain secret-bearing");
     }
 }
