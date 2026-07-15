@@ -149,6 +149,12 @@ pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     })
 }
 
+pub(super) fn closure_graph_structure(roots: &Roots) -> std::io::Result<ClosureGraph> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        migrate_closure_graph_unlocked(roots).map(|(_, graph)| graph)
+    })
+}
+
 pub(super) fn lifecycle_closure_graph_unlocked(roots: &Roots) -> std::io::Result<ClosureGraph> {
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     validate_graph_store_proofs(roots, &graph, false).map_err(std::io::Error::other)?;
@@ -394,23 +400,36 @@ pub fn test_backdate_last_used_at(roots: &Roots, id: &str, last_used_at: u64) ->
 
 pub fn remove_closure_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        recover_closure_journal_unlocked(roots)?;
-        if !load_graph(roots)?.records.contains_key(id) {
-            return Ok(false);
-        }
-        append_entry(
-            roots,
-            &JournalEntry {
-                kind: JournalKind::Delta,
-                objects: Vec::new(),
-                records: Vec::new(),
-                deleted_records: vec![id.to_string()],
-            },
-        )?;
-        remove_package_record(roots, id)?;
-        compact_if_needed(roots)?;
-        Ok(true)
+        remove_closure_record_unlocked(roots, id, true)
     })
+}
+
+pub(super) fn remove_closure_record_unlocked(
+    roots: &Roots,
+    id: &str,
+    validate_store_proofs: bool,
+) -> std::io::Result<bool> {
+    recover_closure_journal_unlocked(roots)?;
+    let graph = if validate_store_proofs {
+        load_graph(roots)?
+    } else {
+        load_graph_structure_mode(roots, true)?
+    };
+    if !graph.records.contains_key(id) {
+        return Ok(false);
+    }
+    append_entry(
+        roots,
+        &JournalEntry {
+            kind: JournalKind::Delta,
+            objects: Vec::new(),
+            records: Vec::new(),
+            deleted_records: vec![id.to_string()],
+        },
+    )?;
+    remove_package_record(roots, id)?;
+    compact_if_needed(roots)?;
+    Ok(true)
 }
 
 pub fn recover_closure_journal(roots: &Roots) -> std::io::Result<usize> {

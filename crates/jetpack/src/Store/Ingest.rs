@@ -1,5 +1,51 @@
 use super::*;
 
+pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result<String, String> {
+    if Path::new(&entry.out).starts_with(roots.hangar_dir()) {
+        // Hangar-owned objects may share payload inodes with its cas pool.
+        super::super::Envelope::try_output_hash_of_in_hangar(
+            &entry.out,
+            &roots.hangar_dir(),
+            !entry.platform_artifact_kind.is_empty(),
+        )
+    } else {
+        super::super::Envelope::try_output_hash_of(&entry.out)
+    }
+}
+
+pub(super) fn make_move_path_writable(path: &Path, root: &Path) -> std::io::Result<()> {
+    if !path.starts_with(root) {
+        return Err(std::io::Error::other("quarantine path escapes Hangar root"));
+    }
+    let mut current = Some(path);
+    while let Some(directory) = current {
+        let metadata = fs::symlink_metadata(directory)?;
+        if metadata.is_dir() {
+            let mut permissions = metadata.permissions();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                permissions.set_mode(permissions.mode() | 0o200);
+            }
+            #[cfg(not(unix))]
+            permissions.set_readonly(false);
+            fs::set_permissions(directory, permissions)?;
+        }
+        if directory == root {
+            return Ok(());
+        }
+        current = directory.parent();
+    }
+    Err(std::io::Error::other("quarantine path has no Hangar parent"))
+}
+
+pub(crate) fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 #[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WindowsIngestContract {

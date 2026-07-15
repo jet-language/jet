@@ -1,6 +1,6 @@
 //! Card #479 — read-only `jetpack doctor` health report.
 
-use super::{Envelope, FFI, JSON, Store};
+use super::{FFI, JSON, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
@@ -121,7 +121,7 @@ fn check_hangar(roots: &Store::Roots) -> Check {
             }
         }
         if !Path::new(&entry.out).exists() { return degraded("hangar", format!("object `{id}` points to a missing output"), "realize the package again") }
-        match Envelope::try_output_hash_of(&entry.out) {
+        match Store::try_entry_output_hash(roots, entry) {
             Ok(actual) if !entry.envelope.output_hash.is_empty() && actual == entry.envelope.output_hash => {}
             Ok(_) => return degraded("hangar", format!("object `{id}` failed its content digest"), "remove the corrupt object with `jetpack clean`, then realize it again"),
             Err(_) => return degraded("hangar", format!("object `{id}` cannot be hashed safely"), "remove the corrupt object with `jetpack clean`, then realize it again"),

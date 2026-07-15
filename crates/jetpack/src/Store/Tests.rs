@@ -617,6 +617,27 @@ mod tests {
     }
 
     #[test]
+    fn quarantine_moves_sealed_owned_output() {
+        let (roots, _g) = temp_roots();
+        let ingested = ingest_fixture(&roots, "sealed", &[("out", "tampered")], Vec::new());
+        let entry = ingested.entry;
+        let out = PathBuf::from(&entry.out);
+
+        quarantine_invalid_entry(&roots, &entry, &test_expectation(&out)).unwrap();
+
+        assert!(!out.exists());
+        assert!(find_by_reference(&roots, "path:sealed").is_none());
+        assert!(fs::read_dir(roots.hangar_dir().join("quarantine"))
+            .unwrap()
+            .flatten()
+            .any(|item| item.file_name().to_string_lossy().starts_with(&format!(
+                "output-{}-",
+                entry.envelope.output_hash
+            ))));
+        ingest_fixture(&roots, "sealed", &[("out", "tampered")], Vec::new());
+    }
+
+    #[test]
     fn cache_lease_is_private_snapshot_without_long_object_lock() {
         let (roots, _g) = temp_roots();
         let out = roots.root.join("leased-output");
@@ -2062,7 +2083,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn cas_pool_hardlink_preserves_verify_and_rejects_outside_peers() {
+    fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
         use std::os::unix::fs::MetadataExt as _;
 
         let (roots, _g) = temp_roots();
@@ -2127,6 +2148,16 @@ mod tests {
         // Hangar-internal cas peers: verify still green; digest stable.
         verify_hangar_object(&roots, &third.entry).unwrap();
         verify_hangar_object(&roots, &fourth.entry).unwrap();
+        let expectation = test_expectation(Path::new(&third.entry.out));
+        let proof = verify_cache_entry(&roots, &third.entry, &third.entry.reference, &expectation);
+        assert!(proof.output_digest, "{proof:?}");
+        assert!(proof.trusted(), "{proof:?}");
+        find_verified_by_reference(&roots, &third.entry.reference, &expectation)
+            .unwrap()
+            .unwrap()
+            .lease
+            .validate()
+            .unwrap();
 
         // Outside-hangar peer still rejected.
         let outside = roots.root.join("outside-peer");
@@ -2139,6 +2170,9 @@ mod tests {
             false,
         );
         assert!(in_hangar.is_err(), "{in_hangar:?}");
+        let proof = verify_cache_entry(&roots, &third.entry, &third.entry.reference, &expectation);
+        assert!(!proof.output_digest, "{proof:?}");
+        assert!(!proof.trusted(), "{proof:?}");
         fs::remove_file(outside).ok();
     }
 

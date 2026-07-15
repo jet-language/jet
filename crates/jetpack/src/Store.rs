@@ -719,7 +719,7 @@ pub fn verify_cache_entry(
     let output_exists = out.exists();
     let output_digest = output_exists
         && !entry.envelope.output_hash.is_empty()
-        && super::Envelope::try_output_hash_of(&entry.out)
+        && Ingest::try_entry_output_hash(roots, entry)
             .is_ok_and(|hash| hash == entry.envelope.output_hash);
     let source = !expectation.identity.source_fingerprint.is_empty()
         && entry.cache_identity.source_fingerprint == expectation.identity.source_fingerprint;
@@ -1465,7 +1465,7 @@ pub fn realize_verified(
 ) -> Result<VerifiedRealization, RealizeError> {
     // WAL is authority. Recover package projections and fail closed on
     // incomplete legacy producer records before any cache lookup can bypass it.
-    closure_graph(roots).map_err(RealizeError::Store)?;
+    Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
     let (reference, expectation) = match request {
         RealizeRequest::Package { spec, table } => (
             spec.raw.clone(),
@@ -1495,7 +1495,7 @@ pub fn realize_verified(
             }
             None => {
                 let proof = verify_cache_entry(roots, &candidate, &reference, expectation);
-                let mut failure = integrity_failure(&candidate, expectation, proof);
+                let mut failure = integrity_failure(roots, &candidate, expectation, proof);
                 if let Err(error) = quarantine_invalid_entry(roots, &candidate, expectation) {
                     failure.actual = format!("{}; quarantine failed: {error}", failure.actual);
                 }
@@ -1522,6 +1522,7 @@ pub fn realize_verified(
 }
 
 fn integrity_failure(
+    roots: &Roots,
     entry: &StoreEntry,
     expectation: &CacheExpectation,
     proof: CacheVerification,
@@ -1536,7 +1537,7 @@ fn integrity_failure(
         (
             "content digest verification",
             entry.envelope.output_hash.clone(),
-            super::Envelope::try_output_hash_of(&entry.out)
+            Ingest::try_entry_output_hash(roots, entry)
                 .unwrap_or_else(|error| format!("unreadable output: {error}")),
         )
     } else if !proof.source {
@@ -1681,14 +1682,21 @@ pub fn quarantine_invalid_entry(
             return Err(std::io::Error::other("invalid cache record identity"));
         }
         let hangar = roots.hangar_dir();
+        Ingest::make_move_path_writable(&hangar, &hangar)?;
         let quarantine = hangar.join("quarantine");
         fs::create_dir_all(&quarantine)?;
         let stamp = now_secs();
+        Closure::remove_closure_record_unlocked(roots, &entry.id, false)?;
         let record = hangar.join(&entry.id);
         if fs::symlink_metadata(&record).is_ok() {
+            Ingest::make_move_path_writable(&record, &hangar)?;
             fs::rename(&record, quarantine.join(format!("record-{}-{stamp}", entry.id)))?;
         }
-        if let Some(owned) = &expectation.owned_output {
+        let canonical_output = hangar.join(OBJECTS_DIR).join(&entry.envelope.output_hash);
+        let owned_output = (Path::new(&entry.out) == canonical_output)
+            .then(|| PathBuf::from(&entry.out))
+            .or_else(|| expectation.owned_output.clone());
+        if let Some(owned) = &owned_output {
             if fs::symlink_metadata(owned).is_ok() {
                 let canonical_hangar = fs::canonicalize(&hangar)?;
                 let canonical_owned = fs::canonicalize(owned)?;
@@ -1701,6 +1709,7 @@ pub fn quarantine_invalid_entry(
                     .file_name()
                     .and_then(|name| name.to_str())
                     .ok_or_else(|| std::io::Error::other("invalid owned output name"))?;
+                Ingest::make_move_path_writable(owned, &hangar)?;
                 fs::rename(owned, quarantine.join(format!("output-{name}-{stamp}")))?;
             }
         }
@@ -2472,13 +2481,6 @@ fn is_live(id: &str, meta: &ParsedMeta, roots: &LiveRoots) -> bool {
                 .contains(&(meta.name.clone(), meta.version.clone())))
 }
 
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 // ── E4-JP1 Hangar Store v2: atomic staged ingest ─────────────────────────
 
 const STAGE_DIR: &str = ".stage";
@@ -2486,7 +2488,6 @@ const OBJECTS_DIR: &str = "objects";
 const CAS_DIR: &str = "cas";
 const REFERRERS_DIR: &str = "referrers";
 const PARTIAL_SUFFIX: &str = ".partial";
-
 
 mod Ingest;
 pub use Ingest::*;
