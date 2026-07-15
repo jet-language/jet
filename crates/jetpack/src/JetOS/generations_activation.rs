@@ -116,7 +116,7 @@ pub(super) fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemP
         fs::create_dir_all(activation_parent)?;
         fs::write(&activation_path, activation.as_bytes())?;
         fs::File::open(&activation_path)?.sync_all()?;
-        fs::File::open(activation_parent)?.sync_all()
+        Store::sync_store_node(activation_parent, true)
     };
     if let Err(e) = write_activation() {
         theme.error_coded(
@@ -182,7 +182,7 @@ pub(super) fn append_generation(gen: &Generation, witness: &str) -> std::io::Res
             if generation_failpoint("after-ledger-durable") {
                 return Err(std::io::Error::other("generation ledger durability failpoint"));
             }
-            fs::File::open(parent)?.sync_all()?;
+            Store::sync_store_node(parent, true)?;
             return Ok(created_at);
         }
         let line = format!(
@@ -211,7 +211,7 @@ pub(super) fn append_generation(gen: &Generation, witness: &str) -> std::io::Res
         if generation_failpoint("after-ledger-durable") {
             return Err(std::io::Error::other("generation ledger durability failpoint"));
         }
-        fs::File::open(parent)?.sync_all()?;
+        Store::sync_store_node(parent, true)?;
         Ok(gen.created_at)
     })
 }

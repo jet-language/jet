@@ -33,16 +33,24 @@ pub(super) fn build_generation(
     let roots = Store::resolve();
     let final_dir = generation_dir(system, flags.name.as_deref());
     let generation_name = final_dir.file_name()?.to_string_lossy().into_owned();
-    if final_dir.exists() {
-        return resume_published_generation(
-            theme,
-            &roots,
-            system,
-            source_config,
+    let published_proof = if final_dir.exists() {
+        match validate_generation_root_proof(
             &final_dir,
+            &system.name,
             &generation_name,
-        );
-    }
+            source_config,
+            &roots,
+            flags,
+        ) {
+            Ok(proof) => Some(proof),
+            Err(error) => {
+                immutable_generation_error(theme, &final_dir, &error);
+                return None;
+            }
+        }
+    } else {
+        None
+    };
     let dir = generation_staging_dir(&final_dir);
     fs::create_dir_all(dir.join("packages")).ok()?;
     let name_w = system
@@ -315,7 +323,7 @@ pub(super) fn build_generation(
         );
         return None;
     }
-    if let Err(e) = write_generation_source_proof(&dir, source_config) {
+    if let Err(e) = write_generation_source_proof(&dir, source_config, flags) {
         theme.error_coded(
             "E1278",
             "jetos generation source proof is incomplete",
@@ -350,7 +358,17 @@ pub(super) fn build_generation(
         return None;
     }
     let parent = final_dir.parent()?;
-    if let Err(e) = fs::rename(&dir, &final_dir) {
+    if let Some(existing) = published_proof {
+        let _ = fs::remove_dir_all(&dir);
+        if existing != root_proof {
+            immutable_generation_error(
+                theme,
+                &final_dir,
+                &std::io::Error::other("current request has a different sealed witness"),
+            );
+            return None;
+        }
+    } else if let Err(e) = fs::rename(&dir, &final_dir) {
         if !final_dir.is_dir() {
             theme.error(
                 "could not publish the jetos generation",
@@ -366,6 +384,7 @@ pub(super) fn build_generation(
             &generation_name,
             source_config,
             &roots,
+            flags,
         ) {
             Ok(proof) => proof,
             Err(error) => {
@@ -381,7 +400,7 @@ pub(super) fn build_generation(
             );
             return None;
         }
-    } else if let Err(e) = fs::File::open(parent).and_then(|dir| dir.sync_all()) {
+    } else if let Err(e) = Store::sync_store_node(parent, true) {
         theme.error(
             "could not publish the jetos generation",
             &format!("syncing the generation directory after atomic publication failed: {e}."),
@@ -405,37 +424,6 @@ pub(super) fn build_generation(
         theme.green("✓")
     ));
     Some(gen)
-}
-
-fn resume_published_generation(
-    theme: &Theme,
-    roots: &Store::Roots,
-    system: &SystemPlan,
-    source_config: &Path,
-    dir: &Path,
-    name: &str,
-) -> Option<Generation> {
-    let proof = match validate_generation_root_proof(
-        dir,
-        &system.name,
-        name,
-        source_config,
-        roots,
-    ) {
-        Ok(proof) => proof,
-        Err(error) => {
-            immutable_generation_error(theme, dir, &error);
-            return None;
-        }
-    };
-    publish_generation(
-        theme,
-        roots,
-        &system.name,
-        name.to_string(),
-        dir.to_path_buf(),
-        proof,
-    )
 }
 
 fn publish_generation(

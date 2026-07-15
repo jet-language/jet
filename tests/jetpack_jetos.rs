@@ -6,7 +6,9 @@
 //! the JetOS Studio slice and `tests/support/jetpack_fixtures.rs` for shared
 //! helpers.
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 mod common;
@@ -14,6 +16,83 @@ mod common;
 #[path = "support/jetpack_fixtures.rs"]
 mod jetpack_fixtures;
 use jetpack_fixtures::*;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LifecycleRootProof {
+    kind: String,
+    id: String,
+    producer: String,
+    witness: String,
+    targets: Vec<String>,
+    phase: String,
+}
+
+fn lifecycle_bytes(root: &Path) -> Vec<(std::ffi::OsString, Vec<u8>)> {
+    let mut entries = fs::read_dir(root.join("hangar/lifecycle-db/journal"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| (entry.file_name(), fs::read(entry.path()).unwrap()))
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
+}
+
+fn lifecycle_roots(root: &Path) -> Vec<LifecycleRootProof> {
+    let mut roots = BTreeMap::<String, LifecycleRootProof>::new();
+    for (_, bytes) in lifecycle_bytes(root) {
+        let text = String::from_utf8(bytes).unwrap();
+        let mut current = None::<String>;
+        for line in text.lines() {
+            let fields = line.split('\t').collect::<Vec<_>>();
+            match fields.as_slice() {
+                ["prepare", kind, id, producer, _incarnation, witness, _at] => {
+                    let id = decode_hex(id);
+                    roots.insert(
+                        id.clone(),
+                        LifecycleRootProof {
+                            kind: (*kind).to_string(),
+                            id: id.clone(),
+                            producer: decode_hex(producer),
+                            witness: decode_hex(witness),
+                            targets: Vec::new(),
+                            phase: "prepared".to_string(),
+                        },
+                    );
+                    current = Some(id);
+                }
+                ["target", target] => {
+                    roots
+                        .get_mut(current.as_ref().expect("target must follow prepare"))
+                        .unwrap()
+                        .targets
+                        .push((*target).to_string());
+                }
+                ["commit", id, _incarnation, witness, _at] => {
+                    let id = decode_hex(id);
+                    let root = roots.get_mut(&id).expect("commit must follow durable prepare");
+                    assert_eq!(root.witness, decode_hex(witness));
+                    root.phase = "committed".to_string();
+                    current = None;
+                }
+                _ => {}
+            }
+        }
+    }
+    roots.into_values().collect()
+}
+
+fn decode_hex(value: &str) -> String {
+    assert_eq!(value.len() % 2, 0, "invalid lifecycle hex: {value}");
+    let bytes = value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let text = std::str::from_utf8(pair).unwrap();
+            u8::from_str_radix(text, 16).unwrap()
+        })
+        .collect::<Vec<_>>();
+    String::from_utf8(bytes).unwrap()
+}
 
 #[test]
 fn os_import_writes_semantic_nixos_facts_with_audit() {
@@ -388,6 +467,7 @@ fn os_build_realizes_selected_system_offline() {
     }
     assert!(stderr.contains("halcyon"), "stderr: {stderr}");
     assert!(stderr.contains("generation"), "stderr: {stderr}");
+    let lifecycle_before_retry = lifecycle_bytes(&root.path);
     let cached = run();
     assert!(
         cached.status.success(),
@@ -395,9 +475,14 @@ fn os_build_realizes_selected_system_offline() {
         String::from_utf8_lossy(&cached.stderr)
     );
     assert!(
-        !String::from_utf8_lossy(&cached.stderr).contains("resolving"),
-        "an exact published retry must validate in place without rebuilding: {}",
+        String::from_utf8_lossy(&cached.stderr).contains("cached"),
+        "exact retry must rebuild a candidate from resolved cached outputs: {}",
         String::from_utf8_lossy(&cached.stderr)
+    );
+    assert_eq!(
+        lifecycle_bytes(&root.path),
+        lifecycle_before_retry,
+        "exact committed retry must change zero lifecycle bytes"
     );
     // A generation directory was assembled under the managed system store.
     assert!(
@@ -419,24 +504,39 @@ fn os_build_realizes_selected_system_offline() {
             .is_empty(),
         "generation files proof must be durable before ledger publication"
     );
+    let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
     assert_eq!(
-        fs::read_to_string(root.join("systems/generations.log"))
-            .unwrap()
+        ledger
             .lines()
             .filter(|line| line.contains("\tfixture-source-built\t"))
             .count(),
         1,
         "exact retry must not duplicate a generation ledger row"
     );
-    let journal = root.join("hangar/lifecycle-db/journal");
-    let lifecycle = fs::read_dir(&journal)
+    let root_json = jetpack::JSON::parse(&root_proof).unwrap();
+    let witness = root_json.get("witness").unwrap().as_str().unwrap();
+    let targets = root_json
+        .get("output_digests")
         .unwrap()
-        .filter_map(Result::ok)
-        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
-        .collect::<String>();
-    assert!(
-        lifecycle.contains("external-consumer") && lifecycle.contains("commit"),
-        "generation must own a committed typed ExternalConsumer root: {lifecycle}"
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let fields = ledger.trim_end().split('\t').collect::<Vec<_>>();
+    assert_eq!(fields.len(), 5, "ledger must contain witness field: {ledger}");
+    assert_eq!(fields[4], witness, "ledger witness must equal generation root");
+    assert_eq!(
+        lifecycle_roots(&root.path),
+        vec![LifecycleRootProof {
+            kind: "external-consumer".to_string(),
+            id: "external-consumer:jetos-generation:6469c44e94fc44d3d95215983c22ae71b36e76b67d2b68600091c9e12cbdbf84".to_string(),
+            producer: "jetos-generation".to_string(),
+            witness: witness.to_string(),
+            targets,
+            phase: "committed".to_string(),
+        }],
+        "effective lifecycle state must exactly match durable generation metadata"
     );
     let kernel = fs::read_to_string(generation.join("boot/kernel")).unwrap();
     let initrd = fs::read_to_string(generation.join("boot/initrd")).unwrap();
@@ -455,6 +555,114 @@ fn os_build_realizes_selected_system_offline() {
         String::from_utf8_lossy(&hello.stdout).contains("hello"),
         "generation-owned executable must survive lease close and FD reuse"
     );
+}
+
+#[test]
+fn os_published_name_binds_imported_source_closure() {
+    let root = Scratch::new("os-imported-closure-root");
+    let project = Scratch::new("os-imported-closure-project");
+    copy_dir_recursive(&config_example_dir(), &project.path);
+    let config = project.join("config.jet");
+    let source = fs::read_to_string(&config).unwrap().replacen(
+        "module halcyon {",
+        "module halcyon {\n    imports: find(\"./modules\")",
+        1,
+    );
+    fs::write(&config, source).unwrap();
+    fs::create_dir_all(project.join("modules")).unwrap();
+    let imported = project.join("modules/extra.jet");
+    fs::write(&imported, "// closure revision one\nmodule extra {}\n").unwrap();
+    let run = || {
+        jet()
+            .args([
+                "os",
+                "build",
+                "halcyon",
+                "--name",
+                "import-bound",
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    fs::write(&imported, "// closure revision two\nmodule extra {}\n").unwrap();
+    let changed = run();
+    assert_eq!(changed.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&changed.stderr).contains("already published"),
+        "import-only change must reject immutable name: {}",
+        String::from_utf8_lossy(&changed.stderr)
+    );
+}
+
+#[test]
+fn os_zero_hangar_generation_has_ledger_without_external_root() {
+    let root = Scratch::new("os-zero-hangar-root");
+    let project = Scratch::new("os-zero-hangar-project");
+    fs::write(
+        project.join("config.jet"),
+        "module empty { system.empty: { target: linux.x64, options: [ boot.kernel: .Linux, init.path: \"/bin/init\" ] } }\n",
+    )
+    .unwrap();
+    let run = || {
+        jet()
+            .args([
+                "os",
+                "build",
+                "empty",
+                "--name",
+                "zero-hangar",
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let generation = root.join("systems/generations/zero-hangar");
+    let root_text = fs::read_to_string(generation.join("generation-root.json")).unwrap();
+    let root_json = jetpack::JSON::parse(&root_text).unwrap();
+    assert!(
+        root_json
+            .get("output_digests")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let witness = root_json.get("witness").unwrap().as_str().unwrap();
+    let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
+    assert_eq!(ledger.trim_end().split('\t').collect::<Vec<_>>()[4], witness);
+    assert!(
+        !root.join("hangar/lifecycle-db").exists(),
+        "zero-Hangar publication must leave provider roots separate"
+    );
+    let retry = run();
+    assert!(
+        retry.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&retry.stderr)
+    );
+    assert_eq!(fs::read_to_string(root.join("systems/generations.log")).unwrap(), ledger);
+    assert!(!root.join("hangar/lifecycle-db").exists());
 }
 
 #[test]
@@ -518,15 +726,30 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
         5,
         "ledger row must bind the immutable root witness: {ledger}"
     );
-    let journal = root.join("hangar/lifecycle-db/journal");
-    let lifecycle = fs::read_dir(journal)
+    let generation = root.join("systems/generations/root-recovery");
+    let root_text = fs::read_to_string(generation.join("generation-root.json")).unwrap();
+    let root_json = jetpack::JSON::parse(&root_text).unwrap();
+    let witness = root_json.get("witness").unwrap().as_str().unwrap();
+    let targets = root_json
+        .get("output_digests")
         .unwrap()
-        .filter_map(Result::ok)
-        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
-        .collect::<String>();
-    assert!(
-        lifecycle.contains("commit"),
-        "retry must commit the exact prepared root: {lifecycle}"
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let fields = ledger.trim_end().split('\t').collect::<Vec<_>>();
+    assert_eq!(fields[4], witness);
+    assert_eq!(
+        lifecycle_roots(&root.path),
+        vec![LifecycleRootProof {
+            kind: "external-consumer".to_string(),
+            id: "external-consumer:jetos-generation:d68db8f4f63784e2062f9df39019967a7fa3e06ba0026d7696d32011c62d26e7".to_string(),
+            producer: "jetos-generation".to_string(),
+            witness: witness.to_string(),
+            targets,
+            phase: "committed".to_string(),
+        }]
     );
 
     let source = project.join("config.jet");
@@ -543,7 +766,6 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
     );
     fs::write(&source, original_source).unwrap();
 
-    let generation = root.join("systems/generations/root-recovery");
     let sealed = generation.join("proof.txt");
     let original_sealed = fs::read(&sealed).unwrap();
     fs::write(&sealed, b"tampered\n").unwrap();
@@ -563,11 +785,17 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
     assert_eq!(run(None).status.code(), Some(2));
     fs::write(files_proof, original_files_proof).unwrap();
 
+    let lifecycle_before_retry = lifecycle_bytes(&root.path);
     let committed_retry = run(None);
     assert!(
         committed_retry.status.success(),
         "exact committed-name retry must validate without mutation: {}",
         String::from_utf8_lossy(&committed_retry.stderr)
+    );
+    assert_eq!(
+        lifecycle_bytes(&root.path),
+        lifecycle_before_retry,
+        "exact committed retry must change zero lifecycle bytes"
     );
 }
 

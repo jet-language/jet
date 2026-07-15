@@ -165,7 +165,7 @@ fn windows_directory_sync_contract() -> WindowsDirectorySyncContract {
     }
 }
 
-fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
+pub(crate) fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
     if !directory {
         return fs::File::open(path)?.sync_all();
     }

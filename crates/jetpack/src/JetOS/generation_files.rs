@@ -15,6 +15,7 @@ use super::module_storage_workload::{
 use super::options_rendering::{boot_profile, render_proof};
 use super::root_projection::{copy_file_replace, write_bootable_root_projection};
 use super::store_realize::RealizedPackage;
+use super::types::OsFlags;
 use super::studio_projection::{make_executable, write_studio_app_projection};
 use super::system_facts::{
     write_hardware_facts, write_init_facts, write_network_facts, write_secret_manifest,
@@ -28,7 +29,9 @@ use super::theme_fleet_lifecycle::{
 use super::user_flatpak_perf::{
     write_flatpak_facts, write_performance_facts, write_user_environment_facts,
 };
+use jet_env_model::AST::{Expr, Item, StrPart};
 use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
+use jet_env_model::{Lexer, Parser, Syntax};
 use crate::Store;
 use crate::JSON;
 use std::collections::BTreeSet;
@@ -138,15 +141,25 @@ pub(super) fn write_generation_files(
     Ok(())
 }
 
-pub(super) fn write_generation_source_proof(dir: &Path, config: &Path) -> std::io::Result<()> {
+const EVALUATOR_SEMANTICS: &str = "jet-env-model.module-eval.v1";
+
+pub(super) fn write_generation_source_proof(
+    dir: &Path,
+    config: &Path,
+    flags: &OsFlags,
+) -> std::io::Result<()> {
     let source = fs::read(config)?;
+    let source_closure = generation_source_closure(config)?;
     let plan = fs::read(dir.join("plan.json"))?;
     let input_plan = std::env::var("JETOS_STUDIO_INPUT_PLAN_SHA256").unwrap_or_default();
     let proof = format!(
-        "{{\"kind\":\"jetos.generation-source-proof\",\"source_sha256\":{},\"input_plan_sha256\":{},\"plan_sha256\":{}}}",
+        "{{\"kind\":\"jetos.generation-source-proof\",\"source_sha256\":{},\"source_closure_sha256\":{},\"input_plan_sha256\":{},\"plan_sha256\":{},\"real_tier\":{},\"evaluator_semantics\":{}}}",
         JSON::quote(&crate::SHA256::sha256_hex(&source)),
+        JSON::quote(&crate::SHA256::sha256_hex(&source_closure)),
         JSON::quote(&input_plan),
         JSON::quote(&crate::SHA256::sha256_hex(&plan)),
+        if flags.real_tier { "true" } else { "false" },
+        JSON::quote(EVALUATOR_SEMANTICS),
     );
     fs::write(dir.join("source-proof.json"), proof)
 }
@@ -201,6 +214,7 @@ pub(super) fn validate_generation_root_proof(
     name: &str,
     source_config: &Path,
     roots: &Store::Roots,
+    flags: &OsFlags,
 ) -> std::io::Result<GenerationRootProof> {
     let root_metadata = fs::symlink_metadata(dir)?;
     if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
@@ -213,7 +227,7 @@ pub(super) fn validate_generation_root_proof(
     }
     let source_proof = fs::read(dir.join("source-proof.json"))?;
     let plan = fs::read(dir.join("plan.json"))?;
-    validate_source_proof(&source_proof, &plan, source_config)?;
+    validate_source_proof(&source_proof, &plan, source_config, flags)?;
     let root_text = fs::read_to_string(dir.join("generation-root.json"))?;
     let root = JSON::parse(&root_text).map_err(invalid_generation)?;
     for (key, expected) in [
@@ -321,22 +335,105 @@ fn validate_source_proof(
     source_proof: &[u8],
     plan: &[u8],
     source_config: &Path,
+    flags: &OsFlags,
 ) -> std::io::Result<()> {
     let proof_text = std::str::from_utf8(source_proof).map_err(invalid_generation)?;
     let proof = JSON::parse(proof_text).map_err(invalid_generation)?;
     let source = fs::read(source_config)?;
+    let source_closure = generation_source_closure(source_config)?;
     let expected_input = std::env::var("JETOS_STUDIO_INPUT_PLAN_SHA256").unwrap_or_default();
     for (key, expected) in [
         ("kind", "jetos.generation-source-proof".to_string()),
         ("source_sha256", crate::SHA256::sha256_hex(&source)),
+        (
+            "source_closure_sha256",
+            crate::SHA256::sha256_hex(&source_closure),
+        ),
         ("input_plan_sha256", expected_input),
         ("plan_sha256", crate::SHA256::sha256_hex(plan)),
+        ("evaluator_semantics", EVALUATOR_SEMANTICS.to_string()),
     ] {
         if json_string(&proof, key)? != expected {
             return Err(invalid_generation("generation source proof does not match current input"));
         }
     }
+    let real_tier = match proof.get("real_tier").map_err(invalid_generation)? {
+        JSON::Json::Bool(value) => *value,
+        _ => return Err(invalid_generation("generation source tier is not boolean")),
+    };
+    if real_tier != flags.real_tier {
+        return Err(invalid_generation("generation source proof uses a different realization tier"));
+    }
     Ok(())
+}
+
+fn generation_source_closure(config: &Path) -> std::io::Result<Vec<u8>> {
+    let source = fs::read_to_string(config)?;
+    let (tokens, diagnostics) = Lexer::lex(&source);
+    if !diagnostics.is_empty() {
+        return Err(invalid_generation("generation source closure does not lex"));
+    }
+    let program = Parser::parse(&tokens).map_err(|_| invalid_generation("generation source closure does not parse"))?;
+    let source_base = std::env::var_os("JETOS_STUDIO_SOURCE_BASE").map(PathBuf::from);
+    let base = source_base
+        .as_deref()
+        .unwrap_or_else(|| config.parent().unwrap_or_else(|| Path::new(".")));
+    let mut files = vec![(PathBuf::from("<root>"), source.into_bytes())];
+    for item in &program.items {
+        let Item::Module(module) = item else {
+            continue;
+        };
+        if module.disabled {
+            continue;
+        }
+        for import in &module.imports {
+            let rel = import_find_directory(import)?;
+            let directory = base.join(rel);
+            let mut entries = fs::read_dir(&directory)?.collect::<Result<Vec<_>, _>>()?;
+            entries.sort_by_key(|entry| path_bytes(&entry.path()));
+            for entry in entries {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some(Syntax::FILE_EXT) {
+                    continue;
+                }
+                let relative = path
+                    .strip_prefix(base)
+                    .map_err(|_| invalid_generation("imported source escaped its evaluation root"))?
+                    .to_path_buf();
+                files.push((relative, fs::read(path)?));
+            }
+        }
+    }
+    files.sort_by(|a, b| path_bytes(&a.0).cmp(&path_bytes(&b.0)));
+    let mut canonical = Vec::new();
+    frame(&mut canonical, b"jetos-source-closure-v1");
+    for (path, bytes) in files {
+        frame(&mut canonical, &path_bytes(&path));
+        frame(&mut canonical, &bytes);
+    }
+    Ok(canonical)
+}
+
+fn import_find_directory(import: &Expr) -> std::io::Result<String> {
+    let Expr::Call(call) = import else {
+        return Err(invalid_generation("generation import is not find(...)"));
+    };
+    if call.name != Syntax::BUILTIN_FIND || call.args.len() != 1 {
+        return Err(invalid_generation("generation import is not find(...)"));
+    }
+    let Expr::Str(parts, _) = &call.args[0].expr else {
+        return Err(invalid_generation("generation import path is not literal"));
+    };
+    let mut path = String::new();
+    for part in parts {
+        match part {
+            StrPart::Lit(value) => path.push_str(value),
+            StrPart::Interp(..) => {
+                return Err(invalid_generation("generation import path is interpolated"));
+            }
+        }
+    }
+    Ok(path)
 }
 
 fn json_string(value: &JSON::Json, key: &str) -> std::io::Result<String> {
@@ -382,20 +479,10 @@ pub(super) fn sync_generation_tree(root: &Path) -> std::io::Result<()> {
         if metadata.is_dir() {
             sync_generation_tree(&path)?;
         } else if metadata.is_file() {
-            fs::File::open(&path)?.sync_all()?;
+            Store::sync_store_node(&path, false)?;
         }
     }
-    sync_directory(root)
-}
-
-#[cfg(unix)]
-fn sync_directory(path: &Path) -> std::io::Result<()> {
-    fs::File::open(path)?.sync_all()
-}
-
-#[cfg(windows)]
-fn sync_directory(_path: &Path) -> std::io::Result<()> {
-    Ok(())
+    Store::sync_store_node(root, true)
 }
 
 fn frame(out: &mut Vec<u8>, bytes: &[u8]) {
@@ -489,6 +576,45 @@ fn generation_mode(metadata: &fs::Metadata) -> u32 {
 #[cfg(windows)]
 fn generation_mode(metadata: &fs::Metadata) -> u32 {
     u32::from(metadata.permissions().readonly())
+}
+
+#[cfg(test)]
+mod request_proof_tests {
+    use super::*;
+
+    fn flags(real_tier: bool) -> OsFlags {
+        OsFlags {
+            fixtures: None,
+            offline: true,
+            name: Some("same-name".to_string()),
+            manual_disk: None,
+            disk: None,
+            json: false,
+            assume_yes: false,
+            host: None,
+            real_tier,
+        }
+    }
+
+    #[test]
+    fn source_proof_rejects_same_name_across_realization_tiers() {
+        let root = std::env::temp_dir().join(format!(
+            "jetos-request-proof-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let config = root.join("config.jet");
+        fs::write(&config, "module empty {}\n").unwrap();
+        fs::write(root.join("plan.json"), "{}\n").unwrap();
+        write_generation_source_proof(&root, &config, &flags(false)).unwrap();
+        let proof = fs::read(root.join("source-proof.json")).unwrap();
+        let plan = fs::read(root.join("plan.json")).unwrap();
+        validate_source_proof(&proof, &plan, &config, &flags(false)).unwrap();
+        assert!(validate_source_proof(&proof, &plan, &config, &flags(true)).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub(super) fn render_plan_json(
