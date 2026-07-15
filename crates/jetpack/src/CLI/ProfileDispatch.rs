@@ -6,8 +6,6 @@
 //! copied executable, then replaces itself with that executable. No shell or
 //! batch parser participates in argv forwarding.
 
-#![allow(dead_code)] // Builder-facing APIs are consumed by tool.rs integration.
-
 use crate::{JSON, SHA256, Store, Syntax};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;

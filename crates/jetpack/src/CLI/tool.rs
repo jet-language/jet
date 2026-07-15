@@ -8,6 +8,7 @@
 //! collides with a project `#Task fn` is E1297 (JPK-TOOL-COLLIDE).
 
 use super::parse::Parsed;
+use super::ProfileDispatch;
 use super::realize::{classify_or_report, RunPlan};
 use super::trust_env_build::compose_env;
 use crate::Output::Theme;
@@ -428,7 +429,6 @@ struct InstalledTool {
     bins: Vec<String>,
     members: Vec<String>,
     member_digests: Vec<String>,
-    member_modes: Vec<u32>,
     output_hash: String,
     store_root: String,
 }
@@ -439,10 +439,7 @@ const PROFILE_COMPLETE_FILE: &str = "complete";
 const PROFILE_POINTER_PARTIAL: &str = "profile.json.partial";
 const PROFILE_CURRENT_FILE: &str = "current";
 const PROFILE_CURRENT_PARTIAL: &str = "current.partial";
-const PROFILE_SCHEMA: &str = "jet-profile-generation-v1";
-const PROFILE_CURRENT_SCHEMA: &str = "jet-profile-current-v1";
 const MAX_PROFILE_TOOLS: usize = 256;
-const MAX_PROFILE_BINS: usize = 1024;
 const MAX_PROFILE_STRING: usize = 4096;
 const PROFILE_FAILPOINT_ENV: &str = "JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT";
 
@@ -485,8 +482,11 @@ fn read_current_tools() -> Result<Vec<InstalledTool>, String> {
     if !path.is_file() {
         return Ok(Vec::new());
     }
-    let (gen, pointer_witness) =
-        parse_current_pointer(&read_bounded(&path).map_err(|error| error.to_string())?)?;
+    let pointer = ProfileDispatch::parse_current_pointer(
+        &read_bounded(&path).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    let (gen, pointer_witness) = (pointer.generation, pointer.witness);
     if gen == 0 {
         return Ok(Vec::new());
     }
@@ -513,11 +513,7 @@ fn read_generation_record(gen: u64) -> Result<GenerationRecord, String> {
     }
     let text = read_bounded(&path).map_err(|error| error.to_string())?;
     let tools = parse_generation_meta(&text, gen)?;
-    let digests = tools
-        .iter()
-        .map(|tool| tool.output_hash.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    let witness = profile_generation_witness(&text, &digests);
+    let witness = generation_record_witness(&text, gen)?;
     let complete = generations_dir()
         .join(gen.to_string())
         .join(PROFILE_COMPLETE_FILE);
@@ -562,7 +558,6 @@ fn project_install(
             bins: bins.iter().map(|(name, _)| name.clone()).collect(),
             members: bins.iter().map(|(_, member)| member.clone()).collect(),
             member_digests: Vec::new(),
-            member_modes: Vec::new(),
             output_hash: receipt.output_hash.clone(),
             store_root: receipt.store_root.to_string_lossy().into_owned(),
         });
@@ -604,11 +599,7 @@ fn write_generation_locked(
     let meta = format_generation_meta(gen, &generation_tools);
     write_synced(&gen_dir.join("meta.json"), meta.as_bytes())?;
     validate_generation_bins(gen, &generation_tools)?;
-    let digests = generation_tools
-        .iter()
-        .map(|tool| tool.output_hash.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    let witness = profile_generation_witness(&meta, &digests);
+    let witness = generation_record_witness(&meta, gen).map_err(io::Error::other)?;
     write_synced(
         &gen_dir.join(PROFILE_COMPLETE_FILE),
         format!("{witness}\n").as_bytes(),
@@ -617,7 +608,7 @@ fn write_generation_locked(
     Store::sync_store_directory(&generations_dir())?;
     profile_failpoint("after-generation")?;
 
-    if !digests.is_empty() {
+    if !generation_tools.is_empty() {
         ensure_generation_roots(gen, &generation_tools, &witness)?;
         profile_failpoint("after-root-commit")?;
     }
@@ -667,6 +658,8 @@ fn recover_profile_state() -> io::Result<()> {
         }
     }
 
+    migrate_legacy_generations_locked()?;
+
     let mut publish = 0;
     if generations_dir().is_dir() {
         let mut generations = fs::read_dir(generations_dir())?
@@ -689,11 +682,7 @@ fn recover_profile_state() -> io::Result<()> {
             }
             let tools = read_generation_tools(generation).map_err(io::Error::other)?;
             let metadata = read_bounded(&generations_dir().join(generation.to_string()).join("meta.json"))?;
-            let digests = tools
-                .iter()
-                .map(|tool| tool.output_hash.clone())
-                .collect::<std::collections::BTreeSet<_>>();
-            let witness = profile_generation_witness(&metadata, &digests);
+            let witness = generation_record_witness(&metadata, generation).map_err(io::Error::other)?;
             if read_bounded(&complete)?.trim() != witness {
                 return Err(io::Error::other("profile generation witness mismatch"));
             }
@@ -711,17 +700,111 @@ fn recover_profile_state() -> io::Result<()> {
                 .join(publish.to_string())
                 .join("meta.json"),
         )?;
-        let digests = tools
-            .iter()
-            .map(|tool| tool.output_hash.clone())
-            .collect::<std::collections::BTreeSet<_>>();
         publish_generation(
             publish,
-            &profile_generation_witness(&metadata, &digests),
+            &generation_record_witness(&metadata, publish).map_err(io::Error::other)?,
             &tools,
         )?;
     }
     Ok(())
+}
+
+fn migrate_legacy_generations_locked() -> io::Result<()> {
+    if !generations_dir().is_dir() {
+        return Ok(());
+    }
+    let mut legacy = Vec::new();
+    for entry in fs::read_dir(generations_dir())? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            return Err(io::Error::other("invalid profile generation entry"));
+        }
+        let generation = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u64>().ok())
+            .filter(|generation| *generation != 0)
+            .ok_or_else(|| io::Error::other("invalid profile generation name"))?;
+        if !entry.path().join(PROFILE_COMPLETE_FILE).is_file()
+            || !entry.path().join("meta.json").is_file()
+        {
+            continue;
+        }
+        let metadata = read_bounded(&entry.path().join("meta.json"))?;
+        let parsed = JSON::parse(&metadata).map_err(io::Error::other)?;
+        let JSON::Json::Object(root) = parsed else {
+            return Err(io::Error::other("profile metadata root is not an object"));
+        };
+        if !root.contains_key("schema") {
+            legacy.push((generation, entry.path(), metadata));
+        }
+    }
+    legacy.sort_by_key(|(generation, _, _)| *generation);
+    for (generation, path, metadata) in legacy {
+        let tools = parse_legacy_generation_meta(&metadata, generation).map_err(io::Error::other)?;
+        let digests = tools
+            .iter()
+            .map(|tool| tool.output_hash.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let witness = profile_generation_witness(&metadata, &digests);
+        if read_bounded(&path.join(PROFILE_COMPLETE_FILE))? != format!("{witness}\n") {
+            return Err(io::Error::other(format!(
+                "legacy profile generation {generation} witness mismatch; remove only after auditing `{}`",
+                path.display()
+            )));
+        }
+        if !canonical_generation_matches(&tools)? {
+            write_generation_locked(&tools, None)?;
+        }
+        let archive = tools_state_dir().join("legacy-generations");
+        fs::create_dir_all(&archive)?;
+        let destination = archive.join(format!("generation-{generation}"));
+        if destination.exists() {
+            return Err(io::Error::other("legacy profile migration archive collision"));
+        }
+        fs::rename(&path, &destination)?;
+        Store::sync_store_directory(&archive)?;
+        Store::sync_store_directory(&generations_dir())?;
+    }
+    Ok(())
+}
+
+fn canonical_generation_matches(legacy: &[InstalledTool]) -> io::Result<bool> {
+    for entry in fs::read_dir(generations_dir())? {
+        let entry = entry?;
+        let Some(generation) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        let Ok(record) = read_generation_record(generation) else {
+            continue;
+        };
+        if record.tools.len() == legacy.len()
+            && record
+                .tools
+                .iter()
+                .zip(legacy)
+                .all(|(left, right)| tool_authority_equal(left, right))
+        {
+            validate_generation_bins(generation, &record.tools)?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn tool_authority_equal(left: &InstalledTool, right: &InstalledTool) -> bool {
+    left.name == right.name
+        && left.version == right.version
+        && left.source == right.source
+        && left.reference == right.reference
+        && left.bins == right.bins
+        && left.members == right.members
+        && left.output_hash == right.output_hash
+        && left.store_root == right.store_root
 }
 
 fn ensure_generation_roots(
@@ -775,7 +858,6 @@ fn materialize_generation_bins(
             return Err(io::Error::other("profile tool has mismatched bin/member pairs"));
         }
         let mut member_digests = Vec::with_capacity(tool.bins.len());
-        let mut member_modes = Vec::with_capacity(tool.bins.len());
         for (bin, member) in tool.bins.iter().zip(&tool.members) {
             validate_bin_name(bin).map_err(io::Error::other)?;
             validate_bin_name(member).map_err(io::Error::other)?;
@@ -802,11 +884,13 @@ fn materialize_generation_bins(
                     &destination,
                 )?
             };
+            #[cfg(unix)]
+            if proof.mode & 0o111 == 0 {
+                return Err(io::Error::other("profile projection is not executable"));
+            }
             member_digests.push(proof.digest);
-            member_modes.push(proof.mode);
         }
         tool.member_digests = member_digests;
-        tool.member_modes = member_modes;
     }
     Store::sync_store_directory(&bin_dir)
 }
@@ -848,24 +932,23 @@ fn validate_generation_bins(generation: u64, tools: &[InstalledTool]) -> io::Res
         return Err(io::Error::other("profile generation bin projection mismatch"));
     }
     for tool in tools {
-        if tool.bins.len() != tool.member_digests.len()
-            || tool.bins.len() != tool.member_modes.len()
-        {
+        if tool.bins.len() != tool.member_digests.len() {
             return Err(io::Error::other("profile projection proof count mismatch"));
         }
         for member in &tool.members {
             let _ = validated_store_member(tool, member)?;
         }
-        for ((bin, digest), mode) in tool
-            .bins
-            .iter()
-            .zip(&tool.member_digests)
-            .zip(&tool.member_modes)
-        {
+        for (bin, digest) in tool.bins.iter().zip(&tool.member_digests) {
             let proof = Store::profile_file_proof(&bin_dir.join(bin))?;
-            if &proof.digest != digest || &proof.mode != mode {
+            if &proof.digest != digest {
                 return Err(io::Error::other(format!(
                     "profile projection proof mismatch for `{bin}`"
+                )));
+            }
+            #[cfg(unix)]
+            if proof.mode & 0o111 == 0 {
+                return Err(io::Error::other(format!(
+                    "profile projection is not executable for `{bin}`"
                 )));
             }
         }
@@ -890,7 +973,11 @@ fn publish_generation(
     }
     Store::sync_store_directory(&user_bin_dir())?;
 
-    atomic_write_current_pointer(format_current_pointer(generation, witness).as_bytes())?;
+    let pointer = ProfileDispatch::format_current_pointer(&ProfileDispatch::CurrentPointer {
+        generation,
+        witness: witness.to_string(),
+    })?;
+    atomic_write_current_pointer(pointer.as_bytes())?;
     profile_failpoint("after-current-pointer")?;
     let profile = format!(
         "{{\n  \"name\": \"{}\",\n  \"current\": {},\n  \"witness\": {}\n}}\n",
@@ -901,108 +988,12 @@ fn publish_generation(
     atomic_write_profile_pointer(profile.as_bytes())
 }
 
-fn format_current_pointer(generation: u64, witness: &str) -> String {
-    let body = format!(
-        "{PROFILE_CURRENT_SCHEMA}\ngeneration\t{generation}\nwitness\t{witness}\n"
-    );
-    let checksum = SHA256::sha256_hex(body.as_bytes());
-    format!("{body}checksum\tsha256-{checksum}\n")
-}
-
-fn parse_current_pointer(text: &str) -> Result<(u64, String), String> {
-    let lines = text.lines().collect::<Vec<_>>();
-    if lines.len() != 4 || lines[0] != PROFILE_CURRENT_SCHEMA || !text.ends_with('\n') {
-        return Err("current pointer has wrong schema or field count".into());
-    }
-    let generation = lines[1]
-        .strip_prefix("generation\t")
-        .ok_or("current pointer lacks generation")?
-        .parse::<u64>()
-        .map_err(|_| "current pointer generation is invalid")?;
-    if generation == 0 {
-        return Err("current pointer generation is zero".into());
-    }
-    let witness = lines[2]
-        .strip_prefix("witness\t")
-        .ok_or("current pointer lacks witness")?;
-    validate_digest(witness).map_err(|error| error.to_string())?;
-    let checksum = lines[3]
-        .strip_prefix("checksum\tsha256-")
-        .ok_or("current pointer lacks checksum")?;
-    if checksum.len() != 64
-        || !checksum
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-    {
-        return Err("current pointer checksum is not canonical".into());
-    }
-    let body_len = text
-        .rfind("checksum\t")
-        .ok_or("current pointer lacks checksum")?;
-    if SHA256::sha256_hex(text[..body_len].as_bytes()) != checksum {
-        return Err("current pointer checksum mismatch".into());
-    }
-    Ok((generation, witness.to_string()))
-}
-
 fn ensure_dispatcher(bin: &str) -> io::Result<()> {
-    validate_bin_name(bin).map_err(io::Error::other)?;
-    #[cfg(unix)]
-    let (path, bytes) = (
-        user_bin_dir().join(bin),
-        format!(
-            "#!/bin/sh\nset -eu\njet_bin_dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd -P)\njet_tools_dir=\"$jet_bin_dir/../{}\"\n{{ IFS= read -r jet_schema; IFS='\t' read -r jet_generation_tag jet_generation; IFS='\t' read -r jet_witness_tag jet_witness; IFS='\t' read -r jet_checksum_tag jet_checksum; }} < \"$jet_tools_dir/{}\"\n[ \"$jet_schema\" = \"{}\" ] && [ \"$jet_generation_tag\" = generation ] && [ \"$jet_witness_tag\" = witness ] && [ \"$jet_checksum_tag\" = checksum ] || exit 126\ncase $jet_generation in ''|*[!0-9]*) exit 126;; esac\njet_target=\"$jet_tools_dir/generations/$jet_generation/bin/{}\"\n[ -f \"$jet_target\" ] && [ -x \"$jet_target\" ] || exit 127\nexec \"$jet_target\" \"$@\"\n",
-            Syntax::TOOL_STATE_DIR,
-            PROFILE_CURRENT_FILE,
-            PROFILE_CURRENT_SCHEMA,
-            bin,
-        )
-        .into_bytes(),
-    );
-    #[cfg(windows)]
-    let (path, bytes) = (
-        user_bin_dir().join(format!("{bin}.cmd")),
-        format!(
-            "@echo off\r\nsetlocal EnableExtensions DisableDelayedExpansion\r\nset \"jet_tools_dir=%~dp0..\\{}\"\r\nfor /f \"usebackq skip=1 tokens=1,2\" %%A in (\"%jet_tools_dir%\\{}\") do if \"%%A\"==\"generation\" set \"jet_generation=%%B\"\r\nif not defined jet_generation exit /b 126\r\nset \"jet_target=%jet_tools_dir%\\generations\\%jet_generation%\\bin\\{}\"\r\nif not exist \"%jet_target%\" exit /b 127\r\n\"%jet_target%\" %*\r\nexit /b %errorlevel%\r\n",
-            Syntax::TOOL_STATE_DIR,
-            PROFILE_CURRENT_FILE,
-            bin,
-        )
-        .into_bytes(),
-    );
-    #[cfg(not(any(unix, windows)))]
-    return Err(io::Error::other("profile dispatch unsupported on this platform"));
-
-    match fs::read(&path) {
-        Ok(existing) if existing == bytes => return Ok(()),
-        Ok(_) => return Err(io::Error::other("profile dispatcher content mismatch")),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-    write_synced(&path, &bytes)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
-        fs::File::open(&path)?.sync_all()?;
-    }
-    Ok(())
+    ProfileDispatch::install_dispatcher(&user_bin_dir(), bin).map(|_| ())
 }
 
 fn validate_bin_name(value: &str) -> Result<(), String> {
-    if value.is_empty() || value.len() > 255 {
-        return Err("profile bin name has invalid length".into());
-    }
-    let mut components = Path::new(value).components();
-    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
-        || components.next().is_some()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'+'))
-    {
-        return Err(format!("invalid profile bin name `{value}`"));
-    }
-    Ok(())
+    ProfileDispatch::validate_bin_name(value).map_err(|error| error.to_string())
 }
 
 fn validate_digest(value: &str) -> io::Result<()> {
@@ -1052,6 +1043,12 @@ fn profile_generation_witness(
         canonical.push('\n');
     }
     format!("sha256-{}", SHA256::sha256_hex(canonical.as_bytes()))
+}
+
+fn generation_record_witness(metadata: &str, generation: u64) -> Result<String, String> {
+    let parsed = ProfileDispatch::parse_generation_metadata(metadata, generation)
+        .map_err(|error| error.to_string())?;
+    Ok(ProfileDispatch::generation_witness(metadata, &parsed))
 }
 
 fn profile_failpoint(phase: &str) -> io::Result<()> {
@@ -1111,70 +1108,27 @@ fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()
 }
 
 fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> String {
-    let mut out = String::new();
-    out.push_str("{\n");
-    out.push_str(&format!("  \"schema\": {},\n", json_str(PROFILE_SCHEMA)));
-    out.push_str(&format!("  \"generation\": {gen},\n"));
-    out.push_str(&format!("  \"owner\": {},\n", json_str(PROFILE_OWNER)));
-    out.push_str(&format!("  \"profile\": \"{}\",\n", Syntax::TOOL_PROFILE_NAME));
-    out.push_str(&format!("  \"created_at\": {},\n", now_secs()));
-    out.push_str("  \"tools\": [\n");
-    for (i, t) in tools.iter().enumerate() {
-        out.push_str("    {\n");
-        out.push_str(&format!("      \"name\": {},\n", json_str(&t.name)));
-        out.push_str(&format!("      \"version\": {},\n", json_str(&t.version)));
-        out.push_str(&format!("      \"source\": {},\n", json_str(&t.source)));
-        out.push_str(&format!("      \"reference\": {},\n", json_str(&t.reference)));
-        out.push_str(&format!(
-            "      \"output_hash\": {},\n",
-            json_str(&t.output_hash)
-        ));
-        out.push_str(&format!(
-            "      \"store_root\": {},\n",
-            json_str(&t.store_root)
-        ));
-        out.push_str("      \"bins\": [");
-        for (j, b) in t.bins.iter().enumerate() {
-            if j > 0 {
-                out.push_str(", ");
-            }
-            out.push_str(&json_str(b));
-        }
-        out.push_str("],\n");
-        out.push_str("      \"members\": [");
-        for (j, b) in t.members.iter().enumerate() {
-            if j > 0 {
-                out.push_str(", ");
-            }
-            out.push_str(&json_str(b));
-        }
-        out.push_str("],\n");
-        out.push_str("      \"member_digests\": [");
-        for (j, digest) in t.member_digests.iter().enumerate() {
-            if j > 0 {
-                out.push_str(", ");
-            }
-            out.push_str(&json_str(digest));
-        }
-        out.push_str("],\n");
-        out.push_str("      \"member_modes\": [");
-        for (j, mode) in t.member_modes.iter().enumerate() {
-            if j > 0 {
-                out.push_str(", ");
-            }
-            out.push_str(&mode.to_string());
-        }
-        out.push_str("]\n");
-        out.push_str("    }");
-        if i + 1 < tools.len() {
-            out.push(',');
-        }
-        out.push('\n');
-    }
-    out.push_str("  ]\n}\n");
-    out
+    let metadata = ProfileDispatch::GenerationMetadata {
+        generation: gen,
+        created_at: now_secs(),
+        tools: tools
+            .iter()
+            .map(|tool| ProfileDispatch::GenerationTool {
+                name: tool.name.clone(),
+                version: tool.version.clone(),
+                source: tool.source.clone(),
+                reference: tool.reference.clone(),
+                output_hash: tool.output_hash.clone(),
+                store_root: tool.store_root.clone(),
+                bins: tool.bins.clone(),
+                members: tool.members.clone(),
+                projection_hashes: tool.member_digests.clone(),
+            })
+            .collect(),
+    };
+    ProfileDispatch::format_generation_metadata(&metadata)
+        .expect("validated producer metadata must match dispatcher schema")
 }
-
 fn json_str(s: &str) -> String {
     format!(
         "\"{}\"",
@@ -1182,84 +1136,101 @@ fn json_str(s: &str) -> String {
     )
 }
 
-fn parse_generation_meta(text: &str, expected_generation: u64) -> Result<Vec<InstalledTool>, String> {
+fn parse_generation_meta(
+    text: &str,
+    expected_generation: u64,
+) -> Result<Vec<InstalledTool>, String> {
+    let metadata = ProfileDispatch::parse_generation_metadata(text, expected_generation)
+        .map_err(|error| error.to_string())?;
+    Ok(metadata
+        .tools
+        .into_iter()
+        .map(|tool| InstalledTool {
+            name: tool.name,
+            version: tool.version,
+            source: tool.source,
+            reference: tool.reference,
+            bins: tool.bins,
+            members: tool.members,
+            member_digests: tool.projection_hashes,
+            output_hash: tool.output_hash,
+            store_root: tool.store_root,
+        })
+        .collect())
+}
+fn parse_legacy_generation_meta(
+    text: &str,
+    expected_generation: u64,
+) -> Result<Vec<InstalledTool>, String> {
     let JSON::Json::Object(root) = JSON::parse(text)? else {
-        return Err("profile metadata root is not an object".into());
+        return Err("legacy profile metadata root is not an object".into());
     };
     expect_exact_keys(
         &root,
-        &["created_at", "generation", "owner", "profile", "schema", "tools"],
-        "profile metadata",
+        &["created_at", "generation", "profile", "tools"],
+        "legacy profile metadata",
     )?;
-    if json_field_string(&root, "schema")? != PROFILE_SCHEMA
-        || json_field_string(&root, "owner")? != PROFILE_OWNER
-        || json_field_string(&root, "profile")? != Syntax::TOOL_PROFILE_NAME
+    if json_field_string(&root, "profile")? != Syntax::TOOL_PROFILE_NAME
+        || json_field_u64(&root, "generation")? != expected_generation
     {
-        return Err("profile metadata identity mismatch".into());
-    }
-    if json_field_u64(&root, "generation")? != expected_generation {
-        return Err("profile generation metadata disagrees with its path".into());
+        return Err("legacy profile metadata identity mismatch".into());
     }
     let _ = json_field_u64(&root, "created_at")?;
-    let JSON::Json::Array(entries) = root.get("tools").ok_or("profile metadata lacks tools")? else {
-        return Err("profile tools field is not an array".into());
+    let JSON::Json::Array(entries) = root.get("tools").ok_or("legacy metadata lacks tools")? else {
+        return Err("legacy profile tools field is not an array".into());
     };
     if entries.len() > MAX_PROFILE_TOOLS {
-        return Err("profile tool count exceeds bound".into());
+        return Err("legacy profile tool count exceeds bound".into());
     }
+    let roots = Store::resolve();
+    validate_store_root(&roots.root.to_string_lossy())?;
+    let store = Store::list_checked(&roots).map_err(|error| error.to_string())?;
     let mut tools = Vec::with_capacity(entries.len());
-    let mut seen_tools = std::collections::BTreeSet::new();
     let mut seen_bins = std::collections::BTreeSet::new();
     for entry in entries {
         let JSON::Json::Object(tool) = entry else {
-            return Err("profile tool entry is not an object".into());
+            return Err("legacy profile tool entry is not an object".into());
         };
         expect_exact_keys(
             tool,
             &[
-                "bins", "member_digests", "member_modes", "members", "name",
-                "output_hash", "reference", "source", "store_root", "version",
+                "bins", "name", "output_hash", "reference", "source", "targets", "version",
             ],
-            "profile tool",
+            "legacy profile tool",
         )?;
         let name = bounded_json_string(tool, "name")?;
         let version = bounded_json_string(tool, "version")?;
         let source = bounded_json_string(tool, "source")?;
         let reference = bounded_json_string(tool, "reference")?;
         let output_hash = bounded_json_string(tool, "output_hash")?;
-        let store_root = bounded_json_string(tool, "store_root")?;
         validate_digest(&output_hash).map_err(|error| error.to_string())?;
-        validate_store_root(&store_root)?;
         let bins = json_string_array(tool, "bins")?;
-        let members = json_string_array(tool, "members")?;
-        let member_digests = json_string_array(tool, "member_digests")?;
-        let member_modes = json_u32_array(tool, "member_modes")?;
-        if bins.is_empty()
-            || bins.len() != members.len()
-            || bins.len() != member_digests.len()
-            || bins.len() != member_modes.len()
-        {
-            return Err("profile tool has mismatched bin/member pairs".into());
+        let targets = json_bounded_string_array(tool, "targets", MAX_PROFILE_STRING)?;
+        if bins.is_empty() || bins.len() != targets.len() {
+            return Err("legacy profile tool has mismatched bin/target pairs".into());
         }
-        if seen_bins.len() + bins.len() > MAX_PROFILE_BINS {
-            return Err("profile bin count exceeds bound".into());
-        }
-        for value in bins.iter().chain(&members) {
-            validate_bin_name(value)?;
-        }
-        for digest in &member_digests {
-            validate_digest(digest).map_err(|error| error.to_string())?;
-        }
-        if member_modes.iter().any(|mode| *mode > 0o777) {
-            return Err("profile executable mode exceeds bounds".into());
-        }
-        for bin in &bins {
+        let authority = store
+            .iter()
+            .find(|entry| {
+                entry.reference == reference && entry.envelope.output_hash == output_hash
+            })
+            .ok_or("legacy profile Store authority is unavailable")?;
+        let mut members = Vec::with_capacity(targets.len());
+        for (bin, target) in bins.iter().zip(&targets) {
+            validate_bin_name(bin)?;
             if !seen_bins.insert(bin.clone()) {
-                return Err(format!("duplicate profile bin `{bin}`"));
+                return Err(format!("duplicate legacy profile bin `{bin}`"));
             }
-        }
-        if !seen_tools.insert((name.clone(), reference.clone())) {
-            return Err("duplicate profile tool identity".into());
+            let target = Path::new(target);
+            let member = target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or("legacy profile target has no UTF-8 member")?;
+            validate_bin_name(member)?;
+            if target != Path::new(&authority.bin).join(member) {
+                return Err("legacy profile target escapes verified Store authority".into());
+            }
+            members.push(member.to_string());
         }
         tools.push(InstalledTool {
             name,
@@ -1268,17 +1239,14 @@ fn parse_generation_meta(text: &str, expected_generation: u64) -> Result<Vec<Ins
             reference,
             bins,
             members,
-            member_digests,
-            member_modes,
+            member_digests: Vec::new(),
             output_hash,
-            store_root,
+            store_root: roots.root.to_string_lossy().into_owned(),
         });
     }
-    if tools.windows(2).any(|pair| {
-        (&pair[0].name, &pair[0].reference) >= (&pair[1].name, &pair[1].reference)
-    }) {
-        return Err("profile tools are not in canonical order".into());
-    }
+    tools.sort_by(|left, right| {
+        (&left.name, &left.reference).cmp(&(&right.name, &right.reference))
+    });
     Ok(tools)
 }
 
@@ -1334,6 +1302,14 @@ fn json_string_array(
     object: &std::collections::BTreeMap<String, JSON::Json>,
     key: &str,
 ) -> Result<Vec<String>, String> {
+    json_bounded_string_array(object, key, 255)
+}
+
+fn json_bounded_string_array(
+    object: &std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+    max_len: usize,
+) -> Result<Vec<String>, String> {
     let Some(JSON::Json::Array(values)) = object.get(key) else {
         return Err(format!("profile field `{key}` is not an array"));
     };
@@ -1341,31 +1317,10 @@ fn json_string_array(
         .iter()
         .map(|value| {
             let value = value.as_str()?;
-            if value.len() > 255 || value.bytes().any(|byte| byte == 0) {
+            if value.len() > max_len || value.bytes().any(|byte| byte == 0) {
                 return Err(format!("profile field `{key}` exceeds bounds"));
             }
             Ok(value.to_string())
-        })
-        .collect()
-}
-
-fn json_u32_array(
-    object: &std::collections::BTreeMap<String, JSON::Json>,
-    key: &str,
-) -> Result<Vec<u32>, String> {
-    let Some(JSON::Json::Array(values)) = object.get(key) else {
-        return Err(format!("profile field `{key}` is not an array"));
-    };
-    values
-        .iter()
-        .map(|value| {
-            let JSON::Json::Num(value) = value else {
-                return Err(format!("profile field `{key}` contains a non-number"));
-            };
-            if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 || *value > u32::MAX as f64 {
-                return Err(format!("profile field `{key}` contains an invalid integer"));
-            }
-            Ok(*value as u32)
         })
         .collect()
 }
@@ -1434,7 +1389,6 @@ fn run() { }
             bins: vec!["tool".into()],
             members: vec!["tool".into()],
             member_digests: vec![format!("sha256-{}", "e".repeat(64))],
-            member_modes: vec![0o755],
             output_hash: digest.clone(),
             store_root: "/store".into(),
         }];
@@ -1457,7 +1411,6 @@ fn run() { }
             bins: vec!["same".into()],
             members: vec!["left".into()],
             member_digests: vec![projection.clone()],
-            member_modes: vec![0o755],
             output_hash: digest.clone(),
             store_root: "/store".into(),
         };
@@ -1469,16 +1422,40 @@ fn run() { }
         right.name = "right".into();
         right.reference = "path:right".into();
         right.members = vec!["right".into()];
-        let duplicate = format_generation_meta(1, &[tool, right]);
-        assert!(parse_generation_meta(&duplicate, 1).is_err());
+        let duplicate = ProfileDispatch::GenerationMetadata {
+            generation: 1,
+            created_at: 1,
+            tools: [tool, right]
+                .into_iter()
+                .map(|tool| ProfileDispatch::GenerationTool {
+                    name: tool.name,
+                    version: tool.version,
+                    source: tool.source,
+                    reference: tool.reference,
+                    output_hash: tool.output_hash,
+                    store_root: tool.store_root,
+                    bins: tool.bins,
+                    members: tool.members,
+                    projection_hashes: tool.member_digests,
+                })
+                .collect(),
+        };
+        assert!(ProfileDispatch::format_generation_metadata(&duplicate).is_err());
     }
 
     #[test]
     fn current_pointer_checksum_rejects_bitflips_and_truncation() {
         let witness = format!("sha256-{}", "f".repeat(64));
-        let pointer = format_current_pointer(9, &witness);
-        assert_eq!(parse_current_pointer(&pointer).unwrap(), (9, witness));
-        assert!(parse_current_pointer(&pointer.replace("generation\t9", "generation\t8")).is_err());
-        assert!(parse_current_pointer(pointer.trim_end()).is_err());
+        let record = ProfileDispatch::CurrentPointer {
+            generation: 9,
+            witness: witness.clone(),
+        };
+        let pointer = ProfileDispatch::format_current_pointer(&record).unwrap();
+        assert_eq!(ProfileDispatch::parse_current_pointer(&pointer).unwrap(), record);
+        assert!(ProfileDispatch::parse_current_pointer(
+            &pointer.replace("generation\t9", "generation\t8")
+        )
+        .is_err());
+        assert!(ProfileDispatch::parse_current_pointer(pointer.trim_end()).is_err());
     }
 }

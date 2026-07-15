@@ -89,6 +89,15 @@ fn metadata_output_hash(metadata: &str) -> String {
         .unwrap()
 }
 
+fn json_meta_field(metadata: &str, key: &str) -> String {
+    let needle = format!("\"{key}\": \"");
+    metadata
+        .split_once(&needle)
+        .and_then(|(_, tail)| tail.split_once('"'))
+        .map(|(value, _)| value.to_string())
+        .unwrap_or_else(|| panic!("missing {key} in {metadata}"))
+}
+
 #[test]
 fn tool_help_lists_run_install_list_uninstall() {
     let output = jetpack().args(["help"]).output().unwrap();
@@ -313,7 +322,8 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
 
 #[test]
 fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
-    let root = Scratch::new("tool-concurrent-root");
+    let left_root = Scratch::new("tool-concurrent-left-root");
+    let right_root = Scratch::new("tool-concurrent-right-root");
     let proj = Scratch::new("tool-concurrent-proj");
     let fixtures = Scratch::new("tool-concurrent-fx");
     let left_out = Scratch::new("tool-concurrent-left-out");
@@ -335,7 +345,7 @@ fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
     );
 
     let left = tool_install_command(
-        &root.path,
+        &left_root.path,
         &proj.path,
         &fixtures.path,
         &home.path,
@@ -346,7 +356,7 @@ fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
     .spawn()
     .unwrap();
     let right = tool_install_command(
-        &root.path,
+        &right_root.path,
         &proj.path,
         &fixtures.path,
         &home.path,
@@ -377,26 +387,106 @@ fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
     assert!(second.contains("left") && second.contains("right"), "{second}");
     assert!(home.join(".jet/tools/generations/1/complete").is_file());
     assert!(home.join(".jet/tools/generations/2/complete").is_file());
-    let roots = lifecycle_wire(&root.path);
-    for generation in [1, 2] {
-        assert!(
-            roots.contains(&ascii_hex(&format!(
-                "profile-generation:user:tools:{generation}"
-            ))),
-            "missing retained generation {generation}: {roots}"
-        );
-    }
+    let left_roots = lifecycle_wire(&left_root.path);
+    let right_roots = lifecycle_wire(&right_root.path);
+    let generation_one = ascii_hex("profile-generation:user:tools:1");
+    let generation_two = ascii_hex("profile-generation:user:tools:2");
+    assert!(
+        left_roots.contains(&generation_one) || right_roots.contains(&generation_one),
+        "missing retained generation 1: left={left_roots}, right={right_roots}"
+    );
+    assert!(
+        left_roots.contains(&generation_two) && right_roots.contains(&generation_two),
+        "generation 2 must bind both Store authorities: left={left_roots}, right={right_roots}"
+    );
 
     let listed = jetpack()
         .args(["tool", "list", "--no-color"])
         .current_dir(&proj.path)
-        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_ROOT", &left_root.path)
         .env("HOME", &home.path)
         .output()
         .unwrap();
     assert!(listed.status.success());
     let stdout = String::from_utf8_lossy(&listed.stdout);
     assert!(stdout.contains("left") && stdout.contains("right"), "{stdout}");
+}
+
+#[test]
+fn legacy_generation_is_verified_and_migrated_to_owned_projection() {
+    let root = Scratch::new("tool-legacy-root");
+    let proj = Scratch::new("tool-legacy-proj");
+    let fixtures = Scratch::new("tool-legacy-fx");
+    let out = Scratch::new("tool-legacy-out");
+    let home = Scratch::new("tool-legacy-home");
+    write_tool_bin_fixture(
+        &fixtures.path,
+        &out.path,
+        "greet",
+        "greet",
+        "#!/bin/sh\necho migrated greet\n",
+    );
+    let installed = tool_install_command(
+        &root.path,
+        &proj.path,
+        &fixtures.path,
+        &home.path,
+        "greet",
+    )
+    .output()
+    .unwrap();
+    assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
+
+    let canonical = fs::read_to_string(home.join(".jet/tools/generations/1/meta.json")).unwrap();
+    let output_hash = metadata_output_hash(&canonical);
+    let store_root = json_meta_field(&canonical, "store_root");
+    let mut store_meta = fs::read_dir(Path::new(&store_root).join("hangar"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("meta.json"))
+        .filter(|path| path.is_file())
+        .map(|path| fs::read_to_string(path).unwrap())
+        .find(|metadata| metadata.contains("nixpkgs:greet"))
+        .expect("greet Store metadata");
+    let bin = json_meta_field(&store_meta, "bin");
+    store_meta.clear();
+    let target = Path::new(&bin).join("greet").to_string_lossy().into_owned();
+    let legacy = format!(
+        "{{\n  \"generation\": 1,\n  \"profile\": \"tools\",\n  \"created_at\": 1,\n  \"tools\": [\n    {{\n      \"name\": \"greet\",\n      \"version\": \"\",\n      \"source\": \"nixpkgs\",\n      \"reference\": \"nixpkgs:greet\",\n      \"output_hash\": {output_hash:?},\n      \"bins\": [\"greet\"],\n      \"targets\": [{target:?}]\n    }}\n  ]\n}}\n"
+    );
+    let witness_input = format!(
+        "jet-profile-generation-witness-v1\nmetadata\t{}\ntarget\t{}\n",
+        jetpack::SHA256::sha256_hex(legacy.as_bytes()),
+        output_hash
+    );
+    let witness = format!(
+        "sha256-{}",
+        jetpack::SHA256::sha256_hex(witness_input.as_bytes())
+    );
+    fs::write(home.join(".jet/tools/generations/1/meta.json"), legacy).unwrap();
+    fs::write(
+        home.join(".jet/tools/generations/1/complete"),
+        format!("{witness}\n"),
+    )
+    .unwrap();
+    fs::remove_file(home.join(".jet/tools/current")).unwrap();
+    fs::remove_file(home.join(".jet/tools/profile.json")).unwrap();
+
+    let migrated = jetpack()
+        .args(["tool", "list", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(migrated.status.success(), "{}", String::from_utf8_lossy(&migrated.stderr));
+    assert!(home.join(".jet/tools/legacy-generations/generation-1").is_dir());
+    assert!(home.join(".jet/tools/generations/2/bin/greet").is_file());
+    let current = fs::read_to_string(home.join(".jet/tools/current")).unwrap();
+    assert!(current.contains("generation\t2"), "{current}");
+    let invoked = Command::new(home.join(".jet/bin/greet")).output().unwrap();
+    assert!(invoked.status.success());
+    assert_eq!(String::from_utf8_lossy(&invoked.stdout).trim(), "migrated greet");
 }
 
 #[test]
