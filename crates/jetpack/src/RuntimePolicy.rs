@@ -8,8 +8,8 @@
 use super::Output::Theme;
 use super::JSON;
 use crate::Syntax;
-use std::fs::{self, OpenOptions};
-use std::io::{self, ErrorKind, Write as _};
+use std::fs::{self, File};
+use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -17,6 +17,16 @@ const LOCK_DIR: &str = ".locks";
 const LOCK_WAIT: Duration = Duration::from_secs(30);
 const LOCK_POLL: Duration = Duration::from_millis(20);
 const SANDBOX_POLICY_FILE: &str = "sandbox-policy";
+
+#[cfg(unix)]
+#[path = "RuntimePolicy/Lock/unix.rs"]
+mod lock_platform;
+#[cfg(windows)]
+#[path = "RuntimePolicy/Lock/windows.rs"]
+mod lock_platform;
+#[cfg(not(any(unix, windows)))]
+#[path = "RuntimePolicy/Lock/unsupported.rs"]
+mod lock_platform;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerbPolicy {
@@ -49,34 +59,39 @@ pub fn all_verb_policies() -> Vec<VerbPolicy> {
 }
 
 pub struct FileLock {
-    path: PathBuf,
+    file: File,
 }
 
 impl Drop for FileLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        // Close also releases advisory locks. Explicit unlock shortens the
+        // handoff boundary and keeps that law visible at this abstraction.
+        let _ = lock_platform::unlock(&self.file);
     }
 }
 
 pub fn acquire_lock(root: &Path, scope: &str) -> io::Result<FileLock> {
+    acquire_lock_with_timing(root, scope, LOCK_WAIT, LOCK_POLL)
+}
+
+fn acquire_lock_with_timing(
+    root: &Path,
+    scope: &str,
+    wait: Duration,
+    poll: Duration,
+) -> io::Result<FileLock> {
     let dir = root.join(LOCK_DIR);
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.lock", sanitize_scope(scope)));
-    let deadline = Instant::now() + LOCK_WAIT;
+    let file = lock_platform::open(&path)?;
+    let deadline = Instant::now() + wait;
     loop {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut f) => {
-                let _ = writeln!(f, "pid={}", std::process::id());
-                #[cfg(target_os = "linux")]
-                if let Some(start) = linux_process_start(std::process::id()) {
-                    let _ = writeln!(f, "process_start={start}");
-                }
-                return Ok(FileLock { path });
+        match lock_platform::try_lock(&file) {
+            Ok(true) => return Ok(FileLock { file }),
+            Ok(false) if Instant::now() < deadline => {
+                std::thread::sleep(poll.min(deadline.saturating_duration_since(Instant::now())));
             }
-            Err(e) if e.kind() == ErrorKind::AlreadyExists && Instant::now() < deadline => {
-                std::thread::sleep(LOCK_POLL);
-            }
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+            Ok(false) => {
                 return Err(io::Error::new(
                     ErrorKind::TimedOut,
                     format!("timed out waiting for jetpack lock `{}`", path.display()),
@@ -87,10 +102,22 @@ pub fn acquire_lock(root: &Path, scope: &str) -> io::Result<FileLock> {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_process_start(pid: u32) -> Option<String> {
-    let stat = fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat")).ok()?;
-    stat.rsplit_once(") ")?.1.split_whitespace().nth(19).map(str::to_string)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LockState {
+    Held,
+    Idle,
+}
+
+/// Probe one persistent lock inode using kernel state. File contents, PID
+/// reuse, timestamps, and path existence are never liveness evidence.
+pub(crate) fn lock_state(path: &Path) -> io::Result<LockState> {
+    let file = lock_platform::open(path)?;
+    if lock_platform::try_lock(&file)? {
+        lock_platform::unlock(&file)?;
+        Ok(LockState::Idle)
+    } else {
+        Ok(LockState::Held)
+    }
 }
 
 pub fn with_lock<T>(root: &Path, scope: &str, f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
@@ -321,6 +348,9 @@ fn sandbox_json(code: &str, severity: &str, status: &SandboxStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     fn scratch(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
@@ -349,6 +379,168 @@ mod tests {
         handle.join().unwrap();
         assert_eq!(fs::read_to_string(root.join("after")).unwrap(), "locked");
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn killed_lock_holder_child() {
+        if std::env::var_os("JETPACK_LOCK_CHILD").is_none() {
+            return;
+        }
+        let root = PathBuf::from(std::env::var_os("JETPACK_LOCK_ROOT").unwrap());
+        let ready = PathBuf::from(std::env::var_os("JETPACK_LOCK_READY").unwrap());
+        let _guard = acquire_lock(&root, "killed-holder").unwrap();
+        fs::write(ready, "held").unwrap();
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    #[test]
+    fn killed_holder_is_immediately_recoverable() {
+        let root = scratch("killed-holder");
+        let ready = root.join("ready");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "RuntimePolicy::tests::killed_lock_holder_child",
+                "--nocapture",
+            ])
+            .env("JETPACK_LOCK_CHILD", "1")
+            .env("JETPACK_LOCK_ROOT", &root)
+            .env("JETPACK_LOCK_READY", &ready)
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(ready.exists(), "child never acquired advisory lock");
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        let started = Instant::now();
+        let guard = acquire_lock_with_timing(
+            &root,
+            "killed-holder",
+            Duration::from_secs(1),
+            Duration::from_millis(5),
+        )
+        .unwrap();
+        assert!(started.elapsed() < Duration::from_millis(250));
+        drop(guard);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn waiter_and_new_opener_never_split_lock_inode() {
+        let root = scratch("one-inode");
+        let first = acquire_lock(&root, "hangar").unwrap();
+        let lock_path = root.join(LOCK_DIR).join("hangar.lock");
+        #[cfg(unix)]
+        let inode = {
+            use std::os::unix::fs::MetadataExt as _;
+            let metadata = fs::metadata(&lock_path).unwrap();
+            (metadata.dev(), metadata.ino())
+        };
+        let active = Arc::new(AtomicUsize::new(0));
+        let enters = Arc::new(AtomicUsize::new(0));
+        let spawn = |root: PathBuf, active: Arc<AtomicUsize>, enters: Arc<AtomicUsize>| {
+            std::thread::spawn(move || {
+                let _guard = acquire_lock(&root, "hangar").unwrap();
+                assert_eq!(active.fetch_add(1, Ordering::SeqCst), 0);
+                enters.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(20));
+                assert_eq!(active.fetch_sub(1, Ordering::SeqCst), 1);
+            })
+        };
+        let waiter = spawn(root.clone(), active.clone(), enters.clone());
+        std::thread::sleep(Duration::from_millis(40));
+        let new_opener = spawn(root.clone(), active.clone(), enters.clone());
+        drop(first);
+        waiter.join().unwrap();
+        new_opener.join().unwrap();
+        assert_eq!(enters.load(Ordering::SeqCst), 2);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            let metadata = fs::metadata(lock_path).unwrap();
+            assert_eq!((metadata.dev(), metadata.ino()), inode);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stale_pid_text_and_file_age_are_not_liveness() {
+        let root = scratch("stale-text");
+        let dir = root.join(LOCK_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hangar.lock");
+        fs::write(&path, "pid=4294967294\nprocess_start=1\n").unwrap();
+        let guard = acquire_lock_with_timing(
+            &root,
+            "hangar",
+            Duration::from_millis(100),
+            Duration::from_millis(5),
+        )
+        .unwrap();
+        assert_eq!(lock_state(&path).unwrap(), LockState::Held);
+        drop(guard);
+        assert_eq!(lock_state(&path).unwrap(), LockState::Idle);
+        assert!(path.exists(), "persistent lock inode must never be unlinked");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lock_timeout_is_deterministic() {
+        let root = scratch("timeout");
+        let guard = acquire_lock(&root, "hangar").unwrap();
+        let started = Instant::now();
+        let error = acquire_lock_with_timing(
+            &root,
+            "hangar",
+            Duration::from_millis(80),
+            Duration::from_millis(5),
+        )
+        .err()
+        .expect("contended advisory lock must time out");
+        let elapsed = started.elapsed();
+        assert_eq!(error.kind(), ErrorKind::TimedOut);
+        assert!(elapsed >= Duration::from_millis(60), "elapsed: {elapsed:?}");
+        assert!(elapsed < Duration::from_millis(500), "elapsed: {elapsed:?}");
+        drop(guard);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lock_open_and_platform_failures_fail_closed() {
+        let root = scratch("fail-closed");
+        fs::write(root.join(LOCK_DIR), "not a directory").unwrap();
+        assert!(acquire_lock(&root, "hangar").is_err());
+
+        fs::remove_file(root.join(LOCK_DIR)).unwrap();
+        fs::create_dir_all(root.join(LOCK_DIR).join("hangar.lock")).unwrap();
+        assert!(acquire_lock(&root, "hangar").is_err());
+        fs::remove_dir_all(root).unwrap();
+
+        let unsupported = include_str!("RuntimePolicy/Lock/unsupported.rs");
+        assert!(unsupported.contains("ErrorKind::Unsupported"));
+        assert!(!unsupported.contains("Ok(File"));
+    }
+
+    #[test]
+    fn windows_lock_contract_is_explicit_and_fail_closed() {
+        let source = include_str!("RuntimePolicy/Lock/windows.rs");
+        for required in [
+            "LockFileEx",
+            "UnlockFileEx",
+            "LOCKFILE_FAIL_IMMEDIATELY",
+            "LOCKFILE_EXCLUSIVE_LOCK",
+            "SetHandleInformation",
+            "HANDLE_FLAG_INHERIT",
+            ".share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)",
+            "lockfileex_runtime_serializes_when_run_on_windows",
+        ] {
+            assert!(source.contains(required), "missing Windows lock law: {required}");
+        }
+        assert!(!source.contains("const FILE_SHARE_DELETE"));
     }
 
     #[test]

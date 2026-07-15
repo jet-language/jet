@@ -170,7 +170,6 @@ fn base64(bytes: &[u8]) -> String {
 
 fn check_locks(project: &Path, roots: &Store::Roots) -> Check {
     let dirs = [roots.root.join(".locks"), Store::managed_dir(project).join(".locks")];
-    let mut stale = BTreeSet::new();
     let mut unknown = BTreeSet::new();
     for dir in dirs {
         let rd = match fs::read_dir(&dir) {
@@ -181,40 +180,13 @@ fn check_locks(project: &Path, roots: &Store::Roots) -> Check {
         for next in rd {
         let ent = match next { Ok(ent) => ent, Err(_) => { unknown.insert("directory entry unreadable".to_string()); continue; } };
         let path = ent.path(); if path.extension().and_then(|s| s.to_str()) != Some("lock") { continue; }
-        match lock_state(&path) {
-            LockState::Stale => { stale.insert(ent.file_name().to_string_lossy().into_owned()); }
-            LockState::Unknown => { unknown.insert(ent.file_name().to_string_lossy().into_owned()); }
-            LockState::Live => {}
+        match super::RuntimePolicy::lock_state(&path) {
+            Ok(super::RuntimePolicy::LockState::Held | super::RuntimePolicy::LockState::Idle) => {}
+            Err(_) => { unknown.insert(ent.file_name().to_string_lossy().into_owned()); }
         }
     }}
-    if !stale.is_empty() { degraded("locks", format!("{} stale lock(s): {}", stale.len(), stale.into_iter().collect::<Vec<_>>().join(", ")), "remove stale lock files after confirming no Jetpack process is running") }
-    else if !unknown.is_empty() { degraded("locks", format!("{} lock(s) have unknown liveness: {}", unknown.len(), unknown.into_iter().collect::<Vec<_>>().join(", ")), "inspect the lock owner; never delete a lock whose process identity is unknown") }
-    else { ok("locks", "no stale command locks") }
-}
-
-enum LockState { Live, Stale, Unknown }
-
-fn lock_state(path: &Path) -> LockState {
-    let Ok(text) = fs::read_to_string(path) else { return LockState::Unknown };
-    let pid = text.lines().find_map(|line| line.strip_prefix("pid=")?.parse::<u32>().ok());
-    let Some(pid) = pid else { return LockState::Unknown };
-    #[cfg(target_os="linux")]
-    {
-        let proc = Path::new("/proc").join(pid.to_string());
-        if !proc.exists() { return LockState::Stale; }
-        let recorded = text.lines().find_map(|line| line.strip_prefix("process_start="));
-        let current = process_start_identity(pid);
-        return match (recorded, current.as_deref()) { (Some(a), Some(b)) if a == b => LockState::Live, (Some(_), Some(_)) => LockState::Stale, _ => LockState::Unknown };
-    }
-    #[cfg(not(target_os="linux"))]
-    { let _ = pid; LockState::Unknown }
-}
-
-#[cfg(target_os="linux")]
-fn process_start_identity(pid: u32) -> Option<String> {
-    let stat = fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat")).ok()?;
-    let after = stat.rsplit_once(") ")?.1;
-    after.split_whitespace().nth(19).map(str::to_string)
+    if !unknown.is_empty() { degraded("locks", format!("{} lock(s) could not be probed: {}", unknown.len(), unknown.into_iter().collect::<Vec<_>>().join(", ")), "restore lock-file access and filesystem advisory-lock support") }
+    else { ok("locks", "kernel advisory locks readable") }
 }
 
 fn check_cache(roots: &Store::Roots) -> Check {
@@ -301,21 +273,16 @@ mod tests {
     }
 
     #[test]
-    fn lock_liveness_is_live_dead_or_unknown_without_age_guessing() {
+    fn lock_health_uses_kernel_state_not_pid_or_file_contents() {
         let root = scratch("locks");
-        let live = root.join("live.lock");
-        let malformed = root.join("malformed.lock");
-        let dead = root.join("dead.lock");
-        #[cfg(target_os = "linux")]
-        {
-            let start = process_start_identity(std::process::id()).unwrap();
-            fs::write(&live, format!("pid={}\nprocess_start={start}\n", std::process::id())).unwrap();
-            assert!(matches!(lock_state(&live), LockState::Live));
-            fs::write(&dead, "pid=4294967294\nprocess_start=1\n").unwrap();
-            assert!(matches!(lock_state(&dead), LockState::Stale));
-        }
-        fs::write(&malformed, "old but no process identity\n").unwrap();
-        assert!(matches!(lock_state(&malformed), LockState::Unknown));
+        fs::create_dir_all(root.join(".locks")).unwrap();
+        fs::write(root.join(".locks/stale.lock"), "pid=4294967294\n").unwrap();
+        let roots = Store::Roots { root: root.clone(), dev_mode: false };
+        assert_eq!(check_locks(&root, &roots).health, Health::Healthy);
+        let guard = super::super::RuntimePolicy::acquire_lock(&root, "held").unwrap();
+        assert_eq!(check_locks(&root, &roots).health, Health::Healthy);
+        drop(guard);
+
         let policy_root = scratch("lock-read-errors");
         fs::write(policy_root.join(".locks"), "not a directory").unwrap();
         let roots = Store::Roots { root: policy_root.clone(), dev_mode: false };
@@ -325,7 +292,7 @@ mod tests {
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("loop.lock", policy_root.join(".locks/loop.lock")).unwrap();
-            assert!(check_locks(&root, &roots).detail.contains("unknown liveness"));
+            assert!(check_locks(&root, &roots).detail.contains("could not be probed"));
         }
         fs::remove_dir_all(policy_root).unwrap();
         fs::remove_dir_all(root).unwrap();
