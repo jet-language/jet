@@ -300,8 +300,18 @@ fn ingest_tree_unlocked(
             envelope,
             cache_identity: req.cache_identity.clone(),
             references: req.references.clone(),
-            named_outputs: named_digests,
+            named_outputs: named_digests.clone(),
             platform_artifact_kind: req.platform_artifact_kind.clone(),
+            producer_record: canonical_producer(
+                "hangar-ingest",
+                &format!("cas:{primary}"),
+                &primary,
+                &req.cache_identity,
+                req.outputs
+                    .keys()
+                    .map(|name| (format!("output.{name}"), named_digests[name].clone()))
+                    .collect(),
+            )?,
             realized_at,
             last_used_at: now,
         };

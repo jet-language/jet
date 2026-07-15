@@ -100,6 +100,9 @@ pub struct StoreEntry {
     /// Explicit platform artifact kind that permits semantic xattrs on ingest.
     /// Empty = semantic xattrs rejected (default).
     pub platform_artifact_kind: String,
+    /// Versioned canonical producer/action/source replay record. Empty only for
+    /// pre-JP4 metadata; engine migration must validate or reject it.
+    pub producer_record: String,
     /// Unix seconds when this hangar object was first realized.
     pub realized_at: u64,
     /// Unix seconds when Jetpack last reused/refreshed this object.
@@ -155,6 +158,7 @@ impl StoreEntry {
         field("references", &references, true);
         field("named_outputs", &named_outputs, true);
         field("platform_artifact_kind", &self.platform_artifact_kind, false);
+        field("producer_record", &self.producer_record, false);
         field("realized_at", &realized_at, false);
         // last field — no trailing comma
         out.push_str("  ");
@@ -227,6 +231,7 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
                 references: parsed.references,
                 named_outputs: parsed.named_outputs,
                 platform_artifact_kind: parsed.platform_artifact_kind,
+                producer_record: parsed.producer_record,
                 realized_at: parsed.realized_at.unwrap_or(0),
                 last_used_at: parsed.last_used_at.unwrap_or(0),
             });
@@ -252,6 +257,7 @@ pub struct ParsedMeta {
     pub references: Vec<String>,
     pub named_outputs: BTreeMap<String, String>,
     pub platform_artifact_kind: String,
+    pub producer_record: String,
     pub realized_at: Option<u64>,
     pub last_used_at: Option<u64>,
 }
@@ -305,6 +311,7 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
         references,
         named_outputs,
         platform_artifact_kind: get("platform_artifact_kind").unwrap_or_default(),
+        producer_record: get("producer_record").unwrap_or_default(),
         realized_at: get("realized_at").and_then(|s| s.parse().ok()),
         last_used_at: get("last_used_at").and_then(|s| s.parse().ok()),
     })

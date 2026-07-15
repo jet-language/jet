@@ -15,6 +15,7 @@ use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::SHA256;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -52,6 +53,38 @@ pub struct Realized {
     pub cache_identity: super::Store::CacheIdentity,
     /// D-JPK-CACHE1 reporting (T4): how this realization was satisfied.
     pub source_state: SourceState,
+    /// Provider output names mapped to exact immutable paths.
+    pub named_outputs: BTreeMap<String, String>,
+    /// CAS closure edges discovered by provider.
+    pub references: Vec<String>,
+    /// Canonical replay/source/toolchain/policy facts.
+    pub producer: super::Store::ProducerRecord,
+}
+
+pub(super) fn producer_record(
+    provider: &str,
+    immutable_source: &str,
+    source_digest: &str,
+    plan_facts: BTreeMap<String, String>,
+    toolchain_facts: &str,
+    identity: &super::Store::CacheIdentity,
+    facts: BTreeMap<String, String>,
+) -> Result<super::Store::ProducerRecord, ProviderError> {
+    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
+        .map_err(ProviderError::CoreBuild)?;
+    super::Store::ProducerRecord::new(
+        provider,
+        immutable_source,
+        source_digest,
+        plan,
+        toolchain_facts,
+        format!(
+            "policy={}\nplatform={}",
+            identity.policy_fingerprint, identity.platform
+        ),
+        facts,
+    )
+    .map_err(ProviderError::CoreBuild)
 }
 
 fn cache_identity(source: &str, recipe: &str, ctx: &Ctx) -> super::Store::CacheIdentity {
@@ -464,6 +497,21 @@ impl Provider for NixProvider {
             policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
             platform: super::Envelope::host_platform(),
         };
+        let previous = realized.producer;
+        realized.producer = super::Store::ProducerRecord::new(
+            previous.provider,
+            previous.immutable_source,
+            realized.envelope.output_hash.clone(),
+            previous.plan,
+            previous.toolchain_facts,
+            format!(
+                "policy={}\nplatform={}",
+                realized.cache_identity.policy_fingerprint,
+                realized.cache_identity.platform
+            ),
+            previous.facts,
+        )
+        .map_err(ProviderError::BadOutput)?;
         // Record the locked identity + closure envelope so an offline realize can
         // reuse this hangar copy after the same proof gate core refs use.
         if let Some(project) = ctx.project_dir {
@@ -611,6 +659,20 @@ impl Provider for CoreProvider {
             manifest.as_ref(),
             kind,
         );
+        let identity = cache_identity(&source_fingerprint, &recipe_identity, ctx);
+        let toolchain = super::Toolchain::Toolchain::resolve();
+        let producer = producer_record(
+            "core",
+            &format!("cas:{source_fingerprint}"),
+            &source_fingerprint,
+            BTreeMap::from([
+                ("action.kind".into(), "core-build".into()),
+                ("action.recipe".into(), recipe_identity.clone()),
+            ]),
+            &format!("{toolchain:?}"),
+            &identity,
+            BTreeMap::from([("source.path".into(), src_dir.to_string_lossy().into_owned())]),
+        )?;
         Ok(Realized {
             name: spec.package.clone(),
             version,
@@ -619,8 +681,11 @@ impl Provider for CoreProvider {
             bin,
             rlib,
             envelope,
-            cache_identity: cache_identity(&source_fingerprint, &recipe_identity, ctx),
+            cache_identity: identity,
             source_state: SourceState::Built,
+            named_outputs: BTreeMap::from([("out".into(), out_dir.to_string_lossy().into_owned())]),
+            references: Vec::new(),
+            producer,
         })
     }
 }
@@ -910,6 +975,25 @@ pub(crate) fn realize_adapter(
     );
     let source_fingerprint = super::Envelope::try_output_hash_of(&staged.to_string_lossy())
         .map_err(ProviderError::Adapter)?;
+    let identity = cache_identity(
+        &source_fingerprint,
+        &format!("adapter-v1:{recipe_hash}"),
+        ctx,
+    );
+    let replay = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
+        .map_err(|d| ProviderError::Adapter(d.what))?
+        .replay_record()
+        .map_err(ProviderError::Adapter)?;
+    let producer = super::Store::ProducerRecord::new(
+        "adapter",
+        format!("cas:{source_fingerprint}"),
+        &source_fingerprint,
+        replay,
+        format!("declared-tools:{:?}", build_ctx.tools),
+        format!("policy={}\nplatform={}", identity.policy_fingerprint, identity.platform),
+        BTreeMap::from([("adapter.source".into(), plan.source.clone())]),
+    )
+    .map_err(ProviderError::Adapter)?;
     Ok(Realized {
         name: plan.name.clone(),
         version: String::new(),
@@ -918,12 +1002,11 @@ pub(crate) fn realize_adapter(
         bin,
         rlib: String::new(),
         envelope,
-        cache_identity: cache_identity(
-            &source_fingerprint,
-            &format!("adapter-v1:{recipe_hash}"),
-            ctx,
-        ),
+        cache_identity: identity,
         source_state: SourceState::Built,
+        named_outputs: BTreeMap::from([("out".into(), out_dir.to_string_lossy().into_owned())]),
+        references: Vec::new(),
+        producer,
     })
 }
 
@@ -1140,6 +1223,25 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         .ok_or_else(|| ProviderError::BadOutput("provider produced no build results".into()))?;
     let outputs = first.get("outputs").map_err(ProviderError::BadOutput)?;
     let outputs = outputs.as_object().map_err(ProviderError::BadOutput)?;
+    let drv_path = first
+        .get("drvPath")
+        .and_then(|value| value.as_str())
+        .map_err(ProviderError::BadOutput)?;
+    if drv_path.trim().is_empty() {
+        return Err(ProviderError::BadOutput(
+            "provider output had no exact `drvPath`".into(),
+        ));
+    }
+
+    let named_outputs = outputs
+        .iter()
+        .map(|(name, value)| {
+            value
+                .as_str()
+                .map(|path| (name.clone(), path.to_string()))
+                .map_err(ProviderError::BadOutput)
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
 
     let out = outputs
         .get("bin")
@@ -1152,6 +1254,30 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
     let bin = format!("{}/bin", out.trim_end_matches('/'));
     let name = spec.short_name().to_string();
     let envelope = super::Envelope::Envelope::for_output(out, &spec.raw, "nix");
+    let provisional_identity = super::Store::CacheIdentity {
+        source_fingerprint: envelope.output_hash.clone(),
+        recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
+        policy_fingerprint: "pending-provider-policy".into(),
+        platform: super::Envelope::host_platform(),
+    };
+    let mut replay_facts = BTreeMap::from([
+        ("nix.drv_path".into(), drv_path.to_string()),
+        ("nix.reference".into(), spec.raw.clone()),
+    ]);
+    let mut facts = BTreeMap::from([("nix.drv_path".into(), drv_path.to_string())]);
+    for (name, path) in &named_outputs {
+        replay_facts.insert(format!("nix.output.{name}"), path.clone());
+        facts.insert(format!("nix.output.{name}"), path.clone());
+    }
+    let producer = producer_record(
+        "nix",
+        drv_path,
+        &envelope.output_hash,
+        replay_facts,
+        &format!("nix-derivation:{drv_path}"),
+        &provisional_identity,
+        facts,
+    )?;
     Ok(Realized {
         version: nix_store_version(out, &name),
         name,
@@ -1162,6 +1288,9 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         envelope,
         cache_identity: super::Store::CacheIdentity::default(),
         source_state: SourceState::Substituted,
+        named_outputs,
+        references: Vec::new(),
+        producer,
     })
 }
 

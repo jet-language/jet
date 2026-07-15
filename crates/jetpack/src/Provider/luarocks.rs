@@ -1,6 +1,6 @@
 //! Native LuaRocks provider (D-FFI-LUA1, D-JPK-PROVIDERS2).
 
-use super::{cache_identity, Ctx, Provider, ProviderError, Realized, SourceState};
+use super::{cache_identity, producer_record, Ctx, Provider, ProviderError, Realized, SourceState};
 use crate::RefSpec::{RefSpec, SourceTable};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -186,6 +186,21 @@ impl Provider for LuaRocksProvider {
                 },
             );
         }
+        let identity = cache_identity(&source_hash, RECIPE_ID, ctx);
+        let producer = producer_record(
+            "luarocks",
+            &format!("cas:{source_hash}"),
+            &source_hash,
+            BTreeMap::from([
+                ("action.kind".into(), "luarocks-install".into()),
+                ("repository".into(), repository.clone()),
+                ("package.version".into(), root.version.clone()),
+            ]),
+            "luarocks-provider-v1",
+            &identity,
+            BTreeMap::from([("repository".into(), repository)]),
+        )
+        .map_err(|error| ProviderError::LuaRocks(format!("invalid producer record: {error:?}")))?;
         Ok(Realized {
             name: root.name.clone(),
             version: root.version.clone(),
@@ -194,8 +209,11 @@ impl Provider for LuaRocksProvider {
             bin: out_dir.join("bin").to_string_lossy().into_owned(),
             rlib: String::new(),
             envelope,
-            cache_identity: cache_identity(&source_hash, RECIPE_ID, ctx),
+            cache_identity: identity,
             source_state: SourceState::Built,
+            named_outputs: BTreeMap::from([("out".into(), out)]),
+            references: Vec::new(),
+            producer,
         })
     }
 }

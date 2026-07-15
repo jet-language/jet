@@ -36,6 +36,35 @@ use std::process::Command;
 use std::process::{Child, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod Producer;
+pub use Producer::*;
+
+fn canonical_producer(
+    provider: &str,
+    immutable_source: &str,
+    source_digest: &str,
+    identity: &CacheIdentity,
+    mut facts: BTreeMap<String, String>,
+) -> std::io::Result<String> {
+    facts.insert("action.recipe".into(), identity.recipe_fingerprint.clone());
+    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
+        .map_err(std::io::Error::other)?;
+    ProducerRecord::new(
+        provider,
+        immutable_source,
+        source_digest,
+        plan,
+        "jetpack-std-provider",
+        format!(
+            "policy={}\nplatform={}",
+            identity.policy_fingerprint, identity.platform
+        ),
+        facts,
+    )
+    .map(|record| record.encode())
+    .map_err(std::io::Error::other)
+}
+
 const BUILD_SCRATCH_DIR: &str = "build-scratch";
 const ACTIVE_TMP_MARKER: &str = ".active";
 const AUTO_CLEAN_STAMP: &str = ".last-auto-clean";
@@ -338,6 +367,13 @@ fn record_verified_mode(
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
+            producer_record: canonical_producer(
+                "store-record",
+                &format!("cas:{}", cache_identity.source_fingerprint),
+                &envelope.output_hash,
+                cache_identity,
+                BTreeMap::from([("reference".into(), reference.to_string())]),
+            )?,
             realized_at,
             last_used_at: now,
         };
