@@ -188,12 +188,15 @@ fn read_process_state(dir: &Path) -> Result<Option<PersistedProcessState>, Strin
             _ => {}
         }
     }
-    if version != Some("1") || pid.is_none() || start_identity.is_none() {
+    if version != Some("1") {
         return Err(format!("service process state `{}` is invalid", path.display()));
     }
+    let (Some(pid), Some(start_identity)) = (pid, start_identity) else {
+        return Err(format!("service process state `{}` is invalid", path.display()));
+    };
     Ok(Some(PersistedProcessState::Verified(ProcessState {
-        pid: pid.unwrap(),
-        start_identity: start_identity.unwrap(),
+        pid,
+        start_identity,
     })))
 }
 
@@ -1080,6 +1083,20 @@ mod tests {
             read_process_state(&dir).unwrap(),
             Some(PersistedProcessState::LegacyPid(42))
         );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn incomplete_process_state_fails_closed() {
+        let dir = scratch("incomplete-process-state");
+        let state_path = pid_path(&dir);
+
+        fs::write(&state_path, "version=1\npid=42\n").unwrap();
+        assert!(read_process_state(&dir).unwrap_err().contains("is invalid"));
+
+        fs::write(&state_path, "version=1\nstart=linux-proc-start:9001\n").unwrap();
+        assert!(read_process_state(&dir).unwrap_err().contains("is invalid"));
+
         fs::remove_dir_all(dir).ok();
     }
 
