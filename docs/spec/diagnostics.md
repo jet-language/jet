@@ -657,6 +657,7 @@ renumbered, and no new `W` code may be allocated.
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown or moved command spelling, with the canonical grouped spelling (E2-M3, D-DX, D-CLI-SURFACE1, D-CLI-SURFACE2) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
+| E2103 | jet   | external completion could not read a verified JetCommandSchema record (D-SHAPE-CLI-CARRIER1, D-SHAPE-CLI-COMPLETE1) |
 | E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
 | E2202 | interp | `jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4) |
 | E2203 | interp | `jet debug` can't step through a feature its interpreter doesn't cover (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (D-DBG3) |
@@ -1310,8 +1311,7 @@ REPL step number in place of a file span (`<repl:N>`).
 
 These are produced by the `jet` driver itself, not by checking a `.jet`
 file, so they have no source span. They use the same what/why/fix voice
-and exit with code **2** (usage error — see "Exit codes" in
-docs/spec/architecture.md). Both carry a "did you mean" when a known
+and use the exit class stated below. E2101/E2102 carry a "did you mean" when a known
 command/flag is within edit distance 2. Their golden transcripts live in
 `tests/cli/` (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
 
@@ -1319,6 +1319,7 @@ command/flag is within edit distance 2. Their golden transcripts live in
 |------|------|-----|-----|
 | E2101 | Unknown or retired CLI route. Moved bare form: `` `{cmd}` moved under `jet {group}` ``. Invalid nested form: `` `{action}` isn't a jet {group} command ``. | Moved bare form: `infrequent commands live in a named area so daily Jet commands stay easy to scan`. Invalid nested form: `jet {group} accepts only commands in its named area`. | Moved bare form: ``run `jet {group} {cmd} {args}` ``. Invalid nested form: ``run `jet {group} help` ``. Human output renders these as Error/Why/Fix lines; JSON uses these exact message, why, and fix strings with control characters, quotes, and backslashes escaped. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
+| E2103 | Couldn't read command metadata from `{program}`. | The file could not be opened/read within the 512 MiB limit, is not ELF/PE/Mach-O/Wasm, or its JetCommandSchema record is missing, malformed, duplicated, unsupported, or inconsistent across universal Mach-O slices. Completion discovery never executes the program and never accepts unverified metadata. | Rebuild the program with this Jet toolchain, then try again. Exits 1 (user error), not 2. |
 
 ### `jet self doctor` advisories
 

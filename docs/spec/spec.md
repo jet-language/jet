@@ -2695,8 +2695,27 @@ layer generated on top of it, not a replacement.
 
 `jet inspect dossier <entry.jet> run --json` projects that same checked command
 schema as `command_schema`: shell flag, value type, required/default state,
-help text, and completion words. The human dossier prints the same facts. Tools
-consume this projection instead of reconstructing field-to-shell mapping.
+help text, subcommands, and completion words. The human dossier prints the same
+facts. Tools consume this projection instead of reconstructing field-to-shell
+mapping.
+
+**Executable command metadata (D-SHAPE-CLI-CARRIER1=A).** Every compiled
+program carries one versioned `JetCommandSchema` record inside its executable:
+`.jet_command` in ELF, `.jetcmd` in PE, `__jetcmd` in Mach-O, and the
+`jet.command` custom section in Wasm. Universal Mach-O files carry the same
+record in every architecture slice. The record is emitted before the artifact
+is cached, packaged, or signed, so it is part of the artifact identity. Readers
+parse the format section tables with bounded offsets and lengths; missing,
+malformed, duplicate, unsupported-version, or disagreeing universal-slice
+records fail closed. They never execute the target program.
+
+`jet self completions SHELL --for PROGRAM` (D-SHAPE-CLI-COMPLETE1=A) reads that
+record and writes a bash, zsh, fish, or PowerShell script to stdout. Without
+`--for`, Jet's own completion output is unchanged. External scripts contain
+only checked schema candidates: `--help`, derived flags, and lowercased enum
+subcommands. They never query live application values. Plain `fn run()` embeds
+an empty application schema and therefore still produces a valid built-in-only
+`--help` script. Metadata failures are E2103 on stderr.
 
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
 including the reserved `--help`), E1307 (subcommand payload isn't
