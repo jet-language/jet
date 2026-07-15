@@ -149,6 +149,12 @@ pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     })
 }
 
+pub(super) fn lifecycle_closure_graph_unlocked(roots: &Roots) -> std::io::Result<ClosureGraph> {
+    let (_, graph) = migrate_closure_graph_unlocked(roots)?;
+    validate_graph_store_proofs(roots, &graph, false).map_err(std::io::Error::other)?;
+    Ok(graph)
+}
+
 pub fn direct_references_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
     Ok(closure_graph(roots)?.direct_references(digest))
 }

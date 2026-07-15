@@ -11,7 +11,7 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 
 mod common;
 
@@ -59,18 +59,6 @@ fn tool_install_command(
         .env("JETPACK_ROOT", root)
         .env("HOME", home);
     command
-}
-
-fn install_tool(
-    root: &Path,
-    project: &Path,
-    fixtures: &Path,
-    home: &Path,
-    package: &str,
-) -> Output {
-    tool_install_command(root, project, fixtures, home, package)
-        .output()
-        .unwrap()
 }
 
 fn lifecycle_wire(root: &Path) -> String {
@@ -184,7 +172,7 @@ fn tool_run_unavailable_provider_is_e1298_not_silent() {
 }
 
 #[test]
-fn tool_install_projects_real_bin_symlink_with_generation() {
+fn tool_install_publishes_stable_dispatcher_and_generation() {
     let root = Scratch::new("tool-inst-root");
     let proj = Scratch::new("tool-inst-proj");
     let fixtures = Scratch::new("tool-inst-fx");
@@ -226,10 +214,13 @@ fn tool_install_projects_real_bin_symlink_with_generation() {
     #[cfg(unix)]
     {
         assert!(
-            link.symlink_metadata().unwrap().file_type().is_symlink(),
-            "install must create a real symlink, not a copy"
+            link.symlink_metadata().unwrap().file_type().is_file(),
+            "install must create a stable dispatcher"
         );
     }
+    let invoked = Command::new(&link).output().unwrap();
+    assert!(invoked.status.success());
+    assert_eq!(String::from_utf8_lossy(&invoked.stdout).trim(), "installed greet");
     let meta = home.join(".jet/tools/generations/1/meta.json");
     assert!(meta.is_file(), "missing generation metadata {}", meta.display());
     let meta_text = fs::read_to_string(&meta).unwrap();
@@ -240,7 +231,9 @@ fn tool_install_projects_real_bin_symlink_with_generation() {
     assert!(home.join(".jet/tools/generations/1/complete").is_file());
     let profile = fs::read_to_string(home.join(".jet/tools/profile.json")).unwrap();
     assert!(profile.contains("\"current\": 1"), "{profile}");
-    assert!(profile.contains("tools"), "{profile}");
+    let current = fs::read_to_string(home.join(".jet/tools/current")).unwrap();
+    assert!(current.contains("generation\t1"), "{current}");
+    assert!(current.contains("checksum\tsha256-"), "{current}");
     let rooted = lifecycle_wire(&root.path);
     assert!(rooted.contains(&output_hash), "{rooted}");
     assert!(
@@ -285,7 +278,9 @@ fn tool_install_projects_real_bin_symlink_with_generation() {
         "stderr: {}",
         String::from_utf8_lossy(&removed.stderr)
     );
-    assert!(!link.exists(), "uninstall must remove PATH projection");
+    assert!(link.exists(), "stable dispatcher must remain after uninstall");
+    let rejected = Command::new(&link).output().unwrap();
+    assert_eq!(rejected.status.code(), Some(127));
     let empty_meta = fs::read_to_string(home.join(".jet/tools/generations/2/meta.json")).unwrap();
     assert!(empty_meta.contains("\"tools\": [\n  ]"), "{empty_meta}");
     assert!(home.join(".jet/tools/generations/2/complete").is_file());
@@ -388,7 +383,14 @@ fn concurrent_installs_serialize_and_retain_two_rooted_generations() {
 
 #[test]
 fn profile_failpoints_recover_conservatively_around_root_and_pointer_publish() {
-    for phase in ["after-generation", "after-root-commit", "after-pointer"] {
+    for phase in [
+        "after-generation",
+        "after-root-prepare",
+        "after-root-commit",
+        "before-pointer",
+        "after-current-pointer",
+        "after-pointer",
+    ] {
         let root = Scratch::new(&format!("tool-fail-{phase}-root"));
         let proj = Scratch::new(&format!("tool-fail-{phase}-proj"));
         let fixtures = Scratch::new(&format!("tool-fail-{phase}-fx"));
@@ -419,48 +421,42 @@ fn profile_failpoints_recover_conservatively_around_root_and_pointer_publish() {
             String::from_utf8_lossy(&failed.stderr)
         );
         assert!(home.join(".jet/tools/generations/1/complete").is_file());
-        let pointer = home.join(".jet/tools/profile.json");
+        let pointer = home.join(".jet/tools/current");
+        let mirror = home.join(".jet/tools/profile.json");
         if phase == "after-pointer" {
             assert!(
-                fs::read_to_string(&pointer).unwrap().contains("\"current\": 1"),
+                fs::read_to_string(&pointer).unwrap().contains("generation\t1"),
                 "phase {phase}"
             );
+            assert!(mirror.is_file(), "phase {phase}");
+        } else if phase == "after-current-pointer" {
+            assert!(fs::read_to_string(&pointer).unwrap().contains("generation\t1"));
+            assert!(!mirror.exists(), "phase {phase}");
         } else {
             assert!(!pointer.exists(), "phase {phase}");
         }
 
-        let retried = install_tool(
-            &root.path,
-            &proj.path,
-            &fixtures.path,
-            &home.path,
-            "greet",
-        );
+        let recovered = jetpack()
+            .args(["tool", "list", "--no-color"])
+            .current_dir(&proj.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("HOME", &home.path)
+            .output()
+            .unwrap();
         assert!(
-            retried.status.success(),
+            recovered.status.success(),
             "phase {phase}: {}",
-            String::from_utf8_lossy(&retried.stderr)
+            String::from_utf8_lossy(&recovered.stderr)
         );
         let pointer = fs::read_to_string(&pointer).unwrap();
-        assert!(pointer.contains("\"current\": 2"), "phase {phase}: {pointer}");
+        assert!(pointer.contains("generation\t1"), "phase {phase}: {pointer}");
         assert!(home.join(".jet/tools/generations/1").is_dir());
-        assert!(home.join(".jet/tools/generations/2/complete").is_file());
+        assert!(!home.join(".jet/tools/generations/2").exists());
         let roots = lifecycle_wire(&root.path);
         assert!(
-            roots.contains(&ascii_hex("profile-generation:user:tools:2")),
+            roots.contains(&ascii_hex("profile-generation:user:tools:1")),
             "phase {phase}: {roots}"
         );
-        if phase == "after-generation" {
-            assert!(
-                !roots.contains(&ascii_hex("profile-generation:user:tools:1")),
-                "unpublished unrooted generation gained a root: {roots}"
-            );
-        } else {
-            assert!(
-                roots.contains(&ascii_hex("profile-generation:user:tools:1")),
-                "durable pre-pointer root was lost: {roots}"
-            );
-        }
     }
 }
 

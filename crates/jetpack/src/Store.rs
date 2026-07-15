@@ -774,6 +774,7 @@ pub struct CacheLease {
     package: String,
     version: String,
     reference: String,
+    store_root: PathBuf,
     status: ConsumptionStatus,
     wrapper_root: Option<PathBuf>,
     _wrapper_dir_handle: Option<fs::File>,
@@ -800,6 +801,31 @@ impl CacheLease {
 
     pub fn original_reference(&self) -> &str {
         &self.reference
+    }
+
+    pub(crate) fn profile_install_receipt(&self) -> std::io::Result<ProfileInstallReceipt> {
+        self.validate()?;
+        let mut executable_members = self
+            .executables
+            .iter()
+            .map(|(name, _)| {
+                name.to_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| std::io::Error::other("tool executable name is not UTF-8"))
+            })
+            .collect::<std::io::Result<Vec<_>>>()?;
+        executable_members.sort();
+        if executable_members.is_empty() {
+            return Err(std::io::Error::other("verified tool lease has no executables"));
+        }
+        Ok(ProfileInstallReceipt {
+            store_root: self.store_root.clone(),
+            package: self.package.clone(),
+            version: self.version.clone(),
+            reference: self.reference.clone(),
+            output_hash: self.expected_digest.clone(),
+            executable_members,
+        })
     }
 
     fn require_consumable(&self) -> std::io::Result<()> {
@@ -934,6 +960,16 @@ impl CacheLease {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProfileInstallReceipt {
+    pub(crate) store_root: PathBuf,
+    pub(crate) package: String,
+    pub(crate) version: String,
+    pub(crate) reference: String,
+    pub(crate) output_hash: String,
+    pub(crate) executable_members: Vec<String>,
+}
+
 impl Drop for CacheLease {
     fn drop(&mut self) {
         let _ = make_tree_writable_for_removal(&self.snapshot_root);
@@ -988,6 +1024,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
             package: entry.name.clone(),
             version: entry.version.clone(),
             reference: entry.reference.clone(),
+            store_root: roots.root.clone(),
             status: ConsumptionStatus::NonConsumable {
                 reason: "realization has no canonical consumable output".to_string(),
             },
@@ -1027,6 +1064,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         package: entry.name.clone(),
         version: entry.version.clone(),
         reference: entry.reference.clone(),
+        store_root: roots.root.clone(),
         status: ConsumptionStatus::Consumable,
         wrapper_root: wrappers.as_ref().map(|wrapper| wrapper.root.clone()),
         _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),
@@ -1670,10 +1708,61 @@ pub(crate) fn commit_profile_generation_root(
     Ok(())
 }
 
+pub(crate) fn reconcile_profile_generation_root(
+    roots: &Roots,
+    owner: &str,
+    profile: &str,
+    generation: u64,
+    witness: &str,
+    mut targets: Vec<String>,
+    at: u64,
+) -> std::io::Result<Option<PreparedProfileGenerationRoot>> {
+    targets.sort();
+    targets.dedup();
+    let id = Lifecycle::RootId::new(format!(
+        "profile-generation:{owner}:{profile}:{generation}"
+    ))?;
+    let expected_targets = targets.iter().cloned().collect::<BTreeSet<_>>();
+    if let Some(root) = Lifecycle::snapshot(roots)?.roots.get(&id) {
+        if root.identity.kind != Lifecycle::RootKind::ProfileGeneration
+            || root.identity.producer.as_str() != "jetpack-profile-generation"
+            || root.identity.incarnation.get() != 1
+            || root.identity.witness.as_str() != witness
+            || root.targets != expected_targets
+            || root.phase == Lifecycle::RootPhase::Tombstoned
+        {
+            return Err(std::io::Error::other(
+                "profile generation root disagrees with immutable metadata",
+            ));
+        }
+        if root.phase == Lifecycle::RootPhase::Committed {
+            return Ok(None);
+        }
+        return Ok(Some(PreparedProfileGenerationRoot {
+            id,
+            incarnation: Lifecycle::Incarnation::new(1)?,
+            witness: Lifecycle::RootWitness::new(witness)?,
+        }));
+    }
+    let prepared = prepare_profile_generation_root(
+        roots,
+        owner,
+        profile,
+        generation,
+        witness,
+        targets,
+        at,
+    )?;
+    Ok(Some(prepared))
+}
+
 fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
     let mut live = current_lock_roots();
-    live.output_hashes
-        .extend(Lifecycle::protected_targets_unlocked(roots)?);
+    let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    for target in lifecycle {
+        live.output_hashes.extend(graph.closure(&target));
+    }
     Ok(live)
 }
 

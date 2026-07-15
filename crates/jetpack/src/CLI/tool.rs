@@ -17,6 +17,7 @@ use crate::SHA256;
 use crate::Shell;
 use crate::Store;
 use crate::Syntax;
+use crate::JSON;
 use jet_env_model::ModuleEval;
 use std::fs;
 use std::io::{self, Write};
@@ -135,12 +136,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
-    let bin_dir = env
-        .bin_dirs
-        .first()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir());
-    let Some(bin_dir) = bin_dir else {
+    let Some(lease) = env.cache_leases.first() else {
         theme.error(
             &format!("`{}` has no bin directory to install", spec.raw),
             "tool install projects package binaries onto PATH; this realization produced no `bin/`.",
@@ -148,7 +144,18 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
-    let bins = match collect_bins(&bin_dir, as_name) {
+    let receipt = match lease.profile_install_receipt() {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            theme.error(
+                "couldn't pin verified tool realization",
+                &error.to_string(),
+                "retry realization; Jetpack will not publish an unverified profile member.",
+            );
+            return 2;
+        }
+    };
+    let bins = match collect_receipt_bins(&receipt, as_name) {
         Ok(bins) if !bins.is_empty() => bins,
         Ok(_) => {
             theme.error(
@@ -176,7 +183,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
     }
-    match project_install(theme, &roots, &spec, &bins) {
+    match project_install(theme, &roots, &spec, &receipt, lease, &bins) {
         Ok((gen, version)) => {
             for (name, _) in &bins {
                 let link = user_bin_dir().join(name);
@@ -207,7 +214,10 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 fn tool_list(theme: &Theme) -> i32 {
-    let tools = match read_current_tools() {
+    let tools = match RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
+        recover_profile_state()?;
+        read_current_tools().map_err(io::Error::other)
+    }) {
         Ok(t) => t,
         Err(e) => {
             theme.error("couldn't read installed tools", &e, "check `~/.jet/tools`.");
@@ -383,30 +393,25 @@ fn task_names_in(src: &str) -> Vec<String> {
     names
 }
 
-fn collect_bins(bin_dir: &Path, as_name: Option<&str>) -> Result<Vec<(String, PathBuf)>, String> {
-    let mut bins = Vec::new();
-    for entry in fs::read_dir(bin_dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = entry.metadata().map_err(|e| e.to_string())?.permissions().mode();
-            if mode & 0o111 == 0 {
-                continue;
-            }
-        }
-        let file_name = entry.file_name().to_string_lossy().into_owned();
-        let link_name = as_name.unwrap_or(&file_name).to_string();
-        bins.push((link_name, path));
-        if as_name.is_some() {
-            break;
-        }
+fn collect_receipt_bins(
+    receipt: &Store::ProfileInstallReceipt,
+    as_name: Option<&str>,
+) -> Result<Vec<(String, String)>, String> {
+    let mut bins = receipt
+        .executable_members
+        .iter()
+        .map(|member| {
+            validate_bin_name(member)?;
+            Ok((as_name.unwrap_or(member).to_string(), member.clone()))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if as_name.is_some() {
+        bins.truncate(1);
     }
-    bins.sort_by(|a, b| a.0.cmp(&b.0));
+    for (projected, _) in &bins {
+        validate_bin_name(projected)?;
+    }
+    bins.sort();
     Ok(bins)
 }
 
@@ -417,14 +422,22 @@ struct InstalledTool {
     source: String,
     reference: String,
     bins: Vec<String>,
-    targets: Vec<String>,
+    members: Vec<String>,
     output_hash: String,
+    store_root: String,
 }
 
 const PROFILE_OWNER: &str = "user";
 const PROFILE_LOCK_SCOPE: &str = "profile-user-tools";
 const PROFILE_COMPLETE_FILE: &str = "complete";
 const PROFILE_POINTER_PARTIAL: &str = "profile.json.partial";
+const PROFILE_CURRENT_FILE: &str = "current";
+const PROFILE_CURRENT_PARTIAL: &str = "current.partial";
+const PROFILE_SCHEMA: &str = "jet-profile-generation-v1";
+const PROFILE_CURRENT_SCHEMA: &str = "jet-profile-current-v1";
+const MAX_PROFILE_TOOLS: usize = 256;
+const MAX_PROFILE_BINS: usize = 1024;
+const MAX_PROFILE_STRING: usize = 4096;
 const PROFILE_FAILPOINT_ENV: &str = "JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT";
 
 fn user_jet_dir() -> PathBuf {
@@ -450,6 +463,10 @@ fn profile_path() -> PathBuf {
     tools_state_dir().join("profile.json")
 }
 
+fn current_path() -> PathBuf {
+    tools_state_dir().join(PROFILE_CURRENT_FILE)
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -457,61 +474,72 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn read_current_generation() -> Result<u64, String> {
-    let path = profile_path();
-    if !path.is_file() {
-        return Ok(0);
-    }
-    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    parse_json_u64(&text, "current")
-        .filter(|generation| *generation != 0)
-        .ok_or_else(|| format!("invalid profile pointer `{}`", path.display()))
-}
-
 fn read_current_tools() -> Result<Vec<InstalledTool>, String> {
-    let gen = read_current_generation()?;
+    let path = current_path();
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let (gen, pointer_witness) =
+        parse_current_pointer(&read_bounded(&path).map_err(|error| error.to_string())?)?;
     if gen == 0 {
         return Ok(Vec::new());
     }
-    read_generation_tools(gen)
+    let record = read_generation_record(gen)?;
+    if record.witness != pointer_witness {
+        return Err("current pointer witness disagrees with generation".into());
+    }
+    Ok(record.tools)
 }
 
 fn read_generation_tools(gen: u64) -> Result<Vec<InstalledTool>, String> {
+    read_generation_record(gen).map(|record| record.tools)
+}
+
+struct GenerationRecord {
+    tools: Vec<InstalledTool>,
+    witness: String,
+}
+
+fn read_generation_record(gen: u64) -> Result<GenerationRecord, String> {
     let path = generations_dir().join(gen.to_string()).join("meta.json");
     if !path.is_file() {
         return Err(format!("profile generation {gen} has no metadata"));
     }
-    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    if parse_json_u64(&text, "generation") != Some(gen) {
-        return Err(format!("profile generation {gen} metadata disagrees with its path"));
+    let text = read_bounded(&path).map_err(|error| error.to_string())?;
+    let tools = parse_generation_meta(&text, gen)?;
+    let digests = tools
+        .iter()
+        .map(|tool| tool.output_hash.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let witness = profile_generation_witness(&text, &digests);
+    let complete = generations_dir()
+        .join(gen.to_string())
+        .join(PROFILE_COMPLETE_FILE);
+    let marker = read_bounded(&complete).map_err(|error| error.to_string())?;
+    if marker != format!("{witness}\n") {
+        return Err(format!("profile generation {gen} witness mismatch"));
     }
-    Ok(parse_tools_array(&text))
+    Ok(GenerationRecord { tools, witness })
 }
 
 fn project_install(
     _theme: &Theme,
     roots: &Store::Roots,
     spec: &RefSpec::RefSpec,
-    bins: &[(String, PathBuf)],
+    receipt: &Store::ProfileInstallReceipt,
+    lease: &Store::CacheLease,
+    bins: &[(String, String)],
 ) -> Result<(u64, String), String> {
-    let entry = Store::list_checked(roots)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|entry| {
-            entry.reference == spec.raw
-                && bins.iter().all(|(_, target)| {
-                    target.parent() == Some(Path::new(&entry.bin))
-                })
-        })
-        .ok_or_else(|| "verified tool StoreEntry disappeared before profile publish".to_string())?;
-    if entry.envelope.output_hash.is_empty() {
-        return Err("verified tool StoreEntry has no output digest".to_string());
+    if receipt.reference != spec.raw
+        || receipt.package != spec.short_name()
+        || receipt.output_hash.is_empty()
+    {
+        return Err("verified tool receipt disagrees with requested package".to_string());
     }
-    let version = entry.version.clone();
-    RuntimePolicy::with_lock(&roots.root, PROFILE_LOCK_SCOPE, || {
-        recover_profile_projection()?;
+    let version = receipt.version.clone();
+    RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
+        recover_profile_state()?;
         let mut tools = read_current_tools().map_err(io::Error::other)?;
-        hydrate_output_hashes(roots, &mut tools)?;
         let short = spec.short_name().to_string();
         tools.retain(|tool| {
             tool.name != short
@@ -526,16 +554,15 @@ fn project_install(
             source: spec.source.label().to_string(),
             reference: spec.raw.clone(),
             bins: bins.iter().map(|(name, _)| name.clone()).collect(),
-            targets: bins
-                .iter()
-                .map(|(_, path)| path.to_string_lossy().into_owned())
-                .collect(),
-            output_hash: entry.envelope.output_hash.clone(),
+            members: bins.iter().map(|(_, member)| member.clone()).collect(),
+            output_hash: receipt.output_hash.clone(),
+            store_root: receipt.store_root.to_string_lossy().into_owned(),
         });
         tools.sort_by(|left, right| {
             (&left.name, &left.reference).cmp(&(&right.name, &right.reference))
         });
-        write_generation_locked(roots, &tools)
+        lease.validate()?;
+        write_generation_locked(roots, &tools, Some((receipt, lease)))
     })
     .map(|generation| (generation, version))
     .map_err(|error| error.to_string())
@@ -544,95 +571,50 @@ fn project_install(
 fn uninstall_tool(theme: &Theme, name: &str) -> Result<bool, String> {
     let _ = theme;
     let roots = Store::resolve();
-    RuntimePolicy::with_lock(&roots.root, PROFILE_LOCK_SCOPE, || {
-        recover_profile_projection()?;
+    RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
+        recover_profile_state()?;
         let mut tools = read_current_tools().map_err(io::Error::other)?;
-        hydrate_output_hashes(&roots, &mut tools)?;
         let before = tools.len();
         tools.retain(|tool| tool.name != name && tool.bins.iter().all(|bin| bin != name));
         if tools.len() == before {
             return Ok(false);
         }
-        write_generation_locked(&roots, &tools)?;
+        write_generation_locked(&roots, &tools, None)?;
         Ok(true)
     })
     .map_err(|error| error.to_string())
 }
 
-fn write_generation_locked(roots: &Store::Roots, tools: &[InstalledTool]) -> io::Result<u64> {
-    let prev = read_current_generation().map_err(io::Error::other)?;
+fn write_generation_locked(
+    roots: &Store::Roots,
+    tools: &[InstalledTool],
+    live: Option<(&Store::ProfileInstallReceipt, &Store::CacheLease)>,
+) -> io::Result<u64> {
     let gen = next_generation()?;
     let gen_dir = generations_dir().join(gen.to_string());
     fs::create_dir(&gen_dir)?;
     let meta = format_generation_meta(gen, tools);
     write_synced(&gen_dir.join("meta.json"), meta.as_bytes())?;
-    write_synced(&gen_dir.join(PROFILE_COMPLETE_FILE), b"complete\n")?;
-    Store::sync_store_directory(&gen_dir)?;
-    Store::sync_store_directory(&generations_dir())?;
-    profile_failpoint("after-generation")?;
-
+    materialize_generation_bins(&gen_dir, tools, live)?;
     let digests = tools
         .iter()
         .map(|tool| tool.output_hash.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    let witness = profile_generation_witness(&meta, &digests);
+    write_synced(
+        &gen_dir.join(PROFILE_COMPLETE_FILE),
+        format!("{witness}\n").as_bytes(),
+    )?;
+    Store::sync_store_directory(&gen_dir)?;
+    Store::sync_store_directory(&generations_dir())?;
+    profile_failpoint("after-generation")?;
+
     if !digests.is_empty() {
-        let witness = profile_generation_witness(&meta, &digests);
-        let prepared = Store::prepare_profile_generation_root(
-            roots,
-            PROFILE_OWNER,
-            Syntax::TOOL_PROFILE_NAME,
-            gen,
-            &witness,
-            digests.into_iter().collect(),
-            now_secs(),
-        )?;
-        profile_failpoint("after-root-prepare")?;
-        Store::commit_profile_generation_root(roots, &prepared, now_secs())?;
+        ensure_generation_roots(gen, tools, &witness)?;
         profile_failpoint("after-root-commit")?;
     }
-
-    let bin_dir = user_bin_dir();
-    fs::create_dir_all(&bin_dir)?;
-
-    // Drop previous generation's projected links that we own, then recreate.
-    if prev > 0 {
-        if let Ok(old) = read_generation_tools(prev) {
-            for t in old {
-                for b in t.bins {
-                    let link = bin_dir.join(&b);
-                    if link.is_symlink() || link.is_file() {
-                        fs::remove_file(&link)?;
-                    }
-                }
-            }
-        }
-    }
-    for t in tools {
-        for (bin, target) in t.bins.iter().zip(t.targets.iter()) {
-            let link = bin_dir.join(bin);
-            if link.exists() || link.is_symlink() {
-                let _ = fs::remove_file(&link);
-            }
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(target, &link)?;
-            }
-            #[cfg(not(unix))]
-            {
-                fs::copy(target, &link)?;
-            }
-        }
-    }
-    Store::sync_store_directory(&bin_dir)?;
     profile_failpoint("before-pointer")?;
-
-    let profile = format!(
-        "{{\n  \"name\": \"{}\",\n  \"current\": {}\n}}\n",
-        Syntax::TOOL_PROFILE_NAME,
-        gen
-    );
-    fs::create_dir_all(tools_state_dir())?;
-    atomic_write_profile_pointer(profile.as_bytes())?;
+    publish_generation(gen, &witness, tools)?;
     profile_failpoint("after-pointer")?;
     Ok(gen)
 }
@@ -661,88 +643,368 @@ fn next_generation() -> io::Result<u64> {
         .ok_or_else(|| io::Error::other("profile generation number overflow"))
 }
 
-fn hydrate_output_hashes(roots: &Store::Roots, tools: &mut [InstalledTool]) -> io::Result<()> {
-    let entries = Store::list_checked(roots)?;
-    for tool in tools {
-        let entry = entries
-            .iter()
-            .find(|entry| {
-                entry.reference == tool.reference
-                    && tool.targets.iter().all(|target| {
-                        Path::new(target).parent() == Some(Path::new(&entry.bin))
-                    })
-            })
-            .ok_or_else(|| {
-                io::Error::other(format!(
-                    "verified StoreEntry for `{}` is unavailable",
-                    tool.reference
+fn recover_profile_state() -> io::Result<()> {
+    fs::create_dir_all(tools_state_dir())?;
+    for partial in [PROFILE_POINTER_PARTIAL, PROFILE_CURRENT_PARTIAL] {
+        let partial = tools_state_dir().join(partial);
+        match fs::symlink_metadata(&partial) {
+            Ok(metadata) if metadata.file_type().is_file() => fs::remove_file(&partial)?,
+            Ok(_) => {
+                return Err(io::Error::other(
+                    "profile pointer partial is not a regular file",
                 ))
-            })?;
-        if entry.envelope.output_hash.is_empty() {
-            return Err(io::Error::other(format!(
-                "verified StoreEntry for `{}` has no output digest",
-                tool.reference
-            )));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
-        if !tool.output_hash.is_empty() && tool.output_hash != entry.envelope.output_hash {
-            return Err(io::Error::other(format!(
-                "profile metadata digest for `{}` disagrees with its verified StoreEntry",
-                tool.reference
-            )));
+    }
+
+    let mut publish = 0;
+    if generations_dir().is_dir() {
+        let mut generations = fs::read_dir(generations_dir())?
+            .map(|entry| {
+                let entry = entry?;
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .parse::<u64>()
+                    .map_err(|_| io::Error::other("invalid profile generation name"))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        generations.sort();
+        for generation in generations {
+            let complete = generations_dir()
+                .join(generation.to_string())
+                .join(PROFILE_COMPLETE_FILE);
+            if !complete.is_file() {
+                continue;
+            }
+            let tools = read_generation_tools(generation).map_err(io::Error::other)?;
+            let metadata = read_bounded(&generations_dir().join(generation.to_string()).join("meta.json"))?;
+            let digests = tools
+                .iter()
+                .map(|tool| tool.output_hash.clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            let witness = profile_generation_witness(&metadata, &digests);
+            if read_bounded(&complete)?.trim() != witness {
+                return Err(io::Error::other("profile generation witness mismatch"));
+            }
+            validate_generation_bins(generation, &tools)?;
+            if !tools.is_empty() {
+                ensure_generation_roots(generation, &tools, &witness)?;
+            }
+            publish = publish.max(generation);
         }
-        tool.output_hash = entry.envelope.output_hash.clone();
+    }
+    if publish != 0 {
+        let tools = read_generation_tools(publish).map_err(io::Error::other)?;
+        let metadata = read_bounded(
+            &generations_dir()
+                .join(publish.to_string())
+                .join("meta.json"),
+        )?;
+        let digests = tools
+            .iter()
+            .map(|tool| tool.output_hash.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        publish_generation(
+            publish,
+            &profile_generation_witness(&metadata, &digests),
+            &tools,
+        )?;
     }
     Ok(())
 }
 
-fn recover_profile_projection() -> io::Result<()> {
-    fs::create_dir_all(tools_state_dir())?;
-    let partial = tools_state_dir().join(PROFILE_POINTER_PARTIAL);
-    match fs::symlink_metadata(&partial) {
-        Ok(metadata) if metadata.file_type().is_file() => fs::remove_file(&partial)?,
-        Ok(_) => return Err(io::Error::other("profile pointer partial is not a regular file")),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+fn ensure_generation_roots(
+    generation: u64,
+    tools: &[InstalledTool],
+    witness: &str,
+) -> io::Result<()> {
+    let mut authorities = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for tool in tools {
+        validate_digest(&tool.output_hash)?;
+        authorities
+            .entry(tool.store_root.clone())
+            .or_default()
+            .push(tool.output_hash.clone());
     }
+    let mut prepared = Vec::new();
+    for (root, targets) in authorities {
+        let roots = Store::Roots {
+            root: PathBuf::from(root),
+            dev_mode: true,
+        };
+        if let Some(receipt) = Store::reconcile_profile_generation_root(
+            &roots,
+            PROFILE_OWNER,
+            Syntax::TOOL_PROFILE_NAME,
+            generation,
+            witness,
+            targets,
+            now_secs(),
+        )? {
+            prepared.push((roots, receipt));
+        }
+    }
+    profile_failpoint("after-root-prepare")?;
+    for (roots, receipt) in prepared {
+        Store::commit_profile_generation_root(&roots, &receipt, now_secs())?;
+    }
+    Ok(())
+}
 
-    let current = read_current_generation().map_err(io::Error::other)?;
-    let current_tools = if current == 0 {
-        Vec::new()
-    } else {
-        read_generation_tools(current).map_err(io::Error::other)?
-    };
-    let mut owned_bins = std::collections::BTreeSet::new();
-    if generations_dir().is_dir() {
-        for entry in fs::read_dir(generations_dir())? {
-            let entry = entry?;
-            let Ok(generation) = entry.file_name().to_string_lossy().parse::<u64>() else {
-                return Err(io::Error::other("invalid profile generation name"));
+fn materialize_generation_bins(
+    generation_dir: &Path,
+    tools: &[InstalledTool],
+    live: Option<(&Store::ProfileInstallReceipt, &Store::CacheLease)>,
+) -> io::Result<()> {
+    let bin_dir = generation_dir.join("bin");
+    fs::create_dir(&bin_dir)?;
+    let mut projected = std::collections::BTreeSet::new();
+    for tool in tools {
+        if tool.bins.len() != tool.members.len() || tool.bins.is_empty() {
+            return Err(io::Error::other("profile tool has mismatched bin/member pairs"));
+        }
+        for (bin, member) in tool.bins.iter().zip(&tool.members) {
+            validate_bin_name(bin).map_err(io::Error::other)?;
+            validate_bin_name(member).map_err(io::Error::other)?;
+            if !projected.insert(bin.clone()) {
+                return Err(io::Error::other(format!("duplicate profile bin `{bin}`")));
+            }
+            let destination = bin_dir.join(bin);
+            let source = if let Some((receipt, lease)) = live.filter(|(receipt, _)| {
+                receipt.reference == tool.reference
+                    && receipt.output_hash == tool.output_hash
+                    && receipt.store_root.to_string_lossy() == tool.store_root
+            }) {
+                lease.validate()?;
+                lease
+                    .executable(member)
+                    .ok_or_else(|| io::Error::other("verified receipt lost executable member"))?
+            } else {
+                validated_store_member(tool, member)?
             };
-            if let Ok(tools) = read_generation_tools(generation) {
-                for tool in tools {
-                    owned_bins.extend(tool.bins);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&source, &destination)?;
+            #[cfg(windows)]
+            {
+                let mut input = fs::File::open(&source)?;
+                let mut output = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&destination)?;
+                std::io::copy(&mut input, &mut output)?;
+                output.sync_all()?;
+                if fs::read(&source)? != fs::read(&destination)? {
+                    return Err(io::Error::other("copied profile executable changed"));
                 }
             }
-        }
-    }
-    let bin_dir = user_bin_dir();
-    fs::create_dir_all(&bin_dir)?;
-    for bin in owned_bins {
-        let path = bin_dir.join(bin);
-        if path.is_file() || path.is_symlink() {
-            fs::remove_file(path)?;
-        }
-    }
-    for tool in &current_tools {
-        for (bin, target) in tool.bins.iter().zip(&tool.targets) {
-            let link = bin_dir.join(bin);
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(target, &link)?;
-            #[cfg(not(unix))]
-            fs::copy(target, &link)?;
+            #[cfg(not(any(unix, windows)))]
+            return Err(io::Error::other("profile projection unsupported on this platform"));
         }
     }
     Store::sync_store_directory(&bin_dir)
+}
+
+fn validated_store_member(tool: &InstalledTool, member: &str) -> io::Result<PathBuf> {
+    let roots = Store::Roots {
+        root: PathBuf::from(&tool.store_root),
+        dev_mode: true,
+    };
+    let entry = Store::list_checked(&roots)?
+        .into_iter()
+        .find(|entry| {
+            entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash
+        })
+        .ok_or_else(|| io::Error::other("profile StoreEntry authority is unavailable"))?;
+    let source = Path::new(&entry.bin).join(member);
+    let metadata = fs::symlink_metadata(&source)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(io::Error::other("profile executable member is not a no-follow file"));
+    }
+    Ok(source)
+}
+
+fn validate_generation_bins(generation: u64, tools: &[InstalledTool]) -> io::Result<()> {
+    let bin_dir = generations_dir().join(generation.to_string()).join("bin");
+    let expected = tools
+        .iter()
+        .flat_map(|tool| tool.bins.iter().cloned())
+        .collect::<std::collections::BTreeSet<_>>();
+    let actual = fs::read_dir(&bin_dir)?
+        .map(|entry| {
+            entry?
+                .file_name()
+                .into_string()
+                .map_err(|_| io::Error::other("profile bin is not UTF-8"))
+        })
+        .collect::<io::Result<std::collections::BTreeSet<_>>>()?;
+    if actual != expected {
+        return Err(io::Error::other("profile generation bin projection mismatch"));
+    }
+    for tool in tools {
+        for member in &tool.members {
+            let _ = validated_store_member(tool, member)?;
+        }
+    }
+    Ok(())
+}
+
+fn publish_generation(
+    generation: u64,
+    witness: &str,
+    tools: &[InstalledTool],
+) -> io::Result<()> {
+    fs::create_dir_all(user_jet_dir())?;
+    fs::create_dir_all(user_bin_dir())?;
+    if fs::symlink_metadata(user_bin_dir())?.file_type().is_symlink() {
+        return Err(io::Error::other(
+            "legacy profile bin symlink requires explicit migration",
+        ));
+    }
+    for bin in tools.iter().flat_map(|tool| &tool.bins) {
+        ensure_dispatcher(bin)?;
+    }
+    Store::sync_store_directory(&user_bin_dir())?;
+
+    atomic_write_current_pointer(format_current_pointer(generation, witness).as_bytes())?;
+    profile_failpoint("after-current-pointer")?;
+    let profile = format!(
+        "{{\n  \"name\": \"{}\",\n  \"current\": {},\n  \"witness\": {}\n}}\n",
+        Syntax::TOOL_PROFILE_NAME,
+        generation,
+        json_str(witness),
+    );
+    atomic_write_profile_pointer(profile.as_bytes())
+}
+
+fn format_current_pointer(generation: u64, witness: &str) -> String {
+    let body = format!(
+        "{PROFILE_CURRENT_SCHEMA}\ngeneration\t{generation}\nwitness\t{witness}\n"
+    );
+    let checksum = SHA256::sha256_hex(body.as_bytes());
+    format!("{body}checksum\tsha256-{checksum}\n")
+}
+
+fn parse_current_pointer(text: &str) -> Result<(u64, String), String> {
+    let lines = text.lines().collect::<Vec<_>>();
+    if lines.len() != 4 || lines[0] != PROFILE_CURRENT_SCHEMA || !text.ends_with('\n') {
+        return Err("current pointer has wrong schema or field count".into());
+    }
+    let generation = lines[1]
+        .strip_prefix("generation\t")
+        .ok_or("current pointer lacks generation")?
+        .parse::<u64>()
+        .map_err(|_| "current pointer generation is invalid")?;
+    if generation == 0 {
+        return Err("current pointer generation is zero".into());
+    }
+    let witness = lines[2]
+        .strip_prefix("witness\t")
+        .ok_or("current pointer lacks witness")?;
+    validate_digest(witness).map_err(|error| error.to_string())?;
+    let checksum = lines[3]
+        .strip_prefix("checksum\tsha256-")
+        .ok_or("current pointer lacks checksum")?;
+    if checksum.len() != 64
+        || !checksum
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err("current pointer checksum is not canonical".into());
+    }
+    let body_len = text
+        .rfind("checksum\t")
+        .ok_or("current pointer lacks checksum")?;
+    if SHA256::sha256_hex(text[..body_len].as_bytes()) != checksum {
+        return Err("current pointer checksum mismatch".into());
+    }
+    Ok((generation, witness.to_string()))
+}
+
+fn ensure_dispatcher(bin: &str) -> io::Result<()> {
+    validate_bin_name(bin).map_err(io::Error::other)?;
+    #[cfg(unix)]
+    let (path, bytes) = (
+        user_bin_dir().join(bin),
+        format!(
+            "#!/bin/sh\nset -eu\njet_bin_dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd -P)\njet_tools_dir=\"$jet_bin_dir/../{}\"\n{{ IFS= read -r jet_schema; IFS='\t' read -r jet_generation_tag jet_generation; IFS='\t' read -r jet_witness_tag jet_witness; IFS='\t' read -r jet_checksum_tag jet_checksum; }} < \"$jet_tools_dir/{}\"\n[ \"$jet_schema\" = \"{}\" ] && [ \"$jet_generation_tag\" = generation ] && [ \"$jet_witness_tag\" = witness ] && [ \"$jet_checksum_tag\" = checksum ] || exit 126\ncase $jet_generation in ''|*[!0-9]*) exit 126;; esac\njet_target=\"$jet_tools_dir/generations/$jet_generation/bin/{}\"\n[ -f \"$jet_target\" ] && [ -x \"$jet_target\" ] || exit 127\nexec \"$jet_target\" \"$@\"\n",
+            Syntax::TOOL_STATE_DIR,
+            PROFILE_CURRENT_FILE,
+            PROFILE_CURRENT_SCHEMA,
+            bin,
+        )
+        .into_bytes(),
+    );
+    #[cfg(windows)]
+    let (path, bytes) = (
+        user_bin_dir().join(format!("{bin}.cmd")),
+        format!(
+            "@echo off\r\nsetlocal EnableExtensions DisableDelayedExpansion\r\nset \"jet_tools_dir=%~dp0..\\{}\"\r\nfor /f \"usebackq skip=1 tokens=1,2\" %%A in (\"%jet_tools_dir%\\{}\") do if \"%%A\"==\"generation\" set \"jet_generation=%%B\"\r\nif not defined jet_generation exit /b 126\r\nset \"jet_target=%jet_tools_dir%\\generations\\%jet_generation%\\bin\\{}\"\r\nif not exist \"%jet_target%\" exit /b 127\r\n\"%jet_target%\" %*\r\nexit /b %errorlevel%\r\n",
+            Syntax::TOOL_STATE_DIR,
+            PROFILE_CURRENT_FILE,
+            bin,
+        )
+        .into_bytes(),
+    );
+    #[cfg(not(any(unix, windows)))]
+    return Err(io::Error::other("profile dispatch unsupported on this platform"));
+
+    match fs::read(&path) {
+        Ok(existing) if existing == bytes => return Ok(()),
+        Ok(_) => return Err(io::Error::other("profile dispatcher content mismatch")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    write_synced(&path, &bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+        fs::File::open(&path)?.sync_all()?;
+    }
+    Ok(())
+}
+
+fn validate_bin_name(value: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > 255 {
+        return Err("profile bin name has invalid length".into());
+    }
+    let mut components = Path::new(value).components();
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'+'))
+    {
+        return Err(format!("invalid profile bin name `{value}`"));
+    }
+    Ok(())
+}
+
+fn validate_digest(value: &str) -> io::Result<()> {
+    let Some(hex) = value.strip_prefix("sha256-") else {
+        return Err(io::Error::other("profile digest is not sha256"));
+    };
+    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) {
+        return Err(io::Error::other("profile digest is not canonical"));
+    }
+    Ok(())
+}
+
+fn read_bounded(path: &Path) -> io::Result<String> {
+    const MAX_PROFILE_METADATA: u64 = 1024 * 1024;
+    let file = fs::File::open(path)?;
+    if file.metadata()?.len() > MAX_PROFILE_METADATA {
+        return Err(io::Error::other("profile metadata exceeds byte bound"));
+    }
+    let mut bytes = Vec::new();
+    std::io::Read::take(file, MAX_PROFILE_METADATA + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_PROFILE_METADATA {
+        return Err(io::Error::other("profile metadata exceeds byte bound"));
+    }
+    String::from_utf8(bytes).map_err(|_| io::Error::other("profile metadata is not UTF-8"))
 }
 
 fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -787,6 +1049,14 @@ fn atomic_write_profile_pointer(bytes: &[u8]) -> io::Result<()> {
     Store::sync_store_directory(&directory)
 }
 
+fn atomic_write_current_pointer(bytes: &[u8]) -> io::Result<()> {
+    let directory = tools_state_dir();
+    let partial = directory.join(PROFILE_CURRENT_PARTIAL);
+    write_synced(&partial, bytes)?;
+    finalize_profile_pointer(&partial, &current_path())?;
+    Store::sync_store_directory(&directory)
+}
+
 #[cfg(windows)]
 fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
@@ -821,7 +1091,9 @@ fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()
 fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> String {
     let mut out = String::new();
     out.push_str("{\n");
+    out.push_str(&format!("  \"schema\": {},\n", json_str(PROFILE_SCHEMA)));
     out.push_str(&format!("  \"generation\": {gen},\n"));
+    out.push_str(&format!("  \"owner\": {},\n", json_str(PROFILE_OWNER)));
     out.push_str(&format!("  \"profile\": \"{}\",\n", Syntax::TOOL_PROFILE_NAME));
     out.push_str(&format!("  \"created_at\": {},\n", now_secs()));
     out.push_str("  \"tools\": [\n");
@@ -835,6 +1107,10 @@ fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> String {
             "      \"output_hash\": {},\n",
             json_str(&t.output_hash)
         ));
+        out.push_str(&format!(
+            "      \"store_root\": {},\n",
+            json_str(&t.store_root)
+        ));
         out.push_str("      \"bins\": [");
         for (j, b) in t.bins.iter().enumerate() {
             if j > 0 {
@@ -843,8 +1119,8 @@ fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> String {
             out.push_str(&json_str(b));
         }
         out.push_str("],\n");
-        out.push_str("      \"targets\": [");
-        for (j, b) in t.targets.iter().enumerate() {
+        out.push_str("      \"members\": [");
+        for (j, b) in t.members.iter().enumerate() {
             if j > 0 {
                 out.push_str(", ");
             }
@@ -868,102 +1144,172 @@ fn json_str(s: &str) -> String {
     )
 }
 
-fn parse_json_u64(text: &str, key: &str) -> Option<u64> {
-    let needle = format!("\"{key}\"");
-    let idx = text.find(&needle)?;
-    let after = &text[idx + needle.len()..];
-    let after = after.trim_start().trim_start_matches(':').trim_start();
-    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
-}
-
-fn parse_tools_array(text: &str) -> Vec<InstalledTool> {
-    let mut tools = Vec::new();
-    // Split on tool objects by `"name":` occurrences inside the tools array.
-    let Some(array_start) = text.find("\"tools\"") else {
-        return tools;
+fn parse_generation_meta(text: &str, expected_generation: u64) -> Result<Vec<InstalledTool>, String> {
+    let JSON::Json::Object(root) = JSON::parse(text)? else {
+        return Err("profile metadata root is not an object".into());
     };
-    let body = &text[array_start..];
-    let mut rest = body;
-    while let Some(name_idx) = rest.find("\"name\"") {
-        let after_name = &rest[name_idx + 6..];
-        let Some(name) = json_string_value(after_name) else {
-            break;
+    expect_exact_keys(
+        &root,
+        &["created_at", "generation", "owner", "profile", "schema", "tools"],
+        "profile metadata",
+    )?;
+    if json_field_string(&root, "schema")? != PROFILE_SCHEMA
+        || json_field_string(&root, "owner")? != PROFILE_OWNER
+        || json_field_string(&root, "profile")? != Syntax::TOOL_PROFILE_NAME
+    {
+        return Err("profile metadata identity mismatch".into());
+    }
+    if json_field_u64(&root, "generation")? != expected_generation {
+        return Err("profile generation metadata disagrees with its path".into());
+    }
+    let _ = json_field_u64(&root, "created_at")?;
+    let JSON::Json::Array(entries) = root.get("tools").ok_or("profile metadata lacks tools")? else {
+        return Err("profile tools field is not an array".into());
+    };
+    if entries.len() > MAX_PROFILE_TOOLS {
+        return Err("profile tool count exceeds bound".into());
+    }
+    let mut tools = Vec::with_capacity(entries.len());
+    let mut seen_tools = std::collections::BTreeSet::new();
+    let mut seen_bins = std::collections::BTreeSet::new();
+    for entry in entries {
+        let JSON::Json::Object(tool) = entry else {
+            return Err("profile tool entry is not an object".into());
         };
-        let chunk_end = rest[name_idx + 6..]
-            .find("\"name\"")
-            .map(|i| name_idx + 6 + i)
-            .unwrap_or(rest.len());
-        let chunk = &rest[name_idx..chunk_end];
-        let version = extract_json_string(chunk, "version").unwrap_or_default();
-        let source = extract_json_string(chunk, "source").unwrap_or_default();
-        let reference = extract_json_string(chunk, "reference").unwrap_or_default();
-        let output_hash = extract_json_string(chunk, "output_hash").unwrap_or_default();
-        let bins = extract_json_string_array(chunk, "bins");
-        let targets = extract_json_string_array(chunk, "targets");
+        expect_exact_keys(
+            tool,
+            &[
+                "bins", "members", "name", "output_hash", "reference", "source",
+                "store_root", "version",
+            ],
+            "profile tool",
+        )?;
+        let name = bounded_json_string(tool, "name")?;
+        let version = bounded_json_string(tool, "version")?;
+        let source = bounded_json_string(tool, "source")?;
+        let reference = bounded_json_string(tool, "reference")?;
+        let output_hash = bounded_json_string(tool, "output_hash")?;
+        let store_root = bounded_json_string(tool, "store_root")?;
+        validate_digest(&output_hash).map_err(|error| error.to_string())?;
+        validate_store_root(&store_root)?;
+        let bins = json_string_array(tool, "bins")?;
+        let members = json_string_array(tool, "members")?;
+        if bins.is_empty() || bins.len() != members.len() {
+            return Err("profile tool has mismatched bin/member pairs".into());
+        }
+        if seen_bins.len() + bins.len() > MAX_PROFILE_BINS {
+            return Err("profile bin count exceeds bound".into());
+        }
+        for value in bins.iter().chain(&members) {
+            validate_bin_name(value)?;
+        }
+        for bin in &bins {
+            if !seen_bins.insert(bin.clone()) {
+                return Err(format!("duplicate profile bin `{bin}`"));
+            }
+        }
+        if !seen_tools.insert((name.clone(), reference.clone())) {
+            return Err("duplicate profile tool identity".into());
+        }
         tools.push(InstalledTool {
             name,
             version,
             source,
             reference,
             bins,
-            targets,
+            members,
             output_hash,
+            store_root,
         });
-        rest = &rest[chunk_end..];
-        if rest.is_empty() {
-            break;
-        }
     }
-    tools
+    if tools.windows(2).any(|pair| {
+        (&pair[0].name, &pair[0].reference) >= (&pair[1].name, &pair[1].reference)
+    }) {
+        return Err("profile tools are not in canonical order".into());
+    }
+    Ok(tools)
 }
 
-fn extract_json_string(chunk: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{key}\"");
-    let idx = chunk.find(&needle)?;
-    json_string_value(&chunk[idx + needle.len()..])
+fn expect_exact_keys(
+    object: &std::collections::BTreeMap<String, JSON::Json>,
+    expected: &[&str],
+    label: &str,
+) -> Result<(), String> {
+    let actual = object.keys().map(String::as_str).collect::<Vec<_>>();
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+    if actual != expected {
+        return Err(format!("{label} has unknown or missing fields"));
+    }
+    Ok(())
 }
 
-fn json_string_value(after_key: &str) -> Option<String> {
-    let after = after_key.trim_start().trim_start_matches(':').trim_start();
-    let after = after.strip_prefix('"')?;
-    let mut out = String::new();
-    let mut chars = after.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(n) = chars.next() {
-                out.push(n);
+fn json_field_string<'a>(
+    object: &'a std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+) -> Result<&'a str, String> {
+    object
+        .get(key)
+        .ok_or_else(|| format!("missing key `{key}`"))?
+        .as_str()
+}
+
+fn bounded_json_string(
+    object: &std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+) -> Result<String, String> {
+    let value = json_field_string(object, key)?;
+    if value.len() > MAX_PROFILE_STRING || value.bytes().any(|byte| byte == 0) {
+        return Err(format!("profile field `{key}` exceeds bounds"));
+    }
+    Ok(value.to_string())
+}
+
+fn json_field_u64(
+    object: &std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+) -> Result<u64, String> {
+    let Some(JSON::Json::Num(value)) = object.get(key) else {
+        return Err(format!("profile field `{key}` is not a number"));
+    };
+    if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 || *value > 9_007_199_254_740_991.0 {
+        return Err(format!("profile field `{key}` is not an exact integer"));
+    }
+    Ok(*value as u64)
+}
+
+fn json_string_array(
+    object: &std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+) -> Result<Vec<String>, String> {
+    let Some(JSON::Json::Array(values)) = object.get(key) else {
+        return Err(format!("profile field `{key}` is not an array"));
+    };
+    values
+        .iter()
+        .map(|value| {
+            let value = value.as_str()?;
+            if value.len() > 255 || value.bytes().any(|byte| byte == 0) {
+                return Err(format!("profile field `{key}` exceeds bounds"));
             }
-        } else if c == '"' {
-            break;
-        } else {
-            out.push(c);
-        }
-    }
-    Some(out)
+            Ok(value.to_string())
+        })
+        .collect()
 }
 
-fn extract_json_string_array(chunk: &str, key: &str) -> Vec<String> {
-    let needle = format!("\"{key}\"");
-    let Some(idx) = chunk.find(&needle) else {
-        return Vec::new();
-    };
-    let after = &chunk[idx + needle.len()..];
-    let Some(bracket) = after.find('[') else {
-        return Vec::new();
-    };
-    let Some(end) = after[bracket + 1..].find(']') else {
-        return Vec::new();
-    };
-    let inner = &after[bracket + 1..bracket + 1 + end];
-    let parts: Vec<&str> = inner.split('"').collect();
-    let mut out = Vec::new();
-    let mut i = 1;
-    while i < parts.len() {
-        out.push(parts[i].to_string());
-        i += 2;
+fn validate_store_root(value: &str) -> Result<(), String> {
+    let path = Path::new(value);
+    if !path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        })
+    {
+        return Err("profile Store authority is not an absolute normalized path".into());
     }
-    out
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1013,11 +1359,12 @@ fn run() { }
             source: "path".into(),
             reference: "path:tool".into(),
             bins: vec!["tool".into()],
-            targets: vec!["/store/tool/bin/tool".into()],
+            members: vec!["tool".into()],
             output_hash: digest.clone(),
+            store_root: "/store".into(),
         }];
         let metadata = format_generation_meta(7, &tools);
-        let parsed = parse_tools_array(&metadata);
+        let parsed = parse_generation_meta(&metadata, 7).expect("parse");
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].output_hash, digest);
         assert!(metadata.contains("\"generation\": 7"));
