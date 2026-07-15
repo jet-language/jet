@@ -197,6 +197,7 @@ fn read_process_state(dir: &Path) -> Result<Option<PersistedProcessState>, Strin
     })))
 }
 
+#[cfg(test)]
 fn read_pid(dir: &Path) -> Option<u32> {
     match read_process_state(dir).ok().flatten()? {
         PersistedProcessState::Verified(state) => Some(state.pid),
@@ -207,6 +208,7 @@ fn read_pid(dir: &Path) -> Option<u32> {
 /// Whether `pid` names a live process — the only signal std can't get any
 /// other way for an arbitrary (non-child) pid, so this shells out to `kill
 /// -0` (the POSIX "is it there" no-op signal), same rationale as `down`.
+#[cfg(test)]
 fn is_alive(pid: u32) -> bool {
     process_alive(pid).unwrap_or(false)
 }

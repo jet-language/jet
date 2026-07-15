@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 631,
-    "rev": 7444,
+    "nextNum": 632,
+    "rev": 7450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18889,6 +18889,66 @@
       "created": "2026-07-15T07:08:54.481Z",
       "updated": "2026-07-15",
       "claimedAt": "2026-07-15T07:08:54.992Z"
+    },
+    {
+      "id": "c0e3s4id",
+      "num": 631,
+      "title": "Jetpack committed tree fails dead-code gate",
+      "body": "cargo check -p jetpack fails because Services.rs read_pid and is_alive became unused under crate-level deny(warnings) after runtime identity hardening. Restore coherent service liveness logic or remove genuinely obsolete helpers without weakening PID identity, stale-process, or cleanup semantics.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "root-631-builder",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo check -p jetpack passes with no warning suppression or dead-code allowance.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:19:26.066Z"
+        },
+        {
+          "n": 2,
+          "text": "Service PID identity, liveness, stale-record, and cleanup semantics remain explicit and fail closed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:19:26.168Z"
+        },
+        {
+          "n": 3,
+          "text": "Targeted Jetpack service/runtime-policy tests pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:19:26.267Z"
+        },
+        {
+          "n": 4,
+          "text": "Mandatory full verification passes on the repaired committed tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T07:19:26.371Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T07:19:25.963Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T07:19:26.476Z"
     }
   ],
   "decisions": [
@@ -38039,6 +38099,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T07:19:26.477Z",
+      "by": "root-631-builder",
+      "action": "card.claim",
+      "ref": "c0e3s4id",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T07:19:26.372Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0e3s4id",
+      "note": "#4 Mandatory full verification passes on the repaired committed"
+    },
+    {
+      "at": "2026-07-15T07:19:26.267Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0e3s4id",
+      "note": "#3 Targeted Jetpack service/runtime-policy tests pass."
+    },
+    {
+      "at": "2026-07-15T07:19:26.168Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0e3s4id",
+      "note": "#2 Service PID identity, liveness, stale-record, and cleanup se"
+    },
+    {
+      "at": "2026-07-15T07:19:26.067Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0e3s4id",
+      "note": "#1 cargo check -p jetpack passes with no warning suppression or"
+    },
+    {
+      "at": "2026-07-15T07:19:25.963Z",
+      "by": "root",
+      "action": "card.add",
+      "ref": "c0e3s4id",
+      "note": "Jetpack committed tree fails dead-code gate"
+    },
+    {
       "at": "2026-07-15T07:08:54.992Z",
       "by": "root-630-builder",
       "action": "card.claim",
@@ -41495,48 +41597,6 @@
       "action": "card.add",
       "ref": "c098lmb7",
       "note": "Full suite red: codemod batch tests lose fixture roots under parallel execution"
-    },
-    {
-      "at": "2026-07-15T00:08:28.528Z",
-      "by": "terra-540-builder",
-      "action": "decision.update",
-      "ref": "D-SHAPE5b",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T00:03:28.318Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-SHAPE-CLI-COMPLETE1",
-      "note": "How users generate completion for a Jet program"
-    },
-    {
-      "at": "2026-07-15T00:03:23.402Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-SHAPE-CLI-CARRIER1",
-      "note": "Where compiled programs carry their command schema"
-    },
-    {
-      "at": "2026-07-15T00:03:18.562Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0bo7bp5",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-07-14T23:59:53.628Z",
-      "by": "terra-540-builder",
-      "action": "card.update",
-      "ref": "c0xqkis5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-14T23:59:48.526Z",
-      "by": "terra-540-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0xqkis5",
-      "note": "#4"
     }
   ],
   "nextNum": 368,

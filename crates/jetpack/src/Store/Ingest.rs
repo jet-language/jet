@@ -778,9 +778,8 @@ mod portability_tests {
     #[cfg(unix)]
     #[test]
     fn nofollow_flag_matches_supported_target_abi() {
-        let flag = super::nofollow_open_flag().unwrap();
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        assert_eq!(flag, 0o400000);
+        assert_eq!(super::nofollow_open_flag().unwrap(), 0o400000);
         #[cfg(any(
             target_os = "macos",
             target_os = "ios",
@@ -789,6 +788,17 @@ mod portability_tests {
             target_os = "netbsd",
             target_os = "dragonfly"
         ))]
-        assert_eq!(flag, 0x0100);
+        assert_eq!(super::nofollow_open_flag().unwrap(), 0x0100);
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        )))]
+        assert!(super::nofollow_open_flag().is_err());
     }
 }

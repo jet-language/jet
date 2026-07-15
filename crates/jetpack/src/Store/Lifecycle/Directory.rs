@@ -100,7 +100,9 @@ mod platform {
     use std::ffi::{c_char, CStr, CString};
     #[cfg(target_os = "macos")]
     use std::ffi::c_void;
-    use std::fs::{self, OpenOptions};
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    use std::fs;
+    use std::fs::OpenOptions;
     use std::os::fd::{AsRawFd as _, FromRawFd as _};
     use std::os::unix::ffi::OsStrExt as _;
     use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
