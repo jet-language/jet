@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 620,
-    "rev": 7104,
+    "rev": 7107,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35310,6 +35310,207 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-15T00:25:27.334Z"
+    },
+    {
+      "id": "D-ECO-OUTPUT-CALLCONTRACT1",
+      "cardId": "c0qj346l",
+      "group": "syntax",
+      "title": "What contract must a runnable output's function satisfy?",
+      "gist": "Choose how executable, service, and check outputs validate the functions they start.",
+      "lesson": "A runnable output describes something Jet can start. The output and its function have different jobs. The output names the packaged result. The function contains the behavior.\n\nA callable contract is the rule that checks whether those two pieces fit. It covers parameters, return values, failure, and lifetime. A direct link can still be wrong when the linked function has an unsuitable signature.\n\nJet already derives command inputs from an entry function's typed parameters. Jet also accepts two top-level completion shapes: `Void` for ordinary completion and `Void ?` for reported failure. This ballot decides how those rules apply to explicit outputs.\n\nA link grants no authority. The linked function keeps its ordinary declared or inferred effects. Its runtime environment must authorize those effects, and policy never changes the function's effect row.\n\nThe collection, output variants, capabilities, and development environment are already decided. Another ballot decides how an output writes its function link. This ballot checks the linked function after that link resolves.\n\nBeginners should keep writing `fn run() { ... }`. Experts need exact contracts that tools can inspect before building, running, scheduling, or auditing an output.",
+      "explainer": "",
+      "story": "Maya's project has a command, a long-running web service, and a release check. She links each output to an ordinary function. Jet must reject a check that expects interactive arguments and a service that returns a data value by mistake.",
+      "inWild": "fn run(port: Int = 8080) -> Void ? {\n    start_cli(port)?\n}\n\nfn serve() -> Void ? {\n    api.serve()?\n}\n\nfn verify_release() -> Void ? {\n    require(licenses_ok(), \"release contains an unapproved license\")\n}\n\njet run todo.cli --port 9000\njet run todo.api\njet test todo.release_checks",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Variant-specific ordinary function contracts",
+          "detail": "Each runnable output variant has one fixed contract. Executables accept typed command parameters. Services take no command parameters and run until they stop. Checks take no parameters and fail through `Void ?`. Every successful function returns no value.",
+          "technical": "Executable links accept `fn(labels...) -> Void` or `fn(labels...) -> Void ?`. D-SHAPE-CLI1 derives their command schema. Service links accept fn() -> Void or fn() -> Void ?. The service exists exactly while that call remains active; returning ends the service. Check links accept `fn() -> Void` or `fn() -> Void ?`; normal return passes and an error fails. Every linked function keeps its resolved effect row. Linking adds no effect and grants no capability. Library, Image, Bundle, and Environment have no callable entry here. D-SHAPE-OUTPUT-CALLABLE1 still owns link representation.",
+          "code": "fn export(path: Path, pretty: Bool = false) -> Void ? {\n    write_export(path, pretty)?\n}\n\nfn serve() -> Void ? {\n    api.serve()?\n}\n\nfn verify_release() -> Void ? {\n    require(licenses_ok(), \"release contains an unapproved license\")\n}\n\n// If a Service links to export, package checking says:\n// Error: `todo.api` needs a service entry with no parameters\n// Fix: link it to `serve`, or move startup settings into the Service value"
+        },
+        {
+          "key": "B",
+          "name": "One universal runnable contract",
+          "detail": "Executables, services, and checks all accept any typed parameters and return `Void` or `Void ?`. One rule is easy to learn, but checks can become interactive and service startup can depend on ad hoc command arguments.",
+          "technical": "Every callable output accepts `fn(labels...) -> Void` or `fn(labels...) -> Void ?`. Each command derives inputs from that function. Service and check parameters therefore become command inputs too. The service exists exactly while that call remains active; returning ends the service. The linked function keeps its resolved effect row. Linking adds no effect and grants no capability. D-SHAPE-OUTPUT-CALLABLE1 still owns link representation.",
+          "code": "fn verify_release(channel: String = \"stable\") -> Void ? {\n    require(licenses_ok(channel), \"release contains an unapproved license\")\n}\n\njet test todo.release_checks --channel nightly\n\n// CI and local users may now run different checks unless policy pins arguments."
+        },
+        {
+          "key": "C",
+          "name": "Capability-specific result values",
+          "detail": "Each linked function returns a dedicated result such as `CommandResult`, `ServiceHandle`, or `CheckResult`. Tools receive structured lifecycle facts, but ordinary application functions must construct tool-facing result values.",
+          "technical": "Executable links return `CommandResult`, service links return `ServiceHandle`, and check links return `CheckResult`. Parameter rules remain variant-specific. These public types become the only successful return shapes for explicit runnable outputs. ServiceHandle is owned and cannot borrow function-local data. The runner owns it until cancellation or shutdown, then deterministic cleanup ends the service. The linked function keeps its resolved effect row. Returning a tool result adds no effect and grants no capability. D-SHAPE-OUTPUT-CALLABLE1 still owns link representation.",
+          "code": "fn verify_release() -> CheckResult {\n    if licenses_ok() {\n        return .Pass\n    }\n    return .Fail(\"release contains an unapproved license\")\n}\n\n// `fn verify_release() { ... }` is rejected for a Check output."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "Cargo binaries share Rust's `main` contract, while tests use a separate harness contract. The package file selects targets but does not weaken either language-level signature.",
+          "code": "fn main() -> Result<(), Error> { ... }\n\n#[test]\nfn release_is_licensed() { ... }"
+        },
+        {
+          "lang": "Bazel",
+          "note": "Bazel rule kinds have distinct providers and execution roles. A binary and a test may share actions, but their target contracts remain different.",
+          "code": "cc_binary(name = \"todo\", ...)\ncc_test(name = \"release_checks\", ...)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Each variant gains one predictable meaning while keeping functions ordinary Jet code. Beginners retain `fn run()`. Experts get checked command schemas, unattended checks, and managed service lifetimes.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A universal signature permits interactive inputs where automation needs one reproducible invocation. Tools would need hidden policy to recover the missing distinction."
+          },
+          {
+            "key": "C",
+            "reason": "Dedicated result objects make packaging concerns enter ordinary function bodies. They create ceremony even when normal completion and top-level errors already carry the needed result."
+          }
+        ],
+        "tradeoff": "A service cannot take command parameters, and a check cannot request them. That is acceptable because their typed output values and project policy provide reproducible configuration."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T01:08:21.813Z"
+    },
+    {
+      "id": "D-ECO-OUTPUT-DEFAULT1",
+      "cardId": "c0qj346l",
+      "group": "tooling",
+      "title": "How does a command choose an output when none is named?",
+      "gist": "Choose the deterministic default for zero-address build, run, test, publish, and dev commands.",
+      "lesson": "An output address names one result in a package, such as `todo.cli` or `todo.web`. An explicit command names that address. A zero-address command stops at the package, such as `jet run todo`.\n\nZero-address commands are useful for beginners and daily work. They become ambiguous when several outputs support the requested capability. Two runnable outputs can both be valid without either being the intended default.\n\nA default-selection law resolves that ambiguity. It must never depend on collection order, filesystem order, or whichever output was built most recently. Those facts change without expressing user intent.\n\nA default chooses an existing canonical output address. It does not create an alias, wrapper, or second identity. Explicit and defaulted commands therefore resolve to the same output address.\n\nJet already chose capability-based selection. Build, run, test, publish, and dev each consider only outputs supporting their matching capability. An explicit output address always wins and remains visible in audit output.\n\nInspect and action-audit views can explain the choice category. The separate receipt law owns durable storage and serialization. This ballot creates no receipt field, tag, or wire value.\n\nProjects containing only `fn run` keep their zero-configuration behavior. This ballot decides what happens after a package declares explicit outputs.",
+      "explainer": "",
+      "story": "Maya begins with one command, so `jet run todo` is obvious. She later adds an admin command and two release checks. Her laptop and continuous integration must choose the same outputs without relying on declaration order.",
+      "inWild": "jet run todo\njet test todo\njet dev todo\n\njet run todo.admin\njet test todo.release_checks",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unique candidate, then explicit defaults",
+          "detail": "A command selects the only capable output automatically. When several candidates exist, a typed defaults record chooses one per capability. Without that record, Jet stops and lists explicit fixes.",
+          "technical": "Selection order is explicit address, unchanged function-only lifecycle, sole capable output, configured capability default, then ambiguity. Default fields are `build`, `run`, `check`, `publish`, and `enter`. Package checking rejects unknown addresses and defaults whose output lacks the named capability. Ambiguity lists canonical addresses in bytewise sorted order. Inspect and action audit distinguish explicit address, function-only entry, unique candidate, and configured default. Receipt law owns their durable representation. A default never mints another identity.",
+          "code": "outputs: [\n    cli: cli_output,\n    admin: admin_output,\n    quick: quick_checks,\n    release: release_checks,\n]\n\ndefaults: .{\n    run: cli,\n    check: quick,\n}\n\njet run todo       // selects todo.cli\njet test todo      // selects todo.quick\njet run todo.admin // explicit address always wins\n\n// Without defaults.run:\n// Error: `todo` has two runnable outputs: todo.admin, todo.cli\n// Fix: run `jet run todo.<name>`, or set `defaults.run`"
+        },
+        {
+          "key": "B",
+          "name": "Capability-named conventional keys",
+          "detail": "A command selects the only capable output, then looks for a conventional key such as `run`, `tests`, or `dev`. That key is the output's canonical address, not an alias. Several ordinary names gain hidden behavior.",
+          "technical": "After unique-candidate selection, commands recognize fixed keys: `build`, `run`, `tests`, `publish`, and `dev`. A conventional key is the canonical output key and never a second address. Package checking rejects a conventional key lacking the matching capability. Ambiguity lists canonical addresses in bytewise sorted order. Inspect and action audit distinguish explicit address, unique candidate, and conventional key. Receipt law owns their durable representation.",
+          "code": "outputs: [\n    run: cli_output,\n    admin: admin_output,\n    tests: quick_checks,\n    release: release_checks,\n]\n\njet run todo  // magic key: todo.run\njet test todo // magic key: todo.tests"
+        },
+        {
+          "key": "C",
+          "name": "Explicit addresses for declared outputs",
+          "detail": "A function-only project keeps `jet run`, but any project with explicit outputs must name one. No default metadata or magic names exist. Daily commands become longer even when only one output is possible.",
+          "technical": "Zero-address lifecycle commands are legal only when the compiler synthesizes the unchanged function-only output. Once an explicit Outputs collection exists, build, run, test, publish, and dev require a full output address.",
+          "code": "jet run todo\n// Error: `todo` declares outputs, so name one\n// Fix: run `jet run todo.cli`\n\njet run todo.cli\njet test todo.quick"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "Cargo runs the sole binary automatically. Several binaries require `--bin` unless package metadata names a default runner.",
+          "code": "default-run = \"todo\"\n\ncargo run\ncargo run --bin todo-admin"
+        },
+        {
+          "lang": "Nix flakes",
+          "note": "Nix uses conventional `default` outputs beside named outputs. The convention is compact, but one default namespace does not express separate run, check, and environment choices.",
+          "code": "packages.default = packages.todo;\napps.default = apps.todo;\ndevShells.default = devShells.dev;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One-output projects stay automatic, while larger projects record each intentional default as typed source. Experts retain exact addresses. Inspect and action audit explain which selection rule applied.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Conventional keys overload ordinary output names with hidden selection behavior. Separate capability defaults also become a naming puzzle instead of explicit project policy."
+          },
+          {
+            "key": "C",
+            "reason": "Requiring an address when only one output can work adds ceremony without removing ambiguity. It weakens the beginner path after a project adopts package outputs."
+          }
+        ],
+        "tradeoff": "Projects with several outputs add a small defaults record. That source prevents silent selection changes. Receipt storage remains governed by the separate receipt law."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T01:08:21.913Z"
+    },
+    {
+      "id": "D-ECO-OUTPUT-PAYLOAD1",
+      "cardId": "c0qj346l",
+      "group": "syntax",
+      "title": "Which facts belong inside each output value?",
+      "gist": "Choose exact output payloads without duplicating the package's shared build and environment graph.",
+      "lesson": "An output variant says what kind of result a package exposes. Its payload is the checked record inside that variant. For example, a library needs modules and a bundle needs members.\n\nThe package graph already owns sources, dependencies, actions, policy, and provenance. An output can point into that graph, or it can repeat those facts inside every payload. Repetition creates a second place that may disagree.\n\nJet already chose one keyed output collection, one closed `Output` sum, and one capability set. It also chose Environment as the shared source for tools, services, variables, paths, allowed host capabilities, and audited actions.\n\nThe `capabilities` field requests authority; it never grants authority. Runtime authority is the intersection of that request and policy-approved authority. Actions can use only that intersection, and policy cannot add an unrequested power.\n\nImage already has `from`, optional `kind: .Oci`, `expose`, `env_vars`, `files`, and `base`. This ballot keeps those facts and decides how every variant fits the output collection. It adds no Image `format` or `target` field.\n\nD-SHAPE5b already shows `name` on output payloads. The output key remains its canonical address, while `name` labels the produced artifact or presentation. `members`, `capabilities`, and `actions` become exact checked fields here.\n\nSeparate ballots own callable-link representation, callable function contracts, and zero-address default selection. Every option uses those outcomes unchanged. This ballot decides only payload fields and whether shared graph facts repeat inside them.\n\nBeginners need short records with useful inference. Experts need stable references to actions, modules, tools, services, capabilities, image inputs, and bundle members.",
+      "explainer": "",
+      "story": "Maya's command, web service, environment, container image, and release bundle reuse one compiled executable. She wants one source of build truth. Her environment must also expose its allowed capabilities and audited setup actions.",
+      "inWild": "outputs: [\n    core: .Library.{ name: \"todo_core\", modules: [Todo] },\n    dev: .Environment.{\n        name: \"dev\",\n        tools: [Jet, Git],\n        services: [database],\n        variables: [TODO_DB: \"./todo.db\"],\n        paths: [\"bin\"],\n        capabilities: [Process, Files],\n        actions: [prepare_database],\n    },\n    release: .Bundle.{ name: \"todo-release\", members: [cli, image] },\n]\n\njet run todo.cli\njet dev todo.dev\njet build todo.release",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Thin typed projections over one graph",
+          "detail": "Each payload contains identity plus only facts unique to its output kind. Shared sources, dependencies, build actions, policy, and provenance stay in the package graph. Environment still carries capabilities and audited actions.",
+          "technical": "Callable payloads are `Executable { name, callable-link }`, `Service { name, callable-link }`, and `Check { name, callable-link }`. Other payloads are `Library { name, modules }`, `Environment { name, tools, services, variables, paths, capabilities, actions }`, and `Bundle { name, members }`. Image is `{ name, from, kind?, expose?, env_vars?, files?, base? }`. Its fields retain D-JPK-IMAGE1 meanings, including OCI-only `kind`. The optional `base` keeps its existing captured-but-not-realized boundary until native registry pull exists.\n\nThe separate callable-link decision supplies that field and value unchanged. Output keys are canonical addresses; `name` is the produced artifact or presentation name. Unknown fields fail. Environment `capabilities` requests authority. Actions receive only its intersection with policy-approved authority. Policy cannot add an unrequested power.",
+          "code": "outputs: [\n    core: .Library.{ name: \"todo_core\", modules: [Todo] },\n    cli: .Executable.{\n        name: \"todo\",\n        // Separate callable-link decision supplies its field and value.\n    },\n    api: .Service.{\n        name: \"todo-api\",\n        // Separate callable-link decision supplies its field and value.\n    },\n    checks: .Check.{\n        name: \"release-checks\",\n        // Separate callable-link decision supplies its field and value.\n    },\n    dev: .Environment.{\n        name: \"dev\",\n        tools: [Jet, Git],\n        services: [database],\n        variables: [TODO_DB: \"./todo.db\"],\n        paths: [\"bin\"],\n        capabilities: [Process, Files],\n        actions: [prepare_database],\n    },\n    image: .Image.{\n        name: \"todo-image\",\n        from: packages.todo,\n        kind: .Oci,\n        expose: [8080],\n        env_vars: [\"MODE\": \"release\"],\n        files: [\"public\"],\n    },\n    release: .Bundle.{ name: \"todo-release\", members: [cli, image] },\n]\n\n// Shared sources and actions stay outside every thin payload."
+        },
+        {
+          "key": "B",
+          "name": "Self-contained output payloads",
+          "detail": "Every output carries sources, dependencies, actions, policy, and kind-specific facts needed to realize it. Environment also carries capabilities and audited actions. Shared settings therefore appear repeatedly.",
+          "technical": "Every variant adds common `sources`, `deps`, `actions`, and `policy` fields to its thin payload. Environment also keeps `tools`, `services`, `variables`, `paths`, and `capabilities`; its `actions` field serves both common and setup actions. Image retains D-JPK-IMAGE1 fields and the existing limit on `base`. The separate callable-link decision remains unchanged. Semantic hashing may deduplicate equal actions after parsing. Source declarations remain repeated, and conflicting copies are errors. Environment `capabilities` requests authority. Actions receive only its intersection with policy-approved authority. Policy cannot add an unrequested power.",
+          "code": "outputs: [\n    core: .Library.{ name: \"todo_core\", modules: [Todo], sources: [\"Source\"], deps: [], actions: [compile_core], policy: release_policy },\n    cli: .Executable.{\n        name: \"todo\", sources: [\"Source\"], deps: [core], actions: [compile_todo], policy: release_policy,\n        // Separate callable-link decision supplies its field and value.\n    },\n    api: .Service.{\n        name: \"todo-api\", sources: [\"Source\"], deps: [core], actions: [compile_todo], policy: service_policy,\n        // Separate callable-link decision supplies its field and value.\n    },\n    checks: .Check.{\n        name: \"release-checks\", sources: [\"Source\"], deps: [core], actions: [compile_todo, verify_release], policy: release_policy,\n        // Separate callable-link decision supplies its field and value.\n    },\n    dev: .Environment.{\n        name: \"dev\", sources: [\"Source\"], deps: [core], actions: [compile_todo, prepare_database], policy: dev_policy,\n        tools: [Jet, Git], services: [database], variables: [TODO_DB: \"./todo.db\"], paths: [\"bin\"], capabilities: [Process, Files],\n    },\n    image: .Image.{\n        name: \"todo-image\", sources: [\"Source\"], deps: [core], actions: [compile_todo, build_image], policy: release_policy,\n        from: packages.todo, kind: .Oci, expose: [8080], env_vars: [\"MODE\": \"release\"], files: [\"public\"],\n    },\n    release: .Bundle.{\n        name: \"todo-release\", members: [cli, image], sources: [\"Source\"], deps: [core], actions: [compile_todo, build_image], policy: release_policy,\n    },\n]"
+        },
+        {
+          "key": "C",
+          "name": "Configuration grouped by capability",
+          "detail": "Each variant groups configuration under the already-ratified Build, Run, Check, Publish, and Enter capabilities. Environment's Enter section includes requested capabilities and audited actions. Every output gains another structural layer.",
+          "technical": "Variants and capabilities remain unchanged. Payload facts are grouped under Build, Run, Check, Publish, and Enter headings instead of sitting directly on each variant. Shared graph actions are referenced inside those sections. Callable sections use the separate link decision unchanged. Environment's Enter section contains tools, services, variables, paths, capabilities, and actions. Image keeps D-JPK-IMAGE1 facts and the existing limit on `base`. Environment `capabilities` requests authority. Actions receive only its intersection with policy-approved authority. Policy cannot add an unrequested power.",
+          "code": "outputs: [\n    core: .Library.{ name: \"todo_core\", modules: [Todo], build: .{ actions: [compile_core] }, publish: .{ policy: release_policy } },\n    cli: .Executable.{\n        name: \"todo\", build: .{ actions: [compile_todo] }, run: .{ /* Separate decision supplies callable-link field and value. */ }, publish: .{ policy: release_policy },\n    },\n    api: .Service.{\n        name: \"todo-api\", build: .{ actions: [compile_todo] }, run: .{ /* Separate decision supplies callable-link field and value. */ },\n    },\n    checks: .Check.{\n        name: \"release-checks\", check: .{ actions: [verify_release] /* Separate decision supplies callable-link field and value. */ },\n    },\n    dev: .Environment.{\n        name: \"dev\", enter: .{\n            tools: [Jet, Git], services: [database], variables: [TODO_DB: \"./todo.db\"], paths: [\"bin\"],\n            capabilities: [Process, Files], actions: [prepare_database],\n        },\n    },\n    image: .Image.{\n        name: \"todo-image\", from: packages.todo, kind: .Oci, expose: [8080], env_vars: [\"MODE\": \"release\"], files: [\"public\"],\n        build: .{ actions: [build_image] }, publish: .{ policy: release_policy },\n    },\n    release: .Bundle.{\n        name: \"todo-release\", members: [cli, image], build: .{ actions: [assemble_release] }, publish: .{ policy: release_policy },\n    },\n]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "Flake outputs often wrap the same derivation in separate package and app records. The derivation stays shared, but users repeat projection wiring across namespaces.",
+          "code": "packages.todo = todo;\napps.todo.program = \"${todo}/bin/todo\";"
+        },
+        {
+          "lang": "Bazel",
+          "note": "Bazel targets expose typed providers over one action graph. Providers describe consumable results without copying the actions that produced them.",
+          "code": "cc_binary(name = \"todo\", deps = [\":core\"])\noci_image(name = \"image\", binary = \":todo\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Outputs remain small typed views over one auditable graph. Environment keeps requested authority and actions visible. Policy intersection stays explicit, and experts trace every projection to shared provenance.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Self-contained records repeat requested authority, policy, and build truth. Hash deduplication cannot make duplicated source declarations easier to review or keep consistent."
+          },
+          {
+            "key": "C",
+            "reason": "Capability grouping uses ratified categories, but it scatters one variant's stable facts across tool-oriented sections. Reading or comparing a complete output becomes less direct."
+          }
+        ],
+        "tradeoff": "Thin payloads require following checked graph references. That is acceptable because diagnostics and audit views render resolved outputs, while requested authority meets policy through one explicit intersection."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T01:08:22.017Z"
     }
   ],
   "questions": [
@@ -36101,6 +36302,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T01:08:22.017Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-OUTPUT-PAYLOAD1",
+      "note": "Which facts belong inside each output value?"
+    },
+    {
+      "at": "2026-07-15T01:08:21.913Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-OUTPUT-DEFAULT1",
+      "note": "How does a command choose an output when none is named?"
+    },
+    {
+      "at": "2026-07-15T01:08:21.814Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-OUTPUT-CALLCONTRACT1",
+      "note": "What contract must a runnable output's function satisfy?"
+    },
     {
       "at": "2026-07-15T01:07:19.659Z",
       "by": "codex-orchestrator",
@@ -39579,27 +39801,6 @@
       "action": "card.update",
       "ref": "c0qptf0n",
       "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-14T22:09:51.553Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c06vgib7",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-14T22:09:51.437Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0mrovih",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-14T22:09:51.315Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0zh74hs",
-      "note": "title,track,epoch,milestoneId,logEntry"
     }
   ],
   "nextNum": 368,
