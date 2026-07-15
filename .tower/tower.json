@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 620,
-    "rev": 7127,
+    "rev": 7130,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17562,6 +17562,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "codex-corelib-reviewer",
+          "text": "Independent review clean after audience-truth repair. Criteria 1-2 verified; both exact tests pass. Criteria 3-4 remain open for integrated corelib and parent full-suite gates."
+        },
+        {
+          "at": "2026-07-15",
           "by": "codex-corelib-builder",
           "text": "Reviewer repair: corrected four stale core.auth ownership comments to match implementation/docs—HS256 signature plus optional expiry; audience returned as claim data, no expected-audience validation. cargo check and both exact #618 tests pass. C2 evidence refreshed; C3/C4 remain parent/integrated gates."
         },
@@ -17575,20 +17580,20 @@
         {
           "n": 1,
           "text": "Codec truth probe proves generated Encode/Decode source reenters the canonical Parser path while retired AST transplantation and Rust fallback remain absent, without relying on brittle generated impl spelling.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-corelib-builder",
-          "verifiedBy": null,
-          "evidence": "Truth probe follows live Registration.rs call into Registration/Serde.rs and pins canonical Lexer::lex -> Parser::parse -> generated Item::Impl facts while retaining negative AST-transplant and codegen fallback checks. Exact test passes.",
-          "at": "2026-07-15T01:10:35.497Z"
+          "verifiedBy": "codex-corelib-reviewer",
+          "evidence": "Independent review confirms live Registration calls source expansion; Serde source reenters canonical Lexer then Parser, retains only parsed Item::Impl nodes, marks generated serde, and reports malformed generated source at the derive span. Retired carrier/transplant and codegen fallback negatives remain scoped to their owning files. Exact test passed.",
+          "at": "2026-07-15T01:23:39.760Z"
         },
         {
           "n": 2,
           "text": "Canonical Core reference lists core.auth with accurate module scope and no invented API.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-corelib-builder",
-          "verifiedBy": null,
-          "evidence": "Core reference and all four compiler ownership comments now agree on shipped core.auth scope: standalone HS256 verify_jwt checks signature plus optional expiry, returns audience claim data, and does not validate an expected audience. Exact reference test passes.",
-          "at": "2026-07-15T01:19:23.193Z"
+          "verifiedBy": "codex-corelib-reviewer",
+          "evidence": "Independent review confirms docs and compiler ownership comments now match implementation: sole core.auth verify_jwt(String, [U8]) performs HS256 signature and optional-expiry checks, returns Claims/AuthError and audience claim data, applies no expected-audience policy, and adds no dependency. Exact Core-reference test passed.",
+          "at": "2026-07-15T01:23:45.138Z"
         },
         {
           "n": 3,
@@ -36368,6 +36373,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T01:23:50.821Z",
+      "by": "codex-corelib-reviewer",
+      "action": "card.update",
+      "ref": "c07p1xxq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T01:23:45.138Z",
+      "by": "codex-corelib-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c07p1xxq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T01:23:39.761Z",
+      "by": "codex-corelib-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c07p1xxq",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T01:21:42.386Z",
       "by": "terra-605-builder",
       "action": "card.update",
@@ -39845,27 +39871,6 @@
       "action": "card.delete",
       "ref": "c014fl27",
       "note": "Open effect-row spelling"
-    },
-    {
-      "at": "2026-07-14T22:11:51.771Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0w5vgms",
-      "note": "Effect denial spelling"
-    },
-    {
-      "at": "2026-07-14T22:11:51.680Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c0guzpt7",
-      "note": "Pipeline input slot"
-    },
-    {
-      "at": "2026-07-14T22:11:51.584Z",
-      "by": "codex-main",
-      "action": "card.delete",
-      "ref": "c07d1t1q",
-      "note": "Choose the meaning of hash markers"
     }
   ],
   "nextNum": 368,
