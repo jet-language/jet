@@ -796,25 +796,21 @@ fn freeze_unix_projection(source: &mut fs::File, expected: &str) -> io::Result<f
     const F_SEAL_WRITE: std::os::raw::c_int = 0x0008;
     const EINVAL: i32 = 22;
     unsafe extern "C" {
-        fn memfd_create(name: *const std::os::raw::c_char, flags: u32) -> std::os::raw::c_int;
         fn fcntl(fd: std::os::raw::c_int, command: std::os::raw::c_int, ...) -> std::os::raw::c_int;
     }
     let name = b"jet-profile-exec\0";
-    let mut descriptor = unsafe {
-        memfd_create(
-            name.as_ptr().cast(),
-            MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_EXEC,
-        )
-    };
-    if descriptor < 0 && io::Error::last_os_error().raw_os_error() == Some(EINVAL) {
+    let mut descriptor = create_memfd(
+        name.as_ptr().cast(),
+        MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_EXEC,
+    );
+    if descriptor
+        .as_ref()
+        .is_err_and(|error| error.raw_os_error() == Some(EINVAL))
+    {
         // Kernels predating MFD_EXEC create executable memfds by default.
-        descriptor = unsafe {
-            memfd_create(name.as_ptr().cast(), MFD_CLOEXEC | MFD_ALLOW_SEALING)
-        };
+        descriptor = create_memfd(name.as_ptr().cast(), MFD_CLOEXEC | MFD_ALLOW_SEALING);
     }
-    if descriptor < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let descriptor = descriptor?;
     let mut frozen = unsafe { fs::File::from_raw_fd(descriptor) };
     source.seek(std::io::SeekFrom::Start(0))?;
     io::copy(source, &mut frozen)?;
@@ -830,6 +826,49 @@ fn freeze_unix_projection(source: &mut fs::File, expected: &str) -> io::Result<f
     }
     ensure_open_executable(&frozen)?;
     Ok(frozen)
+}
+
+#[cfg(target_os = "linux")]
+fn create_memfd(name: *const std::os::raw::c_char, flags: u32) -> io::Result<std::os::raw::c_int> {
+    unsafe extern "C" {
+        fn memfd_create(name: *const std::os::raw::c_char, flags: u32) -> std::os::raw::c_int;
+    }
+    let descriptor = unsafe { memfd_create(name, flags) };
+    if descriptor < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(descriptor)
+    }
+}
+
+#[cfg(target_os = "android")]
+fn create_memfd(name: *const std::os::raw::c_char, flags: u32) -> io::Result<std::os::raw::c_int> {
+    unsafe extern "C" {
+        fn syscall(number: std::os::raw::c_long, ...) -> std::os::raw::c_long;
+    }
+    let number = android_memfd_syscall_number(std::env::consts::ARCH).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Android architecture has no audited memfd_create syscall number",
+        )
+    })?;
+    let descriptor = unsafe { syscall(number, name, flags as std::os::raw::c_uint) };
+    if descriptor < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(descriptor as std::os::raw::c_int)
+    }
+}
+
+#[cfg(any(target_os = "android", test))]
+fn android_memfd_syscall_number(architecture: &str) -> Option<std::os::raw::c_long> {
+    match architecture {
+        "aarch64" | "riscv64" => Some(279),
+        "arm" => Some(385),
+        "x86" => Some(356),
+        "x86_64" => Some(319),
+        _ => None,
+    }
 }
 
 #[cfg(all(
@@ -1156,6 +1195,16 @@ mod tests {
         assert_eq!(find_bin(&metadata, "foo").unwrap().1, 0);
         #[cfg(windows)]
         assert_eq!(find_bin(&metadata, "foo.exe").unwrap().1, 0);
+    }
+
+    #[test]
+    fn android_memfd_syscall_table_is_audited_and_closed() {
+        assert_eq!(android_memfd_syscall_number("aarch64"), Some(279));
+        assert_eq!(android_memfd_syscall_number("arm"), Some(385));
+        assert_eq!(android_memfd_syscall_number("riscv64"), Some(279));
+        assert_eq!(android_memfd_syscall_number("x86"), Some(356));
+        assert_eq!(android_memfd_syscall_number("x86_64"), Some(319));
+        assert_eq!(android_memfd_syscall_number("mips"), None);
     }
 
     #[test]
