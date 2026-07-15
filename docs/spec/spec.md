@@ -2678,10 +2678,10 @@ the rest of argv re-parses against that variant's own `@[Cli]` spec (its
 own `--help`, its own flags — no flag namespace is shared across
 variants). Every variant's payload must be a single `@[Cli]`-derived
 struct — any other payload shape is **E1307**. Given **zero** arguments (no
-subcommand token at all), the generated entry prints the command list to
-stdout and exits 0 — a bare invocation asking "what can this program do"
-is treated as a request for orientation, not a mistake; an unrecognized
-subcommand name is still a real error (nonzero exit, stderr).
+subcommand token at all), or given root `--help`, the generated entry prints
+the lowercased command list to stdout and exits 0 — an invocation asking "what
+can this program do" is treated as a request for orientation, not a mistake;
+an unrecognized subcommand name is still a real error (nonzero exit, stderr).
 
 **Codegen** generates directly onto `core.args`'s existing `ArgsSpec`/
 `ParsedArgs` builder (D-ARGS1) — the same `.flag`/`.option`/`.parse`
@@ -2707,15 +2707,21 @@ record in every architecture slice. The record is emitted before the artifact
 is cached, packaged, or signed, so it is part of the artifact identity. Readers
 parse the format section tables with bounded offsets and lengths; missing,
 malformed, duplicate, unsupported-version, or disagreeing universal-slice
-records fail closed. They never execute the target program.
+records fail closed. Universal slices cannot contain another universal
+container. External discovery opens the artifact once, requires a regular
+file, then reads at most the 512 MiB limit plus one byte from that same handle.
+It never executes the target program.
 
 `jet self completions SHELL --for PROGRAM` (D-SHAPE-CLI-COMPLETE1=A) reads that
 record and writes a bash, zsh, fish, or PowerShell script to stdout. Without
 `--for`, Jet's own completion output is unchanged. External scripts contain
-only checked schema candidates: `--help`, derived flags, and lowercased enum
-subcommands. They never query live application values. Plain `fn run()` embeds
-an empty application schema and therefore still produces a valid built-in-only
-`--help` script. Metadata failures are E2103 on stderr.
+only checked schema candidates: root `--help` and lowercased enum subcommands,
+then only the selected subcommand's `--help` and derived flags. They never
+query live application values. Scripts register the executable's basename,
+not its supplied path; a basename containing control characters is rejected.
+Plain `fn run()` embeds an empty application schema and therefore still
+produces a valid built-in-only `--help` script. Metadata failures are E2103 on
+stderr.
 
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
 including the reserved `--help`), E1307 (subcommand payload isn't
