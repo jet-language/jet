@@ -306,15 +306,12 @@ fn clean_removes_only_stale_unreferenced_hangar_objects() {
     .0;
     fs::write(stale.join("payload"), "old bytes").unwrap();
     fs::write(fresh.join("payload"), "fresh bytes").unwrap();
-    eprintln!("DEBUG stale meta: {}", fs::read_to_string(stale.join("meta.json")).unwrap());
-    eprintln!("DEBUG fresh meta: {}", fs::read_to_string(fresh.join("meta.json")).unwrap());
 
     let out = jetpack()
         .args(["clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
-    eprintln!("DEBUG stale meta after: {}", fs::read_to_string(stale.join("meta.json")).unwrap_or_default());
     assert!(
         out.status.success(),
         "stderr: {}",

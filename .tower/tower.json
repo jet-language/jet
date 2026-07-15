@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 650,
-    "rev": 7729,
+    "rev": 7735,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -38760,6 +38760,348 @@
       "created": "2026-07-15T14:49:55.159Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-15"
+    },
+    {
+      "id": "D-MEM-PARAM1",
+      "cardId": "c0vb511d",
+      "group": "syntax",
+      "title": "Unmarked parameter: read borrow or plain value?",
+      "gist": "Decide what a function parameter with no sigil means: a read borrow of the caller's value, or a plain value with copy-on-write backing.",
+      "lesson": "Glossary. read borrow: the callee may look at the value but not change it; compiles to Rust `&T`, no copy. take (`^`): ownership moves to the callee. copy-on-write (CoW): a value shared until someone changes it, at which point that writer clones the backing store (a detach). detach spike: the allocation that happens on first mutation. reference count (RC): a runtime counter of how many share the backing.\n\nToday's ratified law is D-MEM1 v5: an unmarked parameter is a read borrow, always, with no inference. This ballot asks whether to keep that or make unmarked mean a plain value. Either way, changing the caller's own binding in place still needs `&`.\n\nThis choice may amend ratified D-MEM1 v5. The owner has said audit closure likely overrides the earlier ruling, so picking B rewrites the unmarked-is-read law.",
+      "explainer": "",
+      "story": "Priya is in her first week of Jet. She writes a to-do app: a helper that appends one item to a list, then main prints the list. She writes `add_item(cart, \"eggs\")` with no sigils, the way she would in Python, and expects the printed list to grow.",
+      "inWild": "Any beginner program that passes a String, list, or struct into a helper that changes it: a cart appender, a counter bumper, a config field setter. The question is what happens when the value is passed without a `&` mark and the helper tries to change it.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unmarked is a read borrow (current law)",
+          "detail": "An unmarked parameter borrows the caller's value for reading. The callee may read it, never change it. To change it, the parameter and every call site take `&`. Passing a named value to a writer without `&` is a compile error with a one-line fix. Mutation is always visible, and passing never allocates.",
+          "technical": "Unmarked param lowers to Rust `&T`. No RC, no clone, no hidden allocation. A body write or an escape/consume of an unmarked param is a hard error at the definition (E0205 write, E0209 take). This is the D-MEM1 v5 baseline the owner reset to.",
+          "code": "// The beginner program (same in both options):\nfn add_item(cart: [String], item: String) {\n    cart.push(item)\n}\n\nfn main() {\n    cart := [\"milk\"]\n    add_item(cart, \"eggs\")\n    print(cart)\n}\n\n// Option A run:\n$ jet run cart.jet\nerror[E0205]: `cart` is read-only here — you can look, not change\n  ├─ cart.jet:2  cart.push(item)\n  │              ^^^^ writing through a read parameter\n  └─ fix: mark it writable — `fn add_item(cart: &[String], …)`\n          and call `add_item(&cart, \"eggs\")`\n\n// after the fix:\n$ jet run cart.jet\n[\"milk\", \"eggs\"]"
+        },
+        {
+          "key": "B",
+          "name": "Unmarked is a plain value (copy-on-write backing)",
+          "detail": "An unmarked parameter is the callee's own logical value. Reading and passing never need a mark and never fail with a borrow error, which is the audit's cohesion target: beginner programs see strings, lists, and structs as plain values. The callee may change its copy; the caller's value is untouched. Changing the caller's binding in place still needs `&`.",
+          "technical": "Unmarked param lowers to a CoW value: shared-immutable until first mutation, then it detach-clones the backing. RC tracks sharing at runtime. Ownership analysis should erase counts it can prove single-owner; a real-time `no_alloc` policy may require proof of zero RC and zero detach. `&` is still required to write the caller's binding.",
+          "code": "// Same beginner program as Option A.\n\n// Option B run:\n$ jet run cart.jet\n[\"milk\"]\n\n// `cart` passed by value; `push` grew add_item's own copy.\n// main's cart never changed — no error, no update, no signal.\n// To update in place you still mark it writable:\nfn add_item(cart: &[String], item: String) { cart.push(item) }\nadd_item(&cart, \"eggs\")     // → [\"milk\", \"eggs\"]\n\n// Tradeoff shown: first mutation of a shared list detaches (allocates):\nb := a            // shares backing, RC = 2\nb.push(\"x\")       // detach spike: clones a's backing before the push"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps mutation visible and passing allocation-free. A named value handed to a writer is a clear compile error with a one-line fix, not a program that compiles, runs, and silently drops the update. It is the borrow rule Priya learns once and applies everywhere.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Priya's `push` compiles and runs but silently fails to update the caller — a footgun worse than an error, because nothing points at the bug. CoW also allocates on first mutation (detach spike), and RC traffic must be proven away before a real-time `no_alloc` policy can accept the code."
+          }
+        ],
+        "tradeoff": "A meets the borrow rule earlier: passing a named value and then writing it is a wall until you add `&`. B removes that wall for reads and passes, in exchange for hidden allocation on mutation and a silent lost-update when a beginner forgets `&`."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T19:56:26.369Z"
+    },
+    {
+      "id": "D-MEM-VIEWRET1",
+      "cardId": "c0x9dh3l",
+      "group": "syntax",
+      "title": "Stored and returned safe views",
+      "gist": "Decide whether a function may return or store a safe view into someone else's value, and if so, whether the view's source is a public, semver-checked contract.",
+      "lesson": "Glossary. view: a read (or with `&`, write) window into another value's storage, no copy; today it lives only inside one function body. second-class borrow: a view that cannot be returned, stored in a field, or put in a list. zero-copy: reading part of a value without allocating a new one. provenance: which source a view borrows from. semver check: `jet pkg semver` compares a library's public API to its last release and flags breaking changes.\n\nToday's ratified law (D-MEM1 S3) is second-class borrows: no `-> View` returns, no view fields, escape is E2307/E2305. The audit says this blocks general zero-copy and pushes programs toward Shared, IDs, GC, or raw memory. Options B and C reinstate returnable views and so amend D-MEM1 S3; the owner has said audit closure likely overrides.\n\nComposition: all three compose with ratified D-SHAPE-PLACE1 windows (#613). Ordinary in-body place access stays nameless (bare read, `&` edit, `~` copy); a named `View`/`ViewMut` type appears only at the return or field boundary, and only in B and C. Aliasing safety (I1) is unchanged: at most one write view of a value is live at a time. Views do not duplicate `Shared<T>` or `Pool<T>` — those cover many-owners and cross-thread sharing; a view is zero-copy read-through-owner.",
+      "explainer": "",
+      "story": "Marco writes a log-parser library. Each line yields a timestamp and a message. Today he cannot return a slice pointing into the input buffer, because returned views were deleted (D-MEM1 S3). So every parsed field is copied into a new String, doubling every log line in memory. He wants zero-copy: hand back a view, keep the bytes once.",
+      "inWild": "A config or log parser returning the value slice for a key without copying. A tokenizer returning cursors into the source. A downstream package that stores those views and depends on what they borrow. The question: is returning a view allowed, and can a caller see and version-check what it borrows.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep second-class views only (current law)",
+          "detail": "A view never leaves the function that made it. To hand data back, copy it into an owned value with `~` (allocates per call), or invert control: pass a closure that runs while the view is alive. Zero-copy stays a local optimization; a library boundary always copies or inverts.",
+          "technical": "No returnable or stored borrows (D-MEM1 S3). `-> View` and `View` fields are E2307/E2305. Cross-package data is handed back by owned copy (`~`) or closure inversion. This is the ratified baseline.",
+          "code": "fn value_of(src: String, key: String) -> View<str> {\n    return src.line_with(key).after(\"=\")\n}\n\n$ jet run parse.jet\nerror[E2307]: this view can't leave the function\n  ├─ parse.jet:2  return src.line_with(key).after(\"=\")\n  │               ^^^ a view borrows `src`; returning it would outlive `src`\n  └─ fix: return an owned copy — `return ~src.line_with(key).after(\"=\")`\n          (allocates per call), or run the work while the view is live:\n          `value_of(src, \"port\", v => print(v))`"
+        },
+        {
+          "key": "B",
+          "name": "Returnable views with public provenance",
+          "detail": "A view may be returned or stored. It carries which source it borrows as public, queryable, semver-pinned metadata. A caller can ask a returned view its source, and the semver check flags any change to what a public function's view borrows as a breaking change. This makes cross-package zero-copy a real, versioned contract.",
+          "technical": "`View<T>`/`ViewMut<T>` become returnable and storable. Each records source-provenance in the public API snapshot; changing it trips the semver check (E2601). Sema still proves owner-outlives-view and keeps at most one `ViewMut` live (I1). Extends D-SHAPE-PLACE1 windows to the return and field boundary.",
+          "code": "fn value_of(src: String, key: String) -> View<str> {   // returns a slice of `src`\n    return src.line_with(key).after(\"=\")\n}\n\n$ jet run parse.jet\n8080\n\nport :: value_of(src, \"port\")\nprint(port.source())        // \"src (String buffer)\"  — provenance is public\n\n// Later the author changes what the view borrows:\nfn value_of(src: String, key: String) -> View<str> {\n    tmp := src.upcase()     // now borrows a temporary, not `src`\n    return tmp.after(\"=\")\n}\n\n$ jet pkg semver\nerror[E2601]: breaking API change in `value_of`\n  └─ returned view provenance changed: `src` → `<temporary>`\n     callers relying on `src` outliving the view will break — bump major."
+        },
+        {
+          "key": "C",
+          "name": "Returnable views tied to a named owner (private provenance)",
+          "detail": "A view may be returned or stored, tied to an owner named in the signature with `from name` — no lifetime letters. Same zero-copy power as B, but the borrow relationship is a private compiler check: not published, not queryable, and not part of the semver contract. Downstream tooling cannot see or version-check what a returned view borrows.",
+          "technical": "Returnable views bind to a named owner parameter (`-> View<str> from src`). Provenance is a private sema check, absent from the API snapshot and the semver diff. Same aliasing rules as B; no public `.source()`. Changing `from src` to `from other` is a silent source-compatibility change.",
+          "code": "fn value_of(src: String, key: String) -> View<str> from src   // owner named, no lifetimes\n\n$ jet run parse.jet\n8080\n\nport :: value_of(src, \"port\")\nport.source()               // error: no such method — provenance isn't public\n\n// Author changes the owner:\nfn value_of(src: String, key: String) -> View<str> from other\n\n$ jet pkg semver\nno API changes.             // callers can break with no version signal"
+        }
+      ],
+      "comparisons": [],
+      "rec": "B",
+      "recommendation": {
+        "why": "B makes a stored or returned view a real API contract. A caller can see what a view borrows, and the semver check flags any change to it. Zero-copy parsers, splitters, and cursors stop forcing a copy per field or a closure inversion, and stop being pushed to Shared, IDs, GC, or raw memory.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Every returned slice must be copied (allocates per call) or inverted into a closure. So real zero-copy abstractions cannot cross a library boundary — the exact push toward Shared, IDs, GC, and raw memory the audit names."
+          },
+          {
+            "key": "C",
+            "reason": "Same zero-copy power, but the borrow relationship is invisible to tooling and not a semver contract. A library can silently change what a returned view borrows and break callers with no version signal, which is what public provenance exists to prevent."
+          }
+        ],
+        "tradeoff": "B adds a provenance contract to every public function that returns or stores a view: the metadata is still complexity and it must be semver-pinned. That pinned contract is what makes cross-package zero-copy safe to depend on."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T19:56:26.511Z"
+    },
+    {
+      "id": "D-MEM-FACTS1",
+      "cardId": "c0zdv8vm",
+      "group": "syntax",
+      "title": "Transitive fact vocabulary — allocation, RC, arena bounds",
+      "gist": "Whether no_alloc and related memory guarantees stay local per-function lints or become transitive facts checked through the whole call graph.",
+      "lesson": "This option may supersede the ratified local-only scope of D-NOALLOC-SEM1=A. The owner said audit closure likely overrides that scope cut; choosing B or C replaces policy no_alloc's local-only guarantee with a transitive one.",
+      "explainer": "",
+      "story": "A transitive fact is a promise about a function AND everything it calls; local means only the function's own body. Priya writes firmware for a battery gauge on a heap-less Cortex-M0. She marks her sensor loop no_alloc. A helper three calls deep builds a temporary list. Today the build passes and the allocation ships to a device that cannot serve it.",
+      "inWild": "A no-heap embedded package: read_sensor() is declared no_alloc but calls decode(), which runs buf.push(raw). The same team wants arena_bounded(N) and zero_rc (proof no reference-counted value survives) facts on those functions for a real-time audit.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep local-only lints (status quo)",
+          "detail": "policy no_alloc walks only the marked function's own body against a four-shape denylist and never follows a call. It is fast and honest that it is local, but any allocation one call away is invisible.",
+          "technical": "Ratified D-NOALLOC-SEM1=A, code E0921. Denylist: interpolation holes, .push/.insert, heap-owning literals, ~ of a heap type. No arena or reference-count facts exist. No transitive walk.",
+          "code": "# sensor.jet — no-heap battery-gauge firmware\npolicy no_alloc\n\nfn read_sensor() -> Int {\n    let raw := hw_fetch()\n    return decode(raw)\n}\n\nfn decode(raw: Int) -> Int {\n    var buf := List<Int>.new()\n    buf.push(raw)            # heap growth\n    return buf.sum()\n}\n\n$ jet build --target embedded\n   Compiling firmware v0.1.0\n    Finished — 0 errors\n\n# read_sensor is no_alloc, but the check only walks read_sensor's\n# own body. It never follows the call into decode, so buf.push is\n# invisible. The allocation compiles and ships to a heap-less chip."
+        },
+        {
+          "key": "B",
+          "name": "Transitive facts as checked contracts",
+          "detail": "no_alloc, arena_bounded(N), and zero_rc become facts on a function, propagated through the call graph the way @Pure fn already is. Any reachable violation is reported at its source with the transitive path back to the declaring function.",
+          "technical": "Dynamic-dispatch honesty rule: an open-world call site cannot be proven, so a strict package must seal its target set or consume a signed dependency summary, else E0922. Reuses the @Pure whole-program fixpoint machinery.",
+          "code": "# same sensor.jet — no_alloc is now a transitive fact\n\n$ jet build --target embedded\nerror[E0921]: heap allocation reached under no_alloc\n   ┌─ sensor.jet:11:5\n   │\n11 │     buf.push(raw)\n   │     ^^^^^^^^^^^^^ List.push may grow the heap\n   │\nnote: reached from read_sensor, declared no_alloc\n   ┌─ sensor.jet:6:12\n   │\n 6 │     return decode(raw)\n   │            ^^^^^^^^^^^^ transitive call into decode\n   = help: mark decode no_alloc, or move buf into an arena\n\n# If read_sensor dispatched through an open-world handler value:\nerror[E0922]: no_alloc cannot see through dynamic dispatch\n   = help: seal the target set (sealed handlers) or supply a signed\n           dependency summary; open-world code cannot be proven\n\n# The same vocabulary carries arena_bounded(N) and zero_rc facts,\n# each reported the same way at the first reachable violation."
+        },
+        {
+          "key": "C",
+          "name": "Per-target profiles",
+          "detail": "Facts attach to a build target profile (no_heap, realtime), not to individual functions. Selecting the target checks the whole reachable graph for that build. A beginner picks one target and every guarantee follows from that choice.",
+          "technical": "Profile declared once in workspace.jet/pkg.jet. jet build --target embedded runs the transitive check; per-function annotations become redundant. A debug target keeps the heap. New code E3120.",
+          "code": "# sensor.jet has NO per-function policy line.\n# The build target carries the fact instead:\n\n# workspace.jet\ntarget embedded {\n    profile: no_heap        # denies heap across the whole build\n}\n\n$ jet build --target embedded\nerror[E3120]: target embedded profile no_heap violated\n   ┌─ sensor.jet:11:5\n   │\n11 │     buf.push(raw)\n   │     ^^^^^^^^^^^^^ List.push may grow the heap\n   = note: every function reachable in target embedded is checked\n   = help: no per-function no_alloc needed — the target owns the\n           guarantee; a debug target keeps the heap"
+        }
+      ],
+      "comparisons": [],
+      "rec": "B",
+      "recommendation": {
+        "why": "One vocabulary (no_alloc, arena_bounded, zero_rc) reuses the @Pure whole-program fixpoint already in the compiler and reports the exact transitive path to each violation. The fact then means what it says, with no silent miss like Priya's.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Keeps shipping the silent transitive allocation Priya's audit must catch, so the guarantee is not real."
+          },
+          {
+            "key": "C",
+            "reason": "Removes per-function control: a library author cannot promise no_alloc on one exported function unless the whole target opts in."
+          }
+        ],
+        "tradeoff": "B requires the dynamic-dispatch honesty rule: an open-world call site cannot be proven. Strict packages must seal their target set or consume a signed dependency summary, and library authors annotate each exported contract."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T19:57:03.959Z"
+    },
+    {
+      "id": "D-UNSAFE-OBLIG1",
+      "cardId": "c01gqgxn",
+      "group": "syntax",
+      "title": "Typed unsafe obligations — per-operation review inside audited regions",
+      "gist": "Whether an #Unsafe region stays one binary reason string or records typed per-operation obligations the compiler tracks and audits.",
+      "lesson": "This extends the D-LL1/D-UNSAFE2 unsafe surface and does not weaken I1. Safe-by-default is unchanged; obligations add structure only inside the region a user already opted into with #Unsafe.",
+      "explainer": "",
+      "story": "An obligation is a safety condition the compiler cannot prove, which the author asserts holds — pointer non-null, aligned, not aliased. Sam maintains a 300-line #Unsafe GPIO driver. A review must confirm every pointer operation is sound. Today the region carries one reason sentence for all of it, so an unaudited new operation looks the same as a proven one.",
+      "inWild": "A driver region does mem.volatile_read and mem.volatile_write against MMIO registers. Each operation demands a valid, aligned pointer and no aliasing. The team wants the audit to show, per operation, which of those conditions the author has actually asserted.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the binary gate (status quo)",
+          "detail": "#Unsafe(\"reason\") opens every memory-unsafe operation in the region, and the reason string is the whole audit record. There is no per-operation breakdown; one sentence covers the entire block however large.",
+          "technical": "Ratified D-LL1/D-UNSAFE2. Region lowers straight to Rust unsafe { }. Gates: E3101-E3104, lint L3101. No obligation tracking; audit output lists the region and its reason only.",
+          "code": "use core.mem\n\n#Unsafe(\"MMIO GPIO access, single-threaded boot\") {\n    let status := mem.volatile_read(gpio_base + 0x18)\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n\n$ jet inspect unsafe sensor.jet\nregion sensor.jet:3  \"MMIO GPIO access, single-threaded boot\"\n  2 low-level operations, all covered by the one region reason\n\n# The reason string is the whole audit record. In a 300-line\n# driver region a reviewer cannot tell which pointer op still\n# lacks a checked condition — every op shares one sentence."
+        },
+        {
+          "key": "B",
+          "name": "Typed obligations per operation",
+          "detail": "Each low-level operation carries the specific conditions it demands; the author discharges them inline with an assert clause. The compiler tracks undischarged obligations per region and reports them at the operation, and audit diffs show only what changed.",
+          "technical": "New assert obligation clause on volatile/pointer ops (valid_ptr, aligned, no_alias). An undischarged obligation is a lint the author clears with an assert or an explicit waiver. jet inspect unsafe lists each op and its state.",
+          "code": "use core.mem\n\n#Unsafe(\"MMIO GPIO, single-threaded boot\") {\n    let status := mem.volatile_read(gpio_base + 0x18)\n        assert valid_ptr, aligned\n    mem.volatile_write(gpio_base + 0x1C, 1)\n        assert valid_ptr, aligned\n}\n\n$ jet inspect unsafe sensor.jet\nregion sensor.jet:3  \"MMIO GPIO, single-threaded boot\"\n  volatile_read  @4   valid_ptr ✓   aligned ✓\n  volatile_write @6   valid_ptr ✓   aligned ✓   no_alias ✗ UNDISCHARGED\n  1 remaining obligation\n\n$ git diff — audit shows only the changed obligation:\n  volatile_write @6   + no_alias  (new, needs an assert or waiver)"
+        },
+        {
+          "key": "C",
+          "name": "Region-level obligation manifest",
+          "detail": "Obligations are declared once in a manifest block at the region head, each with a justifying note. The compiler checks the manifest covers all operations. A reviewer reads the manifest instead of the body, and diffs track manifest changes.",
+          "technical": "obligations { } block after the #Unsafe reason. Covers the region as a whole, not per operation. An operation with no matching manifest entry is an error; the binding is region-wide, not per op.",
+          "code": "use core.mem\n\n#Unsafe(\"MMIO GPIO, single-threaded boot\")\n    obligations {\n        valid_ptr:     \"gpio_base from linker script, never null\"\n        aligned:       \"registers are 4-byte aligned by the chip spec\"\n        single_thread: \"runs only in boot, before the scheduler starts\"\n    }\n{\n    let status := mem.volatile_read(gpio_base + 0x18)\n    mem.volatile_write(gpio_base + 0x1C, 1)\n}\n\n$ jet inspect unsafe sensor.jet\nregion sensor.jet:3  \"MMIO GPIO, single-threaded boot\"\n  manifest: valid_ptr, aligned, single_thread  (3 documented)\n  operations covered: 2/2\n\n# Review reads the manifest, not the body. A newly added\n# volatile op inherits the manifest without the author\n# re-confirming those conditions apply to it."
+        }
+      ],
+      "comparisons": [],
+      "rec": "B",
+      "recommendation": {
+        "why": "In Sam's 300-line region, B surfaces each still-unproven condition at the exact operation that needs it, and audit diffs show only newly added obligations. A discharged operation is visibly distinct from an unaudited one.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Gives the whole region one reason string, so a reviewer cannot tell a discharged operation from an unaudited one."
+          },
+          {
+            "key": "C",
+            "reason": "Documents obligations but does not bind each one to the operation that needs it, so a new unsafe op inherits an old manifest unchecked."
+          }
+        ],
+        "tradeoff": "B adds an assert obligation clause on low-level operations, so expert authors write the specific condition each pointer op relies on. An undischarged obligation is a lint the author must clear with an assert or an explicit waiver."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T19:57:04.095Z"
+    },
+    {
+      "id": "D-OPTGC1",
+      "cardId": "c03lc2y3",
+      "group": "stdlib",
+      "title": "Expose the opt-in Gc<T> cycle collector — resolve the I6 gate",
+      "gist": "Whether `use core.gc` and `Gc<T>` are public now, kept behind an experimental gate, or pulled until a later ballot.",
+      "lesson": "Terms. A cycle is two values that point at each other. A leak is memory a refcounted value never frees because its count never reaches zero. `Shared<T>` is Jet's many-owners handle; two `Shared` in a cycle leak. `Pool<T>`/`Id<T>` stores nodes in one table and links them by plain copyable ids, so a cycle never leaks. A traced heap scans from live roots and frees whatever it cannot reach, cycles included; `Gc<T>` is that heap and `gc.collect()` runs the scan.\n\nThe shipped collector is pure Rust in crates/jet-codegen/src/Prelude/Gc.rs — a mark-sweep with zero external crates, so the I6 external-dep concern does not apply here. Ownership stays the default for everyone; `use core.gc` is an expert opt-in for the rare cyclic graph. Note the read path is unfinished: `Gc.get()` currently returns nothing, and only `.with`/`.with_mut` read a node today. This ballot decides whether that opt-in is public.",
+      "explainer": "",
+      "story": "Priya models a folder tree. Each folder owns its files, and each file keeps a link back to its parent folder. With refcounted handles the parent holds the child and the child holds the parent, so dropping the root frees nothing. She wants the cycle to clean itself up.",
+      "inWild": "A scene graph in examples/features/memory/: `Node.{ children: [Gc<Node>], parent: Gc<Node>? }` where each child points back at its parent; dropping the root should reclaim the whole cycle on the next `gc.collect()`.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Public expert module now",
+          "detail": "`use core.gc` resolves; `Gc.new`, `.clone()`, `.with`/`.with_mut`, and `gc.collect()` are documented and supported. It is Jet's blessed traced-home answer for cycles, beside `Pool`/`Id`. No external dependency, so I6 is satisfied.",
+          "technical": "$ jet run scene.jet\n# runs clean, exits 0 — the a<->b cycle is reclaimed by gc.collect()\n\n# contrast: the same two-node cycle built from Shared<Node> never frees.\n# each handle keeps a refcount of 1, so dropping the root leaks both nodes.",
+          "code": "use core.gc\n\nNode :: { name: String, link: Gc<Node>? }\n\n// two nodes that point at each other — a cycle\na :: Gc.new(Node.{ name: \"a\", link: None })\nb :: Gc.new(Node.{ name: \"b\", link: Val(a.clone()) })\na.with_mut(n => n.link = Val(b.clone()))\n\n// drop both handles, then reclaim the whole cycle at once\ngc.collect()   // frees a and b together"
+        },
+        {
+          "key": "B",
+          "name": "Ship it behind an experimental gate",
+          "detail": "The module stays, but `use core.gc` needs an explicit `#Experimental(\"gc\")` marker (same attribute shape as `#Unsafe`) and prints a one-time \"APIs may move\" note. Beginners never reach it by accident; the default cycle answer stays `Pool`/`Id`.",
+          "technical": "# without the marker:\n$ jet run scene.jet\nerror[E0461]: `core.gc` is experimental and not enabled here\n  |\n2 | use core.gc\n  |     ^^^^^^^ opt in with `#Experimental(\"gc\")` at the top of the file\n  = note: the collector read path is still changing; APIs may move\n\n# with the marker:\n$ jet run scene.jet\nnote: using experimental module `core.gc`",
+          "code": "#Experimental(\"gc\")   // required to reach core.gc\nuse core.gc\n\nNode :: { name: String, link: Gc<Node>? }\na :: Gc.new(Node.{ name: \"a\", link: None })\nb :: Gc.new(Node.{ name: \"b\", link: Val(a.clone()) })\na.with_mut(n => n.link = Val(b.clone()))\ngc.collect()"
+        },
+        {
+          "key": "C",
+          "name": "Pull it until a later ballot",
+          "detail": "`use core.gc` stops resolving. The answer to cycles becomes `Pool`/`Id` (built) or a `Weak` back-edge (not yet built). Re-expose `Gc<T>` after a dedicated ballot when the collector read path is finished.",
+          "technical": "$ jet run scene.jet\nerror[E0412]: unknown module `core.gc`\n  |\n1 | use core.gc\n  |     ^^^^^^^ no module named `gc`\n  = help: for cycles use `Pool<T>`/`Id<T>` — nodes in one table, edges as ids\n\n# ids are plain data, so no id-graph can leak; the pool frees on scope exit.",
+          "code": "// no `use core.gc` — cycles use an id-graph instead\nNode :: { name: String, link: Id<Node>? }\n\nworld := Pool<Node>.new()\na :: world.add(Node.{ name: \"a\", link: None })\nb :: world.add(Node.{ name: \"b\", link: Val(a) })\nworld[a].link = Val(b)     // a <-> b via ids — plain data, no leak"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`Rc<T>` cycles leak; `Weak<T>` breaks the back-edge, but you must pick which edge is weak by hand.",
+          "code": "let a = Rc::new(RefCell::new(Node { link: None }));\nlet b = Rc::new(RefCell::new(Node { link: Some(a.clone()) }));\na.borrow_mut().link = Some(b.clone()); // Rc cycle -> both leak\n// fix: make one edge Weak<Node> so the count can reach zero"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "B keeps the working escape hatch for experts, and the default cycle answer stays `Pool`/`Id`. It does not publish the collector's unfinished `.get()` read path as a supported API.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A blesses the collector as supported now, but its `.get()` read path currently returns nothing, and it adds a second cycle mechanism beside `Pool`/`Id` on the default surface."
+          },
+          {
+            "key": "C",
+            "reason": "C removes a working expert escape the owner named as a valid answer — an explicit traced home — forcing every cycle onto id-graphs even where tracing reads clearer."
+          }
+        ],
+        "tradeoff": "B adds one marker line (`#Experimental(\"gc\")`) and a one-time note experts must accept before the module resolves."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T19:59:10.567Z"
+    },
+    {
+      "id": "D-SHAPE-RESOURCE2",
+      "cardId": "c05n5x5o",
+      "group": "syntax",
+      "title": "A defer verb and one close word for resources",
+      "gist": "Whether Jet adds a `defer` verb and a single `close` word for every resource type, or only one of the two.",
+      "lesson": "Terms. A resource is a value tied to something outside memory — an open file, a held lock, a live connection. A plain value like a String or Int copies freely; a resource cannot, because two names for one open file would double-close it. `take`, written `^`, hands a resource away: after `close(^file)` the name `file` is gone. `defer` schedules a cleanup statement to run when the scope exits, on every path.\n\nD-SHAPE-RESOURCE1 already frees owned resources at block end. This ballot adds what the owner asked for after ratifying it: a `defer` mechanism and one close word for every type. Today closing is inconsistent — `close(^handle)` for FFI and db, `.drop(\"reason\")` for discard, no `defer`. The `^` at a close call stays the visible mark that a resource is handed away for good.",
+      "explainer": "",
+      "story": "Sam writes an importer that opens a file, takes a lock on shared state, and opens a database connection. All three must release on every exit — the happy path, a `?` error midway, and an early return. He wants the cleanup to sit next to each acquisition and use one word he does not have to look up per type.",
+      "inWild": "An importer in examples/features/io/ that opens a File, takes a Lock on shared state, and opens a Db connection, then must release all three on every return path — success, `?` error, and early exit.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A defer verb and one close word",
+          "detail": "`close(^x)` is the single word that ends any resource — File, Lock, or Connection. `defer close(^x)` schedules that close at scope exit, written next to acquisition. Block release (D-SHAPE-RESOURCE1) still covers the common case. `close` already appears in the FFI and db surface, so this unifies rather than invents.",
+          "technical": "// using a resource after `^` handed it away:\nclose(^conn)\nrows :: conn.query(sql\"...\")?\n\nerror[E0206]: `conn` was closed and cannot be used\n  |\n  | close(^conn)\n  |       ----- closed here — `^` handed it away\n  | rows :: conn.query(sql\"...\")?\n  |         ^^^^ used after close\n  = note: a File, Lock, or Connection moves with `^`; it has no copy",
+          "code": "fn import(path) -> Report {\n    file :: File.open(path)?\n    defer close(^file)          // runs at scope exit, on every path\n\n    lock :: Lock.acquire(state)?\n    defer close(^lock)\n\n    conn :: Db.open(\"cache.db\")?\n    defer close(^conn)\n\n    rows :: conn.query(sql\"select * from log\")?\n    Report.from(rows)\n}   // close(^conn), close(^lock), close(^file) run here, reverse order"
+        },
+        {
+          "key": "B",
+          "name": "One close word, no defer",
+          "detail": "Standardize on `close(^x)` for every type and retire `.drop`/`release` spellings for resources. Early release stays block-based (D-SHAPE-RESOURCE1). No `defer`: you write the closes yourself, or let block scope release on `?` returns.",
+          "technical": "$ jet run import.jet\n# works. but if conn.query fails, the three close() lines never run —\n# block scope releases them instead, so cleanup lives in two places.\n\n# use-after-close is still caught:\nerror[E0206]: `file` was closed and cannot be used",
+          "code": "fn import(path) -> Report {\n    file :: File.open(path)?\n    lock :: Lock.acquire(state)?\n    conn :: Db.open(\"cache.db\")?\n\n    rows :: conn.query(sql\"select * from log\")?\n    report :: Report.from(rows)\n\n    close(^conn)                // one word for every type\n    close(^lock)\n    close(^file)\n    report\n}   // any early `?` return still auto-releases via block scope"
+        },
+        {
+          "key": "C",
+          "name": "defer only, per-type close verbs",
+          "detail": "Add `defer <stmt>` running at scope exit, but keep each type's own close method. A File closes with `close`, a Lock with `release`, a Connection with `disconnect`. No single vocabulary.",
+          "technical": "// call the wrong verb and you learn each type is different:\ndefer file.release()\n\nerror[E0117]: no method `release` on `File`\n  |\n  | defer file.release()\n  |            ^^^^^^^ did you mean `close`?\n  = note: File closes with `close`, Lock with `release`, Connection with `disconnect`",
+          "code": "fn import(path) -> Report {\n    file :: File.open(path)?\n    defer file.close()\n\n    lock :: Lock.acquire(state)?\n    defer lock.release()        // different word per type\n\n    conn :: Db.open(\"cache.db\")?\n    defer conn.disconnect()\n\n    rows :: conn.query(sql\"select * from log\")?\n    Report.from(rows)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "`defer f.Close()` runs at function return; Jet's `defer close(^x)` adds the `^` so the handoff is visible.",
+          "code": "file, err := os.Open(path)\nif err != nil { return err }\ndefer file.Close()   // runs when the function returns"
+        },
+        {
+          "lang": "Python",
+          "note": "`with open(p) as f:` scopes cleanup to a block; Jet's block release already does this, and `defer` covers the non-block case.",
+          "code": "with open(path) as f:\n    data = f.read()\n# f closed at block exit"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives both things the owner asked for: a `defer` verb and one close word. Cleanup sits on the line next to acquisition and runs on every exit path, and `close` is the single vocabulary for File, Lock, and Connection.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B has no `defer`, so cleanup drifts to the bottom of the function away from acquisition, and early-return paths lean on implicit block release instead of one visible line."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps a different close word per type — `close`, `release`, `disconnect` — the inconsistent vocabulary the owner asked to remove."
+          }
+        ],
+        "tradeoff": "A introduces two constructs at once, `defer` and a universal `close`, so there are two new spellings to learn instead of one."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T19:59:10.706Z"
     }
   ],
   "questions": [
@@ -39564,6 +39906,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T19:59:10.706Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-SHAPE-RESOURCE2",
+      "note": "A defer verb and one close word for resources"
+    },
+    {
+      "at": "2026-07-15T19:59:10.567Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-OPTGC1",
+      "note": "Expose the opt-in Gc<T> cycle collector — resolve the I6 gate"
+    },
+    {
+      "at": "2026-07-15T19:57:04.095Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-UNSAFE-OBLIG1",
+      "note": "Typed unsafe obligations — per-operation review inside audited regions"
+    },
+    {
+      "at": "2026-07-15T19:57:03.959Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MEM-FACTS1",
+      "note": "Transitive fact vocabulary — allocation, RC, arena bounds"
+    },
+    {
+      "at": "2026-07-15T19:56:26.511Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MEM-VIEWRET1",
+      "note": "Stored and returned safe views"
+    },
+    {
+      "at": "2026-07-15T19:56:26.369Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MEM-PARAM1",
+      "note": "Unmarked parameter: read borrow or plain value?"
+    },
     {
       "at": "2026-07-15T19:50:05.496Z",
       "by": "claude-main",
@@ -43021,48 +43405,6 @@
       "action": "card.add",
       "ref": "c0mwjrp1",
       "note": "Full suite red: UI snapshots hide crypto nominal collision"
-    },
-    {
-      "at": "2026-07-15T03:17:33.267Z",
-      "by": "codex-diagnostic-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0izrn87",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T03:17:27.964Z",
-      "by": "codex-diagnostic-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0izrn87",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T03:17:22.929Z",
-      "by": "codex-diagnostic-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0izrn87",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T03:17:17.325Z",
-      "by": "codex-diagnostic-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0izrn87",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T03:12:15.447Z",
-      "by": "terra-420-builder",
-      "action": "card.release",
-      "ref": "c01fj815",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T03:12:15.351Z",
-      "by": "terra-420-builder",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,

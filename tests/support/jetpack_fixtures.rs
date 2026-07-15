@@ -454,6 +454,20 @@ pub fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
 /// payload), so this returns `(hangar_dir, envelope_output_hash)` — callers
 /// that need to cross-reference the digest elsewhere (e.g. a lockfile's
 /// `output-hash`) read it back from the second element.
+///
+/// KNOWN LIMITATION (found while wiring this up, not fixed here — see the
+/// delegation report): `last_used_at`/`realized_at` are patched into
+/// `meta.json` on disk *after* `ingest_tree` registers the entry, but the
+/// closure journal (not `meta.json`) is the actual source of truth now.
+/// `recover_closure_journal_graph_unlocked` re-materializes `meta.json` from
+/// the journal's stored record on every subsequent hangar operation
+/// (including the very `jetpack clean` a caller is about to invoke), which
+/// clobbers this patch back to the real ingest-time timestamp before any
+/// staleness check ever reads it. There is no public API to backdate a
+/// hangar entry's timestamp through `ingest_tree`. Tests that need a
+/// genuinely *stale* or *timestamp-less* (legacy) entry cannot get one this
+/// way post-card-#420; that needs either a production-side test hook or
+/// direct closure-journal surgery (see the report for detail).
 pub fn write_hangar_meta(
     root: &Path,
     id: &str,
