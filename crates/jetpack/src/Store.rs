@@ -1952,6 +1952,8 @@ fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
                 || name == OBJECTS_DIR
                 || name == CAS_DIR
                 || name == REFERRERS_DIR
+                || name == "lifecycle-db"
+                || name == "closure-db"
                 || name == "quarantine"
                 || name.starts_with('.');
             if path.is_dir() && !reserved {
@@ -2063,5 +2065,7 @@ mod Ingest;
 pub use Ingest::*;
 mod Closure;
 pub use Closure::*;
+#[allow(dead_code)]
+pub(crate) mod Lifecycle;
 #[cfg(test)]
 mod Tests;

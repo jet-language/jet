@@ -498,6 +498,32 @@ fn load_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     load_graph_mode(roots, false)
 }
 
+pub(super) fn lifecycle_inputs_unlocked(
+    roots: &Roots,
+) -> std::io::Result<(BTreeSet<String>, String)> {
+    recover_closure_journal_unlocked(roots)?;
+    let graph = load_graph_mode(roots, true)?;
+    let journal = journal_dir(roots);
+    let mut paths = transaction_paths(&journal)?;
+    paths.sort();
+    let mut canonical = b"jet-closure-head-v1\0".to_vec();
+    for path in paths {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| std::io::Error::other("closure journal has a non-UTF-8 name"))?;
+        let bytes = fs::read(&path)?;
+        canonical.extend_from_slice(&(name.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(name.as_bytes());
+        canonical.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(&bytes);
+    }
+    Ok((
+        graph.objects.into_keys().collect(),
+        format!("sha256-{}", SHA256::sha256_hex(&canonical)),
+    ))
+}
+
 fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<ClosureGraph> {
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {

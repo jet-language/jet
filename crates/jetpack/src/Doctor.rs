@@ -67,7 +67,7 @@ fn check_hangar(roots: &Store::Roots) -> Check {
         if !path.is_dir() { continue; }
         if matches!(
             ent.file_name().to_str(),
-            Some("build-scratch" | "objects" | ".stage" | "cas" | "referrers" | "closure-db" | "quarantine")
+            Some("build-scratch" | "objects" | ".stage" | "cas" | "referrers" | "closure-db" | "lifecycle-db" | "quarantine")
         ) {
             continue;
         }
