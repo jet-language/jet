@@ -30,6 +30,24 @@ struct SourceArtifact {
     hash: String,
 }
 
+fn dependency_objects(root: &str, artifacts: &[SourceArtifact]) -> (Vec<String>, BTreeMap<String, String>) {
+    let mut references = Vec::new();
+    let mut facts = BTreeMap::new();
+    for artifact in artifacts
+        .iter()
+        .filter(|artifact| artifact.record.name != root)
+    {
+        let digest = format!("sha256-{}", artifact.hash);
+        let relative = format!(
+            "sources/{}",
+            artifact.path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        facts.insert(format!("dependency.object.{digest}"), relative);
+        references.push(digest);
+    }
+    (references, facts)
+}
+
 pub(super) struct CranProvider;
 
 impl Provider for CranProvider {
@@ -158,6 +176,8 @@ impl Provider for CranProvider {
             );
         }
         let identity = cache_identity(&source_hash, RECIPE_ID, ctx);
+        let (references, mut dependency_facts) = dependency_objects(&root.name, &artifacts);
+        dependency_facts.insert("repository".into(), repository.clone());
         let producer = producer_record(
             "cran",
             &format!("cas:{source_hash}"),
@@ -169,7 +189,7 @@ impl Provider for CranProvider {
             ]),
             "cran-provider-v1",
             &identity,
-            BTreeMap::from([("repository".into(), repository)]),
+            dependency_facts,
         )
         .map_err(|error| ProviderError::Cran(format!("invalid producer record: {error:?}")))?;
         Ok(Realized {
@@ -183,7 +203,7 @@ impl Provider for CranProvider {
             cache_identity: identity,
             source_state: SourceState::Built,
             named_outputs: BTreeMap::from([("out".into(), out)]),
-            references: Vec::new(),
+            references,
             producer,
         })
     }
@@ -544,6 +564,26 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn dependency_edges_use_exact_preserved_source_object_digests() {
+        let artifact = |name: &str, hash: &str| SourceArtifact {
+            record: Record {
+                name: name.into(),
+                version: "1".into(),
+                dependencies: Vec::new(),
+            },
+            path: PathBuf::from(format!("/scratch/{name}.tar.gz")),
+            hash: hash.into(),
+        };
+        let artifacts = [artifact("dep", "abcd"), artifact("app", "root")];
+        let (references, facts) = dependency_objects("app", &artifacts);
+        assert_eq!(references, vec!["sha256-abcd"]);
+        assert_eq!(
+            facts.get("dependency.object.sha256-abcd").map(String::as_str),
+            Some("sources/dep.tar.gz")
+        );
+    }
 
     #[test]
     fn parses_real_cran_dcf_and_orders_dependencies() {

@@ -68,17 +68,8 @@ pub(super) fn producer_record(
     plan_facts: BTreeMap<String, String>,
     toolchain_facts: &str,
     identity: &super::Store::CacheIdentity,
-    mut facts: BTreeMap<String, String>,
+    facts: BTreeMap<String, String>,
 ) -> Result<super::Store::ProducerRecord, ProviderError> {
-    facts.insert(
-        "closure.authority".into(),
-        if provider == "nix" {
-            "external-nix-gc-root"
-        } else {
-            "embedded-output"
-        }
-        .into(),
-    );
     let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
         .map_err(ProviderError::CoreBuild)?;
     super::Store::ProducerRecord::new(
@@ -1004,10 +995,7 @@ pub(crate) fn realize_adapter(
         replay,
         format!("declared-tools:{:?}", build_ctx.tools),
         format!("policy={}\nplatform={}", identity.policy_fingerprint, identity.platform),
-        BTreeMap::from([
-            ("adapter.source".into(), plan.source.clone()),
-            ("closure.authority".into(), "embedded-output".into()),
-        ]),
+        BTreeMap::from([("adapter.source".into(), plan.source.clone())]),
     )
     .map_err(ProviderError::Adapter)?;
     Ok(Realized {
@@ -1467,10 +1455,7 @@ mod tests {
             r.producer.source_digest,
             SHA256::sha256_hex(b"/nix/store/abc-fastfetch.drv")
         );
-        assert_eq!(
-            r.producer.facts.get("closure.authority").map(String::as_str),
-            Some("external-nix-gc-root")
-        );
+        assert!(!r.producer.facts.contains_key("closure.authority"));
         assert_eq!(
             r.producer.plan.facts().get("nix.output.out").map(String::as_str),
             Some("/nix/store/abc-fastfetch-2.0")

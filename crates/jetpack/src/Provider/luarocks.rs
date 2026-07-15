@@ -36,6 +36,24 @@ struct Artifact {
     source_hash: String,
 }
 
+fn dependency_objects(root: &str, artifacts: &[Artifact]) -> (Vec<String>, BTreeMap<String, String>) {
+    let mut references = Vec::new();
+    let mut facts = BTreeMap::new();
+    for artifact in artifacts
+        .iter()
+        .filter(|artifact| artifact.spec.name != root)
+    {
+        let digest = format!("sha256-{}", artifact.source_hash);
+        let relative = format!(
+            "sources/{}",
+            artifact.source_path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        facts.insert(format!("dependency.object.{digest}"), relative);
+        references.push(digest);
+    }
+    (references, facts)
+}
+
 pub(super) struct LuaRocksProvider;
 
 impl Provider for LuaRocksProvider {
@@ -187,6 +205,8 @@ impl Provider for LuaRocksProvider {
             );
         }
         let identity = cache_identity(&source_hash, RECIPE_ID, ctx);
+        let (references, mut dependency_facts) = dependency_objects(&root.name, &artifacts);
+        dependency_facts.insert("repository".into(), repository.clone());
         let producer = producer_record(
             "luarocks",
             &format!("cas:{source_hash}"),
@@ -198,7 +218,7 @@ impl Provider for LuaRocksProvider {
             ]),
             "luarocks-provider-v1",
             &identity,
-            BTreeMap::from([("repository".into(), repository)]),
+            dependency_facts,
         )
         .map_err(|error| ProviderError::LuaRocks(format!("invalid producer record: {error:?}")))?;
         Ok(Realized {
@@ -212,7 +232,7 @@ impl Provider for LuaRocksProvider {
             cache_identity: identity,
             source_state: SourceState::Built,
             named_outputs: BTreeMap::from([("out".into(), out)]),
-            references: Vec::new(),
+            references,
             producer,
         })
     }
@@ -803,6 +823,33 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn dependency_edges_use_exact_preserved_source_object_digests() {
+        let spec = |name: &str| Rockspec {
+            name: name.into(),
+            version: "1-1".into(),
+            source_url: format!("file:///{name}.tar.gz"),
+            source_hash: "source".into(),
+            dependencies: Vec::new(),
+            modules: BTreeMap::new(),
+            platforms: Vec::new(),
+        };
+        let artifact = |name: &str, hash: &str| Artifact {
+            spec: spec(name),
+            rockspec_path: PathBuf::from(format!("/scratch/{name}.rockspec")),
+            source_path: PathBuf::from(format!("/scratch/{name}.tar.gz")),
+            rockspec_hash: "rockspec".into(),
+            source_hash: hash.into(),
+        };
+        let artifacts = [artifact("dep", "abcd"), artifact("app", "root")];
+        let (references, facts) = dependency_objects("app", &artifacts);
+        assert_eq!(references, vec!["sha256-abcd"]);
+        assert_eq!(
+            facts.get("dependency.object.sha256-abcd").map(String::as_str),
+            Some("sources/dep.tar.gz")
+        );
+    }
 
     #[test]
     fn parses_rockspec_and_rejects_mutable_or_unsafe_refs() {

@@ -1282,7 +1282,6 @@ mod tests {
                 format!("nix-derivation:{drv}"),
                 "policy=test\nplatform=test",
                 BTreeMap::from([
-                    ("closure.authority".into(), "external-nix-gc-root".into()),
                     ("nix.output.out".into(), output.into()),
                 ]),
             ).unwrap().encode()
@@ -1319,21 +1318,24 @@ mod tests {
     }
 
     #[test]
-    fn closure_rejects_same_record_action_with_different_named_outputs() {
+    fn closure_rejects_same_action_output_name_with_conflicting_bytes() {
         let (roots, _g) = temp_roots();
         let primary = ingest_fixture(&roots, "same-record", &[("out", "primary")], Vec::new());
         let named = ingest_fixture(&roots, "named-source", &[("out", "named")], Vec::new());
         let action = entry_action_key(&primary.entry);
         let mut conflicting = primary.entry.clone();
-        conflicting.named_outputs.insert(
-            "dev".to_string(),
+        conflicting.id = "conflicting-projection".into();
+        conflicting.out = named.entry.out.clone();
+        conflicting.envelope.output_hash = named.entry.envelope.output_hash.clone();
+        conflicting.named_outputs = BTreeMap::from([(
+            "out".to_string(),
             named.entry.envelope.output_hash.clone(),
-        );
+        )]);
         let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
             register_entry_unlocked(&roots, &conflicting)
         })
         .unwrap_err();
-        assert!(error.to_string().contains("maps to conflicting records"));
+        assert!(error.to_string().contains("conflicting bytes"));
         assert_eq!(action_outputs_of(&roots, &action).unwrap().len(), 1);
         assert!(!action_outputs_of(&roots, &action).unwrap().contains_key("dev"));
     }

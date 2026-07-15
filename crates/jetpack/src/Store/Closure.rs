@@ -33,6 +33,12 @@ pub struct ClosureGraph {
     pub deleted_records: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CanonicalActionRecord {
+    outputs: BTreeMap<String, String>,
+    references: BTreeSet<String>,
+}
+
 impl ClosureGraph {
     pub fn direct_references(&self, digest: &str) -> Vec<String> {
         let mut out = BTreeSet::new();
@@ -101,8 +107,10 @@ impl ClosureGraph {
     pub fn action_outputs(&self, action_key: &str) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
         for record in self.records.values().filter(|record| record.action_key == action_key) {
-            for (name, digest) in &record.outputs {
-                out.insert(name.clone(), digest.clone());
+            if let Ok(projection) = canonical_action_projection(record) {
+                for (name, digest) in projection.outputs {
+                    out.insert(name, digest);
+                }
             }
         }
         out
@@ -461,6 +469,44 @@ fn descriptor_for_entry(
             external,
         });
     }
+    if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+        for digest in &entry.references {
+            let Some(relative) = producer.facts.get(&format!("dependency.object.{digest}")) else {
+                continue;
+            };
+            let relative = Path::new(relative);
+            if relative.is_absolute()
+                || relative.components().any(|component| {
+                    !matches!(component, std::path::Component::Normal(_))
+                })
+            {
+                return Err(std::io::Error::other(format!(
+                    "closure record `{}` has invalid dependency object path `{}`",
+                    entry.id,
+                    relative.display()
+                )));
+            }
+            let path = Path::new(&entry.out).join(relative);
+            let bytes = fs::read(&path).map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!("reading dependency object `{}`: {error}", path.display()),
+                )
+            })?;
+            let actual = format!("sha256-{}", SHA256::sha256_hex(&bytes));
+            if &actual != digest {
+                return Err(std::io::Error::other(format!(
+                    "dependency object `{}` records `{digest}`, re-hash produced `{actual}`",
+                    path.display()
+                )));
+            }
+            objects.push(ClosureObject {
+                digest: digest.clone(),
+                external: !path.starts_with(roots.hangar_dir()),
+                path: path.to_string_lossy().into_owned(),
+            });
+        }
+    }
     objects.sort_by(|left, right| left.digest.cmp(&right.digest));
     objects.dedup_by(|left, right| left.digest == right.digest);
     let mut package_entry = entry.clone();
@@ -663,7 +709,7 @@ fn validate_graph_mode(
     {
         return Err(format!("invalid deleted closure record `{id}`"));
     }
-    let mut actions: BTreeMap<&str, &ClosureRecord> = BTreeMap::new();
+    let mut actions: BTreeMap<&str, CanonicalActionRecord> = BTreeMap::new();
     for (id, record) in &graph.records {
         if id.is_empty() || id != &record.id || record.action_key.is_empty() {
             return Err(format!("invalid closure record `{id}`"));
@@ -697,18 +743,20 @@ fn validate_graph_mode(
             let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
                 format!("closure record `{id}` has invalid producer record: {error}")
             })?;
-            if record.references.is_empty()
-                && !matches!(
-                    producer.facts.get("closure.authority").map(String::as_str),
-                    Some("hangar-cas" | "embedded-output" | "external-nix-gc-root")
-                )
-            {
-                return Err(format!(
-                    "closure record `{id}` has no dependency references or explicit closure authority"
-                ));
-            }
             let meta = parse_meta(&record.package_meta)
                 .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
+            if record.action_key != entry_action_key(&store_entry_from_meta(id, &meta)) {
+                return Err(format!(
+                    "closure record `{id}` action key disagrees with package metadata"
+                ));
+            }
+            if record.references.is_empty()
+                && !store_validates_complete_closure(roots, record, &meta, &producer)
+            {
+                return Err(format!(
+                    "closure record `{id}` has no dependency references or store-validated closure proof"
+                ));
+            }
             if meta.producer_record != record.producer_record {
                 return Err(format!(
                     "closure record `{id}` package metadata disagrees with producer record"
@@ -720,16 +768,11 @@ fn validate_graph_mode(
                 ));
             }
         }
-        if let Some(existing) = actions.insert(&record.action_key, record) {
-            if existing.outputs != record.outputs
-                || existing.references != record.references
-                || existing.producer_record != record.producer_record
-            {
-                return Err(format!(
-                    "action `{}` maps to conflicting records `{}` and `{}`",
-                    record.action_key, existing.id, record.id
-                ));
-            }
+        let projection = canonical_action_projection(record)?;
+        if let Some(action) = actions.get_mut(record.action_key.as_str()) {
+            merge_action_projection(action, &projection, &record.action_key)?;
+        } else {
+            actions.insert(record.action_key.as_str(), projection);
         }
     }
     Ok(())
@@ -745,18 +788,114 @@ fn valid_output_name(name: &str) -> bool {
 }
 
 fn reject_action_conflict(graph: &ClosureGraph, candidate: &ClosureRecord) -> Result<(), String> {
-    if let Some(existing) = graph.records.values().find(|record| {
-        record.action_key == candidate.action_key
-            && (record.outputs != candidate.outputs
-                || record.references != candidate.references
-                || record.producer_record != candidate.producer_record)
-    }) {
-        return Err(format!(
-            "action `{}` maps to conflicting records `{}` and `{}`",
-            candidate.action_key, existing.id, candidate.id
-        ));
+    let candidate_projection = canonical_action_projection(candidate)?;
+    for existing in graph
+        .records
+        .values()
+        .filter(|record| record.action_key == candidate.action_key)
+    {
+        let mut action = canonical_action_projection(existing)?;
+        merge_action_projection(&mut action, &candidate_projection, &candidate.action_key)?;
     }
     Ok(())
+}
+
+fn canonical_action_projection(record: &ClosureRecord) -> Result<CanonicalActionRecord, String> {
+    if record.producer_record.is_empty() {
+        return Ok(CanonicalActionRecord {
+            outputs: record.outputs.clone(),
+            references: record.references.clone(),
+        });
+    }
+    let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
+        format!("closure record `{}` has invalid producer record: {error}", record.id)
+    })?;
+    let outputs: BTreeMap<String, String> = if producer.provider == "nix" {
+        producer
+            .facts
+            .keys()
+            .filter_map(|key| key.strip_prefix("nix.output."))
+            .filter_map(|name| {
+                record
+                    .outputs
+                    .get(name)
+                    .map(|digest| (name.to_string(), digest.clone()))
+            })
+            .collect()
+    } else {
+        record.outputs.clone()
+    };
+    if outputs.is_empty() {
+        return Err(format!(
+            "closure record `{}` has no canonical action output projection",
+            record.id
+        ));
+    }
+    Ok(CanonicalActionRecord {
+        outputs,
+        references: record.references.clone(),
+    })
+}
+
+fn merge_action_projection(
+    action: &mut CanonicalActionRecord,
+    projection: &CanonicalActionRecord,
+    action_key: &str,
+) -> Result<(), String> {
+    if action.references != projection.references {
+        return Err(format!("action `{action_key}` has conflicting dependency references"));
+    }
+    for (name, digest) in &projection.outputs {
+        if let Some(existing) = action.outputs.get(name) {
+            if existing != digest {
+                return Err(format!(
+                    "action `{action_key}` output `{name}` maps to conflicting bytes `{existing}` and `{digest}`"
+                ));
+            }
+        } else {
+            action.outputs.insert(name.clone(), digest.clone());
+        }
+    }
+    Ok(())
+}
+
+fn store_validates_complete_closure(
+    roots: &Roots,
+    record: &ClosureRecord,
+    meta: &ParsedMeta,
+    producer: &ProducerRecord,
+) -> bool {
+    let output = Path::new(&meta.out);
+    let local = roots.hangar_dir().join(OBJECTS_DIR).join(&record.primary);
+    if output == local && local.exists() {
+        return true;
+    }
+    if producer.provider != "nix" || !output.starts_with("/nix/store") {
+        return false;
+    }
+    let root = roots.hangar_dir().join(&record.id).join("nix-gc-root");
+    root.exists()
+        && std::fs::canonicalize(root).ok() == std::fs::canonicalize(output).ok()
+}
+
+fn store_entry_from_meta(id: &str, meta: &ParsedMeta) -> StoreEntry {
+    StoreEntry {
+        id: id.to_string(),
+        name: meta.name.clone(),
+        version: meta.version.clone(),
+        reference: meta.reference.clone(),
+        out: meta.out.clone(),
+        bin: meta.bin.clone(),
+        rlib: meta.rlib.clone(),
+        envelope: meta.envelope.clone(),
+        cache_identity: meta.cache_identity.clone(),
+        references: meta.references.clone(),
+        named_outputs: meta.named_outputs.clone(),
+        platform_artifact_kind: meta.platform_artifact_kind.clone(),
+        producer_record: meta.producer_record.clone(),
+        realized_at: meta.realized_at.unwrap_or(0),
+        last_used_at: meta.last_used_at.unwrap_or(0),
+    }
 }
 
 fn append_entry(roots: &Roots, entry: &JournalEntry) -> std::io::Result<()> {
@@ -1081,6 +1220,89 @@ mod integrity_tests {
     fn checked(body: String) -> String {
         let checksum = SHA256::sha256_hex(body.as_bytes());
         format!("{body}checksum\t{checksum}\n")
+    }
+
+    fn nix_projection_record(
+        id: &str,
+        output_name: &str,
+        digest: &str,
+        reference: &str,
+    ) -> ClosureRecord {
+        let drv = "/nix/store/canonical-action.drv";
+        let output_path = format!("/nix/store/{digest}");
+        let producer = ProducerRecord::new(
+            "nix",
+            drv,
+            SHA256::sha256_hex(drv.as_bytes()),
+            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+                ("nix.drv_path".into(), drv.into()),
+                ("nix.reference".into(), reference.into()),
+                (format!("nix.output.{output_name}"), output_path.clone()),
+            ]))
+            .unwrap(),
+            format!("nix-derivation:{drv}"),
+            "policy=test\nplatform=test",
+            BTreeMap::from([
+                ("nix.drv_path".into(), drv.into()),
+                (format!("nix.output.{output_name}"), output_path),
+            ]),
+        )
+        .unwrap()
+        .encode();
+        ClosureRecord {
+            id: id.into(),
+            primary: digest.into(),
+            action_key: "sha256-same-action".into(),
+            outputs: BTreeMap::from([
+                ("out".into(), digest.into()),
+                (output_name.into(), digest.into()),
+            ]),
+            references: BTreeSet::new(),
+            producer_record: producer,
+            package_meta: String::new(),
+        }
+    }
+
+    #[test]
+    fn canonical_action_merges_multi_output_alias_projections_and_rejects_conflicting_bytes() {
+        let out = nix_projection_record("alias-out", "out", "sha256-out", "nixpkgs:pkg");
+        let dev = nix_projection_record("alias-dev", "dev", "sha256-dev", "stable:pkg.dev");
+        let objects = ["sha256-out", "sha256-dev"]
+            .into_iter()
+            .map(|digest| ClosureObject {
+                digest: digest.into(),
+                path: format!("/nix/store/{digest}"),
+                external: true,
+            })
+            .collect();
+        let mut graph = ClosureGraph::default();
+        apply_entry(
+            &mut graph,
+            JournalEntry {
+                kind: JournalKind::Delta,
+                objects,
+                records: vec![out, dev],
+                deleted_records: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            graph.action_outputs("sha256-same-action"),
+            BTreeMap::from([
+                ("dev".into(), "sha256-dev".into()),
+                ("out".into(), "sha256-out".into()),
+            ])
+        );
+
+        let conflict = nix_projection_record(
+            "alias-dev-conflict",
+            "dev",
+            "sha256-other-dev",
+            "other:pkg.dev",
+        );
+        assert!(reject_action_conflict(&graph, &conflict)
+            .unwrap_err()
+            .contains("conflicting bytes"));
     }
 
     #[test]

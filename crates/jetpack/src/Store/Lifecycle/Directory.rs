@@ -98,6 +98,8 @@ fn valid_name(name: &str) -> io::Result<()> {
 mod platform {
     use super::*;
     use std::ffi::{c_char, CStr, CString};
+    #[cfg(target_os = "macos")]
+    use std::ffi::c_void;
     use std::fs::{self, OpenOptions};
     use std::os::fd::{AsRawFd as _, FromRawFd as _};
     use std::os::unix::ffi::OsStrExt as _;
@@ -146,6 +148,38 @@ mod platform {
             flags: i32,
         ) -> i32;
         fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
+        #[cfg(target_os = "macos")]
+        fn dup(fd: i32) -> i32;
+        #[cfg(target_os = "macos")]
+        fn fdopendir(fd: i32) -> *mut c_void;
+        #[cfg(target_os = "macos")]
+        fn readdir(directory: *mut c_void) -> *mut MacDirent;
+        #[cfg(target_os = "macos")]
+        fn closedir(directory: *mut c_void) -> i32;
+        #[cfg(target_os = "macos")]
+        fn __error() -> *mut i32;
+    }
+
+    #[cfg(target_os = "macos")]
+    #[repr(C)]
+    struct MacDirent {
+        inode: u64,
+        seek_offset: u64,
+        record_length: u16,
+        name_length: u16,
+        file_type: u8,
+        name: [c_char; 1024],
+    }
+
+    #[cfg(target_os = "macos")]
+    struct DirectoryStream(*mut c_void);
+
+    #[cfg(target_os = "macos")]
+    impl Drop for DirectoryStream {
+        fn drop(&mut self) {
+            // SAFETY: fdopendir returned this uniquely owned stream.
+            let _ = unsafe { closedir(self.0) };
+        }
     }
 
     pub(super) struct PinnedDirectory {
@@ -217,12 +251,16 @@ mod platform {
                     .map(|entry| entry.map(|entry| entry.file_name()))
                     .collect();
             }
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            #[cfg(target_os = "macos")]
+            {
+                return macos_names(self.file.as_raw_fd(), maximum);
+            }
+            #[cfg(target_os = "ios")]
             {
                 let _ = maximum;
                 Err(io::Error::new(
                     io::ErrorKind::Unsupported,
-                    "pinned lifecycle directory enumeration requires fdopendir support",
+                    "pinned lifecycle directory enumeration is unsupported on iOS",
                 ))
             }
         }
@@ -384,6 +422,44 @@ mod platform {
             return Err(io::Error::other("pinned directory member was replaced"));
         }
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_names(fd: i32, maximum: usize) -> io::Result<Vec<OsString>> {
+        // fdopendir owns its fd, so duplicate the pinned handle first.
+        let duplicate = unsafe { dup(fd) };
+        if duplicate < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let raw = unsafe { fdopendir(duplicate) };
+        if raw.is_null() {
+            // fdopendir leaves the duplicate owned by the caller on failure.
+            drop(unsafe { File::from_raw_fd(duplicate) });
+            return Err(io::Error::last_os_error());
+        }
+        let stream = DirectoryStream(raw);
+        let mut names = Vec::new();
+        while names.len() < maximum {
+            unsafe { *__error() = 0 };
+            let entry = unsafe { readdir(stream.0) };
+            if entry.is_null() {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(0) {
+                    break;
+                }
+                return Err(error);
+            }
+            let entry = unsafe { &*entry };
+            let length = usize::from(entry.name_length).min(entry.name.len());
+            let bytes = unsafe {
+                std::slice::from_raw_parts(entry.name.as_ptr().cast::<u8>(), length)
+            };
+            if matches!(bytes, b"." | b"..") {
+                continue;
+            }
+            names.push(std::ffi::OsStr::from_bytes(bytes).to_os_string());
+        }
+        Ok(names)
     }
 }
 

@@ -244,7 +244,7 @@ fn ingest_tree_unlocked(
                     )));
                 }
                 fsync_tree(&destination)?;
-                fsync_dir(&objects)?;
+                super::sync_store_directory(&objects)?;
                 make_tree_writable_for_removal(staged)?;
                 fs::remove_dir_all(staged)?;
                 continue;
@@ -271,9 +271,9 @@ fn ingest_tree_unlocked(
                 )));
             }
             fsync_tree(&partial)?;
-            fsync_dir(&objects)?;
+            super::sync_store_directory(&objects)?;
             fs::rename(&partial, &destination)?;
-            fsync_dir(&objects)?;
+            super::sync_store_directory(&objects)?;
         }
 
         let out_path = final_obj.to_string_lossy().into_owned();
@@ -364,29 +364,6 @@ fn valid_output_name(name: &str) -> bool {
     component == path.as_os_str() && components.next().is_none()
 }
 
-#[cfg(unix)]
-fn libc_fsync(fd: i32) -> i32 {
-    #[link(name = "c")]
-    extern "C" {
-        fn fsync(fd: i32) -> i32;
-    }
-    unsafe { fsync(fd) }
-}
-
-fn fsync_dir(path: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd as _;
-        let file = fs::File::open(path)?;
-        let rc = libc_fsync(file.as_raw_fd());
-        if rc != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-    }
-    let _ = path;
-    Ok(())
-}
-
 fn reject_semantic_xattrs_tree(root: &Path) -> Result<(), IngestError> {
     fn walk(path: &Path) -> Result<(), IngestError> {
         let meta = fs::symlink_metadata(path).map_err(|e| IngestError::Io(e.to_string()))?;
@@ -431,7 +408,7 @@ fn copy_semantic_xattrs_tree(src_root: &Path, dst_root: &Path) -> Result<(), Ing
 }
 
 fn copy_semantic_xattrs_file(src: &Path, dst: &Path) -> Result<(), IngestError> {
-    let names = super::super::Envelope::list_xattr_names(src).map_err(IngestError::Invalid)?;
+    let names = semantic_xattr_names(src)?;
     for name in names {
         if super::super::Envelope::is_excluded_xattr(&name) {
             continue;
@@ -440,6 +417,50 @@ fn copy_semantic_xattrs_file(src: &Path, dst: &Path) -> Result<(), IngestError> 
         set_xattr_value(dst, &name, &value)?;
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn semantic_xattr_names(path: &Path) -> Result<Vec<String>, IngestError> {
+    super::super::Envelope::list_xattr_names(path).map_err(IngestError::Invalid)
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn semantic_xattr_names(path: &Path) -> Result<Vec<String>, IngestError> {
+    use std::os::unix::ffi::OsStrExt as _;
+    unsafe extern "C" {
+        fn listxattr(path: *const i8, list: *mut i8, size: usize, options: i32) -> isize;
+    }
+    const XATTR_NOFOLLOW: i32 = 0x0001;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| IngestError::Invalid("xattr path contains NUL".into()))?;
+    let size = unsafe { listxattr(path.as_ptr(), std::ptr::null_mut(), 0, XATTR_NOFOLLOW) };
+    if size < 0 {
+        return Err(IngestError::Io(format!(
+            "listxattr failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let mut names = vec![0i8; size as usize];
+    let wrote = unsafe { listxattr(path.as_ptr(), names.as_mut_ptr(), names.len(), XATTR_NOFOLLOW) };
+    if wrote < 0 {
+        return Err(IngestError::Io(format!(
+            "listxattr failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(names.as_ptr().cast::<u8>(), wrote as usize) };
+    Ok(bytes
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+fn semantic_xattr_names(_path: &Path) -> Result<Vec<String>, IngestError> {
+    Err(IngestError::Invalid(
+        "semantic xattr ingest is unsupported on this platform".into(),
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -482,9 +503,54 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
     Ok(buf)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
+    use std::os::unix::ffi::OsStrExt as _;
+    unsafe extern "C" {
+        fn getxattr(
+            path: *const i8,
+            name: *const i8,
+            value: *mut u8,
+            size: usize,
+            position: u32,
+            options: i32,
+        ) -> isize;
+    }
+    const XATTR_NOFOLLOW: i32 = 0x0001;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| IngestError::Invalid(format!("path `{}` contains NUL", path.display())))?;
+    let c_name = std::ffi::CString::new(name)
+        .map_err(|_| IngestError::Invalid(format!("xattr name `{name}` contains NUL")))?;
+    let size = unsafe {
+        getxattr(c_path.as_ptr(), c_name.as_ptr(), std::ptr::null_mut(), 0, 0, XATTR_NOFOLLOW)
+    };
+    if size < 0 {
+        return Err(IngestError::Io(format!(
+            "getxattr `{name}` on `{}`: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    let mut value = vec![0; size as usize];
+    let wrote = unsafe {
+        getxattr(c_path.as_ptr(), c_name.as_ptr(), value.as_mut_ptr(), value.len(), 0, XATTR_NOFOLLOW)
+    };
+    if wrote < 0 {
+        return Err(IngestError::Io(format!(
+            "getxattr `{name}` on `{}`: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    value.truncate(wrote as usize);
+    Ok(value)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
 fn get_xattr_value(_path: &Path, _name: &str) -> Result<Vec<u8>, IngestError> {
-    Ok(Vec::new())
+    Err(IngestError::Invalid(
+        "semantic xattr ingest is unsupported on this platform".into(),
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -525,9 +591,42 @@ fn set_xattr_value(path: &Path, name: &str, value: &[u8]) -> Result<(), IngestEr
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn set_xattr_value(_path: &Path, _name: &str, _value: &[u8]) -> Result<(), IngestError> {
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn set_xattr_value(path: &Path, name: &str, value: &[u8]) -> Result<(), IngestError> {
+    use std::os::unix::ffi::OsStrExt as _;
+    unsafe extern "C" {
+        fn setxattr(
+            path: *const i8,
+            name: *const i8,
+            value: *const u8,
+            size: usize,
+            position: u32,
+            options: i32,
+        ) -> i32;
+    }
+    const XATTR_NOFOLLOW: i32 = 0x0001;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| IngestError::Invalid(format!("path `{}` contains NUL", path.display())))?;
+    let c_name = std::ffi::CString::new(name)
+        .map_err(|_| IngestError::Invalid(format!("xattr name `{name}` contains NUL")))?;
+    if unsafe {
+        setxattr(c_path.as_ptr(), c_name.as_ptr(), value.as_ptr(), value.len(), 0, XATTR_NOFOLLOW)
+    } != 0
+    {
+        return Err(IngestError::Io(format!(
+            "setxattr `{name}` on `{}`: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
     Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+fn set_xattr_value(_path: &Path, _name: &str, _value: &[u8]) -> Result<(), IngestError> {
+    Err(IngestError::Invalid(
+        "semantic xattr ingest is unsupported on this platform".into(),
+    ))
 }
 
 fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
@@ -601,8 +700,7 @@ fn copy_nofollow_file(
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
-        const O_NOFOLLOW: i32 = 0x20000;
-        options.custom_flags(O_NOFOLLOW);
+        options.custom_flags(nofollow_open_flag()?);
     }
     let mut file = options
         .open(src)
@@ -639,6 +737,25 @@ fn copy_nofollow_file(
     Ok(())
 }
 
+#[cfg(unix)]
+fn nofollow_open_flag() -> Result<i32, IngestError> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    return Ok(0o400000);
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    return Ok(0x0100);
+    #[allow(unreachable_code)]
+    Err(IngestError::Invalid(
+        "nofollow ingest is unsupported on this Unix platform".into(),
+    ))
+}
+
 fn stable_meta_identity(meta: &fs::Metadata) -> (u64, u64, u64, u32) {
     #[cfg(unix)]
     {
@@ -653,5 +770,25 @@ fn stable_meta_identity(meta: &fs::Metadata) -> (u64, u64, u64, u32) {
             meta.len(),
             u32::from(meta.permissions().readonly()),
         )
+    }
+}
+
+#[cfg(test)]
+mod portability_tests {
+    #[cfg(unix)]
+    #[test]
+    fn nofollow_flag_matches_supported_target_abi() {
+        let flag = super::nofollow_open_flag().unwrap();
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        assert_eq!(flag, 0o400000);
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        assert_eq!(flag, 0x0100);
     }
 }
