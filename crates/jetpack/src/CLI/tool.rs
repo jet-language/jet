@@ -20,7 +20,7 @@ use crate::Syntax;
 use crate::JSON;
 use jet_env_model::ModuleEval;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -220,7 +220,11 @@ fn tool_list(theme: &Theme) -> i32 {
     }) {
         Ok(t) => t,
         Err(e) => {
-            theme.error("couldn't read installed tools", &e, "check `~/.jet/tools`.");
+            theme.error(
+                "couldn't read installed tools",
+                &e.to_string(),
+                "check `~/.jet/tools`.",
+            );
             return 2;
         }
     };
@@ -524,7 +528,7 @@ fn read_generation_record(gen: u64) -> Result<GenerationRecord, String> {
 
 fn project_install(
     _theme: &Theme,
-    roots: &Store::Roots,
+    _roots: &Store::Roots,
     spec: &RefSpec::RefSpec,
     receipt: &Store::ProfileInstallReceipt,
     lease: &Store::CacheLease,
@@ -562,7 +566,7 @@ fn project_install(
             (&left.name, &left.reference).cmp(&(&right.name, &right.reference))
         });
         lease.validate()?;
-        write_generation_locked(roots, &tools, Some((receipt, lease)))
+        write_generation_locked(&tools, Some((receipt, lease)))
     })
     .map(|generation| (generation, version))
     .map_err(|error| error.to_string())
@@ -570,7 +574,6 @@ fn project_install(
 
 fn uninstall_tool(theme: &Theme, name: &str) -> Result<bool, String> {
     let _ = theme;
-    let roots = Store::resolve();
     RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
         recover_profile_state()?;
         let mut tools = read_current_tools().map_err(io::Error::other)?;
@@ -579,14 +582,13 @@ fn uninstall_tool(theme: &Theme, name: &str) -> Result<bool, String> {
         if tools.len() == before {
             return Ok(false);
         }
-        write_generation_locked(&roots, &tools, None)?;
+        write_generation_locked(&tools, None)?;
         Ok(true)
     })
     .map_err(|error| error.to_string())
 }
 
 fn write_generation_locked(
-    roots: &Store::Roots,
     tools: &[InstalledTool],
     live: Option<(&Store::ProfileInstallReceipt, &Store::CacheLease)>,
 ) -> io::Result<u64> {
@@ -773,7 +775,7 @@ fn materialize_generation_bins(
                 return Err(io::Error::other(format!("duplicate profile bin `{bin}`")));
             }
             let destination = bin_dir.join(bin);
-            let source = if let Some((receipt, lease)) = live.filter(|(receipt, _)| {
+            let source = if let Some((_receipt, lease)) = live.filter(|(receipt, _)| {
                 receipt.reference == tool.reference
                     && receipt.output_hash == tool.output_hash
                     && receipt.store_root.to_string_lossy() == tool.store_root
