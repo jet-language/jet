@@ -2470,6 +2470,32 @@ decisions on #532, #605, and #608 remain gates. D-SHAPE-MERGEPROVENANCE1 adds
 no `Syntax.rs` entry, parser or runtime behavior, CLI, grammar, snapshot, or
 executable example by itself.
 
+**D-ECO-RECEIPT2=A — One connected record spans realization through
+rollback**: the record connects exact inputs, planned actions, produced output
+digests, activation proof, and the parent generation. A planned action is not
+the bytes it produces; keeping them distinct lets Jet detect when identical
+planned work yields unexpected bytes.
+
+```text
+conceptual relationships only — not a schema, file format, or CLI
+exact inputs => planned action
+planned action != produced bytes => output digest => activation proof
+activation proof => parent generation
+```
+
+D-SHAPE-MERGEPROVENANCE1 remains unchanged: `.jet/lock` is the sole primary
+copy of complete successful merge history. The connected receipt may refer to
+locked inputs and their digests, but it neither replaces nor duplicates that
+merge-history authority.
+
+D-ECO-RECEIPT2 does not choose schema, serialization, file placement,
+retention, a normalized-DAG shape, a freeze algorithm, or CLI spelling.
+Implementation is currently fragmented across #420, #422, #424, #425, and
+#431; those cards or a dedicated receipt-integration card must connect the
+record end to end before this law ships. #608 itself adds no `Syntax.rs` entry,
+parser or runtime behavior, diagnostic, grammar, snapshot, or executable
+example.
+
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
 is **`pkg.jet`** (`payload: { name, version }` identity + `packages:` +
 `deps:` + `targets:` + `effects:`); dev shell is **`env.jet`**; monorepo
@@ -3768,7 +3794,6 @@ implementation milestone is pending.
 | D-ECO1 | which project concepts share one semantic graph | **Epoch 4** — Tower #532 |
 | D-ECO-DECL1 | one source shape for packages through JetOS systems | **Epoch 4** — Tower #615 |
 | D-ECO-SOURCE1 | whether one `project.jet` replaces the current role-file division | **Epoch 4** — Tower #610 |
-| D-ECO-RECEIPT2 | how the graph lowers to actions, receipts, and generations | **Epoch 4** — Tower #608 |
 | D-ECO-JETOS2 | how the project graph becomes JetOS and activates safely | **Epoch 4** — Tower #609 |
 | D-SHAPE-INTERNAL1 | whether public `_name` marks unsupported API | **Epoch 3** — Tower #551 |
 | D-SHAPE-DUNDER2 | who owns the `__name` namespace | **Epoch 3** — Tower #601 |

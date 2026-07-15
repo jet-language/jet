@@ -3,8 +3,10 @@
 > **Status, 2026-07-15:** the Deck/Roles/Fold proposal and its later atomic
 > ballots are archived research. D-ECO-COMPOSE2=A now fixes order-independent
 > typed composition, and D-ECO-EXTENSION1=A fixes ordinary typed Jet functions
-> as the extension contract. Five focused live ballots still decide graph
-> scope, declaration shape, source control, realization, and JetOS lifecycle.
+> as the extension contract. D-ECO-RECEIPT2=A fixes one connected record from
+> exact inputs through activation proof and parent generation. Four focused live
+> ballots still decide graph scope, declaration shape, source control, and
+> JetOS lifecycle.
 > `project.jet` is an option only in D-ECO-SOURCE1; current
 > `pkg.jet` / `env.jet` / `workspace.jet` law remains until that vote. Nothing
 > below authorizes syntax.
@@ -24,7 +26,9 @@ The new ballots test one coherent model, not unrelated syntax samples:
 5. D-ECO-COMPOSE2=A fixes finite, order-independent typed composition: safe
    additions combine, equal facts coalesce, disagreements stop with both
    origins, and successful results retain provenance.
-6. D-ECO-RECEIPT2 chooses one action, output, receipt, and generation record.
+6. D-ECO-RECEIPT2=A fixes one connected record spanning exact inputs, planned
+   actions, output digests, activation proof, and parent generation. Planned
+   actions remain distinct from produced bytes.
 7. D-ECO-JETOS2 chooses build, proof, activation, and rollback behavior.
 
 Ratified resolver, variant, BuildContext, and policy laws are inputs to these
