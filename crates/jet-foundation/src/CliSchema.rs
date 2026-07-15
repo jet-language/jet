@@ -120,6 +120,16 @@ pub struct CliSubcommandSchema {
 /// built-in `--help` surface without executing the program.
 pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
     let items = &bundle.modules[bundle.entry].items;
+    entry_schema(items).unwrap_or(CliCommandSchema {
+        entry_type: String::new(),
+        inputs: Vec::new(),
+        commands: Vec::new(),
+    })
+}
+
+/// Checked schema for a typed `fn run` in one entry module. Codegen, dossier,
+/// executable metadata, and completion all consume this projection.
+pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
     let run_type = items.iter().find_map(|item| match item {
         Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
             match &function.params[0].ty {
@@ -128,8 +138,8 @@ pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
             }
         }
         _ => None,
-    });
-    let schema = run_type.and_then(|name| {
+    })?;
+    let name = run_type;
         if let Some(structure) = items.iter().find_map(|item| match item {
             Item::Struct(structure) if structure.name == name => command_schema(structure),
             _ => None,
@@ -148,8 +158,6 @@ pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
             Some(CliSubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
         }).collect();
         Some(CliCommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
-    });
-    schema.unwrap_or(CliCommandSchema { entry_type: String::new(), inputs: Vec::new(), commands: Vec::new() })
 }
 
 /// Canonical, versioned JetCommandSchema record. The digest makes corruption
@@ -556,12 +564,12 @@ pub fn embed_wasm_record(wasm: &mut Vec<u8>, record: &[u8]) -> Result<(), Metada
 }
 
 impl CliCommandSchema {
+    /// Candidates legal before any subcommand is selected.
     pub fn completion_words(&self) -> Vec<String> {
         let mut words = vec!["--help".to_string()];
         words.extend(self.inputs.iter().map(|input| format!("--{}", input.flag)));
         for command in &self.commands {
             words.push(command.name.clone());
-            words.extend(command.inputs.iter().map(|input| format!("--{}", input.flag)));
         }
         words
     }

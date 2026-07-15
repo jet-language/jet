@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 620,
-    "rev": 7176,
+    "nextNum": 621,
+    "rev": 7182,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17831,6 +17831,70 @@
       "created": "2026-07-15T01:04:19.709Z",
       "updated": "2026-07-15",
       "claimedAt": "2026-07-15T01:04:29.166Z"
+    },
+    {
+      "id": "c0ikqqoo",
+      "num": 620,
+      "title": "Full suite red: entropy bridge fixture inherits root workspace",
+      "body": "tests/crypto_entropy.rs creates a standalone Cargo fixture under target/test-tmp, but its manifest lacks an empty [workspace]. Cargo treats it as an undeclared member of the Jet root workspace and rejects before the real entropy bridge proof runs.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Make the generated fixture explicitly standalone, keep the real compile/run and entropy assertions intact, run the exact target and independent review, then resume the parent full gate.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "codex-orchestrator",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Generated entropy bridge Cargo fixture is explicitly standalone and never depends on root workspace membership or exclusion state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:44:57.603Z"
+        },
+        {
+          "n": 2,
+          "text": "The real bridge fixture compiles and runs, preserving live entropy, zeroization, retry, bounds, and fail-closed assertions; all 13 crypto_entropy tests pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:44:57.704Z"
+        },
+        {
+          "n": 3,
+          "text": "No product, syntax, diagnostic, dependency, unsafe, or owner decision changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:44:57.806Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:44:57.904Z"
+        }
+      ],
+      "refs": [
+        "tests/crypto_entropy.rs",
+        "Cargo.toml",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T01:44:38.886Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T01:44:58.003Z"
     }
   ],
   "decisions": [
@@ -36614,6 +36678,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T01:44:58.003Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c0ikqqoo",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T01:44:57.904Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ikqqoo",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T01:44:57.806Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ikqqoo",
+      "note": "#3 No product, syntax, diagnostic, dependency, unsafe, or owner"
+    },
+    {
+      "at": "2026-07-15T01:44:57.704Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ikqqoo",
+      "note": "#2 The real bridge fixture compiles and runs, preserving live e"
+    },
+    {
+      "at": "2026-07-15T01:44:57.603Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ikqqoo",
+      "note": "#1 Generated entropy bridge Cargo fixture is explicitly standal"
+    },
+    {
+      "at": "2026-07-15T01:44:38.886Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c0ikqqoo",
+      "note": "Full suite red: entropy bridge fixture inherits root workspace"
+    },
+    {
       "at": "2026-07-15T01:42:38.946Z",
       "by": "terra-608-builder",
       "action": "card.update",
@@ -40070,48 +40176,6 @@
       "action": "decision.update",
       "ref": "D-SHAPE-RESOURCE1",
       "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T22:35:25.966Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T22:35:25.863Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T22:35:18.136Z",
-      "by": "terra-foreign-root-probe",
-      "action": "card.claim",
-      "ref": "c086i4qv",
-      "note": ""
-    },
-    {
-      "at": "2026-07-14T22:35:18.028Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c086i4qv",
-      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-14T22:35:17.928Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c086i4qv",
-      "note": "#3 All 44 cffi tests pass without product, diagnostic, dependen"
-    },
-    {
-      "at": "2026-07-14T22:35:17.833Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c086i4qv",
-      "note": "#2 Malformed bare, empty, and over-segmented foreign module pat"
     }
   ],
   "nextNum": 368,

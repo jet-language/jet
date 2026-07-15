@@ -570,7 +570,9 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
         Item::Enum(e) if &e.name == name => Some(e),
         _ => None,
     }) {
-        emit_cli_subcommand_entry(cx, e, &arg_expr, out);
+        let schema = jet_foundation::CliSchema::entry_schema(items)
+            .expect("sema-approved enum entry has one checked command schema");
+        emit_cli_subcommand_entry(cx, e, &schema, &arg_expr, out);
     }
 }
 
@@ -593,10 +595,11 @@ fn is_fallible_void_entry_return(f: &Func) -> bool {
 fn emit_cli_subcommand_entry(
     cx: &Cx,
     e: &EnumDef,
+    schema: &jet_foundation::CliSchema::CliCommandSchema,
     arg_expr: &dyn Fn(&str) -> String,
     out: &mut String,
 ) {
-    let cmd_names: Vec<String> = e.variants.iter().map(|v| v.name.to_lowercase()).collect();
+    let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
     let usage_lines = cmd_names
         .iter()
         .map(|c| format!("  {c}"))
@@ -621,7 +624,7 @@ fn emit_cli_subcommand_entry(
     let _ = cx;
 
     out.push_str(&format!(
-        "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
+        "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
         usage = usage_lines,
         arms = arms,
         cmds = cmd_names.join(", "),
