@@ -279,7 +279,7 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "region",
-            "region inner { region_only :: 7; print(region_only) }",
+            "#Region(inner) { region_only :: 7; print(region_only) }",
             &["region_only"],
         ),
         (
@@ -312,11 +312,10 @@ fn panic_context_uses_only_lexically_live_locals() {
             "#Grant(Io) { caps -> grant_only :: 7; print(grant_only) }",
             &["grant_only"],
         ),
-        (
-            "assume_deterministic",
-            "assume_deterministic { deterministic_only :: 7; print(deterministic_only) }",
-            &["deterministic_only"],
-        ),
+        // `assume_deterministic { … }` was renamed to `#Nondeterministic("reason") { … }`
+        // (D-BLOCKPLANE1), legal only inside a `@Pure fn` — inexpressible in this
+        // impure print/panic template, so the block-plane liveness coverage for it
+        // lives with the other `#`-marker cases above.
         (
             "transact",
             "#Transact { transact_only :: 7; print(transact_only) }",

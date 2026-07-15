@@ -127,6 +127,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-env-model",
             "jet-foundation",
             "jet-lexer",
+            "jet-nix-eval",
             "jet-parser",
             "jet-pkg-model",
             "jet-sema",
