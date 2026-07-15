@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 628,
-    "rev": 7396,
+    "rev": 7397,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8938,6 +8938,11 @@
       "workOrder": 78,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "terra-541-builder",
+          "text": "[handoff] Lifecycle correction landed in fa15220c2 after independent review of e7e68fe7/b8b7d8c3. recover now holds the Hangar lock through closure recovery, known-target derivation, bounded checksum parse, target validation, and strict transition replay. Lifecycle directory access is pinned: Unix walks components with openat(O_NOFOLLOW) and uses handle-relative create/rename/unlink plus identity checks; Windows holds no-delete OPEN_REPARSE_POINT handles and uses handle-based rename/delete; unsupported platforms fail closed. Directory fsync reuses the Store handle helper. Witness-exact prepare/commit/tombstone/legacy retries are idempotent after durable post-rename ambiguity. Journal enforces byte/member/root/per-root-target/total-target/work bounds and compacts into checksummed sequence snapshots with crash-safe stale-transaction replay. Hostile component symlink/replacement, Windows contract, semantic recover, checksum/truncation, ENOSPC, post-directory-sync retry, bounds, concurrency, determinism, and 130-operation compaction proofs pass: Store::Lifecycle 16/16. No public manual-root API/CLI/diagnostics or producer/lease/clean wiring; D-JPK-MANUALROOT1 and criterion 3 remain open. Parent runs full suite."
+        },
         {
           "at": "2026-07-15",
           "by": "terra-420-lockfix",
@@ -37756,6 +37761,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T06:23:51.521Z",
+      "by": "terra-541-builder",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-15T06:09:07.763Z",
       "by": "terra-420-lockfix",
       "action": "card.release",
@@ -41246,13 +41258,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-ECO-COMPOSE2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:31.665Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-MODULEINTERNAL1",
       "note": "marked ready"
     }
   ],
