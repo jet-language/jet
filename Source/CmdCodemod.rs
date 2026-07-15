@@ -466,7 +466,7 @@ fn apply_rule(
                 for d in idx.definitions().iter().filter(|d| {
                     d.name == *name
                         && kind_matches(&d.kind, kind)
-                        && anchors.contains(&definition_anchor(d))
+                        && anchors_match_definition(&anchors, &definition_anchor(d))
                 }) {
                     edits
                         .entry(canonicalish(Path::new(&d.module_path)))
@@ -475,7 +475,9 @@ fn apply_rule(
                 }
                 for r in idx.references().iter().filter(|r| {
                     r.name == *name
-                        && r.target.as_ref().is_some_and(|target| anchors.contains(target))
+                        && r.target
+                            .as_ref()
+                            .is_some_and(|target| anchors_match_definition(&anchors, target))
                 }) {
                     let path = canonicalish(Path::new(&r.module_path));
                     if files.contains_key(&path) {
@@ -1589,6 +1591,24 @@ fn definition_anchor(definition: &jet_semindex::SymbolDef) -> DefinitionAnchor {
         semantic_identity: Some(definition.identity.clone()),
     }
 }
+
+fn anchors_match_definition(
+    selected: &BTreeSet<DefinitionAnchor>,
+    candidate: &DefinitionAnchor,
+) -> bool {
+    selected.iter().any(|anchor| match (
+        anchor.semantic_identity.as_deref(),
+        candidate.semantic_identity.as_deref(),
+    ) {
+        (Some(selected), Some(candidate)) => selected == candidate,
+        _ => {
+            anchor.module_path == candidate.module_path
+                && anchor.kind == candidate.kind
+                && anchor.def_span == candidate.def_span
+        }
+    })
+}
+
 fn read_fingerprint(path: &Path, inputs: &mut BTreeMap<PathBuf, String>) -> Vec<u8> {
     let bytes = fs::read(path)
         .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", path.display())));
