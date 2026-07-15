@@ -69,8 +69,10 @@ fn write_fastfetch_fixture(fixtures: &std::path::Path, out_dir: &std::path::Path
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
     }
+    let drv_path = out_dir.with_extension("drv");
     let json = format!(
-        "[{{\"outputs\":{{\"out\":{:?}}}}}]",
+        "[{{\"drvPath\":{:?},\"outputs\":{{\"out\":{:?}}}}}]",
+        drv_path.to_string_lossy(),
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap();
