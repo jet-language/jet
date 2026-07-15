@@ -636,17 +636,23 @@ impl<'a> Fmt<'a> {
         let mut brackets = 0usize;
         let mut braces = 0usize;
         let mut last_end = stmt_end(stmt);
-        for token in self.source_toks.iter().filter(|token| token.span.start >= start) {
+        let first = self
+            .source_toks
+            .partition_point(|token| token.span.start < start);
+        for token in &self.source_toks[first..] {
             match token.kind {
                 TokKind::LineComment(_) | TokKind::BlockComment(_) => continue,
                 TokKind::Semi if parens == 0 && brackets == 0 && braces == 0 => return last_end,
                 TokKind::Eof => return last_end,
                 TokKind::LParen => parens += 1,
-                TokKind::RParen => parens = parens.saturating_sub(1),
+                TokKind::RParen if parens == 0 => return last_end,
+                TokKind::RParen => parens -= 1,
                 TokKind::LBracket => brackets += 1,
-                TokKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokKind::RBracket if brackets == 0 => return last_end,
+                TokKind::RBracket => brackets -= 1,
                 TokKind::LBrace => braces += 1,
-                TokKind::RBrace => braces = braces.saturating_sub(1),
+                TokKind::RBrace if braces == 0 => return last_end,
+                TokKind::RBrace => braces -= 1,
                 _ => {}
             }
             last_end = token.span.end;
@@ -1030,6 +1036,19 @@ mod tests {
             .find("// both land, or neither")
             .expect("trailing comment should survive");
         assert!(close < comment, "comment moved into lambda:\n{formatted}");
+        assert_eq!(
+            formatted,
+            format_source(&formatted).expect("formatted source should re-format")
+        );
+    }
+
+    #[test]
+    fn inner_comment_stays_before_enclosing_block_close() {
+        let source = "fn run() {\n    if ready { launch() /* go */ }\n}\n";
+        let formatted = format_source(source).expect("source should format");
+        let comment = formatted.find("/* go */").expect("comment should survive");
+        let inner_close = formatted.find('}').expect("if body should close");
+        assert!(comment < inner_close, "comment left its block:\n{formatted}");
         assert_eq!(
             formatted,
             format_source(&formatted).expect("formatted source should re-format")
