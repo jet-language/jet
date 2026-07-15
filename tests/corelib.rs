@@ -2863,6 +2863,40 @@ fn dns_cname_additional_response(query: &[u8]) -> Vec<u8> {
     response
 }
 
+fn bind_dns_dual_protocol_fixture() -> (
+    std::net::TcpListener,
+    std::net::UdpSocket,
+    std::net::SocketAddr,
+) {
+    const MAX_ATTEMPTS: usize = 64;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        let tcp = match std::net::TcpListener::bind("127.0.0.1:0") {
+            Ok(tcp) => tcp,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(error) => panic!("failed to bind DNS fixture TCP listener: {error}"),
+        };
+        let addr = tcp.local_addr().unwrap_or_else(|error| {
+            panic!("failed to read DNS fixture TCP listener address: {error}")
+        });
+        match std::net::UdpSocket::bind(addr) {
+            Ok(udp) => return (tcp, udp, addr),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AddrInUse
+                    && attempt < MAX_ATTEMPTS =>
+            {
+                continue;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => panic!(
+                "failed to reserve one TCP/UDP DNS fixture port after {MAX_ATTEMPTS} attempts"
+            ),
+            Err(error) => panic!("failed to bind DNS fixture UDP socket at {addr}: {error}"),
+        }
+    }
+
+    unreachable!("DNS fixture bind loop always returns or panics")
+}
+
 #[test]
 fn core_net_dns_txt_and_srv_are_real_udp_queries() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -2900,9 +2934,7 @@ fn run() {{
 fn core_net_dns_udp_truncation_retries_tcp_and_reads_cname_additional() {
     use std::io::{Read, Write};
 
-    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = tcp.local_addr().unwrap();
-    let udp = std::net::UdpSocket::bind(addr).unwrap();
+    let (tcp, udp, addr) = bind_dns_dual_protocol_fixture();
     let server = std::thread::spawn(move || {
         let mut udp_query = [0u8; 512];
         let (n, peer) = udp.recv_from(&mut udp_query).unwrap();
@@ -2944,9 +2976,7 @@ fn run() {{
 fn core_net_dns_timeout_is_one_budget_across_udp_and_tcp() {
     use std::io::Read;
 
-    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = tcp.local_addr().unwrap();
-    let udp = std::net::UdpSocket::bind(addr).unwrap();
+    let (tcp, udp, addr) = bind_dns_dual_protocol_fixture();
     let server = std::thread::spawn(move || {
         let mut query = [0u8; 512];
         let (n, peer) = udp.recv_from(&mut query).unwrap();
