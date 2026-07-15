@@ -107,21 +107,65 @@ fn jet_process_spec_spawn(
         started: std::time::Instant::now(),
     })
 }
-fn jet_process_collect_output(
+fn jet_process_drain_reader<R>(
+    reader: Option<std::io::BufReader<R>>,
+) -> Option<std::thread::JoinHandle<std::io::Result<String>>>
+where
+    R: std::io::Read + Send + 'static,
+{
+    reader.map(|mut reader| {
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut reader, &mut text)?;
+            Ok(text)
+        })
+    })
+}
+fn jet_process_start_output_drain(
     child: &jet_std::ProcessChild,
+) -> (
+    Option<std::thread::JoinHandle<std::io::Result<String>>>,
+    Option<std::thread::JoinHandle<std::io::Result<String>>>,
+) {
+    let stdout = child.stdout.borrow_mut().take();
+    let stderr = child.stderr.borrow_mut().take();
+    (
+        jet_process_drain_reader(stdout),
+        jet_process_drain_reader(stderr),
+    )
+}
+fn jet_process_finish_output_drain(
+    drain: Option<std::thread::JoinHandle<std::io::Result<String>>>,
+    stream: &'static str,
+) -> Result<String, jet_std::IoError> {
+    let Some(drain) = drain else {
+        return Ok(String::new());
+    };
+    drain
+        .join()
+        .map_err(|_| {
+            jet_std::IoError::other(
+                jet_std::IoOperation::Read,
+                Some(stream.to_string()),
+                "process output reader panicked",
+            )
+        })?
+        .map_err(|error| {
+            jet_std::IoError::other(
+                jet_std::IoOperation::Read,
+                Some(stream.to_string()),
+                error,
+            )
+        })
+}
+fn jet_process_collect_output(
+    drains: (
+        Option<std::thread::JoinHandle<std::io::Result<String>>>,
+        Option<std::thread::JoinHandle<std::io::Result<String>>>,
+    ),
 ) -> Result<(String, String), jet_std::IoError> {
-    let mut output = String::new();
-    let mut errors = String::new();
-    if let Some(mut stdout) = child.stdout.borrow_mut().take() {
-        std::io::Read::read_to_string(&mut stdout, &mut output).map_err(|error| {
-            jet_std::IoError::other(jet_std::IoOperation::Read, Some("process stdout".to_string()), error)
-        })?;
-    }
-    if let Some(mut stderr) = child.stderr.borrow_mut().take() {
-        std::io::Read::read_to_string(&mut stderr, &mut errors).map_err(|error| {
-            jet_std::IoError::other(jet_std::IoOperation::Read, Some("process stderr".to_string()), error)
-        })?;
-    }
+    let output = jet_process_finish_output_drain(drains.0, "process stdout")?;
+    let errors = jet_process_finish_output_drain(drains.1, "process stderr")?;
     Ok((output, errors))
 }
 fn jet_process_spec_run_inner(
@@ -152,11 +196,16 @@ fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
 fn jet_process_child_wait(
     child: &jet_std::ProcessChild,
 ) -> Result<jet_std::ProcessResult, jet_std::IoError> {
+    // Capture pipes must be drained while the child runs. Waiting first can
+    // deadlock when either pipe fills; stdout and stderr need independent
+    // readers because a child may fill both concurrently. Stream consumers
+    // keep their earlier reads, and wait drains only the remaining bytes.
+    let drains = jet_process_start_output_drain(child);
     let mut timed_out = false;
     let status = loop {
         let mut slot = child.inner.borrow_mut();
         let Some(inner) = slot.as_mut() else {
-            let (output, errors) = jet_process_collect_output(child)?;
+            let (output, errors) = jet_process_collect_output(drains)?;
             return Ok(jet_std::ProcessResult {
                 code: 0,
                 success: true,
@@ -183,7 +232,7 @@ fn jet_process_child_wait(
         jet_scheduler_park_ms("process wait", 10);
     };
     child.inner.borrow_mut().take();
-    let (output, errors) = jet_process_collect_output(child)?;
+    let (output, errors) = jet_process_collect_output(drains)?;
     let code = status.code().unwrap_or(-1) as i64;
     Ok(jet_std::ProcessResult {
         code,

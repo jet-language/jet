@@ -75,7 +75,14 @@ fn run() {
 "#;
     let (dir, out) = compile("mutation", src);
     let bin = build(&dir, "mutation", &out);
-    let run = Command::new(bin).current_dir(&dir).output().unwrap();
+    // Exceed a typical pipe buffer so process.run must drain the child's
+    // captured output while it waits. The logical snapshot inherits this raw
+    // host entry, and `/usr/bin/env` writes it before exiting.
+    let run = Command::new(bin)
+        .current_dir(&dir)
+        .env("JET_OVERLAY_PIPE_PRESSURE", "x".repeat(96 * 1024))
+        .output()
+        .unwrap();
     assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
@@ -109,6 +116,16 @@ fn run() {
     assert!(out.rust.contains("fn main() {\n    jet_std_env_init();"));
     assert!(out.rust.contains("command.env_clear()"));
     assert!(out.rust.contains("command.envs(child_env)"));
+    assert!(out.rust.contains("std::thread::spawn(move ||"));
+    let drain = out
+        .rust
+        .find("let drains = jet_process_start_output_drain(child);")
+        .expect("process wait must start capture drains");
+    let wait = out
+        .rust
+        .find("inner.try_wait()")
+        .expect("process wait must poll child status");
+    assert!(drain < wait, "capture drains must start before child wait");
     assert!(out.rust.contains("i32::try_from(left.len())"));
     assert!(out.rust.contains("2 => std::cmp::Ordering::Equal"));
     assert!(out.rust.contains("_ => left.cmp(&right)"));
