@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 632,
-    "rev": 7461,
+    "rev": 7463,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18926,20 +18926,20 @@
         {
           "n": 1,
           "text": "cargo check -p jetpack passes with no warning suppression or dead-code allowance.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-631-builder",
-          "verifiedBy": null,
-          "evidence": "nix develop -c cargo check -p jetpack passed at 6df219d27; no warning allowances or dead-code attributes added by repair. Captured prior cfg(test) wrappers are test-only convenience over stricter production identity path.",
-          "at": "2026-07-15T07:26:52.321Z"
+          "verifiedBy": "root-631-reviewer",
+          "evidence": "Independent cargo check -p jetpack passed at 6df219d27/HEAD; no warning suppression or dead-code allowance. read_pid/is_alive are intentionally cfg(test) wrappers.",
+          "at": "2026-07-15T07:32:26.418Z"
         },
         {
           "n": 2,
           "text": "Service PID identity, liveness, stale-record, and cleanup semantics remain explicit and fail closed.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-631-builder",
-          "verifiedBy": null,
-          "evidence": "Production up/down/health require versioned ProcessState with pid plus stable start identity before liveness or signal; legacy PID-only and identity-mismatch records are removed without signaling. Linux ESRCH during procfs teardown is classified as process gone; all other identity errors propagate/fail closed.",
-          "at": "2026-07-15T07:26:56.415Z"
+          "verifiedBy": "root-631-reviewer",
+          "evidence": "Independent source review: production reads versioned ProcessState; identity mismatch/absence short-circuits before liveness or signal; legacy PID-only state is removed unsignaled. Linux ESRCH=3 is scoped only to /proc/<pid>/stat read and means gone; all other read/parse/probe errors propagate fail-closed.",
+          "at": "2026-07-15T07:32:26.520Z"
         },
         {
           "n": 3,
@@ -38114,6 +38114,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T07:32:26.520Z",
+      "by": "root-631-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0e3s4id",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T07:32:26.418Z",
+      "by": "root-631-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0e3s4id",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T07:29:40.492Z",
       "by": "root-630-builder",
       "action": "card.release",
@@ -41598,20 +41612,6 @@
       "action": "card.criteria-verify",
       "ref": "c0xqkis5",
       "note": "#4"
-    },
-    {
-      "at": "2026-07-15T00:13:33.796Z",
-      "by": "luna-540-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0xqkis5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T00:13:33.694Z",
-      "by": "luna-540-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0xqkis5",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
