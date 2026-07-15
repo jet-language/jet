@@ -1,0 +1,910 @@
+//! Native tools-profile dispatcher.
+//!
+//! Copies of the `jetpack` executable installed under `~/.jet/bin/<name>`
+//! enter here before ordinary CLI dispatch. The dispatcher reads one durable,
+//! checksummed generation pointer, validates the immutable generation and its
+//! copied executable, then replaces itself with that executable. No shell or
+//! batch parser participates in argv forwarding.
+
+#![allow(dead_code)] // Builder-facing APIs are consumed by tool.rs integration.
+
+use crate::{JSON, SHA256, Store, Syntax};
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
+use std::fs;
+use std::io::{self, Read};
+use std::path::{Component, Path, PathBuf};
+
+pub(crate) const CURRENT_SCHEMA: &str = "jet-profile-current-v1";
+pub(crate) const GENERATION_SCHEMA: &str = "jet-profile-generation-v2";
+pub(crate) const PROFILE_OWNER: &str = "user";
+pub(crate) const INVALID_DISPATCH_EXIT: i32 = 126;
+pub(crate) const MISSING_DISPATCH_EXIT: i32 = 127;
+
+const CURRENT_FILE: &str = "current";
+const COMPLETE_FILE: &str = "complete";
+const MAX_METADATA_BYTES: u64 = 1024 * 1024;
+const MAX_TOOLS: usize = 256;
+const MAX_BINS: usize = 1024;
+const MAX_STRING: usize = 4096;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CurrentPointer {
+    pub(crate) generation: u64,
+    pub(crate) witness: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenerationMetadata {
+    pub(crate) generation: u64,
+    pub(crate) created_at: u64,
+    pub(crate) tools: Vec<GenerationTool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenerationTool {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) source: String,
+    pub(crate) reference: String,
+    pub(crate) output_hash: String,
+    pub(crate) store_root: String,
+    pub(crate) bins: Vec<String>,
+    pub(crate) members: Vec<String>,
+    /// SHA-256 of each immutable generation-owned executable, aligned with
+    /// `bins` and `members`.
+    pub(crate) projection_hashes: Vec<String>,
+}
+
+pub(crate) fn format_current_pointer(pointer: &CurrentPointer) -> io::Result<String> {
+    if pointer.generation == 0 {
+        return Err(invalid("profile generation is zero"));
+    }
+    validate_digest(&pointer.witness)?;
+    let body = format!(
+        "{CURRENT_SCHEMA}\ngeneration\t{}\nwitness\t{}\n",
+        pointer.generation, pointer.witness
+    );
+    Ok(format!(
+        "{body}checksum\tsha256-{}\n",
+        SHA256::sha256_hex(body.as_bytes())
+    ))
+}
+
+pub(crate) fn parse_current_pointer(text: &str) -> io::Result<CurrentPointer> {
+    let lines = text.lines().collect::<Vec<_>>();
+    if lines.len() != 4 || lines[0] != CURRENT_SCHEMA || !text.ends_with('\n') {
+        return Err(invalid("current pointer has wrong schema or field count"));
+    }
+    let generation = lines[1]
+        .strip_prefix("generation\t")
+        .ok_or_else(|| invalid("current pointer lacks generation"))?
+        .parse::<u64>()
+        .map_err(|_| invalid("current pointer generation is invalid"))?;
+    if generation == 0 {
+        return Err(invalid("current pointer generation is zero"));
+    }
+    let witness = lines[2]
+        .strip_prefix("witness\t")
+        .ok_or_else(|| invalid("current pointer lacks witness"))?;
+    validate_digest(witness)?;
+    let checksum = lines[3]
+        .strip_prefix("checksum\tsha256-")
+        .ok_or_else(|| invalid("current pointer lacks checksum"))?;
+    validate_hex64(checksum, "current pointer checksum")?;
+    let body_len = text
+        .rfind("checksum\t")
+        .ok_or_else(|| invalid("current pointer lacks checksum"))?;
+    if SHA256::sha256_hex(text[..body_len].as_bytes()) != checksum {
+        return Err(invalid("current pointer checksum mismatch"));
+    }
+    Ok(CurrentPointer {
+        generation,
+        witness: witness.to_string(),
+    })
+}
+
+pub(crate) fn format_generation_metadata(metadata: &GenerationMetadata) -> io::Result<String> {
+    validate_generation(metadata)?;
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str(&format!("  \"schema\": {},\n", json_string(GENERATION_SCHEMA)));
+    out.push_str(&format!("  \"generation\": {},\n", metadata.generation));
+    out.push_str(&format!("  \"owner\": {},\n", json_string(PROFILE_OWNER)));
+    out.push_str(&format!(
+        "  \"profile\": {},\n",
+        json_string(Syntax::TOOL_PROFILE_NAME)
+    ));
+    out.push_str(&format!("  \"created_at\": {},\n", metadata.created_at));
+    out.push_str("  \"tools\": [\n");
+    for (index, tool) in metadata.tools.iter().enumerate() {
+        out.push_str("    {\n");
+        for (key, value) in [
+            ("name", &tool.name),
+            ("version", &tool.version),
+            ("source", &tool.source),
+            ("reference", &tool.reference),
+            ("output_hash", &tool.output_hash),
+            ("store_root", &tool.store_root),
+        ]
+        .into_iter()
+        {
+            out.push_str(&format!("      \"{key}\": {},\n", json_string(value)));
+        }
+        write_string_array(&mut out, "bins", &tool.bins, true);
+        write_string_array(&mut out, "members", &tool.members, true);
+        write_string_array(
+            &mut out,
+            "projection_hashes",
+            &tool.projection_hashes,
+            false,
+        );
+        out.push_str("    }");
+        if index + 1 != metadata.tools.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str("  ]\n}\n");
+    Ok(out)
+}
+
+pub(crate) fn parse_generation_metadata(
+    text: &str,
+    expected_generation: u64,
+) -> io::Result<GenerationMetadata> {
+    let JSON::Json::Object(root) = JSON::parse(text).map_err(invalid)? else {
+        return Err(invalid("profile metadata root is not an object"));
+    };
+    expect_exact_keys(
+        &root,
+        &["created_at", "generation", "owner", "profile", "schema", "tools"],
+        "profile metadata",
+    )?;
+    if string_field(&root, "schema")? != GENERATION_SCHEMA
+        || string_field(&root, "owner")? != PROFILE_OWNER
+        || string_field(&root, "profile")? != Syntax::TOOL_PROFILE_NAME
+    {
+        return Err(invalid("profile metadata identity mismatch"));
+    }
+    let generation = integer_field(&root, "generation")?;
+    if generation != expected_generation || generation == 0 {
+        return Err(invalid("profile generation metadata disagrees with path"));
+    }
+    let created_at = integer_field(&root, "created_at")?;
+    let JSON::Json::Array(entries) = root
+        .get("tools")
+        .ok_or_else(|| invalid("profile metadata lacks tools"))?
+    else {
+        return Err(invalid("profile tools field is not an array"));
+    };
+    if entries.len() > MAX_TOOLS {
+        return Err(invalid("profile tool count exceeds bound"));
+    }
+    let mut tools = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let JSON::Json::Object(tool) = entry else {
+            return Err(invalid("profile tool entry is not an object"));
+        };
+        expect_exact_keys(
+            tool,
+            &[
+                "bins",
+                "members",
+                "name",
+                "output_hash",
+                "projection_hashes",
+                "reference",
+                "source",
+                "store_root",
+                "version",
+            ],
+            "profile tool",
+        )?;
+        tools.push(GenerationTool {
+            name: bounded_string(tool, "name")?,
+            version: bounded_string(tool, "version")?,
+            source: bounded_string(tool, "source")?,
+            reference: bounded_string(tool, "reference")?,
+            output_hash: bounded_string(tool, "output_hash")?,
+            store_root: bounded_string(tool, "store_root")?,
+            bins: string_array(tool, "bins")?,
+            members: string_array(tool, "members")?,
+            projection_hashes: string_array(tool, "projection_hashes")?,
+        });
+    }
+    let metadata = GenerationMetadata {
+        generation,
+        created_at,
+        tools,
+    };
+    validate_generation(&metadata)?;
+    Ok(metadata)
+}
+
+pub(crate) fn generation_witness(metadata_text: &str, metadata: &GenerationMetadata) -> String {
+    let targets = metadata
+        .tools
+        .iter()
+        .map(|tool| tool.output_hash.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut canonical = format!(
+        "jet-profile-generation-witness-v1\nmetadata\t{}\n",
+        SHA256::sha256_hex(metadata_text.as_bytes())
+    );
+    for digest in targets {
+        canonical.push_str("target\t");
+        canonical.push_str(digest);
+        canonical.push('\n');
+    }
+    format!("sha256-{}", SHA256::sha256_hex(canonical.as_bytes()))
+}
+
+/// Atomically install this running `jetpack` executable as one exact-name
+/// dispatcher. Caller owns profile serialization and collision policy.
+pub(crate) fn install_dispatcher(bin_dir: &Path, bin: &str) -> io::Result<PathBuf> {
+    validate_bin_name(bin)?;
+    ensure_directory_chain(bin_dir)?;
+    let source = std::env::current_exe()?;
+    validate_regular_file(&source)?;
+    let destination = bin_dir.join(bin);
+    match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => return Err(invalid("dispatcher destination is not an owned regular file")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let partial = bin_dir.join(format!(".dispatcher-{bin}-{}.partial", std::process::id()));
+    remove_regular_partial(&partial)?;
+
+    if fs::hard_link(&source, &partial).is_err() {
+        copy_file_create_new(&source, &partial)?;
+    }
+    sync_and_match(&source, &partial)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(&source)?.permissions().mode();
+        fs::set_permissions(&partial, fs::Permissions::from_mode(mode))?;
+        fs::File::open(&partial)?.sync_all()?;
+    }
+    atomic_replace(&partial, &destination)?;
+    Store::sync_store_directory(bin_dir)?;
+    validate_regular_file(&destination)?;
+    Ok(destination)
+}
+
+/// Returns `None` for ordinary `jetpack`; installed dispatcher invocations
+/// return an exit code or replace the process on Unix.
+#[doc(hidden)]
+pub fn dispatch_current_process() -> Option<i32> {
+    let executable = std::env::current_exe().ok()?;
+    let bin_dir = user_bin_dir();
+    if !same_directory(executable.parent()?, &bin_dir).ok()? {
+        return None;
+    }
+    let bin = executable.file_name()?.to_str()?;
+    Some(match resolve_dispatch_target(&bin_dir, bin) {
+        Ok(target) => execute_target(&target),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => MISSING_DISPATCH_EXIT,
+        Err(_) => INVALID_DISPATCH_EXIT,
+    })
+}
+
+fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<PathBuf> {
+    validate_bin_name(bin)?;
+    ensure_directory_chain(bin_dir)?;
+    let tools = bin_dir
+        .parent()
+        .ok_or_else(|| invalid("profile bin directory has no parent"))?
+        .join(Syntax::TOOL_STATE_DIR);
+    ensure_directory_chain(&tools)?;
+    let pointer_text = read_bounded_regular(&tools.join(CURRENT_FILE))?;
+    let pointer = parse_current_pointer(&pointer_text)?;
+    let generation_dir = tools.join("generations").join(pointer.generation.to_string());
+    ensure_directory_chain(&generation_dir)?;
+    let metadata_text = read_bounded_regular(&generation_dir.join("meta.json"))?;
+    let metadata = parse_generation_metadata(&metadata_text, pointer.generation)?;
+    let witness = generation_witness(&metadata_text, &metadata);
+    if witness != pointer.witness {
+        return Err(invalid("current pointer witness disagrees with generation"));
+    }
+    let complete = read_bounded_regular(&generation_dir.join(COMPLETE_FILE))?;
+    if complete != format!("{witness}\n") {
+        return Err(invalid("profile generation complete witness mismatch"));
+    }
+    let (tool, slot) = find_bin(&metadata, bin)?;
+    let projection = generation_dir.join("bin").join(bin);
+    validate_regular_file(&projection)?;
+    let actual = format!("sha256-{}", SHA256::sha256_file_hex(&projection)?);
+    if actual != tool.projection_hashes[slot] {
+        return Err(invalid("profile projection digest mismatch"));
+    }
+    validate_original_authority(tool, slot, &actual)?;
+    ensure_executable(&projection)?;
+    Ok(projection)
+}
+
+fn find_bin<'a>(
+    metadata: &'a GenerationMetadata,
+    bin: &str,
+) -> io::Result<(&'a GenerationTool, usize)> {
+    metadata
+        .tools
+        .iter()
+        .find_map(|tool| tool.bins.iter().position(|candidate| candidate == bin).map(|i| (tool, i)))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "profile bin was removed"))
+}
+
+fn validate_original_authority(tool: &GenerationTool, slot: usize, digest: &str) -> io::Result<()> {
+    let roots = Store::Roots {
+        root: PathBuf::from(&tool.store_root),
+        dev_mode: false,
+    };
+    ensure_directory_chain(&roots.root)?;
+    let entry = Store::list_checked(&roots)?
+        .into_iter()
+        .find(|entry| entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash)
+        .ok_or_else(|| invalid("profile Store authority is unavailable"))?;
+    let member = Path::new(&entry.bin).join(&tool.members[slot]);
+    validate_regular_file(&member)?;
+    let member_digest = format!("sha256-{}", SHA256::sha256_file_hex(&member)?);
+    if member_digest != digest {
+        return Err(invalid("profile projection disagrees with Store member"));
+    }
+    ensure_executable(&member)
+}
+
+#[cfg(unix)]
+fn execute_target(target: &Path) -> i32 {
+    use std::os::unix::process::CommandExt as _;
+    let error = target_command(target, std::env::args_os().skip(1)).exec();
+    let _ = error;
+    INVALID_DISPATCH_EXIT
+}
+
+#[cfg(windows)]
+fn execute_target(target: &Path) -> i32 {
+    target_command(target, std::env::args_os().skip(1))
+        .status()
+        .ok()
+        .and_then(|status| status.code())
+        .unwrap_or(INVALID_DISPATCH_EXIT)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn execute_target(_target: &Path) -> i32 {
+    INVALID_DISPATCH_EXIT
+}
+
+fn target_command(
+    target: &Path,
+    arguments: impl IntoIterator<Item = OsString>,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(target);
+    command.args(arguments);
+    command
+}
+
+fn validate_generation(metadata: &GenerationMetadata) -> io::Result<()> {
+    if metadata.generation == 0 || metadata.tools.len() > MAX_TOOLS {
+        return Err(invalid("profile generation exceeds bounds"));
+    }
+    let mut identities = BTreeSet::new();
+    let mut bins = BTreeSet::new();
+    let mut folded_bins = BTreeSet::new();
+    for tool in &metadata.tools {
+        for value in [
+            &tool.name,
+            &tool.version,
+            &tool.source,
+            &tool.reference,
+            &tool.store_root,
+        ] {
+            validate_string(value)?;
+        }
+        validate_digest(&tool.output_hash)?;
+        validate_store_root(&tool.store_root)?;
+        if tool.bins.is_empty()
+            || tool.bins.len() != tool.members.len()
+            || tool.bins.len() != tool.projection_hashes.len()
+        {
+            return Err(invalid("profile tool has mismatched projection fields"));
+        }
+        if !identities.insert((&tool.name, &tool.reference)) {
+            return Err(invalid("duplicate profile tool identity"));
+        }
+        for ((bin, member), digest) in tool
+            .bins
+            .iter()
+            .zip(&tool.members)
+            .zip(&tool.projection_hashes)
+        {
+            validate_bin_name(bin)?;
+            validate_bin_name(member)?;
+            validate_digest(digest)?;
+            if !bins.insert(bin) || !folded_bins.insert(bin.to_ascii_lowercase()) {
+                return Err(invalid("duplicate profile bin"));
+            }
+            if bins.len() > MAX_BINS {
+                return Err(invalid("profile bin count exceeds bound"));
+            }
+        }
+    }
+    if metadata.tools.windows(2).any(|pair| {
+        (&pair[0].name, &pair[0].reference) >= (&pair[1].name, &pair[1].reference)
+    }) {
+        return Err(invalid("profile tools are not in canonical order"));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_bin_name(value: &str) -> io::Result<()> {
+    if value.is_empty() || value.len() > 255 {
+        return Err(invalid("profile bin name has invalid length"));
+    }
+    let mut components = Path::new(value).components();
+    if !matches!(components.next(), Some(Component::Normal(_)))
+        || components.next().is_some()
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'+'))
+    {
+        return Err(invalid("profile bin name is not one normal component"));
+    }
+    let stem = value.split('.').next().unwrap_or(value).to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
+        || stem
+            .strip_prefix("COM")
+            .and_then(|value| value.parse::<u8>().ok())
+            .is_some_and(|value| (1..=9).contains(&value))
+        || stem
+            .strip_prefix("LPT")
+            .and_then(|value| value.parse::<u8>().ok())
+            .is_some_and(|value| (1..=9).contains(&value));
+    if reserved {
+        return Err(invalid("profile bin name is reserved on Windows"));
+    }
+    Ok(())
+}
+
+fn validate_store_root(value: &str) -> io::Result<()> {
+    validate_string(value)?;
+    let path = Path::new(value);
+    if !path.is_absolute()
+        || path.components().any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+    {
+        return Err(invalid("profile Store authority is not absolute and normalized"));
+    }
+    Ok(())
+}
+
+fn validate_digest(value: &str) -> io::Result<()> {
+    let hex = value
+        .strip_prefix("sha256-")
+        .ok_or_else(|| invalid("profile digest is not sha256"))?;
+    validate_hex64(hex, "profile digest")
+}
+
+fn validate_hex64(value: &str, label: &str) -> io::Result<()> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(invalid(format!("{label} is not canonical")));
+    }
+    Ok(())
+}
+
+fn validate_string(value: &str) -> io::Result<()> {
+    if value.len() > MAX_STRING || value.bytes().any(|byte| byte == 0 || byte.is_ascii_control()) {
+        return Err(invalid("profile string exceeds bounds"));
+    }
+    Ok(())
+}
+
+fn read_bounded_regular(path: &Path) -> io::Result<String> {
+    validate_regular_file(path)?;
+    let mut file = fs::File::open(path)?;
+    let before = file.metadata()?;
+    if before.len() > MAX_METADATA_BYTES {
+        return Err(invalid("profile metadata exceeds byte bound"));
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(MAX_METADATA_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_METADATA_BYTES || !same_file_metadata(&before, &file.metadata()?) {
+        return Err(invalid("profile metadata changed while reading"));
+    }
+    String::from_utf8(bytes).map_err(|_| invalid("profile metadata is not UTF-8"))
+}
+
+fn ensure_directory_chain(path: &Path) -> io::Result<()> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut cursor = PathBuf::new();
+    for component in absolute.components() {
+        cursor.push(component.as_os_str());
+        if matches!(component, Component::RootDir | Component::Prefix(_)) {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(&cursor)?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(invalid("profile authority crosses non-directory or symlink"));
+        }
+        #[cfg(windows)]
+        if is_windows_reparse(&metadata) {
+            return Err(invalid("profile authority crosses Windows reparse point"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_regular_file(path: &Path) -> io::Result<()> {
+    let parent = path.parent().ok_or_else(|| invalid("profile file has no parent"))?;
+    ensure_directory_chain(parent)?;
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(invalid("profile authority is not a no-follow regular file"));
+    }
+    #[cfg(windows)]
+    if is_windows_reparse(&metadata) {
+        return Err(invalid("profile file is a Windows reparse point"));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_windows_reparse(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+fn ensure_executable(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if fs::metadata(path)?.permissions().mode() & 0o111 == 0 {
+            return Err(invalid("profile projection is not executable"));
+        }
+    }
+    #[cfg(windows)]
+    {
+        let extension = path
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or("");
+        if !matches!(extension.to_ascii_lowercase().as_str(), "exe" | "com") {
+            return Err(invalid("profile projection is not a native Windows executable"));
+        }
+    }
+    Ok(())
+}
+
+fn same_directory(left: &Path, right: &Path) -> io::Result<bool> {
+    ensure_directory_chain(left)?;
+    ensure_directory_chain(right)?;
+    Ok(fs::canonicalize(left)? == fs::canonicalize(right)?)
+}
+
+fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        return left.dev() == right.dev()
+            && left.ino() == right.ino()
+            && left.len() == right.len()
+            && left.mtime() == right.mtime()
+            && left.mtime_nsec() == right.mtime_nsec();
+    }
+    #[cfg(not(unix))]
+    {
+        left.len() == right.len() && left.modified().ok() == right.modified().ok()
+    }
+}
+
+fn copy_file_create_new(source: &Path, destination: &Path) -> io::Result<()> {
+    let mut input = fs::File::open(source)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    io::copy(&mut input, &mut output)?;
+    output.sync_all()
+}
+
+fn sync_and_match(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::File::open(destination)?.sync_all()?;
+    if SHA256::sha256_file_hex(source)? != SHA256::sha256_file_hex(destination)? {
+        return Err(invalid("dispatcher copy digest mismatch"));
+    }
+    Ok(())
+}
+
+fn remove_regular_partial(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => fs::remove_file(path),
+        Ok(_) => Err(invalid("dispatcher partial is not a regular file")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    const MOVEFILE_REPLACE_EXISTING: u32 = 1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 8;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+    let mut existing = source.as_os_str().encode_wide().collect::<Vec<_>>();
+    existing.push(0);
+    let mut replacement = destination.as_os_str().encode_wide().collect::<Vec<_>>();
+    replacement.push(0);
+    if unsafe {
+        MoveFileExW(
+            existing.as_ptr(),
+            replacement.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn user_bin_dir() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    home.join(Syntax::CONFIG_DEFAULT_DIR).join(Syntax::TOOL_BIN_DIR)
+}
+
+fn invalid(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+fn json_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            value if value.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\u{:04x}", value as u32);
+            }
+            value => out.push(value),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn write_string_array(out: &mut String, key: &str, values: &[String], comma: bool) {
+    out.push_str(&format!("      \"{key}\": ["));
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&json_string(value));
+    }
+    out.push(']');
+    if comma {
+        out.push(',');
+    }
+    out.push('\n');
+}
+
+fn expect_exact_keys(
+    object: &BTreeMap<String, JSON::Json>,
+    expected: &[&str],
+    label: &str,
+) -> io::Result<()> {
+    let actual = object.keys().map(String::as_str).collect::<Vec<_>>();
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+    if actual != expected {
+        return Err(invalid(format!("{label} has unknown or missing fields")));
+    }
+    Ok(())
+}
+
+fn string_field<'a>(object: &'a BTreeMap<String, JSON::Json>, key: &str) -> io::Result<&'a str> {
+    object
+        .get(key)
+        .ok_or_else(|| invalid(format!("missing key `{key}`")))?
+        .as_str()
+        .map_err(invalid)
+}
+
+fn bounded_string(object: &BTreeMap<String, JSON::Json>, key: &str) -> io::Result<String> {
+    let value = string_field(object, key)?;
+    validate_string(value)?;
+    Ok(value.to_string())
+}
+
+fn integer_field(object: &BTreeMap<String, JSON::Json>, key: &str) -> io::Result<u64> {
+    let Some(JSON::Json::Num(value)) = object.get(key) else {
+        return Err(invalid(format!("profile field `{key}` is not a number")));
+    };
+    if !value.is_finite()
+        || *value < 0.0
+        || value.fract() != 0.0
+        || *value > 9_007_199_254_740_991.0
+    {
+        return Err(invalid(format!("profile field `{key}` is not an exact integer")));
+    }
+    Ok(*value as u64)
+}
+
+fn string_array(object: &BTreeMap<String, JSON::Json>, key: &str) -> io::Result<Vec<String>> {
+    let Some(JSON::Json::Array(values)) = object.get(key) else {
+        return Err(invalid(format!("profile field `{key}` is not an array")));
+    };
+    values
+        .iter()
+        .map(|value| {
+            let value = value.as_str().map_err(invalid)?;
+            if value.len() > 255 {
+                return Err(invalid(format!("profile field `{key}` exceeds bounds")));
+            }
+            Ok(value.to_string())
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn digest(byte: char) -> String {
+        format!("sha256-{}", byte.to_string().repeat(64))
+    }
+
+    fn metadata() -> GenerationMetadata {
+        GenerationMetadata {
+            generation: 7,
+            created_at: 1,
+            tools: vec![GenerationTool {
+                name: "echo-args".into(),
+                version: "1".into(),
+                source: "path".into(),
+                reference: "path:echo-args".into(),
+                output_hash: digest('a'),
+                store_root: if cfg!(windows) { "C:\\store".into() } else { "/store".into() },
+                bins: vec!["echo-args".into()],
+                members: vec!["echo-args".into()],
+                projection_hashes: vec![digest('b')],
+            }],
+        }
+    }
+
+    #[test]
+    fn current_pointer_rejects_bitflip_truncation_and_traversal() {
+        let pointer = CurrentPointer { generation: 7, witness: digest('a') };
+        let wire = format_current_pointer(&pointer).unwrap();
+        assert_eq!(parse_current_pointer(&wire).unwrap(), pointer);
+        assert!(parse_current_pointer(&wire.replace("generation\t7", "generation\t8")).is_err());
+        assert!(parse_current_pointer(wire.trim_end()).is_err());
+        assert!(parse_current_pointer(&wire.replace("generation\t7", "generation\t../7")).is_err());
+    }
+
+    #[test]
+    fn generation_metadata_roundtrips_and_binds_projection() {
+        let metadata = metadata();
+        let wire = format_generation_metadata(&metadata).unwrap();
+        assert_eq!(parse_generation_metadata(&wire, 7).unwrap(), metadata);
+        let witness = generation_witness(&wire, &metadata);
+        let changed = wire.replace(&digest('b'), &digest('c'));
+        let changed_metadata = parse_generation_metadata(&changed, 7).unwrap();
+        assert_ne!(witness, generation_witness(&changed, &changed_metadata));
+    }
+
+    #[test]
+    fn names_reject_traversal_windows_reserved_and_case_collisions() {
+        for invalid in ["", "../x", "a/b", "a\\b", "CON", "com1.exe", "nul.txt"] {
+            assert!(validate_bin_name(invalid).is_err(), "accepted {invalid:?}");
+        }
+        let mut metadata = metadata();
+        metadata.tools.push(GenerationTool {
+            name: "other".into(),
+            version: "1".into(),
+            source: "path".into(),
+            reference: "path:other".into(),
+            output_hash: digest('c'),
+            store_root: metadata.tools[0].store_root.clone(),
+            bins: vec!["ECHO-ARGS".into()],
+            members: vec!["other".into()],
+            projection_hashes: vec![digest('d')],
+        });
+        assert!(format_generation_metadata(&metadata).is_err());
+    }
+
+    #[test]
+    fn windows_dispatch_contract_is_native_not_batch() {
+        assert_eq!(MISSING_DISPATCH_EXIT, 127);
+        assert_eq!(INVALID_DISPATCH_EXIT, 126);
+        let source = include_str!("../bin/jetpack.rs");
+        assert!(source.contains("dispatch_current_process"));
+        assert!(!source.contains(".cmd"));
+    }
+
+    #[test]
+    fn native_command_preserves_metacharacter_arguments() {
+        let arguments = vec![
+            OsString::from("plain"),
+            OsString::from("a&b"),
+            OsString::from("%PATH%"),
+            OsString::from("semi;colon"),
+            OsString::from("space value"),
+        ];
+        let command = target_command(Path::new("tool"), arguments.clone());
+        assert_eq!(command.get_args().collect::<Vec<_>>(), arguments.iter().map(OsString::as_os_str).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn removed_bin_is_stable_not_found() {
+        let metadata = GenerationMetadata {
+            generation: 1,
+            created_at: 1,
+            tools: Vec::new(),
+        };
+        let error = find_bin(&metadata, "removed").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(MISSING_DISPATCH_EXIT, 127);
+    }
+
+    #[test]
+    fn native_dispatcher_install_is_synced_exact_binary() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-profile-dispatch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let installed = install_dispatcher(&bin, "sample-tool").unwrap();
+        assert_eq!(
+            SHA256::sha256_file_hex(&installed).unwrap(),
+            SHA256::sha256_file_hex(&std::env::current_exe().unwrap()).unwrap()
+        );
+        validate_regular_file(&installed).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_projection_symlink_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!("jet-profile-link-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("target");
+        fs::write(&target, b"tool").unwrap();
+        let projection = root.join("projection");
+        symlink(&target, &projection).unwrap();
+        assert!(validate_regular_file(&projection).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+}

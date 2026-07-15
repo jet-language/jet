@@ -20,6 +20,8 @@ mod bridge_os_studio;
 mod studio_server;
 mod studio_transactions;
 mod tool;
+#[doc(hidden)]
+pub mod ProfileDispatch;
 mod usage_tests;
 
 use parse::Parsed;

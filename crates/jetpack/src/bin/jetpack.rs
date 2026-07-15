@@ -17,6 +17,9 @@
 #![allow(non_snake_case)]
 
 fn main() {
+    if let Some(code) = jetpack::CLI::ProfileDispatch::dispatch_current_process() {
+        std::process::exit(code);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     // D-JPK-DISPATCH1=B (A1): `jet` queries this before exec-ing any real
     // verb, to catch a `jet`/`jetpack` version mismatch as E1227 instead of
