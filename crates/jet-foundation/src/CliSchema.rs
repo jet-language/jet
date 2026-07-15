@@ -426,7 +426,13 @@ fn pe_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
             // own length trims only zero alignment padding, then validates.
             if raw.len() < 14 { return Err(MetadataError::Malformed("truncated PE metadata section")); }
             let record_len = 46usize.checked_add(u32::from_le_bytes(raw[10..14].try_into().unwrap()) as usize).ok_or(MetadataError::Malformed("record length overflow"))?;
-            found.push(bounds(raw, 0, record_len)?);
+            let record = bounds(raw, 0, record_len)?;
+            let trailing = &raw[record_len..];
+            if trailing.starts_with(RECORD_MAGIC) { return Err(MetadataError::Duplicate); }
+            if trailing.iter().any(|byte| *byte != 0) {
+                return Err(MetadataError::Malformed("nonzero bytes after PE metadata record"));
+            }
+            found.push(record);
         }
     }
     Ok(found)
@@ -439,10 +445,14 @@ fn is_mach(bytes: &[u8]) -> bool {
         Some([0xbe, 0xba, 0xfe, 0xca]) | Some([0xbf, 0xba, 0xfe, 0xca]))
 }
 
-fn mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
-    if matches!(bytes.get(..4),
+fn is_fat_mach(bytes: &[u8]) -> bool {
+    matches!(bytes.get(..4),
         Some([0xca, 0xfe, 0xba, 0xbe]) | Some([0xca, 0xfe, 0xba, 0xbf]) |
-        Some([0xbe, 0xba, 0xfe, 0xca]) | Some([0xbf, 0xba, 0xfe, 0xca])) {
+        Some([0xbe, 0xba, 0xfe, 0xca]) | Some([0xbf, 0xba, 0xfe, 0xca]))
+}
+
+fn mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
+    if is_fat_mach(bytes) {
         return fat_mach_sections(bytes);
     }
     let is_64 = bytes.get(..4) == Some(&[0xcf, 0xfa, 0xed, 0xfe]);
@@ -495,6 +505,9 @@ fn fat_mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
         let offset = usize_num(read_num(bytes, arch + 8, width, little)?)?;
         let size = usize_num(read_num(bytes, arch + 8 + width, width, little)?)?;
         let slice = bounds(bytes, offset, size)?;
+        if is_fat_mach(slice) {
+            return Err(MetadataError::Malformed("nested universal Mach-O slice"));
+        }
         let sections = mach_sections(slice)?;
         if sections.len() != 1 {
             return if sections.is_empty() { Err(MetadataError::Missing) } else { Err(MetadataError::Duplicate) };
@@ -728,6 +741,15 @@ mod tests {
         bytes
     }
 
+    fn pe_with_trailing(record: &[u8], trailing: &[u8]) -> Vec<u8> {
+        let mut bytes = pe(record, false);
+        let table = 0x80 + 24;
+        bytes[table + 16..table + 20]
+            .copy_from_slice(&((record.len() + trailing.len()) as u32).to_le_bytes());
+        bytes.extend_from_slice(trailing);
+        bytes
+    }
+
     fn mach(record: &[u8]) -> Vec<u8> {
         let command_size = 72 + 80;
         let record_at = 32 + command_size;
@@ -763,6 +785,18 @@ mod tests {
         bytes
     }
 
+    fn nested_fat_mach(record: &[u8]) -> Vec<u8> {
+        let inner = fat_mach(record);
+        let table_end = 8 + 20;
+        let mut bytes = vec![0u8; table_end + inner.len()];
+        bytes[..4].copy_from_slice(&[0xca, 0xfe, 0xba, 0xbe]);
+        bytes[4..8].copy_from_slice(&1u32.to_be_bytes());
+        bytes[16..20].copy_from_slice(&(table_end as u32).to_be_bytes());
+        bytes[20..24].copy_from_slice(&(inner.len() as u32).to_be_bytes());
+        bytes[table_end..].copy_from_slice(&inner);
+        bytes
+    }
+
     #[test]
     fn canonical_record_round_trips() {
         let schema = schema();
@@ -788,6 +822,10 @@ mod tests {
         assert_eq!(read_executable(b"not executable"), Err(MetadataError::UnknownFormat));
         assert_eq!(read_executable(b"\0asm\x01\0\0\0"), Err(MetadataError::Missing));
         assert_eq!(read_executable(&pe(&record, true)), Err(MetadataError::Duplicate));
+        assert_eq!(read_executable(&pe_with_trailing(&record, &record)), Err(MetadataError::Duplicate));
+        assert_eq!(read_executable(&pe_with_trailing(&record, &[0, 7])), Err(MetadataError::Malformed("nonzero bytes after PE metadata record")));
+        assert_eq!(read_executable(&pe_with_trailing(&record, &[0; 16])).unwrap(), schema());
+        assert_eq!(read_executable(&nested_fat_mach(&record)), Err(MetadataError::Malformed("nested universal Mach-O slice")));
 
         let mut unsupported = record.clone();
         unsupported[8..10].copy_from_slice(&2u16.to_le_bytes());

@@ -1,8 +1,8 @@
 //! dev / repl / doctor / explain / completions / bind / eval / emit / bench
 //! developer-tooling subcommand handlers.
 
-use std::fs;
-use std::io::IsTerminal;
+use std::fs::{self, File, OpenOptions};
+use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
@@ -467,19 +467,47 @@ pub(crate) fn run_completions(args: &[String]) {
         }
     } else {
         let program = &args[2];
-        let metadata = fs::metadata(program).unwrap_or_else(|error| completion_metadata_error(program, &format!("the program could not be opened ({error})")));
-        if metadata.len() > 512 * 1024 * 1024 {
+        let command_name = jet::CLI::completion_command_name(program)
+            .unwrap_or_else(|error| completion_metadata_error(program, error));
+        let mut file = open_completion_program(program).unwrap_or_else(|error| completion_metadata_error(program, &format!("the program could not be opened ({error})")));
+        let metadata = file.metadata().unwrap_or_else(|error| completion_metadata_error(program, &format!("the opened program could not be inspected ({error})")));
+        if !metadata.file_type().is_file() {
+            completion_metadata_error(program, "the program is not a regular file");
+        }
+        const MAX_PROGRAM_BYTES: u64 = 512 * 1024 * 1024;
+        if metadata.len() > MAX_PROGRAM_BYTES {
             completion_metadata_error(program, "the program is larger than the 512 MiB metadata-reader limit");
         }
-        let bytes = fs::read(program).unwrap_or_else(|error| completion_metadata_error(program, &format!("the program could not be read ({error})")));
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.by_ref().take(MAX_PROGRAM_BYTES + 1).read_to_end(&mut bytes)
+            .unwrap_or_else(|error| completion_metadata_error(program, &format!("the opened program could not be read ({error})")));
+        if bytes.len() as u64 > MAX_PROGRAM_BYTES {
+            completion_metadata_error(program, "the program grew beyond the 512 MiB metadata-reader limit while being read");
+        }
         let schema = jet_foundation::CliSchema::read_executable(&bytes)
             .unwrap_or_else(|error| completion_metadata_error(program, &error.to_string()));
-        jet::CLI::completions_for_program(shell, program, &schema).unwrap()
+        jet::CLI::completions_for_program(shell, &command_name, &schema).unwrap()
     };
     print!("{}", out);
 }
 
+#[cfg(unix)]
+fn open_completion_program(path: &str) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const NONBLOCK: i32 = 0o4000;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    const NONBLOCK: i32 = 0x0004;
+    OpenOptions::new().read(true).custom_flags(NONBLOCK).open(path)
+}
+
+#[cfg(not(unix))]
+fn open_completion_program(path: &str) -> std::io::Result<File> {
+    OpenOptions::new().read(true).open(path)
+}
+
 fn completion_metadata_error(program: &str, why: &str) -> ! {
+    let program = program.chars().flat_map(char::escape_default).collect::<String>();
     eprintln!("Error [E2103]: couldn't read command metadata from `{program}`.");
     eprintln!(" Why: {why}.");
     eprintln!(" Fix: rebuild the program with this Jet toolchain, then try again.");

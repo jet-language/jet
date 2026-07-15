@@ -1137,6 +1137,57 @@ fn external_completion_metadata_errors_fail_closed() {
 }
 
 #[test]
+fn external_completion_rejects_hostile_files_and_names() {
+    let dir = isolated_cwd("shape_cli_hostile_artifacts");
+    let oversized = dir.join("oversized");
+    fs::File::create(&oversized).unwrap().set_len(512 * 1024 * 1024 + 1).unwrap();
+    let oversized_out = Command::new(jet())
+        .args(["self", "completions", "bash", "--for", "oversized"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(oversized_out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&oversized_out.stderr).contains("larger than the 512 MiB"));
+
+    #[cfg(unix)]
+    {
+        let device = Command::new(jet())
+            .args(["self", "completions", "bash", "--for", "/dev/null"])
+            .output()
+            .unwrap();
+        assert_eq!(device.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&device.stderr).contains("not a regular file"));
+
+        let fifo = dir.join("program-fifo");
+        let made = Command::new("mkfifo").arg(&fifo).status().unwrap();
+        assert!(made.success());
+        let fifo_out = Command::new(jet())
+            .args(["self", "completions", "bash", "--for", "program-fifo"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert_eq!(fifo_out.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&fifo_out.stderr).contains("not a regular file"));
+    }
+
+    let hostile = "safe\nINJECT_COMMAND\nnext";
+    fs::write(dir.join(hostile), b"not an executable").unwrap();
+    for shell in ["bash", "zsh", "fish", "powershell"] {
+        let out = Command::new(jet())
+            .args(["self", "completions", shell, "--for", hostile])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stdout.is_empty(), "{shell} emitted attacker-controlled script bytes");
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(stderr.contains("contains a control character"));
+        assert!(!stderr.contains("\nINJECT_COMMAND\n"), "{shell} exposed an executable line: {stderr:?}");
+        assert!(stderr.contains("safe\\nINJECT_COMMAND\\nnext"));
+    }
+}
+
+#[test]
 fn external_completion_preserves_checked_subcommands() {
     let dir = isolated_cwd("shape_cli_subcommands");
     fs::write(dir.join("commands.jet"), r#"@Cli
