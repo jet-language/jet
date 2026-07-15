@@ -18,7 +18,7 @@ use jetpack_fixtures::*;
 #[test]
 fn jet_clean_delegates_to_jetpack_clean() {
     let root = Scratch::new("root");
-    let stale = write_hangar_meta(&root.path, "old-top", "oldtop", "1.0", "", Some(1));
+    let stale = write_hangar_meta(&root.path, "old-top", "oldtop", "1.0", Some(1)).0;
 
     let out = jet()
         .args(["clean", "--no-color", "--yes"])

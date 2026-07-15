@@ -309,7 +309,7 @@ pub fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let json = format!(
-        "[{{\"outputs\":{{\"out\":{:?}}}}}]",
+        "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
@@ -336,7 +336,7 @@ pub fn write_fastfetch_fixture(fixtures: &Path, out_dir: &Path) {
         fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let json = format!(
-        "[{{\"outputs\":{{\"out\":{:?}}}}}]",
+        "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-fastfetch.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap();
@@ -432,27 +432,82 @@ pub fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
 }
 
 
+/// Register a real, contract-valid hangar object via the production
+/// `ingest_tree` API.
+///
+/// Card #420's producer-record refactor made `jetpack clean`/`closure_graph`
+/// fail-closed: every hangar entry it walks must decode a valid
+/// `ProducerRecord` and pass `store_validates_complete_closure` (real content
+/// re-hashed against the recorded digest — see
+/// `crates/jetpack/src/Store/Closure.rs::{normalize_legacy_entry,
+/// store_validates_complete_closure}`). A hand-written `meta.json` with a
+/// fictitious `/nix/store/...` `out` and blank `CacheIdentity` can no longer
+/// satisfy that — it always fails with "legacy package lacks immutable
+/// producer facts" or "has no dependency references or store-validated
+/// closure proof". `ingest_tree` (provider `hangar-ingest`) is the only
+/// producer-record-issuing constructor reachable from outside the `jetpack`
+/// crate (the `store-record`/`core` provider path is `#[cfg(test)]`-gated
+/// inside `jetpack` itself), so fixtures now go through it to get a real
+/// digest over real bytes.
+///
+/// The digest is no longer caller-chosen (it's the real hash of the fixture
+/// payload), so this returns `(hangar_dir, envelope_output_hash)` — callers
+/// that need to cross-reference the digest elsewhere (e.g. a lockfile's
+/// `output-hash`) read it back from the second element.
 pub fn write_hangar_meta(
     root: &Path,
     id: &str,
     name: &str,
     version: &str,
-    output_hash: &str,
     last_used_at: Option<u64>,
-) -> PathBuf {
-    let dir = root.join("hangar").join(id);
-    fs::create_dir_all(&dir).unwrap();
-    let timestamps = last_used_at
-        .map(|ts| format!("  \"realized_at\": \"{ts}\",\n  \"last_used_at\": \"{ts}\",\n"))
-        .unwrap_or_default();
-    fs::write(
-        dir.join("meta.json"),
-        format!(
-            "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"ref\": \"nixpkgs:{name}\",\n  \"out\": \"/nix/store/{name}\",\n  \"bin\": \"/nix/store/{name}/bin\",\n  \"rlib\": \"\",\n  \"output_hash\": \"{output_hash}\",\n  \"platform\": \"test\",\n  \"signature\": \"\",\n  \"provenance\": \"fixture\",\n{timestamps}  \"end\": \"meta\"\n}}"
-        ),
+) -> (PathBuf, String) {
+    let roots = jetpack::Store::Roots {
+        root: root.to_path_buf(),
+        dev_mode: false,
+    };
+    let src = root.join(format!("hangar-meta-src-{id}"));
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("payload"), format!("fixture payload: {id}")).unwrap();
+    let entry = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: name.to_string(),
+            version: version.to_string(),
+            reference: format!("fixture:{id}"),
+            cache_identity: jetpack::Store::CacheIdentity {
+                source_fingerprint: format!("sha256-fixture-source-{id}"),
+                recipe_fingerprint: format!("sha256-fixture-recipe-{id}"),
+                policy_fingerprint: "policy=fixture".to_string(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".to_string(), src.clone())]),
+            signature: String::new(),
+            provenance: "fixture".to_string(),
+            platform_artifact_kind: String::new(),
+        },
     )
-    .unwrap();
-    dir
+    .unwrap()
+    .entry;
+    fs::remove_dir_all(&src).ok();
+    let dir = root.join("hangar").join(&entry.id);
+    let meta_path = dir.join("meta.json");
+    let mut text = fs::read_to_string(&meta_path).unwrap();
+    if let Some(ts) = last_used_at {
+        text = text.replace(
+            &format!("\"realized_at\": \"{}\"", entry.realized_at),
+            &format!("\"realized_at\": \"{ts}\""),
+        );
+    }
+    let last_used_replacement = last_used_at
+        .map(|ts| ts.to_string())
+        .unwrap_or_default();
+    text = text.replace(
+        &format!("\"last_used_at\": \"{}\"", entry.last_used_at),
+        &format!("\"last_used_at\": \"{last_used_replacement}\""),
+    );
+    fs::write(&meta_path, text).unwrap();
+    (dir, entry.envelope.output_hash)
 }
 
 

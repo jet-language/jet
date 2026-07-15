@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 642,
-    "rev": 7720,
+    "nextNum": 650,
+    "rev": 7729,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8978,6 +8978,11 @@
       "workOrder": 78,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "claude-main",
+          "text": "Producer-record strictness (3361cb438/5267856bb/980e7935e) left shared test fixtures unupdated: ~25 red across jetpack_dispatch/engine/offline (missing drvPath; legacy entries lack producer_record/cache_identity). jet-impl deriving contract from refactor's own tests and completing fixture debt now — tests only, fail-closed production behavior untouched. Blocks full-suite gate for #535 and the C4 sweep."
+        },
         {
           "at": "2026-07-15",
           "by": "codex-root",
@@ -20078,6 +20083,174 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T18:59:43.052Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0vb511d",
+      "num": 642,
+      "title": "Memory audit: plain-parameter semantics — values vs read borrows",
+      "body": "2026-07-15 owner audit: plain parameters are read borrows under ratified D-MEM1 v5 (syntax-decisions.md:939, spec.md:179); audit's target cohesion model reads them as plain VALUES for beginners (strings/lists/structs: plain values only). Decide whether unmarked parameter semantics stay read-borrow (today's enhanced-rust-borrow-checker baseline reset) or become value semantics with copy-on-write backing. Ballot must carry audit tradeoffs verbatim: CoW detach spikes (plain value code may allocate on mutation; transitive contracts expose this; real-time policy can deny); reference-count traffic (ownership analysis should erase counts; policy may require proof of zero RC). Conflicts: touches ratified D-MEM1 v5 unmarked-is-read law — owner says audit closure likely overrides. BALLOT REQUIRED before any code.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:04.630Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0x9dh3l",
+      "num": 643,
+      "title": "Memory audit: stored and returned safe views with public provenance",
+      "body": "2026-07-15 owner audit: stored/returned safe references were deleted (D-MEM1 S3), which blocks general zero-copy abstractions and pushes programs toward Shared, IDs, GC, or raw memory. Decide reinstating returned/stored views via hidden source metadata that is PUBLIC, stable, queryable, and semver-checked (audit: view provenance complexity — hidden metadata is still complexity; metadata must be semver-pinned). Cohesion targets: zero-copy parsing with View/ViewMut and no lifetime syntax; returned or stored views semver-pinned. Interacts with ratified D-SHAPE-PLACE1 windows (#613) and second-class borrow law. BALLOT REQUIRED.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:04.748Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c0zdv8vm",
+      "num": 644,
+      "title": "Memory audit: transitive fact vocabulary — allocation, RC, targets",
+      "body": "2026-07-15 owner audit: #Policy(no_alloc) is local and denylist-based, not transitive; deliberately misses several allocations and calls (syntax-decisions.md:993, D-NOALLOC-SEM1=A scope cut). Audit target: one transitive fact vocabulary for contracts and policy — transitive allocation denial for fixed/no-heap targets, arena bounds/high-water facts in contracts, proof-of-zero-RC policy, and dynamic-dispatch honesty (open-world targets prevent exact transitive guarantees: strict packages must seal target sets or consume signed dependency summaries). Supersedes the ratified local-only scope if owner confirms. BALLOT REQUIRED.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:04.876Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c01gqgxn",
+      "num": 645,
+      "title": "Memory audit: typed unsafe obligations",
+      "body": "2026-07-15 owner audit: current unsafe gating records a binary gate, not typed remaining obligations (spec.md:1260). Target: operation-level obligations so large audited unsafe regions (drivers, kernels) stay inspectable — audit diffs plus typed remaining obligations per region. Extends D-LL1/D-UNSAFE2 surface. BALLOT REQUIRED for the obligation surface.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:05.002Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c03lc2y3",
+      "num": 646,
+      "title": "Memory audit: Gc<T> exposure vs unratified I6 gate — status drift",
+      "body": "2026-07-15 owner audit: Gc<T> is implemented and exposed (crates/jet-codegen/src/Prelude/Gc.rs) while syntax-decisions.md:2217 still describes it as gated on its I6 ballot (D-OPTGC1). Reconcile: ballot D-OPTGC1 for real (ratify exposure with its external-dep and cycle story — audit: Shared cycles leak; Weak, Graph/Id, or explicit traced home are the answers) or pull the exposure until ratified. BALLOT REQUIRED either way; I6 gate is an owner-only call.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:05.131Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c05n5x5o",
+      "num": 647,
+      "title": "Memory audit: cleanup surface — defer verb and one close word",
+      "body": "2026-07-15 owner audit: D-SHAPE-RESOURCE1 ratified block-based early release, but owner comment (recorded only in audit discussions, not on the board) requests defer and one consistent close word; cleanup surface remains unsettled. Raise follow-up ballot covering: defer mechanism, single close verb across files/locks/resources, resource/value split teaching (files cannot copy like strings; take makes the exceptional rule visible). BALLOT REQUIRED.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:05.255Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c07nt4xr",
+      "num": 648,
+      "title": "Memory audit: distinct allocator runtimes — Arena, Bump, Fixed, slab",
+      "body": "2026-07-15 owner audit: Arena, Bump, Pool, and Fixed currently wrap the same vector-of-boxes runtime (crates/jet-codegen/src/Prelude/Mem.rs) and do not provide distinct contiguous-bump, fixed-buffer, or slab behavior. Implement honest distinct runtimes; surface arena retention facts (bulk cleanup may retain more than individual destruction — bounds and high-water facts belong in contracts, see transitive-facts card). No user-syntax change expected; if contract surface needed, that lands in the fact-vocabulary ballot.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:05.377Z",
+      "updated": "2026-07-15"
+    },
+    {
+      "id": "c09minfo",
+      "num": 649,
+      "title": "Memory audit: unify view tracking + provenance/alias model spec + S9 gate",
+      "body": "2026-07-15 owner audit: string views remain statically String with binding-side tracking while list and arena views use separate tracking maps (crates/jet-sema/src/Sema/CheckerOwnership.rs documents the parallel mechanisms) — unify into one checker mechanism. Jet's provenance and alias model must be specified independently and checked before Rust generation (compiler soundness; optimizer may change representation but never value behavior, alias behavior, resource timing, or pinned layout). Includes the D-MEM1 migration's S9 final verification gate, which had no live card until now. Gated on the parameter-semantics and stored-views ballots where their outcomes change the model.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T19:50:05.496Z",
       "updated": "2026-07-15"
     }
   ],
@@ -39392,6 +39565,69 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T19:50:05.496Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c09minfo",
+      "note": "Memory audit: unify view tracking + provenance/alias model spec + S9 gate"
+    },
+    {
+      "at": "2026-07-15T19:50:05.377Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c07nt4xr",
+      "note": "Memory audit: distinct allocator runtimes — Arena, Bump, Fixed, slab"
+    },
+    {
+      "at": "2026-07-15T19:50:05.255Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c05n5x5o",
+      "note": "Memory audit: cleanup surface — defer verb and one close word"
+    },
+    {
+      "at": "2026-07-15T19:50:05.131Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c03lc2y3",
+      "note": "Memory audit: Gc<T> exposure vs unratified I6 gate — status drift"
+    },
+    {
+      "at": "2026-07-15T19:50:05.002Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c01gqgxn",
+      "note": "Memory audit: typed unsafe obligations"
+    },
+    {
+      "at": "2026-07-15T19:50:04.877Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0zdv8vm",
+      "note": "Memory audit: transitive fact vocabulary — allocation, RC, targets"
+    },
+    {
+      "at": "2026-07-15T19:50:04.748Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0x9dh3l",
+      "note": "Memory audit: stored and returned safe views with public provenance"
+    },
+    {
+      "at": "2026-07-15T19:50:04.630Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0vb511d",
+      "note": "Memory audit: plain-parameter semantics — values vs read borrows"
+    },
+    {
+      "at": "2026-07-15T19:20:32.650Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-15T19:19:54.187Z",
       "by": "claude-main",
       "action": "card.update",
@@ -42827,69 +43063,6 @@
       "action": "card.update",
       "ref": "c01fj815",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T03:12:15.231Z",
-      "by": "terra-420-builder",
-      "action": "card.criteria-meet",
-      "ref": "c01fj815",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T03:01:29.157Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c0izrn87",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T03:01:29.054Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0izrn87",
-      "note": "#5 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-15T03:01:28.952Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0izrn87",
-      "note": "#4 Full diagnostic_snapshots target passes; no unreviewed snaps"
-    },
-    {
-      "at": "2026-07-15T03:01:28.846Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0izrn87",
-      "note": "#3 E0915, E0921, E0143, and E0722 snapshots match current fixtu"
-    },
-    {
-      "at": "2026-07-15T03:01:28.742Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0izrn87",
-      "note": "#2 Core-module E1001 snapshots exactly match the active frozen "
-    },
-    {
-      "at": "2026-07-15T03:01:28.596Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0izrn87",
-      "note": "#1 Every mismatched UI fixture is traced to current source plus"
-    },
-    {
-      "at": "2026-07-15T03:01:07.569Z",
-      "by": "codex-orchestrator",
-      "action": "card.add",
-      "ref": "c0izrn87",
-      "note": "Full suite red: UI snapshots lag ratified diagnostics and core surface"
-    },
-    {
-      "at": "2026-07-15T02:50:16.281Z",
-      "by": "terra-420-builder",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

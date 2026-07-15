@@ -295,23 +295,26 @@ fn list_shows_realized_package() {
 #[test]
 fn clean_removes_only_stale_unreferenced_hangar_objects() {
     let root = Scratch::new("root");
-    let stale = write_hangar_meta(&root.path, "old-1", "old", "1.0", "sha256-old", Some(1));
+    let stale = write_hangar_meta(&root.path, "old-1", "old", "1.0", Some(1)).0;
     let fresh = write_hangar_meta(
         &root.path,
         "fresh-1",
         "fresh",
         "1.0",
-        "sha256-fresh",
         Some(now_secs()),
-    );
+    )
+    .0;
     fs::write(stale.join("payload"), "old bytes").unwrap();
     fs::write(fresh.join("payload"), "fresh bytes").unwrap();
+    eprintln!("DEBUG stale meta: {}", fs::read_to_string(stale.join("meta.json")).unwrap());
+    eprintln!("DEBUG fresh meta: {}", fs::read_to_string(fresh.join("meta.json")).unwrap());
 
     let out = jetpack()
         .args(["clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
+    eprintln!("DEBUG stale meta after: {}", fs::read_to_string(stale.join("meta.json")).unwrap_or_default());
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -330,7 +333,7 @@ fn clean_removes_only_stale_unreferenced_hangar_objects() {
 #[test]
 fn clean_without_yes_prints_plan_and_does_not_apply_in_non_tty() {
     let root = Scratch::new("root");
-    let stale = write_hangar_meta(&root.path, "old-plan", "oldplan", "1.0", "", Some(1));
+    let stale = write_hangar_meta(&root.path, "old-plan", "oldplan", "1.0", Some(1)).0;
     fs::write(stale.join("payload"), "old bytes").unwrap();
 
     let out = jetpack()
@@ -355,9 +358,9 @@ fn clean_without_yes_prints_plan_and_does_not_apply_in_non_tty() {
 fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
     let root = Scratch::new("root");
     let project = Scratch::new("proj");
-    let live = write_hangar_meta(&root.path, "live-1", "live", "1.0", "sha256-live", Some(1));
-    let legacy = write_hangar_meta(&root.path, "legacy-1", "legacy", "1.0", "", None);
-    write_lock_with_live_output(&project.path, "live", "1.0", "sha256-live");
+    let (live, live_hash) = write_hangar_meta(&root.path, "live-1", "live", "1.0", Some(1));
+    let legacy = write_hangar_meta(&root.path, "legacy-1", "legacy", "1.0", None).0;
+    write_lock_with_live_output(&project.path, "live", "1.0", &live_hash);
 
     let out = jetpack()
         .args(["clean", "--no-color", "--yes"])
@@ -413,17 +416,17 @@ fn clean_optimizes_duplicate_files_inside_hangar_only() {
         "dup-a",
         "dupa",
         "1.0",
-        "sha256-a",
         Some(now_secs()),
-    );
+    )
+    .0;
     let second = write_hangar_meta(
         &root.path,
         "dup-b",
         "dupb",
         "1.0",
-        "sha256-b",
         Some(now_secs()),
-    );
+    )
+    .0;
     fs::write(first.join("blob"), "same payload").unwrap();
     fs::write(second.join("blob"), "same payload").unwrap();
 
@@ -453,7 +456,7 @@ fn clean_optimizes_duplicate_files_inside_hangar_only() {
 #[test]
 fn build_runs_opportunistic_clean_after_success() {
     let root = Scratch::new("root");
-    let stale = write_hangar_meta(&root.path, "old-auto", "oldauto", "1.0", "", Some(1));
+    let stale = write_hangar_meta(&root.path, "old-auto", "oldauto", "1.0", Some(1)).0;
 
     let out = jetpack()
         .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
@@ -1077,7 +1080,7 @@ module dev {
     );
     fs::write(
         fixtures.join("default-greet.json"),
-        r#"[{"outputs":{"out":"/nix/store/0000000000000000000000000000000a-greet-1.2.0"}}]"#,
+        r#"[{"drvPath":"/nix/store/0000000000000000000000000000000b-greet-1.2.0.drv","outputs":{"out":"/nix/store/0000000000000000000000000000000a-greet-1.2.0"}}]"#,
     )
     .unwrap();
 

@@ -50,7 +50,7 @@ fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let json = format!(
-        "[{{\"outputs\":{{\"out\":{:?}}}}}]",
+        "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
