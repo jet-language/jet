@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 641,
-    "rev": 7716,
+    "nextNum": 642,
+    "rev": 7717,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20047,6 +20047,27 @@
       "needsAcceptance": false,
       "created": "2026-07-15T18:57:09.810Z",
       "updated": "2026-07-15"
+    },
+    {
+      "id": "c0rxl8sx",
+      "num": 641,
+      "title": "Provider output parse breaks on nix store noise lines",
+      "body": "tests/jetpack_dispatch (top_level_jet_run_nixpkgs_colon_tool_execs_tool, jet_clean_delegates_to_jetpack_clean) fail on hosts whose nix store optimise hit the hard-link ceiling: nix emits repeated '<store>/.links/... has maximum number of links' lines which reach the text parse_realization (crates/jetpack/src/Provider.rs:1223) consumes as pure JSON, so realization dies with BadOutput 'couldn't understand the provider's output — likely a Jetpack bug'. Any user with a large optimised store hits this. Root-cause which invocation leaks noise into the JSON stream (offline fixture + adapter build path, L0205 present), make the consumer robust to non-JSON noise without weakening validation or forged-output rejection.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T18:59:43.052Z",
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -39360,6 +39381,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T18:59:43.052Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0rxl8sx",
+      "note": "Provider output parse breaks on nix store noise lines"
+    },
+    {
       "at": "2026-07-15T18:57:09.810Z",
       "by": "claude-main",
       "action": "card.add",
@@ -42851,13 +42879,6 @@
       "action": "card.update",
       "ref": "c02ahrf4",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T02:44:15.988Z",
-      "by": "codex-json-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c02ahrf4",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
