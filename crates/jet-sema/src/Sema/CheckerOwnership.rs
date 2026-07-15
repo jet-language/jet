@@ -1267,12 +1267,12 @@ pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
 /// D-DROP-WORD1: E0143 — `consume(x)` deliberately discards a
 /// `#SingleUse` value, but the discard wasn't audited. Throwing away a value
 /// whose whole point is "this job must be done" needs a written justification,
-/// so `drop` of a `#SingleUse` value is legal only inside an `#Unsafe("reason")`
+/// so `consume` of a `#SingleUse` value is legal only inside an `#Unsafe("reason")`
 /// region/fn — the reason IS the audit note (reuses D-UNSAFE2's audited gate).
 pub(crate) fn e0143_drop_unaudited(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0143",
-        format!("`{}` is `#SingleUse` — discarding it with `drop` needs an audited reason", name),
+        format!("`{}` is `#SingleUse` — discarding it with `consume` needs an audited reason", name),
         "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down".to_string(),
         format!(
             "wrap it in an audited region: `#{}(\"why discarding this is fine\") {{ consume({}) }}`",

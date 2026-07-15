@@ -204,7 +204,7 @@ renumbered, and no new `W` code may be allocated.
 | E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |
 | E0141 | sema  | `#SingleUse` value consumed on only one `if` branch (D-LIN1) |
 | E0142 | sema  | `#SingleUse` value lent/shared instead of moved (D-LIN1) |
-| E0143 | sema  | `drop` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP) |
+| E0143 | sema  | `consume` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP/D-DROP-WORD1) |
 | E0144 | sema  | `result` used inside a `@Pre` condition — it only exists once the function has returned (D-PREPOST1) |
 | E0145 | parse | `@Persist` on a binding that isn't module-level (D-PERSIST1) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
