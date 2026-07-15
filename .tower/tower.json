@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 634,
-    "rev": 7496,
+    "rev": 7499,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19061,29 +19061,29 @@
         {
           "n": 1,
           "text": "Both exact closure compaction/reader tests complete under 30-second external bounds and pass repeatedly.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-633-builder",
-          "verifiedBy": null,
-          "evidence": "Committed e5e0aa838. Exact compaction passed under 30s three times: 6.86s, 6.69s, 6.69s. Exact reader/compaction passed under 30s three times: 17.44s, 17.73s, 17.52s.",
-          "at": "2026-07-15T08:15:19.644Z"
+          "verifiedBy": "root-633-reviewer",
+          "evidence": "Independent 2026-07-15: exact closure_journal_compacts_without_changing_graph passed twice under timeout 30s (12.37s including rebuild, 6.81s); closure_readers_are_serialized_with_registration_and_compaction passed twice (17.81s, 17.72s).",
+          "at": "2026-07-15T08:24:47.603Z"
         },
         {
           "n": 2,
           "text": "Closure registration, compaction, and readers serialize without reentrant lock deadlock, partial visibility, or lost graph state.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-633-builder",
-          "verifiedBy": null,
-          "evidence": "Writer replay now validates each applied WAL entry before advancing, performs one final structural pass, proofs only newly registered records before append, snapshots structurally during compaction, and final-proofs all store authority at closure_graph/lifecycle consumption. Shared replay removes nested recovery/migration/load cycles; tests preserve monotonic 70-record visibility and exact graph after compaction.",
-          "at": "2026-07-15T08:15:19.745Z"
+          "verifiedBy": "root-633-reviewer",
+          "evidence": "Independent source review of e5e0aa838: recovery/migration/register share one replay graph; every delta prefix gets transaction-local structural validation; one final structural pass follows replay; closure_graph and lifecycle_inputs retain whole-graph store-proof validation; register proofs the new record before append; compaction snapshots replayed structural state. Exact monotonic 70-record reader test and compaction graph-equality test pass repeatedly; no lost recovery, migration, materialization, deletion, or proof authority found.",
+          "at": "2026-07-15T08:24:47.702Z"
         },
         {
           "n": 3,
           "text": "Full closure filter and targeted Jetpack store tests pass under bounded execution.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-633-builder",
-          "verifiedBy": null,
-          "evidence": "Bounded cargo test -p jetpack closure_: 19/19 in 17.68s. Bounded Store::Tests::tests:: filter: 48/48 in 17.69s. cargo check -p jetpack green; git diff --check clean.",
-          "at": "2026-07-15T08:15:19.847Z"
+          "verifiedBy": "root-633-reviewer",
+          "evidence": "Independent bounded matrix: cargo test -p jetpack closure_ passed 19/19 in 18.07s; cargo test -p jetpack Store::Tests::tests:: passed 49/49 in 18.07s (49 includes unrelated in-progress xattr test); cargo check -p jetpack green. All commands sequential in one Nix dev shell.",
+          "at": "2026-07-15T08:24:47.806Z"
         },
         {
           "n": 4,
@@ -38326,6 +38326,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T08:24:47.806Z",
+      "by": "root-633-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0qn1s08",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T08:24:47.703Z",
+      "by": "root-633-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0qn1s08",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T08:24:47.603Z",
+      "by": "root-633-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0qn1s08",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T08:22:49.408Z",
       "by": "codex-root-producer-audit",
       "action": "decision.update",
@@ -41803,27 +41824,6 @@
       "action": "card.criteria-add",
       "ref": "c0n183gm",
       "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T00:21:26.537Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n183gm",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T00:20:27.653Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-QUANTITY1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T00:20:27.653Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qptf0n",
-      "note": "#4 snapshots re-blessed"
     }
   ],
   "nextNum": 368,
