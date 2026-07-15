@@ -2398,6 +2398,27 @@ inventory are implemented by #587; language-wide shape enforcement is owned by
 #560. Aliases, default selection, and callable entry linking remain separate
 choices and are not implied by D-SHAPE5b.
 
+**D-ECO-EXTENSION1=A — Extensions are ordinary typed Jet functions**: an
+extension accepts typed settings and returns a closed typed graph value. The
+returned value follows the same validation, authority checks, composition law,
+and provenance retention as a built-in value.
+
+```text
+conceptual flow only — not Jet syntax
+typed settings => ordinary Jet function => closed typed graph value
+```
+
+There is no separate plugin language and no callback with authority to mutate
+the whole graph. Extension code constructs and returns values; normal graph
+composition decides how those values join other contributions.
+
+This decision does not choose the aggregate graph's name or boundary, any
+project-part type name, declaration shape, file path, or source spelling; #532
+and #615 remain gates for those questions. Executable enforcement and
+conformance tests remain downstream under #560 or a dedicated graph
+implementation card. #611 itself adds no `Syntax.rs` entry, parser or runtime
+behavior, diagnostic, grammar, snapshot, or executable example.
+
 **D-ECO-COMPOSE2=A — Safe additions combine; disagreements stop**: composition
 is order-independent and follows the field type. Equal single facts coalesce.
 Unequal single facts conflict, and the diagnostic identifies both origins.
@@ -3747,7 +3768,6 @@ implementation milestone is pending.
 | D-ECO1 | which project concepts share one semantic graph | **Epoch 4** — Tower #532 |
 | D-ECO-DECL1 | one source shape for packages through JetOS systems | **Epoch 4** — Tower #615 |
 | D-ECO-SOURCE1 | whether one `project.jet` replaces the current role-file division | **Epoch 4** — Tower #610 |
-| D-ECO-EXTENSION1 | how third parties add typed graph vocabulary | **Epoch 4** — Tower #611 |
 | D-ECO-RECEIPT2 | how the graph lowers to actions, receipts, and generations | **Epoch 4** — Tower #608 |
 | D-ECO-JETOS2 | how the project graph becomes JetOS and activates safely | **Epoch 4** — Tower #609 |
 | D-SHAPE-INTERNAL1 | whether public `_name` marks unsupported API | **Epoch 3** — Tower #551 |
