@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 628,
-    "rev": 7390,
+    "rev": 7393,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18617,6 +18617,11 @@
       "log": [
         {
           "at": "2026-07-15",
+          "by": "root-627-reviewer",
+          "text": "Independent review clean. Exact DNS fallback tests passed 3x each; full corelib 137 passed, 2 ignored. C1-C2 verified; parent retains mandatory full-repo C3."
+        },
+        {
+          "at": "2026-07-15",
           "by": "root-627-builder",
           "text": "Self-review hardening b22dfd2a routes final-attempt TCP and UDP AddrInUse through the same explicit bounded-exhaustion failure. Exact fallback and timeout tests rerun green after follow-up."
         },
@@ -18635,20 +18640,20 @@
         {
           "n": 1,
           "text": "Both DNS TCP-fallback fixtures obtain a TCP listener and UDP socket on one numeric port through bounded race-safe retry, without skipping real network behavior.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-627-builder",
-          "verifiedBy": null,
-          "evidence": "Commit dc586efa adds a 64-attempt dual-protocol helper that retains both sockets, retries the whole pair only on AddrInUse, fails clearly on exhaustion/other errors, and both fallback fixtures use it.",
-          "at": "2026-07-15T05:56:23.369Z"
+          "verifiedBy": "root-627-reviewer",
+          "evidence": "Independent review of dc586efa+b22dfd2a: bounded helper retains TCP+UDP pair, retries whole pair only for AddrInUse, reports immediate real bind failures and explicit 64-attempt exhaustion, and both real-network fallback fixtures use it.",
+          "at": "2026-07-15T06:03:24.031Z"
         },
         {
           "n": 2,
           "text": "The truncation/CNAME and single-budget timeout exact tests pass repeatedly; full corelib target remains green.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-627-builder",
-          "verifiedBy": null,
-          "evidence": "Both exact tests passed 5 consecutive runs each; cargo test --test corelib passed 137 tests with 2 ignored on commit dc586efa.",
-          "at": "2026-07-15T05:56:26.825Z"
+          "verifiedBy": "root-627-reviewer",
+          "evidence": "Independent Nix verification: truncation/CNAME exact test passed 3/3, one-budget timeout exact test passed 3/3, and cargo test --test corelib passed 137 with 2 ignored.",
+          "at": "2026-07-15T06:03:24.124Z"
         },
         {
           "n": 3,
@@ -37747,6 +37752,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T06:03:24.246Z",
+      "by": "root-627-reviewer",
+      "action": "card.update",
+      "ref": "c0hes1mt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T06:03:24.124Z",
+      "by": "root-627-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hes1mt",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T06:03:24.032Z",
+      "by": "root-627-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hes1mt",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T05:59:22.255Z",
       "by": "root-627-builder",
       "action": "card.update",
@@ -41223,27 +41249,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-SHAPE-VIEW1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:30.854Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-RESOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:30.663Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:37:30.451Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-DECL1",
       "note": "marked ready"
     }
   ],
