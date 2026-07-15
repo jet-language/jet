@@ -7331,19 +7331,20 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn owner_teardown_task() -> (task: Task<DispatchReport<String> >, release: Sender<Int>) {
+fn owner_teardown_task() -> Task<DispatchReport<String>> {
     owner_scope :: event.scope()
     ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: tasks.channel<Int>()
     (release_tx, release_rx) :: tasks.channel<Int>()
     ev.on(owner_scope, (n: Int) => {
         started_tx.send(copy n)
+        held_sender :: copy release_tx
         released :: release_rx.receive() ?? panic("release")
     })
     running :: ev.emit_async(98)
     started :: started_rx.receive() ?? panic("started")
     queued :: ev.emit_async(99)
-    return (task: queued, release: release_tx)
+    return queued
 }
 
 fn run() {
@@ -7407,8 +7408,8 @@ fn run() {
     pending_queued.join()
     pending_running.join()
 
-    owner_teardown :: owner_teardown_task()
-    owner_report :: owner_teardown.task.join()
+    owner_task :: owner_teardown_task()
+    owner_report :: owner_task.join()
     print("owner teardown={owner_report.accepted() && owner_report.state() == .Cancelled} trace={owner_report.trace().summary()}")
 }
 "#,
