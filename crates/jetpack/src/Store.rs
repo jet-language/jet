@@ -290,7 +290,9 @@ fn canonicalize_local_output_unlocked(
         return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
     }
     let destination = objects.join(digest);
-    fs::create_dir_all(&objects)?;
+    fs::create_dir_all(&objects).map_err(|error| {
+        std::io::Error::new(error.kind(), format!("creating canonical object directory: {error}"))
+    })?;
     if destination.exists() {
         let actual = super::Envelope::try_output_hash_of_in_hangar(
             &destination.to_string_lossy(),
@@ -305,11 +307,23 @@ fn canonicalize_local_output_unlocked(
         }
         if source != destination && source.exists() {
             make_tree_writable_for_removal(source)?;
-            fs::remove_dir_all(source)?;
+            fs::remove_dir_all(source).map_err(|error| {
+                std::io::Error::new(error.kind(), format!("removing duplicate provider output: {error}"))
+            })?;
         }
     } else {
-        fs::rename(source, &destination)?;
-        fs::File::open(&objects)?.sync_all()?;
+        // Provider outputs are sealed before this registration boundary. Some
+        // tier-1 filesystems deny renaming a read-only directory, so reopen it
+        // only while the Hangar transaction lock is held, publish, then seal
+        // the canonical path again before metadata becomes visible.
+        make_tree_writable_for_removal(source)?;
+        fs::rename(source, &destination).map_err(|error| {
+            std::io::Error::new(error.kind(), format!("publishing canonical provider output: {error}"))
+        })?;
+        seal_local_output(&destination)?;
+        fs::File::open(&objects)?.sync_all().map_err(|error| {
+            std::io::Error::new(error.kind(), format!("syncing canonical object directory: {error}"))
+        })?;
     }
     let remap = |member: &str| {
         if member.is_empty() {

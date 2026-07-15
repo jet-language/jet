@@ -1102,6 +1102,73 @@ mod tests {
     }
 
     #[test]
+    fn closure_rejects_one_action_mapping_to_different_outputs() {
+        let (roots, _g) = temp_roots();
+        let make = |name: &str, bytes: &str| {
+            let out = roots.root.join(name);
+            fs::create_dir_all(&out).unwrap();
+            fs::write(out.join("payload"), bytes).unwrap();
+            let envelope = super::super::super::Envelope::Envelope::for_output(
+                &out.to_string_lossy(),
+                "path:same-action",
+                "action-conflict",
+            );
+            record_verified(
+                &roots,
+                name,
+                "1",
+                "path:same-action",
+                &out.to_string_lossy(),
+                "",
+                "",
+                &envelope,
+                &test_identity(),
+            )
+        };
+        make("first-action-output", "first").unwrap();
+        let error = make("second-action-output", "second").unwrap_err();
+        assert!(error.to_string().contains("maps to conflicting records"));
+        assert_eq!(closure_graph(&roots).unwrap().records.len(), 1);
+    }
+
+    #[test]
+    fn closure_action_key_includes_sorted_reference_digests() {
+        let (roots, _g) = temp_roots();
+        let first = ingest_fixture(&roots, "key-first", &[("out", "first")], Vec::new());
+        let second = ingest_fixture(&roots, "key-second", &[("out", "second")], Vec::new());
+        let mut entry = first.entry.clone();
+        entry.references = vec![
+            second.entry.envelope.output_hash.clone(),
+            first.entry.envelope.output_hash.clone(),
+        ];
+        let ordered = entry_action_key(&entry);
+        entry.references.reverse();
+        assert_eq!(entry_action_key(&entry), ordered);
+        entry.references.pop();
+        assert_ne!(entry_action_key(&entry), ordered);
+    }
+
+    #[test]
+    fn closure_rejects_same_record_action_with_different_named_outputs() {
+        let (roots, _g) = temp_roots();
+        let primary = ingest_fixture(&roots, "same-record", &[("out", "primary")], Vec::new());
+        let named = ingest_fixture(&roots, "named-source", &[("out", "named")], Vec::new());
+        let action = entry_action_key(&primary.entry);
+        let mut conflicting = primary.entry.clone();
+        conflicting.named_outputs.insert(
+            "dev".to_string(),
+            named.entry.envelope.output_hash.clone(),
+        );
+        let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &conflicting)
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("maps to conflicting records"));
+        assert_eq!(action_outputs_of(&roots, &action).unwrap().len(), 1);
+        assert!(!action_outputs_of(&roots, &action).unwrap().contains_key("dev"));
+    }
+
+    #[test]
     fn closure_journal_recovers_partial_and_rejects_committed_corruption() {
         use std::io::Write as _;
 
@@ -1165,23 +1232,31 @@ mod tests {
         let out = roots.hangar_dir().join("provider-output");
         fs::create_dir_all(out.join("bin")).unwrap();
         fs::write(out.join("bin/tool"), "provider").unwrap();
+        seal_local_output(&out).unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
             "path:provider",
             "provider",
         );
-        seal_local_output(&out).unwrap();
+        let (canonical_out, canonical_bin, canonical_rlib) = canonicalize_local_output_unlocked(
+            &roots,
+            &out.to_string_lossy(),
+            &out.join("bin").to_string_lossy(),
+            "",
+            &envelope.output_hash,
+        )
+        .unwrap();
         let entry = record_verified_mode(
             &roots,
             "provider",
             "1",
             "path:provider",
-            &out.to_string_lossy(),
-            &out.join("bin").to_string_lossy(),
-            "",
+            &canonical_out,
+            &canonical_bin,
+            &canonical_rlib,
             &envelope,
             &test_identity(),
-            true,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -1242,6 +1317,42 @@ mod tests {
             .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn"))
             .count();
         assert!(transactions < 10, "journal did not compact: {transactions}");
+    }
+
+    #[test]
+    fn closure_readers_are_serialized_with_registration_and_compaction() {
+        let (roots, _g) = temp_roots();
+        let writer_root = roots.root.clone();
+        let writer = std::thread::spawn(move || {
+            let roots = Roots {
+                root: writer_root,
+                dev_mode: true,
+            };
+            for index in 0..70 {
+                ingest_fixture(
+                    &roots,
+                    &format!("reader-compact-{index}"),
+                    &[("out", &format!("reader-compact-bytes-{index}"))],
+                    Vec::new(),
+                );
+            }
+        });
+        let reader_root = roots.root.clone();
+        let reader = std::thread::spawn(move || {
+            let roots = Roots {
+                root: reader_root,
+                dev_mode: true,
+            };
+            let mut previous = 0;
+            for _ in 0..100 {
+                let count = closure_graph(&roots).unwrap().records.len();
+                assert!(count >= previous, "reader observed a stale graph");
+                previous = count;
+            }
+        });
+        writer.join().unwrap();
+        reader.join().unwrap();
+        assert_eq!(closure_graph(&roots).unwrap().records.len(), 70);
     }
 
     #[cfg(target_os = "linux")]

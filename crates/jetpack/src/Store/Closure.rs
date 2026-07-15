@@ -101,8 +101,10 @@ struct JournalEntry {
 }
 
 pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
-    recover_closure_journal(roots)?;
-    load_graph(roots)
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        recover_closure_journal_unlocked(roots)?;
+        load_graph(roots)
+    })
 }
 
 pub fn direct_references_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
@@ -129,14 +131,19 @@ pub fn actions_for_output(
 
 pub fn entry_action_key(entry: &StoreEntry) -> String {
     let identity = &entry.cache_identity;
-    let canonical = format!(
-        "jet.action-store.v1\nreference={}\nsource={}\nrecipe={}\npolicy={}\nplatform={}\n",
+    let mut canonical = format!(
+        "jet.action-store.v2\nreference={}\nsource={}\nrecipe={}\npolicy={}\nplatform={}\n",
         entry.reference,
         identity.source_fingerprint,
         identity.recipe_fingerprint,
         identity.policy_fingerprint,
         identity.platform,
     );
+    for digest in entry.references.iter().collect::<BTreeSet<_>>() {
+        canonical.push_str("reference-digest=");
+        canonical.push_str(digest);
+        canonical.push('\n');
+    }
     format!("sha256-{}", SHA256::sha256_hex(canonical.as_bytes()))
 }
 
@@ -147,7 +154,7 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
 }
 
 fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
-    recover_closure_journal(roots)?;
+    recover_closure_journal_unlocked(roots)?;
     let mut migrated = 0;
     for entry in list(roots) {
         if register_entry_unlocked(roots, &entry)? {
@@ -164,7 +171,7 @@ pub(crate) fn register_entry_unlocked(
     if entry.envelope.output_hash.is_empty() {
         return Ok(false);
     }
-    recover_closure_journal(roots)?;
+    recover_closure_journal_unlocked(roots)?;
     let graph = load_graph(roots)?;
     let (objects, record) = descriptor_for_entry(roots, entry)?;
     if graph.records.get(&record.id) == Some(&record)
@@ -198,6 +205,7 @@ pub(crate) fn register_entry_unlocked(
             record.id
         )));
     }
+    reject_action_conflict(&graph, &record).map_err(std::io::Error::other)?;
     append_entry(
         roots,
         &JournalEntry {
@@ -213,7 +221,7 @@ pub(crate) fn register_entry_unlocked(
 
 pub fn remove_closure_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        recover_closure_journal(roots)?;
+        recover_closure_journal_unlocked(roots)?;
         if !load_graph(roots)?.records.contains_key(id) {
             return Ok(false);
         }
@@ -232,6 +240,12 @@ pub fn remove_closure_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
 }
 
 pub fn recover_closure_journal(roots: &Roots) -> std::io::Result<usize> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        recover_closure_journal_unlocked(roots)
+    })
+}
+
+fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result<usize> {
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
         return Ok(0);
@@ -339,10 +353,26 @@ fn load_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
             }
         }
         for record in entry.records {
+            reject_action_conflict(&graph, &record).map_err(|error| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, error)
+            })?;
             graph.records.insert(record.id.clone(), record);
         }
     }
     Ok(graph)
+}
+
+fn reject_action_conflict(graph: &ClosureGraph, candidate: &ClosureRecord) -> Result<(), String> {
+    if let Some(existing) = graph.records.values().find(|record| {
+        record.action_key == candidate.action_key
+            && (record.outputs != candidate.outputs || record.references != candidate.references)
+    }) {
+        return Err(format!(
+            "action `{}` maps to conflicting records `{}` and `{}`",
+            candidate.action_key, existing.id, candidate.id
+        ));
+    }
+    Ok(())
 }
 
 fn append_entry(roots: &Roots, entry: &JournalEntry) -> std::io::Result<()> {
