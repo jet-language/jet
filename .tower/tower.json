@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 621,
-    "rev": 7195,
+    "rev": 7196,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35902,6 +35902,78 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-15T01:39:39.593Z"
+    },
+    {
+      "id": "D-ECO-JETOS-PREVIEW1",
+      "cardId": "c0kxss7s",
+      "group": "syntax",
+      "title": "Which JetOS verb shows a machine change?",
+      "gist": "Choose whether `plan`, `proof`, or a new `diff` command shows how a JetOS machine would change.",
+      "lesson": "A JetOS `System` is a named typed description of one desired machine. A generation is one named complete machine build. The active generation is the one currently running.\n\nA baseline is the active generation used for comparison. Capturing its identity when a candidate is built makes later proof reproducible, even if another generation becomes active before someone inspects the candidate.\n\nJetOS already has two views. `jet os plan` checks desired machine intent before building. `jet os proof` reads one exact built generation, including its output digests and readiness checks.\n\nA later lifecycle decision showed `jet os diff` between build and switch, but `diff` is absent from the exact JetOS verb list. This ballot resolves that mismatch.\n\nPlanned actions and produced bytes are different facts. A pre-build view can project changes. Only a built generation can prove exact bytes, passed checks, and differences from its immutable build-time baseline.\n\nBeginners need one clear safe path. Experts need JSON, exact generation selection, immutable baseline identity, and auditable evidence. This decision does not alter build, switch, rollback, or receipt law.",
+      "explainer": "",
+      "story": "Rin changes a service port on halcyon. Before activation, Rin wants a readable summary. Automation needs the exact built generation, active baseline, output digests, checks, and machine-readable differences.",
+      "inWild": "# Existing exact verbs\njet os plan halcyon --json\njet os build halcyon\njet os proof halcyon --json\njet os switch halcyon\njet os rollback halcyon\n\n# D-ECO-JETOS2 used `jet os diff halcyon`.\n# This ballot decides whether that spelling becomes canonical.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Proof owns built changes",
+          "detail": "Keep the existing verbs. `plan` shows the checked pre-build intent. After `build`, `proof` shows the exact generation's changes against the active baseline together with readiness evidence.",
+          "technical": "This preserves D-JPK-OSVERB1 and D-JOS-PROOFAPI1. Build stores the active baseline identity and typed delta inside the candidate generation. Proof never recomputes against query-time state. `--json` returns baseline, candidate, digests, checks, and deltas. The older `diff` example was conceptual.",
+          "code": "$ jet os proof halcyon --name gen-42\nJetOS proof: halcyon generation gen-42\nbaseline: gen-41 (captured when gen-42 was built)\nchanges: 1 added, 1 changed, 1 removed\n  + service api\n  ~ package curl 8.9 -> 8.10\n  - file /etc/old.conf\nreadiness: passed (12/12 checks)\n\n$ jet os proof halcyon --name missing\nError [E1278]: jetos proof is missing.\n Why: no built generation named `missing` exists for `halcyon`.\n Fix: run `jet os build halcyon --name missing` first."
+        },
+        {
+          "key": "B",
+          "name": "Add a distinct diff verb",
+          "detail": "Add `jet os diff` only for comparing a built candidate with the active generation. `plan` remains pre-build intent, while `proof` remains readiness and provenance.",
+          "technical": "This expands D-JPK-OSVERB1 with `diff`; D-JOS-PROOFAPI1 remains unchanged. Build stores the immutable active baseline and typed delta. `diff HOST --name NAME` reads that stored comparison. `proof HOST --name NAME` reads readiness and provenance. Neither recomputes against query-time state.",
+          "code": "$ jet os diff halcyon --name gen-42\nJetOS diff: halcyon generation gen-42\nbaseline: gen-41 (captured when gen-42 was built)\n  + service api\n  ~ package curl 8.9 -> 8.10\n  - file /etc/old.conf\n\n$ jet os proof halcyon --name gen-42\nreadiness: passed (12/12 checks)\nprovenance: complete\n\n$ jet os diff halcyon --name missing\nError [E1278]: jetos diff is missing.\n Why: no built generation named `missing` exists for `halcyon`.\n Fix: run `jet os build halcyon --name missing` first."
+        },
+        {
+          "key": "C",
+          "name": "Rename plan to diff",
+          "detail": "Replace `jet os plan` with `jet os diff`. The command shows a checked pre-build delta against the active generation. Built bytes and readiness remain under `build` and `proof`.",
+          "technical": "This supersedes `plan` in D-JPK-OSVERB1 and D-JOS-PROOFAPI1; there is no alias. `diff --json` carries the full checked pre-build plan and projected delta. It compares against the active generation observed at query time and labels the candidate unbuilt. Proof remains exact built evidence with a build-time baseline.",
+          "code": "$ jet os diff halcyon\nJetOS projected diff: halcyon\nbaseline: gen-41 (active now)\ncandidate: not built\n  + service api\n  ~ package curl 8.9 -> 8.10\n  - file /etc/old.conf\nproof: unavailable until build\n\n$ jet os diff first-machine\nJetOS projected diff: first-machine\nbaseline: none (all desired facts are additions)\ncandidate: not built"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "`nixos-rebuild dry-build` previews realization, while generation and store metadata describe produced results. The preview and built evidence are different stages.",
+          "code": "nixos-rebuild dry-build\nnixos-rebuild build"
+        },
+        {
+          "lang": "Terraform",
+          "note": "Terraform separates a saved plan from apply. The plan predicts resource changes, but provider results after apply remain separate evidence.",
+          "code": "terraform plan -out=change.plan\nterraform apply change.plan"
+        },
+        {
+          "lang": "Guix System",
+          "note": "Guix can build a system generation before switching. The realized generation is inspectable and rollback keeps older generations available.",
+          "code": "guix system build config.scm\nguix system reconfigure config.scm"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Proof already reads the exact built generation. Showing its changes beside readiness keeps produced facts together, preserves the ratified verb surface, and leaves plan honest as a pre-build view.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A separate diff has a precise job, but it splits one built-generation audit across diff and proof. Both commands would read the same candidate, baseline, and typed evidence."
+          },
+          {
+            "key": "C",
+            "reason": "Diff is familiar for changes, but replacing plan hides that the JSON view is the complete checked execution plan. It also reopens an already-ratified exact verb."
+          }
+        ],
+        "tradeoff": "Users must learn that proof includes both exact changes and readiness. Before building, plan remains only a checked projection; it cannot claim produced digests or successful machine checks."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-15T01:54:32.561Z"
     }
   ],
   "questions": [
@@ -36693,6 +36765,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T01:54:32.561Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-ECO-JETOS-PREVIEW1",
+      "note": "Which JetOS verb shows a machine change?"
+    },
     {
       "at": "2026-07-15T01:53:00.656Z",
       "by": "codex-entropy-reviewer",
@@ -40185,13 +40264,6 @@
       "action": "decision.update",
       "ref": "D-SHAPE-INTERNAL1",
       "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T22:42:36.987Z",
-      "by": "luna-foreign-root-verifier",
-      "action": "card.update",
-      "ref": "c086i4qv",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
