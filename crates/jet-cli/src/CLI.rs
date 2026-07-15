@@ -905,6 +905,14 @@ pub fn completions_for_program(
     let root_words = schema.completion_words();
     match shell {
         "bash" => {
+            if schema.commands.is_empty() {
+                return Some(format!(
+                    "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F _jet_program_completion -- {}\n",
+                    jet_foundation::CliSchema::RECORD_VERSION,
+                    shell_single_quote(&root_words.join(" ")),
+                    shell_single_quote(command_name),
+                ));
+            }
             let cases = schema.commands.iter().map(|command| format!(
                 "        {}) flags={} ;;",
                 shell_single_quote(&command.name),
@@ -956,13 +964,16 @@ pub fn completions_for_program(
         }
         "powershell" => {
             let root = root_words.iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
+            if schema.commands.is_empty() {
+                return Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CliSchema::RECORD_VERSION, ps_single(command_name)));
+            }
             let flags = input_words(&schema.inputs).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
             let command_flags = schema.commands.iter().map(|command| format!(
                 "{} = @({})",
                 ps_single(&command.name),
                 input_words(&command.inputs).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(","),
             )).collect::<Vec<_>>().join("; ");
-            Some(format!("# PowerShell completion from JetCommandSchema v{}\n$JetRoot = @({root})\n$JetFlags = @({flags})\n$JetCommandFlags = @{{ {command_flags} }}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $choices = if ($wordToComplete.StartsWith('-') -and $words.Count -ge 2 -and $JetCommandFlags.ContainsKey($words[1])) {{ $JetCommandFlags[$words[1]] }} elseif ($wordToComplete.StartsWith('-')) {{ $JetFlags }} else {{ $JetRoot }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CliSchema::RECORD_VERSION, ps_single(command_name)))
+            Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CliSchema::RECORD_VERSION, ps_single(command_name)))
         }
         _ => None,
     }
