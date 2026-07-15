@@ -13,6 +13,25 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+fn make_writable(path: &str) {
+    fn walk(path: &Path) {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                walk(&entry.unwrap().path());
+            }
+        }
+        let mut permissions = metadata.permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            permissions.set_mode(permissions.mode() | 0o200);
+        }
+        fs::set_permissions(path, permissions).unwrap();
+    }
+    walk(Path::new(path));
+}
+
 mod common;
 
 #[path = "support/jetpack_fixtures.rs"]
@@ -98,18 +117,36 @@ fn doctor_checks_real_state_and_is_read_only() {
     let output = root.join("owned-output");
     fs::create_dir_all(&output).unwrap();
     fs::write(output.join("payload"), "trusted bytes").unwrap();
-    let envelope = jetpack::Envelope::Envelope::for_output(
-        &output.to_string_lossy(), "path:demo", "test-recipe");
     let roots = jetpack::Store::Roots { root: root.path.clone(), dev_mode: false };
-    let entry = jetpack::Store::record(&roots, "demo", "1", "path:demo",
-        &output.to_string_lossy(), "", "", &envelope).unwrap();
+    let entry = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "demo".into(),
+            version: "1".into(),
+            reference: "path:demo".into(),
+            cache_identity: jetpack::Store::CacheIdentity {
+                source_fingerprint: "sha256-test-source".into(),
+                recipe_fingerprint: "sha256-test-recipe".into(),
+                policy_fingerprint: "sha256-test-policy".into(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".into(), output.clone())]),
+            signature: String::new(),
+            provenance: "path:demo via test".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap()
+    .entry;
     let meta = root.join(&format!("hangar/{}/meta.json", entry.id));
     let old_meta = fs::read_to_string(&meta).unwrap();
     let stale_meta = old_meta.replace(
         &format!("\"last_used_at\": \"{}\"", entry.last_used_at),
         "\"last_used_at\": \"0\"");
     fs::write(&meta, &stale_meta).unwrap();
-    fs::write(output.join("payload"), "corrupt bytes").unwrap();
+    make_writable(&entry.out);
+    fs::write(std::path::Path::new(&entry.out).join("payload"), "corrupt bytes").unwrap();
     fs::create_dir_all(root.join(".locks")).unwrap();
     let stale_lock = root.join(".locks/abandoned.lock");
     fs::write(&stale_lock, "pid=4294967294\n").unwrap();
@@ -2482,5 +2519,3 @@ fn jet_hangar_du_counts_source_built_objects() {
         "du summary must count source-built objects honestly: {report}"
     );
 }
-
-

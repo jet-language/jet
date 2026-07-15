@@ -283,6 +283,7 @@ pub fn entry_id(name: &str, version: &str, reference: &str, out: &str) -> String
 }
 
 /// Record (or refresh) a store entry; returns the entry with its id filled in.
+#[cfg(test)]
 pub fn record(
     roots: &Roots,
     name: &str,
@@ -306,6 +307,7 @@ pub fn record(
     )
 }
 
+#[cfg(test)]
 pub fn record_verified(
     roots: &Roots,
     name: &str,
@@ -332,6 +334,7 @@ pub fn record_verified(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn record_verified_mode(
     roots: &Roots,
     name: &str,
@@ -1243,6 +1246,9 @@ pub fn realize_verified(
     ctx: &super::Provider::Ctx<'_>,
     request: RealizeRequest<'_>,
 ) -> Result<VerifiedRealization, RealizeError> {
+    // WAL is authority. Recover package projections and fail closed on
+    // incomplete legacy producer records before any cache lookup can bypass it.
+    closure_graph(roots).map_err(RealizeError::Store)?;
     let (reference, expectation) = match request {
         RealizeRequest::Package { spec, table } => (
             spec.raw.clone(),
