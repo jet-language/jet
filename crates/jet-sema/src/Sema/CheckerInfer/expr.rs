@@ -308,8 +308,8 @@ impl<'a> Checker<'a> {
                         if let Some(t) = t {
                             match fmt {
                                 crate::AST::StrFormat::Display => {
-                                    if !is_displayable(&t, self.trait_reg) {
-                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                    if !is_displayable(&t, self.registry, self.trait_reg) {
+                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t, self.registry) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0915",
                                                 format!("secret-bearing `{}` has no `Display` implementation", t.name()),
@@ -367,7 +367,7 @@ impl<'a> Checker<'a> {
                                 }
                                 crate::AST::StrFormat::Debug => {
                                     if !is_debuggable(&t, self.registry, self.trait_reg) {
-                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t, self.registry) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0112",
                                                 format!("secret-bearing `{}` cannot use `@Debug`", t.name()),
@@ -1321,7 +1321,7 @@ impl<'a> Checker<'a> {
                 for item in items.iter_mut() {
                     if let Some(t) = self.infer(item) {
                         if !is_printable(&t, self.registry) {
-                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t, self.registry) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!("secret-bearing `{}` cannot be printed", t.name()),

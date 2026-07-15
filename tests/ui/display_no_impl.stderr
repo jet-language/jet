@@ -1,7 +1,7 @@
-Error [E0915]: secret-bearing `Secret` has no `Display` implementation
+Warning [L0520]: `Secret` has no `Display` impl — bare `{}` will require one soon
   --> tests/ui/display_no_impl.jet:8:13
     |
   8 |     print("{s}")
     |             ^
- Why: cryptographic secrets cannot enter logs or strings through interpolation
- Fix: remove the interpolation; log a public operation label or key identifier instead
+ Why: Display is the user-facing interpolation hook; Debug is for `{value@Debug}`
+ Fix: add `impl Secret.Display { fn display(self) -> String { … } }`

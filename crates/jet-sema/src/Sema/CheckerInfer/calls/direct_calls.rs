@@ -219,7 +219,7 @@ impl<'a> Checker<'a> {
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
                     if !is_printable(&t, self.registry) {
-                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t, self.registry) {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!("secret-bearing `{}` cannot be printed", t.name()),

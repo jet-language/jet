@@ -877,8 +877,8 @@ impl<'a> Checker<'a> {
                     }
                     let arg = &mut args[0];
                     if let Some(ty) = self.infer(&mut arg.expr) {
-                        if !is_displayable(&ty, self.trait_reg) {
-                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&ty) {
+                        if !is_displayable(&ty, self.registry, self.trait_reg) {
+                            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&ty, self.registry) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!("secret-bearing `{}` cannot be reflected", ty.name()),

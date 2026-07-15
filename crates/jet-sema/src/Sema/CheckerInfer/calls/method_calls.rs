@@ -755,7 +755,7 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
-            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&recv_ty)
+            if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&recv_ty, self.registry)
                 && matches!(method, "clone" | "encode" | "hash" | "debug" | "display")
             {
                 let shown = recv_ty.show().trim_matches('`').to_string();
