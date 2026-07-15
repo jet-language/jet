@@ -186,13 +186,16 @@ pub fn actions_for_output(
 pub fn entry_action_key(entry: &StoreEntry) -> String {
     let identity = &entry.cache_identity;
     let producer = ProducerRecord::decode(&entry.producer_record);
-    let nix = producer.as_ref().is_ok_and(|record| record.provider == "nix");
+    let nix_producer = producer
+        .as_ref()
+        .ok()
+        .filter(|record| record.provider == "nix");
+    let nix = nix_producer.is_some();
     let mut canonical = b"jet.action-store.v5\0".to_vec();
-    if nix {
+    if let Some(producer) = nix_producer {
         // A Nix derivation path is the canonical input/action identity. Output
         // paths and output-derived cache fingerprints are consequences; using
         // them here would let the same action silently map to different bytes.
-        let producer = producer.as_ref().expect("checked above");
         push_frame(&mut canonical, producer.immutable_source.as_bytes());
         for field in [
             identity.recipe_fingerprint.as_bytes(),
@@ -806,6 +809,14 @@ fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io:
     let tmp = dir.join(format!("meta.json.{}.partial", std::process::id()));
     fs::write(&tmp, &record.package_meta)?;
     fs::File::open(&tmp)?.sync_all()?;
+    #[cfg(windows)]
+    if path.exists() {
+        // std rename does not replace on Windows. The committed WAL remains
+        // authoritative if a crash lands between removal and publication;
+        // the next recovery recreates the exact projection.
+        fs::remove_file(&path)?;
+        sync_dir(&dir)?;
+    }
     fs::rename(&tmp, &path)?;
     sync_dir(&dir)?;
     Ok(true)

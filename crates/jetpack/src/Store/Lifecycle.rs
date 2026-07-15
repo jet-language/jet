@@ -991,7 +991,12 @@ fn read_member_bounded(
         return Err(invalid("lifecycle journal member exceeds byte bound"));
     }
     let mut bytes = Vec::with_capacity(length);
-    file.take(u64::try_from(maximum + 1).expect("journal byte bound"))
+    let read_limit = maximum
+        .checked_add(1)
+        .ok_or_else(|| invalid("lifecycle journal byte bound overflows usize"))?;
+    let read_limit = u64::try_from(read_limit)
+        .map_err(|_| invalid("lifecycle journal byte bound overflows u64"))?;
+    file.take(read_limit)
         .read_to_end(&mut bytes)?;
     if bytes.len() > maximum {
         return Err(invalid("lifecycle journal member exceeds byte bound"));
@@ -1267,7 +1272,9 @@ fn parse_snapshot(raw: &str) -> Result<(u64, BTreeMap<RootId, LifecycleRoot>), S
                 let id = current
                     .as_ref()
                     .ok_or_else(|| "snapshot target precedes root".to_string())?;
-                let root = roots.get_mut(id).expect("current snapshot root");
+                let root = roots
+                    .get_mut(id)
+                    .ok_or_else(|| "snapshot target has no current root".to_string())?;
                 let set = if *kind == "target" {
                     &mut root.targets
                 } else {

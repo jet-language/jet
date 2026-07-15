@@ -71,7 +71,7 @@ impl PinnedDirectory {
     }
 
     pub(super) fn sync(&self) -> io::Result<()> {
-        super::super::sync_store_directory_handle(self.0.handle())
+        super::super::sync_store_directory_handle(self.0.handle()?)
     }
 }
 
@@ -204,8 +204,8 @@ mod platform {
             &self.path
         }
 
-        pub(super) fn handle(&self) -> &File {
-            &self.file
+        pub(super) fn handle(&self) -> io::Result<&File> {
+            Ok(&self.file)
         }
 
         pub(super) fn names(&self, maximum: usize) -> io::Result<Vec<OsString>> {
@@ -228,14 +228,14 @@ mod platform {
         }
 
         pub(super) fn open_read(&self, name: &str) -> io::Result<File> {
-            let name = CString::new(name).expect("validated member name");
+            let name = member_name(name)?;
             let file = open_file_at(&self.file, &name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW, 0)?;
             require_regular(&file)?;
             Ok(file)
         }
 
         pub(super) fn create_new(&self, name: &str) -> io::Result<File> {
-            let name = CString::new(name).expect("validated member name");
+            let name = member_name(name)?;
             let file = open_file_at(
                 &self.file,
                 &name,
@@ -253,8 +253,8 @@ mod platform {
             new_name: &str,
             replace: bool,
         ) -> io::Result<()> {
-            let old_name = CString::new(old_name).expect("validated member name");
-            let new_name = CString::new(new_name).expect("validated member name");
+            let old_name = member_name(old_name)?;
+            let new_name = member_name(new_name)?;
             validate_open_name(&self.file, source, &old_name)?;
             if !replace {
                 // linkat publishes the opened inode and atomically rejects an
@@ -298,14 +298,14 @@ mod platform {
         }
 
         pub(super) fn remove_file(&self, name: &str) -> io::Result<()> {
-            let name = CString::new(name).expect("validated member name");
-            let file = self.open_read(name.to_str().expect("ASCII journal name"))?;
-            validate_open_name(&self.file, &file, &name)?;
+            let member = member_name(name)?;
+            let file = self.open_read(name)?;
+            validate_open_name(&self.file, &file, &member)?;
             // Lifecycle mutations are cooperative under the Hangar advisory
             // lock. Identity is checked immediately before unlink; external
             // writers that ignore that ownership law are corruption, not a
             // supported concurrent mutator.
-            if unsafe { unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+            if unsafe { unlinkat(self.file.as_raw_fd(), member.as_ptr(), 0) } != 0 {
                 return Err(io::Error::last_os_error());
             }
             Ok(())
@@ -330,6 +330,15 @@ mod platform {
             ));
         }
         Ok(path)
+    }
+
+    fn member_name(name: &str) -> io::Result<CString> {
+        CString::new(name).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "pinned-directory member name contains NUL",
+            )
+        })
     }
 
     fn open_directory_at(parent: &File, name: &CStr) -> io::Result<File> {
@@ -474,8 +483,10 @@ mod platform {
             &self.path
         }
 
-        pub(super) fn handle(&self) -> &File {
-            self.handles.last().expect("pinned directory handle")
+        pub(super) fn handle(&self) -> io::Result<&File> {
+            self.handles
+                .last()
+                .ok_or_else(|| io::Error::other("pinned directory has no open handle"))
         }
 
         pub(super) fn names(&self, maximum: usize) -> io::Result<Vec<OsString>> {
@@ -520,11 +531,12 @@ mod platform {
             let words = size.div_ceil(std::mem::size_of::<usize>());
             let mut storage = vec![0usize; words];
             let info = storage.as_mut_ptr().cast::<FileRenameInfo>();
+            let directory_handle = self.handle()?.as_raw_handle().cast();
             // SAFETY: storage is pointer-aligned and sized for header plus the
             // exact UTF-16 name. All writes stay within that allocation.
             unsafe {
                 (*info).replace_if_exists = u8::from(replace);
-                (*info).root_directory = self.handle().as_raw_handle().cast();
+                (*info).root_directory = directory_handle;
                 (*info).file_name_length = u32::try_from(name.len() * 2)
                     .map_err(|_| io::Error::other("journal filename is too long"))?;
                 std::ptr::copy_nonoverlapping(
@@ -550,6 +562,8 @@ mod platform {
             let file = open_member(&self.path.join(name), GENERIC_READ | DELETE, false)?;
             require_regular(&file)?;
             let mut info = FileDispositionInfo { delete_file: 1 };
+            let info_size = u32::try_from(std::mem::size_of::<FileDispositionInfo>())
+                .map_err(|_| io::Error::other("disposition record is too large"))?;
             // SAFETY: file handle is live with DELETE access; info is initialized
             // and remains writable through this synchronous call.
             if unsafe {
@@ -557,8 +571,7 @@ mod platform {
                     file.as_raw_handle().cast(),
                     FILE_DISPOSITION_INFO_CLASS,
                     (&mut info as *mut FileDispositionInfo).cast(),
-                    u32::try_from(std::mem::size_of::<FileDispositionInfo>())
-                        .expect("disposition record size"),
+                    info_size,
                 )
             } == 0
             {
@@ -638,8 +651,11 @@ mod platform {
             Path::new("")
         }
 
-        pub(super) fn handle(&self) -> &File {
-            unreachable!("unsupported pinned directory has no handle")
+        pub(super) fn handle(&self) -> io::Result<&File> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "unsupported pinned directory has no handle",
+            ))
         }
 
         pub(super) fn names(&self, _maximum: usize) -> io::Result<Vec<OsString>> {
