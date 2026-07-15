@@ -71,14 +71,14 @@ project: Project :: Project.{                 // NEW: D-ECO-ROOTNAME1
 }
 
 app: Wing :: Wing.{                          // NEW: D-ECO-SLICENAME1
-    packages: {
+    packages: .{
         api: Package.{ source: "Source/api" }
     }
 }
 
 operations: Wing :: Wing.{                   // NEW: D-ECO-SLICENAME1
-    services: {
-        api: Service.{ from: app.packages.api, port: 8080 }
+    services: .{
+        api: Service.{ enable: true, from: app.packages.api, ports: [8080] }
     }
 }
 ```
@@ -90,14 +90,14 @@ Composition is deterministic:
 - named collections combine by key;
 - sets union;
 - ordered values use the order law declared by their type;
-- `OptionValue.{ value, priority }` is the sole expert precedence wrapper;
+- ecosystem scalar disagreements stop with provenance; experts use ordinary functions to construct one final value (D-ECO-COMPOSE2); `OptionValue.{ value, priority }` exists only inside option contributions (D-JOS-PRIORITY-SURFACE2);
 - every successful contributor remains in `.jet/lock`.
 
 ```text
-$ jet explain services.api.port
-services.api.port = 8080
-  app.jet:18        default  8080
-  operations.jet:7 ordinary  8080
+$ jet explain services.api.ports
+services.api.ports = [8080]
+  app.jet:18        default  [8080]
+  operations.jet:7 ordinary  [8080]
 Both contributions agree. No value was discarded.
 ```
 
@@ -105,9 +105,9 @@ Both contributions agree. No value was discarded.
 
 `project.jet` is the only reserved ecosystem source filename (`NEW: D-ECO-FILEROOT1`). It replaces `pkg.jet`, `env.jet`, `workspace.jet`, and JetOS `config.jet`. A script needs no reserved file. At first, all Project facts may remain inline. Any Wing may later move to any discovered `.jet` file.
 
-Discovery starts at the nearest `project.jet`, follows explicit imports and member sources, and discovers `.jet` Wings under declared roots. A leading `_` disables a discovered file without changing its contents. Generated state remains under `.jet/`.
+Discovery starts at the nearest `project.jet`, follows explicit imports and member sources, and discovers `.jet` Wings under declared roots. A leading `_` disables a discovered file without changing its contents (`NEW: D-ECO-FILEROOT1`). Generated state remains under `.jet/`.
 
-For one epoch, old role files are read together and produce one teaching diagnostic:
+For one epoch, old role files are read together and produce one proposed teaching diagnostic. `L1320` is minted only if D-ECO-FILEROOT1 is ratified:
 
 ```text
 $ jet check
@@ -124,6 +124,7 @@ Warning [L1320]: this Project uses four retired ecosystem filenames
 Outputs are thin projections over facts stored once on the graph. The proposed closed v1 kind set is `Library`, `Executable`, `Service`, `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet` (`NEW: D-ECO-OUTPUT-KINDS1`). Adding another kind requires a decision; arbitrary text kinds are rejected.
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1
 cli: Output :: .Executable.{ name: "todo", entry: run }
 lib: Output :: .Library.{ name: "todo_core", modules: [Todo] }
 api: Output :: .Service.{ name: "todo_api", entry: serve }
@@ -132,7 +133,7 @@ dev: Output :: .Environment.{ name: "dev", tools: [ripgrep] }              // NE
 image: Output :: .Image.{ name: "todo", from: cli, kind: .Oci }
 all: Output :: .Bundle.{ name: "todo-release", members: [cli, image] }
 host: Output :: .System.{ name: "halcyon", packages: [cli] }               // NEW: D-ECO-OUTPUT-KINDS1
-prod: Output :: .Fleet.{ name: "prod", hosts: { halcyon: host } }          // NEW: D-ECO-OUTPUT-KINDS1
+prod: Output :: .Fleet.{ name: "prod", hosts: .{ halcyon: host } }         // NEW: D-ECO-OUTPUT-KINDS1
 ```
 
 The payload holds only name and kind-specific facts. Sources, dependencies, actions, effects, policy, target facts, and provenance live once. `jet inspect output` (`NEW: D-ECO-OUTPUT-PAYLOAD1`) reconstructs the complete path:
@@ -169,7 +170,7 @@ fn verify_release() -> Void ? {
 }
 ```
 
-Selection is one ordered rule: explicit address; unchanged function-only `fn run`; sole capable Output; checked `defaults:` entry for that capability; otherwise a sorted candidate error. Adding a second Output never silently changes automation because a formerly unique command becomes an error until `defaults:` is set.
+Plural intents run every matching Output: `jet test` runs every Check. Singular intents (`run`, `enter`, `publish`, and activation) use one ordered rule: explicit address; unchanged function-only `fn run`; sole capable Output; checked `defaults:` entry for that capability; otherwise a sorted candidate error. Adding a second singular-capability Output never silently changes automation because a formerly unique command becomes an error until `defaults:` is set.
 
 ### Lock, receipts, Hangar, and roots
 
@@ -208,7 +209,7 @@ Per-user Hangar is the default (`NEW: D-ECO-HANGARPATH1`):
 Projects, profiles, running processes, builds, toolchains, Systems, and Generations create automatic closure roots. Manual roots cover only external consumers:
 
 ```text
-$ jet hangar register-external-root backup-sdk nixpkgs:ripgrep#2.0.17 --expires-in 12w --yes
+$ jet hangar register-external-root backup-sdk nixpkgs:ripgrep#2.0.17 --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
 Plan external root
   + backup-sdk
     closure objects: 3
@@ -313,13 +314,13 @@ report
 Expert path: make the ephemeral lock reviewable and prove offline behavior.
 
 ```text
-$ jet store lock report.jet
+$ jet fetch --lock report.jet
 Wrote script lock for report.jet sha256:12ad…
   textkit#1.4.2 sha256:7c01…
   unicode-data#15.1.0 sha256:b119…
 
 $ jet run report.jet --offline
-Using satisfied script lock sha256:65aa…
+Using satisfied script lock sha256:12ad…
 A long
 weekly
 report
@@ -355,8 +356,8 @@ Generated `project.jet` (four source lines; `Project` is `NEW: D-ECO-ROOTNAME1`)
 
 ```jet
 project: Project :: Project.{
-    packages: { report: Package.{ source: "report.jet" } }
-    deps: { textkit: "1.4" }
+    packages: .{ report: Package.{ source: "report.jet" } }
+    deps: .{ textkit: "1.4" }
 }
 ```
 
@@ -395,7 +396,7 @@ Fresh `weather/project.jet`:
 
 ```jet
 project: Project :: Project.{                 // NEW: D-ECO-ROOTNAME1
-    packages: { weather: Package.{ source: "weather.jet" } }
+    packages: .{ weather: Package.{ source: "weather.jet" } }
 }
 ```
 
@@ -427,25 +428,26 @@ One file owns application, development environment, service, secret binding, and
 `project.jet` (`Project` and filename are `NEW: D-ECO-ROOTNAME1` and `NEW: D-ECO-FILEROOT1`; `Environment` and `Check` kinds are `NEW: D-ECO-OUTPUT-KINDS1`):
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1; NEW: D-ECO-OUTPUT-DEFAULT1
 project: Project :: Project.{
-    packages: {
+    packages: .{
         pulse: Package.{
             source: "Source"
-            deps: { http: "2.3", postgres: "1.9" }
-            outputs: {
+            deps: .{ http: "2.3", postgres: "1.9" }
+            outputs: .{
                 app: Output.Executable.{ name: "pulse", entry: run }
                 unit: Output.Check.{ name: "unit", entry: test_unit }
             }
         }
     }
-    environments: {
+    environments: .{
         dev: Output.Environment.{
             name: "dev"
             tools: [ripgrep, jet_language_server]
-            services: {
-                postgres: Service.{ version: 16, port: 5432, health: postgres_ready }
+            services: .{
+                postgres: Service.{ enable: true, ports: [5432], ready: postgres_ready }
             }
-            secrets: { DB_PASS: secret("db-dev") }
+            secrets: .{ DB_PASS: secret("db-dev") }
         }
     }
     defaults: .{ run: packages.pulse.outputs.app, check: packages.pulse.outputs.unit, enter: environments.dev }
@@ -468,12 +470,14 @@ fn postgres_ready() -> Void ? {
 }
 ```
 
+After the environment starts, `jet dev` runs `fn dev()` when present and falls back to `fn run()` (D-JPK-DEVCOMPOSE1).
+
 Beginner path:
 
 ```text
 $ jet dev
 Plan development environment `dev`
-  + postgres 16 on 127.0.0.1:5432
+  + postgres on 127.0.0.1:5432
   + secret binding DB_PASS (memory only)
 postgres healthy
 pulse ready
@@ -490,9 +494,9 @@ Schedule: postgres -> health gate -> pulse
 Effects: postgres write(.jet/services/postgres); pulse Secret(DB_PASS), Net(loopback)
 Audit: sandbox passed; secret plaintext absent from lock and Hangar; provenance complete
 
-$ jet explain environments.dev.services.postgres.port
-environments.dev.services.postgres.port = 5432
-  project.jet:16 ordinary 5432
+$ jet explain environments.dev.services.postgres.ports
+environments.dev.services.postgres.ports = [5432]
+  project.jet:16 ordinary [5432]
 Source policy: project
 ```
 
@@ -527,17 +531,18 @@ Reverse with: jet split --fold project/env.jet # NEW: D-ECO-TRANSITION1
 Resulting `project.jet`:
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1; NEW: D-ECO-OUTPUT-DEFAULT1
 project: Project :: Project.{                 // NEW: D-ECO-ROOTNAME1
     wings: [application, development]         // NEW: D-ECO-SLICENAME1
     defaults: .{ run: application.packages.pulse.outputs.app, check: application.packages.pulse.outputs.unit, enter: development.environments.dev }
 }
 
 application: Wing :: Wing.{                  // NEW: D-ECO-SLICENAME1
-    packages: {
+    packages: .{
         pulse: Package.{
             source: "Source"
-            deps: { http: "2.3", postgres: "1.9" }
-            outputs: {
+            deps: .{ http: "2.3", postgres: "1.9" }
+            outputs: .{
                 app: Output.Executable.{ name: "pulse", entry: run }
                 unit: Output.Check.{ name: "unit", entry: test_unit }
             }
@@ -550,12 +555,12 @@ Resulting `project/env.jet`:
 
 ```jet
 pub development: Wing :: Wing.{              // NEW: D-ECO-SLICENAME1
-    environments: {
+    environments: .{
         dev: Output.Environment.{             // NEW: D-ECO-OUTPUT-KINDS1
             name: "dev"
             tools: [ripgrep, jet_language_server]
-            services: { postgres: Service.{ version: 16, port: 5432, health: postgres_ready } }
-            secrets: { DB_PASS: secret("db-dev") }
+            services: .{ postgres: Service.{ enable: true, ports: [5432], ready: postgres_ready } }
+            secrets: .{ DB_PASS: secret("db-dev") }
         }
     }
 }
@@ -568,11 +573,12 @@ The common path remains `jet build`. The same Project records build, host, and t
 `project.jet` (`NEW: D-ECO-ROOTNAME1`, `NEW: D-ECO-FILEROOT1`):
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1
 project: Project :: Project.{
-    packages: {
+    packages: .{
         edge_agent: Package.{
             source: "Source"
-            deps: {
+            deps: .{
                 wire: "3.1"
                 weirdctl: Pkg.adapt(
                     name: "weirdctl"
@@ -580,20 +586,20 @@ project: Project :: Project.{
                     recipe: Recipe.cmake
                 )
             }
-            outputs: { agent: Output.Executable.{ name: "edge-agent", entry: run } }
+            outputs: .{ agent: Output.Executable.{ name: "edge-agent", entry: run } }
         }
     }
-    targets: {
+    targets: .{
         appliance: Target.{ build: linux.x64, host: linux.x64, target: linux.arm64, libc: .Musl }
     }
-    profiles: {
+    profiles: .{
         release: Build.{ optimize: .Speed, debug_info: .Lines, small: false, panic: .Abort }
     }
-    toolchains: { appliance: Toolchain.{ jet: "3.2.0", sdk: "aarch64-linux-musl#1.2.5" } }
+    toolchains: .{ appliance: Toolchain.{ jet: "3.2.0", sdk: "aarch64-linux-musl#1.2.5" } }
     build: .{
         remote: RemoteBuild.{ role: "trusted-arm", fallback: .Local }
         cache: CachePolicy.{ read: [team_read], write: team_ci, require_provenance: true }
-        scheduler: Scheduler.{ pools: { cpu: 12, memory: 24GB, linker: 1 } }
+        scheduler: Scheduler.{ pools: .{ cpu: 12, memory: 24GB, linker: 1 } }
     }
     policy: .{
         trust: .{ ci: .DenyPrompt }
@@ -638,7 +644,7 @@ Plan build `edge_agent.agent`
   unsafe: Source/device.jet:3, reason recorded
 Verified remote output sha256:0d9f…
 
-$ jet why weirdctl
+$ jet explain package:weirdctl
 edge_agent -> build dependency weirdctl
 Introduced at project.jet:8
 No canonical metadata found; adapter `Recipe.cmake` owns conversion.
@@ -658,12 +664,12 @@ One Project owns members, shared versions, policy, source authority, cache roles
 ```jet
 project: Project :: Project.{
     members: find("./packages")
-    catalog: {
+    catalog: .{
         http: "4.2.1"
         postgres: "1.9.4"
         tracing: "3.0.2"
     }
-    sources: {
+    sources: .{
         public: registry@registry.jet.dev
         company: registry@packages.example.test
     }
@@ -675,7 +681,7 @@ project: Project :: Project.{
         cache: .{ read: [company_read], write: company_ci }
         resolution: .Conservative
     }
-    checks: {
+    checks: .{
         minimum: MatrixCheck.{ resolution: .Lowest, targets: [linux.x64, linux.arm64, macos.arm64, windows.x64] }
         current: MatrixCheck.{ resolution: .Latest, targets: [linux.x64, linux.arm64, macos.arm64, windows.x64] }
     }
@@ -685,12 +691,13 @@ project: Project :: Project.{
 `packages/api/package.jet`:
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1
 pub api: Wing :: Wing.{                       // NEW: D-ECO-SLICENAME1
-    packages: {
+    packages: .{
         api: Package.{
             source: "Source"
-            deps: { http: catalog.http, postgres: catalog.postgres, tracing: catalog.tracing }
-            outputs: {
+            deps: .{ http: catalog.http, postgres: catalog.postgres, tracing: catalog.tracing }
+            outputs: .{
                 server: Output.Executable.{ name: "acme-api", entry: run }
                 unit: Output.Check.{ name: "api-unit", entry: unit }
             }
@@ -699,15 +706,28 @@ pub api: Wing :: Wing.{                       // NEW: D-ECO-SLICENAME1
 }
 ```
 
+`packages/api/Source/main.jet`:
+
+```jet
+fn run() -> Void ? {
+    print("api ready")
+}
+
+fn unit() -> Void ? {
+    require(true, "api unit failed")
+}
+```
+
 `packages/billing/package.jet`:
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1
 pub billing: Wing :: Wing.{                   // NEW: D-ECO-SLICENAME1
-    packages: {
+    packages: .{
         billing: Package.{
             source: "Source"
-            deps: { http: catalog.http, api_contract: packages.api }
-            outputs: {
+            deps: .{ http: catalog.http, api_contract: packages.api }
+            outputs: .{
                 library: Output.Library.{ name: "billing", modules: [Billing] }
                 unit: Output.Check.{ name: "billing-unit", entry: unit }
             }
@@ -716,17 +736,34 @@ pub billing: Wing :: Wing.{                   // NEW: D-ECO-SLICENAME1
 }
 ```
 
+`packages/billing/Source/main.jet`:
+
+```jet
+fn unit() -> Void ? {
+    require(true, "billing unit failed")
+}
+```
+
 `packages/web/package.jet`:
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1
 pub web: Wing :: Wing.{                       // NEW: D-ECO-SLICENAME1
-    packages: {
+    packages: .{
         web: Package.{
             source: "Source"
-            deps: { http: catalog.http, api_contract: packages.api }
-            outputs: { app: Output.Executable.{ name: "acme-web", entry: run } }
+            deps: .{ http: catalog.http, api_contract: packages.api }
+            outputs: .{ app: Output.Executable.{ name: "acme-web", entry: run } }
         }
     }
+}
+```
+
+`packages/web/Source/main.jet`:
+
+```jet
+fn run() -> Void ? {
+    print("web ready")
 }
 ```
 
@@ -807,13 +844,14 @@ A Project may contain only an Environment Output. There is no dummy Package and 
 `project.jet` (`NEW: D-ECO-ROOTNAME1`, `NEW: D-ECO-FILEROOT1`, and `NEW: D-ECO-OUTPUT-KINDS1`):
 
 ```jet
+// NEW: D-ECO-OUTPUT-DEFAULT1
 project: Project :: Project.{
-    sources: { upstream: nixpkgs@nixos-unstable }
-    environments: {
+    sources: .{ upstream: nixpkgs@nixos-unstable }
+    environments: .{
         data: Output.Environment.{
             name: "data"
             tools: [upstream.[python3, duckdb, ripgrep]]
-            variables: { DATA_ROOT: path("./data") }
+            variables: .{ DATA_ROOT: path("./data") }
         }
     }
     defaults: .{ enter: environments.data }
@@ -885,25 +923,28 @@ This System covers a graphical laptop, one-line desktop selection, users, themes
 
 `project.jet` (`NEW: D-ECO-ROOTNAME1`, `NEW: D-ECO-FILEROOT1`, `NEW: D-ECO-JETOS2`, and System/Image/Check kinds under `NEW: D-ECO-OUTPUT-KINDS1`):
 
+Under D-ECO-JETOS2, `profiles:`, `themes:`, the VM `checks:` entry, and `filesystem:` re-home the ratified D-JOS-USERENV1, D-JOS-THEME1, D-JOS-VMTEST1, and D-JOS-DISK1 surfaces as typed Project values.
+
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1
 project: Project :: Project.{
     imports: find("./system")
     options: laptop_options
-    themes: { halcyon: halcyon_theme }
-    profiles: { nate: Profile.{ packages: [fish, helix, git] } }
-    systems: {
+    themes: .{ halcyon: halcyon_theme }
+    profiles: .{ nate: Profile.{ packages: [fish, helix, git] } }
+    systems: .{
         halcyon: Output.System.{
             name: "halcyon"
             target: linux.x64
             packages: [firefox, ghostty, helix, git, ripgrep, btop]
-            users: {
+            users: .{
                 nate: User.{ shell: fish, groups: [wheel], profile: profiles.nate }
             }
-            filesystem: {
+            filesystem: .{
                 root: Filesystem.{ device: "/dev/disk/by-label/jetos", type: .Ext4 }
             }
             hardware: hardware.halcyon
-            variants: {
+            variants: .{
                 rescue: SystemVariant.{ services: .{ desktop: .{ enable: false } }, boot: .{ target: .Rescue } }
             }
             network: .{ hostName: "halcyon", firewall: .{ allowedTcpPorts: [22] } }
@@ -912,15 +953,16 @@ project: Project :: Project.{
                 audio: .{ pipewire: true }
                 openssh: .{ enable: false }
             }
+            apps: .{ flatpak: [FlatpakApp.{ ref: "org.mozilla.firefox" }] } // NEW: D-ECO-JETOS2
             theme: themes.halcyon
-            files: {
-                issue: File.{ path: "/etc/issue", text: "jetos 26.10 (Apex)\\n", mode: 0o644 }
+            files: .{
+                issue: File.{ path: "/etc/issue", text: "jetos 26.10 (Apex)\n", mode: 0o644 }
                 sysctl: generated_sysctl
             }
             health: [booted, desktop_ready, user_login]
         }
     }
-    images: {
+    images: .{
         installer: Output.Image.{
             name: "halcyon-installer"
             from: systems.halcyon
@@ -928,7 +970,7 @@ project: Project :: Project.{
             installer: Installer.{ mode: .Guided, desktop: .Kde, storage: .FromSystem }
         }
     }
-    checks: {
+    checks: .{
         vm: Output.Check.{ name: "halcyon-vm", entry: verify_halcyon_vm }
     }
 }
@@ -938,7 +980,7 @@ project: Project :: Project.{
 
 ```jet
 pub laptop_options: OptionSet :: OptionSet.{   // NEW: D-ECO-JETOS2
-    declarations: {
+    declarations: .{
         desktop: Option<Desktop>.{
             path: "services.desktop.environment"
             default: .Kde
@@ -969,7 +1011,7 @@ pub halcyon_theme: Theme :: Theme.{            // D-JOS-THEME1; unified placemen
 
 ```jet
 pub halcyon_hardware: Wing :: Wing.{          // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
-    hardware: {
+    hardware: .{
         halcyon: Hardware.{
             cpu: .Amd64
             graphics: .Amd
@@ -985,8 +1027,8 @@ pub halcyon_hardware: Wing :: Wing.{          // NEW: D-ECO-SLICENAME1; schema: 
 ```jet
 fn workstation() -> Wing {                    // NEW: D-ECO-SLICENAME1
     return Wing.{
-        overlays: {
-            browsers: Overlay.{ packages: { firefox: PackageOverride.{ channel: "stable" } } }
+        overlays: .{
+            browsers: Overlay.{ packages: .{ firefox: PackageOverride.{ channel: "stable" } } }
         }
     }
 }
@@ -999,7 +1041,7 @@ pub workstation_packages: Wing :: workstation() // NEW: D-ECO-SLICENAME1
 ```jet
 pub generated_sysctl: File :: File.{          // NEW: D-ECO-JETOS2
     path: "/etc/sysctl.d/90-jetos.conf"
-    text: "vm.swappiness=10\\n"
+    text: "vm.swappiness=10\n"
     mode: 0o644
     replace: .Force
 }
@@ -1016,10 +1058,10 @@ pub ghostty_config: File :: File.{            // NEW: D-ECO-JETOS2
 
 ```jet
 pub laptop: Wing :: Wing.{                    // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
-    systems: {
+    systems: .{
         halcyon: SystemDelta.{ services: .{ power: .{ profile: .Balanced } } }
     }
-    profiles: {
+    profiles: .{
         nate: ProfileDelta.{ packages: [brightnessctl], files: [ghostty_config] }
     }
 }
@@ -1030,19 +1072,22 @@ pub laptop: Wing :: Wing.{                    // NEW: D-ECO-SLICENAME1; schema: 
 ```jet
 fn verify_halcyon_vm() -> Void ? {
     host :: vm.host(systems.halcyon)
+    host.install(images.installer)?
+    host.reboot()?
     host.wait_for_boot(90s)?
     host.assert_unit_active("display-manager.service")?
     host.assert_desktop(.Kde)?
     host.assert_user_login("nate")?
+    host.assert_generation_switch()?
     host.assert_rollback()?
 }
 ```
 
-`system/_nvidia.jet` is discovered but disabled by its one-character `_` prefix:
+`system/_nvidia.jet` is discovered but disabled by its one-character `_` prefix (`NEW: D-ECO-FILEROOT1`):
 
 ```jet
-pub nvidia: Wing :: Wing.{                    // NEW: D-ECO-SLICENAME1
-    systems: { halcyon: SystemDelta.{ kernel: .{ drivers: [nvidia] } } }
+pub nvidia: Wing :: Wing.{                    // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
+    systems: .{ halcyon: SystemDelta.{ kernel: .{ drivers: [nvidia] } } }
 }
 ```
 
@@ -1115,7 +1160,7 @@ receipt: sha256:91b8…
 rollback: gen-41 ready
 ```
 
-The type/default/docs declarations feed source checks, completion, `jet search`, `jet info`, Studio, and generated reference pages. Final-value reads use the checked resolved graph; a dependency cycle reports the shortest option cycle and every source span. Lists and maps merge by their declared type law; unequal ordinary scalars conflict. `OptionValue.{ value, priority: .Force }` is the one explicit expert override, never a parallel `force` grammar.
+The type/default/docs declarations feed source checks, completion, `jet inspect search`, `jet inspect info`, Studio, and generated reference pages. Final-value reads use the checked resolved graph; a dependency cycle reports the shortest option cycle and every source span. Lists and maps merge by their declared type law; unequal ordinary scalars conflict. Experts use ordinary functions to construct one final ecosystem value (D-ECO-COMPOSE2). Only option contributions may use `OptionValue.{ value, priority: .Force }` (D-JOS-PRIORITY-SURFACE2), never a parallel `force` grammar.
 
 Representative NixOS comparison:
 
@@ -1148,10 +1193,10 @@ Generated `project/fleet.jet`:
 
 ```jet
 pub home: Wing :: Wing.{                      // NEW: D-ECO-SLICENAME1
-    fleets: {
+    fleets: .{
         home: Output.Fleet.{                  // NEW: D-ECO-OUTPUT-KINDS1
             name: "home"
-            hosts: { halcyon: systems.halcyon }
+            hosts: .{ halcyon: systems.halcyon }
             rollout: Rollout.{ canary: 1, max_parallel: 1, on_failure: .RollbackAndStop }
         }
     }
@@ -1165,29 +1210,52 @@ The fleet adds two web hosts. Shared Wings carry common packages and health rule
 `project/fleet.jet` (`NEW: D-ECO-SLICENAME1`, `NEW: D-ECO-OUTPUT-KINDS1`, and `NEW: D-ECO-JETOS2`):
 
 ```jet
+// NEW: D-SHAPE-OUTPUT-CALLABLE1
+use core.http as http
+use core.net as net
+
+fn run_api() -> Void ? {
+    print("api ready")
+}
+
+fn api_ready() -> Void ? {
+    stream :: net.tcp_connect("127.0.0.1:8080")?
+    stream.close()?
+}
+
+fn api_can_serve() -> Void ? {
+    response :: http.get("http://127.0.0.1:8080/health")?
+    require(response.status() == 200, "api could not serve a request")
+}
+
 pub web_base: Wing :: Wing.{
-    systems: {
+    packages: .{
+        api: Package.{
+            source: "Source/api"
+            outputs: .{ service: Output.Service.{ name: "api", entry: run_api } }
+        }
+    }
+    systems: .{
         web: SystemTemplate.{
             target: linux.x64
-            packages: [api, curl, btop]
-            services: { api: .{ enable: true, port: 8080 } }
+            packages: [packages.api, curl, btop]
+            services: .{ api: .{ enable: true, ports: [8080], ready: api_ready } }
             health: [booted, api_ready, api_can_serve]
         }
     }
 }
 
 pub production: Wing :: Wing.{
-    systems: {
+    systems: .{
         web1: web_base.systems.web.with(SystemDelta.{ network: .{ hostName: "web1" }, region: "us-east" })
         web2: web_base.systems.web.with(SystemDelta.{ network: .{ hostName: "web2" }, region: "eu-west" })
     }
-    fleets: {
+    fleets: .{
         prod: Output.Fleet.{
             name: "prod"
-            hosts: {
-                halcyon: Host.{ system: systems.halcyon, target: "halcyon" }
-                web1: Host.{ system: systems.web1, target: "web1" }
-                web2: Host.{ system: systems.web2, target: "web2" }
+            hosts: .{
+                web1: Host.{ system: systems.web1, target: DeployTarget.{ binding: "web1" }, authority: DeployAuthority.{ identity: "deploy", privilege: .Root } }
+                web2: Host.{ system: systems.web2, target: DeployTarget.{ binding: "web2" }, authority: DeployAuthority.{ identity: "deploy", privilege: .Root } }
             }
             rollout: Rollout.{
                 cohorts: [[web1], [web2]]
@@ -1201,7 +1269,7 @@ pub production: Wing :: Wing.{
 }
 ```
 
-Host endpoints and credentials are local bindings, not repository authority:
+Host endpoints and credentials are local bindings, not repository authority. These commands are explicit one-time host setup; the beginner path starts at `jet push prod`:
 
 ```text
 $ jet remote bind web1 ssh://deploy@web1.example.test --credential company-ssh
@@ -1289,18 +1357,18 @@ The S7/S8 shape covers every requirement in the Epoch 4 JetOS research appendix 
 | Required reach | Where it appears |
 |---|---|
 | Multi-host, ISO host, hardware, variants | Fleet host map; Image `.Iso`; hardware Wing; named System deltas and boot variants. |
-| Typed options with type/default/docs/enums | `OptionSet` declarations feed checks, search, info, Studio, and docs (`NEW: D-ECO-JETOS2`). |
+| Typed options with type/default/docs/enums | `OptionSet` declarations feed checks, `jet inspect search`, `jet inspect info`, Studio, and docs (`NEW: D-ECO-JETOS2`). |
 | Final-value reads and cycle diagnostics | Resolved graph view; shortest cycle with all source spans. |
 | Deterministic merge and provenance | Field-law composition; `.jet/lock`; `jet explain` shows contributors, priority, winner, and reason. |
-| One-character disable | Leading `_` on a discovered `.jet` contribution. |
+| One-character disable | S7's `system/_nvidia.jet` uses D-ECO-FILEROOT1's proposed discovered-file rule. |
 | File emission | Typed `File.{ path, text, mode, replace }` projected inside generation (`NEW: D-ECO-JETOS2`). |
-| Stable/unstable sets, overlays, custom derivations | Direct provider roots, typed Overlay Wings, ordinary Package recipes, and compatibility proof. |
+| Stable/unstable sets, overlays, custom derivations | S6 shows `nixpkgs@nixos-unstable`; S7 shows a stable browser Overlay. Custom derivation acceptance uses ordinary Package recipes and is not shown here. |
 | One feature spanning system and user scope | A Wing may contribute System facts and referenced user Profile facts in one closed value. |
-| KDE, GNOME, Hyprland, Niri and display managers | One `services.desktop.environment` enum; session/display manager derive unless explicitly set. |
-| Theming | Reusable Theme value projects GTK, Qt, terminals, editors, display manager, and Studio preview. |
-| Flatpak, AppImage, native packages | Typed app/package facts under the same System and activation proof. |
+| KDE, GNOME, Hyprland, Niri and display managers | S7 shows representative KDE selection. GNOME/Hyprland/Niri and display-manager swap acceptance over the same typed field are not shown here. |
+| Theming | S7 shows a representative Theme value. Owner-stack parity across Home Manager/Stylix/NUR-class breadth is acceptance work over the same mechanism, not shown here. |
+| Flatpak, AppImage, native packages | S7 shows one Flatpak app fact and native packages. AppImage acceptance over the same typed app facts is not shown here. |
 | Installer | Image Output `.Iso`; guided install drafts editable storage facts; scripted path consumes the same graph. |
-| VM tests | Check Output with typed host handles; install, reboot, login, desktop, services, and rollback produce guest-bound proof. |
+| VM tests | S7's Check calls `install`, `reboot`, boot, service, desktop, login, generation-switch, and rollback assertions on one typed host. |
 | Fleet rollout | Typed targets and authority, staged canary, bounded concurrency, health gates, rollback-and-stop, per-host receipts. |
 
 Raw escape hatches remain explicit and audited. A compatibility file or service action declares effects, checkpoints, compensation, and proof. It cannot mutate outside the generation and still claim declarative activation.
@@ -1332,7 +1400,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 | Users debug evaluator or backend internals | Eager typed graph checks point at user source. rustc and provider internals remain optional debug context under Jet-owned what/why/fix diagnostics. |
 | Global files mutate without a generation | Profiles, users, Systems, and Fleets activate immutable closures by pointer; file projection occurs inside a generation. |
 | Resolution or install executes undeclared code | Metadata probes never execute code. Hooks and adapters are digest-bound, reviewed, effect-declared, and sandboxed. |
-| Merge and override algebra is folklore | One field law, one `OptionValue` precedence wrapper, and complete locked provenance replace last-file-wins and constructor families. |
+| Merge and override algebra is folklore | One field law, ordinary functions for final ecosystem values, option-only `OptionValue` contributions, and complete locked provenance replace last-file-wins and constructor families. |
 | A distant consumer silently changes package behavior | Direct dependency visibility and closed variant domains prevent additive feature or peer-dependency leakage across unrelated graph members. |
 | An under-specified build is called reproducible | Lock identity includes source, toolchain, target, effects, environment, and policy; clean rebuild divergence creates failed proof. |
 | Lockfiles tell partial truth | `.jet/lock` owns exact graph facts and reasons; receipt digests connect those facts to observed bytes and activation. |
@@ -1346,7 +1414,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 |---|---|
 | First install asks for daemon and root choices | Per-user Hangar works first. Shared broker is an administrator opt-in and absent without consequence. |
 | Old and experimental command families disagree | One versioned `jet` command registry dispatches to engines and rejects version skew. |
-| Package attribute differs from executable name | `jet search ripgrep` returns Package and Output names; `jet info` shows the exact runnable address. |
+| Package attribute differs from executable name | `jet inspect search ripgrep` returns Package and Output names; `jet inspect info` shows the exact runnable address. |
 | Dev shell requires choosing `shell.nix`, `flake.nix`, or framework | `jet env` selects the Project's Environment Output or consumes a foreign flake when no Environment exists. |
 | Flake schema and `${system}` precede first build | `jet build` derives host target; `--target` reveals explicit control only when asked. |
 | Untracked source disappears from a flake snapshot | Plan names every included and excluded source with the owning source-set rule before build. |
@@ -1371,18 +1439,18 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Project | `project: Project :: Project.{ packages: {} }`; `jet check` prints `Project is valid.` Familiar before Jet is explained. |
-| B — Airframe | `airframe: Airframe :: Airframe.{ packages: {} }`; conflict prints `Airframe has two values for services.api.port.` Strong whole-with-parts meaning, unfamiliar for software. |
-| C — Aircraft | `aircraft: Aircraft :: Aircraft.{ packages: {} }`; `jet inspect aircraft` names a concrete vehicle, awkward for a library. |
-| D — Flight | `flight: Flight :: Flight.{ packages: {} }`; `jet build` prints `Flight resolved.` Suggests one execution rather than durable definition. |
-| E — Formation | `formation: Formation :: Formation.{ packages: {} }`; `jet inspect formation` suits fleets but overstates one script. |
-| F — Mission | `mission: Mission :: Mission.{ packages: {} }`; `jet check` prints `Mission is valid.` Purposeful, but implies a run or deployment. |
-| G — Squadron | `squadron: Squadron :: Squadron.{ packages: {} }`; diagnostics fit fleets and misfit a package. |
-| H — Assembly | `assembly: Assembly :: Assembly.{ packages: {} }`; describes composition but collides with machine code and build assemblies. |
-| I — Platform | `platform: Platform :: Platform.{ packages: {} }`; reads well at enterprise scale and inflated at S2. |
-| J — Workspace | `workspace: Workspace :: Workspace.{ packages: {} }`; `jet check` reinforces the false repository/editor boundary. |
-| K — Stack | `stack: Stack :: Stack.{ packages: {} }`; familiar for deployed apps, but collides with call and data stacks. |
-| L — Constellation | `constellation: Constellation :: Constellation.{ packages: {} }`; conveys connected parts, but is long and not aviation-specific. |
+| A — Project | `project: Project :: Project.{ packages: .{} }`; `jet check` prints `Project is valid.` Familiar before Jet is explained. |
+| B — Airframe | `airframe: Airframe :: Airframe.{ packages: .{} }`; conflict prints `Airframe has two values for services.api.port.` Strong whole-with-parts meaning, unfamiliar for software. |
+| C — Aircraft | `aircraft: Aircraft :: Aircraft.{ packages: .{} }`; `jet inspect aircraft` names a concrete vehicle, awkward for a library. |
+| D — Flight | `flight: Flight :: Flight.{ packages: .{} }`; `jet build` prints `Flight resolved.` Suggests one execution rather than durable definition. |
+| E — Formation | `formation: Formation :: Formation.{ packages: .{} }`; `jet inspect formation` suits fleets but overstates one script. |
+| F — Mission | `mission: Mission :: Mission.{ packages: .{} }`; `jet check` prints `Mission is valid.` Purposeful, but implies a run or deployment. |
+| G — Squadron | `squadron: Squadron :: Squadron.{ packages: .{} }`; diagnostics fit fleets and misfit a package. |
+| H — Assembly | `assembly: Assembly :: Assembly.{ packages: .{} }`; describes composition but collides with machine code and build assemblies. |
+| I — Platform | `platform: Platform :: Platform.{ packages: .{} }`; reads well at enterprise scale and inflated at S2. |
+| J — Workspace | `workspace: Workspace :: Workspace.{ packages: .{} }`; `jet check` reinforces the false repository/editor boundary. |
+| K — Stack | `stack: Stack :: Stack.{ packages: .{} }`; familiar for deployed apps, but collides with call and data stacks. |
+| L — Constellation | `constellation: Constellation :: Constellation.{ packages: .{} }`; conveys connected parts, but is long and not aviation-specific. |
 
 **Recommendation: A — Project.** It is clear at S2 and S8, while one explicit law removes the repository-boundary assumption. Tradeoff: docs must state that a Project may span repositories and a repository may contain several Projects.
 
@@ -1394,28 +1462,28 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Wing | `pub web: Wing :: Wing.{ services: {} }`; conflict: `Wing web and Wing monitoring disagree at services.api.port.` Short and clear, with a Winglang search collision. |
-| B — Spar | `pub web: Spar :: Spar.{ services: {} }`; `jet split env` creates `Spar development`. Precise load-bearing part, unfamiliar to many beginners. |
-| C — Strut | `pub web: Strut :: Strut.{ services: {} }`; diagnostic says `Strut web contributed this value.` Suggests support rather than content. |
-| D — Rib | `pub web: Rib :: Rib.{ services: {} }`; compact structural part, but collides with anatomy, food, Golem's language, and RenderMan RIB. |
-| E — Fin | `pub web: Fin :: Fin.{ services: {} }`; short, but reads as a directional appendage and is weak in diagnostics. |
-| F — Vane | `pub web: Vane :: Vane.{ services: {} }`; distinct and directional, but not naturally a composition unit. |
-| G — Aileron | `pub web: Aileron :: Aileron.{ services: {} }`; aviation-specific, but long and control-surface-specific. |
-| H — Flap | `pub web: Flap :: Flap.{ services: {} }`; short, but casual English meanings weaken source search. |
-| I — Panel | `pub web: Panel :: Panel.{ services: {} }`; understandable part, but collides with UI and physical file layout. |
-| J — Bay | `pub web: Bay :: Bay.{ services: {} }`; suggests a container or location instead of contributed facts. |
-| K — Nacelle | `pub web: Nacelle :: Nacelle.{ services: {} }`; distinct integrated unit, but unfamiliar and container-shaped. |
-| L — Pylon | `pub web: Pylon :: Pylon.{ services: {} }`; strong attachment point, but sounds infrastructural rather than general. |
-| M — Stringer | `pub web: Stringer :: Stringer.{ services: {} }`; accurate longitudinal member, but collides with string tooling and needs teaching. |
-| N — Frame | `pub web: Frame :: Frame.{ services: {} }`; structural and common, but collides with stack frames, GUI frames, and data frames. |
-| O — Section | `pub web: Section :: Section.{ services: {} }`; plain language, heavily overloaded in documents, binaries, and configuration. |
-| P — Tailplane | `pub web: Tailplane :: Tailplane.{ services: {} }`; unambiguous aviation term, but semantically too specific and long. |
+| A — Wing | `pub web: Wing :: Wing.{ services: .{} }`; conflict: `Wing web and Wing monitoring disagree at services.api.port.` Short and clear, with a Winglang search collision. |
+| B — Spar | `pub web: Spar :: Spar.{ services: .{} }`; `jet split env` creates `Spar development`. Precise load-bearing part, unfamiliar to many beginners. |
+| C — Strut | `pub web: Strut :: Strut.{ services: .{} }`; diagnostic says `Strut web contributed this value.` Suggests support rather than content. |
+| D — Rib | `pub web: Rib :: Rib.{ services: .{} }`; compact structural part, but collides with anatomy, food, Golem's language, and RenderMan RIB. |
+| E — Fin | `pub web: Fin :: Fin.{ services: .{} }`; short, but reads as a directional appendage and is weak in diagnostics. |
+| F — Vane | `pub web: Vane :: Vane.{ services: .{} }`; distinct and directional, but not naturally a composition unit. |
+| G — Aileron | `pub web: Aileron :: Aileron.{ services: .{} }`; aviation-specific, but long and control-surface-specific. |
+| H — Flap | `pub web: Flap :: Flap.{ services: .{} }`; short, but casual English meanings weaken source search. |
+| I — Panel | `pub web: Panel :: Panel.{ services: .{} }`; understandable part, but collides with UI and physical file layout. |
+| J — Bay | `pub web: Bay :: Bay.{ services: .{} }`; suggests a container or location instead of contributed facts. |
+| K — Nacelle | `pub web: Nacelle :: Nacelle.{ services: .{} }`; distinct integrated unit, but unfamiliar and container-shaped. |
+| L — Pylon | `pub web: Pylon :: Pylon.{ services: .{} }`; strong attachment point, but sounds infrastructural rather than general. |
+| M — Stringer | `pub web: Stringer :: Stringer.{ services: .{} }`; accurate longitudinal member, but collides with string tooling and needs teaching. |
+| N — Frame | `pub web: Frame :: Frame.{ services: .{} }`; structural and common, but collides with stack frames, GUI frames, and data frames. |
+| O — Section | `pub web: Section :: Section.{ services: .{} }`; plain language, heavily overloaded in documents, binaries, and configuration. |
+| P — Tailplane | `pub web: Tailplane :: Tailplane.{ services: .{} }`; unambiguous aviation term, but semantically too specific and long. |
 
 **Recommendation: A — Wing.** It reads naturally in source, split output, and conflict diagnostics, and works for every Project tier. Tradeoff: Jet-qualified docs must absorb the Winglang product collision.
 
 ### 3. D-ECO-FILEROOT1 — choose the final source-file law
 
-**Answers/replaces:** D-ECO-SOURCE1; overturns S52, D-JPK-FILENAME2, D-JPK-TWONAMES1, and D-JPK-OSHOST1's `config.jet` path while preserving bare-host resolution.
+**Answers/replaces:** D-ECO-SOURCE1; overturns S52, D-JPK-FILENAME2, D-JPK-TWONAMES1, and D-JPK-OSHOST1's `config.jet` path while preserving bare-host resolution. It extends U3's module-level leading-underscore disable rule to discovered files.
 
 **Gist:** Decide whether one reserved Project file replaces permanent package, environment, workspace, and OS role files.
 
@@ -1435,7 +1503,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Extract and move | From inline `environments: { dev: … }`, `jet split env --check` prints `Would create project/env.jet::development; graph unchanged.` It then creates the Wing and records a reversible ledger. |
+| A — Extract and move | From inline `environments: .{ dev: … }`, `jet split env --check` prints `Would create project/env.jet::development; graph unchanged.` It then creates the Wing and records a reversible ledger. |
 | B — Move Wings only | Same input prints `Error: no exported Wing owns tier env. Fix: extract it, then retry.` Experts get a smaller refactor tool; beginners perform its prerequisite manually. |
 
 **Recommendation: A.** It fulfills the user's intent while producing the same Wing experts write directly. Tradeoff: preview must name the generated binding and refuse non-closed extraction before writes.
@@ -1514,12 +1582,12 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 **Answers/replaces:** open D-ECO-OUTPUT-DEFAULT1.
 
-**Gist:** Choose the deterministic selection rule for build, run, test, publish, enter, and activation intents.
+**Gist:** Choose the deterministic selection rule for singular `run`, `enter`, `publish`, and activation intents; plural `test` runs every Check Output.
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Explicit, legacy, sole, defaults, error | With one executable, `jet run` selects it. After a second appears, output lists both until `defaults: .{ run: cli }` is added. Explicit `jet run admin` always wins. |
-| B — Conventional keys | `outputs: { run: Output.Executable.{…}, check: Output.Check.{…} }`; `jet run` selects key `run`. Names become reserved policy vocabulary. |
+| A — Plural all; singular explicit, legacy, sole, defaults, error | `jet test` runs every Check. With one executable, `jet run` selects it. After a second appears, output lists both until `defaults: .{ run: cli }` is added. Explicit `jet run admin` always wins. |
+| B — Conventional keys | `outputs: .{ run: Output.Executable.{…}, check: Output.Check.{…} }`; `jet run` selects key `run`. Names become reserved policy vocabulary. |
 | C — Always explicit after Outputs | A sole `cli` still makes `jet run` print `name an Output; use jet run cli`. Typing adds no information. |
 
 **Recommendation: A.** Small Projects stay automatic, large Projects record checked intent, and adding an Output cannot silently retarget automation. Tradeoff: multi-output Projects carry a small defaults record.
@@ -1539,7 +1607,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 ### 12. D-ECO-JETOS2 — connect Project to JetOS
 
-**Answers/replaces:** open D-ECO-JETOS2 and the JetOS half of D-ECO1.
+**Answers/replaces:** open D-ECO-JETOS2 and the JetOS half of D-ECO1. It re-homes ratified D-JOS-USERENV1 (`user.<name>`), D-JOS-THEME1 (`theme.<name>`), D-JOS-VMTEST1, and D-JOS-DISK1 spellings as typed Project values — semantics preserved, re-spelling gated by this row.
 
 **Gist:** Decide whether Systems and Fleets are Outputs of the same Project graph and use the same realization substrate.
 
@@ -1559,7 +1627,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Plan predicts, proof confirms | `jet os plan halcyon` shows predicted `gen-41 -> candidate`. Later `jet os proof --name gen-42` prints baseline `gen-41`, built changes, output digests, readiness, activation, provenance, and rollback. |
+| A — Plan predicts, proof confirms | `jet os plan halcyon` shows predicted `gen-41 -> candidate`. Later `jet os proof halcyon --name gen-42` prints baseline `gen-41`, built changes, output digests, readiness, activation, provenance, and rollback. |
 | B — Plan is the only delta | Plan shows current desired versus active. Historical proof prints `changes: not recorded`; after active state moves, gen-42's exact delta cannot be reconstructed. |
 
 **Recommendation: A.** Beginners get a safe preview and auditors get immutable historical evidence without another command. Tradeoff: each generation retains a compact typed delta and observation record.
@@ -1572,7 +1640,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Hangar objects referenced by lock/generation | `.jet/lock` contains `receipt sha256:91b8…`; `jet os proof` loads the immutable Hangar object and prints its locked-input ref. Export copies the receipt closure. |
+| A — Hangar objects referenced by lock/generation | `.jet/lock` contains `receipt sha256:91b8…`; `jet os proof halcyon --name gen-42` loads the immutable Hangar object and prints its locked-input ref. Export copies the receipt closure. |
 | B — Inline every receipt in `.jet/lock` | One build appends action, logs, output, readiness, and activation fields directly. `git diff .jet/lock` grows with every local realization and mixes source resolution with observations. |
 | C — Project-local receipt directory | `.jet/receipts/gen-42.json` is readable and portable; `jet clean` must treat mutable paths as identity and prevent edits from rewriting evidence. |
 
@@ -1580,7 +1648,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 ### 15. D-ECO-FLEETVERB1 — choose fleet lifecycle verbs
 
-**Answers/replaces:** new fleet command gate left open by D-JPK-FLEET1 and D-JOS-FLEETROLLOUT1.
+**Answers/replaces:** new fleet command gate left open by D-JPK-FLEET1 and D-JOS-FLEETROLLOUT1. Option A amends D-CLI-SURFACE3's grouping of `push`; option C preserves D-CLI-SURFACE3 unchanged.
 
 **Gist:** Choose the command users type for plan, staged rollout, observation, and rollback across hosts.
 
@@ -1588,7 +1656,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 |---|---|
 | A — Intent-first `jet push <fleet>` | `jet push prod` prints cohorts, canary, health gates, and rollback policy; `jet push prod --stage-only` builds without activation. Per-host inspection remains `jet os proof web1`. |
 | B — Grouped `jet fleet plan\|push\|rollback` | `jet fleet push prod` prints the same plan. Namespace is explicit, but duplicates plan and rollback nouns already owned by the shared lifecycle. |
-| C — Extend `jet os` | `jet os push prod` treats Fleet as OS scope. It groups activation verbs, but excludes future non-OS deployment Outputs and makes host/fleet selection less obvious. |
+| C — Keep D-CLI-SURFACE3 `jet os push` | `jet os push prod` treats Fleet as OS scope and preserves D-CLI-SURFACE3 unchanged. It groups activation verbs, but excludes future non-OS deployment Outputs and makes host/fleet selection less obvious. |
 
 **Recommendation: A.** `push` is the fleet-level intent, while the plan/proof lifecycle and per-host OS verbs remain unchanged. Tradeoff: help must reserve top-level `push` for Fleet rather than generic artifact upload.
 
