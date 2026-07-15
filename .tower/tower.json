@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 634,
-    "rev": 7489,
+    "rev": 7495,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19044,40 +19044,46 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "workOrder": 0,
-      "assignee": "root-633-builder",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "root-633-builder",
+          "text": "[handoff] e5e0aa838 repairs cubic closure replay and redundant consumer passes. C1-C3 met. Distinct verifier: inspect proof boundary, rerun exact/filter tests, then parent runs mandatory full suite for C4."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Both exact closure compaction/reader tests complete under 30-second external bounds and pass repeatedly.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-633-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:57:36.799Z"
+          "evidence": "Committed e5e0aa838. Exact compaction passed under 30s three times: 6.86s, 6.69s, 6.69s. Exact reader/compaction passed under 30s three times: 17.44s, 17.73s, 17.52s.",
+          "at": "2026-07-15T08:15:19.644Z"
         },
         {
           "n": 2,
           "text": "Closure registration, compaction, and readers serialize without reentrant lock deadlock, partial visibility, or lost graph state.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-633-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:57:36.900Z"
+          "evidence": "Writer replay now validates each applied WAL entry before advancing, performs one final structural pass, proofs only newly registered records before append, snapshots structurally during compaction, and final-proofs all store authority at closure_graph/lifecycle consumption. Shared replay removes nested recovery/migration/load cycles; tests preserve monotonic 70-record visibility and exact graph after compaction.",
+          "at": "2026-07-15T08:15:19.745Z"
         },
         {
           "n": 3,
           "text": "Full closure filter and targeted Jetpack store tests pass under bounded execution.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-633-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:57:37.008Z"
+          "evidence": "Bounded cargo test -p jetpack closure_: 19/19 in 17.68s. Bounded Store::Tests::tests:: filter: 48/48 in 17.69s. cargo check -p jetpack green; git diff --check clean.",
+          "at": "2026-07-15T08:15:19.847Z"
         },
         {
           "n": 4,
@@ -19092,8 +19098,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T07:57:36.696Z",
-      "updated": "2026-07-15",
-      "claimedAt": "2026-07-15T07:57:59.012Z"
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -38316,6 +38321,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T08:15:20.078Z",
+      "by": "root-633-builder",
+      "action": "card.release",
+      "ref": "c0qn1s08",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T08:15:19.975Z",
+      "by": "root-633-builder",
+      "action": "card.update",
+      "ref": "c0qn1s08",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T08:15:19.847Z",
+      "by": "root-633-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qn1s08",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T08:15:19.745Z",
+      "by": "root-633-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qn1s08",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T08:15:19.644Z",
+      "by": "root-633-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qn1s08",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T08:15:01.809Z",
+      "by": "root-633-builder",
+      "action": "card.claim",
+      "ref": "c0qn1s08",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T08:03:40.316Z",
       "by": "codex-root-producer-audit",
       "action": "card.release",
@@ -41772,48 +41819,6 @@
       "action": "card.criteria-add",
       "ref": "c0qptf0n",
       "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T00:20:27.653Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qptf0n",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T00:20:27.653Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qptf0n",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T00:20:17.580Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-VIEW1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T00:20:17.580Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c06vgib7",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T00:20:17.580Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c06vgib7",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T00:20:17.580Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c06vgib7",
-      "note": "#2 syntax-decisions.md log entry"
     }
   ],
   "nextNum": 368,
