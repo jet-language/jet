@@ -529,6 +529,19 @@ Examples: `examples/features/crypto/crypto_suite.jet`,
 `examples/features/crypto/crypto_envelope.jet`, and
 `examples/features/crypto/crypto_sign.jet`.
 
+### `core.auth` — HS256 JWT verification
+
+`core.auth` exports one verifier: `verify_jwt(token: String, key: [U8]) ->
+Claims ? AuthError`. It requires a three-part JWT whose header selects HS256,
+checks the HMAC-SHA256 signature, decodes the header and payload as UTF-8, and
+rejects an expired `exp` timestamp. `Claims` carries the parsed `sub`, `aud`,
+`exp`, and `iat` claims. The current function returns `aud` as claim data; it
+does not take an expected audience or apply application audience policy.
+
+Malformed tokens, invalid signatures, expired tokens, and decoding failures
+return `AuthError`. The implementation is compiler-embedded, std-only, and adds
+no external dependency.
+
 ### `core.watcher` — file/process/port change events
 
 `core.watcher` owns watch-style APIs (D-WATCH-SCOPE1). It uses std-only polling

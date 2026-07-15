@@ -6157,13 +6157,18 @@ fn run() {
 #[test]
 fn builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback() {
     let registration = include_str!("../crates/jet-sema/src/Sema/Registration.rs");
+    let serde = include_str!("../crates/jet-sema/src/Sema/Registration/Serde.rs");
     let items = include_str!("../crates/jet-codegen/src/Codegen/Items.rs");
-    assert!(registration.contains("impl {}.Encode"));
-    assert!(registration.contains("impl {}.Decode"));
-    assert!(registration.contains("Some(trigger_span)"));
-    assert!(!registration.contains("__JetSerdeCarrier"));
-    assert!(!registration.contains("__JetSerdeGenerated"));
-    assert!(!registration.contains("trait_impls.extend"));
+    assert!(registration.contains("expand_builtin_serde_source(prog, &mut diags);"));
+    assert!(serde.contains("let (tokens, lex_diags) = crate::Lexer::lex(source);"));
+    assert!(serde.contains("crate::Parser::parse(&tokens)"));
+    assert!(serde.contains("Ok(generated) => Some(generated.items)"));
+    assert!(serde.contains("Some(Item::Impl(imp))"));
+    assert!(serde.contains("imp.is_generated_serde = true"));
+    assert!(serde.contains("Some(trigger_span)"));
+    assert!(!serde.contains("__JetSerdeCarrier"));
+    assert!(!serde.contains("__JetSerdeGenerated"));
+    assert!(!serde.contains("trait_impls.extend"));
     assert!(!items.contains("emit_struct_serde"));
     assert!(!items.contains("emit_enum_serde"));
 }
