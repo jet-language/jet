@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 627,
-    "rev": 7377,
+    "nextNum": 628,
+    "rev": 7385,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8936,8 +8936,13 @@
         "c0c7d9qt"
       ],
       "workOrder": 78,
-      "assignee": null,
+      "assignee": "terra-420-lockfix",
       "log": [
+        {
+          "at": "2026-07-15",
+          "by": "terra-541-builder",
+          "text": "[handoff] C3 internal lifecycle foundation landed in e7e68fe7 and b8b7d8c3. Private typed ProjectLock/ProfileGeneration/Toolchain/ExternalConsumer/Manual roots persist stable ids, producers, incarnations, witnesses, exact targets, and prepare/commit/tombstone timestamps in checksummed fsync lifecycle-db transactions under the Hangar lock. Prepare protects old union new; commit narrows to exact new; corrupt, truncated, duplicate, unknown-target, hostile-path, and invalid transitions fail closed. Snapshot/list, conservative legacy import/root, deterministic LifecycleRevision, and closure-head StoreRevision are implemented. Targeted Store::Lifecycle 9/9 green. No public manual-root syntax, CLI, diagnostics, producer/lease/clean wiring, or criterion claim; D-JPK-MANUALROOT1 remains open. C3 stays open for process/build leases and end-to-end producer wiring; parent runs full suite."
+        },
         {
           "at": "2026-07-15",
           "text": "[handoff] Prerequisite lock slice A complete in 26e2750ad + 9093c4a7; do not mark criteria 3-5. Independent continuation may build typed roots/leases/GC atop persistent advisory lock. Parent runs full suite. Broad Store module exposed two unrelated C1 test-only record failures (`producer record has empty source_digest`); lock-specific Store reruns are green."
@@ -9117,7 +9122,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-15T05:47:40.252Z"
     },
     {
       "id": "c041flkr",
@@ -18592,6 +18598,63 @@
       "needsAcceptance": false,
       "created": "2026-07-15T05:33:16.868Z",
       "updated": "2026-07-15"
+    },
+    {
+      "id": "c0hes1mt",
+      "num": 627,
+      "title": "Full suite red: DNS dual-port fixture races",
+      "body": "Two core DNS TCP-fallback fixtures bind TCP on port 0, then unwrap UDP bind on the same numeric port. Another process can claim the unrelated UDP port between calls, causing EADDRINUSE. Reserve the dual-protocol fixture pair with a bounded retry; preserve real UDP-truncation-to-TCP behavior.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "root-627-builder",
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "root-627-builder",
+          "text": "Full gate failed at corelib.rs:2905 with EADDRINUSE. TCP :0 does not reserve the same UDP port; sibling test repeats the unsafe pair."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Both DNS TCP-fallback fixtures obtain a TCP listener and UDP socket on one numeric port through bounded race-safe retry, without skipping real network behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T05:51:26.750Z"
+        },
+        {
+          "n": 2,
+          "text": "The truncation/CNAME and single-budget timeout exact tests pass repeatedly; full corelib target remains green.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T05:51:26.853Z"
+        },
+        {
+          "n": 3,
+          "text": "Mandatory full verification passes on the repaired committed tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T05:51:26.956Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-15T05:51:18.759Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T05:51:27.059Z"
     }
   ],
   "decisions": [
@@ -37675,6 +37738,62 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T05:51:27.185Z",
+      "by": "root-627-builder",
+      "action": "card.update",
+      "ref": "c0hes1mt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T05:51:27.060Z",
+      "by": "root-627-builder",
+      "action": "card.claim",
+      "ref": "c0hes1mt",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T05:51:26.957Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0hes1mt",
+      "note": "#3 Mandatory full verification passes on the repaired committed"
+    },
+    {
+      "at": "2026-07-15T05:51:26.853Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0hes1mt",
+      "note": "#2 The truncation/CNAME and single-budget timeout exact tests p"
+    },
+    {
+      "at": "2026-07-15T05:51:26.750Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0hes1mt",
+      "note": "#1 Both DNS TCP-fallback fixtures obtain a TCP listener and UDP"
+    },
+    {
+      "at": "2026-07-15T05:51:18.759Z",
+      "by": "root",
+      "action": "card.add",
+      "ref": "c0hes1mt",
+      "note": "Full suite red: DNS dual-port fixture races"
+    },
+    {
+      "at": "2026-07-15T05:51:12.884Z",
+      "by": "terra-541-builder",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T05:47:40.252Z",
+      "by": "terra-420-lockfix",
+      "action": "card.claim",
+      "ref": "c01fj815",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T05:39:20.012Z",
       "by": "root-626-reviewer",
       "action": "card.criteria-verify",
@@ -41116,62 +41235,6 @@
       "by": "codex-main",
       "action": "decision.update",
       "ref": "D-ECO1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:19.518Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEWMUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:19.380Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-EXTENSION1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:19.239Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:19.097Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:18.957Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-RECEIPT2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:18.816Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-ECO-COMPOSE2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:18.675Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-MODULEINTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T23:34:18.536Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-DUNDER2",
       "note": "marked ready"
     }
   ],
