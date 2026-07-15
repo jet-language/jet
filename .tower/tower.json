@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 636,
-    "rev": 7578,
+    "nextNum": 637,
+    "rev": 7583,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19472,6 +19472,67 @@
       "created": "2026-07-10T22:02:17.897Z",
       "updated": "2026-07-15",
       "claimedAt": "2026-07-10T22:02:27.606Z"
+    },
+    {
+      "id": "c0ts6uv1",
+      "num": 636,
+      "title": "jet-codegen map builtin coverage regressed",
+      "body": "The jet-codegen unit Codegen::TIR::tests::covers_map_builtin_methods fails deterministically at tests.rs:874 because covers(src, f) rejects the map builtin fixture. Restore truthful TIR coverage or repair the fixture without weakening the coverage ratchet.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Trace the exact unsupported handoff, write or tighten the failing proof, repair frontend/TIR coverage rather than masking it, run the exact test and full jet-codegen target, independent review, then parent full gate.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The exact covers_map_builtin_methods unit passes because every map builtin in its valid fixture reaches complete TIR coverage, with no assertion weakening or fixture deletion.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T13:16:45.308Z"
+        },
+        {
+          "n": 2,
+          "text": "The repaired path preserves map semantics and rejects unsupported shapes through frontend-owned diagnostics or handoff assertions; no rustc-as-checker fallback.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T13:16:45.405Z"
+        },
+        {
+          "n": 3,
+          "text": "cargo test -p jet-codegen passes all non-ignored tests with no syntax, diagnostic, dependency, or unsafe change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T13:16:45.503Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated committed tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T13:16:45.606Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-codegen/src/Codegen/TIR/tests.rs",
+        "crates/jet-codegen/src/Codegen/TIR"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T13:16:37.333Z",
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -38786,6 +38847,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T13:16:45.606Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ts6uv1",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated co"
+    },
+    {
+      "at": "2026-07-15T13:16:45.503Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ts6uv1",
+      "note": "#3 cargo test -p jet-codegen passes all non-ignored tests with "
+    },
+    {
+      "at": "2026-07-15T13:16:45.405Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ts6uv1",
+      "note": "#2 The repaired path preserves map semantics and rejects unsupp"
+    },
+    {
+      "at": "2026-07-15T13:16:45.308Z",
+      "by": "root",
+      "action": "card.criteria-add",
+      "ref": "c0ts6uv1",
+      "note": "#1 The exact covers_map_builtin_methods unit passes because eve"
+    },
+    {
+      "at": "2026-07-15T13:16:37.333Z",
+      "by": "root",
+      "action": "card.add",
+      "ref": "c0ts6uv1",
+      "note": "jet-codegen map builtin coverage regressed"
+    },
+    {
       "at": "2026-07-15T13:15:08.341Z",
       "by": "codex-event-builder",
       "action": "card.criteria-meet",
@@ -42249,41 +42345,6 @@
       "action": "card.criteria-add",
       "ref": "c05t6xnx",
       "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-15T01:04:28.729Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05t6xnx",
-      "note": "#3 Exact core_data regression and full corelib target pass; no "
-    },
-    {
-      "at": "2026-07-15T01:04:28.513Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05t6xnx",
-      "note": "#2 Sema/TIR owns and validates the exact decode result shape be"
-    },
-    {
-      "at": "2026-07-15T01:04:28.278Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05t6xnx",
-      "note": "#1 Typed CSV decoding of [Ticket] and [Budget] yields one list "
-    },
-    {
-      "at": "2026-07-15T01:04:19.709Z",
-      "by": "codex-orchestrator",
-      "action": "card.add",
-      "ref": "c05t6xnx",
-      "note": "Full suite red: typed CSV decode nests list results"
-    },
-    {
-      "at": "2026-07-15T01:04:19.492Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c07p1xxq",
-      "note": ""
     }
   ],
   "nextNum": 368,
