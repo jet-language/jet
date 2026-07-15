@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 620,
-    "rev": 7112,
+    "rev": 7119,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17011,7 +17011,44 @@
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canon records D-ECO-COMPOSE2=A: equal singleton facts coalesce, unequal facts conflict with both origins, named collections combine by key, sets union, and ordered steps combine only when their type defines order.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:14:42.539Z"
+        },
+        {
+          "n": 2,
+          "text": "Every composed result retains provenance, and experts resolve disagreement by constructing the final value with ordinary Jet functions before contributing it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:14:42.772Z"
+        },
+        {
+          "n": 3,
+          "text": "Package ecosystem status marks composition ratified, removes D-ECO-COMPOSE2 from the open-decision table, preserves the archive disclaimer, and does not canonize ProjectPart, ballot paths, last-wins, override operators, or source spelling.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:14:43.001Z"
+        },
+        {
+          "n": 4,
+          "text": "Docs state executable implementation and conformance tests remain downstream under #560 or a dedicated owner, and claim no Syntax.rs, grammar, snapshot, parser, sema, runtime, or example work on #605.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T01:14:43.215Z"
+        }
+      ],
       "refs": [
         "docs/spec/philosophy.md",
         "docs/spec/syntax-decisions.md",
@@ -17588,25 +17625,31 @@
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "codex-orchestrator",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "codex-csv-builder",
+          "text": "Regression-first trace: old compile-only test failed on generated jet_enc_csv_decode::<Vec<user_Ticket>>, proving nested Vec construction. After TIR repair, compile-only test passes in 0.06s and exact core_data runtime passes in 3.40s. Full corelib could not start: unrelated crates/jet-foundation/src/CliSchema.rs references missing elf_sections, pe_sections, wasm_sections, is_mach, and mach_sections. Criteria 3-4 remain open; card stays building pending upstream repair and parent verification."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Typed CSV decoding of [Ticket] and [Budget] yields one list layer (Vec<T>), never Vec<Vec<T>>; scalar and nested-field decoding remain correct.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-csv-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T01:04:28.278Z"
+          "evidence": "Compile-only regression proves core.data.csv<Ticket> emits jet_enc_csv_decode::<Ticket>, never jet_enc_csv_decode::<Vec<Ticket>>. Exact core_data runtime decodes Ticket and Budget to one Vec layer and preserves String/Float fields plus nested join-field access; test passes in 3.40s.",
+          "at": "2026-07-15T01:15:05.712Z"
         },
         {
           "n": 2,
           "text": "Sema/TIR owns and validates the exact decode result shape before codegen; no user-visible rustc diagnostic can escape for the regression.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-csv-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T01:04:28.513Z"
+          "evidence": "Sema already resolves core.data.csv<T> as Result<List<T>,DecodeError>. TIR emitter now consumes that resolved list element through enc_row_target_rust, matching core.encoding.csv; codegen performs no inference. Compile-only front-end regression passes and exact runtime reaches rustc successfully.",
+          "at": "2026-07-15T01:15:05.810Z"
         },
         {
           "n": 3,
@@ -36315,6 +36358,55 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T01:15:05.935Z",
+      "by": "codex-csv-builder",
+      "action": "card.update",
+      "ref": "c05t6xnx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-15T01:15:05.811Z",
+      "by": "codex-csv-builder",
+      "action": "card.criteria-meet",
+      "ref": "c05t6xnx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T01:15:05.712Z",
+      "by": "codex-csv-builder",
+      "action": "card.criteria-meet",
+      "ref": "c05t6xnx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T01:14:43.215Z",
+      "by": "terra-605-builder",
+      "action": "card.criteria-add",
+      "ref": "c08d713o",
+      "note": "#4 Docs state executable implementation and conformance tests r"
+    },
+    {
+      "at": "2026-07-15T01:14:43.001Z",
+      "by": "terra-605-builder",
+      "action": "card.criteria-add",
+      "ref": "c08d713o",
+      "note": "#3 Package ecosystem status marks composition ratified, removes"
+    },
+    {
+      "at": "2026-07-15T01:14:42.772Z",
+      "by": "terra-605-builder",
+      "action": "card.criteria-add",
+      "ref": "c08d713o",
+      "note": "#2 Every composed result retains provenance, and experts resolv"
+    },
+    {
+      "at": "2026-07-15T01:14:42.539Z",
+      "by": "terra-605-builder",
+      "action": "card.criteria-add",
+      "ref": "c08d713o",
+      "note": "#1 Canon records D-ECO-COMPOSE2=A: equal singleton facts coales"
+    },
+    {
       "at": "2026-07-15T01:12:25.376Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -39764,55 +39856,6 @@
       "action": "card.update",
       "ref": "c083j754",
       "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T22:11:50.721Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c008rjua",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T22:11:50.603Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0dv54re",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T22:11:50.485Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0bo7bp5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-14T22:11:50.371Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0xqkis5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-14T22:11:50.255Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0t32dtn",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-07-14T22:11:50.139Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0q35155",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-14T22:11:05.119Z",
-      "by": "terra-capability-probes",
-      "action": "card.release",
-      "ref": "c0ckmp1o",
-      "note": "[handoff] logged"
     }
   ],
   "nextNum": 368,

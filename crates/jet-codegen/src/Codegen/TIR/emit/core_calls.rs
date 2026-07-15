@@ -726,7 +726,7 @@ pub(crate) fn emit_tir_core_call(
             format!(
                 "{}::<{}>(&({}))",
                 helper("jet_enc_csv_decode"),
-                enc_target_rust(ret_ty, cx),
+                enc_row_target_rust(ret_ty, cx),
                 arg(0)
             )
         }

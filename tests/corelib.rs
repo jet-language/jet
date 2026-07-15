@@ -4047,6 +4047,16 @@ fn run() {
 "#,
     );
     assert!(out.rust.contains("jet_enc_csv_decode"));
+    assert!(
+        out.rust.contains("jet_enc_csv_decode::<user_Ticket>"),
+        "core.data.csv must lower its sema-owned list element type exactly:\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("jet_enc_csv_decode::<Vec<user_Ticket>>"),
+        "core.data.csv nested its list result at the runtime boundary:\n{}",
+        out.rust
+    );
     assert!(out.rust.contains("jet_data_count"));
 }
 
