@@ -648,6 +648,16 @@ fn set_xattr_value(_path: &Path, _name: &str, _value: &[u8]) -> Result<(), Inges
 
 fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
     let meta = fs::symlink_metadata(src).map_err(|e| IngestError::Io(e.to_string()))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        if meta.file_attributes() & windows_ingest_contract().reparse_attribute != 0 {
+            return Err(IngestError::Invalid(format!(
+                "reparse-point node `{}` is unsupported",
+                src.display()
+            )));
+        }
+    }
     let before = stable_meta_identity(&meta);
     if meta.file_type().is_dir() {
         fs::create_dir_all(dst)?;
