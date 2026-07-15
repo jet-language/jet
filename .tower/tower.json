@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 630,
-    "rev": 7423,
+    "rev": 7430,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18768,40 +18768,46 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "workOrder": 0,
-      "assignee": "root-629-builder",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-15",
+          "by": "root-629-builder",
+          "text": "[handoff] Production expect ceiling repaired in e8b9b12a6. C1-C3 met. Independent verifier rerun invariant, Jetpack check, lifecycle/directory/closure/action-key targets; parent owns full suite C4. Commit race created canceling 0e80551b6/a67eb99e2 around unrelated Windows hunk; net tree preserves it exactly."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Jetpack production contains zero unwrap/expect findings and the exact invariant test passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-629-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T06:46:08.996Z"
+          "evidence": "e8b9b12a6 removes all 11 production expect calls; cargo test --test ban_jetpack_unwrap_expect passed 6/6 including jetpack_production_has_no_unwrap_or_expect.",
+          "at": "2026-07-15T06:52:29.145Z"
         },
         {
           "n": 2,
           "text": "Each removed expect preserves explicit fail-closed error handling for lifecycle directory, snapshot parsing, bounded reads, and closure actions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-629-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T06:46:09.090Z"
+          "evidence": "e8b9b12a6 uses fallible CString conversion and pinned-handle lookup, checked read-limit and record-size conversions, explicit missing-root parse error, and direct decoded Nix borrow; lifecycle 16/16, directory 5/5, action-key 3/3 prove fail-closed semantics.",
+          "at": "2026-07-15T06:52:29.244Z"
         },
         {
           "n": 3,
           "text": "Targeted Jetpack lifecycle/closure tests and cargo check pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "root-629-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T06:46:09.186Z"
+          "evidence": "cargo check -p jetpack passed; Store::Lifecycle::tests 16/16, Store::Lifecycle::Directory::tests 5/5, Store::Closure::integrity_tests 3/3, action_key 3/3 passed.",
+          "at": "2026-07-15T06:52:29.341Z"
         },
         {
           "n": 4,
@@ -18816,8 +18822,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T06:46:08.901Z",
-      "updated": "2026-07-15",
-      "claimedAt": "2026-07-15T06:46:40.317Z"
+      "updated": "2026-07-15"
     }
   ],
   "decisions": [
@@ -37968,6 +37973,55 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T06:52:48.314Z",
+      "by": "root-629-reviewer",
+      "action": "card.release",
+      "ref": "c0ycodgm",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T06:52:42.169Z",
+      "by": "root-629-reviewer",
+      "action": "card.claim",
+      "ref": "c0ycodgm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T06:52:29.577Z",
+      "by": "root-629-builder",
+      "action": "card.release",
+      "ref": "c0ycodgm",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T06:52:29.470Z",
+      "by": "root-629-builder",
+      "action": "card.update",
+      "ref": "c0ycodgm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-15T06:52:29.342Z",
+      "by": "root-629-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ycodgm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T06:52:29.244Z",
+      "by": "root-629-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ycodgm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T06:52:29.145Z",
+      "by": "root-629-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0ycodgm",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-15T06:47:51.942Z",
       "by": "codex-nixpin-ballot",
       "action": "decision.update",
@@ -41417,55 +41471,6 @@
       "action": "card.criteria-add",
       "ref": "c0xqkis5",
       "note": "#4 Docs do not claim output aliases, default selection, callabl"
-    },
-    {
-      "at": "2026-07-14T23:57:06.824Z",
-      "by": "terra-540-builder",
-      "action": "card.criteria-add",
-      "ref": "c0xqkis5",
-      "note": "#3 Durable docs state that #560 owns language-wide enforcement "
-    },
-    {
-      "at": "2026-07-14T23:57:06.601Z",
-      "by": "terra-540-builder",
-      "action": "card.criteria-add",
-      "ref": "c0xqkis5",
-      "note": "#2 Worked output examples use existing valid named-payload enum"
-    },
-    {
-      "at": "2026-07-14T23:57:06.371Z",
-      "by": "terra-540-builder",
-      "action": "card.criteria-add",
-      "ref": "c0xqkis5",
-      "note": "#1 Canonical syntax decisions record D-SHAPE5b=A as one closed "
-    },
-    {
-      "at": "2026-07-14T23:54:27.612Z",
-      "by": "codex-budget-builder",
-      "action": "card.update",
-      "ref": "c0c008wm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-14T23:54:25.243Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0xqkis5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-14T23:54:25.118Z",
-      "by": "terra-540-builder",
-      "action": "card.claim",
-      "ref": "c0xqkis5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-14T23:54:07.188Z",
-      "by": "codex-budget-builder",
-      "action": "card.update",
-      "ref": "c0c008wm",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
