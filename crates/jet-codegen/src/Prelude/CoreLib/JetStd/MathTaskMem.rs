@@ -261,6 +261,7 @@
                 handle: Some(super::jet_scheduler_spawn_with_control(
                     move || {
                         let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
+                        let _typed_deadline_boundary = super::JetTypedDeadlineBoundary::enter();
                         f()
                     },
                     control.clone(),

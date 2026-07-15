@@ -2614,16 +2614,29 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert_eq!(scheduler.matches("process::exit(70)").count(), 1);
     assert!(task_mem.contains("super::jet_panic(\"<core.tasks>\""));
     // The deadline helper binds the rendered E3003 to a local so it can feed
-    // both interrupt handlers and native wait boundaries while ordinary scheduler
-    // tasks retain the exact process-fatal E3003 diagnostic. It still routes its
-    // fatal path through `jet_runtime_diagnostic`, never `process::exit`.
+    // interrupt handlers, native wait boundaries, and explicitly typed deadline
+    // tasks while ordinary scheduler tasks retain the exact process-fatal E3003
+    // diagnostic. It still routes its fatal path through `jet_runtime_diagnostic`,
+    // never `process::exit`.
     assert!(time.contains("jet_runtime_diagnostic(rendered)"));
-    assert!(time.contains(
-        "if jet_interrupt_handler_should_unwind() || jet_scheduler_wait_boundary_should_unwind()"
-    ));
+    assert!(time.contains("jet_interrupt_handler_should_unwind()"));
+    assert!(time.contains("jet_scheduler_wait_boundary_should_unwind()"));
+    assert!(time.contains("jet_typed_deadline_boundary_should_unwind()"));
     assert!(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"));
     assert!(scheduler.contains("struct JetSchedulerWaitBoundary"));
     assert!(scheduler.contains("let _boundary = JetSchedulerWaitBoundary::enter()"));
+    assert!(scheduler.contains("struct JetTypedDeadlineBoundary"));
+    let (ordinary_task_spawn, typed_task_spawn) = task_mem
+        .split_once("pub(crate) fn spawn_typed_deadline")
+        .expect("typed-deadline task spawn must remain explicit");
+    assert!(!ordinary_task_spawn.contains("JetTypedDeadlineBoundary::enter()"));
+    let typed_task_spawn = typed_task_spawn
+        .split_once("pub fn pause")
+        .expect("typed-deadline task spawn boundary")
+        .0;
+    assert!(typed_task_spawn.contains(
+        "let _typed_deadline_boundary = super::JetTypedDeadlineBoundary::enter()"
+    ));
     let core = include_str!("../crates/jet-codegen/src/Prelude/Core.rs");
     assert!(core.contains("fn jet_runtime_should_unwind() -> bool"));
     assert!(core.contains("jet_scheduler_in_task() || jet_interrupt_handler_should_unwind()"));

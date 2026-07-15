@@ -17,6 +17,8 @@ thread_local! {
         const { std::cell::Cell::new(false) };
     static JET_SCHEDULER_WAIT_BOUNDARY_DEPTH: std::cell::Cell<u32> =
         const { std::cell::Cell::new(0) };
+    static JET_TYPED_DEADLINE_BOUNDARY_DEPTH: std::cell::Cell<u32> =
+        const { std::cell::Cell::new(0) };
 }
 
 struct JetSchedulerWaitBoundary;
@@ -38,6 +40,27 @@ impl Drop for JetSchedulerWaitBoundary {
 
 fn jet_scheduler_wait_boundary_should_unwind() -> bool {
     JET_SCHEDULER_WAIT_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
+}
+
+struct JetTypedDeadlineBoundary;
+
+impl JetTypedDeadlineBoundary {
+    fn enter() -> Self {
+        JET_TYPED_DEADLINE_BOUNDARY_DEPTH
+            .with(|depth| depth.set(depth.get().saturating_add(1)));
+        Self
+    }
+}
+
+impl Drop for JetTypedDeadlineBoundary {
+    fn drop(&mut self) {
+        JET_TYPED_DEADLINE_BOUNDARY_DEPTH
+            .with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+fn jet_typed_deadline_boundary_should_unwind() -> bool {
+    JET_TYPED_DEADLINE_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
 }
 
 static JET_SCHEDULER_PANIC_HOOK: OnceLock<()> = OnceLock::new();
