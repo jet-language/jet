@@ -22,6 +22,7 @@ const SNAPSHOT_FILE: &str = "snapshot";
 const SNAPSHOT_PARTIAL: &str = "snapshot.partial";
 const MAX_TRANSACTION_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_RECOVERY_BYTES: usize = 32 * 1024 * 1024;
 const MAX_JOURNAL_MEMBERS: usize = 512;
 const COMPACT_AFTER_TRANSACTIONS: usize = 128;
 const MAX_ROOTS: usize = 4096;
@@ -488,13 +489,12 @@ fn entry_already_applied(
             identity,
             proposed,
             protected,
-            at,
+            at: _,
         } => state.get(&identity.id).is_some_and(|root| {
             root.phase == RootPhase::Prepared
                 && root.identity == *identity
                 && root.targets == *proposed
                 && root.protected_targets == *protected
-                && root.prepared_at == *at
                 && root.committed_at.is_none()
                 && root.tombstoned_at.is_none()
         }),
@@ -502,37 +502,36 @@ fn entry_already_applied(
             id,
             incarnation,
             witness,
-            at,
+            at: _,
         } => state.get(id).is_some_and(|root| {
             root.phase == RootPhase::Committed
                 && root.identity.incarnation == *incarnation
                 && root.identity.witness == *witness
-                && root.committed_at == Some(*at)
+                && root.committed_at.is_some()
                 && root.tombstoned_at.is_none()
         }),
         JournalEntry::Tombstone {
             id,
             incarnation,
             witness,
-            at,
+            at: _,
         } => state.get(id).is_some_and(|root| {
             root.phase == RootPhase::Tombstoned
                 && root.identity.incarnation == *incarnation
                 && root.identity.witness == *witness
-                && root.tombstoned_at == Some(*at)
+                && root.tombstoned_at.is_some()
         }),
         JournalEntry::Legacy {
             identity,
             targets,
-            at,
+            at: _,
         } => state.get(&identity.id).is_some_and(|root| {
             root.legacy
                 && root.phase == RootPhase::Committed
                 && root.identity == *identity
                 && root.targets == *targets
                 && root.protected_targets == *targets
-                && root.prepared_at == *at
-                && root.committed_at == Some(*at)
+                && root.committed_at.is_some()
         }),
     }
 }
@@ -761,6 +760,7 @@ fn persist_entry(
     control: WriteControl,
 ) -> io::Result<()> {
     validate_state_bounds(state)?;
+    validate_snapshot_wire(state)?;
     let journal = ensure_journal_dir(roots)?;
     let sequence = next_sequence(&journal)?;
     let body = render_entry(entry);
@@ -831,7 +831,7 @@ fn ensure_journal_dir(roots: &Roots) -> io::Result<PinnedDirectory> {
 }
 
 fn bounded_names(journal: &PinnedDirectory) -> io::Result<Vec<std::ffi::OsString>> {
-    let names = journal.names()?;
+    let names = journal.names(MAX_JOURNAL_MEMBERS + 1)?;
     if names.len() > MAX_JOURNAL_MEMBERS {
         return Err(invalid("lifecycle journal exceeds member-count bound"));
     }
@@ -869,10 +869,25 @@ struct JournalScan {
 fn scan_journal(journal: &PinnedDirectory) -> io::Result<JournalScan> {
     let mut names = bounded_names(journal)?;
     names.sort();
-    let mut snapshot = None;
+    let snapshot = if names
+        .iter()
+        .any(|name| name.as_os_str() == std::ffi::OsStr::new(SNAPSHOT_FILE))
+    {
+        let raw = read_member_bounded(journal, SNAPSHOT_FILE, MAX_SNAPSHOT_BYTES)?;
+        Some(
+            parse_snapshot(&raw)
+                .map_err(|error| corrupt_name(journal, SNAPSHOT_FILE, error))?,
+        )
+    } else {
+        None
+    };
+    let through = snapshot.as_ref().map(|(sequence, _)| *sequence).unwrap_or(0);
     let mut transactions = Vec::new();
     let mut transaction_names = Vec::new();
     let mut work = 0usize;
+    let mut decoded_bytes = 0usize;
+    let mut last_sequence = through;
+    let mut sequences = BTreeSet::new();
     for name in names {
         let name = name
             .into_string()
@@ -881,11 +896,6 @@ fn scan_journal(journal: &PinnedDirectory) -> io::Result<JournalScan> {
             continue;
         }
         if name == SNAPSHOT_FILE {
-            let raw = read_member_bounded(journal, &name, MAX_SNAPSHOT_BYTES)?;
-            snapshot = Some(
-                parse_snapshot(&raw)
-                    .map_err(|error| corrupt_name(journal, &name, error))?,
-            );
             continue;
         }
         if !valid_transaction_name(&name) {
@@ -893,6 +903,13 @@ fn scan_journal(journal: &PinnedDirectory) -> io::Result<JournalScan> {
         }
         let sequence = parse_sequence(&name)
             .ok_or_else(|| corrupt_name(journal, &name, "invalid journal sequence"))?;
+        if !sequences.insert(sequence) {
+            return Err(corrupt_name(
+                journal,
+                &name,
+                "duplicate journal sequence",
+            ));
+        }
         let raw = read_member_bounded(journal, &name, MAX_TRANSACTION_BYTES)?;
         let body = checked_body(&raw).map_err(|error| corrupt_name(journal, &name, error))?;
         let checksum = SHA256::sha256_hex(body.as_bytes());
@@ -904,6 +921,21 @@ fn scan_journal(journal: &PinnedDirectory) -> io::Result<JournalScan> {
                 "journal filename disagrees with checksum",
             ));
         }
+        transaction_names.push(name.clone());
+        last_sequence = last_sequence.max(sequence);
+        // A durable snapshot supersedes transaction semantics through its
+        // sequence. Still authenticate every old file and filename, but do
+        // not decode or charge it as recovery work after a crash between
+        // snapshot publication and journal deletion.
+        if sequence <= through {
+            continue;
+        }
+        decoded_bytes = decoded_bytes
+            .checked_add(raw.len())
+            .ok_or_else(|| invalid("lifecycle journal byte work overflow"))?;
+        if decoded_bytes > MAX_RECOVERY_BYTES {
+            return Err(invalid("lifecycle journal exceeds aggregate byte bound"));
+        }
         let entry = parse_entry(&raw).map_err(|error| corrupt_name(journal, &name, error))?;
         work = work
             .checked_add(entry_work(&entry))
@@ -911,11 +943,9 @@ fn scan_journal(journal: &PinnedDirectory) -> io::Result<JournalScan> {
         if work > MAX_RECOVERY_WORK {
             return Err(invalid("lifecycle journal exceeds work bound"));
         }
-        transaction_names.push(name.clone());
         transactions.push((sequence, name, entry));
     }
     transactions.sort_by_key(|(sequence, _, _)| *sequence);
-    let through = snapshot.as_ref().map(|(sequence, _)| *sequence).unwrap_or(0);
     let mut expected = through.checked_add(1)
         .ok_or_else(|| invalid("lifecycle journal sequence overflow"))?;
     for (sequence, name, _) in transactions.iter().filter(|(sequence, _, _)| *sequence > through) {
@@ -941,11 +971,6 @@ fn scan_journal(journal: &PinnedDirectory) -> io::Result<JournalScan> {
             }
         }
     }
-    let last_sequence = transactions
-        .last()
-        .map(|(sequence, _, _)| *sequence)
-        .unwrap_or(through)
-        .max(through);
     Ok(JournalScan {
         snapshot,
         transactions,
@@ -990,6 +1015,7 @@ fn compact_if_needed(
         return Ok(());
     }
     validate_state_bounds(state)?;
+    validate_snapshot_wire(state)?;
     let body = render_snapshot(scan.last_sequence, state);
     let checksum = SHA256::sha256_hex(body.as_bytes());
     let wire = format!("{body}checksum\t{checksum}\n");
@@ -1007,6 +1033,20 @@ fn compact_if_needed(
         }
     }
     journal.sync()
+}
+
+fn validate_snapshot_wire(state: &BTreeMap<RootId, LifecycleRoot>) -> io::Result<()> {
+    // Use the longest possible sequence spelling so admission guarantees a
+    // later compaction cannot fail after its transaction is already durable.
+    let body = render_snapshot(u64::MAX, state);
+    let wire_len = body
+        .len()
+        .checked_add("checksum\t".len() + 64 + 1)
+        .ok_or_else(|| invalid("lifecycle snapshot byte count overflow"))?;
+    if wire_len > MAX_SNAPSHOT_BYTES {
+        return Err(invalid("lifecycle state cannot fit a durable snapshot"));
+    }
+    Ok(())
 }
 
 fn corrupt_name(
@@ -1431,6 +1471,20 @@ mod tests {
 
     fn cleanup(roots: &Roots) { let _ = fs::remove_dir_all(&roots.root); }
 
+    fn persist_controlled(
+        roots: &Roots,
+        known: &BTreeSet<String>,
+        entry: JournalEntry,
+        control: WriteControl,
+    ) -> io::Result<()> {
+        let mut state = load_state(roots, known)?;
+        if !entry_already_applied(&state, &entry) {
+            apply_entry(&mut state, entry.clone())?;
+            persist_entry(roots, &entry, &state, control)?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn replacement_recovery_obeys_old_union_new_law() {
         let (roots, known) = fixture();
@@ -1506,13 +1560,14 @@ mod tests {
             &roots,
             second.clone(),
             vec![digest('b')],
-            LifecycleTimestamp(3),
+            LifecycleTimestamp(30),
         )
         .unwrap();
         assert_eq!(
             retried.protected_targets,
             BTreeSet::from([digest('a'), digest('b')])
         );
+        assert_eq!(retried.roots[&second.id].prepared_at, LifecycleTimestamp(3));
         assert!(prepare(
             &roots,
             identity("root", 2, "different-witness"),
@@ -1521,6 +1576,88 @@ mod tests {
         )
         .is_err());
         assert_eq!(validated_transaction_paths(&roots).unwrap().len(), 3);
+        cleanup(&roots);
+    }
+
+    #[test]
+    fn durable_commit_tombstone_and_legacy_retries_ignore_new_timestamp() {
+        let (roots, known) = fixture();
+        let root = identity("root", 1, "w1");
+        prepare(&roots, root.clone(), vec![digest('a')], LifecycleTimestamp(1)).unwrap();
+        crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            persist_controlled(
+                &roots,
+                &known,
+                JournalEntry::Commit {
+                    id: root.id.clone(),
+                    incarnation: root.incarnation,
+                    witness: root.witness.clone(),
+                    at: LifecycleTimestamp(2),
+                },
+                WriteControl::fail(WritePhase::AfterDirectorySync, 5),
+            )
+        })
+        .unwrap_err();
+        let committed = commit(
+            &roots,
+            &root.id,
+            root.incarnation,
+            &root.witness,
+            LifecycleTimestamp(20),
+        )
+        .unwrap();
+        assert_eq!(committed.roots[&root.id].committed_at, Some(LifecycleTimestamp(2)));
+
+        crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            persist_controlled(
+                &roots,
+                &known,
+                JournalEntry::Tombstone {
+                    id: root.id.clone(),
+                    incarnation: root.incarnation,
+                    witness: root.witness.clone(),
+                    at: LifecycleTimestamp(3),
+                },
+                WriteControl::fail(WritePhase::AfterDirectorySync, 5),
+            )
+        })
+        .unwrap_err();
+        let tombstoned = remove_root(
+            &roots,
+            &root.id,
+            root.incarnation,
+            &root.witness,
+            LifecycleTimestamp(30),
+        )
+        .unwrap();
+        assert_eq!(tombstoned.roots[&root.id].tombstoned_at, Some(LifecycleTimestamp(3)));
+        cleanup(&roots);
+
+        let (roots, known) = fixture();
+        let legacy = LegacyRoot {
+            identity: identity("legacy", 1, "legacy-witness"),
+            targets: vec![digest('b')],
+            observed_at: LifecycleTimestamp(4),
+        };
+        crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            persist_controlled(
+                &roots,
+                &known,
+                JournalEntry::Legacy {
+                    identity: legacy.identity.clone(),
+                    targets: BTreeSet::from([digest('b')]),
+                    at: legacy.observed_at,
+                },
+                WriteControl::fail(WritePhase::AfterDirectorySync, 5),
+            )
+        })
+        .unwrap_err();
+        let mut retry = legacy.clone();
+        retry.observed_at = LifecycleTimestamp(40);
+        let imported = import_legacy_root(&roots, retry).unwrap();
+        let durable = &imported.roots[&legacy.identity.id];
+        assert_eq!(durable.prepared_at, LifecycleTimestamp(4));
+        assert_eq!(durable.committed_at, Some(LifecycleTimestamp(4)));
         cleanup(&roots);
     }
 
@@ -1682,6 +1819,70 @@ mod tests {
         assert!(scan.snapshot.is_some());
         assert!(scan.transactions.len() < 10);
         cleanup(&roots);
+    }
+
+    #[test]
+    fn published_snapshot_supersedes_lingering_authenticated_transactions() {
+        let (roots, known) = fixture();
+        let root = identity("root", 1, "w1");
+        prepare(&roots, root.clone(), vec![digest('a')], LifecycleTimestamp(1)).unwrap();
+        commit(&roots, &root.id, root.incarnation, &root.witness, LifecycleTimestamp(2)).unwrap();
+        let state = load_state(&roots, &known).unwrap();
+        let journal = ensure_journal_dir(&roots).unwrap();
+        let scan = scan_journal(&journal).unwrap();
+        assert_eq!(scan.last_sequence, 2);
+        let body = render_snapshot(scan.last_sequence, &state);
+        let checksum = SHA256::sha256_hex(body.as_bytes());
+        fs::write(
+            journal.path().join(SNAPSHOT_FILE),
+            format!("{body}checksum\t{checksum}\n"),
+        )
+        .unwrap();
+
+        let crashed = scan_journal(&journal).unwrap();
+        assert_eq!(crashed.transaction_names.len(), 2);
+        assert!(crashed.transactions.is_empty());
+        assert_eq!(load_state(&roots, &known).unwrap(), state);
+        cleanup(&roots);
+    }
+
+    #[test]
+    fn admission_rejects_state_that_cannot_fit_future_snapshot() {
+        let mut state = BTreeMap::new();
+        let targets = (0..8)
+            .map(|index| format!("sha256-{index:064x}"))
+            .collect::<BTreeSet<_>>();
+        for index in 0..MAX_ROOTS {
+            let prefix = format!("root-{index:04}-");
+            let id = format!("{prefix}{}", "i".repeat(512 - prefix.len()));
+            let producer = format!("producer-{}", "p".repeat(503));
+            let witness = format!("witness-{}", "w".repeat(504));
+            let identity = RootIdentity::new(
+                RootKind::Manual,
+                RootId::new(id).unwrap(),
+                ProducerId::new(producer).unwrap(),
+                Incarnation::new(1).unwrap(),
+                RootWitness::new(witness).unwrap(),
+            );
+            state.insert(
+                identity.id.clone(),
+                LifecycleRoot {
+                    identity,
+                    targets: targets.clone(),
+                    protected_targets: targets.clone(),
+                    phase: RootPhase::Committed,
+                    prepared_at: LifecycleTimestamp(1),
+                    committed_at: Some(LifecycleTimestamp(2)),
+                    tombstoned_at: None,
+                    legacy: false,
+                },
+            );
+        }
+        validate_state_bounds(&state).unwrap();
+        assert!(validate_snapshot_wire(&state)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot fit"));
     }
 
     #[test]

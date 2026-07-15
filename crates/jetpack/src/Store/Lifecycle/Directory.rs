@@ -39,8 +39,8 @@ impl PinnedDirectory {
         self.0.path()
     }
 
-    pub(super) fn names(&self) -> io::Result<Vec<OsString>> {
-        self.0.names()
+    pub(super) fn names(&self, maximum: usize) -> io::Result<Vec<OsString>> {
+        self.0.names(maximum)
     }
 
     pub(super) fn open_read(&self, name: &str) -> io::Result<File> {
@@ -93,11 +93,7 @@ fn valid_name(name: &str) -> io::Result<()> {
     target_os = "linux",
     target_os = "android",
     target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "openbsd",
-    target_os = "netbsd"
+    target_os = "ios"
 ))]
 mod platform {
     use super::*;
@@ -121,24 +117,10 @@ mod platform {
     const O_CLOEXEC: i32 = 0o2000000;
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     const O_CLOEXEC: i32 = 0x01000000;
-    #[cfg(any(
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    ))]
-    const O_CLOEXEC: i32 = 0x00100000;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     const O_DIRECTORY: i32 = 0o200000;
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     const O_DIRECTORY: i32 = 0x00100000;
-    #[cfg(any(
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    ))]
-    const O_DIRECTORY: i32 = 0x00020000;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     const O_NOFOLLOW: i32 = 0o400000;
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -155,6 +137,13 @@ mod platform {
             old_path: *const c_char,
             new_directory: i32,
             new_path: *const c_char,
+        ) -> i32;
+        fn linkat(
+            old_directory: i32,
+            old_path: *const c_char,
+            new_directory: i32,
+            new_path: *const c_char,
+            flags: i32,
         ) -> i32;
         fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
     }
@@ -219,14 +208,23 @@ mod platform {
             &self.file
         }
 
-        pub(super) fn names(&self) -> io::Result<Vec<OsString>> {
+        pub(super) fn names(&self, maximum: usize) -> io::Result<Vec<OsString>> {
             #[cfg(any(target_os = "linux", target_os = "android"))]
-            let handle_path = PathBuf::from(format!("/proc/self/fd/{}", self.file.as_raw_fd()));
-            #[cfg(not(any(target_os = "linux", target_os = "android")))]
-            let handle_path = PathBuf::from(format!("/dev/fd/{}", self.file.as_raw_fd()));
-            fs::read_dir(handle_path)?
-                .map(|entry| entry.map(|entry| entry.file_name()))
-                .collect()
+            {
+                let handle_path = PathBuf::from(format!("/proc/self/fd/{}", self.file.as_raw_fd()));
+                return fs::read_dir(handle_path)?
+                    .take(maximum)
+                    .map(|entry| entry.map(|entry| entry.file_name()))
+                    .collect();
+            }
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            {
+                let _ = maximum;
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "pinned lifecycle directory enumeration requires fdopendir support",
+                ))
+            }
         }
 
         pub(super) fn open_read(&self, name: &str) -> io::Result<File> {
@@ -259,16 +257,29 @@ mod platform {
             let new_name = CString::new(new_name).expect("validated member name");
             validate_open_name(&self.file, source, &old_name)?;
             if !replace {
-                match self.open_read(new_name.to_str().expect("ASCII journal name")) {
-                    Ok(_) => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::AlreadyExists,
-                            "pinned directory destination already exists",
-                        ));
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
+                // linkat publishes the opened inode and atomically rejects an
+                // existing destination. Removing the partial afterwards is
+                // crash-safe: recovery recognizes and removes the second link.
+                if unsafe {
+                    linkat(
+                        self.file.as_raw_fd(),
+                        old_name.as_ptr(),
+                        self.file.as_raw_fd(),
+                        new_name.as_ptr(),
+                        0,
+                    )
+                } != 0
+                {
+                    return Err(io::Error::last_os_error());
                 }
+                if let Err(error) = validate_open_name(&self.file, source, &new_name) {
+                    let _ = unsafe { unlinkat(self.file.as_raw_fd(), new_name.as_ptr(), 0) };
+                    return Err(error);
+                }
+                if unsafe { unlinkat(self.file.as_raw_fd(), old_name.as_ptr(), 0) } != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                return Ok(());
             }
             // SAFETY: both directory fds and both NUL-terminated names remain
             // live through renameat; names contain no separators.
@@ -290,8 +301,10 @@ mod platform {
             let name = CString::new(name).expect("validated member name");
             let file = self.open_read(name.to_str().expect("ASCII journal name"))?;
             validate_open_name(&self.file, &file, &name)?;
-            // SAFETY: directory fd and component remain live; flags=0 removes
-            // regular files only, never directories.
+            // Lifecycle mutations are cooperative under the Hangar advisory
+            // lock. Identity is checked immediately before unlink; external
+            // writers that ignore that ownership law are corruption, not a
+            // supported concurrent mutator.
             if unsafe { unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) } != 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -465,8 +478,9 @@ mod platform {
             self.handles.last().expect("pinned directory handle")
         }
 
-        pub(super) fn names(&self) -> io::Result<Vec<OsString>> {
+        pub(super) fn names(&self, maximum: usize) -> io::Result<Vec<OsString>> {
             fs::read_dir(&self.path)?
+                .take(maximum)
                 .map(|entry| entry.map(|entry| entry.file_name()))
                 .collect()
         }
@@ -605,10 +619,6 @@ mod platform {
     target_os = "android",
     target_os = "macos",
     target_os = "ios",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "openbsd",
-    target_os = "netbsd",
     windows
 )))]
 mod platform {
@@ -632,7 +642,7 @@ mod platform {
             unreachable!("unsupported pinned directory has no handle")
         }
 
-        pub(super) fn names(&self) -> io::Result<Vec<OsString>> {
+        pub(super) fn names(&self, _maximum: usize) -> io::Result<Vec<OsString>> {
             unreachable!("unsupported pinned directory cannot list")
         }
 
@@ -698,6 +708,41 @@ mod tests {
         proof.read_to_string(&mut text).unwrap();
         assert_eq!(text, "held");
         drop(proof);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn enumeration_stops_at_requested_limit() {
+        let root = fixture();
+        let directory = PinnedDirectory::open_or_create(&root).unwrap();
+        for index in 0..8 {
+            let _ = directory.create_new(&format!("{index}.txn")).unwrap();
+        }
+        assert_eq!(directory.names(3).unwrap().len(), 3);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn no_replace_publication_is_atomic() {
+        let root = fixture();
+        let directory = PinnedDirectory::open_or_create(&root).unwrap();
+        let mut source = directory.create_new("source.partial").unwrap();
+        source.write_all(b"source").unwrap();
+        source.sync_all().unwrap();
+        let mut destination = directory.create_new("destination.txn").unwrap();
+        destination.write_all(b"destination").unwrap();
+        destination.sync_all().unwrap();
+        assert_eq!(
+            directory
+                .rename_open(&source, "source.partial", "destination.txn", false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        let mut text = String::new();
+        directory.open_read("destination.txn").unwrap().read_to_string(&mut text).unwrap();
+        assert_eq!(text, "destination");
+        assert!(directory.open_read("source.partial").is_ok());
         let _ = std::fs::remove_dir_all(root);
     }
 
