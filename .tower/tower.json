@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 636,
-    "rev": 7560,
+    "rev": 7562,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,7 +21,6 @@
         "radar-cards",
         "radar:e5",
         "radar:e6",
-        "radar:e3",
         "radar-sq"
       ]
     },
@@ -18380,11 +18379,11 @@
         {
           "n": 6,
           "text": "hangar_verify_digest_mismatch UI fixture supplies a valid store closure proof so it reaches and snapshot-pins the intended E1315 digest mismatch instead of failing an earlier closure-proof precondition.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e1315-fixture-builder",
-          "verifiedBy": null,
-          "evidence": "Fixture seeds a valid two-record Hangar closure through Store::ingest_tree: the target has a live dependency reference, then only the target CAS payload is corrupted. Exact JET_UI_FILTER=tests/ui/hangar_verify_digest_mismatch.jet UI run passes 1/1 with the existing late output-digest E1315 snapshot unchanged; full diagnostic_snapshots passes 3/3. Store closure validation remains unchanged.",
-          "at": "2026-07-15T10:43:07.398Z"
+          "verifiedBy": "e1315-fixture-reviewer",
+          "evidence": "Independent source review of ca4c7de71 confirms a valid two-object Store closure: dependency ingested first, target record references its exact digest, and only target CAS payload is corrupted before real jetpack hangar verify. Existing E1315 expected stderr is unchanged, so no blind blessing. Builder transcript reports exact hangar_verify_digest_mismatch filter 1/1 and full diagnostic_snapshots 3/3; Store closure validation remains unchanged. git show --check clean.",
+          "at": "2026-07-15T10:51:04.074Z"
         }
       ],
       "refs": [
@@ -38568,6 +38567,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T10:51:04.075Z",
+      "by": "e1315-fixture-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0izrn87",
+      "note": "#6"
+    },
+    {
       "at": "2026-07-15T10:43:07.398Z",
       "by": "e1315-fixture-builder",
       "action": "card.criteria-meet",
@@ -42059,13 +42065,6 @@
       "action": "card.criteria-add",
       "ref": "c0nec3bh",
       "note": "#4 Docs exclude tool inventory/schema, service/task/CI mappings"
-    },
-    {
-      "at": "2026-07-15T00:53:32.776Z",
-      "by": "terra-586-builder",
-      "action": "card.criteria-add",
-      "ref": "c0nec3bh",
-      "note": "#3 Canon assigns typed output and capability mapping to #587, l"
     }
   ],
   "nextNum": 368,
