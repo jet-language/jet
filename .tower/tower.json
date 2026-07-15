@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 634,
-    "rev": 7495,
+    "rev": 7496,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37395,65 +37395,70 @@
       "id": "D-JPK-NIXPIN1",
       "cardId": "c0xe5g33",
       "group": "tooling",
-      "title": "Initial nixpkgs oracle revision",
-      "gist": "Choose the exact nixpkgs source revision that anchors Jetpack's first Nix 2.34 compatibility corpus.",
-      "lesson": "Nixpkgs is a Git repository containing package definitions. A commit is one exact snapshot of those definitions. Nix 2.34 is the evaluator version that interprets that snapshot. A derivation is Nix's build-plan record describing inputs, the builder, its environment, and expected outputs; changing the evaluator or package definitions can change derivation bytes and store paths.\n\nJetpack needs an oracle: a trusted reference used only to create and check compatibility fixtures. The oracle record contains the Nix version, the full nixpkgs commit, and its Nix Archive (NAR) hash. A NAR is Nix's canonical serialization of a filesystem tree. The hash verifies the normalized source tree Nix obtained, not the transport archive or Git commit object.\n\nThis pin does not become a beginner-facing setting or change a project's dependencies. Beginners keep writing Jet and receive the native package experience. Experts can inspect the compatibility manifest, reproduce each oracle case, and see exactly which source and evaluator produced every expected value, derivation, and store path.\n\nPlatform remains a separate corpus dimension because nixpkgs can evaluate differently for each Nix `system`, and every fixture records its system. The first evaluator stage covers representative derivations. The following full-parity stage expands coverage to every supported platform tier, with a named reason for every skip. One source revision anchors all rows, so platform differences cannot be confused with source drift.\n\nThe pin is immutable after selection. Updating the repository's ordinary development shell does not move the compatibility oracle. A future re-pin needs every comparison against reference Nix to match under the proposed revision and a new owner decision amending the existing pinned-baseline rule. The old manifest remains available for audit.",
+      "title": "Exact Nix 2.34.8 oracle and nixpkgs source",
+      "gist": "Choose the exact nixpkgs snapshot used inside Jetpack's fixed, platform-verified Nix 2.34.8 oracle boundary.",
+      "lesson": "Nix and nixpkgs are different inputs. Nix is the evaluator and build tool. nixpkgs is a repository of package definitions interpreted by that tool. Compatibility evidence must identify both, because changing either input can change derivations and store paths.\n\nNix 2.34.8 has an official annotated Git tag. An annotated tag is its own Git object, which points to a source commit. The tag object is `b6769c588f60b3e762f73d3a8cf60294df078ccd`. Its peeled source commit is `f3f1c3c5b8ad91850e0f7c590cf177f7ab022024`. Recording both prevents a moving tag name from changing the selected source.\n\nThose two identifiers pin source history, not a runnable build. Compiler versions, linked libraries, build flags, and target systems can still change the produced Nix executable. A source tag alone therefore cannot prove which executable generated an oracle fixture.\n\nA Nix Archive, called a NAR, is Nix's canonical filesystem serialization. Each supported oracle platform records one NAR hash for the built install output and one for the executable used by tests. Missing or mismatched hashes block fixture generation and acceptance. No fallback silently rebuilds a different oracle.\n\nThe remaining choice is the nixpkgs snapshot interpreted by that fixed oracle. Beginners receive no prompt or setting. Experts can inspect one manifest containing exact Nix source, exact nixpkgs source, platform build identities, fixture systems, and corpus status. Future movement requires a new decision and a green differential corpus.",
       "explainer": "",
-      "story": "Mara updates Jet's development shell and its ordinary flake lock moves to newer nixpkgs. A compatibility test changes on macOS. The separate oracle manifest shows whether the evaluator diverged from Nix 2.34 or only the development shell changed. Beginners see no new prompt. Mara can reproduce the exact failing source, system, expression, and expected derivation before proposing a deliberate re-pin.",
-      "inWild": "Proposed committed audit file: `tests/fixtures/nix-compat/oracle.json`\n\n{\n  \"nix_version\": \"2.34\",\n  \"nixpkgs_rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n  \"nixpkgs_nar_hash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\",\n  \"systems\": [\"x86_64-linux\", \"aarch64-darwin\"],\n  \"source_identity\": \"verified\",\n  \"corpus_status\": \"pending\",\n  \"acceptance_target\": \"zero divergences\"\n}\n\nUntil that file is committed, this ballot is the audit source. It proves the selected source identity only; it does not claim a completed corpus.",
+      "story": "Mara updates Jet's development shell while a macOS compatibility fixture changes. The manifest proves whether nixpkgs moved, the Nix source moved, or a platform rebuilt Nix differently. Until each platform's executable and build hashes are recorded, the test refuses to bless new output. Beginners still see the same native package workflow.",
+      "inWild": "Proposed committed audit file: `tests/fixtures/nix-compat/oracle.json`\n\n{\n  \"nix\": {\n    \"version\": \"2.34.8\",\n    \"tag_object\": \"b6769c588f60b3e762f73d3a8cf60294df078ccd\",\n    \"source_commit\": \"f3f1c3c5b8ad91850e0f7c590cf177f7ab022024\",\n    \"builds\": {\n      \"x86_64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"x86_64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"}\n    }\n  },\n  \"nixpkgs\": {\n    \"rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n    \"nar_hash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\"\n  },\n  \"corpus_status\": \"blocked_on_oracle_build_hashes\"\n}\n\nThe official tag mapping has been checked with `git ls-remote`. That check pins the selected Git objects. It does not populate or prove any platform build hash.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Current repository lock",
-          "detail": "Use the nixpkgs snapshot already locked by Jet's current root flake. Its full commit and NAR hash are committed local evidence. Copy both into a separate compatibility manifest, then let the development lock and oracle move independently. Beginners receive no prompt or configuration. Experts get one reproducible starting point already used by the repository, while every corpus row still records its system and expected bytes.",
-          "technical": "Pin Nix 2.34 with nixpkgs `b5aa0fbd538984f6e3d201be0005b4463d8b09f8`, `lastModified = 1782723713`, and `narHash = sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=`. The evidence is the root `flake.lock` committed by repository commit `6a01b05f0acca94b2cbdd7fddd14de315234d7ab`. This lock evidence proves source identity only; the native evaluator's Nix 2.34 differential corpus remains pending and must reach zero divergences. The compatibility manifest copies values; it never follows later root-lock updates. Re-pinning requires the ratified green-corpus amendment law.",
-          "code": "# proposed file: tests/fixtures/nix-compat/oracle.json\n{\n  \"nix_version\": \"2.34\",\n  \"nixpkgs_rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n  \"nixpkgs_nar_hash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\",\n  \"source_identity\": \"verified\",\n  \"corpus_status\": \"pending\"\n}"
+          "name": "Current repository nixpkgs lock",
+          "detail": "Use the nixpkgs snapshot already locked by Jet's current root flake. Copy its revision and NAR hash into the immutable compatibility manifest. Pair it with the exact Nix 2.34.8 tag object, peeled source commit, and required platform build hashes. Beginners receive no configuration. Experts get a nixpkgs source already used by the repository, while oracle execution remains blocked until every required build identity is populated.",
+          "technical": "Nix is exactly version 2.34.8, annotated tag object `b6769c588f60b3e762f73d3a8cf60294df078ccd`, peeled source commit `f3f1c3c5b8ad91850e0f7c590cf177f7ab022024`. nixpkgs is revision `b5aa0fbd538984f6e3d201be0005b4463d8b09f8`, `lastModified = 1782723713`, and `narHash = sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=` from root `flake.lock` at repository commit `6a01b05f0acca94b2cbdd7fddd14de315234d7ab`. Each supported oracle system must record `build_nar_hash` for the complete Nix install output and `executable_nar_hash` for the exact executable invoked. Null, absent, unknown-system, or mismatched values stop generation and acceptance before any expected bytes change. The tag object and source commit never substitute for those hashes.",
+          "code": "{\n  \"nix\": {\n    \"version\": \"2.34.8\",\n    \"tag_object\": \"b6769c588f60b3e762f73d3a8cf60294df078ccd\",\n    \"source_commit\": \"f3f1c3c5b8ad91850e0f7c590cf177f7ab022024\",\n    \"builds\": {\n      \"x86_64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"x86_64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"}\n    }\n  },\n  \"nixpkgs\": {\n    \"rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n    \"nar_hash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\"\n  },\n  \"corpus_status\": \"blocked_on_oracle_build_hashes\"\n}"
         },
         {
           "key": "B",
-          "name": "Original repository lock",
-          "detail": "Use the nixpkgs snapshot from Jet's original root flake lock. Its full commit and NAR hash also survive in repository history. This gives the corpus an older repository-proven source, independent of today's development environment. Beginners still see nothing. Experts can reproduce it exactly, but the snapshot no longer has a current repository role showing that Jet's present toolchain and package examples evaluate against it.",
-          "technical": "Pin Nix 2.34 with nixpkgs `a799d3e3886da994fa307f817a6bc705ae538eeb`, `lastModified = 1780749050`, and `narHash = sha256-3av0pIjlOWQ6rDbNOmpUSvbNnJkGORQKKjb4LtCZsIY=`. The evidence is the root `flake.lock` in repository commit `baa917d6c53a19914898f214934658bd02d76d8f`. This lock evidence proves source identity only; the native evaluator's Nix 2.34 differential corpus remains pending and must reach zero divergences. Corpus systems and expected bytes remain explicit. Future movement follows the same amendment law.",
-          "code": "# proposed file: tests/fixtures/nix-compat/oracle.json\n{\n  \"nix_version\": \"2.34\",\n  \"nixpkgs_rev\": \"a799d3e3886da994fa307f817a6bc705ae538eeb\",\n  \"nixpkgs_nar_hash\": \"sha256-3av0pIjlOWQ6rDbNOmpUSvbNnJkGORQKKjb4LtCZsIY=\",\n  \"source_identity\": \"verified\",\n  \"corpus_status\": \"pending\"\n}"
+          "name": "Original repository nixpkgs lock",
+          "detail": "Use the nixpkgs snapshot from Jet's original root flake lock. It remains byte-identifiable in repository history. The same exact Nix 2.34.8 source and per-platform build-hash gate apply. Beginners still see nothing. Experts gain an older repository-proven nixpkgs baseline, but it no longer represents any current Jet environment. Oracle execution remains blocked until every platform build identity is populated.",
+          "technical": "Nix is exactly version 2.34.8 with tag object `b6769c588f60b3e762f73d3a8cf60294df078ccd` and peeled commit `f3f1c3c5b8ad91850e0f7c590cf177f7ab022024`. nixpkgs is revision `a799d3e3886da994fa307f817a6bc705ae538eeb`, `lastModified = 1780749050`, and `narHash = sha256-3av0pIjlOWQ6rDbNOmpUSvbNnJkGORQKKjb4LtCZsIY=` from root `flake.lock` at repository commit `baa917d6c53a19914898f214934658bd02d76d8f`. Every supported system still needs exact build-output and executable NAR hashes. Source identifiers alone never authorize fixture generation, differential acceptance, or corpus claims.",
+          "code": "{\n  \"nix\": {\n    \"version\": \"2.34.8\",\n    \"tag_object\": \"b6769c588f60b3e762f73d3a8cf60294df078ccd\",\n    \"source_commit\": \"f3f1c3c5b8ad91850e0f7c590cf177f7ab022024\",\n    \"builds\": {\n      \"x86_64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"x86_64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"}\n    }\n  },\n  \"nixpkgs\": {\n    \"rev\": \"a799d3e3886da994fa307f817a6bc705ae538eeb\",\n    \"nar_hash\": \"sha256-3av0pIjlOWQ6rDbNOmpUSvbNnJkGORQKKjb4LtCZsIY=\"\n  },\n  \"corpus_status\": \"blocked_on_oracle_build_hashes\"\n}"
         },
         {
           "key": "C",
-          "name": "JetOS fixture revision",
-          "detail": "Use the exact nixpkgs commit already exercised by JetOS import and backend fixtures. This aligns the first evaluator corpus with those migration examples. The local fixture records only the commit, not its NAR hash. Before any corpus claim, the Nix 2.34 oracle must fetch that revision, record its canonical NAR hash, and verify every fixture against it. Until then, verification fails closed, leaving beginners unaffected while experts see the missing identity rather than an inferred hash.",
-          "technical": "Pin commit `fef9403a3e4d31b0a23f0bacebbec52c248fbb51`. Local evidence appears in `tests/support/jetpack_fixtures.rs`, `tests/jetpack_jetos.rs`, and `tests/fixtures/jetpack-config-real/config.jet`. Those synthetic locks omit `narHash` and do not establish this source as the Nix 2.34 oracle. The committed compatibility manifest must add the oracle-produced NAR hash before criteria can pass. Future movement follows the same amendment law.",
-          "code": "# proposed file: tests/fixtures/nix-compat/oracle.json\n{\n  \"nix_version\": \"2.34\",\n  \"nixpkgs_rev\": \"fef9403a3e4d31b0a23f0bacebbec52c248fbb51\",\n  \"nixpkgs_nar_hash\": null,\n  \"source_identity\": \"incomplete\",\n  \"corpus_status\": \"blocked\",\n  \"fix\": \"record the oracle-produced NAR hash\"\n}"
+          "name": "JetOS fixture nixpkgs revision",
+          "detail": "Use the nixpkgs commit already exercised by JetOS fixtures. The fixture lacks a nixpkgs NAR hash, so source normalization is incomplete. Exact Nix 2.34.8 source and platform build identities are also mandatory. This option remains blocked on both the nixpkgs NAR hash and every oracle build hash. Beginners remain unaffected. Experts see each missing identity instead of an inferred or locally rebuilt substitute.",
+          "technical": "Nix is exactly version 2.34.8 with tag object `b6769c588f60b3e762f73d3a8cf60294df078ccd` and peeled commit `f3f1c3c5b8ad91850e0f7c590cf177f7ab022024`. nixpkgs commit is `fef9403a3e4d31b0a23f0bacebbec52c248fbb51`. Local evidence appears in `tests/support/jetpack_fixtures.rs`, `tests/jetpack_jetos.rs`, and `tests/fixtures/jetpack-config-real/config.jet`. Those synthetic locks omit nixpkgs `narHash`. The compatibility manifest must populate that hash plus each platform's Nix build-output and executable NAR hashes. No source tag, local `nix` binary, or successful evaluation weakens the fail-closed gate.",
+          "code": "{\n  \"nix\": {\n    \"version\": \"2.34.8\",\n    \"tag_object\": \"b6769c588f60b3e762f73d3a8cf60294df078ccd\",\n    \"source_commit\": \"f3f1c3c5b8ad91850e0f7c590cf177f7ab022024\",\n    \"builds\": {\n      \"x86_64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-linux\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"x86_64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"},\n      \"aarch64-darwin\": {\"build_nar_hash\": null, \"executable_nar_hash\": null, \"status\": \"blocked\"}\n    }\n  },\n  \"nixpkgs\": {\n    \"rev\": \"fef9403a3e4d31b0a23f0bacebbec52c248fbb51\",\n    \"nar_hash\": null\n  },\n  \"corpus_status\": \"blocked_on_source_and_oracle_build_hashes\"\n}"
         }
       ],
       "comparisons": [
         {
+          "lang": "Git",
+          "note": "An annotated tag is a Git object that points to another object. Recording the tag object and peeled commit fixes the selected source relationship. It says nothing about compiler inputs or produced executable bytes.",
+          "code": "refs/tags/2.34.8 = b6769c588f60b3e762f73d3a8cf60294df078ccd\nrefs/tags/2.34.8^{} = f3f1c3c5b8ad91850e0f7c590cf177f7ab022024"
+        },
+        {
           "lang": "Nix flakes",
-          "note": "A flake lock records both a Git revision and a NAR hash. The revision selects Git history; the hash verifies Nix's canonical serialization of the normalized fetched tree, not the transport archive or Git commit object. Jetpack applies that identity pair to its compatibility oracle, then adds the Nix version, platform, and expected outputs.",
-          "code": "\"locked\": {\n  \"rev\": \"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\",\n  \"narHash\": \"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\"\n}"
+          "note": "A flake lock pairs a source revision with a NAR hash for normalized source. Jet's oracle adds platform build-output and executable hashes because identical source can still produce different tools.",
+          "code": "source revision + source NAR hash + platform build NAR hash + executable NAR hash"
         },
         {
           "lang": "Rust toolchains",
-          "note": "A pinned Rust compiler and Cargo lock answer different questions. The compiler fixes language behavior; the lock fixes dependency sources. Nix 2.34 and the nixpkgs commit form the same two-part reference boundary here.",
-          "code": "rust-toolchain.toml + Cargo.lock"
+          "note": "A compiler source commit and a distributed compiler binary are separate identities. Reproducible testing records both. Jet applies the same rule to Nix source and each oracle executable.",
+          "code": "rust source commit != rustc artifact hash"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "The current root lock is the only locally evidenced candidate that combines an exact commit, canonical source hash, and a live repository role. Copying it into an immutable corpus manifest gives beginners a silent native default and experts a complete audit boundary. Separate storage prevents later development-shell updates from changing compatibility evidence.",
+        "why": "It combines the fixed Nix 2.34.8 source boundary with the only nixpkgs candidate that has a complete source identity and a current repository role. Platform build hashes remain mandatory, so present repository use cannot masquerade as oracle proof. Beginners stay ceremony-free; experts receive exact source, build, executable, platform, and corpus facts.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "The historical lock is byte-identifiable, but it no longer anchors any current repository environment. Selecting it would disconnect the initial corpus from the source snapshot Jet currently uses without adding a stronger identity guarantee."
+            "reason": "Its nixpkgs source identity is complete, but the snapshot no longer anchors a current repository environment. It adds no stronger evaluator or build guarantee than the recommended source."
           },
           {
             "key": "C",
-            "reason": "The JetOS commit has useful migration coverage, but its local fixtures omit the NAR hash and are synthetic backend inputs. They do not yet prove the source identity required for a fail-closed parity oracle."
+            "reason": "Its migration coverage is useful, but the nixpkgs NAR hash is missing. It begins with one more unresolved identity while retaining the same platform build requirements."
           }
         ],
-        "tradeoff": "The current development pin was selected for Jet's toolchain, not specifically for evaluator coverage. Accept this because corpus membership is explicit and separately reviewed; any unsupported construct is named, never hidden by changing the source pin."
+        "tradeoff": "The chosen nixpkgs snapshot was selected for Jet's development environment, not specifically for evaluator coverage. Corpus rows remain separately reviewed, and no row runs until exact Nix build identities exist."
       },
       "hybrid": null,
-      "checkInstructions": "After ratification, commit `tests/fixtures/nix-compat/oracle.json` with Nix 2.34, the selected revision, its canonical NAR hash, and each fixture's Nix system. Prove ordinary root `flake.lock` updates do not mutate that manifest. Run the committed corpus without Nix on PATH; the oracle is permitted only for fixture generation and differential CI. A future re-pin requires the full proposed corpus green and an owner amendment to the pinned-baseline rule. If C wins, no native-evaluator parity criterion may pass until the canonical NAR hash is committed.",
+      "checkInstructions": "After ratification, commit `tests/fixtures/nix-compat/oracle.json` with Nix version 2.34.8, annotated tag object `b6769c588f60b3e762f73d3a8cf60294df078ccd`, peeled source commit `f3f1c3c5b8ad91850e0f7c590cf177f7ab022024`, selected nixpkgs revision, and nixpkgs NAR hash. Record each supported oracle system explicitly. For every system, build through one declared recipe and record the complete install-output NAR hash plus the exact invoked executable NAR hash. Null, absent, unknown-system, or mismatched hashes must fail before fixture generation, snapshot update, expected-byte acceptance, or parity claims. Prove a tag-name match, tag-object match, or source-commit match alone cannot pass the build gate. Prove ordinary root `flake.lock` updates cannot mutate the oracle manifest. Differential CI must verify the executable hash before invocation and the build hash before accepting results. A future Nix source, build recipe, platform build, or nixpkgs re-pin requires a green proposed corpus and a new owner amendment. If C wins, its nixpkgs NAR hash must also be populated before any corpus row can run.",
       "draft": true,
       "status": "open",
       "created": "2026-07-15T06:46:05.656Z"
@@ -38320,6 +38325,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T08:22:49.408Z",
+      "by": "codex-root-producer-audit",
+      "action": "decision.update",
+      "ref": "D-JPK-NIXPIN1",
+      "note": ""
+    },
     {
       "at": "2026-07-15T08:15:20.078Z",
       "by": "root-633-builder",
@@ -41812,13 +41824,6 @@
       "action": "card.criteria-add",
       "ref": "c0qptf0n",
       "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T00:20:27.653Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qptf0n",
-      "note": "#3 jet devtools grammars regenerated"
     }
   ],
   "nextNum": 368,
