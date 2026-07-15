@@ -133,6 +133,17 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         String::from_utf8_lossy(&verify.stderr)
     );
 
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::list(&roots)
+        .into_iter()
+        .find(|entry| entry.name == "hello")
+        .unwrap();
+    let meta = roots.hangar_dir().join(&entry.id).join("meta.json");
+    fs::remove_file(&meta).unwrap();
+
     let recover = jetpack()
         .args(["hangar", "recover", "--no-color"])
         .current_dir(&proj.path)
@@ -140,6 +151,10 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         .output()
         .unwrap();
     assert!(recover.status.success());
+    assert!(
+        meta.is_file(),
+        "CLI recovery must replay committed package metadata"
+    );
     let _ = Path::new("."); // keep Path import used on all cfgs
 }
 

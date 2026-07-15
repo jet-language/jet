@@ -30,6 +30,7 @@ pub struct ClosureRecord {
 pub struct ClosureGraph {
     pub objects: BTreeMap<String, ClosureObject>,
     pub records: BTreeMap<String, ClosureRecord>,
+    pub deleted_records: BTreeSet<String>,
 }
 
 impl ClosureGraph {
@@ -184,16 +185,37 @@ pub fn actions_for_output(
 
 pub fn entry_action_key(entry: &StoreEntry) -> String {
     let identity = &entry.cache_identity;
-    let mut canonical = b"jet.action-store.v3\0".to_vec();
+    let mut canonical = b"jet.action-store.v4\0".to_vec();
     for field in [
         entry.reference.as_bytes(),
         identity.source_fingerprint.as_bytes(),
         identity.recipe_fingerprint.as_bytes(),
         identity.policy_fingerprint.as_bytes(),
         identity.platform.as_bytes(),
-        entry.producer_record.as_bytes(),
     ] {
         push_frame(&mut canonical, field);
+    }
+    if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+        for field in [
+            producer.provider.as_bytes(),
+            producer.toolchain_facts.as_bytes(),
+            producer.policy_facts.as_bytes(),
+        ] {
+            push_frame(&mut canonical, field);
+        }
+        for (key, value) in producer
+            .plan
+            .facts()
+            .iter()
+            .filter(|(key, _)| action_replay_fact(key))
+        {
+            push_frame(&mut canonical, key.as_bytes());
+            push_frame(&mut canonical, value.as_bytes());
+        }
+    } else {
+        // Validation rejects malformed producer records. Keep the key stable
+        // until that fail-closed boundary instead of panicking here.
+        push_frame(&mut canonical, b"invalid-producer-record");
     }
     let references = entry.references.iter().collect::<BTreeSet<_>>();
     canonical.extend_from_slice(&(references.len() as u64).to_be_bytes());
@@ -201,6 +223,10 @@ pub fn entry_action_key(entry: &StoreEntry) -> String {
         push_frame(&mut canonical, digest.as_bytes());
     }
     format!("sha256-{}", SHA256::sha256_hex(&canonical))
+}
+
+fn action_replay_fact(key: &str) -> bool {
+    !key.starts_with("nix.output.") && !key.starts_with("output.")
 }
 
 fn push_frame(out: &mut Vec<u8>, field: &[u8]) {
@@ -217,13 +243,16 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
 fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<usize> {
     recover_closure_journal_unlocked(roots)?;
     let mut graph = load_graph_mode(roots, true)?;
-    let mut entries = list(roots);
+    let mut entries = list_unlocked(roots);
     entries.sort_by(|left, right| left.id.cmp(&right.id));
     let mut seen_records = BTreeSet::new();
     let mut objects = BTreeMap::new();
     let mut records = Vec::new();
     for entry in entries {
         let entry = normalize_legacy_entry(entry)?;
+        if graph.deleted_records.contains(&entry.id) {
+            continue;
+        }
         let (descriptors, record) = descriptor_for_entry(roots, &entry)?;
         if !seen_records.insert(record.id.clone()) {
             return Err(std::io::Error::other(format!(
@@ -320,6 +349,7 @@ pub fn remove_closure_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
                 deleted_records: vec![id.to_string()],
             },
         )?;
+        remove_package_record(roots, id)?;
         compact_if_needed(roots)?;
         Ok(true)
     })
@@ -331,7 +361,7 @@ pub fn recover_closure_journal(roots: &Roots) -> std::io::Result<usize> {
     })
 }
 
-fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result<usize> {
+pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result<usize> {
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
         return Ok(0);
@@ -355,6 +385,17 @@ fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result<usize> {
                 )
             })?;
         }
+    }
+    let graph = load_graph_mode(roots, true)?;
+    for record in graph
+        .records
+        .values()
+        .filter(|record| !record.package_meta.is_empty())
+    {
+        recovered += usize::from(materialize_missing_package_record(roots, record)?);
+    }
+    for id in &graph.deleted_records {
+        recovered += usize::from(remove_package_record(roots, id)?);
     }
     Ok(recovered)
 }
@@ -489,6 +530,7 @@ fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), Stri
     }
     for id in entry.deleted_records {
         graph.records.remove(&id);
+        graph.deleted_records.insert(id);
     }
     for object in entry.objects {
         if let Some(existing) = graph.objects.get(&object.digest) {
@@ -504,6 +546,7 @@ fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), Stri
     }
     for record in entry.records {
         reject_action_conflict(graph, &record)?;
+        graph.deleted_records.remove(&record.id);
         graph.records.insert(record.id.clone(), record);
     }
     Ok(())
@@ -538,6 +581,13 @@ fn validate_graph_mode(
                 "closure object `{digest}` has invalid external marker"
             ));
         }
+    }
+    if let Some(id) = graph
+        .deleted_records
+        .iter()
+        .find(|id| id.is_empty() || graph.records.contains_key(*id))
+    {
+        return Err(format!("invalid deleted closure record `{id}`"));
     }
     let mut actions: BTreeMap<&str, &ClosureRecord> = BTreeMap::new();
     for (id, record) in &graph.records {
@@ -643,7 +693,7 @@ fn compact_if_needed(roots: &Roots) -> std::io::Result<()> {
         kind: JournalKind::Snapshot,
         objects: graph.objects.into_values().collect(),
         records: graph.records.into_values().collect(),
-        deleted_records: Vec::new(),
+        deleted_records: graph.deleted_records.into_iter().collect(),
     };
     let sequence = next_sequence(&journal)?;
     write_entry(&journal, sequence, &snapshot)?;
@@ -665,18 +715,45 @@ fn write_entry(journal: &Path, sequence: u64, entry: &JournalEntry) -> std::io::
     sync_dir(journal)
 }
 
-fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io::Result<()> {
+fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io::Result<bool> {
     let dir = roots.hangar_dir().join(&record.id);
     fs::create_dir_all(&dir)?;
     let path = dir.join("meta.json");
     if fs::read_to_string(&path).ok().as_deref() == Some(record.package_meta.as_str()) {
-        return Ok(());
+        return Ok(false);
     }
     let tmp = dir.join(format!("meta.json.{}.partial", std::process::id()));
     fs::write(&tmp, &record.package_meta)?;
     fs::File::open(&tmp)?.sync_all()?;
     fs::rename(&tmp, &path)?;
-    sync_dir(&dir)
+    sync_dir(&dir)?;
+    Ok(true)
+}
+
+fn materialize_missing_package_record(
+    roots: &Roots,
+    record: &ClosureRecord,
+) -> std::io::Result<bool> {
+    if roots
+        .hangar_dir()
+        .join(&record.id)
+        .join("meta.json")
+        .exists()
+    {
+        return Ok(false);
+    }
+    materialize_package_record(roots, record)
+}
+
+fn remove_package_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
+    let dir = roots.hangar_dir().join(id);
+    let path = dir.join("meta.json");
+    if !path.exists() {
+        return Ok(false);
+    }
+    fs::remove_file(path)?;
+    sync_dir(&dir)?;
+    Ok(true)
 }
 
 fn render_entry(entry: &JournalEntry) -> String {
@@ -952,6 +1029,7 @@ mod integrity_tests {
         let mut graph = ClosureGraph {
             objects: BTreeMap::from([(digest.clone(), object)]),
             records: BTreeMap::from([(record.id.clone(), record)]),
+            deleted_records: BTreeSet::new(),
         };
         assert!(validate_graph(&roots, &graph)
             .unwrap_err()

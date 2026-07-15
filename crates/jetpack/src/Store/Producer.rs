@@ -64,10 +64,18 @@ impl ProducerRecord {
     }
 
     pub fn decode(raw: &str) -> Result<Self, String> {
+        let Some(raw) = raw.strip_suffix('\n') else {
+            return Err("producer record is truncated".to_string());
+        };
         let Some((body, checksum)) = raw.rsplit_once("checksum\t") else {
             return Err("producer record is truncated".to_string());
         };
-        if SHA256::sha256_hex(body.as_bytes()) != checksum.trim() {
+        if checksum.len() != 64
+            || !checksum
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+            || SHA256::sha256_hex(body.as_bytes()) != checksum
+        {
             return Err("producer record checksum mismatch".to_string());
         }
         let mut lines = body.lines();
@@ -191,6 +199,9 @@ mod tests {
         let encoded = record.encode();
         assert_eq!(ProducerRecord::decode(&encoded).unwrap(), record);
         assert!(ProducerRecord::decode(&encoded[..encoded.len() - 3]).is_err());
+        assert!(ProducerRecord::decode(encoded.trim_end()).is_err());
+        assert!(ProducerRecord::decode(&format!("{encoded} ")).is_err());
+        assert!(ProducerRecord::decode(&format!("{encoded}\n")).is_err());
         let duplicate = encoded.replacen("checksum\t", "70726f7669646572\t78\nchecksum\t", 1);
         assert!(ProducerRecord::decode(&duplicate).is_err());
     }

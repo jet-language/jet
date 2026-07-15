@@ -23,8 +23,7 @@
 //! leasing, GC). Re-exported here so every other call site in this crate is
 //! unchanged.
 pub use jet_pkg_model::Store::{
-    list, lock_path, managed_dir, parse_meta, resolve, CacheIdentity, ParsedMeta, Roots,
-    StoreEntry,
+    lock_path, managed_dir, parse_meta, resolve, CacheIdentity, ParsedMeta, Roots, StoreEntry,
 };
 
 use crate::SHA256;
@@ -38,6 +37,25 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod Producer;
 pub use Producer::*;
+
+fn list_unlocked(roots: &Roots) -> Vec<StoreEntry> {
+    jet_pkg_model::Store::list(roots)
+}
+
+pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        Closure::recover_closure_journal_unlocked(roots)?;
+        Ok(list_unlocked(roots))
+    })
+}
+
+/// Read package records after replaying committed closure projections.
+/// Corrupt WAL fails closed as an empty list for compatibility with the
+/// historical infallible listing API; integrity-sensitive callers use
+/// `list_checked`.
+pub fn list(roots: &Roots) -> Vec<StoreEntry> {
+    list_checked(roots).unwrap_or_default()
+}
 
 fn canonical_producer(
     provider: &str,
@@ -572,8 +590,9 @@ fn migrate_nix_gc_roots_with(
     nix_store: &Path,
 ) -> std::io::Result<usize> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        Closure::recover_closure_journal_unlocked(roots)?;
         let mut rooted = 0;
-        for entry in list(roots) {
+        for entry in list_unlocked(roots) {
             let out = Path::new(&entry.out);
             if !out.starts_with(store_prefix) || !out.exists() {
                 continue;
@@ -898,7 +917,8 @@ pub fn find_verified_by_reference(
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
     let _global = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
-    let entry = list(roots)
+    Closure::recover_closure_journal_unlocked(roots)?;
+    let entry = list_unlocked(roots)
         .into_iter()
         .filter(|entry| entry.reference == reference)
         .filter(|entry| verify_cache_entry(roots, entry, reference, expectation).trusted())

@@ -1152,10 +1152,16 @@ mod tests {
             vec![refreshed.entry.envelope.output_hash.clone()]
         );
         assert!(remove_closure_record(&roots, &refreshed.entry.id).unwrap());
+        let stale_meta = roots
+            .hangar_dir()
+            .join(&refreshed.entry.id)
+            .join("meta.json");
+        fs::write(&stale_meta, refreshed.entry.meta_json()).unwrap();
         assert!(closure_graph(&roots)
             .unwrap()
             .referrers(&right.entry.envelope.output_hash)
             .is_empty());
+        assert!(!stale_meta.exists());
         assert!(!remove_closure_record(&roots, &refreshed.entry.id).unwrap());
     }
 
@@ -1212,6 +1218,39 @@ mod tests {
         right.reference = "a".to_string();
         right.cache_identity.source_fingerprint = "b\nsource=c".to_string();
         assert_ne!(entry_action_key(&left), entry_action_key(&right));
+    }
+
+    #[test]
+    fn closure_action_key_excludes_realized_outputs_but_keeps_action_facts() {
+        let (roots, _g) = temp_roots();
+        let mut entry = ingest_fixture(
+            &roots,
+            "action-projection",
+            &[("out", "bytes")],
+            Vec::new(),
+        )
+        .entry;
+        let original_record = entry.producer_record.clone();
+        let original = entry_action_key(&entry);
+        let mut producer = ProducerRecord::decode(&entry.producer_record).unwrap();
+
+        let mut replay = producer.plan.facts().clone();
+        replay.insert("output.out".to_string(), "sha256-different".to_string());
+        producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(replay).unwrap();
+        entry.producer_record = producer.encode();
+        assert_eq!(entry_action_key(&entry), original);
+
+        let mut producer = ProducerRecord::decode(&entry.producer_record).unwrap();
+        let mut replay = producer.plan.facts().clone();
+        replay.insert("action.recipe".to_string(), "different-recipe".to_string());
+        producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(replay).unwrap();
+        entry.producer_record = producer.encode();
+        assert_ne!(entry_action_key(&entry), original);
+
+        let mut producer = ProducerRecord::decode(&original_record).unwrap();
+        producer.toolchain_facts.push_str("-different");
+        entry.producer_record = producer.encode();
+        assert_ne!(entry_action_key(&entry), original);
     }
 
     #[test]
@@ -1298,10 +1337,28 @@ mod tests {
         let expected = fs::read_to_string(&meta).unwrap();
         fs::remove_file(&meta).unwrap();
 
+        assert_eq!(recover_closure_journal(&roots).unwrap(), 1);
+        assert!(list_checked(&roots)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.id == ingested.entry.id));
         let graph = closure_graph(&roots).unwrap();
         let record = graph.records.get(&ingested.entry.id).unwrap();
-        assert_eq!(ProducerRecord::decode(&record.producer_record).unwrap().provider, "hangar-ingest");
+        assert_eq!(
+            ProducerRecord::decode(&record.producer_record)
+                .unwrap()
+                .provider,
+            "hangar-ingest"
+        );
         assert_eq!(record.outputs.len(), 2);
+        assert_eq!(fs::read_to_string(&meta).unwrap(), expected);
+
+        fs::remove_file(&meta).unwrap();
+        let changed = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &ingested.entry)
+        })
+        .unwrap();
+        assert!(!changed);
         assert_eq!(fs::read_to_string(meta).unwrap(), expected);
     }
 

@@ -91,9 +91,13 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
         Some("referrers") => cmd_hangar_referrers(theme, parsed),
         Some("recover") => {
             let roots = Store::resolve();
-            match Store::recover_hangar_staging(&roots) {
+            match Store::recover_hangar_staging(&roots).and_then(|staging| {
+                Store::recover_closure_journal(&roots).map(|closure| staging + closure)
+            }) {
                 Ok(n) => {
-                    theme.status(&format!("recovered {n} abandoned stage/partial item(s)"));
+                    theme.status(&format!(
+                        "recovered {n} abandoned or committed hangar item(s)"
+                    ));
                     0
                 }
                 Err(e) => {
