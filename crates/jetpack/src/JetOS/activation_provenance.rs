@@ -1,5 +1,4 @@
 use super::etc_boot_facts::{cachyos_kernel_entry, kernel_package_json};
-use super::generations_activation::current_generation_path;
 use super::options_rendering::{
     clean_value, collect_names, option_value, package_path_or_literal, service_extra,
     shell_single_quote,
@@ -17,13 +16,10 @@ pub(super) fn write_activation_diff(
     system: &SystemPlan,
     realized: &[RealizedPackage],
 ) -> std::io::Result<()> {
-    let previous = current_generation_path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<none>".to_string());
     let enabled_services = system.services.iter().filter(|s| s.enable).count();
     let mut diff = String::new();
     diff.push_str(&format!("host: {}\n", system.name));
-    diff.push_str(&format!("previous: {previous}\n"));
+    diff.push_str("previous: <activation-time>\n");
     diff.push_str(&format!("next: {}\n", published_dir.display()));
     diff.push_str(&format!("packages: {}\n", realized.len()));
     diff.push_str(&format!("services: {enabled_services}\n"));
