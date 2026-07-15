@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 639,
-    "rev": 7656,
+    "rev": 7657,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37144,95 +37144,6 @@
       "ratifiedAt": "2026-07-15"
     },
     {
-      "id": "D-SHAPE-VIEWMUT1",
-      "cardId": "c08wuixb",
-      "group": "syntax",
-      "title": "How do I edit through a borrowed window?",
-      "gist": "Choose the visible operation for a safe exclusive view that can change its source.",
-      "lesson": "A mutable view edits storage owned by another value. While it exists, no overlapping reader or writer may use the same storage. That prevents data races and confusing aliases.\n\nTwo windows may both be mutable when Jet can prove they do not overlap. For unknown positions, a checked split can create two proven-safe windows.\n\nRaw unchecked memory remains inside `#Unsafe`. A mutable view is never a shortcut around safety.",
-      "explainer": "",
-      "story": "Inez decrypts a packet payload in place. The header stays untouched, and Jet must reject a second window when the two ranges might overlap.",
-      "inWild": "packet :: receive_mut()?\npayload :: packet.view_mut(16..)\npayload[0] = 0\n\npacket.read(0)\nerror: packet is exclusively borrowed by payload\n\npacket.push(0)\nerror: resizing would invalidate payload\n\nleft :: packet.view_mut(0..15)\nright :: packet.view_mut(16..31) // proven disjoint\n\na :: packet.view_mut(i..j)\nb :: packet.view_mut(k..m)\nerror: the mutable windows may overlap\nUse packet.split_mut(boundary)? to check and prove the split.\n\n// A smaller mutable view cannot outlive the larger one.\nsub :: payload.view_mut(0..3)",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Use a distinct `.view_mut` operation",
-          "detail": "`source.view_mut(range)` returns `ViewMut<T>`. The operation and result type both say that access is exclusive and writable.",
-          "technical": "Jet checks overlap, owner use, resize, escape, and task transfer. A checked `split_mut` creates dynamic disjoint windows.",
-          "code": "payload: ViewMut<Byte> :: packet.view_mut(16..)\npayload.fill(0)\n\n[left, right] :: packet.split_mut(boundary)?"
-        },
-        {
-          "key": "B",
-          "name": "Rust directly",
-          "detail": "Host language: Rust. `&mut source[range]` creates an exclusive mutable slice. People love compile-time prevention of aliases and data races without runtime ownership overhead.",
-          "technical": "Copy Rust mutable-borrow and checked split rules.",
-          "code": "// Rust\nlet payload: &mut [u8] = &mut packet[16..];\npayload.fill(0);\nlet (left, right) = packet.split_at_mut(16);"
-        },
-        {
-          "key": "C",
-          "name": "Use `.view` for both kinds",
-          "detail": "Read-only and mutable windows use the same method. The expected type or later writes decide which one Jet meant. Source is shorter, but intent becomes contextual.",
-          "technical": "Jet chooses View or ViewMut from the expected type and later operations.",
-          "code": "payload :: packet.view(16..)\npayload.fill(0) // this later line makes the earlier borrow exclusive"
-        },
-        {
-          "key": "D",
-          "name": "Use a scoped edit callback",
-          "detail": "The source lends a mutable window only inside a callback. Escape is impossible, but nested control flow and error handling gain extra indentation.",
-          "technical": "`with_view_mut` creates and destroys the exclusive view around one closure call.",
-          "code": "packet.with_view_mut(16.., fn(payload) {\n    payload.fill(0)\n})?"
-        },
-        {
-          "key": "E",
-          "name": "Do not expose mutable views",
-          "detail": "Only the owner’s own methods may change storage. This is simple and safe, but third-party zero-copy algorithms cannot edit a window directly.",
-          "technical": "View remains read-only. Mutation uses source-specific operations or an owned copy followed by write-back.",
-          "code": "packet.fill(range: 16.., value: 0)\n// no reusable ViewMut type"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "The strongest direct exclusive-view model. Rust is liked because the compiler prevents aliases and data races.",
-          "code": "&mut bytes[range]"
-        },
-        {
-          "lang": "Swift",
-          "note": "Swift also enforces exclusive mutable access. People like safe collection performance without normal pointer use.",
-          "code": "MutableSpan<Element>"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A makes writable borrowing obvious at the exact line it starts. It keeps zero-copy expert power while giving Jet one clear, safe exclusive-view type.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Rust supplies the right safety law, but Jet does not need Rust’s borrow operator to express it."
-          },
-          {
-            "key": "C",
-            "reason": "Using one method hides whether access is shared or exclusive until later context."
-          },
-          {
-            "key": "D",
-            "reason": "Callbacks guarantee scope but make ordinary multi-step algorithms and error flow harder to read."
-          },
-          {
-            "key": "E",
-            "reason": "Owner-only methods are safe but block reusable zero-copy algorithms."
-          }
-        ],
-        "tradeoff": "Jet gains a second view name and type. That small distinction makes read-only sharing and writable exclusivity immediately clear."
-      },
-      "hybrid": null,
-      "checkInstructions": null,
-      "draft": false,
-      "status": "open",
-      "created": "2026-07-14T23:05:59.325Z"
-    },
-    {
       "id": "D-ECO-DECL1",
       "cardId": "c0yrwcvx",
       "group": "syntax",
@@ -39169,6 +39080,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-15T14:41:58.236Z",
+      "by": "claude-main",
+      "action": "decision.delete",
+      "ref": "D-SHAPE-VIEWMUT1",
+      "note": "How do I edit through a borrowed window?"
+    },
     {
       "at": "2026-07-15T14:38:48.492Z",
       "by": "fable-burndown",
@@ -42661,13 +42579,6 @@
       "action": "card.criteria-meet",
       "ref": "c0hsphd7",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-15T01:42:33.158Z",
-      "by": "terra-608-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0hsphd7",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

@@ -11,12 +11,43 @@
 //! Snapshots live in `tests/cli/*.txt`; bless with `UPDATE_EXPECT=1`.
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::time::Duration;
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+}
+
+fn output_with_retry(cmd: &mut Command) -> Output {
+    let mut last = None;
+    for attempt in 0..8 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(20 * attempt));
+        }
+        match cmd.output() {
+            Ok(out) => return out,
+            Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => last = Some(e),
+            Err(e) => panic!("CLI command failed: {e}"),
+        }
+    }
+    panic!("CLI command stayed busy: {}", last.unwrap());
+}
+
+fn spawn_with_retry(cmd: &mut Command) -> Child {
+    let mut last = None;
+    for attempt in 0..8 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(20 * attempt));
+        }
+        match cmd.spawn() {
+            Ok(child) => return child,
+            Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => last = Some(e),
+            Err(e) => panic!("CLI command failed: {e}"),
+        }
+    }
+    panic!("CLI command stayed busy: {}", last.unwrap());
 }
 
 #[test]
@@ -742,7 +773,7 @@ fn budget_unreadable_compiler_identity_rejects_before_artifact() {
     let copied = dir.join("jet-unreadable");
     fs::copy(jet(), &copied).unwrap();
     fs::set_permissions(&copied, fs::Permissions::from_mode(0o111)).unwrap();
-    let out = Command::new(&copied).args(["budget", "check"]).current_dir(&dir).output().unwrap();
+    let out = output_with_retry(Command::new(&copied).args(["budget", "check"]).current_dir(&dir));
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("cannot hash running compiler executable"), "{stderr}");
@@ -763,13 +794,11 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
     fs::copy(jet(), &copied).unwrap();
     let expected = jet::SHA256::sha256_file_hex(&copied).unwrap();
     let children = dirs.iter().map(|dir| {
-        Command::new(&copied)
+        spawn_with_retry(Command::new(&copied)
             .args(["budget", "check", "--json"])
             .current_dir(dir)
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap()
+            .stderr(std::process::Stdio::piped()))
     }).collect::<Vec<_>>();
     fs::remove_file(&copied).unwrap();
     for (child, dir) in children.into_iter().zip(&dirs) {
