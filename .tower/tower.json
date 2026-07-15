@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 636,
-    "rev": 7557,
+    "rev": 7558,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16659,11 +16659,11 @@
         {
           "n": 5,
           "text": "New profile-generation publication code contains no production unwrap/expect sites; zero-ceiling scanner passes 6/6 without scanner weakening.",
-          "status": "met",
+          "status": "verified",
           "metBy": "profile-expect-fix",
-          "verifiedBy": null,
-          "evidence": "Commit e69b738c replaces profile generation metadata formatter expect with io::Result propagation through write_generation_locked; formatter remains canonical byte producer. Nix rustc standalone execution of unchanged tests/ban_jetpack_unwrap_expect.rs passes 6/6, including production-zero, lexical, cfg, seeded-failure, and symlink/cycle guards. No scanner, Cargo, diagnostic, Syntax, dependency, or unsafe change.",
-          "at": "2026-07-15T09:50:23.589Z"
+          "verifiedBy": "profile-expect-reviewer",
+          "evidence": "Independent review of e69b738c6: format_generation_meta now returns io::Result<String>; sole production caller write_generation_locked uses ? and existing io::Result propagation reaches project_install/uninstall_tool error results. Same ProfileDispatch::format_generation_metadata producer preserves canonical bytes; no formatter/scanner/Cargo/diagnostic/Syntax/dependency/unsafe change. cargo check -p jetpack passes; cargo test --test ban_jetpack_unwrap_expect -- --nocapture passes 6/6; git show --check clean.",
+          "at": "2026-07-15T10:19:04.664Z"
         }
       ],
       "refs": [
@@ -38559,6 +38559,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T10:19:04.665Z",
+      "by": "profile-expect-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0zoq183",
+      "note": "#5"
+    },
+    {
       "at": "2026-07-15T09:54:21.374Z",
       "by": "owner",
       "action": "card.update",
@@ -42050,13 +42057,6 @@
       "action": "card.criteria-add",
       "ref": "c0nec3bh",
       "note": "#1 syntax-decisions.md records D-ECO-ENV1=A: Environment is one"
-    },
-    {
-      "at": "2026-07-15T00:52:34.740Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0nec3bh",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
