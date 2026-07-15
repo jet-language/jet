@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 625,
-    "rev": 7322,
+    "rev": 7325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8936,8 +8936,12 @@
         "c0c7d9qt"
       ],
       "workOrder": 78,
-      "assignee": "terra-420-producer",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-15",
+          "text": "[handoff] Criterion 1 met, not self-verified. Commits 3361cb43, 5267856bb, dde5be4b2, 8352768f1, 7c6b74d2. Independent reviewer should audit WAL commit-before-projection/recovery, producer strictness and legacy fail-closed behavior, then rerun exact criterion tests. Criteria 3-9 remain open; criterion 2 already independently verified. Parent runs full suite."
+        },
         {
           "at": "2026-07-15",
           "by": "terra-420-producer",
@@ -9019,11 +9023,11 @@
         {
           "n": 1,
           "text": "Every production producer registers canonical object descriptors, named outputs, references, action/output relations, and package records through one crash-recoverable transaction; legacy migration is idempotent.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-420-producer",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T02:07:13.010Z"
+          "evidence": "Canonical producer path landed in 3361cb43, 5267856bb, 8352768f1, and 7c6b74d2: deterministic BuildPlanReplay and versioned checksummed ProducerRecord; core, adapter, CRAN, LuaRocks, Nix, and ingest persist immutable source/toolchain/policy/action facts; Nix requires exact drvPath and records every named output. Closure WAL commits object descriptors, outputs, refs, action relation, producer record, and exact package metadata before projection, then recovers deleted projection. Legacy migration idempotently synthesizes only complete immutable non-Nix facts and rejects incomplete/Nix-without-derivation state. Production record bypasses removed. Targeted hostile/truncation, crash recovery, corrupt journal, conflict, concurrent, retry, legacy, Nix, core, and fresh-binary doctor proofs green.",
+          "at": "2026-07-15T04:40:52.324Z"
         },
         {
           "n": 2,
@@ -9099,8 +9103,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-15T04:01:18.740Z"
+      "refs": []
     },
     {
       "id": "c041flkr",
@@ -37287,6 +37290,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T04:40:52.324Z",
+      "by": "terra-420-producer",
+      "action": "card.criteria-meet",
+      "ref": "c01fj815",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T04:39:42.946Z",
+      "by": "agent",
+      "action": "card.release",
+      "ref": "c01fj815",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T04:39:02.739Z",
+      "by": "terra-420-producer",
+      "action": "card.claim",
+      "ref": "c01fj815",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T04:33:16.647Z",
       "by": "root-624-reviewer",
       "action": "card.update",
@@ -40764,27 +40788,6 @@
       "action": "card.update",
       "ref": "c0bo7bp5",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-14T23:22:56.367Z",
-      "by": "terra-541-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0bo7bp5",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-14T23:22:56.151Z",
-      "by": "terra-541-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0bo7bp5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-14T23:22:55.939Z",
-      "by": "terra-541-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0bo7bp5",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
