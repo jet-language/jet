@@ -62,8 +62,7 @@ mod tests {
 
     fn verified(roots: &Roots, reference: &str, expectation: &CacheExpectation) -> bool {
         find_verified_by_reference(roots, reference, expectation)
-            .unwrap()
-            .is_some()
+            .is_ok_and(|hit| hit.is_some())
     }
 
     #[test]
@@ -613,7 +612,7 @@ mod tests {
 
         quarantine_invalid_entry(&roots, &entry, &expectation).unwrap();
         assert_eq!(fs::read_to_string(survivor.join("keep")).unwrap(), "survivor");
-        assert!(!expected.exists());
+        assert_eq!(fs::read_to_string(expected.join("bad")).unwrap(), "candidate");
     }
 
     #[test]
@@ -622,6 +621,11 @@ mod tests {
         let ingested = ingest_fixture(&roots, "sealed", &[("out", "tampered")], Vec::new());
         let entry = ingested.entry;
         let out = PathBuf::from(&entry.out);
+        let payload = out.join("payload");
+        let mut permissions = fs::metadata(&payload).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(&payload, permissions).unwrap();
+        fs::write(&payload, "corrupt").unwrap();
 
         quarantine_invalid_entry(&roots, &entry, &test_expectation(&out)).unwrap();
 
@@ -635,6 +639,153 @@ mod tests {
                 entry.envelope.output_hash
             ))));
         ingest_fixture(&roots, "sealed", &[("out", "tampered")], Vec::new());
+    }
+
+    #[test]
+    fn identity_only_quarantine_preserves_shared_cas_object() {
+        let (roots, _g) = temp_roots();
+        let stale = ingest_fixture(&roots, "shared-stale", &[("out", "same")], Vec::new());
+        let survivor = ingest_fixture(&roots, "shared-survivor", &[("out", "same")], Vec::new());
+        assert_eq!(stale.entry.out, survivor.entry.out);
+
+        let mut mismatch = test_expectation(Path::new(&stale.entry.out));
+        mismatch.identity.source_fingerprint = "wrong-source".into();
+        quarantine_invalid_entry(&roots, &stale.entry, &mismatch).unwrap();
+
+        assert!(Path::new(&survivor.entry.out).exists());
+        assert!(find_by_reference(&roots, &stale.entry.reference).is_none());
+        find_verified_by_reference(
+            &roots,
+            &survivor.entry.reference,
+            &test_expectation(Path::new(&survivor.entry.out)),
+        )
+        .unwrap()
+        .unwrap()
+        .lease
+        .validate()
+        .unwrap();
+    }
+
+    #[test]
+    fn quarantine_skips_concurrently_refreshed_record() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("refreshed-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "trusted").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "mine:refreshed",
+            "core-source",
+        );
+        let stale = record_verified(
+            &roots,
+            "refreshed",
+            "1.0",
+            "mine:refreshed",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        let mut fresh_identity = test_identity();
+        fresh_identity.source_fingerprint = "source-v2".into();
+        let fresh = record_verified(
+            &roots,
+            "refreshed",
+            "1.0",
+            "mine:refreshed",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &fresh_identity,
+        )
+        .unwrap();
+        assert_eq!(stale.id, fresh.id);
+        assert_ne!(entry_action_key(&stale), entry_action_key(&fresh));
+
+        quarantine_invalid_entry(&roots, &stale, &test_expectation(&out)).unwrap();
+
+        let current = find_by_reference(&roots, "mine:refreshed").unwrap();
+        assert_eq!(current.cache_identity, fresh_identity);
+        let expectation = CacheExpectation {
+            identity: fresh_identity,
+            owned_output: Some(out),
+            allow_unsigned_local: true,
+        };
+        assert!(verified(&roots, "mine:refreshed", &expectation));
+    }
+
+    #[test]
+    fn quarantine_skips_same_action_record_repaired_before_lock() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("repaired-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "trusted").unwrap();
+        let mut stale_envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "mine:repaired",
+            "core-source",
+        );
+        stale_envelope.provenance.clear();
+        let stale = record_verified(
+            &roots,
+            "repaired",
+            "1.0",
+            "mine:repaired",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &stale_envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        let mut repaired_envelope = stale_envelope;
+        repaired_envelope.provenance = "repaired provenance".into();
+        let repaired = record_verified(
+            &roots,
+            "repaired",
+            "1.0",
+            "mine:repaired",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &repaired_envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        assert_eq!(stale.envelope.output_hash, repaired.envelope.output_hash);
+        assert_eq!(entry_action_key(&stale), entry_action_key(&repaired));
+
+        quarantine_invalid_entry(&roots, &stale, &test_expectation(&out)).unwrap();
+
+        let current = find_by_reference(&roots, "mine:repaired").unwrap();
+        assert_eq!(current.envelope.provenance, "repaired provenance");
+        assert!(verified(&roots, "mine:repaired", &test_expectation(&out)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quarantine_failure_restores_permissions_without_tombstone() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (roots, _g) = temp_roots();
+        let ingested = ingest_fixture(&roots, "restore", &[("out", "same")], Vec::new());
+        let hangar = roots.hangar_dir();
+        fs::write(hangar.join("quarantine"), "blocks directory creation").unwrap();
+        fs::set_permissions(&hangar, fs::Permissions::from_mode(0o555)).unwrap();
+        let mut mismatch = test_expectation(Path::new(&ingested.entry.out));
+        mismatch.identity.source_fingerprint = "wrong-source".into();
+
+        let error = quarantine_invalid_entry(&roots, &ingested.entry, &mismatch).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::metadata(&hangar).unwrap().permissions().mode() & 0o777, 0o555);
+        assert!(hangar.join(&ingested.entry.id).exists());
+
+        fs::set_permissions(&hangar, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(find_by_reference(&roots, &ingested.entry.reference).is_some());
     }
 
     #[test]

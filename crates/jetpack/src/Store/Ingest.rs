@@ -1,11 +1,14 @@
 use super::*;
 
 pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result<String, String> {
-    if Path::new(&entry.out).starts_with(roots.hangar_dir()) {
+    let hangar = roots.hangar_dir();
+    let canonical_hangar = fs::canonicalize(&hangar).unwrap_or_else(|_| hangar.clone());
+    let out = Path::new(&entry.out);
+    if out.starts_with(&hangar) || out.starts_with(&canonical_hangar) {
         // Hangar-owned objects may share payload inodes with its cas pool.
         super::super::Envelope::try_output_hash_of_in_hangar(
             &entry.out,
-            &roots.hangar_dir(),
+            &canonical_hangar,
             !entry.platform_artifact_kind.is_empty(),
         )
     } else {
@@ -13,30 +16,169 @@ pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result
     }
 }
 
-pub(super) fn make_move_path_writable(path: &Path, root: &Path) -> std::io::Result<()> {
-    if !path.starts_with(root) {
-        return Err(std::io::Error::other("quarantine path escapes Hangar root"));
-    }
-    let mut current = Some(path);
-    while let Some(directory) = current {
-        let metadata = fs::symlink_metadata(directory)?;
-        if metadata.is_dir() {
-            let mut permissions = metadata.permissions();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt as _;
-                permissions.set_mode(permissions.mode() | 0o200);
-            }
-            #[cfg(not(unix))]
-            permissions.set_readonly(false);
-            fs::set_permissions(directory, permissions)?;
+#[derive(Default)]
+pub(super) struct MovePathPermissions {
+    original: Vec<(PathBuf, fs::Permissions)>,
+}
+
+impl MovePathPermissions {
+    pub(super) fn make_writable(&mut self, path: &Path, root: &Path) -> std::io::Result<()> {
+        if !path.starts_with(root) {
+            return Err(std::io::Error::other("quarantine path escapes Hangar root"));
         }
-        if directory == root {
+        let mut current = Some(path);
+        while let Some(directory) = current {
+            let metadata = fs::symlink_metadata(directory)?;
+            if metadata.is_dir()
+                && !self.original.iter().any(|(saved, _)| saved == directory)
+            {
+                let original = metadata.permissions();
+                let mut writable = original.clone();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt as _;
+                    writable.set_mode(writable.mode() | 0o200);
+                }
+                #[cfg(not(unix))]
+                writable.set_readonly(false);
+                fs::set_permissions(directory, writable)?;
+                self.original.push((directory.to_path_buf(), original));
+            }
+            if directory == root {
+                return Ok(());
+            }
+            current = directory.parent();
+        }
+        Err(std::io::Error::other("quarantine path has no Hangar parent"))
+    }
+
+    pub(super) fn renamed(&mut self, from: &Path, to: &Path) {
+        for (path, _) in &mut self.original {
+            if let Ok(suffix) = path.strip_prefix(from) {
+                *path = to.join(suffix);
+            }
+        }
+    }
+
+    pub(super) fn restore(&mut self) -> std::io::Result<()> {
+        let mut first_error = None;
+        for (path, permissions) in self.original.drain(..).rev() {
+            if fs::symlink_metadata(&path).is_ok() {
+                if let Err(error) = fs::set_permissions(path, permissions) {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+}
+
+impl Drop for MovePathPermissions {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
+
+/// Remove an invalid local cache candidate so provider realization cannot
+/// mistake the same tampered directory for a fresh hit. Never removes external
+/// outputs such as `/nix/store`; their provider must realize them again.
+pub fn quarantine_invalid_entry(
+    roots: &Roots,
+    entry: &StoreEntry,
+    expectation: &CacheExpectation,
+) -> std::io::Result<()> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let expected_id = entry_id(
+            &entry.name,
+            &entry.version,
+            &entry.reference,
+            &entry.out,
+        );
+        if entry.id != expected_id || Path::new(&entry.id).components().count() != 1 {
+            return Err(std::io::Error::other("invalid cache record identity"));
+        }
+        Closure::recover_closure_journal_unlocked(roots)?;
+        let Some(current) = list_unlocked(roots)
+            .into_iter()
+            .find(|candidate| candidate.id == entry.id)
+        else {
+            return Ok(());
+        };
+        if current.envelope.output_hash != entry.envelope.output_hash
+            || entry_action_key(&current) != entry_action_key(entry)
+        {
             return Ok(());
         }
-        current = directory.parent();
-    }
-    Err(std::io::Error::other("quarantine path has no Hangar parent"))
+        let current_expected_id = entry_id(
+            &current.name,
+            &current.version,
+            &current.reference,
+            &current.out,
+        );
+        if current.id != current_expected_id {
+            return Err(std::io::Error::other("invalid cache record identity"));
+        }
+        let proof = verify_cache_entry(roots, &current, &current.reference, expectation);
+        if proof.trusted() {
+            return Ok(());
+        }
+        let quarantine_output = proof.output_exists && !proof.output_digest;
+        let hangar = roots.hangar_dir();
+        let mut permissions = MovePathPermissions::default();
+        let operation = (|| {
+            permissions.make_writable(&hangar, &hangar)?;
+            let quarantine = hangar.join("quarantine");
+            fs::create_dir_all(&quarantine)?;
+            let stamp = now_secs();
+            let record = hangar.join(&current.id);
+            if fs::symlink_metadata(&record).is_ok() {
+                permissions.make_writable(&record, &hangar)?;
+                let destination = quarantine.join(format!("record-{}-{stamp}", current.id));
+                fs::rename(&record, &destination)?;
+                permissions.renamed(&record, &destination);
+            }
+            let canonical_output = hangar
+                .join(OBJECTS_DIR)
+                .join(&current.envelope.output_hash);
+            let owned_output = (Path::new(&current.out) == canonical_output)
+                .then(|| PathBuf::from(&current.out))
+                .or_else(|| expectation.owned_output.clone());
+            if quarantine_output {
+                if let Some(owned) = &owned_output {
+                    if fs::symlink_metadata(owned).is_ok() {
+                        let canonical_hangar = fs::canonicalize(&hangar)?;
+                        let canonical_owned = fs::canonicalize(owned)?;
+                        if !owned.starts_with(&hangar)
+                            || !canonical_owned.starts_with(&canonical_hangar)
+                        {
+                            return Err(std::io::Error::other(
+                                "derived cache output escapes canonical Hangar root",
+                            ));
+                        }
+                        let name = owned
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .ok_or_else(|| std::io::Error::other("invalid owned output name"))?;
+                        permissions.make_writable(owned, &hangar)?;
+                        let destination = quarantine.join(format!("output-{name}-{stamp}"));
+                        fs::rename(owned, &destination)?;
+                        permissions.renamed(owned, &destination);
+                    }
+                }
+            }
+            Closure::tombstone_closure_record_unlocked(roots, &current.id)?;
+            Ok(())
+        })();
+        let restored = permissions.restore();
+        match (operation, restored) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(error), Err(restore)) => Err(std::io::Error::other(format!(
+                "{error}; restoring Hangar permissions failed: {restore}"
+            ))),
+        }
+    })
 }
 
 pub(crate) fn now_secs() -> u64 {

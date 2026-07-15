@@ -1112,7 +1112,7 @@ pub fn find_verified_by_reference(
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
     let _global = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
-    Closure::recover_closure_journal_unlocked(roots)?;
+    Closure::lifecycle_closure_graph_unlocked(roots)?;
     let entry = list_unlocked(roots)
         .into_iter()
         .filter(|entry| entry.reference == reference)
@@ -1465,7 +1465,7 @@ pub fn realize_verified(
 ) -> Result<VerifiedRealization, RealizeError> {
     // WAL is authority. Recover package projections and fail closed on
     // incomplete legacy producer records before any cache lookup can bypass it.
-    Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
+    closure_graph(roots).map_err(RealizeError::Store)?;
     let (reference, expectation) = match request {
         RealizeRequest::Package { spec, table } => (
             spec.raw.clone(),
@@ -1660,60 +1660,6 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
             return false;
         };
         canonical_member != canonical_out && canonical_member.starts_with(&canonical_out)
-    })
-}
-
-/// Remove an invalid local cache candidate so provider realization cannot
-/// mistake the same tampered directory for a fresh hit. Never removes external
-/// outputs such as `/nix/store`; their provider must realize them again.
-pub fn quarantine_invalid_entry(
-    roots: &Roots,
-    entry: &StoreEntry,
-    expectation: &CacheExpectation,
-) -> std::io::Result<()> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let expected_id = entry_id(
-            &entry.name,
-            &entry.version,
-            &entry.reference,
-            &entry.out,
-        );
-        if entry.id != expected_id || Path::new(&entry.id).components().count() != 1 {
-            return Err(std::io::Error::other("invalid cache record identity"));
-        }
-        let hangar = roots.hangar_dir();
-        Ingest::make_move_path_writable(&hangar, &hangar)?;
-        let quarantine = hangar.join("quarantine");
-        fs::create_dir_all(&quarantine)?;
-        let stamp = now_secs();
-        Closure::remove_closure_record_unlocked(roots, &entry.id, false)?;
-        let record = hangar.join(&entry.id);
-        if fs::symlink_metadata(&record).is_ok() {
-            Ingest::make_move_path_writable(&record, &hangar)?;
-            fs::rename(&record, quarantine.join(format!("record-{}-{stamp}", entry.id)))?;
-        }
-        let canonical_output = hangar.join(OBJECTS_DIR).join(&entry.envelope.output_hash);
-        let owned_output = (Path::new(&entry.out) == canonical_output)
-            .then(|| PathBuf::from(&entry.out))
-            .or_else(|| expectation.owned_output.clone());
-        if let Some(owned) = &owned_output {
-            if fs::symlink_metadata(owned).is_ok() {
-                let canonical_hangar = fs::canonicalize(&hangar)?;
-                let canonical_owned = fs::canonicalize(owned)?;
-                if !owned.starts_with(&hangar) || !canonical_owned.starts_with(&canonical_hangar) {
-                    return Err(std::io::Error::other(
-                        "derived cache output escapes canonical Hangar root",
-                    ));
-                }
-                let name = owned
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .ok_or_else(|| std::io::Error::other("invalid owned output name"))?;
-                Ingest::make_move_path_writable(owned, &hangar)?;
-                fs::rename(owned, quarantine.join(format!("output-{name}-{stamp}")))?;
-            }
-        }
-        Ok(())
     })
 }
 
