@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 632,
-    "rev": 7464,
+    "rev": 7469,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18856,29 +18856,29 @@
         {
           "n": 1,
           "text": "The exact owner-teardown regression passes repeatedly and always reports queued -> terminal:Cancelled with teardown=true.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-630-builder",
-          "verifiedBy": null,
-          "evidence": "Commit 26e20cc7; exact regression passed 10 consecutive bounded runs, each reporting teardown=true and queued -> terminal:Cancelled.",
-          "at": "2026-07-15T07:29:32.188Z"
+          "verifiedBy": "root",
+          "evidence": "Independent parent run: exact regression passed five consecutive executions under timeout 30s each; reaching the full target proves all five exited zero with teardown=true and queued -> terminal:Cancelled assertions.",
+          "at": "2026-07-15T07:38:34.721Z"
         },
         {
           "n": 2,
           "text": "Owner teardown deterministically cancels queued scoped events exactly once without weakening running, pending, deadline, or delivery semantics.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-630-builder",
-          "verifiedBy": null,
-          "evidence": "Fixture now waits for a running handler barrier, keeps its release channel open through a sender captured by that handler, then enqueues the returned task before lexical event/scope teardown. D-EVENT2 owner cancellation wins deterministically for the queued entry; existing pending/running/deadline assertions remain unchanged and green.",
-          "at": "2026-07-15T07:29:32.289Z"
+          "verifiedBy": "root",
+          "evidence": "Reviewed 26e20cc7: fixture waits for first handler Running, handler captures both receiver and sender so the channel remains blocked, second task is Queued, then lexical event/scope Drop exercises D-EVENT2 cancellation. No sleeps or runtime changes; pending/running/deadline assertions unchanged.",
+          "at": "2026-07-15T07:38:34.828Z"
         },
         {
           "n": 3,
           "text": "Full corelib target passes under bounded execution, including event scope and scheduler tests.",
-          "status": "met",
+          "status": "verified",
           "metBy": "root-630-builder",
-          "verifiedBy": null,
-          "evidence": "Bounded cargo test --test corelib passed: 137 passed, 0 failed, 2 ignored in 43.46s.",
-          "at": "2026-07-15T07:29:32.389Z"
+          "verifiedBy": "root",
+          "evidence": "Independent bounded full corelib run passed 137/137 with 2 ignored in 36.38s, including event scope, scheduler, deadline, and owner-drop coverage.",
+          "at": "2026-07-15T07:38:34.930Z"
         },
         {
           "n": 4,
@@ -38114,6 +38114,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T07:38:35.030Z",
+      "by": "root-630-reviewer",
+      "action": "card.release",
+      "ref": "c0ajdb8z",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-15T07:38:34.930Z",
+      "by": "root",
+      "action": "card.criteria-verify",
+      "ref": "c0ajdb8z",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-15T07:38:34.828Z",
+      "by": "root",
+      "action": "card.criteria-verify",
+      "ref": "c0ajdb8z",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-15T07:38:34.721Z",
+      "by": "root",
+      "action": "card.criteria-verify",
+      "ref": "c0ajdb8z",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-15T07:34:49.223Z",
+      "by": "root-630-reviewer",
+      "action": "card.claim",
+      "ref": "c0ajdb8z",
+      "note": ""
+    },
+    {
       "at": "2026-07-15T07:33:00.717Z",
       "by": "root-631-reviewer",
       "action": "card.criteria-verify",
@@ -41577,41 +41612,6 @@
       "action": "card.criteria-add",
       "ref": "c0vvxein",
       "note": "#3 #560 exclusively owns parser, sema, TIR, formatter, hover, i"
-    },
-    {
-      "at": "2026-07-15T00:15:03.354Z",
-      "by": "terra-539-builder",
-      "action": "card.criteria-add",
-      "ref": "c0vvxein",
-      "note": "#2 Canon and proposal show equivalent inferred and explicit rol"
-    },
-    {
-      "at": "2026-07-15T00:15:03.143Z",
-      "by": "terra-539-builder",
-      "action": "card.criteria-add",
-      "ref": "c0vvxein",
-      "note": "#1 Canon fixes each package role as a schema field with a fixed"
-    },
-    {
-      "at": "2026-07-15T00:14:31.755Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0vvxein",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T00:14:31.639Z",
-      "by": "terra-539-builder",
-      "action": "card.claim",
-      "ref": "c0vvxein",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T00:13:34.022Z",
-      "by": "luna-540-reviewer",
-      "action": "card.update",
-      "ref": "c0xqkis5",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
