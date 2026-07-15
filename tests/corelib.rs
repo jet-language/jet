@@ -7443,6 +7443,105 @@ fn run() {
 }
 
 #[test]
+fn async_event_terminal_transition_rejects_terminal_expected_phase() {
+    let source = include_str!(
+        "../crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs"
+    );
+    let complete_entry = source
+        .split_once("fn complete_entry(")
+        .expect("async event terminal transition")
+        .1
+        .split_once("fn complete_report(")
+        .expect("async event report transition")
+        .0;
+    let terminal_guard = complete_entry
+        .find("if expected == JET_EVENT_TERMINAL")
+        .expect("terminal phase must be absorbing");
+    let phase_cas = complete_entry
+        .find("entry.phase.compare_exchange(")
+        .expect("terminal transition CAS");
+    assert!(
+        terminal_guard < phase_cas,
+        "TERMINAL -> TERMINAL must be rejected before the phase CAS"
+    );
+}
+
+#[test]
+fn async_event_cancel_and_close_winners_remain_immutable_after_task_drain() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_absorbing_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "async_event_absorbing",
+        r#"
+use core.event as event
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    (cancel_gate_started_tx, cancel_gate_started_rx) :: tasks.channel<Int>()
+    (cancel_gate_release_tx, cancel_gate_release_rx) :: tasks.channel<Int>()
+    cancel_gate :: tasks.spawn(take(cancel_gate_started_tx, cancel_gate_release_rx) () => {
+        cancel_gate_started_tx.send(1)
+        released :: cancel_gate_release_rx.receive() ?? panic("cancel gate")
+    })
+    cancel_gate_started :: cancel_gate_started_rx.receive() ?? panic("cancel gate start")
+
+    cancel_scope :: event.scope()
+    cancel_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    #Context(deadline: time.now() + 100000) {
+        cancel_queued :: cancel_event.emit_async(1)
+        cancel_pending :: cancel_event.emit_async(2)
+        cancel_event.on(cancel_scope, (n: Int) => {})
+        cancel_scope.cancel()
+        cancel_gate_release_tx.send(1)
+        queued_report :: cancel_queued.join()
+        pending_report :: cancel_pending.join()
+        print("cancel queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
+        print("cancel pending={pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
+    }
+    print("cancel counts={cancel_event.queued_count()},{cancel_event.running_count()},{cancel_event.blocked_count()}")
+
+    (close_gate_started_tx, close_gate_started_rx) :: tasks.channel<Int>()
+    (close_gate_release_tx, close_gate_release_rx) :: tasks.channel<Int>()
+    close_gate :: tasks.spawn(take(close_gate_started_tx, close_gate_release_rx) () => {
+        close_gate_started_tx.send(1)
+        released :: close_gate_release_rx.receive() ?? panic("close gate")
+    })
+    close_gate_started :: close_gate_started_rx.receive() ?? panic("close gate start")
+
+    close_scope :: event.scope()
+    close_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    close_event.on(close_scope, (n: Int) => {})
+    #Context(deadline: time.now() + 100000) {
+        close_queued :: close_event.emit_async(3)
+        close_pending :: close_event.emit_async(4)
+        close_event.close()
+        close_scope.cancel()
+        close_gate_release_tx.send(1)
+        queued_report :: close_queued.join()
+        pending_report :: close_pending.join()
+        print("close queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
+        print("close pending={pending_report.state() == .Closed} trace={pending_report.trace().summary()}")
+    }
+    print("close counts={close_event.queued_count()},{close_event.running_count()},{close_event.blocked_count()}")
+}
+"#,
+        &[("JET_SCHEDULER_THREADS", "1")],
+        None,
+    );
+    assert_eq!(code, 0, "async event absorbing terminal failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "cancel queued=true trace=queued -> terminal:Cancelled\ncancel pending=true trace=pending -> terminal:Cancelled\ncancel counts=0,0,0\nclose queued=true trace=queued -> terminal:Cancelled\nclose pending=true trace=pending -> terminal:Closed\nclose counts=0,0,0\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn event_sync_dispatch_handles_mutation_reentrancy_and_owner_drop() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

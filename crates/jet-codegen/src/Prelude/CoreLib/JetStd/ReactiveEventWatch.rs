@@ -787,6 +787,13 @@
             state: JetDispatchState,
         ) -> bool {
             let mut terminal = entry.terminal.lock().unwrap();
+            // Terminal is absorbing. Catch paths load the current phase after
+            // an unwind, so a concurrent cancel/close winner can already have
+            // published its report before they acquire this lock. Never allow
+            // TERMINAL -> TERMINAL to succeed and replace that winner.
+            if expected == JET_EVENT_TERMINAL {
+                return false;
+            }
             if entry.phase.compare_exchange(
                 expected,
                 JET_EVENT_TERMINAL,
