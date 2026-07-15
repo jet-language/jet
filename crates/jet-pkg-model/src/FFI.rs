@@ -914,6 +914,10 @@ fn build_bridge_full(
             HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
             HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
         );
+        deps.insert(
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
+        );
     }
     if needs_net_tls {
         deps.insert(
