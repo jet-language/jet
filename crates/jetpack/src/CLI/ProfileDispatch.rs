@@ -1084,19 +1084,19 @@ mod tests {
         for invalid in ["", "../x", "a/b", "a\\b", "CON", "com1.exe", "nul.txt", "jetpack"] {
             assert!(validate_bin_name(invalid).is_err(), "accepted {invalid:?}");
         }
-        let mut metadata = metadata();
-        metadata.tools.push(GenerationTool {
+        let mut case_collision = metadata();
+        case_collision.tools.push(GenerationTool {
             name: "other".into(),
             version: "1".into(),
             source: "path".into(),
             reference: "path:other".into(),
             output_hash: digest('c'),
-            store_root: metadata.tools[0].store_root.clone(),
+            store_root: case_collision.tools[0].store_root.clone(),
             bins: vec!["ECHO-ARGS".into()],
             members: vec!["other".into()],
             projection_hashes: vec![digest('d')],
         });
-        assert!(format_generation_metadata(&metadata).is_err());
+        assert!(format_generation_metadata(&case_collision).is_err());
 
         let mut physical_collision = metadata();
         physical_collision.tools[0].bins = vec!["foo".into()];
