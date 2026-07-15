@@ -6,8 +6,8 @@
 
 | Term | Meaning |
 |---|---|
-| Package | The complete checked meaning of one endeavor: packages, environments, checks, images, systems, fleets, policy, and outputs. It is not a repository or directory. The name is proposed by D-ECO-ROOTNAME1. |
-| Shard | One typed contribution to a Package. A Shard may live in any discovered `.jet` file. The name is proposed by D-ECO-SLICENAME1. |
+| Package | The complete checked meaning of one endeavor: packages, environments, checks, images, systems, fleets, policy, and outputs. A package may contain packages; the outermost package is the whole. It is not a repository or directory. |
+| Config | One typed slice of a package's settings that merges into the package; holds no code, produces no outputs. |
 | Output | A named, typed result users can build, run, enter, publish, activate, or deploy. Outputs are thin views over the package graph. |
 | Graph | The resolved facts and relationships shared by the compiler, package manager, environment manager, JetOS, editors, and audit tools. |
 | Lock | `.jet/lock`, the source-adjacent index of exact graph identity, selection reasons, policy, platform facts, and complete merge provenance. |
@@ -24,7 +24,7 @@
 
 ## The one idea
 
-One typed value spans everything a project is. Everything users make is an Output of that value. Files organize source; declarations carry meaning. Growth moves the same values into more files without changing their identity or wiring.
+One typed value spans the whole endeavor. Everything users make is an Output of that value. Files organize source; declarations carry meaning. Growth moves the same values into more files without changing their identity or wiring.
 
 The same graph answers every rung:
 
@@ -56,27 +56,27 @@ This proposal completes, and does not reopen, these decisions:
 | D-JPK-PROFILE1=D | Package profiles and user profiles share one generation engine. |
 | D-SHAPE-MERGEPROVENANCE1=A | `.jet/lock` remains the sole primary merge-history authority. |
 | D-JPK-DISPATCH1=B | Users type `jet`; `jetpack` and `jetos` remain versioned engine processes behind it. |
-| U7 / R9 | A single `.jet` file remains a complete program without project state. |
+| U7 / R9 | A single `.jet` file remains a complete program without package state. |
 | U28 / U29 | Per-user operation needs no root or resident daemon; a satisfied lock realizes offline. |
 
 ## Final shape
 
-### Package and Shard
+### Package and Config
 
-`Package` is the semantic whole, independent of checkout boundaries. A repository may contain several Packages. One Package may import signed Shards from several repositories. A source file may hold one or many Shards. File order and path never decide meaning.
+`Package` is recursive and independent of checkout boundaries. A package may contain packages; the outermost package is the semantic whole. A repository may contain several outer packages, and one package may import signed Configs from several repositories. A source file may hold one or many Configs. File order and path never decide meaning.
 
 ```jet
 package: Package :: Package.{                 // NEW: D-ECO-ROOTNAME1
-    shards: [app, operations]                  // NEW: D-ECO-SLICENAME1
+    configs: [app, operations]                 // NEW: D-ECO-SLICENAME1
 }
 
-app: Shard :: Shard.{                          // NEW: D-ECO-SLICENAME1
+app: Config :: Config.{                        // NEW: D-ECO-SLICENAME1
     packages: .{
         api: Package.{ source: "Source/api" }
     }
 }
 
-operations: Shard :: Shard.{                   // NEW: D-ECO-SLICENAME1
+operations: Config :: Config.{                 // NEW: D-ECO-SLICENAME1
     services: .{
         api: Service.{ enable: true, from: app.packages.api, ports: [8080] }
     }
@@ -103,9 +103,9 @@ Both contributions agree. No value was discarded.
 
 ### One reserved file
 
-`package.jet` is the only reserved ecosystem source filename (`NEW: D-ECO-FILEROOT1`). It replaces `pkg.jet`, `env.jet`, `workspace.jet`, and JetOS `config.jet`. A script needs no reserved file. At first, all Package facts may remain inline. Any Shard may later move to any discovered `.jet` file.
+`package.jet` is the only reserved ecosystem source filename (`NEW: D-ECO-FILEROOT1`). It replaces `pkg.jet`, `env.jet`, `workspace.jet`, and JetOS `config.jet`. A script needs no reserved file. At first, all Package facts may remain inline. Any Config may later move to any discovered `.jet` file.
 
-Discovery starts at the nearest `package.jet`, follows explicit imports and member sources, and discovers `.jet` Shards under declared roots. A leading `_` disables a discovered file without changing its contents (`NEW: D-ECO-FILEROOT1`). Generated state remains under `.jet/`.
+Discovery starts at the nearest `package.jet`, follows explicit imports and member sources, and discovers `.jet` Configs under declared roots. A leading `_` disables a discovered file without changing its contents (`NEW: D-ECO-FILEROOT1`). Generated state remains under `.jet/`.
 
 For one epoch, old role files are read together and produce one proposed teaching diagnostic. `L1320` is minted only if D-ECO-FILEROOT1 is ratified:
 
@@ -178,7 +178,7 @@ Plural intents run every matching Output: `jet test` runs every Check. Singular 
 
 ```text
 .jet/lock
-  project graph sha256:20f1…
+  package graph sha256:20f1…
   exact package and toolchain selections
   policy and platform matrix
   successful merge edges with source spans
@@ -216,11 +216,17 @@ Plan external root
     expires: 12 weeks
     etag: 1.1
 Created external root `backup-sdk` at etag 1.1.
+
+$ jet hangar list-external-roots
+backup-sdk  nixpkgs:ripgrep#2.0.17  expires in 12 weeks  etag 1.1
+
+$ jet hangar unregister-external-root backup-sdk --etag 1.1 --yes
+Removed external root `backup-sdk`.
 ```
 
 ### JetOS is the same graph
 
-A System is an Output closing over packages, services, users, files, typed options, boot facts, images, variants, and proofs. A Fleet is an Output mapping host names to Systems plus shared Shards, host deltas, targets, and rollout policy (`NEW: D-ECO-JETOS2`). JetOS consumes Jetpack's resolver, native Nix compatibility, sandbox, Hangar, cache, toolchain, closure, and receipt substrate. It owns system assembly and activation; it does not fork a provider or build engine.
+A System is an Output closing over packages, services, users, files, typed options, boot facts, images, variants, and proofs. A Fleet is an Output mapping host names to Systems plus shared Configs, host deltas, targets, and rollout policy (`NEW: D-ECO-JETOS2`). JetOS consumes Jetpack's resolver, native Nix compatibility, sandbox, Hangar, cache, toolchain, closure, and receipt substrate. It owns system assembly and activation; it does not fork a provider or build engine.
 
 The lifecycle is the same at every scale:
 
@@ -256,7 +262,7 @@ Each rung shows the complete authored files for that rung. Generated `.jet/lock`
 
 ### S0 — one script
 
-Beginner path: write one file and run it. No manifest, lock, daemon, project directory, or root access.
+Beginner path: write one file and run it. No manifest, lock, daemon, package directory, or root access.
 
 `hello.jet`:
 
@@ -497,7 +503,7 @@ Audit: sandbox passed; secret plaintext absent from lock and Hangar; provenance 
 $ jet explain environments.dev.services.postgres.ports
 environments.dev.services.postgres.ports = [5432]
   package.jet:16 ordinary [5432]
-Source policy: project
+Source policy: package
 ```
 
 Representative equivalent split uses three configuration files before application code:
@@ -517,7 +523,7 @@ The comparison counts the shown responsibilities, not comments, lockfiles, or ap
 $ jet split env --check
 Would extract: package.environments
 Would create: package/env.jet::development
-Would add: Shard `development`                 # NEW: D-ECO-SLICENAME1
+Would add: Config `development`                # NEW: D-ECO-SLICENAME1
 package graph before: sha256:39df…
 package graph after:  sha256:39df…
 No files changed.
@@ -533,11 +539,11 @@ Resulting `package.jet`:
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1; NEW: D-ECO-OUTPUT-DEFAULT1
 package: Package :: Package.{                 // NEW: D-ECO-ROOTNAME1
-    shards: [application, development]         // NEW: D-ECO-SLICENAME1
+    configs: [application, development]        // NEW: D-ECO-SLICENAME1
     defaults: .{ run: application.packages.pulse.outputs.app, check: application.packages.pulse.outputs.unit, enter: development.environments.dev }
 }
 
-application: Shard :: Shard.{                  // NEW: D-ECO-SLICENAME1
+application: Config :: Config.{                // NEW: D-ECO-SLICENAME1
     packages: .{
         pulse: Package.{
             source: "Source"
@@ -554,7 +560,7 @@ application: Shard :: Shard.{                  // NEW: D-ECO-SLICENAME1
 Resulting `package/env.jet`:
 
 ```jet
-pub development: Shard :: Shard.{              // NEW: D-ECO-SLICENAME1
+pub development: Config :: Config.{            // NEW: D-ECO-SLICENAME1
     environments: .{
         dev: Output.Environment.{             // NEW: D-ECO-OUTPUT-KINDS1
             name: "dev"
@@ -566,7 +572,7 @@ pub development: Shard :: Shard.{              // NEW: D-ECO-SLICENAME1
 }
 ```
 
-### S4 — expert systems project
+### S4 — expert systems package
 
 The common path remains `jet build`. The same Package records build, host, and target roles; pinned toolchains; remote execution authority; cache roles; resource pools; and audit policy.
 
@@ -692,7 +698,7 @@ package: Package :: Package.{
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-pub api: Shard :: Shard.{                       // NEW: D-ECO-SLICENAME1
+pub api: Config :: Config.{                     // NEW: D-ECO-SLICENAME1
     packages: .{
         api: Package.{
             source: "Source"
@@ -722,7 +728,7 @@ fn unit() -> Void ? {
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-pub billing: Shard :: Shard.{                   // NEW: D-ECO-SLICENAME1
+pub billing: Config :: Config.{                 // NEW: D-ECO-SLICENAME1
     packages: .{
         billing: Package.{
             source: "Source"
@@ -748,7 +754,7 @@ fn unit() -> Void ? {
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-pub web: Shard :: Shard.{                       // NEW: D-ECO-SLICENAME1
+pub web: Config :: Config.{                     // NEW: D-ECO-SLICENAME1
     packages: .{
         web: Package.{
             source: "Source"
@@ -812,7 +818,7 @@ Representative equivalent responsibility split:
 
 | Shape | Root/member configuration lines | Files | Missing or duplicated concern |
 |---|---:|---:|---|
-| Jet Package + three member Shards | 57 | 4 | One graph carries members, versions, policy, cache roles, CI matrices, and affected queries. |
+| Jet Package + three member Configs | 57 | 4 | One graph carries members, versions, policy, cache roles, CI matrices, and affected queries. |
 | Cargo workspace + three Cargo manifests + Bazel workspace/BUILD + Artifactory policy | 86 | 8 | Cargo owns language deps; Bazel repeats target edges; repository/cache policy lives outside both. |
 
 The Cargo-only equivalent is shorter when Cargo builds everything locally, but it does not cover remote action identity, affected queries, source authority, binary-cache writer policy, or lowest/latest platform matrices. The Bazel-only equivalent can own those actions, but then Jet package metadata is modeled twice.
@@ -823,7 +829,7 @@ The same `split` operation extracts a closed Package contribution. No workspace 
 
 ```text
 $ jet split package billing --check             # NEW: D-ECO-TRANSITION1
-Would extract: project.packages.billing
+Would extract: package.packages.billing
 Would create: packages/billing/package.jet::billing
 Would preserve canonical address: packages.billing
 package graph before: sha256:af31…
@@ -882,10 +888,10 @@ Tools:
   duckdb  -> Hangar sha256:a5b2…/bin/duckdb
   ripgrep -> Hangar sha256:50f0…/bin/rg
 Cache: 3 verified hits from local Hangar
-Effects: read ./data; no project function executed
+Effects: read ./data; no package function executed
 Toolchain: environment tools pinned independently; Jet runner jet#3.2.0
 Schedule: 3 tool projections in parallel; shell starts after all verify
-Audit: provider digests verified; no hooks, secrets, network, or project code
+Audit: provider digests verified; no hooks, secrets, network, or package code
 
 $ jet inspect dossier environment:data --json
 {"environment":"data","target":"aarch64-darwin","lock":"sha256:…","tools":[…],"effects":[…]}
@@ -1010,7 +1016,7 @@ pub halcyon_theme: Theme :: Theme.{            // D-JOS-THEME1; unified placemen
 `system/hardware.jet`:
 
 ```jet
-pub halcyon_hardware: Shard :: Shard.{          // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+pub halcyon_hardware: Config :: Config.{        // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     hardware: .{
         halcyon: Hardware.{
             cpu: .Amd64
@@ -1025,15 +1031,15 @@ pub halcyon_hardware: Shard :: Shard.{          // NEW: D-ECO-SLICENAME1; schema
 `system/packages.jet`:
 
 ```jet
-fn workstation() -> Shard {                    // NEW: D-ECO-SLICENAME1
-    return Shard.{
+fn workstation() -> Config {                   // NEW: D-ECO-SLICENAME1
+    return Config.{
         overlays: .{
             browsers: Overlay.{ packages: .{ firefox: PackageOverride.{ channel: "stable" } } }
         }
     }
 }
 
-pub workstation_packages: Shard :: workstation() // NEW: D-ECO-SLICENAME1
+pub workstation_packages: Config :: workstation() // NEW: D-ECO-SLICENAME1
 ```
 
 `system/files.jet`:
@@ -1057,7 +1063,7 @@ pub ghostty_config: File :: File.{            // NEW: D-ECO-JETOS2
 `system/laptop.jet` contributes one closed feature across system and user scope:
 
 ```jet
-pub laptop: Shard :: Shard.{                    // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+pub laptop: Config :: Config.{                  // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     systems: .{
         halcyon: SystemDelta.{ services: .{ power: .{ profile: .Balanced } } }
     }
@@ -1086,7 +1092,7 @@ fn verify_halcyon_vm() -> Void ? {
 `system/_nvidia.jet` is discovered but disabled by its one-character `_` prefix (`NEW: D-ECO-FILEROOT1`):
 
 ```jet
-pub nvidia: Shard :: Shard.{                    // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
+pub nvidia: Config :: Config.{                  // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
     systems: .{ halcyon: SystemDelta.{ kernel: .{ drivers: [nvidia] } } }
 }
 ```
@@ -1169,7 +1175,7 @@ Representative NixOS comparison:
 | Jet | 116 | 9 | Typed source points at both contributors; ordinary conflicts stop; one explicit priority wrapper; proof records built delta. |
 | `configuration.nix` + Home Manager + Stylix/overlay/VM test modules | 116 | 6 | Equivalent concerns use module imports plus `mkDefault`/`mkForce`, overlay functions, and a separate NixOS test expression. |
 
-NixOS may need fewer lines when a module already packages the exact laptop policy. Jet permits the same reuse through an ordinary typed function returning a Shard. Jet's comparison advantage is local meaning and proof, not lack of abstraction.
+NixOS may need fewer lines when a module already packages the exact laptop policy. Jet permits the same reuse through an ordinary typed function returning a Config. Jet's comparison advantage is local meaning and proof, not lack of abstraction.
 
 ### Transition S7 -> S8 — one host becomes a fleet
 
@@ -1192,7 +1198,7 @@ System graph unchanged: sha256:7780…
 Generated `package/fleet.jet`:
 
 ```jet
-pub home: Shard :: Shard.{                      // NEW: D-ECO-SLICENAME1
+pub home: Config :: Config.{                    // NEW: D-ECO-SLICENAME1
     fleets: .{
         home: Output.Fleet.{                  // NEW: D-ECO-OUTPUT-KINDS1
             name: "home"
@@ -1205,7 +1211,7 @@ pub home: Shard :: Shard.{                      // NEW: D-ECO-SLICENAME1
 
 ### S8 — multi-host fleet
 
-The fleet adds two web hosts. Shared Shards carry common packages and health rules. Per-host deltas contain only facts that differ.
+The fleet adds two web hosts. Shared Configs carry common packages and health rules. Per-host deltas contain only facts that differ.
 
 `package/fleet.jet` (`NEW: D-ECO-SLICENAME1`, `NEW: D-ECO-OUTPUT-KINDS1`, and `NEW: D-ECO-JETOS2`):
 
@@ -1228,7 +1234,7 @@ fn api_can_serve() -> Void ? {
     require(response.status() == 200, "api could not serve a request")
 }
 
-pub web_base: Shard :: Shard.{
+pub web_base: Config :: Config.{
     packages: .{
         api: Package.{
             source: "Source/api"
@@ -1245,7 +1251,7 @@ pub web_base: Shard :: Shard.{
     }
 }
 
-pub production: Shard :: Shard.{
+pub production: Config :: Config.{
     systems: .{
         web1: web_base.systems.web.with(SystemDelta.{ network: .{ hostName: "web1" }, region: "us-east" })
         web2: web_base.systems.web.with(SystemDelta.{ network: .{ hostName: "web2" }, region: "eu-west" })
@@ -1356,14 +1362,14 @@ The S7/S8 shape covers every requirement in the Epoch 4 JetOS research appendix 
 
 | Required reach | Where it appears |
 |---|---|
-| Multi-host, ISO host, hardware, variants | Fleet host map; Image `.Iso`; hardware Shard; named System deltas and boot variants. |
+| Multi-host, ISO host, hardware, variants | Fleet host map; Image `.Iso`; hardware Config; named System deltas and boot variants. |
 | Typed options with type/default/docs/enums | `OptionSet` declarations feed checks, `jet inspect search`, `jet inspect info`, Studio, and docs (`NEW: D-ECO-JETOS2`). |
 | Final-value reads and cycle diagnostics | Resolved graph view; shortest cycle with all source spans. |
 | Deterministic merge and provenance | Field-law composition; `.jet/lock`; `jet explain` shows contributors, priority, winner, and reason. |
 | One-character disable | S7's `system/_nvidia.jet` uses D-ECO-FILEROOT1's proposed discovered-file rule. |
 | File emission | Typed `File.{ path, text, mode, replace }` projected inside generation (`NEW: D-ECO-JETOS2`). |
 | Stable/unstable sets, overlays, custom derivations | S6 shows `nixpkgs@nixos-unstable`; S7 shows a stable browser Overlay. Custom derivation acceptance uses ordinary Package recipes and is not shown here. |
-| One feature spanning system and user scope | A Shard may contribute System facts and referenced user Profile facts in one closed value. |
+| One feature spanning system and user scope | A Config may contribute System facts and referenced user Profile facts in one closed value. |
 | KDE, GNOME, Hyprland, Niri and display managers | S7 shows representative KDE selection. GNOME/Hyprland/Niri and display-manager swap acceptance over the same typed field are not shown here. |
 | Theming | S7 shows a representative Theme value. Owner-stack parity across Home Manager/Stylix/NUR-class breadth is acceptance work over the same mechanism, not shown here. |
 | Flatpak, AppImage, native packages | S7 shows one Flatpak app fact and native packages. AppImage acceptance over the same typed app facts is not shown here. |
@@ -1388,7 +1394,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 | Workspace and single-file parity | Package ladder | S1 inline deps and S5 member packages lower to the same package graph and cache identities. |
 | Toolchain and target ownership | Target/Toolchain facts | S4 distinguishes build, host, and target and keys artifacts by SDK, ABI, libc, and toolchain. |
 | Secure substitution and remote execution | Cache roles and RemoteBuild | A cache hit must match digest, signature, provenance, platform, sandbox, and policy; miss falls back to a source build. |
-| Typed composition with provenance | Shard field laws | `jet explain services.desktop.environment` shows defaults, ordinary values, explicit priority, winner, and source spans. |
+| Typed composition with provenance | Config field laws | `jet explain services.desktop.environment` shows defaults, ordinary values, explicit priority, winner, and source spans. |
 | Plan before mutation | Plan/proof lifecycle | S7 predicts disk/service changes before build; S8 previews cohorts and rollback behavior before push. |
 | Open provider and recipe ecosystem | Provider roots and Pkg.adapt | Direct roots preserve provider facts; an adapter converts fetched bytes under the same lock, sandbox, and audit rules. |
 | Laptop-to-fleet desired state | System and Fleet Outputs | The same System identity becomes one Fleet host; staged rollout adds execution policy, not another declaration language. |
@@ -1433,53 +1439,25 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 ### 1. D-ECO-ROOTNAME1 — name the semantic whole
 
-**Answers/replaces:** open D-ECO-ROOTNAME1 and umbrella gate D-ECO1.
+**Answers/replaces:** D-ECO-ROOTNAME1 and umbrella gate D-ECO1.
 
-**Gist:** Choose the noun used in source, diagnostics, docs, and inspection for the repository-neutral semantic whole.
+**Gist:** Record the noun used in source, diagnostics, docs, and inspection for the repository-neutral semantic whole.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Package | `package: Package :: Package.{ packages: .{} }`; `jet check` prints `Package is valid.` Familiar before Jet is explained. |
-| B — Airframe | `airframe: Airframe :: Airframe.{ packages: .{} }`; conflict prints `Airframe has two values for services.api.port.` Strong whole-with-parts meaning, unfamiliar for software. |
-| C — Aircraft | `aircraft: Aircraft :: Aircraft.{ packages: .{} }`; `jet inspect aircraft` names a concrete vehicle, awkward for a library. |
-| D — Flight | `flight: Flight :: Flight.{ packages: .{} }`; `jet build` prints `Flight resolved.` Suggests one execution rather than durable definition. |
-| E — Formation | `formation: Formation :: Formation.{ packages: .{} }`; `jet inspect formation` suits fleets but overstates one script. |
-| F — Mission | `mission: Mission :: Mission.{ packages: .{} }`; `jet check` prints `Mission is valid.` Purposeful, but implies a run or deployment. |
-| G — Squadron | `squadron: Squadron :: Squadron.{ packages: .{} }`; diagnostics fit fleets and misfit a package. |
-| H — Assembly | `assembly: Assembly :: Assembly.{ packages: .{} }`; describes composition but collides with machine code and build assemblies. |
-| I — Platform | `platform: Platform :: Platform.{ packages: .{} }`; reads well at enterprise scale and inflated at S2. |
-| J — Workspace | `workspace: Workspace :: Workspace.{ packages: .{} }`; `jet check` reinforces the false repository/editor boundary. |
-| K — Stack | `stack: Stack :: Stack.{ packages: .{} }`; familiar for deployed apps, but collides with call and data stacks. |
-| L — Constellation | `constellation: Constellation :: Constellation.{ packages: .{} }`; conveys connected parts, but is long and not aviation-specific. |
+**Decision: DECIDED.**
 
-**Recommendation: A — Package.** It is clear at S2 and S8, while one explicit law removes the repository-boundary assumption. Tradeoff: docs must state that a Package may span repositories and a repository may contain several Packages.
+**Owner selected (2026-07-15): Package.** This collapses the old Project/Package split into one recursive noun: a package may contain packages, and the outermost package is the whole. It fits Jetpack and keeps one noun from script through fleet.
+
+Rejected: Hub, Manifest, Project.
 
 ### 2. D-ECO-SLICENAME1 — name one typed contribution
 
-**Answers/replaces:** open D-ECO-SLICENAME1.
+**Answers/replaces:** D-ECO-SLICENAME1.
 
-**Gist:** Choose the noun for one layout-neutral typed value that contributes facts to a Package.
+**Gist:** Record the noun for one layout-neutral typed value that contributes facts to a Package.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Shard | `pub web: Shard :: Shard.{ services: .{} }`; conflict: `Shard web and Shard monitoring disagree at services.api.port.` Short and clear, with a Shardlang search collision. |
-| B — Spar | `pub web: Spar :: Spar.{ services: .{} }`; `jet split env` creates `Spar development`. Precise load-bearing part, unfamiliar to many beginners. |
-| C — Strut | `pub web: Strut :: Strut.{ services: .{} }`; diagnostic says `Strut web contributed this value.` Suggests support rather than content. |
-| D — Rib | `pub web: Rib :: Rib.{ services: .{} }`; compact structural part, but collides with anatomy, food, Golem's language, and RenderMan RIB. |
-| E — Fin | `pub web: Fin :: Fin.{ services: .{} }`; short, but reads as a directional appendage and is weak in diagnostics. |
-| F — Vane | `pub web: Vane :: Vane.{ services: .{} }`; distinct and directional, but not naturally a composition unit. |
-| G — Aileron | `pub web: Aileron :: Aileron.{ services: .{} }`; aviation-specific, but long and control-surface-specific. |
-| H — Flap | `pub web: Flap :: Flap.{ services: .{} }`; short, but casual English meanings weaken source search. |
-| I — Panel | `pub web: Panel :: Panel.{ services: .{} }`; understandable part, but collides with UI and physical file layout. |
-| J — Bay | `pub web: Bay :: Bay.{ services: .{} }`; suggests a container or location instead of contributed facts. |
-| K — Nacelle | `pub web: Nacelle :: Nacelle.{ services: .{} }`; distinct integrated unit, but unfamiliar and container-shaped. |
-| L — Pylon | `pub web: Pylon :: Pylon.{ services: .{} }`; strong attachment point, but sounds infrastructural rather than general. |
-| M — Stringer | `pub web: Stringer :: Stringer.{ services: .{} }`; accurate longitudinal member, but collides with string tooling and needs teaching. |
-| N — Frame | `pub web: Frame :: Frame.{ services: .{} }`; structural and common, but collides with stack frames, GUI frames, and data frames. |
-| O — Section | `pub web: Section :: Section.{ services: .{} }`; plain language, heavily overloaded in documents, binaries, and configuration. |
-| P — Tailplane | `pub web: Tailplane :: Tailplane.{ services: .{} }`; unambiguous aviation term, but semantically too specific and long. |
+**Decision: DECIDED.**
 
-**Recommendation: A — Shard.** It reads naturally in source, split output, and conflict diagnostics, and works for every package tier. Tradeoff: Jet-qualified docs must absorb the Shardlang product collision.
+**Owner selected (2026-07-15): Config.** Rationale: plain English, self-explanatory (modules hold code, packages ship things, configs merge settings), inherits NixOS's own "configuration" vocabulary for migrating users. Rejected runners-up: Shard, Spoke, Part.
 
 ### 3. D-ECO-FILEROOT1 — choose the final source-file law
 
@@ -1491,7 +1469,7 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 |---|---|
 | A — One `package.jet` | `package.jet` contains `package: Package :: Package.{…}`; `jet os plan halcyon` discovers `systems.halcyon` there. `jet init` folds old files with a teaching diagnostic. |
 | B — Keep role files | `pkg.jet`, `env.jet`, `workspace.jet`, and `config.jet` remain authorities; `jet explain services.db.port` must report which role file won, preserving the current identity splits. |
-| C — No reserved file | User runs `jet --project config/root.jet build`; bare `jet build` prints `No Package root selected.` Layout is free, but first Package adds permanent selection ceremony. |
+| C — No reserved file | User runs `jet --package config/root.jet build`; bare `jet build` prints `No Package root selected.` Layout is free, but first Package adds permanent selection ceremony. |
 
 **Recommendation: A.** It makes file growth organizational, retires three competing shapes, and keeps S0 file-free. Tradeoff: one migration epoch must teach and reversibly fold four ratified old filenames.
 
@@ -1499,28 +1477,26 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 **Answers/replaces:** open D-ECO-SPLITPOLICY1.
 
-**Gist:** Decide whether `jet split` extracts inline facts or only moves an already-authored Shard.
+**Gist:** Decide whether `jet split` extracts inline facts or only moves an already-authored Config.
 
 | Option | Worked source and terminal consequence |
 |---|---|
-| A — Extract and move | From inline `environments: .{ dev: … }`, `jet split env --check` prints `Would create package/env.jet::development; graph unchanged.` It then creates the Shard and records a reversible ledger. |
-| B — Move Shards only | Same input prints `Error: no exported Shard owns tier env. Fix: extract it, then retry.` Experts get a smaller refactor tool; beginners perform its prerequisite manually. |
+| A — Extract and move | From inline `environments: .{ dev: … }`, `jet split env --check` prints `Would create package/env.jet::development; graph unchanged.` It then creates the Config and records a reversible ledger. |
+| B — Move Configs only | Same input prints `Error: no exported Config owns tier env. Fix: extract it, then retry.` Experts get a smaller refactor tool; beginners perform its prerequisite manually. |
 
-**Recommendation: A.** It fulfills the user's intent while producing the same Shard experts write directly. Tradeoff: preview must name the generated binding and refuse non-closed extraction before writes.
+**Recommendation: A.** It fulfills the user's intent while producing the same Config experts write directly. Tradeoff: preview must name the generated binding and refuse non-closed extraction before writes.
 
 ### 5. D-ECO-TRANSITION1 — name growth and reversal commands
 
 **Answers/replaces:** new gate surfaced by S3, S5, and S7 transitions; uses D-ECO-SPLITPOLICY1's semantics.
 
-**Gist:** Choose one command family for extracting and folding package tiers.
+**Gist:** Record the commands for extracting and folding package tiers.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — `jet split`, reverse by flag | `jet split package billing`; output: `Created packages/billing/package.jet. Graph unchanged.` Reverse: `jet fold packages/billing/package.jet`. |
-| B — `jet split` and `jet fold` | Same extraction; `jet fold packages/billing/package.jet` prints `Restored package.jet byte-for-byte.` Clear reverse verb, but adds a second top-level operation for one refactor. |
-| C — Intent-specific verbs | `jet extract-env`, `jet move-member`, `jet fleet-lift`; each prints its own preview. Names are direct, but growth semantics fragment by tier. |
+**Decision: DECIDED.**
 
-**Recommendation: A.** One mechanical operation covers every tier and the `--fold` flag makes reversal part of the same ledger. Tradeoff: help must make the reverse form visible.
+**Owner selected (2026-07-15): `jet split` / `jet fold`.** `fold` is the clearest reverse verb and keeps reversal visible as its own operation while both commands use one provenance ledger.
+
+Rejected: flag-based reversal, intent-specific transition verbs.
 
 ### 6. D-ECO-OUTPUT-PAYLOAD1 — decide where output facts live
 
@@ -1648,32 +1624,27 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 ### 15. D-ECO-FLEETVERB1 — choose fleet lifecycle verbs
 
-**Answers/replaces:** new fleet command gate left open by D-JPK-FLEET1 and D-JOS-FLEETROLLOUT1. Option A amends D-CLI-SURFACE3's grouping of `push`; option C preserves D-CLI-SURFACE3 unchanged.
+**Answers/replaces:** new fleet command gate left open by D-JPK-FLEET1 and D-JOS-FLEETROLLOUT1; amends D-CLI-SURFACE3's grouping of `jet os push`.
 
-**Gist:** Choose the command users type for plan, staged rollout, observation, and rollback across hosts.
+**Gist:** Record the command users type for plan, staged rollout, observation, and rollback across hosts.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Intent-first `jet deploy <fleet>` | `jet deploy prod` prints cohorts, canary, health gates, and rollback policy; `jet deploy prod --stage-only` builds without activation. Per-host inspection remains `jet os proof web1`. |
-| B — Grouped `jet fleet plan\|push\|rollback` | `jet fleet push prod` prints the same plan. Namespace is explicit, but duplicates plan and rollback nouns already owned by the shared lifecycle. |
-| C — Keep D-CLI-SURFACE3 `jet os push` | `jet os push prod` treats Fleet as OS scope and preserves D-CLI-SURFACE3 unchanged. It groups activation verbs, but excludes future non-OS deployment Outputs and makes host/fleet selection less obvious. |
+**Decision: DECIDED.**
 
-**Recommendation: A.** `push` is the fleet-level intent, while the plan/proof lifecycle and per-host OS verbs remain unchanged. Tradeoff: help must reserve top-level `push` for Fleet rather than generic artifact upload.
+**Owner selected (2026-07-15): `jet deploy <fleet>`.** `deploy` is the industry word for rollout and leaves `push` free for another job. It still amends D-CLI-SURFACE3's `jet os push` grouping.
+
+Rejected: `jet fleet push`, `jet os push`, bare push.
 
 ### 16. D-JPK-MANUALROOT1 — name external retention operations
 
-**Answers/replaces:** open D-JPK-MANUALROOT1.
+**Answers/replaces:** D-JPK-MANUALROOT1.
 
-**Gist:** Name the rare expert operation that retains a closure with no Package, profile, process, build, toolchain, System, or Generation owner.
+**Gist:** Record the rare expert operations that retain a closure with no Package, profile, process, build, toolchain, System, or Generation owner.
 
-| Option | Worked source and terminal consequence |
-|---|---|
-| A — Add/remove | `jet hangar add-external-root backup-sdk <ref>` prints `Added root`; “add” can sound like importing or realizing bytes. |
-| B — Register/unregister | `jet hangar register-external-root backup-sdk <ref>` prints closure count, expiry, and etag; `unregister-external-root backup-sdk --etag 1.1` removes only matching metadata. |
-| C — Keep/release | `jet hangar keep backup-sdk <ref>` and `release backup-sdk` are short, but audit logs hide that a typed closure root changed. |
-| D — Pin/unpin | `jet hangar pin-external backup-sdk <ref>` is familiar, but `pin` already means an exact package version or toolchain. |
+**Decision: DECIDED.**
 
-**Recommendation: B.** It distinguishes retention metadata from realization and stays explicit in scripts, CAS errors, and audit. Tradeoff: long verbs are accepted for a rare operation.
+**Owner selected (2026-07-15): `register-external-root` / `unregister-external-root` / `list-external-roots`.** These precise verbs distinguish retention metadata from realization in scripts, CAS errors, and audit records.
+
+Rejected: add/remove, keep/release, pin/unpin.
 
 ### 17. D-ECO-HANGARPATH1 — replace the root-owned default path
 
@@ -1705,4 +1676,4 @@ Decide in order. Later rows depend on earlier vocabulary. Every recommendation p
 
 ### Decision order
 
-Ratify rows 1-5 first to settle root, composition vocabulary, file law, and growth. Ratify rows 6-11 as one coherent Output model. Ratify rows 12-15 as one JetOS/receipt/fleet model. Ratify rows 16-18 as Hangar lifecycle and privilege wording. No implementation or migration should mint the marked spellings before its row is decided.
+Rows 1-5 now use the owner's in-session core vocabulary: recursive Package, Config, `package.jet`, and `jet split` / `jet fold`. Rows 1, 2, 5, 15, and 16 are owner-selected; rows 3-4, 6-14, and 17-18 remain open. Formal Tower ratification of the selected rows records these outcomes. No implementation or migration should mint a marked spelling before its row is formally ratified.
