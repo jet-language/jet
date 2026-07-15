@@ -168,7 +168,8 @@ fn doctor_checks_real_state_and_is_read_only() {
     let text = String::from_utf8(broken.stdout).unwrap();
     assert!(text.contains("failed its content digest"), "{text}");
     assert!(text.contains("local index missing"), "{text}");
-    assert!(text.contains("stale lock"), "{text}");
+    assert!(!text.contains("stale lock"), "{text}");
+    assert!(text.contains("kernel advisory locks readable"), "{text}");
     assert!(text.contains("unused for more than 30 days"), "{text}");
     assert!(text.contains("signing key for `jet` is missing"), "{text}");
     assert_eq!(fs::read(&meta).unwrap(), before_meta, "doctor changed metadata");

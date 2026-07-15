@@ -1,8 +1,40 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::File;
 use std::io::{self, ErrorKind};
-use std::os::fd::AsRawFd as _;
-use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+use std::fs::{self, OpenOptions};
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+use std::os::fd::AsRawFd as _;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+use std::os::unix::fs::MetadataExt as _;
 
 #[cfg(any(
     target_os = "linux",

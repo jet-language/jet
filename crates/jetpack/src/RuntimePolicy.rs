@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 
 const LOCK_DIR: &str = ".locks";
 const LOCK_WAIT: Duration = Duration::from_secs(30);
-const LOCK_POLL: Duration = Duration::from_millis(20);
+// Short polling prevents a hot reacquirer from starving an already-open
+// contender while retaining deterministic timeout control.
+const LOCK_POLL: Duration = Duration::from_millis(1);
 const SANDBOX_POLICY_FILE: &str = "sandbox-policy";
 
 #[cfg(unix)]
@@ -67,6 +69,9 @@ impl Drop for FileLock {
         // Close also releases advisory locks. Explicit unlock shortens the
         // handoff boundary and keeps that law visible at this abstraction.
         let _ = lock_platform::unlock(&self.file);
+        // `LOCK_NB` waiters are not kernel-queued. Brief handoff grace stops a
+        // hot loop from reacquiring before an already-polling peer can run.
+        std::thread::sleep(Duration::from_millis(2));
     }
 }
 
@@ -520,6 +525,20 @@ mod tests {
         assert!(acquire_lock(&root, "hangar").is_err());
         fs::remove_dir_all(root).unwrap();
 
+        #[cfg(unix)]
+        {
+            let root = scratch("symlink-fail-closed");
+            fs::create_dir_all(root.join(LOCK_DIR)).unwrap();
+            fs::write(root.join("target"), "not a lock inode").unwrap();
+            std::os::unix::fs::symlink(
+                root.join("target"),
+                root.join(LOCK_DIR).join("hangar.lock"),
+            )
+            .unwrap();
+            assert!(acquire_lock(&root, "hangar").is_err());
+            fs::remove_dir_all(root).unwrap();
+        }
+
         let unsupported = include_str!("RuntimePolicy/Lock/unsupported.rs");
         assert!(unsupported.contains("ErrorKind::Unsupported"));
         assert!(!unsupported.contains("Ok(File"));
@@ -541,6 +560,11 @@ mod tests {
             assert!(source.contains(required), "missing Windows lock law: {required}");
         }
         assert!(!source.contains("const FILE_SHARE_DELETE"));
+
+        let unix = include_str!("RuntimePolicy/Lock/unix.rs");
+        for required in ["F_GETFD", "F_SETFD", "FD_CLOEXEC", "LOCK_EX | LOCK_NB"] {
+            assert!(unix.contains(required), "missing Unix lock law: {required}");
+        }
     }
 
     #[test]

@@ -120,8 +120,11 @@ pub fn keygen(force: bool) -> Result<(PathBuf, String), String> {
 /// [`recipients_path`] if not already present. Returns `false` if already
 /// there (idempotent, same shape as `Trust::add_pattern`).
 pub fn add_recipient(project_dir: &Path, recipient: &str) -> bool {
-    let _guard =
-        super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets").ok();
+    let Ok(_guard) =
+        super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets")
+    else {
+        return false;
+    };
     let path = recipients_path(project_dir);
     let recipient = recipient.trim();
     if list_recipients(project_dir).iter().any(|r| r == recipient) {
