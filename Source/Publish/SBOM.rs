@@ -1,4 +1,5 @@
 use crate::Lock::LockFile;
+use jet_foundation::JSON::json_escape;
 
 // ──────────────────────────────────────────────
 // SBOM generation (SPDX 2.3 tag-value)
@@ -170,11 +171,4 @@ pub(crate) fn iso8601(secs: u64) -> String {
 
 fn is_leap(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
 }

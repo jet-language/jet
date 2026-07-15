@@ -926,8 +926,8 @@ gone from the grammar entirely (ordinary syntax error — no compat, per the
 rule at the top of this file), and `*T` never shipped further than this doc
 as a *parameter* sigil (raw-pointer access stays the separate `p.*`/`*x`
 expression mechanism, D-CAP9, untouched by the migration).
-`AccessConvention::Share`/`::Raw` remain dead enum variants in the compiler,
-inert until a future tier reactivates them.
+The dead internal `AccessConvention::Share`/`::Raw` placeholders were removed;
+a future ratified tier can add the exact representation it needs.
 
 **D-CAP8 — Unmarked default (retired 2026-07-04 by D-MEM1/S2)**: originally,
 an unmarked param elevated by body usage and froze its resolved capability

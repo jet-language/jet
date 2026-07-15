@@ -15,10 +15,6 @@ impl InputKey {
     pub fn new(name: impl Into<String>) -> Self {
         InputKey(name.into())
     }
-
-    pub fn name(&self) -> &str {
-        &self.0
-    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -35,20 +31,6 @@ impl QueryKey {
         }
     }
 
-    pub fn kind(&self) -> &'static str {
-        self.kind
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct InputSnapshot {
-    pub revision: u64,
-    pub text_hash: u64,
-    pub len: usize,
 }
 
 struct InputCell {
@@ -88,30 +70,17 @@ impl QueryEngine {
         Self::default()
     }
 
-    pub fn global_revision(&self) -> u64 {
-        self.revision
-    }
-
-    pub fn set_input(&mut self, key: InputKey, text: String) -> InputSnapshot {
+    pub fn set_input(&mut self, key: InputKey, text: String) {
         let text_hash = hash_text(&text);
-        let len = text.len();
         if let Some(cell) = self.inputs.get_mut(&key) {
             if cell.text_hash == text_hash && cell.text == text {
-                return InputSnapshot {
-                    revision: cell.revision,
-                    text_hash: cell.text_hash,
-                    len: cell.text.len(),
-                };
+                return;
             }
             self.revision += 1;
             cell.revision = self.revision;
             cell.text = text;
             cell.text_hash = text_hash;
-            return InputSnapshot {
-                revision: cell.revision,
-                text_hash,
-                len,
-            };
+            return;
         }
 
         self.revision += 1;
@@ -124,11 +93,6 @@ impl QueryEngine {
                 text_hash,
             },
         );
-        InputSnapshot {
-            revision,
-            text_hash,
-            len,
-        }
     }
 
     pub fn remove_input(&mut self, key: &InputKey) -> bool {
@@ -142,14 +106,6 @@ impl QueryEngine {
     pub fn input_text(&mut self, key: &InputKey) -> Option<String> {
         self.record_dep(key);
         self.inputs.get(key).map(|cell| cell.text.clone())
-    }
-
-    pub fn input_snapshot(&self, key: &InputKey) -> Option<InputSnapshot> {
-        self.inputs.get(key).map(|cell| InputSnapshot {
-            revision: cell.revision,
-            text_hash: cell.text_hash,
-            len: cell.text.len(),
-        })
     }
 
     pub fn query<T, F>(&mut self, key: QueryKey, compute: F) -> T
@@ -190,11 +146,6 @@ impl QueryEngine {
             .get(key)
             .map(|entry| entry.recomputes)
             .unwrap_or(0)
-    }
-
-    pub fn clear(&mut self) {
-        self.memo.clear();
-        self.dep_stack.clear();
     }
 
     fn record_dep(&mut self, key: &InputKey) {

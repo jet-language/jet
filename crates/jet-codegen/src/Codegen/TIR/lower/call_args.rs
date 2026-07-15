@@ -193,9 +193,7 @@ pub(crate) fn lower_one_call_arg(
     // NOT borrowed (the AST `match conv` skips it), so the fn-coerce form stands alone.
     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
     let (borrow, mut_borrow) = match &conv {
-        // D-CAP9: Share borrows like Read (`&(…)`) until its phase specializes
-        // it; Raw (never produced yet) stays by-value.
-        Some((AccessConvention::Read | AccessConvention::Share, t))
+        Some((AccessConvention::Read, t))
             if !t.is_scalar() && !matches!(t, Type::Fn { .. }) =>
         {
             (true, false)

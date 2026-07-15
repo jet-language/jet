@@ -37,8 +37,6 @@ pub(crate) struct MethodSig {
 #[derive(Debug, Clone)]
 pub(crate) enum TypeDef {
     Struct {
-        #[allow(dead_code)] // stored for future duplicate-name diagnostics
-        name_span: Span,
         fields: Vec<(String, Span, Type, bool)>,
         methods: HashMap<String, MethodSig>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
@@ -59,8 +57,6 @@ pub(crate) enum TypeDef {
         is_c_layout: bool,
     },
     Enum {
-        #[allow(dead_code)] // stored for future duplicate-name diagnostics
-        name_span: Span,
         variants: HashMap<String, (Span, VariantPayload)>,
         variant_order: Vec<String>,
         /// D-TAG1: variant groups — group path → (span, ordered leaf paths in
@@ -78,8 +74,6 @@ pub(crate) enum TypeDef {
     /// a base type. No implicit coercion either direction (E0128). Arithmetic
     /// only when `is_numeric` (D-DIST3, E0127).
     Distinct {
-        #[allow(dead_code)] // stored for future duplicate-name diagnostics
-        name_span: Span,
         base: Type,
         is_numeric: bool,
         /// D-CAPBUNDLE1: `@Comparable`/`@Printable`/`@CodableAsBase` grants.
@@ -93,8 +87,6 @@ pub(crate) enum TypeDef {
     /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — transparent
     /// generic shortcut; expands in sema, erases at codegen.
     Alias {
-        #[allow(dead_code)]
-        name_span: Span,
         params: Vec<crate::AST::TypeParam>,
         target: Type,
     },
@@ -555,10 +547,6 @@ pub(crate) struct LocalInfo {
     /// for `view`/`&` borrows (which never own). When still in scope and not in
     /// `moved` at scope end, E0140 fires.
     single_use_span: Option<Span>,
-    /// D-DETACH1: set when the task's spawn lambda captured a view borrow (E1102
-    /// fired at spawn time). Used by the `detach()` handler to emit E1103.
-    #[allow(dead_code)] // D-DETACH1 reader (E1103 path) not yet implemented
-    task_has_view_capture: bool,
 }
 
 /// D-ALLOC2 (ratified 2026-06-21): bookkeeping for an arena-`view` binding —
@@ -652,7 +640,6 @@ pub(crate) struct ModuleState {
     field_pub: HashMap<(String, String), bool>,
     field_pkg_pub: HashMap<(String, String), bool>,
     registry: TypeRegistry,
-    structs: HashMap<String, Vec<Type>>,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
     core_imports: HashMap<String, String>,
@@ -680,7 +667,6 @@ pub(crate) struct ModuleState {
 pub(crate) struct Checker<'a> {
     funcs: &'a HashMap<String, FuncSig>,
     registry: &'a TypeRegistry,
-    structs: &'a HashMap<String, Vec<Type>>,
     consts: &'a HashMap<String, Type>,
     modules: Option<&'a [ModuleState]>,
     module_idx: usize,

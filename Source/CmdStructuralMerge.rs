@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{exit, Command};
 
+use jet::Diagnostics::json_str as json_string;
 use jet_semindex::{open_structural_with_overlays, DefinitionFact, SemIndexError};
 
 #[derive(Clone)]
@@ -457,7 +458,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
     out
 }
-fn json_string(value: &str) -> String { format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")) }
 fn change_json(change: &Change) -> String { format!("{{\"kind\":{},\"stable_id\":{},\"before\":{},\"after\":{}}}", json_string(change.kind.name()), json_string(&change.stable_id), change.before.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into()), change.after.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into())) }
 fn conflict_json(conflict: &Conflict) -> String { format!("{{\"kind\":{},\"stable_id\":{},\"human_identity\":{},\"ours\":{},\"theirs\":{}}}", json_string(conflict.kind), json_string(&conflict.stable_id), json_string(&conflict.human_identity), json_string(&conflict.ours), json_string(&conflict.theirs)) }
 fn render_index_error(context: &str, error: SemIndexError) -> ! { eprintln!("error: {context}"); let SemIndexError::Load(diags) = error; for diagnostic in diags { eprintln!("  {}: {}", diagnostic.code, diagnostic.what); } eprintln!(" fix: correct source errors; structural tools never merge unchecked code"); exit(1) }

@@ -320,112 +320,12 @@ pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, V
 
 /// In-memory web-target compile (used by integration tests).
 pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let (toks, lex_diags) = Lexer::lex(src);
-    if !lex_diags.is_empty() {
-        return Err(lex_diags);
-    }
-    let mut prog = Parser::parse(&toks)?;
-    let mut bundle = AST::ProgramBundle {
-        entry: 0,
-        project_root: std::path::PathBuf::from("."),
-        modules: vec![AST::LoadedModule {
-            path: std::path::PathBuf::from(file),
-            display: file.to_string(),
-            alias: "main".to_string(),
-            imports: std::mem::take(&mut prog.imports),
-            items: std::mem::take(&mut prog.items),
-            source: src.to_string(),
-            web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
-            no_prelude: prog.no_prelude,
-            html_path: prog.html_path.clone(),
-            no_alloc_policy: prog.no_alloc_policy,
-        }],
-        parse_teaching: Vec::new(),
-        used_core: std::collections::HashSet::new(),
-        ffi_callback_fns: std::collections::HashSet::new(),
-        cffi: CFFI::CFfi::default(),
-        comptime_inputs: Vec::new(),
-        import_targets: std::collections::HashMap::new(),
-        layer_ceiling: None,
-        inferred_layer: Syntax::RuntimeLayer::Core,
-        web_partitions: std::collections::HashMap::new(),
-        web_partition_enforced: true,
-        web_partition_report: None,
-        dep_roots: std::collections::HashMap::new(),
-        // D-OSTARGET2=B: this inline single-module path has no `--target`; the
-        // host OS is the active bucket.
-        active_os: Syntax::OsTarget::host(),
-    };
-    if let Err(diags) = Foreign::assemble_active_namespaces(&mut bundle) {
-        return Err(diags);
-    }
-    bundle.cffi = match CFFI::assemble(&mut bundle) {
-        Ok(c) => c,
-        Err(diags) => return Err(diags),
-    };
-    let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Run);
-    let mut errors = Vec::new();
-    let mut lints = Vec::new();
-    for d in diags {
-        match d.severity {
-            Diagnostics::Severity::Error => errors.push(d),
-            Diagnostics::Severity::Lint => lints.push(d),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    let ffi = match FFI::prepare(&bundle) {
-        Ok(link) => link,
-        Err(ffi_diags) => return Err(ffi_diags),
-    };
-    let web_tir_errors: Vec<_> = Codegen::validate_web_tir_support(&bundle, ffi.as_ref())
-        .into_iter()
-        .map(|miss| {
-            Diagnostics::Diagnostic::error(
-                "E-WEB-TIR-UNSUPPORTED",
-                format!("web output cannot compile `{}` yet", miss.func_name),
-                "web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today".to_string(),
-                "move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target".to_string(),
-                Some(miss.span),
-            )
-        })
-        .collect();
-    if !web_tir_errors.is_empty() {
-        return Err(web_tir_errors);
-    }
-    let rust = Codegen::emit_bundle(&bundle, Sema::CompileMode::Run, ffi.as_ref());
-    let web = Some(Codegen::emit_web(
-        &bundle,
+    Driver::compile_src_with_options(
+        src,
+        file,
         Sema::CompileMode::Run,
-        ffi.as_ref(),
-    ).map_err(|miss| vec![Diagnostics::Diagnostic::error(
-        "E-WEB-TIR-UNSUPPORTED",
-        format!("web output cannot compile `{}` yet", miss.func_name),
-        "web emitter capability facts drifted after validation".to_string(),
-        "report this compiler bug with the named function".to_string(),
-        Some(miss.span),
-    )])?);
-    let capabilities = Capabilities::from_sema(
-        &bundle.used_core,
-        bundle_uses_unsafe(&bundle),
-        ffi.is_some() || bundle.cffi.links_c(),
-    );
-    let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
-    Ok(CompileOutput {
-        rust,
-        lints,
-        ffi,
-        clinks: Vec::new(),
-        capabilities,
-        comptime_inputs,
-        web,
-        web_partition_report: bundle.web_partition_report.clone(),
-        plugin: None,
-        inferred_layer: bundle.inferred_layer,
-        layer_ceiling: bundle.layer_ceiling,
-    })
+        Driver::CompileSrcOptions { web_target: true },
+    )
 }
 
 /// Resolve native C-library link args for a built program (S59 / E2-M14),
@@ -440,15 +340,7 @@ pub fn resolve_c_links(file: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
     crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root)
 }
 
-/// Compile for `jet test`: optional `main`, at least one test block required.
-pub fn compile_tests_with_path(
-    src: &str,
-    file: &str,
-) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_tests_with_path_cov(src, file, false)
-}
-
-/// D-COV1: as `compile_tests_with_path`, but with optional `jet test --coverage`
+/// Compile for `jet test`, with optional `jet test --coverage`
 /// instrumentation. `coverage = false` produces the historical, uninstrumented
 /// harness.
 pub fn compile_tests_with_path_cov(
@@ -574,11 +466,6 @@ fn compile_with_mode(
     Driver::compile_src(src, file, mode)
 }
 
-/// Back-compat: compile and return only Rust (drops lints).
-pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
-    compile(src).map(|o| o.rust)
-}
-
 pub use Comptime::CtValue;
 pub use Diagnostics::render_all as render_diagnostics;
 pub use Diagnostics::{render_all_colored, render_all_json, render_all_linked};
@@ -638,67 +525,4 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
     let value =
         Comptime::run_main_value(main_fn, &func_map, base_dir, &mut sink).map_err(|d| vec![d])?;
     Ok(value)
-}
-
-/// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
-/// interpreter and return its output as a stable JSON string. The program's
-/// `run()` function is interpreted using the comptime engine; any print calls
-/// are captured; the captured output is returned as a JSON string value.
-///
-/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
-pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
-    use std::collections::HashMap;
-
-    let (toks, lex_diags) = Lexer::lex(src);
-    if !lex_diags.is_empty() {
-        return Err(lex_diags);
-    }
-    let prog = Parser::parse(&toks)?;
-
-    // Collect functions into a map for the comptime evaluator.
-    let func_map: HashMap<String, &AST::Func> = prog
-        .items
-        .iter()
-        .filter_map(|item| {
-            if let AST::Item::Func(f) = item {
-                Some((f.name.clone(), f))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let main_fn = func_map.get("run").ok_or_else(|| {
-        vec![Diagnostics::Diagnostic::error(
-            "E3401",
-            "no `run` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `@Pure fn run()` entry point".to_string(),
-            "add `@Pure fn run() { … }` to the program".to_string(),
-            None,
-        )]
-    })?;
-
-    // Run main() via the comptime engine with a dev sink capturing print output.
-    let base_dir = std::path::Path::new(file)
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
-    let mut sink = Comptime::DevSink::new();
-    let program = Comptime::ProgramInfo::empty();
-    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink, &program).map_err(|d| vec![d])?;
-    let text = sink.stdout;
-    // Render the captured output as a JSON string.
-    let json = if text.trim().is_empty() {
-        "null".to_string()
-    } else {
-        // Try to parse as a number or bool for cleaner output; otherwise quote it.
-        let trimmed = text.trim();
-        if trimmed == "true" || trimmed == "false" {
-            trimmed.to_string()
-        } else if trimmed.parse::<i64>().is_ok() || trimmed.parse::<f64>().is_ok() {
-            trimmed.to_string()
-        } else {
-            format!("{:?}", trimmed)
-        }
-    };
-    Ok(json)
 }

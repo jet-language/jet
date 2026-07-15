@@ -18,6 +18,7 @@
 // CAPABILITY_CLAIM: claim.package-build | Build/package/environment commands have canonical ownership.
 // CAPABILITY_CLAIMS:END
 
+pub use crate::Syntax::edit_distance;
 use crate::Syntax::BINARY_NAME;
 
 /// One global flag that applies across commands.
@@ -249,11 +250,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
-        name: "devtools",
-        summary: "run checked developer generators (grammars)",
-        headline: false,
-    },
-    CommandSpec {
         name: "serve",
         summary: "retired (D-CLI-DEVSERVE1=A) — teaches `jet dev --swap`",
         headline: false,
@@ -299,11 +295,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
-        name: "doctor",
-        summary: "diagnose the toolchain and offer fixes",
-        headline: false,
-    },
-    CommandSpec {
         name: "env",
         summary: "enter the project dev shell",
         headline: false,
@@ -339,11 +330,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
-        name: "bind",
-        summary: "generate a C binding cache from a header",
-        headline: false,
-    },
-    CommandSpec {
         name: "add",
         summary: "add a dependency and fetch it",
         headline: false,
@@ -361,11 +347,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "update",
         summary: "refresh moving dependency selectors (`update jet` moves the toolchain pin)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "toolchain",
-        summary: "show the project's pinned jet self toolchain and its locked version (D-JPK-TOOLCHAIN1)",
         headline: false,
     },
     CommandSpec {
@@ -419,56 +400,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
-        name: "schema",
-        summary: "inspect or re-baseline @PublishedSchema snapshots (status | squash)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "semindex",
-        summary: "query the stable semantic index for a project entry file",
-        headline: false,
-    },
-    CommandSpec {
-        name: "dossier",
-        summary: "explain a file or symbol through stable semantic fact lenses",
-        headline: false,
-    },
-    CommandSpec {
-        name: "impact",
-        summary: "report blast radius for a symbol (callers, references, callees)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "live",
-        summary: "attach to a running observable Jet process (D-OBSERVE-LIVE1)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "graph",
-        summary: "print typed programmable-build graph (D-BUILDQUERY1)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "query",
-        summary: "query typed facts; `jet inspect query build <file>` inspects build graph",
-        headline: false,
-    },
-    CommandSpec {
-        name: "explain-build",
-        summary: "explain one build target, action, or file (D-BUILDQUERY1)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "codemod",
-        summary: "dry-run, apply, or undo replayable semantic codemods",
-        headline: false,
-    },
-    CommandSpec {
-        name: "expand",
-        summary: "print sema's facts for one lens (--facts <lens>) or every lens (D-EXPANDCLI1)",
-        headline: false,
-    },
-    CommandSpec {
         name: "vendor",
         summary: "copy all dependencies into vendor/",
         headline: false,
@@ -509,28 +440,8 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
-        name: "completions",
-        summary: "print shell completions (bash | zsh | fish)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "man",
-        summary: "print the jet self man page (roff)",
-        headline: false,
-    },
-    CommandSpec {
-        name: "lsp",
-        summary: "language server (stdio JSON-RPC)",
-        headline: false,
-    },
-    CommandSpec {
         name: "version",
         summary: "print compiler version",
-        headline: false,
-    },
-    CommandSpec {
-        name: "upgrade",
-        summary: "how to download a newer release",
         headline: false,
     },
     CommandSpec {
@@ -726,21 +637,6 @@ pub fn is_known_flag(flag: &str) -> bool {
 }
 
 /// Levenshtein edit distance — the same shape used by sema's S14 suggestions.
-pub fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    for i in 1..=a.len() {
-        let mut cur = vec![i];
-        for j in 1..=b.len() {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost));
-        }
-        prev = cur;
-    }
-    prev[b.len()]
-}
-
 /// Closest built-in command to `name` within edit distance 3, or `None`.
 pub fn closest_command(name: &str) -> Option<&'static str> {
     closest(

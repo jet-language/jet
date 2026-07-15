@@ -486,13 +486,10 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
 /// dereferenced; `Mutate` is `&mut T` (deref'd); `Move`/scalar-`Read` is by value.
 pub(crate) fn param_place(rust_name: &str, p: &Param) -> String {
     let deref = match p.convention {
-        // D-CAP9: Share/Raw follow Read until their phases specialize them.
-        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw
-            if p.ty.is_scalar() =>
-        {
+        AccessConvention::Read if p.ty.is_scalar() => {
             false
         }
-        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => true,
+        AccessConvention::Read => true,
         AccessConvention::Write => true,
         AccessConvention::Move => false,
     };

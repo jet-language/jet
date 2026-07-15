@@ -1,28 +1,12 @@
 //! Stable JSON encoding for `SemIndex` (no external crates — I6 path deps only).
 
-use jet_foundation::Diagnostics::Span;
+use jet_foundation::JSON::json_escape;
 
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
     BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex,
     SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
 };
-
-fn escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
-}
 
 fn json_instance(value: &InstanceFact) -> String {
     let arguments = value.arguments.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
@@ -37,16 +21,11 @@ fn json_definition_fact(f: &DefinitionFact) -> String {
 }
 
 fn json_str(s: &str) -> String {
-    format!("\"{}\"", escape(s))
+    format!("\"{}\"", json_escape(s))
 }
 
 fn json_span(span: SourceSpan) -> String {
     format!("{{\"start\":{},\"end\":{}}}", span.start, span.end)
-}
-
-#[allow(dead_code)]
-fn json_span_raw(span: Span) -> String {
-    json_span(span.into())
 }
 
 fn json_kind(kind: &SymbolKind) -> String {
@@ -335,77 +314,6 @@ fn origin_text(origin: &MemberOrigin) -> String {
         MemberOrigin::InherentImpl => "impl".to_string(),
         MemberOrigin::TraitImpl { trait_name } => format!("impl {trait_name}"),
         MemberOrigin::TraitRequirement { trait_name } => format!("trait {trait_name}"),
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn lsp_sym_kind_json(kind: &SymKind) -> String {
-    match kind {
-        SymKind::Module => "{\"kind\":\"module\"}".to_string(),
-        SymKind::Function { params, ret } => {
-            let ps: Vec<String> = params
-                .iter()
-                .map(|(n, t)| {
-                    format!(
-                        "{{\"name\":{},\"type\":{}}}",
-                        json_str(n),
-                        json_str(&t.name())
-                    )
-                })
-                .collect();
-            let ret_json = match ret {
-                Some(t) => json_str(&t.name()),
-                None => "null".to_string(),
-            };
-            format!(
-                "{{\"kind\":\"function\",\"params\":[{}],\"ret\":{}}}",
-                ps.join(","),
-                ret_json
-            )
-        }
-        SymKind::Struct { fields } => {
-            let fs: Vec<String> = fields
-                .iter()
-                .map(|(n, t)| {
-                    format!(
-                        "{{\"name\":{},\"type\":{}}}",
-                        json_str(n),
-                        json_str(&t.name())
-                    )
-                })
-                .collect();
-            format!("{{\"kind\":\"struct\",\"fields\":[{}]}}", fs.join(","))
-        }
-        SymKind::Enum { variants } => {
-            let vs: Vec<String> = variants.iter().map(|v| json_str(v)).collect();
-            format!("{{\"kind\":\"enum\",\"variants\":[{}]}}", vs.join(","))
-        }
-        SymKind::Trait => "{\"kind\":\"trait\"}".to_string(),
-        SymKind::Tag => "{\"kind\":\"tag\"}".to_string(),
-        SymKind::Const => "{\"kind\":\"const\"}".to_string(),
-        SymKind::EnumVariant { parent } => format!(
-            "{{\"kind\":\"enum_variant\",\"parent\":{}}}",
-            json_str(parent)
-        ),
-        SymKind::Field { ty, parent } => format!(
-            "{{\"kind\":\"field\",\"type\":{},\"parent\":{}}}",
-            json_str(&ty.name()),
-            json_str(parent)
-        ),
-        SymKind::Local { mutable, ty } => {
-            let ty_json = match ty {
-                Some(t) => json_str(&t.name()),
-                None => "null".to_string(),
-            };
-            format!(
-                "{{\"kind\":\"local\",\"mutable\":{},\"type\":{}}}",
-                if *mutable { "true" } else { "false" },
-                ty_json
-            )
-        }
-        SymKind::Param { ty } => {
-            format!("{{\"kind\":\"param\",\"type\":{}}}", json_str(&ty.name()))
-        }
     }
 }
 

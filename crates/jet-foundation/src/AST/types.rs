@@ -7,14 +7,9 @@ pub const CORE_CRYPTO_NOMINAL_MARKER: &str = "\0core.crypto";
 /// The access capability of a parameter / argument / receiver (D-MEM1, was
 /// D-CAP7/8/9/10).
 ///
-/// Surface sigils map here: unmarked `T`→`Read`, `&T`→`Write`, `^T`→`Move`,
-/// `*T`→`Raw`. S2 ("signatures can't lie"): an unmarked param is decided as
+/// Surface sigils map here: unmarked `T`→`Read`, `&T`→`Write`, `^T`→`Move`.
+/// S2 ("signatures can't lie"): an unmarked param is decided as
 /// `Read` at parse time, period — no body-usage inference, no elevation.
-/// `Raw` is only produced by the `*` sigil inside `#Unsafe` and never inferred
-/// in safe code. `Share` has no surface sigil as of D-MEM1 (the `&` glyph
-/// moved to `Write`) — it is unreachable from parsing and kept only for the
-/// out-of-scope tier-2 storable-borrow future (see migration plan's "Out of
-/// scope" section); nothing currently produces it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessConvention {
     /// Shared read borrow (`&T` in Rust; scalars pass by value).
@@ -24,13 +19,6 @@ pub enum AccessConvention {
     Write,
     /// `^T`: ownership transfer / move (`T` by value).
     Move,
-    /// No surface sigil under D-MEM1 (was `&T` pre-migration): the value may
-    /// escape / be retained beyond the call (share). Composes with
-    /// regions/arenas (D-CAP10/c130); a safe escaping handle, not a raw
-    /// pointer. Reserved for a post-v1 tier; never produced by the parser.
-    Share,
-    /// `*T`: raw unsafe pointer/address (`#Unsafe`-only, never inferred; D-CAP9).
-    Raw,
 }
 
 impl AccessConvention {
@@ -43,8 +31,6 @@ impl AccessConvention {
             AccessConvention::Read => "",
             AccessConvention::Write => "&",
             AccessConvention::Move => "^",
-            AccessConvention::Share => "&",
-            AccessConvention::Raw => "*",
         }
     }
 }

@@ -5,6 +5,7 @@
 //! nothing. JSON is hand-rolled — no serde, no external crate (I6).
 
 use std::time::Instant;
+use jet_foundation::JSON::json_escape;
 
 /// Whether phase timing is requested for this process. Set `JET_TIMING=1`.
 pub fn enabled() -> bool {
@@ -58,7 +59,7 @@ impl PhaseTimer {
             if i > 0 {
                 s.push(',');
             }
-            s.push_str(&format!("{{\"name\":\"{}\",\"us\":{}}}", escape(name), us));
+            s.push_str(&format!("{{\"name\":\"{}\",\"us\":{}}}", json_escape(name), us));
         }
         s.push_str("]}\n");
         s
@@ -69,20 +70,6 @@ impl PhaseTimer {
     pub fn write_to(&self, dir: &std::path::Path) {
         let _ = std::fs::write(dir.join("jet-timing.json"), self.to_json());
     }
-}
-
-/// Escape a phase name for embedding in a JSON string. Phase names are
-/// compiler-internal ASCII identifiers, but stay correct regardless.
-fn escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            _ => out.push(c),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

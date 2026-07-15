@@ -1038,10 +1038,6 @@ fn regex_escape(s: &str) -> String {
     out
 }
 
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
     match class {
         HighlightClass::KeywordControl => "JET_HIGHLIGHT_KEYWORD_CONTROL",
@@ -1085,3 +1081,4 @@ use super::{
     TYPE_TASKGROUP, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UTF8_ERROR, TYPE_VOID,
     TYPE_WATCH_EVENT, TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
 };
+use crate::JSON::json_escape;

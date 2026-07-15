@@ -703,7 +703,7 @@ impl<'a> Checker<'a> {
                 let inner_t = self.infer(inner);
                 self.allow_string_view_read = was_view_read;
                 let inner_t = inner_t?;
-                if !type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry, self.structs) {
+                if !type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry) {
                     self.diags.push(Diagnostic::error(
                         "E0211",
                         format!("`{}` can't be copied", inner_t.show()),

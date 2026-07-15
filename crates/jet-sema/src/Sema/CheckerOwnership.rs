@@ -921,11 +921,9 @@ impl<'a> Checker<'a> {
             }
         }
         match arg.convention {
-            // D-CAP9: Share/Raw aren't produced yet — ownership specializes
-            // them when their phases land.
-            AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
+            AccessConvention::Read => {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    if is_cloneable(param_ty, self.registry, self.structs) {
+                    if is_cloneable(param_ty, self.registry) {
                         arg.flags.implicit_clone = true;
                         // D-MEM1/S2 (was D-L0201 lint): passing a named binding to
                         // a Move param without `^` is always a hard error now.

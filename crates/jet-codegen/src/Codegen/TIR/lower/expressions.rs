@@ -1968,8 +1968,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let sig = cx.sigs.get(name);
             let borrow = matches!(
                 sig.and_then(|ps| ps.first()),
-                // D-CAP9: Share borrows like Read (see lower_one_call_arg).
-                Some((AccessConvention::Read | AccessConvention::Share, t)) if !t.is_scalar()
+                Some((AccessConvention::Read, t)) if !t.is_scalar()
             );
             let calls: Vec<TExpr> = items
                 .iter()

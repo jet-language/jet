@@ -181,7 +181,6 @@ impl<'a> Checker<'a> {
                     sendable: true,
                     task_lint_span: None,
                     single_use_span: None,
-                    task_has_view_capture: false,
                 },
             );
             self.uninit.insert(b.name.clone(), b.name_span);
@@ -237,7 +236,7 @@ impl<'a> Checker<'a> {
                 if let Some(info) = self.lookup(n) {
                     if !info.ty.is_scalar() {
                         if matches!(info.param_conv, Some(AccessConvention::Read))
-                            && is_cloneable(&info.ty, self.registry, self.structs)
+                            && is_cloneable(&info.ty, self.registry)
                         {
                             // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to —
                             // one mechanism for "duplicate this value".
@@ -490,7 +489,6 @@ impl<'a> Checker<'a> {
             // E2307 check on `Expr::Ident` reads (this binding's init was already
             // inferred above) already caught `y :: d` for a live view `d`; a
             // second check here would double-report the same span.
-            let task_has_view_capture = self.view_capture_tasks.contains(&b.name);
             self.declare(
                 &b.name,
                 b.name_span,
@@ -503,7 +501,6 @@ impl<'a> Checker<'a> {
                     sendable: binding_sendable,
                     task_lint_span,
                     single_use_span,
-                    task_has_view_capture,
                 },
             );
             self.current_binding_name = prev_binding_name;

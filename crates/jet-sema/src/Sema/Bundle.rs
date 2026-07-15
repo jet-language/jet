@@ -493,7 +493,6 @@ pub(crate) fn check_bundle_opts(
                 types: HashMap::new(),
                 computed_fields: HashMap::new(),
             },
-            structs: HashMap::new(),
             consts: HashMap::new(),
             imports: HashMap::new(),
             core_imports: HashMap::new(),
@@ -526,7 +525,7 @@ pub(crate) fn check_bundle_opts(
             if consumer == *owner { continue; }
             match item {
                 Item::Struct(def) => {
-                    register_struct(def, &mut st.registry, &mut st.structs, &mut diags, &st.funcs, &st.consts);
+                    register_struct(def, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                     st.type_pub.insert(def.name.clone(), def.is_pub && !def.is_package_pub);
                     st.type_pkg_pub.insert(def.name.clone(), def.is_package_pub);
                 }
@@ -646,7 +645,6 @@ pub(crate) fn check_bundle_opts(
                     register_struct(
                         s,
                         &mut st.registry,
-                        &mut st.structs,
                         &mut diags,
                         &st.funcs,
                         &st.consts,
@@ -978,7 +976,6 @@ pub(crate) fn check_bundle_opts(
                             register_struct(
                                 s,
                                 &mut st.registry,
-                                &mut st.structs,
                                 &mut diags,
                                 &st.funcs,
                                 &st.consts,

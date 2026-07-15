@@ -25,7 +25,6 @@ impl<'a> Checker<'a> {
                     sendable,
                     task_lint_span,
                     single_use_span,
-                    task_has_view_capture: false,
                 },
             );
         }

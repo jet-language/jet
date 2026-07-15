@@ -113,7 +113,6 @@ impl<'a> Checker<'a> {
                             sendable: true,
                             task_lint_span: None,
                             single_use_span: None,
-                            task_has_view_capture: false,
                         },
                     );
                 }
@@ -159,7 +158,6 @@ impl<'a> Checker<'a> {
                         sendable: true,
                         task_lint_span: None,
                         single_use_span: None,
-                        task_has_view_capture: false,
                     },
                 );
             }
@@ -246,7 +244,6 @@ impl<'a> Checker<'a> {
                     sendable: true,
                     task_lint_span: None,
                     single_use_span: None,
-                    task_has_view_capture: false,
                 },
             );
             for clause in &mut f.post {
@@ -602,7 +599,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     let mut consts: HashMap<String, Type> = HashMap::new();
     let mut trait_reg = TraitRegistry::default();
     // Legacy M2 struct field-type map, kept for the cloneable helper.
-    let mut struct_fields_legacy: HashMap<String, Vec<Type>> = HashMap::new();
 
     // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field` rewrite +
     // synthesized getter methods, before anything else sees the struct.
@@ -694,7 +690,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::Struct(s) => register_struct(
                 s,
                 &mut registry,
-                &mut struct_fields_legacy,
                 &mut diags,
                 &funcs,
                 &consts,
@@ -897,7 +892,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     Item::Struct(s) => register_struct(
                         s,
                         &mut registry,
-                        &mut struct_fields_legacy,
                         &mut diags,
                         &funcs,
                         &consts,
@@ -1124,7 +1118,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     f,
                     &funcs,
                     &registry,
-                    &struct_fields_legacy,
                     &consts,
                     &trait_reg,
                     None,
@@ -1145,7 +1138,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         m,
                         &funcs,
                         &registry,
-                        &struct_fields_legacy,
                         &consts,
                         &trait_reg,
                         Some(&i.type_name),
@@ -1167,7 +1159,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         m,
                         &funcs,
                         &registry,
-                        &struct_fields_legacy,
                         &consts,
                         &trait_reg,
                         Some(&s.name),
@@ -1188,7 +1179,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             m,
                             &funcs,
                             &registry,
-                            &struct_fields_legacy,
                             &consts,
                             &trait_reg,
                             Some(&s.name),
@@ -1211,7 +1201,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         m,
                         &funcs,
                         &registry,
-                        &struct_fields_legacy,
                         &consts,
                         &trait_reg,
                         Some(&e.name),
@@ -1272,7 +1261,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &mut synthetic,
                     &funcs,
                     &registry,
-                    &struct_fields_legacy,
                     &consts,
                     &trait_reg,
                     None,
@@ -1294,7 +1282,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     ec,
                     &funcs,
                     &registry,
-                    &struct_fields_legacy,
                     &consts,
                     &trait_reg,
                     &ct_funcs,
@@ -1607,7 +1594,6 @@ pub(crate) fn check_func_body(
     f: &mut Func,
     funcs: &HashMap<String, FuncSig>,
     registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<Type>>,
     consts: &HashMap<String, Type>,
     trait_reg: &TraitRegistry,
     owner_type: Option<&str>,
@@ -1635,7 +1621,6 @@ pub(crate) fn check_func_body(
     let mut ck = Checker {
         funcs,
         registry,
-        structs,
         consts,
         modules: None,
         module_idx: 0,
@@ -1773,7 +1758,6 @@ pub(crate) fn check_error_conv_body(
     ec: &mut crate::AST::ErrorConvDef,
     funcs: &HashMap<String, FuncSig>,
     registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<Type>>,
     consts: &HashMap<String, Type>,
     trait_reg: &TraitRegistry,
     ct_funcs: &HashMap<String, Func>,
@@ -1843,7 +1827,6 @@ pub(crate) fn check_error_conv_body(
         &mut synthetic,
         funcs,
         registry,
-        structs,
         consts,
         trait_reg,
         Some(&ec.from_ty),

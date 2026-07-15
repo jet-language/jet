@@ -1211,7 +1211,6 @@ pub(crate) fn check_module_bodies(
                     ec,
                     &st.funcs,
                     &st.registry,
-                    &st.structs,
                     &st.consts,
                     &st.trait_reg,
                     &ct_funcs,
@@ -1253,7 +1252,6 @@ pub(crate) fn check_func_body_bundle(
     let mut ck = Checker {
         funcs: &st.funcs,
         registry: &st.registry,
-        structs: &st.structs,
         consts: &st.consts,
         modules: Some(states),
         module_idx,

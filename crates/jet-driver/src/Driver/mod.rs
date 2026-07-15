@@ -1488,11 +1488,25 @@ fn compile_bundle_path_opts_full(
     })
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CompileSrcOptions {
+    pub web_target: bool,
+}
+
 /// In-memory pipeline: lex → parse → bundle → sema → ffi → codegen.
 pub fn compile_src(
     src: &str,
     file: &str,
     mode: crate::Sema::CompileMode,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_src_with_options(src, file, mode, CompileSrcOptions::default())
+}
+
+pub fn compile_src_with_options(
+    src: &str,
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    options: CompileSrcOptions,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     if !lex_diags.is_empty() {
@@ -1524,7 +1538,7 @@ pub fn compile_src(
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: std::collections::HashMap::new(),
-        web_partition_enforced: false,
+        web_partition_enforced: options.web_target,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OsTarget::host(),
@@ -1553,7 +1567,38 @@ pub fn compile_src(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
+    if options.web_target {
+        let web_tir_errors: Vec<_> =
+            crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref())
+                .into_iter()
+                .map(|miss| {
+                    Diagnostic::error(
+                        "E-WEB-TIR-UNSUPPORTED",
+                        format!("web output cannot compile `{}` yet", miss.func_name),
+                        "web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today".to_string(),
+                        "move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target".to_string(),
+                        Some(miss.span),
+                    )
+                })
+                .collect();
+        if !web_tir_errors.is_empty() {
+            return Err(web_tir_errors);
+        }
+    }
     let rust = crate::Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
+    let web = if options.web_target {
+        Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
+            vec![Diagnostic::error(
+                "E-WEB-TIR-UNSUPPORTED",
+                format!("web output cannot compile `{}` yet", miss.func_name),
+                "web emitter capability facts drifted after validation".to_string(),
+                "report this compiler bug with the named function".to_string(),
+                Some(miss.span),
+            )]
+        })?)
+    } else {
+        None
+    };
     // c110: capabilities are derived from semantic facts (resolved Core calls,
     // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
     let capabilities = crate::Capabilities::from_sema(
@@ -1569,7 +1614,7 @@ pub fn compile_src(
         clinks: Vec::new(),
         capabilities,
         comptime_inputs,
-        web: None,
+        web,
         web_partition_report: bundle.web_partition_report.clone(),
         plugin: None,
         inferred_layer: bundle.inferred_layer,

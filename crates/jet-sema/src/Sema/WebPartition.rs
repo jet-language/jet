@@ -60,62 +60,17 @@ fn collect_abi_types(items: &[Item], out: &mut AbiTypeIndex) {
 }
 
 fn clone_struct(s: &StructDef) -> StructDef {
-    StructDef {
-        span: s.span,
-        is_pub: s.is_pub,
-        is_package_pub: s.is_package_pub,
-        name: s.name.clone(),
-        name_span: s.name_span,
-        type_params: s.type_params.clone(),
-        fields: s.fields.clone(),
-        methods: Vec::new(),
-        trait_impls: Vec::new(),
-        derives: s.derives.clone(),
-        is_published_schema: s.is_published_schema,
-        published_schema_span: s.published_schema_span,
-        is_single_use: s.is_single_use,
-        single_use_span: s.single_use_span,
-        is_must_use: s.is_must_use,
-        must_use_span: s.must_use_span,
-        layout: s.layout.clone(),
-        layout_span: s.layout_span,
-        serde_markers: s.serde_markers.clone(),
-        type_markers: s.type_markers.clone(),
-        validate_block: s.validate_block.clone(),
-        validate_span: s.validate_span,
-    }
-}
-
-fn clone_variant(v: &crate::AST::Variant) -> crate::AST::Variant {
-    crate::AST::Variant {
-        name: v.name.clone(),
-        name_span: v.name_span,
-        payload: v.payload.clone(),
-        discriminant: v.discriminant,
-        serde_markers: v.serde_markers.clone(),
-    }
+    let mut result = s.clone();
+    result.methods.clear();
+    result.trait_impls.clear();
+    result
 }
 
 fn clone_enum(e: &crate::AST::EnumDef) -> EnumDef {
-    EnumDef {
-        span: e.span,
-        is_pub: e.is_pub,
-        is_package_pub: e.is_package_pub,
-        name: e.name.clone(),
-        name_span: e.name_span,
-        type_params: e.type_params.clone(),
-        variants: e.variants.iter().map(clone_variant).collect(),
-        methods: Vec::new(),
-        trait_impls: Vec::new(),
-        derives: e.derives.clone(),
-        is_single_use: e.is_single_use,
-        single_use_span: e.single_use_span,
-        is_must_use: e.is_must_use,
-        must_use_span: e.must_use_span,
-        serde_markers: e.serde_markers.clone(),
-        type_markers: e.type_markers.clone(),
-        groups: e.groups.clone(),
-    }
+    let mut result = e.clone();
+    result.methods.clear();
+    result.trait_impls.clear();
+    result
 }
 
 fn has_codable_derive(derives: &[(String, crate::Diagnostics::Span)]) -> bool {

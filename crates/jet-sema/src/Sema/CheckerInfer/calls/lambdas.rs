@@ -197,7 +197,7 @@ impl<'a> Checker<'a> {
                     if mut_caps.contains(name) {
                         continue;
                     }
-                    if !is_cloneable(&cap_ty, self.registry, self.structs) {
+                    if !is_cloneable(&cap_ty, self.registry) {
                         if !taken {
                             if self.is_task_spawn {
                                 self.diags.push(Diagnostic::error(
@@ -274,7 +274,6 @@ impl<'a> Checker<'a> {
                         sendable: true,
                         task_lint_span: None,
                         single_use_span: None,
-                        task_has_view_capture: false,
                     },
                 );
             }

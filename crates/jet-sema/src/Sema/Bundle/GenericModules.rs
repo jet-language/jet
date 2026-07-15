@@ -388,26 +388,9 @@ fn mapped_definition_name(name: &str, types: &HashMap<String, Type>) -> String {
     }
 }
 
-fn clone_trait(source: &crate::AST::TraitDef) -> crate::AST::TraitDef {
-    crate::AST::TraitDef {
-        span: source.span,
-        is_pub: source.is_pub,
-        is_package_pub: source.is_package_pub,
-        name: source.name.clone(),
-        name_span: source.name_span,
-        assoc_types: source.assoc_types.clone(),
-        methods: source.methods.clone(),
-    }
-}
-
-fn clone_tag(source: &crate::AST::TagDef) -> crate::AST::TagDef {
-    crate::AST::TagDef { is_pub: source.is_pub, is_package_pub: source.is_package_pub,
-        name: source.name.clone(), name_span: source.name_span, methods: source.methods.clone(), span: source.span }
-}
-
 fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
-    let mut result = clone_tag(source);
+    let mut result = source.clone();
     result.name = mapped_definition_name(&source.name, types);
     for method in &mut result.methods {
         for param in &mut method.params { param.ty = specialize_module_type(&param.ty, types, values); }
@@ -417,45 +400,9 @@ fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
     result
 }
 
-fn clone_impl(source: &crate::AST::ImplDef) -> crate::AST::ImplDef {
-    crate::AST::ImplDef {
-        span: source.span,
-        type_name: source.type_name.clone(),
-        type_span: source.type_span,
-        trait_name: source.trait_name.clone(),
-        trait_span: source.trait_span,
-        methods: source.methods.clone(),
-        delegation_field: source.delegation_field.clone(),
-        assoc_type_impls: source.assoc_type_impls.clone(),
-        is_generated_serde: source.is_generated_serde,
-        os_target: source.os_target,
-    }
-}
-
-fn clone_error_conv(source: &crate::AST::ErrorConvDef) -> crate::AST::ErrorConvDef {
-    crate::AST::ErrorConvDef {
-        from_ty: source.from_ty.clone(),
-        from_span: source.from_span,
-        to_ty: source.to_ty.clone(),
-        to_span: source.to_span,
-        body: source.body.clone(),
-        body_span: source.body_span,
-    }
-}
-
-fn clone_test(source: &crate::AST::TestDef) -> crate::AST::TestDef {
-    crate::AST::TestDef { span: source.span, name: source.name.clone(), name_span: source.name_span,
-        params: source.params.clone(), fn_keyword_span: source.fn_keyword_span, body: source.body.clone() }
-}
-
-fn clone_bench(source: &crate::AST::BenchDef) -> crate::AST::BenchDef {
-    crate::AST::BenchDef { span: source.span, name: source.name.clone(), name_span: source.name_span,
-        body: source.body.clone() }
-}
-
 fn specialize_test(source: &crate::AST::TestDef, alias: &str,
     types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TestDef {
-    let mut result = clone_test(source);
+    let mut result = source.clone();
     result.name = format!("{alias}__{}", source.name);
     for param in &mut result.params {
         param.ty = specialize_module_type(&param.ty, types, values);
@@ -467,7 +414,7 @@ fn specialize_test(source: &crate::AST::TestDef, alias: &str,
 
 fn specialize_bench(source: &crate::AST::BenchDef, alias: &str,
     types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::BenchDef {
-    let mut result = clone_bench(source);
+    let mut result = source.clone();
     result.name = format!("{alias}__{}", source.name);
     substitute_stmts(&mut result.body, types, values);
     result
@@ -480,7 +427,7 @@ fn specialize_trait(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> crate::AST::TraitDef {
-    let mut result = clone_trait(source);
+    let mut result = source.clone();
     result.name = mapped_definition_name(&source.name, types);
     for method in &mut result.methods {
         for param in &mut method.params {
@@ -505,7 +452,7 @@ fn specialize_impl(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> crate::AST::ImplDef {
-    let mut result = clone_impl(source);
+    let mut result = source.clone();
     result.type_name = mapped_definition_name(&source.type_name, types);
     result.trait_name = source.trait_name.as_ref().map(|name| mapped_definition_name(name, types));
     result.methods = source.methods.iter().cloned()
@@ -521,7 +468,7 @@ fn specialize_error_conv(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> crate::AST::ErrorConvDef {
-    let mut result = clone_error_conv(source);
+    let mut result = source.clone();
     result.from_ty = mapped_definition_name(&source.from_ty, types);
     result.to_ty = mapped_definition_name(&source.to_ty, types);
     substitute_stmts(&mut result.body, types, values);
@@ -580,7 +527,10 @@ fn specialize_nested_code_module(
             Item::Const(def) => {
                 let mut value = def.value.clone();
                 substitute_expr(&mut value, types, values);
-                Some(Item::Const(crate::AST::ConstDef { span: def.span, name: def.name.clone(), name_span: def.name_span, value, meta: def.meta.clone(), attrs: def.attrs.clone(), rust_kind: def.rust_kind, is_comptime: def.is_comptime, ct: def.ct.clone(), ty: def.ty.as_ref().map(|ty| specialize_module_type(ty, types, values)), is_persist: def.is_persist, persist_span: def.persist_span }))
+                let mut result = def.clone();
+                result.value = value;
+                result.ty = def.ty.as_ref().map(|ty| specialize_module_type(ty, types, values));
+                Some(Item::Const(result))
             }
             Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(child, params, args, types, values))),
             Item::Trait(def) => Some(Item::Trait(specialize_trait(def, params, args, types, values))),
@@ -592,7 +542,9 @@ fn specialize_nested_code_module(
             _ => None,
         }).collect()
     });
-    CodeModule { name: module.name.clone(), name_span: module.name_span, is_pub: module.is_pub, is_package_pub: module.is_package_pub, body, web_target: module.web_target, instance_identity: module.instance_identity.clone(), span: module.span }
+    let mut result = module.clone();
+    result.body = body;
+    result
 }
 
 fn specialize_struct(
@@ -669,45 +621,21 @@ fn specialize_struct(
                 .collect(),
         })
         .collect();
-    crate::AST::StructDef {
-        span: source.span,
-        is_pub: source.is_pub,
-        is_package_pub: source.is_package_pub,
-        name: if alias.is_empty() {
-            source.name.clone()
-        } else {
-            format!("{alias}__{}", source.name)
-        },
-        name_span: source.name_span,
-        type_params: source.type_params.clone(),
-        fields,
-        methods,
-        trait_impls,
-        derives: source.derives.iter().map(|(name, span)| (mapped_definition_name(name, &types), *span)).collect(),
-        is_published_schema: source.is_published_schema,
-        published_schema_span: source.published_schema_span,
-        is_single_use: source.is_single_use,
-        single_use_span: source.single_use_span,
-        is_must_use: source.is_must_use,
-        must_use_span: source.must_use_span,
-        layout: source.layout.clone(),
-        layout_span: source.layout_span,
-        serde_markers: source.serde_markers.clone(),
-        type_markers: source.type_markers.clone(),
-        validate_block: source.validate_block.clone(),
-        validate_span: source.validate_span,
+    let mut result = source.clone();
+    if !alias.is_empty() {
+        result.name = format!("{alias}__{}", source.name);
     }
+    result.fields = fields;
+    result.methods = methods;
+    result.trait_impls = trait_impls;
+    result.derives = source.derives.iter().map(|(name, span)| {
+        (mapped_definition_name(name, &types), *span)
+    }).collect();
+    result
 }
 
 pub(super) fn clone_struct(source: &crate::AST::StructDef) -> crate::AST::StructDef {
-    specialize_struct(
-        source,
-        "",
-        &[],
-        &[],
-        &HashMap::new(),
-        &HashMap::new(),
-    )
+    source.clone()
 }
 
 fn specialize_enum(
@@ -807,40 +735,21 @@ fn specialize_enum(
                 .collect(),
         })
         .collect();
-    crate::AST::EnumDef {
-        span: source.span,
-        is_pub: source.is_pub,
-        is_package_pub: source.is_package_pub,
-        name: if alias.is_empty() {
-            source.name.clone()
-        } else {
-            format!("{alias}__{}", source.name)
-        },
-        name_span: source.name_span,
-        type_params: source.type_params.clone(),
-        variants,
-        methods,
-        trait_impls,
-        derives: source.derives.iter().map(|(name, span)| (mapped_definition_name(name, &types), *span)).collect(),
-        is_single_use: source.is_single_use,
-        single_use_span: source.single_use_span,
-        is_must_use: source.is_must_use,
-        must_use_span: source.must_use_span,
-        serde_markers: source.serde_markers.clone(),
-        type_markers: source.type_markers.clone(),
-        groups: source.groups.clone(),
+    let mut result = source.clone();
+    if !alias.is_empty() {
+        result.name = format!("{alias}__{}", source.name);
     }
+    result.variants = variants;
+    result.methods = methods;
+    result.trait_impls = trait_impls;
+    result.derives = source.derives.iter().map(|(name, span)| {
+        (mapped_definition_name(name, &types), *span)
+    }).collect();
+    result
 }
 
 pub(super) fn clone_enum(source: &crate::AST::EnumDef) -> crate::AST::EnumDef {
-    specialize_enum(
-        source,
-        "",
-        &[],
-        &[],
-        &HashMap::new(),
-        &HashMap::new(),
-    )
+    source.clone()
 }
 
 #[derive(Clone)]
@@ -851,6 +760,7 @@ enum ResolvedModuleParam {
 }
 
 /// A cloned view of a generic module template.
+#[derive(Clone)]
 struct TemplateInfo {
     def: GenericModuleDef,
     definition_id: String,
@@ -861,54 +771,14 @@ struct TemplateInfo {
     source_values: HashMap<String, crate::AST::CtValue>,
 }
 
-impl Clone for TemplateInfo {
-    fn clone(&self) -> Self {
-        Self {
-            def: clone_generic_module_def(&self.def),
-            definition_id: self.definition_id.clone(),
-            definition_full_key: self.definition_full_key.clone(),
-            params: self.params.clone(),
-            source_module: self.source_module,
-            source_items: clone_definition_items(&self.source_items),
-            source_values: self.source_values.clone(),
-        }
-    }
-}
-
 fn clone_definition_items(items: &[Item]) -> Vec<Item> {
     items
         .iter()
-        .filter_map(|item| match item {
-            Item::Func(def) => Some(Item::Func(def.clone())),
-            Item::Struct(def) => Some(Item::Struct(clone_struct(def))),
-            Item::Enum(def) => Some(Item::Enum(clone_enum(def))),
-            Item::Trait(def) => Some(Item::Trait(clone_trait(def))),
-            Item::Tag(def) => Some(Item::Tag(clone_tag(def))),
-            Item::Impl(def) => Some(Item::Impl(clone_impl(def))),
-            Item::ErrorConv(def) => Some(Item::ErrorConv(clone_error_conv(def))),
-            Item::Test(def) => Some(Item::Test(clone_test(def))),
-            Item::Bench(def) => Some(Item::Bench(clone_bench(def))),
-            Item::Const(def) => Some(Item::Const(crate::AST::ConstDef {
-                span: def.span,
-                name: def.name.clone(),
-                name_span: def.name_span,
-                value: def.value.clone(),
-                meta: def.meta.clone(),
-                attrs: def.attrs.clone(),
-                rust_kind: def.rust_kind,
-                is_comptime: def.is_comptime,
-                ct: def.ct.clone(),
-                ty: def.ty.clone(),
-                is_persist: def.is_persist,
-                persist_span: def.persist_span,
-            })),
-            _ => None,
-        })
+        .filter(|item| matches!(item, Item::Func(_) | Item::Struct(_) | Item::Enum(_)
+            | Item::Trait(_) | Item::Tag(_) | Item::Impl(_) | Item::ErrorConv(_)
+            | Item::Test(_) | Item::Bench(_) | Item::Const(_)))
+        .cloned()
         .collect()
-}
-
-fn clone_generic_module_def(gm: &GenericModuleDef) -> GenericModuleDef {
-    gm.clone()
 }
 
 struct AliasExpansion {
@@ -921,7 +791,7 @@ fn specialize_nested_template_outer(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> GenericModuleDef {
-    let mut result = clone_generic_module_def(source);
+    let mut result = source.clone();
     result.body = result.body.into_iter().map(|item| match item {
         Item::Func(func) => Item::Func(specialize_func(func, &[], &[], types, values)),
         Item::Struct(def) => Item::Struct(specialize_struct(&def, "", &[], &[], types, values)),
@@ -1714,7 +1584,7 @@ fn expand_alias(
         }).collect();
         let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
             let full_key = definition_full_key("nested", "", &info.definition_id, &def.name);
-            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
+            (def.name.clone(), TemplateInfo { def: def.clone(), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
                 params: resolve_params(def, &nested_traits, &nested_enums, diags),
                 source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone() })
         }).collect();
@@ -1996,7 +1866,7 @@ pub(crate) fn expand_generic_module_aliases(
                         Some((
                             gm.name.clone(),
                             TemplateInfo {
-                                def: clone_generic_module_def(gm),
+                                def: gm.clone(),
                                 definition_id: crate::SHA256::sha256_hex(&full_key),
                                 definition_full_key: full_key,
                                 params: resolve_params(gm, &traits, &enums, diags),
@@ -2398,7 +2268,7 @@ fn run() {}
             Item::GenericModule(template) => Some(template),
             _ => None,
         }).expect("generic template");
-        let snapshot = clone_generic_module_def(template);
+        let snapshot = template.clone();
         assert_eq!(snapshot.body.len(), template.body.len());
         assert_eq!(
             crate::CanonicalAST::canonical_fragment(&snapshot.body),

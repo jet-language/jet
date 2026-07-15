@@ -2,6 +2,7 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{self, is_type_var_name};
 use crate::Syntax;
+pub(crate) use crate::Syntax::edit_distance;
 use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
@@ -171,13 +172,9 @@ pub(crate) fn if_definitely_returns(ifs: &IfStmt) -> bool {
     }
 }
 
-pub(crate) fn is_cloneable(
-    ty: &Type,
-    registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<Type>>,
-) -> bool {
+pub(crate) fn is_cloneable(ty: &Type, registry: &TypeRegistry) -> bool {
     let mut visiting = HashSet::new();
-    is_cloneable_rec(ty, registry, structs, &mut visiting)
+    is_cloneable_rec(ty, registry, &mut visiting)
 }
 
 /// `is_cloneable`'s recursion, with a `visiting` guard against self-referential
@@ -188,22 +185,21 @@ pub(crate) fn is_cloneable(
 fn is_cloneable_rec(
     ty: &Type,
     registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<Type>>,
     visiting: &mut HashSet<String>,
 ) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-            is_cloneable_rec(inner, registry, structs, visiting)
+            is_cloneable_rec(inner, registry, visiting)
         }
         Type::Map { key, value, .. } => {
-            is_cloneable_rec(key, registry, structs, visiting)
-                && is_cloneable_rec(value, registry, structs, visiting)
+            is_cloneable_rec(key, registry, visiting)
+                && is_cloneable_rec(value, registry, visiting)
         }
         Type::Result { ok, err } => {
-            is_cloneable_rec(ok, registry, structs, visiting)
-                && is_cloneable_rec(err, registry, structs, visiting)
+            is_cloneable_rec(ok, registry, visiting)
+                && is_cloneable_rec(err, registry, visiting)
         }
         Type::Fn { .. } => false,
         Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
@@ -215,22 +211,22 @@ fn is_cloneable_rec(
                 && match registry.types.get(name) {
                     Some(TypeDef::Struct { fields, .. }) => fields
                         .iter()
-                        .all(|(_, _, fty, _)| is_cloneable_rec(fty, registry, structs, visiting)),
+                        .all(|(_, _, fty, _)| is_cloneable_rec(fty, registry, visiting)),
                     Some(TypeDef::Enum { variants, .. }) => {
                         variants.values().all(|(_, p)| match p {
                             VariantPayload::Unit => true,
                             VariantPayload::Single(t, _) => {
-                                is_cloneable_rec(t, registry, structs, visiting)
+                                is_cloneable_rec(t, registry, visiting)
                             }
                             VariantPayload::Named(fs) => fs
                                 .iter()
-                                .all(|f| is_cloneable_rec(&f.ty, registry, structs, visiting)),
+                                .all(|f| is_cloneable_rec(&f.ty, registry, visiting)),
                         })
                     }
                     // D-DIST1: distinct types wrap a scalar; they are always cloneable.
                     Some(TypeDef::Distinct { .. }) => true,
                     Some(TypeDef::Alias { target, .. }) => {
-                        is_cloneable_rec(target, registry, structs, visiting)
+                        is_cloneable_rec(target, registry, visiting)
                     }
                     None => false,
                 };
@@ -239,13 +235,13 @@ fn is_cloneable_rec(
         }
         Type::Apply { args, .. } => args
             .iter()
-            .all(|a| is_cloneable_rec(a, registry, structs, visiting)),
+            .all(|a| is_cloneable_rec(a, registry, visiting)),
         Type::Tuple(fields) => fields
             .iter()
-            .all(|(_, t)| is_cloneable_rec(t, registry, structs, visiting)),
+            .all(|(_, t)| is_cloneable_rec(t, registry, visiting)),
         Type::TraitObject(_) => false,
-        Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, structs, visiting),
-        Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, structs, visiting),
+        Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, visiting),
+        Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, visiting),
     }
 }
 
@@ -955,21 +951,6 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::TYPE_CHAR => Some(Type::Char),
         _ => None,
     }
-}
-
-pub(crate) fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    for i in 1..=a.len() {
-        let mut cur = vec![i];
-        for j in 1..=b.len() {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost));
-        }
-        prev = cur;
-    }
-    prev[b.len()]
 }
 
 /// D-FIELDPOL1: writing to a computed field (`s.field = v`, `s.field++`) — a

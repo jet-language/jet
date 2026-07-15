@@ -76,7 +76,6 @@ impl<'a> Checker<'a> {
                             sendable: true,
                             task_lint_span: None,
                             single_use_span: None,
-                            task_has_view_capture: false,
                         },
                     );
                 }
@@ -147,7 +146,6 @@ impl<'a> Checker<'a> {
                                     sendable: true,
                                     task_lint_span: None,
                                     single_use_span: None,
-                                    task_has_view_capture: false,
                                 },
                             );
                         }
@@ -181,7 +179,6 @@ impl<'a> Checker<'a> {
                                 sendable: true,
                                 task_lint_span: None,
                                 single_use_span: None,
-                                task_has_view_capture: false,
                             },
                         );
                     }

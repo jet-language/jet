@@ -333,8 +333,6 @@ pub(crate) fn access_keyword(c: AccessConvention) -> &'static str {
         AccessConvention::Read => "read",
         AccessConvention::Write => Syntax::SIGIL_WRITE,
         AccessConvention::Move => Syntax::SIGIL_MOVE,
-        AccessConvention::Share => Syntax::SIGIL_WRITE,
-        AccessConvention::Raw => "raw",
     }
 }
 

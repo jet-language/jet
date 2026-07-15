@@ -1192,7 +1192,7 @@ impl<'a> Checker<'a> {
                 match (param_conv, arg.convention) {
                     (AccessConvention::Move, AccessConvention::Read) => {
                         if let Expr::Ident(name, span) = &arg.expr {
-                            if is_cloneable(param_ty, self.registry, self.structs) {
+                            if is_cloneable(param_ty, self.registry) {
                                 arg.flags.implicit_clone = true;
                                 // D-MEM1/S2 (was D-L0201 lint): a hard error now,
                                 // regardless of liveness — no clone is ever silent.

@@ -1,4 +1,5 @@
 use jet_semindex::SourceSpan;
+pub(super) use jet_driver::Diagnostics::json_str;
 
 use super::graph_helpers::{edit_error, project_edit_error, query_error};
 use super::graph_json::{CommentHint, canvas_collapse_hints, canvas_comment_hints};
@@ -602,26 +603,6 @@ pub(super) fn json_strs(values: &[String]) -> String {
         .join(",")
 }
 
-pub(super) fn json_str(s: &str) -> String {
-    format!("\"{}\"", json_escape(s))
-}
-
 pub(super) fn json_optional_str(value: Option<&str>) -> String {
     value.map(json_str).unwrap_or_else(|| "null".to_string())
-}
-
-pub(super) fn json_escape(s: &str) -> String {
-    let mut out = String::new();
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
 }

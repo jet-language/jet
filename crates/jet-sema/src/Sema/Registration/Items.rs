@@ -77,7 +77,6 @@ pub(crate) fn register_distinct(
     registry.types.insert(
         d.name.clone(),
         TypeDef::Distinct {
-            name_span: d.name_span,
             base: d.base.clone(),
             is_numeric: d.is_numeric,
             is_comparable: d.is_comparable,
@@ -121,7 +120,6 @@ pub(crate) fn register_type_alias(
     registry.types.insert(
         a.name.clone(),
         TypeDef::Alias {
-            name_span: a.name_span,
             params: a.type_params.clone(),
             target: a.target.clone(),
         },
@@ -401,7 +399,6 @@ pub(crate) fn register_const(
 pub(crate) fn register_struct(
     s: &StructDef,
     registry: &mut TypeRegistry,
-    legacy: &mut HashMap<String, Vec<Type>>,
     diags: &mut Vec<Diagnostic>,
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
@@ -466,7 +463,6 @@ pub(crate) fn register_struct(
     registry.types.insert(
         s.name.clone(),
         TypeDef::Struct {
-            name_span: s.name_span,
             fields,
             methods: HashMap::new(),
             single_use: s.is_single_use,
@@ -480,10 +476,6 @@ pub(crate) fn register_struct(
             .computed_fields
             .insert(s.name.clone(), computed_fields);
     }
-    legacy.insert(
-        s.name.clone(),
-        s.fields.iter().map(|f| f.ty.clone()).collect(),
-    );
     // D-REPRC1: `#layout(c)` structs may not contain growable fields.
     if s.layout == Some(crate::AST::StructLayout::C) {
         for f in &s.fields {
@@ -592,7 +584,6 @@ pub(crate) fn register_enum(
     registry.types.insert(
         e.name.clone(),
         TypeDef::Enum {
-            name_span: e.name_span,
             variants,
             variant_order,
             groups,

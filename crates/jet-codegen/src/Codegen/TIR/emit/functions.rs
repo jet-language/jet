@@ -169,7 +169,7 @@ pub(crate) fn emit_tir_method(
     if let Some(conv) = self_conv {
         params.push(
             match conv {
-                AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => "&self",
+                AccessConvention::Read => "&self",
                 AccessConvention::Write => "&mut self",
                 AccessConvention::Move => "self",
             }
@@ -253,7 +253,7 @@ pub(crate) fn emit_tir_trait_method(
     // D-MUTSELF1: the receiver honors the source convention — `&self` / `&mut self` /
     // `self` — matching `emit_trait_method` and the trait declaration (emit_trait_def).
     let self_recv = match self_conv {
-        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => "&self",
+        AccessConvention::Read => "&self",
         AccessConvention::Write => "&mut self",
         AccessConvention::Move => "self",
     };

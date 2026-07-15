@@ -661,11 +661,11 @@ impl<'a> Fmt<'a> {
     fn fmt_param(&mut self, p: &Param) {
         // D-MEM1: capability is a sigil, never a word. The sigil rides the type
         // (`name: &Type`), or `self` for a receiver (`&self`). `Read` is
-        // unmarked; `Share`/`Raw` aren't produced on parameters yet.
+        // unmarked.
         let sigil = match p.convention {
             AccessConvention::Write => Some(Syntax::SIGIL_WRITE),
             AccessConvention::Move => Some(Syntax::SIGIL_MOVE),
-            AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => None,
+            AccessConvention::Read => None,
         };
         let is_self_receiver = p.name == Syntax::KW_SELF && p.ty.name().is_empty();
         if is_self_receiver {

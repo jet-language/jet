@@ -8,33 +8,21 @@ use super::SymbolDB::{SymKind, SymbolDB};
 use jet_foundation::JSON::json_escape;
 
 /// LSP completion item kinds (standard integers).
-#[allow(dead_code)]
 mod ck {
-    pub const TEXT: u8 = 1;
     pub const METHOD: u8 = 2;
     pub const FUNCTION: u8 = 3;
-    pub const CONSTRUCTOR: u8 = 4;
     pub const FIELD: u8 = 5;
     pub const VARIABLE: u8 = 6;
     pub const CLASS: u8 = 7;
     pub const INTERFACE: u8 = 8;
     pub const MODULE: u8 = 9;
     pub const PROPERTY: u8 = 10;
-    pub const UNIT: u8 = 11;
-    pub const VALUE: u8 = 12;
     pub const ENUM: u8 = 13;
     pub const KEYWORD: u8 = 14;
     pub const SNIPPET: u8 = 15;
-    pub const COLOR: u8 = 16;
-    pub const FILE: u8 = 17;
-    pub const REFERENCE: u8 = 18;
-    pub const FOLDER: u8 = 19;
     pub const ENUM_MEMBER: u8 = 20;
     pub const CONSTANT: u8 = 21;
     pub const STRUCT: u8 = 22;
-    pub const EVENT: u8 = 23;
-    pub const OPERATOR: u8 = 24;
-    pub const TYPE_PARAMETER: u8 = 25;
 }
 
 pub(crate) struct CompletionItem {

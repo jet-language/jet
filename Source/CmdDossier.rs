@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
+use jet::Diagnostics::json_str as json_string;
 use jet::ExitCodes;
 use jet_semindex::{open, SemIndexError};
 
@@ -193,23 +194,6 @@ fn command_text(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
         "  completion words: {}\n",
         command.completion_words().join(" ")
     ));
-    out
-}
-
-fn json_string(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '\"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('\"');
     out
 }
 

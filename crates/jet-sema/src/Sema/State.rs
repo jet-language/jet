@@ -27,6 +27,7 @@
 //! rather than guessing (P1 — beginners never see a spurious error).
 
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Syntax::edit_distance;
 use crate::AST::{Call, ElseBranch, Expr, Func, IfStmt, Item, LValue, Stmt};
 use std::collections::{HashMap, HashSet};
 
@@ -797,34 +798,6 @@ pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
         ),
         Some(span),
     )
-}
-
-/// Simple Levenshtein distance (capped at 3) for state-name suggestions in E0151.
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let (m, n) = (a.len(), b.len());
-    if m == 0 {
-        return n.min(3);
-    }
-    if n == 0 {
-        return m.min(3);
-    }
-    let mut row: Vec<usize> = (0..=n).collect();
-    for i in 1..=m {
-        let mut prev = row[0];
-        row[0] = i;
-        for j in 1..=n {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            let next = (row[j] + 1).min(row[j - 1] + 1).min(prev + cost);
-            prev = row[j];
-            row[j] = next;
-            if next >= 3 {
-                break;
-            }
-        }
-    }
-    row[n]
 }
 
 /// E0150 (D-STATE1): a typestate operation is called on a value in the wrong state.

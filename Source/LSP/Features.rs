@@ -348,28 +348,20 @@ pub(crate) fn compute_rename(
 // ── Semantic tokens ───────────────────────────────────────────────────────────
 //
 // Token type indices (must match the legend in initialize_response).
-#[allow(dead_code)] // wired in c41 (semantic token highlighting)
 mod st {
     pub const KEYWORD: u32 = 0;
     pub const TYPE: u32 = 1;
-    pub const FUNCTION: u32 = 2;
     pub const VARIABLE: u32 = 3;
-    pub const PARAMETER: u32 = 4;
-    pub const PROPERTY: u32 = 5;
-    pub const ENUM_MEMBER: u32 = 6;
     pub const STRING: u32 = 7;
     pub const NUMBER: u32 = 8;
     pub const COMMENT: u32 = 9;
     pub const OPERATOR: u32 = 10;
-    pub const NAMESPACE: u32 = 11;
     pub const OWNERSHIP: u32 = 12;
     pub const DECORATOR: u32 = 13;
 }
 
 // Modifier bitmasks
-#[allow(dead_code)] // wired in c41 (semantic token highlighting)
 mod sm {
-    pub const DECLARATION: u32 = 1 << 0;
     pub const READONLY: u32 = 1 << 1;
     pub const MOVE: u32 = 1 << 2;
     pub const WRITE_BORROW: u32 = 1 << 3;

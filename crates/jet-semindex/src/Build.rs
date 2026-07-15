@@ -194,14 +194,6 @@ impl SymbolDB {
         })).collect());
     }
 
-    /// Find the definition whose def_span contains `offset` in module at `path`.
-    #[allow(dead_code)]
-    fn def_at_offset(&self, path: &str, offset: usize) -> Option<&SymDef> {
-        self.defs.iter().find(|d| {
-            d.module_path == path && d.def_span.start <= offset && offset <= d.def_span.end
-        })
-    }
-
     /// Hover text for the symbol at `offset` in `path`.
     pub fn hover_at(&self, path: &str, offset: usize) -> Option<&str> {
         self.hover

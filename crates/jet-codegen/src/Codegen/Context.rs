@@ -1254,9 +1254,7 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
         || matches!(ty, Type::TraitObject(_))
     {
         return match convention {
-            // D-CAP9: `Share`/`Raw` aren't produced yet (specialized when their
-            // phases land); both follow `Read`.
-            AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
+            AccessConvention::Read => {
                 format!("&{base}")
             }
             AccessConvention::Write => format!("&mut {base}"),
@@ -1270,7 +1268,7 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
         || cx.current_type_params.borrow().contains(n.as_str()))
     {
         return match convention {
-            AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
+            AccessConvention::Read => {
                 format!("&{base}")
             }
             AccessConvention::Write => format!("&mut {base}"),
@@ -1281,15 +1279,10 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
         return base;
     }
     match convention {
-        // D-CAP9: Share/Raw follow Read until their phases specialize them.
-        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw
-            if ty.is_scalar() =>
-        {
+        AccessConvention::Read if ty.is_scalar() => {
             base
         }
-        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
-            format!("&{}", base)
-        }
+        AccessConvention::Read => format!("&{}", base),
         AccessConvention::Write => format!("&mut {}", base),
         AccessConvention::Move => base,
     }

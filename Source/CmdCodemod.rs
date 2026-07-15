@@ -12,6 +12,7 @@ use std::process::exit;
 
 use jet::Diagnostics::{Severity, Span, TextEdit};
 use jet::ExitCodes;
+use jet_foundation::JSON::json_escape;
 use jet_semindex::{
     open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs, SemIndex,
     DefinitionAnchor, SemIndexError, SymbolKind,
@@ -1735,21 +1736,6 @@ pub(super) fn fail(msg: &str) -> ! {
 }
 pub(super) fn hash_bytes(b: &[u8]) -> String {
     format!("sha256-{}", jet::SHA256::sha256_hex(b))
-}
-pub(super) fn json_escape(s: &str) -> String {
-    let mut o = String::new();
-    for c in s.chars() {
-        match c {
-            '"' => o.push_str("\\\""),
-            '\\' => o.push_str("\\\\"),
-            '\n' => o.push_str("\\n"),
-            '\r' => o.push_str("\\r"),
-            '\t' => o.push_str("\\t"),
-            c if c.is_control() => o.push_str(&format!("\\u{:04x}", c as u32)),
-            c => o.push(c),
-        }
-    }
-    o
 }
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()

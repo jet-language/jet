@@ -9,6 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use jet::ExitCodes;
+use jet_foundation::JSON::json_escape;
 
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
 
@@ -85,10 +86,6 @@ fn print_build_explanation(explanation: &jet::Comptime::Build::BuildExplanation,
 
 fn json_strings(values: &[String]) -> String {
     format!("[{}]", values.iter().map(|value| format!("\"{}\"", json_escape(value))).collect::<Vec<_>>().join(","))
-}
-
-fn json_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
 
 /// D-BUILDPROFILE1: load `pkg.jet` build profiles from the project root of `source_file`.

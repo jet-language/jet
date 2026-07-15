@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use jet::ExitCodes;
+use jet_foundation::JSON::json_escape;
 
 const TODO_CODE: &str = "JT0101";
 const HEADER: &str =
@@ -621,7 +622,7 @@ fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
                 "{{\"code\":\"JT0199\",\"what\":\"source import conflict\",\"paths\":[{}]}}",
                 conflicts
                     .iter()
-                    .map(|path| format!("\"{}\"", escape(&path.display().to_string())))
+                    .map(|path| format!("\"{}\"", json_escape(&path.display().to_string())))
                     .collect::<Vec<_>>()
                     .join(",")
             );
@@ -677,8 +678,8 @@ fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
 fn report(plan: &Plan) -> String {
     let mut output = format!(
         "{{\"schema\":\"jet.source-import.v1\",\"language\":\"py\",\"source\":\"{}\",\"target\":\"{}\",\"summary\":{{\"files\":{},\"translated_functions\":{},\"carried_tests\":{},\"omissions\":{}}},\"omissions\":[",
-        escape(&plan.source.display().to_string()),
-        escape(&plan.target.display().to_string()),
+        json_escape(&plan.source.display().to_string()),
+        json_escape(&plan.target.display().to_string()),
         plan.generated.len(),
         plan.functions,
         plan.tests,
@@ -690,11 +691,11 @@ fn report(plan: &Plan) -> String {
         }
         output.push_str(&format!(
             "{{\"code\":\"{TODO_CODE}\",\"what\":\"{}\",\"why\":\"{}\",\"fix\":\"{}\",\"source\":\"{}\",\"generated_target\":\"{}\",\"migration_status\":\"{}\"}}",
-            escape(&todo.what),
-            escape(&todo.why),
-            escape(&todo.fix),
-            escape(&todo.source),
-            escape(&todo.target),
+            json_escape(&todo.what),
+            json_escape(&todo.why),
+            json_escape(&todo.fix),
+            json_escape(&todo.source),
+            json_escape(&todo.target),
             todo.status
         ));
     }
@@ -776,28 +777,12 @@ fn shorten(value: &str) -> String {
     }
 }
 
-fn escape(value: &str) -> String {
-    let mut output = String::new();
-    for ch in value.chars() {
-        match ch {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            ch if ch.is_control() => output.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => output.push(ch),
-        }
-    }
-    output
-}
-
 fn usage_error(what: &str, fix: &str, json: bool) -> i32 {
     if json {
         println!(
             "{{\"code\":\"E2102\",\"what\":\"{}\",\"why\":\"D-MIGRATE-SRC1 keeps source import arguments explicit\",\"fix\":\"{}\"}}",
-            escape(what),
-            escape(fix)
+            json_escape(what),
+            json_escape(fix)
         );
     } else {
         eprintln!("error[E2102]: {what}");
@@ -811,8 +796,8 @@ fn operation_error(what: &str, why: &str, json: bool) -> i32 {
     if json {
         println!(
             "{{\"code\":\"JT0198\",\"what\":\"{}\",\"why\":\"{}\",\"fix\":\"check source path and write permissions, then rerun\"}}",
-            escape(what),
-            escape(why)
+            json_escape(what),
+            json_escape(why)
         );
     } else {
         eprintln!("error[JT0198]: {what}");

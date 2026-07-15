@@ -988,7 +988,6 @@ impl<'a> Checker<'a> {
                                     sendable: true,
                                     task_lint_span: None,
                                     single_use_span: None,
-                                    task_has_view_capture: false,
                                 },
                             );
                             for s in body.iter_mut() {
@@ -1307,7 +1306,6 @@ impl<'a> Checker<'a> {
                             sendable: true,
                             task_lint_span: None,
                             single_use_span: None,
-                            task_has_view_capture: false,
                         },
                     );
                     self.taskgroup_stack.push(TaskGroupCtx::new(name.clone()));
@@ -1349,7 +1347,6 @@ impl<'a> Checker<'a> {
                             sendable: true,
                             task_lint_span: None,
                             single_use_span: None,
-                            task_has_view_capture: false,
                         },
                     );
                     self.push_scope();
