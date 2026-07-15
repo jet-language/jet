@@ -1378,6 +1378,41 @@ mod tests {
     }
 
     #[test]
+    fn store_tree_sync_has_platform_directory_contracts() {
+        let source = include_str!("../Store.rs");
+        let function = source
+            .split("fn sync_store_node")
+            .nth(1)
+            .unwrap()
+            .split("#[derive(Debug, Clone, PartialEq, Eq)]")
+            .next()
+            .unwrap();
+        for required in [
+            "#[cfg(unix)]",
+            "#[cfg(windows)]",
+            "std::os::windows::fs::OpenOptionsExt",
+            "FILE_FLAG_BACKUP_SEMANTICS",
+            "FILE_FLAG_OPEN_REPARSE_POINT",
+            ".share_mode(",
+            ".custom_flags(",
+            ".sync_all()",
+        ] {
+            assert!(function.contains(required), "missing directory sync law: {required}");
+        }
+        assert!(!function.contains("unsafe"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_store_tree_sync_flushes_directory_handle() {
+        let (roots, _g) = temp_roots();
+        let tree = roots.root.join("windows-sync-tree");
+        fs::create_dir_all(tree.join("nested")).unwrap();
+        fs::write(tree.join("nested/payload"), "durable").unwrap();
+        fsync_tree(&tree).unwrap();
+    }
+
+    #[test]
     fn closure_registration_serializes_concurrent_writers() {
         let (roots, _g) = temp_roots();
         let root = roots.root.clone();

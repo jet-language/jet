@@ -82,7 +82,44 @@ fn fsync_tree(path: &Path) -> std::io::Result<()> {
             fsync_tree(&entry?.path())?;
         }
     }
-    fs::File::open(path)?.sync_all()
+    sync_store_node(path, meta.is_dir())
+}
+
+fn sync_store_node(path: &Path, directory: bool) -> std::io::Result<()> {
+    if !directory {
+        return fs::File::open(path)?.sync_all();
+    }
+    #[cfg(unix)]
+    {
+        return fs::File::open(path)?.sync_all();
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+        const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+        const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+        // BACKUP_SEMANTICS is the Win32 directory-open contract. sync_all is
+        // std's durable FlushFileBuffers-equivalent for the resulting handle.
+        return fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?
+            .sync_all();
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        // No std directory-handle contract exists on this target. File bytes
+        // were synced recursively above; the parent publication rename keeps
+        // its platform durability guarantee at the caller boundary.
+        let _ = path;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
