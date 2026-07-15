@@ -1781,7 +1781,7 @@ mod tests {
         set_user_xattr(&src, "user.jet.directory", b"directory");
         set_user_xattr(&file, "user.jet.test", b"keep");
         let mut outputs = BTreeMap::new();
-        outputs.insert("out".to_string(), src);
+        outputs.insert("out".to_string(), src.clone());
         let ingested = ingest_tree(
             &roots,
             &IngestRequest {
@@ -1797,6 +1797,7 @@ mod tests {
             },
         )
         .unwrap();
+        let first_hash = ingested.entry.envelope.output_hash.clone();
         assert_eq!(ingested.entry.platform_artifact_kind, "macos-app");
         verify_hangar_object(&roots, &ingested.entry).unwrap();
         let sealed = Path::new(&ingested.entry.out).join("payload");
@@ -1810,6 +1811,14 @@ mod tests {
         )
         .unwrap();
         assert!(root_names.iter().any(|name| name == "user.jet.directory"));
+        set_user_xattr(&src, "user.jet.directory", b"changed");
+        let changed_hash = super::super::super::Envelope::try_output_hash_of_with_policy(
+            &src.to_string_lossy(),
+            true,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_ne!(first_hash, changed_hash);
     }
 
     #[cfg(target_os = "linux")]
@@ -1835,6 +1844,45 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.what().contains("semantic xattr") || error.why().contains("semantic xattr"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ingest_symlink_xattr_is_nofollow_rejected_digested_and_copied() {
+        use std::os::unix::fs::symlink;
+        let (roots, _g) = temp_roots();
+        let src = roots.root.join("xattr-symlink");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("target"), "bytes").unwrap();
+        symlink("target", src.join("link")).unwrap();
+        set_apple_xattr(&src.join("link"), "user.jet.symlink", b"first");
+        let request = |kind: &str| IngestRequest {
+            name: "xattr-symlink".into(),
+            version: "1".into(),
+            reference: "path:xattr-symlink".into(),
+            cache_identity: test_identity(),
+            references: Vec::new(),
+            outputs: BTreeMap::from([("out".into(), src.clone())]),
+            signature: String::new(),
+            provenance: String::new(),
+            platform_artifact_kind: kind.into(),
+        };
+        assert!(ingest_tree(&roots, &request("")).is_err());
+        let ingested = ingest_tree(&roots, &request("macos-tree")).unwrap();
+        let sealed = Path::new(&ingested.entry.out).join("link");
+        assert!(super::super::super::Envelope::list_xattr_names(&sealed)
+            .unwrap()
+            .iter()
+            .any(|name| name == "user.jet.symlink"));
+        let first = ingested.entry.envelope.output_hash;
+        set_apple_xattr(&src.join("link"), "user.jet.symlink", b"second");
+        let second = super::super::super::Envelope::try_output_hash_of_with_policy(
+            &src.to_string_lossy(),
+            true,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_ne!(first, second);
     }
 
     #[cfg(unix)]
@@ -1945,6 +1993,34 @@ mod tests {
             )
         };
         assert_eq!(rc, 0, "lsetxattr failed: {}", std::io::Error::last_os_error());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn set_apple_xattr(path: &Path, name: &str, value: &[u8]) {
+        use std::os::unix::ffi::OsStrExt as _;
+        unsafe extern "C" {
+            fn setxattr(
+                path: *const i8,
+                name: *const i8,
+                value: *const u8,
+                size: usize,
+                position: u32,
+                options: i32,
+            ) -> i32;
+        }
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        let name = std::ffi::CString::new(name).unwrap();
+        let rc = unsafe {
+            setxattr(
+                path.as_ptr(),
+                name.as_ptr(),
+                value.as_ptr(),
+                value.len(),
+                0,
+                0x0001,
+            )
+        };
+        assert_eq!(rc, 0, "setxattr failed: {}", std::io::Error::last_os_error());
     }
 }
 
