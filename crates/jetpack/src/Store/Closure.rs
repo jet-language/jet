@@ -870,6 +870,12 @@ fn store_validates_complete_closure(
     if output == local && local.exists() {
         return true;
     }
+    if producer.provider == "store-record"
+        && super::super::Envelope::try_output_hash_of(&meta.out).ok().as_ref()
+            == Some(&record.primary)
+    {
+        return true;
+    }
     if producer.provider != "nix" || !output.starts_with("/nix/store") {
         return false;
     }

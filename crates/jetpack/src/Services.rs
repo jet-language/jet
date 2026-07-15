@@ -239,10 +239,18 @@ fn process_alive(pid: u32) -> Result<bool, String> {
 
 #[cfg(target_os = "linux")]
 fn process_start_identity(pid: u32) -> Result<Option<String>, String> {
+    const ESRCH: i32 = 3;
     let path = PathBuf::from(format!("/proc/{pid}/stat"));
     let stat = match fs::read_to_string(&path) {
         Ok(stat) => stat,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(ESRCH) =>
+        {
+            // Linux may report ESRCH instead of ENOENT when the process
+            // disappears while procfs resolves its stat entry.
+            return Ok(None);
+        }
         Err(error) => {
             return Err(format!(
                 "couldn't read service process identity `{}`: {error}",
