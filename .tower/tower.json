@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 638,
-    "rev": 7651,
+    "nextNum": 639,
+    "rev": 7656,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19798,6 +19798,60 @@
       "needsAcceptance": false,
       "created": "2026-07-15T13:27:39.151Z",
       "updated": "2026-07-15"
+    },
+    {
+      "id": "c067p6dz",
+      "num": 638,
+      "title": "Full suite red: cli budget tests race copied-compiler exec (ETXTBSY)",
+      "body": "budget_unreadable_compiler_identity_rejects_before_artifact failed the full gate with ExecutableFileBusy at tests/cli.rs:745: exec of a freshly copied jet binary races a concurrent test's fork, which inherits the copy's write file descriptor before its own exec closes it. The test passes solo. tests/engine_dispatch.rs already carries output_with_retry for exactly this race; tests/cli.rs copy-and-exec sites lack it.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Port the bounded ExecutableFileBusy retry pattern from tests/engine_dispatch.rs into tests/cli.rs and use it at every site that executes a freshly copied compiler binary (budget_unreadable_compiler_identity_rejects_before_artifact and budget_parallel_child_builds_survive_running_compiler_unlink). No product code changes. Targeted cli tests, then parent reruns the full gate.",
+      "blockedBy": [],
+      "assignee": "fable-burndown",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every tests/cli.rs site that executes a freshly copied compiler binary retries bounded ExecutableFileBusy failures, mirroring tests/engine_dispatch.rs; no product code changes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T14:38:01.477Z"
+        },
+        {
+          "n": 2,
+          "text": "Targeted cli budget tests pass, including the two repaired tests under parallel execution.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T14:38:24.958Z"
+        },
+        {
+          "n": 3,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-15T14:38:48.492Z"
+        }
+      ],
+      "refs": [
+        "tests/cli.rs",
+        "tests/engine_dispatch.rs",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-15T14:37:01.835Z",
+      "updated": "2026-07-15",
+      "claimedAt": "2026-07-15T14:37:37.840Z"
     }
   ],
   "decisions": [
@@ -39116,6 +39170,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-15T14:38:48.492Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-add",
+      "ref": "c067p6dz",
+      "note": "#3 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-15T14:38:24.958Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-add",
+      "ref": "c067p6dz",
+      "note": "#2 Targeted cli budget tests pass, including the two repaired t"
+    },
+    {
+      "at": "2026-07-15T14:38:01.478Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-add",
+      "ref": "c067p6dz",
+      "note": "#1 Every tests/cli.rs site that executes a freshly copied compi"
+    },
+    {
+      "at": "2026-07-15T14:37:37.841Z",
+      "by": "fable-burndown",
+      "action": "card.claim",
+      "ref": "c067p6dz",
+      "note": ""
+    },
+    {
+      "at": "2026-07-15T14:37:01.835Z",
+      "by": "fable-burndown",
+      "action": "card.add",
+      "ref": "c067p6dz",
+      "note": "Full suite red: cli budget tests race copied-compiler exec (ETXTBSY)"
+    },
+    {
       "at": "2026-07-15T14:24:53.553Z",
       "by": "fable-burndown",
       "action": "card.claim",
@@ -42578,41 +42667,6 @@
       "by": "terra-608-builder",
       "action": "card.criteria-meet",
       "ref": "c0hsphd7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T01:41:33.988Z",
-      "by": "luna-611-reviewer",
-      "action": "card.update",
-      "ref": "c0p5ugzr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T01:41:28.735Z",
-      "by": "luna-611-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0p5ugzr",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-15T01:41:28.635Z",
-      "by": "luna-611-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0p5ugzr",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T01:41:28.533Z",
-      "by": "luna-611-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0p5ugzr",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-15T01:41:28.431Z",
-      "by": "luna-611-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0p5ugzr",
       "note": "#1"
     }
   ],
