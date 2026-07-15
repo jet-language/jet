@@ -1,0 +1,19 @@
+# bash completion from JetCommandSchema v1
+_jet_program_completion() {
+    local cur flags
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W '--help serve import' -- "$cur") )
+        return 0
+    fi
+    flags='--help'
+    case "${COMP_WORDS[1]}" in
+        'serve') flags='--help --port' ;;
+        'import') flags='--help --file' ;;
+    esac
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+    fi
+}
+complete -F _jet_program_completion -- 'commands'

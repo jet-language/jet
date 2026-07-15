@@ -1199,15 +1199,28 @@ fn run(cmd: Cmd) {}
 "#).unwrap();
     let build = Command::new(jet()).args(["build", "commands.jet"]).current_dir(&dir).output().unwrap();
     assert!(build.status.success(), "subcommand build failed: {}", String::from_utf8_lossy(&build.stderr));
-    let completion = Command::new(jet())
-        .args(["self", "completions", "bash", "--for", "build/commands"])
+    let help = Command::new(dir.join("build/commands"))
+        .arg("--help")
         .current_dir(&dir)
         .output()
         .unwrap();
-    assert!(completion.status.success(), "subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
-    let script = String::from_utf8(completion.stdout).unwrap();
-    for word in ["serve", "import", "--port", "--file"] {
-        assert!(script.contains(word), "external completion omitted {word}: {script}");
+    assert!(help.status.success(), "subcommand root help failed: {}", String::from_utf8_lossy(&help.stderr));
+    let help = String::from_utf8(help.stdout).unwrap();
+    assert_eq!(help, "Usage: <program> <command> [options]\n\nCommands:\n  serve\n  import\n");
+    assert!(!help.contains("Serve") && !help.contains("Import"));
+
+    for shell in ["bash", "zsh", "fish", "powershell"] {
+        let completion = Command::new(jet())
+            .args(["self", "completions", shell, "--for", "build/commands"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(completion.status.success(), "{shell} subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
+        let script = String::from_utf8(completion.stdout).unwrap();
+        for word in ["serve", "import", "--port", "--file"] {
+            assert!(script.contains(word), "{shell} external completion omitted {word}: {script}");
+        }
+        check_snapshot(&format!("shape_cli_enum_{shell}.txt"), &script);
     }
     let dossier = Command::new(jet())
         .args(["inspect", "dossier", "commands.jet", "run", "--json"])
@@ -1216,6 +1229,7 @@ fn run(cmd: Cmd) {}
         .unwrap();
     assert!(dossier.status.success());
     let dossier = String::from_utf8(dossier.stdout).unwrap();
+    assert!(dossier.contains("\"completion_words\":[\"--help\",\"serve\",\"import\"]"), "dossier flattened enum flags: {dossier}");
     for fact in ["\"commands\":[", "\"name\":\"serve\"", "\"name\":\"import\"", "\"flag\":\"--port\"", "\"flag\":\"--file\""] {
         assert!(dossier.contains(fact), "dossier omitted {fact}: {dossier}");
     }

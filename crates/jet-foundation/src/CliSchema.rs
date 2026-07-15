@@ -140,24 +140,26 @@ pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
         _ => None,
     })?;
     let name = run_type;
-        if let Some(structure) = items.iter().find_map(|item| match item {
-            Item::Struct(structure) if structure.name == name => command_schema(structure),
-            _ => None,
-        }) { return Some(structure); }
-        let enumeration = items.iter().find_map(|item| match item {
-            Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
+    if let Some(structure) = items.iter().find_map(|item| match item {
+        Item::Struct(structure) if structure.name == name => command_schema(structure),
+        _ => None,
+    }) {
+        return Some(structure);
+    }
+    let enumeration = items.iter().find_map(|item| match item {
+        Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
+        _ => None,
+    })?;
+    let commands = enumeration.variants.iter().filter_map(|variant| {
+        let VariantPayload::Single(Type::Named(payload), _) = &variant.payload else { return None };
+        let structure = items.iter().find_map(|item| match item {
+            Item::Struct(structure) if structure.name == *payload => Some(structure),
             _ => None,
         })?;
-        let commands = enumeration.variants.iter().filter_map(|variant| {
-            let VariantPayload::Single(Type::Named(payload), _) = &variant.payload else { return None };
-            let structure = items.iter().find_map(|item| match item {
-                Item::Struct(structure) if structure.name == *payload => Some(structure),
-                _ => None,
-            })?;
-            let payload = command_schema(structure)?;
-            Some(CliSubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
-        }).collect();
-        Some(CliCommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
+        let payload = command_schema(structure)?;
+        Some(CliSubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
+    }).collect();
+    Some(CliCommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
 }
 
 /// Canonical, versioned JetCommandSchema record. The digest makes corruption

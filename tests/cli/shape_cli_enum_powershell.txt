@@ -1,0 +1,5 @@
+# PowerShell completion from JetCommandSchema v1
+$JetRoot = @('--help','serve','import')
+$JetFlags = @('--help')
+$JetCommandFlags = @{ 'serve' = @('--help','--port'); 'import' = @('--help','--file') }
+Register-ArgumentCompleter -Native -CommandName 'commands' -ScriptBlock { param($wordToComplete,$commandAst,$cursorPosition) $words = @($commandAst.CommandElements | ForEach-Object { $_.Extent.Text }); $choices = if ($wordToComplete.StartsWith('-') -and $words.Count -ge 2 -and $JetCommandFlags.ContainsKey($words[1])) { $JetCommandFlags[$words[1]] } elseif ($wordToComplete.StartsWith('-')) { $JetFlags } else { $JetRoot }; $choices | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) } }
