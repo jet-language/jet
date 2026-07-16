@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 666,
-    "rev": 8100,
+    "rev": 8101,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20557,12 +20557,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P0",
       "plan": "Use the canonical in-hangar-aware output hash/closure validator at every cache verification, integrity, lease, and snapshot site. Permit CAS/sibling hardlink peers only when every peer is store-validated inside Hangar; continue rejecting any outside-Hangar peer, forged peer count, mutation, or missing closure. Make quarantine work on sealed object trees through controlled permission restoration and rollback. Prove all listed cache paths plus hostile external links and optimize/revalidate races.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "REOPENED — independent verifier caught a real regression the fix-round introduced: jet_build_never_reports_{deleted,tampered}_output_as_cached fail deterministically (run4 green was a fluke). First build ok, tampered/deleted output correctly rejected (E2604), but the REBUILD fails 'closure record hello-0.1.0-... has no dependency references or store-validated closure proof'. Cause: fix-round replaced quarantine's physical remove_package_record with a journal tombstone (deleted_records); rebuild re-adds the SAME record id and the tombstone shadows/deletes it in load_graph. Must fix tombstone-vs-rebuild while keeping F2 shared-CAS-object protection. The 7 gate cards + #650 verified green by same pass — only #652 blocks."
+        },
         {
           "at": "2026-07-16",
           "by": "owner",
@@ -41569,6 +41574,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T01:34:52.907Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0sucg7f",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-16T01:33:09.060Z",
       "by": "fable-clerk",
       "action": "card.update",
@@ -45059,13 +45071,6 @@
       "by": "fable-burndown",
       "action": "card.claim",
       "ref": "c0x3pi8i",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T14:23:46.637Z",
-      "by": "fable-burndown",
-      "action": "card.claim",
-      "ref": "c06k81ci",
       "note": ""
     }
   ],
