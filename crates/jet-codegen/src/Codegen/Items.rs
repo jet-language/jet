@@ -42,7 +42,7 @@ fn emit_gc_trace_impl(s: &StructDef, out: &mut String) {
         }
     }
     out.push_str(&format!(
-        "impl jet_gc::GcTrace for {name} {{\n    fn trace(&self, out: &mut Vec<usize>) {{\n{trace_body}    }}\n}}\n\n",
+        "impl jet_gc::GcTrace for {name} {{\n    fn trace(&self, out: &mut Vec<jet_gc::ObjectId>) {{\n{trace_body}    }}\n}}\n\n",
         name = user_type_rust(&s.name),
         trace_body = trace_body
     ));

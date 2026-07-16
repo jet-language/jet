@@ -322,24 +322,18 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
 }
 
 fn func_to_sig(f: &Func) -> FuncSig {
-    let type_params: HashSet<String> = f.type_params.iter().map(|p| p.name.clone()).collect();
     let param_variadic: Vec<bool> = f.params.iter().map(|p| p.variadic).collect();
     FuncSig {
         params: f
             .params
             .iter()
             .map(|p| {
-                let conv = if matches!(&p.ty, Type::Named(n) if type_params.contains(n)) {
-                    AccessConvention::Move
-                } else {
-                    p.convention
-                };
                 let ty = if p.variadic {
                     Type::List(Box::new(p.ty.clone()))
                 } else {
                     p.ty.clone()
                 };
-                (conv, ty)
+                (p.convention, ty)
             })
             .collect(),
         param_info: f

@@ -368,8 +368,18 @@ const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
-/// D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` runtime (stripped when unused).
-const GC_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
+/// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
+const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
+/// Pre-#658 compatibility only. #658 retires this source-facing wrapper.
+const GC_ADAPTER_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
+
+fn push_gc_prelude(out: &mut String) {
+    out.push_str("mod jet_gc {\n");
+    out.push_str(GC_RUNTIME_PRELUDE);
+    out.push('\n');
+    out.push_str(GC_ADAPTER_PRELUDE);
+    out.push_str("\n}\n");
+}
 /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): the `layout NAME { … }`
 /// constraint-solver runtime (`jet_layout`). Pure safe Rust (no `unsafe`), so —
 /// unlike `MEM_PRELUDE` — it never needs stripping; included everywhere
@@ -851,7 +861,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    out.push_str(GC_PRELUDE);
+    push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push('\n');
 
@@ -956,6 +966,28 @@ mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
+
+    #[test]
+    fn gc_runtime_source_is_shared_by_aot_and_jit() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let runtime = std::fs::read_to_string(root.join("../jet-rt/src/__gc.rs")).unwrap();
+        let adapter = std::fs::read_to_string(root.join("src/Prelude/Gc.rs")).unwrap();
+        assert_eq!(GC_RUNTIME_PRELUDE, runtime);
+        assert_eq!(GC_ADAPTER_PRELUDE, adapter);
+
+        let mut emitted = String::new();
+        push_gc_prelude(&mut emitted);
+        assert!(emitted.starts_with("mod jet_gc {\n"));
+        assert_eq!(emitted.matches(runtime.as_str()).count(), 1);
+        assert_eq!(emitted.matches(adapter.as_str()).count(), 1);
+
+        let unused = strip_unused_gc_prelude(format!("{emitted}fn main() {{}}\n"));
+        assert!(!unused.contains("mod jet_gc"));
+        let used = strip_unused_gc_prelude(format!(
+            "{emitted}fn main() {{ jet_gc::gc_collect(); }}\n"
+        ));
+        assert!(used.contains("mod jet_gc"));
+    }
 
     #[test]
     fn core_prelude_stays_split_by_runtime_ownership() {
@@ -1172,7 +1204,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    out.push_str(GC_PRELUDE);
+    push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if any_property_test(&tests) {
@@ -1578,7 +1610,7 @@ pub fn emit_bundle_dbg(
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    out.push_str(GC_PRELUDE);
+    push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
         push_corelib_prelude(&mut out);
@@ -1704,7 +1736,7 @@ pub fn emit_bundle_tests_cov(
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    out.push_str(GC_PRELUDE);
+    push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {
@@ -1892,7 +1924,7 @@ pub fn emit_bundle_fuzz(
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    out.push_str(GC_PRELUDE);
+    push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
@@ -2136,7 +2168,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    out.push_str(GC_PRELUDE);
+    push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {

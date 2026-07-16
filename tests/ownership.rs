@@ -511,3 +511,140 @@ fn run() {
     let diags = jet::compile(src).expect_err("all returned-view paths must be rejected");
     assert!(diags.iter().any(|d| d.code == "E2305"), "got {diags:?}");
 }
+
+#[test]
+fn borrowed_parameter_binding_never_inserts_hidden_copy() {
+    let src = r#"
+fn bind_again(text: String) {
+    alias :: text
+    print(alias)
+}
+
+fn run() {
+    bind_again("hello")
+}
+"#;
+    let diags = jet::compile(src).expect_err("borrowed parameter binding must need explicit ownership");
+    let escape = diags
+        .iter()
+        .find(|diag| diag.code == "E0120")
+        .expect("borrowed binding must report E0120 instead of cloning");
+    assert!(escape.fix.contains("~text"), "fix must name explicit copy: {escape:?}");
+}
+
+#[test]
+fn generic_borrowed_parameter_cannot_return_as_owned() {
+    let src = r#"
+fn identity<T>(value: T) -> T {
+    return value
+}
+
+fn run() {
+    print(0)
+}
+"#;
+    let diags = jet::compile(src).expect_err("generic read parameter cannot escape as owned");
+    let escape = diags
+        .iter()
+        .find(|diag| diag.code == "E0120")
+        .expect("generic borrowed return must report E0120 before codegen");
+    assert!(escape.fix.contains("^T"), "fix must name take ownership: {escape:?}");
+}
+
+#[test]
+fn every_unmarked_nonscalar_parameter_has_read_borrow_rust_shape() {
+    let src = r#"
+struct Parcel {
+    label: String
+}
+
+impl Parcel {
+    fn show(self) {
+        print(self.label)
+    }
+}
+
+fn read_text(text: String) {
+    if true {
+        print(text)
+    }
+}
+
+fn read_list(values: [Int]) {
+    print(values.len())
+}
+
+fn read_parcel(parcel: Parcel) {
+    parcel.show()
+}
+
+fn read_generic<T>(value: T) {
+    print(0)
+}
+
+fn apply(f: fn(Int) -> Int, value: Int) -> Int {
+    return f(value)
+}
+
+fn run() {
+    text :: "hello"
+    values :: [1, 2, 3]
+    parcel :: Parcel.{ label: "parcel" }
+    read_text(text)
+    read_list(values)
+    read_parcel(parcel)
+    read_generic(text)
+    print(apply((n: Int) => (n + 1), 41))
+}
+"#;
+    let out = jet::compile(src).expect("all plain parameters are read borrows");
+    assert!(out.rust.contains("user_text: &String"), "{}", out.rust);
+    assert!(out.rust.contains("user_values: &Vec<i64>"), "{}", out.rust);
+    assert!(out.rust.contains("user_parcel: &user_Parcel"), "{}", out.rust);
+    assert!(out.rust.contains("user_value: &T"), "{}", out.rust);
+    assert!(out.rust.contains("user_f: &Box<dyn Fn"), "{}", out.rust);
+    assert!(!out.rust.contains("((*user_text)).clone()"), "{}", out.rust);
+}
+
+#[test]
+fn plain_parameter_write_take_and_escape_diagnostics_name_explicit_access() {
+    let write_src = r#"
+fn edit(values: [Int]) {
+    values.push(4)
+}
+fn run() { print(0) }
+"#;
+    let write = jet::compile(write_src).expect_err("plain list parameter cannot be edited");
+    let write = write.iter().find(|d| d.code == "E0205").expect("E0205");
+    assert!(write.fix.contains("&[Int]"), "{write:?}");
+
+    let take_src = r#"
+fn consume<T>(value: ^T) { print(0) }
+fn relay<T>(value: T) { consume(value) }
+fn run() { print(0) }
+"#;
+    let take = jet::compile(take_src).expect_err("plain generic parameter cannot be consumed");
+    let take = take.iter().find(|d| d.code == "E0209").expect("E0209");
+    assert!(take.fix.contains("^value"), "{take:?}");
+
+    let callback_src = r#"
+fn keep(f: fn(Int) -> Int) -> fn(Int) -> Int { return f }
+fn run() { print(0) }
+"#;
+    let escape = jet::compile(callback_src).expect_err("plain callback parameter cannot escape");
+    assert!(escape.iter().any(|d| d.code == "E0120"), "{escape:?}");
+}
+
+#[test]
+fn borrowed_parameter_cannot_fill_an_owned_struct_field_without_explicit_copy() {
+    let src = r#"
+struct Holder { value: String }
+fn wrap(value: String) -> Holder {
+    return Holder.{ value: value }
+}
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("borrowed field value must not clone silently");
+    let escape = diags.iter().find(|d| d.code == "E0120").expect("E0120");
+    assert!(escape.fix.contains("~value"), "{escape:?}");
+}

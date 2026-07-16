@@ -1,5 +1,9 @@
 #![deny(warnings)]
 
+/// Compiler/runtime-only traced heap. Jet source reaches this through codegen.
+#[doc(hidden)]
+pub mod __gc;
+
 pub fn display_f32(v: f32) -> String {
     format!("{v:?}")
 }

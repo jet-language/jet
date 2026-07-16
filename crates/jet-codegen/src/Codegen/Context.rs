@@ -1275,9 +1275,6 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
             AccessConvention::Move => base,
         };
     }
-    if matches!(ty, Type::Fn { .. }) {
-        return base;
-    }
     match convention {
         AccessConvention::Read if ty.is_scalar() => {
             base

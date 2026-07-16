@@ -189,13 +189,10 @@ pub(crate) fn lower_one_call_arg(
             if arg_elem == param_elem
     );
     // Borrow wrappers (applied after the clone + fn-coerce wrappers). A `Read`
-    // non-scalar (non-Fn) is `&(…)`; a `Mutate` is `&mut (…)`. A Fn-typed `Read` is
-    // NOT borrowed (the AST `match conv` skips it), so the fn-coerce form stands alone.
+    // non-scalar is `&(…)`; a `Mutate` is `&mut (…)`.
     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
     let (borrow, mut_borrow) = match &conv {
-        Some((AccessConvention::Read, t))
-            if !t.is_scalar() && !matches!(t, Type::Fn { .. }) =>
-        {
+        Some((AccessConvention::Read, t)) if !t.is_scalar() => {
             (true, false)
         }
         Some((AccessConvention::Write, _)) => (false, true),

@@ -1,6 +1,6 @@
 use crate::AST::{AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, StrPart, Type};
 use crate::Diagnostics::Diagnostic;
-use crate::Sema::Diagnostics::{edit_distance, is_cloneable, is_task_type, type_fix_hint};
+use crate::Sema::Diagnostics::{edit_distance, is_task_type, type_fix_hint};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use super::helpers::is_pod_uninit_type;
@@ -234,38 +234,30 @@ impl<'a> Checker<'a> {
             }
             if let Expr::Ident(n, nspan) = &mut b.init {
                 if let Some(info) = self.lookup(n) {
-                    if !info.ty.is_scalar() {
-                        if matches!(info.param_conv, Some(AccessConvention::Read))
-                            && is_cloneable(&info.ty, self.registry)
-                        {
-                            // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to —
-                            // one mechanism for "duplicate this value".
-                            let span = *nspan;
-                            let old = std::mem::replace(&mut b.init, Expr::Absent(span));
-                            b.init = Expr::Copy(Box::new(old), span);
-                        } else if matches!(
+                    if !info.ty.is_scalar()
+                        && matches!(
                             info.param_conv,
                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
-                        ) {
-                            self.diags.push(Diagnostic::error(
-                                "E0120",
-                                format!("`{}` was not moved here, so it cannot be taken (`^`)", n),
-                                "this function has read access only and does not own the value"
-                                    .to_string(),
-                                format!(
-                                    "copy it instead: `{} {} {}{}`",
-                                    b.name,
-                                    if b.mutable {
-                                        Syntax::SIGIL_BIND_MUT
-                                    } else {
-                                        Syntax::SIGIL_BIND_IMMUT
-                                    },
-                                    Syntax::SIGIL_COPY,
-                                    n
-                                ),
-                                Some(*nspan),
-                            ));
-                        }
+                        )
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0120",
+                            format!("`{}` was not moved here, so it cannot be taken (`^`)", n),
+                            "this function has read access only and does not own the value"
+                                .to_string(),
+                            format!(
+                                "copy it instead: `{} {} {}{}`",
+                                b.name,
+                                if b.mutable {
+                                    Syntax::SIGIL_BIND_MUT
+                                } else {
+                                    Syntax::SIGIL_BIND_IMMUT
+                                },
+                                Syntax::SIGIL_COPY,
+                                n
+                            ),
+                            Some(*nspan),
+                        ));
                     }
                 }
             }

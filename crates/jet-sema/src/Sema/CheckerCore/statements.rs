@@ -738,18 +738,9 @@ impl<'a> Checker<'a> {
                             // string view's bare-`&str` read is never silent).
                             // Returning a borrowed parameter would move out of a
                             // borrow in the generated Rust (I2) — require a copy.
-                            // Exception: if the param type is a type variable, codegen
-                            // always passes it by move (implicit `T: Clone` bound) so
-                            // returning it bare is safe. c148: also covers multi-char
-                            // type params (`Elem`, `Kind`) via `type_param_scope` lookup.
                             if let Expr::Ident(n, nspan) = &*e {
                                 if let Some(info) = self.lookup(n) {
-                                    let is_type_var_param = matches!(&info.ty,
-                                        Type::Named(tn)
-                                            if crate::Generics::is_type_var_name(tn)
-                                                || self.type_param_scope.iter().any(|p| &p.name == tn));
                                     if !info.ty.is_scalar()
-                                        && !is_type_var_param
                                         && matches!(
                                             info.param_conv,
                                             Some(AccessConvention::Read)

@@ -2572,9 +2572,8 @@ pub struct TCallArg {
     /// `Box::new(value) as <fn-type>` — unless it is ALREADY boxed (a bare fn-name
     /// value emits its own `Box::new(…)`, or the value is a fn-typed local ident), in
     /// which case only the ` as <fn-type>` suffix is applied. `already_boxed` carries
-    /// that resolved decision so emit makes none. This is mutually exclusive with the
-    /// borrow/clone wrappers (a Fn param is never borrowed/cloned — `emit_call_args`
-    /// skips `&(…)` for `Type::Fn`).
+    /// that resolved decision so emit makes none. A read callback parameter borrows the
+    /// resulting box like every other non-scalar parameter.
     pub fn_coerce: Option<TFnCoerce>,
     /// D-FIXARR1: a `[T#N]` argument passed to a `[T]` (Vec) slot is widened by
     /// copying into a growable list. When true, emit wraps with `.to_vec()`.
