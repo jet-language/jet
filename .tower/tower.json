@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 674,
-    "rev": 8853,
+    "nextNum": 675,
+    "rev": 8954,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3246,16 +3246,21 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "First slice ST0 (docs/plans/epoch-7/jetos-studio.md): a read-only source-backed Studio app -- render discovered modules, parse/check diagnostics, existing option paths, and raw source panes behind jetos studio; default launch targets the installed jetos Studio app, falling back to serve-and-open-browser. No write path, no jetos activation in this slice. Subsequent slices (ST1 option/provenance explorer, ST2 write transactions, ST3 proof dashboard, ST4 activation handoff, ST5 lift/import) each get their own card once ST0 lands, gated per the ratified D-WD7/D-JOS-STUDIO-* law. Ballot any new syntax, manifest field, command spelling, marker, or diagnostic before implementing it.",
+      "plan": "Retain the shipped installed-app, browser, and headless projections plus the local source transaction and command-run endpoints. Replace the static semantic_state:none facade with live ModuleEval documents, diagnostics, typed option schema, merged values, and provenance. Then complete the durable ST0-ST5 order in docs/plans/epoch-7/jetos-studio.md: read-only facts, source-backed edits with exact diff and re-projection, proof dashboard, current-fingerprint activation handoff, and lift/import. Jet source remains the only semantic store; every client consumes one local protocol. Ratified D-JOS-STUDIO-* law clears owner gates.",
       "blockedBy": [
-        "#470",
-        "#323"
+        "c0by6tvm",
+        "c0om2gxe"
       ],
       "workOrder": 433,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -3318,7 +3323,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/jetos-studio.md",
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "crates/jet-env-model/src/ModuleEval/mod.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c8q043mt",
@@ -6137,14 +6148,19 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Ratified decisions: D-JOS-FLEETTARGET1=A (host target/authority fields with label defaults and reusable target refs) and D-JOS-FLEETROLLOUT1=A (staged proof-gated rollout, plan/stage controls, rollback-and-stop default). Owner gates clear; the card is dependency-blocked by #410 (MS1 native terminal baseline) until that proof lands, since fleet deploy needs a proven native build/boot pipeline. Implementation plan: 1) extend FleetPlan with ratified target/auth and rollout fields, preserving E1242 host-system cross-checks; 2) build phase realizes each host system generation through the native P1 pipeline, applies host overrides, records per-host closure/provenance/tool hashes; 3) transport phase pushes closures over the ratified SSH authority path, offline mode accepts only prebuilt/local artifacts; 4) remote activation runs proof-before-switch remotely with minimal privilege, writes a remote generation ledger, streams structured logs; 5) health/rollback implements the ratified staged policy, per-host health checks, automatic rollback, halted-rollout state, resume/replay metadata; 6) secrets integrate U13 recipients, delivered at deploy time only to selected host identities; 7) tests: fake SSH transport tests for build/ship/activate/rollback, bad-target diagnostics, unknown-host E1242, local loopback smoke; 8) artifacts/docs: systems/fleets/<name>/proof.json, per-host logs, rollout graph, docs/spec updates; 9) verification: focused fleet tests, Jetpack suite, cargo build --bin jetos, real or fake SSH smoke.",
+      "plan": "Preserve the shipped FleetPlan parser and fleet projection as evidence, not completion. After native terminal proof c0dhzann, implement D-JOS-FLEETTARGET1=A and D-JOS-FLEETROLLOUT1=A end to end: resolve host authority locally; build exact native closures; transfer over SSH without repository credentials; proof-gate cohort activation; observe declared health windows; rollback and halt on failure; persist immutable per-host receipts, resume state, and secret-recipient evidence. Fake-SSH hostile tests cover transfer loss, proof failure, health failure, resume, concurrency, idempotency, and rollback; a loopback native deployment proves the real path.",
       "blockedBy": [
-        "#410"
+        "c0dhzann"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -6255,7 +6271,11 @@
       ],
       "needsAcceptance": false,
       "refs": [
-        "docs/proposals/ecosystem-shape.md"
+        "docs/plans/epoch-7/native-jetos.md",
+        "docs/proposals/ecosystem-shape.md",
+        "crates/jet-env-model/src/ModuleEval/Types.rs",
+        "crates/jetpack/src/JetOS/theme_fleet_lifecycle.rs",
+        "tests/jetpack_jetos.rs"
       ],
       "workOrder": 431
     },
@@ -6270,12 +6290,17 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "D-JOS-OPTIONSVERB1=B is ratified: reuse jet search/jet info, no new verb -- no owner gate. Build order: generate a typed option index from system.* declarations (sema facts, not doc-string scraping); wire into jet search/jet info/LSP/Studio projections; include provenance (which module set or overrode each value, via the #470 priority/explain engine), defaults, examples, deprecation facts. CI fails when a shipped option lacks docs (schema-drift ratchet). Depends on #470 for the what-set-this-value output. Acceptance: jet search/jet info return exact option docs and source; ranking/index-generation tests ratchet; no hand-maintained stale index.",
+      "plan": "Keep the shipped reference.json and exact/explain helper as a compatibility slice. Replace its projection-only index with one typed index generated from checked option facts, then route ratified jet search and jet info, LSP, and Studio through that same index. Complete docs, types, defaults, examples, deprecations, defining spans, and all priority contenders from c0by6tvm. A schema-drift test rejects any shipped option without facts. No hand-maintained catalog or second search verb remains.",
       "blockedBy": [
-        "#470"
+        "c0by6tvm"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -6373,7 +6398,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/options_rendering.rs",
+        "crates/jet-env-model/src/ModuleEval/Types.rs",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 419
     },
     {
@@ -6385,14 +6416,20 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "D-JOS-CONTAINER1=A is ratified -- no owner gate. Build order: workload.<name> declaration with a backend enum (Container/MicroVM); shared fields (image/package, ports, mounts, secrets, health, resources) realized through the #402 activation engine (per-workload generation plus rollback, not a forked mechanism); the Container backend uses shared-store lightweight isolation; the MicroVM backend shells to QEMU/cloud-hypervisor with the same declaration surface. Depends on #402 for generation and rollback reuse. Exit: one workload.<name> with backend=Container and one with backend=MicroVM both build, start, and roll back independently using the same generation ledger as jet os switch. Verify: unit tests for schema/backend dispatch plus a vmtest starting both backend kinds.",
+      "plan": "The current workload projection writes plans and helper scripts only. Replace that facade with D-JOS-CONTAINER1=A execution: one workload.<name> schema and backend enum share image, ports, mounts, secrets, health, resources, immutable generation identity, and rollback. Container uses native isolation; MicroVM boots through the shared VM harness c0yry94n. Both reuse activation and ledger c04de5hj. Real reachability, failed-health rollback, independent generation, and cross-backend parity tests are required.",
       "blockedBy": [
-        "#402"
+        "c04de5hj",
+        "c0yry94n"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -6479,7 +6516,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jet-env-model/src/ModuleEval/Types.rs",
+        "crates/jetpack/src/JetOS/module_storage_workload.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 426
     },
     {
@@ -6493,12 +6537,17 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "Build order: add format-matrix planning over qcow2/raw, SD-card image, netboot/PXE, cloud images (AMI/GCE/Azure), and appliance, each with provenance/proof metadata like the existing installer ISO path. Ship qcow2, SD, and netboot first with provenance; card the remaining formats as shipped/carded/declined. Depends on #471 (shared VM test harness) for boot-proof verification of each format. Acceptance: three reproducible formats produce proof artifacts; a docs matrix shows shipped/carded/declined rows. No gate if the format stays under the existing --format flag; ballot only if adding new source declarations.",
+      "plan": "Current qcow2, raw, SD, and netboot paths include sparse-marker artifacts and hash metadata; they are not bootable-format proof. After D-JOS-IMAGEFORMAT2 fixes the public --format surface, replace every marker with a reproducible real artifact rooted in one built generation. Qcow2, SD, and netboot must boot through c0yry94n or an equivalent protocol test and publish source, closure, tool, hash, and guest-proof facts. Keep ISO behavior; classify AMI, GCE, Azure, and appliance rows explicitly as shipped, separately carded, or declined.",
       "blockedBy": [
-        "#471"
+        "c0yry94n"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -6591,7 +6640,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/installer_media.rs",
+        "crates/jetpack/src/JetOS/iso_vm_commands.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 427
     },
     {
@@ -6603,15 +6658,21 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "D-JOS-HARDWARE1=A is ratified -- no owner gate. Build order: installer/first-boot hardware scan emits a typed hardware.<host> declaration (disks, filesystems, kernel modules, firmware, GPU); first-party hardware profile packages applyable per device; specialisations as named boot-time variants of one host config sharing a generation, with the #470 explain output showing what changed per specialisation; jet os doctor hardware drift report comparing scanned vs declared hardware. Depends on #409 (generations/bootloader, for specialisation boot entries) and #471 (VM harness) for scan-fixture verification. Exit: a scan fixture emits a correct hardware.<host> for a known synthetic device profile; a specialisation (for example gpu-passthrough on/off) boots as a distinct boot-menu entry sharing the base generation. Verify: unit tests for scan parsing plus a vmtest booting both specialisation variants.",
+      "plan": "Retain existing boot facts and first-boot projection, then implement D-JOS-HARDWARE1=A as checked source facts: scan disks, filesystems, modules, firmware, and GPU into hardware.<host>; compose first-party device profiles; derive named specialisations as boot entries sharing a base generation; expose contender provenance through c0by6tvm; compare scan and declaration in doctor output. Synthetic scan fixtures and c0yry94n boot tests prove base and specialisation facts without host borrowing.",
       "blockedBy": [
-        "#409",
-        "#471"
+        "c0by6tvm",
+        "c0yry94n",
+        "c0cc6n6t"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -6698,7 +6759,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/etc_boot_facts.rs",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 428
     },
     {
@@ -6712,13 +6780,18 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "Build order: retention policy declaration (keep last N generations / keep-younger-than) with an explainable why-kept/why-deleted GC; channel/pin update surface over jetpack channels (U21) at the OS layer; unattended auto-upgrade (fetch, build, proof-gate via the existing #409 generation/proof machinery, switch inside a rollback window, roll back on failed health checks); all no-daemon/no-root compliant (U28). Depends on #409 (generations/proof) and #471 (VM harness) for rollback-window verification. Acceptance: tests cover keep/delete reasons, auto-upgrade success, failed-health rollback, offline behavior, and audit logs. No gate unless retention/update becomes new source syntax.",
+      "plan": "The current generated GC and auto-upgrade scripts prove projection shape only. After D-JOS-LIFECYCLE1 chooses source policy and defaults, implement retention with why-kept and why-deleted facts against generation roots, channel updates through the existing Jetpack pin path, and proof-gated one-shot upgrades. Scheduling must honor the chosen no-resident-privileged-daemon law. Offline, success, failed-health rollback, rollback-window, and audit-replay tests run through c0yry94n.",
       "blockedBy": [
-        "#409",
-        "#471"
+        "c0cc6n6t",
+        "c0yry94n"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -6815,7 +6888,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/theme_fleet_lifecycle.rs",
+        "crates/jetpack/src/Store/Lifecycle.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 429
     },
     {
@@ -6827,14 +6907,21 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "D-JOS-DISK1=A is ratified -- no owner gate. Build order: a typed storage tree (partitions, filesystems, LVM, LUKS, ZFS/btrfs pools/subvolumes) consumed by the installer for destructive partitioning instead of imperative scripts; mount generation from the same source; an opt-in ephemeral root (tmpfs / rollback-snapshot root) with an explicit persist list -- the activation diff shows exactly what persists, nothing silently lost. Depends on #409 (generations, for persistence-proof interplay) and the existing installer (already shipped). Exit: a storage-tree fixture with LUKS plus ext4 drives both installer partitioning and activation mount/persistence proof from one source; an ephemeral-root fixture with a persist list shows the activation diff naming exactly the persisted paths. Verify: unit tests for storage-tree parsing plus a vmtest installing from the declared layout and proving persistence across a reboot.",
+      "plan": "Preserve the current storage-plan projection and manual safety gate, then replace its fixed shell template with D-JOS-DISK1=A typed storage execution. One checked tree drives installer partitioning, generated mounts, activation diff, and proof for partitions, filesystems, LUKS, LVM, ZFS, and btrfs. Ephemeral root stays explicit with an exact persist list. Atomic file application c039kz2t, activation c04de5hj, and VM harness c0yry94n prove LUKS install, reboot persistence, rollback, and destructive-action confirmation.",
       "blockedBy": [
-        "#409"
+        "c039kz2t",
+        "c04de5hj",
+        "c0yry94n"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -6926,7 +7013,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/module_storage_workload.rs",
+        "crates/jetpack/src/JetOS/installer_media.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 430
     },
     {
@@ -6940,13 +7034,18 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "D-JPK-OSINIT1/D-JOS-SYSTEMTREE1 own the existing systemd and system-tree law; this card extends the #407 unit-generation contract. Build order: typed options for socket activation, timer units (cron-parity schedule declarations), tmpfiles-class managed paths, resource limits (cpu/mem/io), sandboxing/hardening defaults (secure-by-default per I1, explicit opt-out required), and jet os logs <unit> --since wired to core.log formats. Depends on #407 (unit gen v2) and #470 (priority/explain, for hardening-override provenance). No new option syntax is expected beyond the existing service-option model; ballot only if one turns out to be needed.",
+      "plan": "Do not duplicate activation tmpfiles c04de5hj or systemd unit composition c0a11ldt. This card owns service defaults and journal behavior: typed socket and timer contributions, resource and hardening policy, structured journal retention/query, and exact override provenance from c0by6tvm. Replace the generated feature JSON and jetos-service-logs helper with the command path selected by D-JOS-SERVICELOG1. Unit snapshots and a native guest prove activation, schedule, limits, secure defaults, opt-out provenance, and log filtering.",
       "blockedBy": [
-        "#407",
-        "#470"
+        "c0a11ldt",
+        "c0by6tvm"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -7034,7 +7133,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/theme_fleet_lifecycle.rs",
+        "crates/jetpack/src/JetOS/system_facts.rs",
+        "crates/jetpack/src/JetOS/options_rendering.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 420
     },
     {
@@ -7216,13 +7321,23 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Depends on #469 (per-user environment engine, ratified D-JOS-USERENV1/USERAPPLY1 -- mints the work the placeholder #321 used to point at) and #330 (jetpack overlays/provider policy) for extension pinning and patching. Build order: a typed app-module template (package plus config-file projection plus service hooks) conforming to D-JOS-APPMODULE1=B one-record-one-field-per-app shape; first ~20 modules: git, ssh, fish, starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer, fastfetch, VS Code/Cursor (extensions via the #330 overlay/importNpmLock path), browsers (Zen/Brave/Helium) with policies, Discord/spicetify where providers exist. Acceptance: every app in the owner config has a module, test fixture, or a recorded gap card; generated files and services are proven in a VM/home fixture.",
+      "plan": "Retain the generated app catalog and apply helper only as a projection fixture. Implement D-JOS-APPMODULE1=B through exact user.<name>.apps records, one field per app, backed by the c03asgps profile engine and c0yzg1yu source/overlay policy. Each module realizes package, config files, and service hooks from one record; there is no enable flag or parallel programs.* mechanism. Cover the owner app inventory with real modules, fixtures, or linked gap cards and prove generated files, services, extension pins, and rollback in a user profile and guest.",
       "blockedBy": [
-        "#469",
-        "#330"
+        "c03asgps",
+        "c0yzg1yu"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 criteria audit: replaced stale or tautological checklist with functional, executable acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
@@ -7273,43 +7388,49 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "A checked user.<name>.apps record with one field per app resolves package, config files, and service hooks without an enable flag or programs.* alias.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:25:06.965Z"
+          "at": "2026-07-16T06:28:45.590Z"
         },
         {
           "n": 2,
-          "text": "syntax-decisions.md log entry",
+          "text": "Every app in the owner configuration maps to a working module fixture or a linked gap card; the audit reports no silent omissions.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:25:06.965Z"
+          "at": "2026-07-16T06:28:45.590Z"
         },
         {
           "n": 3,
-          "text": "jet devtools grammars regenerated",
+          "text": "A standalone user profile realizes at least one package-only, one config-file, and one service-owning app through the same module path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:25:06.965Z"
+          "at": "2026-07-16T06:28:45.590Z"
         },
         {
           "n": 4,
-          "text": "snapshots re-blessed",
+          "text": "A native guest proves generated files and services, source provenance, extension pinning, failed-apply rollback, and no cross-user leakage.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:25:06.965Z"
+          "at": "2026-07-16T06:28:45.590Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/theme_fleet_lifecycle.rs",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 421
     },
     {
@@ -7321,14 +7442,19 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "D-JOS-THEME1=A is ratified -- no owner gate. Build order: theme.<name> module (palette explicit or derived from wallpaper via a base16-class algorithm, polarity, font stack, cursor); apply engine projects the resolved theme into GTK/Qt/DM/terminal/editor targets through the #332 app-module library config-file projection hook; per-app opt-out flag; Studio preview reads the same resolved theme without writing separate state. Depends on #332 for projection targets. Exit: one theme.<name> reference on a host projects a consistent palette into at least GTK, a terminal app module, and an editor app module, each individually opt-outable; a wallpaper-derived palette matches a golden-fixture derivation. Verify: snapshot tests per target plus a fixture proving per-app opt-out leaves that app own config untouched.",
+      "plan": "The shipped theme projection and generated app hooks are fixtures, not Stylix parity. Implement D-JOS-THEME1=A as one resolved theme.<name> fact: explicit palette or deterministic wallpaper derivation, polarity, fonts, and cursor. Project that fact through c013gf7s into GTK, Qt, display manager, terminal, and editor outputs; each app can opt out without hidden state. Studio previews the same fact. Golden derivation, per-target snapshots, source provenance, and an opt-out guest test close the card.",
       "blockedBy": [
-        "#332"
+        "c013gf7s"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -7420,7 +7546,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/theme_fleet_lifecycle.rs",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 422
     },
     {
@@ -7432,16 +7564,26 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "Build order: map audio (pipewire+rtkit), locale/timezone/keyboard, XDG mime/default-apps, fonts, display managers, KDE Plasma as a first-class DE beside GNOME, Wayland/X11 session choice, virtualization (libvirtd+QEMU+swtpm+SPICE+virt-manager+USB redirection), gaming (Steam, gamemode, wine/proton tooling), smartcard/pcscd, and AppImage binfmt into typed options/modules. Depends on #469 (user env), #470 (priority/explain), and #333 (theming) where applicable; base system/service plumbing already ships as the P1 pillar. Acceptance: every module in the owner ~/nixos modules/core plus modules/apps trees maps to an option/test/gap card; VM proof checks desktop/app presence where relevant. No gate unless a module needs new declaration syntax.",
+      "plan": "Start from the shipped desktop-breadth projection, then implement only uncovered breadth: locale/timezone/keyboard, XDG defaults, virtualization, gaming, smartcard, and AppImage integration. Do not rebuild font/session composition c08vpj75, audio/portal substrate c0eli2fh, KDE or display-manager swaps c0fp9sb3, printing or Bluetooth c0pfsrnc, zram c05hqpe6, themes c0254elb, or user profiles c03asgps. Map every owner configuration item to one owning option, real guest assertion, or linked gap card; c0by6tvm supplies override provenance.",
       "blockedBy": [
-        "#469",
-        "#470",
-        "#333"
+        "c03asgps",
+        "c0by6tvm",
+        "c0254elb",
+        "c08vpj75",
+        "c0eli2fh",
+        "c0fp9sb3",
+        "c0pfsrnc",
+        "c05hqpe6"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -7524,7 +7666,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "crates/jetpack/src/JetOS/system_facts.rs",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 423
     },
     {
@@ -7536,14 +7684,20 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "D-JOS-FLATPAK1=A is ratified -- no owner gate. Build order: apps.flatpak central policy (remotes, refs, pin/tracking mode, permission policy) plus per-user references (via the #332 app-module shape) for per-user install intent; activation computes one plan/diff before switch (install/remove/update shown, proof-gated like any other activation change) with rollback. Depends on #332 for the per-user reference shape. Exit: declaring 2 flatpak refs and removing 1 from config.jet produces a plan/diff naming exactly those 3 changes before switch, applies them, and rolls back cleanly on failure. Verify: unit tests for plan/diff computation plus a vmtest applying and rolling back a flatpak change.",
+      "plan": "Replace the current Flatpak facts projection with D-JOS-FLATPAK1=A realization. One apps.flatpak policy owns remotes, refs, pins, and permissions; user intent composes through canonical user.<name> packages without a parallel app schema. Activation c04de5hj computes an exact install, remove, and update diff before mutation, records immutable receipts, and rolls back the whole transaction on failure. Unit plan tests plus c0yry94n guest proof cover two installs, one removal, offline behavior, permission drift, and rollback.",
       "blockedBy": [
-        "#332"
+        "c04de5hj",
+        "c0yry94n"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -7625,7 +7779,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 424
     },
     {
@@ -7637,14 +7797,21 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "D-JOS-KERNELTUNE1=A is ratified -- no owner gate. Build order: kernel profile enum (safe=zen / lts=cachyos-lts / performance=cachyos-latest) selecting boot.kernelPackages via the #408 first-party kernel packaging path; typed sysctl (vm.swappiness etc.), zram/swap with a memory cap, scx scheduler service declarations, initrd verbosity/systemd-initrd knobs, and limine maxGenerations/EFI-variable depth around the #409 bootloader machinery. Every expert override carries risk/proof classification and explain output per D-JOS-KERNELTUNE1=A. Depends on #408 (kernel packaging). Exit: switching only the kernel-profile enum across all three profiles boots successfully in a vmtest; an expert sysctl/zram override shows in explain output with its risk class. Verify: unit tests for option rendering plus a profile-swap vmtest.",
+      "plan": "Keep existing kernel and performance fact files as fixtures. Implement D-JOS-KERNELTUNE1=A through one typed profile plus explicit expert overrides: kernel choice, sysctl, zram/swap cap, sched-ext service, initrd settings, and Limine retention. Generation and boot c0cc6n6t own selection; c0by6tvm shows every contender and risk class; c0yry94n proves all three kernel profiles, override rendering, invalid caps, rollback, and zero host-kernel borrowing.",
       "blockedBy": [
-        "#408"
+        "c0cc6n6t",
+        "c0by6tvm",
+        "c0yry94n"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -7731,7 +7898,15 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "crates/jetpack/src/JetOS/kernel_bootstrap.rs",
+        "crates/jetpack/src/JetOS/etc_boot_facts.rs",
+        "crates/jetpack/src/JetOS/options_rendering.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "workOrder": 425
     },
     {
@@ -10328,55 +10503,85 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "planning",
       "priority": "P0",
-      "plan": "Union builder in jetpack (pure, deterministic, snapshot-tested); post passes shell-free where possible (glib-compile-schemas is a package tool — invoked from the hangar, not the host). Exit: profile containing gnome-shell + kde apps resolves binaries, icons, schemas correctly in the guest. Verify: unit snapshots + guest assertion in the VM harness.",
-      "blockedBy": [],
+      "plan": "Consume the shared D-JPK-PROFILE1 engine from E4 card c0esko6c; JetOS does not own a second profile union or collision law. After D-JPK-PROFILECOLLISION1, project one profile.<name> generation into the system root and run closure-owned schema, MIME, and XDG composition. Preserve the shared engine receipts for identical-file deduplication, directory composition, exact-path selection, stale package identities, and file-directory failure. Native guest proof then checks binaries, icons, schemas, and the same collision result seen by jet profile and user profiles.",
+      "blockedBy": [
+        "c0esko6c",
+        "D-JPK-PROFILECOLLISION1"
+      ],
       "workOrder": 404,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "Second ballot review: criterion 2 now consumes exact shared D-JPK-PROFILECOLLISION1 law; removed package-priority assumption."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 review correction: removed duplicate JetOS collision ballot; card now consumes shared E4 #425 profile engine and D-JPK-PROFILECOLLISION1."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "Owner-gated surface found during E7 plan review; full ballot drafted and kept unexposed pending independent review."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:39.715Z",
       "updated": "2026-07-16",
       "criteria": [
         {
           "n": 1,
-          "text": "The union builder is pure and deterministic -- a snapshot test proves the same input package set always yields a byte-identical profile tree.",
+          "text": "The JetOS system root consumes the exact profile generation identity and union tree produced by shared E4 card #425; a snapshot proves byte-identical projection for identical inputs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:39.762Z"
+          "at": "2026-07-16T07:05:59.182Z"
         },
         {
           "n": 2,
-          "text": "The collision policy resolves by package priority with a typed diagnostic for unresolved collisions, covered by a unit test on a real collision fixture.",
+          "text": "D-JPK-PROFILECOLLISION1 governs every overlap: identical files deduplicate, directories compose, exact-path selections bind real package identities, and stale or file-directory conflicts fail; no package-priority path exists.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:39.886Z"
+          "at": "2026-07-16T07:05:59.182Z"
         },
         {
           "n": 3,
-          "text": "glib-compile-schemas, MIME cache, and XDG_DATA_DIRS composition passes run from hangar-built package tools, never a host binary -- verified by a test asserting no host-tool invocation.",
+          "text": "Schema, MIME, and XDG composition tools execute from the locked profile closure, never the host, and their inputs and outputs appear in the shared profile receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:40.008Z"
+          "at": "2026-07-16T07:05:59.182Z"
         },
         {
           "n": 4,
-          "text": "VM harness assertion: a profile containing gnome-shell plus a KDE app resolves binaries, icons, and compiled schemas correctly in a booted guest.",
+          "text": "A native guest containing GNOME plus a KDE application resolves binaries, icons, schemas, and collision winners exactly as jet profile and user.<name> views report them.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:40.125Z"
+          "at": "2026-07-16T07:05:59.182Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "crates/jetpack/src/JetOS/root_projection.rs",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c039kz2t",
@@ -10387,13 +10592,24 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "planning",
       "priority": "P1",
-      "plan": "Typed environment.etc-class options exist under the ratified namespaces; renderer emits tree + sidecars; activation applies atomically with rollback on failure. Exit: guest /etc matches declared tree across two switches incl. a file mode change; power-cut sim leaves consistent /etc. Verify: vmtest scenario.",
+      "plan": "Retain the shipped generated /etc facts and immutable generation staging. After D-JOS-ETCMANAGE1 chooses managed-versus-mutable defaults, implement typed entries with contents, source, mode, uid, gid, and the selected ownership policy. Publish the whole declared tree atomically, preserve explicitly mutable paths by law, and restore the prior tree on failure. Snapshot, interrupted-apply, mode-only switch, mutable-edit, rollback, and power-loss guest tests prove no partial or silent overwrite.",
       "blockedBy": [],
       "workOrder": 405,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "Owner-gated surface found during E7 plan review; full ballot drafted and kept unexposed pending independent review."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:39.786Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10435,7 +10651,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "crates/jetpack/src/JetOS/etc_boot_facts.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c04de5hj",
@@ -10448,65 +10670,87 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Snippet registry w/ deps (topo sort, cycle diagnostics per house I4 style); wrapper shim (small static helper, hangar-built); tmpfiles engine; dry-run output as product copy. Exit: activation runs twice = no-op second time; wrappers get correct caps; dry-run names every change. Verify: vmtest + unit tests.",
+      "plan": "Build on the shipped immutable generation pointer and activation provenance. Add a dependency-checked idempotent snippet registry, audited setuid/setcap wrappers, tmpfiles execution, exact dry-run diff, and transactional current-system publication. Sema or plan evaluation owns cycle and policy diagnostics; realization executes approved facts. Unit failpoints plus native guest tests prove topological order, correct caps, tmpfiles behavior, identical second activation with zero mutations, complete dry-run output, and rollback after every injected failure.",
       "blockedBy": [
-        "#400",
-        "#401"
+        "c0233d1b",
+        "c039kz2t"
       ],
       "workOrder": 410,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 criteria audit: replaced stale or tautological checklist with functional, executable acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:39.853Z",
       "updated": "2026-07-16",
       "criteria": [
         {
           "n": 1,
-          "text": "The snippet registry topo-sorts dependency-ordered idempotent snippets with a typed cycle diagnostic (I4 style), covered by a unit test on a cycle fixture.",
+          "text": "A unit test proves dependency-ordered activation snippets execute topologically and a cycle produces a registered Jet diagnostic with snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:43.794Z"
+          "at": "2026-07-16T06:28:45.771Z"
         },
         {
           "n": 2,
-          "text": "The setuid/setcap wrapper dir builds a small static hangar-built helper with correct capabilities, verified by a unit test inspecting generated wrapper caps.",
+          "text": "The hangar-built wrapper helper receives exactly the declared setuid or capability policy; a hostile test rejects excess privilege.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:43.923Z"
+          "at": "2026-07-16T06:28:45.771Z"
         },
         {
           "n": 3,
-          "text": "The tmpfiles engine creates and cleans declared paths, covered by a unit test.",
+          "text": "The tmpfiles engine creates, cleans, and receipts declared paths without touching undeclared paths.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:44.051Z"
+          "at": "2026-07-16T06:28:45.771Z"
         },
         {
           "n": 4,
-          "text": "Running activation twice on an unchanged generation is a no-op the second time, asserted by a unit or vmtest checking zero mutations.",
+          "text": "Running activation twice on an unchanged generation performs zero mutations on the second run, proven by filesystem and action receipts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:44.177Z"
+          "at": "2026-07-16T06:28:45.771Z"
         },
         {
           "n": 5,
-          "text": "true",
+          "text": "jet os switch --plan names every file, unit, wrapper, tmpfiles, and pointer change before mutation; an injected failure at each publish stage restores the prior generation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T05:01:44.304Z"
+          "at": "2026-07-16T06:28:45.771Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/activation_provenance.rs",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c05iu605",
@@ -10519,14 +10763,25 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Unit differ (INI-aware) + transaction planner + executor via systemctl/dbus; plan is printable (jet os switch --plan) before apply. Exit: vmtest changes a service option live → only that unit restarts; changing a reload-trigger only reloads; activation failure restores prior generation pointer. Verify: vmtest scenarios.",
+      "plan": "Extend the shipped activation diff and unit facts with one INI-aware live-switch transaction. Compare old and new approved generations, classify start, stop, restart, and reload from c0a11ldt policy, print the exact plan before c04de5hj mutates state, then execute and receipt each action. Unit semantic-diff tests and native guest scenarios prove one-service restart, reload-only change, stopped removal, idempotent replay, and prior-generation restoration on failure.",
       "blockedBy": [
-        "#402",
-        "#407"
+        "c04de5hj",
+        "c0a11ldt"
       ],
       "workOrder": 413,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:39.923Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10577,7 +10832,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/activation_provenance.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/system_facts.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c06lehoq",
@@ -10588,13 +10849,29 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "planning",
       "priority": "P0",
-      "plan": "Reconciler with fixture-driven tests (declared×live matrices incl. deletions, uid conflicts); backup file discipline. Exit: vmtest sets a user password in the guest, switches twice, password survives; removing a declared user follows the ratified removal semantics (diagnostic-gated). Verify: unit matrix + vmtest.",
+      "plan": "Replace static passwd/shadow/group projection with reconciliation against declared and live state. Preserve mutable password hashes and stable identities, allocate collision-free ids, publish all account files atomically, and retain recovery backups. D-JOS-USERREMOVAL1 must decide what absence removes and how home data is protected. A declared-by-live fixture matrix plus native guest tests prove adds, conflicts, repeated switches, password preservation, chosen removal behavior, interruption recovery, and no silent data loss.",
       "blockedBy": [],
       "workOrder": 406,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "Owner-gated surface found during E7 plan review; full ballot drafted and kept unexposed pending independent review."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:39.988Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10645,7 +10922,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "crates/jetpack/src/JetOS/etc_boot_facts.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c07p2e72",
@@ -10658,11 +10941,24 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Options under the ratified services/security namespaces; renderer snapshot-tested; the desktop DE deltas contribute rules (kwallet-pam, gnome-keyring). Exit: guest login via gdm and sddm works with keyring/kwallet unlock; sudo works. Verify: snapshots + graphical vmtest.",
-      "blockedBy": [],
+      "plan": "Build typed PAM rule composition on reconciled account facts c06lehoq, replacing the shipped skeleton files. Compose ordered auth, account, password, and session rules for login, sudo, GDM, and SDDM; desktop deltas contribute keyring rules through the same registry. Snapshot conflicts and ordering, then prove sudo, terminal login, GDM keyring unlock, and SDDM wallet unlock in native guests.",
+      "blockedBy": [
+        "c06lehoq"
+      ],
       "workOrder": 407,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.054Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10704,7 +11000,12 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/etc_boot_facts.rs",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c08vpj75",
@@ -10717,14 +11018,20 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Each composer = pure function over the package set + options, snapshot-tested; wired into generation build. Exit: guest hotplug (udev), fonts render in GNOME/KDE, session env vars present in a graphical session. Verify: snapshots + guest assertions.",
+      "plan": "Replace scattered generated facts with pure composers over the selected profile c0233d1b and unit registry c0a11ldt: D-Bus service discovery, udev and hwdb, fontconfig, and session environment. Each composer emits deterministic artifacts with complete source provenance and no host tools. Snapshots plus native guest hotplug, font rendering, and PATH/XDG assertions prove the same artifacts feed terminal and graphical sessions.",
       "blockedBy": [
-        "#400",
-        "#407"
+        "c0233d1b",
+        "c0a11ldt"
       ],
       "workOrder": 409,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.126Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10766,7 +11073,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/system_facts.rs",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0a11ldt",
@@ -10779,11 +11092,17 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Unit source resolution (package example units + generated + overrides); renderer keeps I4-quality diagnostics for conflicts. Exit: pipewire + gdm + NetworkManager run from UPSTREAM units composed with jetos overrides in the guest. Verify: unit snapshots + vmtest service states.",
+      "plan": "Extend the shipped minimal unit library into one systemd composition path over upstream package units, generated units, user drop-ins, masks, wants/requires links, and hardening keys. Reject conflicting sources before realization; never silently drop a key. Snapshot every composition case, then prove NetworkManager, PipeWire, GDM, masks, and hardened overrides in a native guest with provenance back to package and source.",
       "blockedBy": [],
       "workOrder": 408,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.195Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10825,7 +11144,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/system_facts.rs",
+        "crates/jetpack/src/JetOS/activation_provenance.rs",
+        "crates/jetpack/src/JetOS/root_projection.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0b698t4",
@@ -10838,11 +11163,19 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "modinfo-based dep closure walker; cpio builder; systemd-initrd unit set; kernel package recipe (source build via 706 or substituted via chaotic pin through 703). Exit: guest boots OUR initrd + first-party kernel with luks-on-ext4 vmtest; nothing references host paths. Verify: vmtest matrix (plain, luks).",
-      "blockedBy": [],
+      "plan": "The current bootstrap can borrow host kernel artifacts and overlay installer tools; that is evidence only. After native builder c0zqnb18 clears its owner boundary, build the selected first-party kernel recipe, compute exact module and firmware closure, and assemble a reproducible systemd initrd without host paths. Plain ext4 and LUKS-on-ext4 real guests must boot that kernel and initrd; source, tool, closure, hash, and guest facts prove no borrowed artifact.",
+      "blockedBy": [
+        "c0zqnb18"
+      ],
       "workOrder": 411,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.264Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10884,7 +11217,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/kernel_bootstrap.rs",
+        "crates/jetpack/src/JetOS/initrd_overlay.rs",
+        "crates/jetpack/src/JetOS/installer_media.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0cc6n6t",
@@ -10897,13 +11237,19 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Extend the REAL ledger/pointer machinery to profile objects with hangar roots; limine.conf generator; ESP staging. Exit: vmtest: three switches → three boot entries, booting entry N-1 rolls the system back fully; jet clean never collects a listed generation. Verify: vmtest + hangar GC test.",
+      "plan": "Extend the shipped generation ledger and current/default pointers with immutable hangar GC roots and boot profiles. For each c0b698t4 kernel/initrd pair, generate and atomically stage a Limine entry on the ESP; preserve default and explicit rollback targets. Snapshot configs and native guest tests prove three switches create three bootable entries, booting N-1 restores the full system, failed staging keeps the prior menu, and jet clean cannot collect a listed generation.",
       "blockedBy": [
-        "#408"
+        "c0b698t4"
       ],
       "workOrder": 412,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.335Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -10945,7 +11291,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "crates/jetpack/src/JetOS/installer_media.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0dhzann",
@@ -10958,21 +11310,30 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Integration card: consumes 701-703, 707-710, 712, 716-717. Exit: jet os vm run <host> boots to getty; proof records guest facts; PATH-stripped no-nix lane green; screenshot artifact. This card cannot close on plumbing-tier evidence.",
+      "plan": "Integrate the native package substitution/evaluation/store prerequisites c0w7297z, c0xe5g33, c0yl347q, and c00wjjmo with P1 cards c0233d1b through c0cc6n6t. Build and boot the fully declared terminal baseline in real QEMU with PATH stripped of nix and nix-store. Proof must come from inside the guest and bind source, closure, toolchain, kernel, initrd, generation, identity, package, service, network, rollback, and login facts. Plumbing-tier markers cannot satisfy any criterion; attach serial and screenshot evidence.",
       "blockedBy": [
-        "#400",
-        "#401",
-        "#402",
-        "#404",
-        "#405",
-        "#406",
-        "#407",
-        "#408",
-        "#409"
+        "c0233d1b",
+        "c039kz2t",
+        "c04de5hj",
+        "c06lehoq",
+        "c07p2e72",
+        "c08vpj75",
+        "c0a11ldt",
+        "c0b698t4",
+        "c0cc6n6t",
+        "c0w7297z",
+        "c0xe5g33",
+        "c0yl347q",
+        "c00wjjmo"
       ],
       "workOrder": 414,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -11025,7 +11386,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "crates/jetpack/src/JetOS/vm_commands.rs",
+        "crates/jetpack/src/JetOS/installer_media.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0eli2fh",
@@ -11038,15 +11405,21 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Substrate module under ratified namespaces; session registry data model + validation (unknown session name = typed diagnostic listing known); portal config renderer. Exit: substrate + a bare compositor session entry reaches a wayland session in the VM. Verify: guest assertions (session type, portal running).",
+      "plan": "Build one graphical substrate on PAM c07p2e72, composition c08vpj75, and systemd c0a11ldt: session registry, portals, PipeWire and rtkit, polkit, logind seats, and typed invalid-session diagnostics. Reuse shipped desktop facts only as fixtures. Deterministic projections and a native bare-compositor guest prove Wayland session identity, portal selection, audio, authorization, seat ownership, and no desktop-specific logic in the substrate.",
       "blockedBy": [
-        "#405",
-        "#406",
-        "#407"
+        "c07p2e72",
+        "c08vpj75",
+        "c0a11ldt"
       ],
       "workOrder": 415,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.472Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -11088,7 +11461,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "crates/jetpack/src/JetOS/system_facts.rs",
+        "crates/jetpack/src/JetOS/etc_boot_facts.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0fp9sb3",
@@ -11101,13 +11480,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "B-E7-DESKTOPNS1=E is ratified -- no fixture is blocked on a ballot any more. Build order: per-DE delta modules (GNOME/KDE/Hyprland/Niri) carrying only DE-specific wiring per the desktop-glue audit matrix; display-manager auto-derivation (Gnome to Gdm, Kde to Sddm, Hyprland/Niri to Greetd) with override, matching B-E7-DESKTOPNS1=E; session-name derivation including x11 variants for GNOME/KDE. Depends on #411 (graphical substrate). Exit: switching only the desktop line in config.jet across all four DEs yields a working session in the VM each time (the proof harness asserts the right shell process and session type per DE); x11 variants for gnome/kde boot too. Verify: swap-matrix vmtest (8 combos including invalid-combo diagnostics).",
+      "plan": "Implement B-E7-DESKTOPNS1=E as thin GNOME, KDE, Hyprland, and Niri deltas over substrate c0eli2fh. Auto-derive GDM, SDDM, or Greetd with explicit override; derive Wayland and allowed X11 sessions; reject invalid combinations with source-linked typed assertions. Replace projection-only desktop claims with the full native swap matrix: four Wayland desktops, GNOME/KDE X11 variants, invalid combinations, correct shell process, display manager, session type, and rollback after a failed swap.",
       "blockedBy": [
-        "#411"
+        "c0eli2fh"
       ],
       "workOrder": 416,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
@@ -11163,7 +11547,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0gtqigv",
@@ -11176,20 +11566,28 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "B-E7-BASELINE1=D is ratified -- content is fixed, no open ballot. Make jet os init and the installer materialize the chosen baseline directly into config.jet, with every package, service, option, policy, and component provenance explicit. Studio edits that same source and covers settings, packages, updates, generations, proof, and rollback without a terminal. Baseline changes are reviewable source diffs, never ambient upgrades. Expert removals/replacements are authoritative: report missing obligations and failed proof without silently healing choices. Exit: terminal baseline boots and login-proves the exact lean modern tool set from B-E7-BASELINE1=D; graphical baseline boots a live GNOME Wayland session and proves every named hardware/app/admin job through GUI paths. Closure audit maps every installed root and enabled unit to a config.jet source span; no undeclared service/app/default. Verify with native real-guest vmtests for both profiles plus hostile remove/swap tests and source-to-closure completeness checks.",
+      "plan": "Implement B-E7-BASELINE1=D by materializing every terminal or graphical choice directly into config.jet during init/install. Reuse networking c0pfsrnc, app modules c013gf7s, Studio c6q02qhw, P1 system facts, and desktop swaps; do not hide ambient defaults. Terminal is lean-modern; graphical completes named jobs without a command line. Source-to-closure tests reject every undeclared package, unit, app, and default. Hostile removals remain authoritative and produce obligation or proof failures, never silent healing.",
       "blockedBy": [
-        "#401",
-        "#404",
-        "#405",
-        "#406",
-        "#407",
-        "#409",
-        "#411",
-        "#412"
+        "c039kz2t",
+        "c06lehoq",
+        "c07p2e72",
+        "c08vpj75",
+        "c0a11ldt",
+        "c0cc6n6t",
+        "c0eli2fh",
+        "c0fp9sb3",
+        "c0pfsrnc",
+        "c013gf7s",
+        "c6q02qhw"
       ],
       "workOrder": 417,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
@@ -11250,7 +11648,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "docs/plans/epoch-7/jetos-studio.md",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0hzhedp",
@@ -11263,16 +11668,23 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Integration of 703+708-717+719-721. Exit: live-desktop proof (D-JOS-DESKTOPPROOF1=C assertions: dm active, shell process, session type) on native GNOME; swap matrix green; artifacts on card. Cannot close on plumbing evidence.",
+      "plan": "Integrate native substitution/store prerequisites c0w7297z and c00wjjmo, terminal milestone c0dhzann, graphical substrate c0eli2fh, desktop matrix c0fp9sb3, and baseline c0gtqigv. Build GNOME entirely by substitution, boot a native real guest, and record display-manager, shell-process, Wayland-session, package, service, rollback, and source-closure facts. Run the full one-line swap matrix. Attach a real rendered desktop screenshot plus serial/proof JSON; text-only or plumbing evidence cannot close the milestone.",
       "blockedBy": [
-        "#410",
-        "#411",
-        "#412",
-        "#413"
+        "c0dhzann",
+        "c0eli2fh",
+        "c0fp9sb3",
+        "c0gtqigv",
+        "c0w7297z",
+        "c00wjjmo"
       ],
       "workOrder": 418,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -11325,7 +11737,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "crates/jetpack/src/JetOS/installer_media.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0j57gh4",
@@ -11336,13 +11754,24 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "planning",
       "priority": "P1",
-      "plan": "Move nixos_backend behind the migration verb (surface wording is product copy; verb naming may need a mini-ballot if new user-typeable syntax emerges); delete rebranding code paths; migration docs. Exit: migration command builds + boots the comparison guest labeled NixOS; product path contains no reference to it; importer tests green. Verify: targeted tests + docs review.",
+      "plan": "Keep the semantic importer and NixOS backend only as migration evidence. After D-JOS-MIGRATIONVERB1 chooses the explicit surface, route every NixOS comparison build through it, label guest identity and all output NixOS, and delete distro-rebranding byte rewrites. Native jetos product commands must never reach this backend. Import fixtures, an rg boundary test, and a real comparison guest prove honest labeling, explicit invocation, and zero product-path leakage.",
       "blockedBy": [],
       "workOrder": 403,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "Owner-gated surface found during E7 plan review; full ballot drafted and kept unexposed pending independent review."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.746Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -11384,7 +11813,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/nixos_import.rs",
+        "crates/jetpack/src/JetOS/nixos_import_live.rs",
+        "crates/jetpack/src/JetOS/nixos_backend.rs",
+        "crates/jetpack/src/JetOS/commands.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c0kbaab0",
@@ -11397,14 +11833,25 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Rolling card: each import-audit omission becomes a linked breadth task; acceptance = owner config proof green + omission list empty or owner-acknowledged. Exit per D-JOS-PARITYBAR1=A. Verify: real-guest proof + import audit diff.",
+      "plan": "Run the real owner configuration through semantic import and the complete native package pipeline c0w7297z through c00wjjmo, then through terminal and graphical milestones c0dhzann and c0hzhedp. Every import omission becomes a linked breadth card until none remains. A native real guest must prove desktop, kernel, users, firewall, sysctl, packages, unfree inputs, custom sources, and per-user environment. The audit diff, source-to-closure facts, and screenshots are acceptance evidence; synthetic fixtures cannot close this card.",
       "blockedBy": [
-        "#410",
-        "#414"
+        "c0dhzann",
+        "c0hzhedp",
+        "c0w7297z",
+        "c0xe5g33",
+        "c0yl347q",
+        "c0zqnb18",
+        "c00wjjmo"
       ],
       "workOrder": 432,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "created": "2026-07-09T18:16:40.817Z",
       "updated": "2026-07-16",
       "criteria": [
@@ -11455,7 +11902,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/nixos_import.rs",
+        "crates/jetpack/src/JetOS/nixos_import_live.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "crates/jetpack/src/JetOS/generation_files.rs",
+        "tests/jetpack_jetos.rs"
+      ]
     },
     {
       "id": "c01fj815",
@@ -14246,10 +14700,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "No owner gate -- D-JOS-USERENV1=A and D-JOS-USERAPPLY1=A are already ratified; pure execution. Build order: parse/sema for user.<name> module declarations (packages, files, env, apps per D-JOS-APPMODULE1=B); standalone profile realization (build a user profile independent of any system host) plus attach/override composition into system.<host>; jetos user plan|build|switch|rollback|prove reusing the existing generation-ledger/atomic-flip machinery from jet os switch, scoped to a per-user profile root instead of /run/current-system. Exit: a fixture with two users on one host builds two independent profiles, switches, rolls back independently, and an attached user packages compose correctly with host-level packages under the ratified priority model. Verify: unit tests for parse/sema plus a vmtest scenario proving two users isolated profiles and independent rollback.",
+      "plan": "Implement D-JOS-USERENV1=A and D-JOS-USERAPPLY1=A through canonical user.<name>. Parse and check packages, files, environment, and app records; diagnose legacy users as a migration spelling rather than maintaining an alias. Reuse the system generation ledger and atomic flip for standalone and host-attached user profiles. Two-user guest tests prove independent roots, switch, proof, rollback, package composition, file ownership, and that rolling one user back cannot affect another.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -14297,7 +14757,14 @@
           "at": "2026-07-16T05:01:38.671Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jet-env-model/src/ModuleEval/Types.rs",
+        "crates/jet-env-model/src/ModuleEval/System.rs",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:03:31.052Z",
       "updated": "2026-07-16",
@@ -14314,10 +14781,20 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "D-JOS-PRIORITY1=A is already ratified (docs/spec/syntax-decisions.md:2054): named tiers (Default, ordinary, Force) + expert Priority(n) weights, one mechanism, explain output shows all contenders, stable module IDs for disabling. No owner gate — implement the ratified mechanism plus jet os options explain-class provenance output. #323/#329/#334 all unblock once this lands.",
+      "plan": "Finish D-JOS-PRIORITY-SURFACE2=A as OptionValue { value, priority }, never sibling tier fields. Plain values remain ordinary; only expert overrides wrap Default, Force, or Priority(n). Evaluation retains every contender and stable module id, selects once, and passes only the winner to realization. Explain and Studio show source spans, tiers, weights, disabled contributors, and winner. Conflict, path-ending-in-priority, merge-order, parser, formatter, diagnostic, and guest provenance tests prove one mechanism.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 criteria audit: replaced stale or tautological checklist with functional, executable acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -14337,42 +14814,58 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
-          "status": "met",
-          "metBy": "codex-main",
+          "text": "Plain option values and OptionValue { value, priority } both parse, format stably, and sema-check under D-JOS-PRIORITY-SURFACE2=A; sibling tier fields are rejected.",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "Registered OptionValue and Default/Force/Priority vocabulary under D-JOS-PRIORITY-SURFACE2 in Syntax.rs.",
-          "at": "2026-07-11T22:12:34.937Z"
+          "evidence": "",
+          "at": "2026-07-16T06:28:45.952Z"
         },
         {
           "n": 2,
-          "text": "syntax-decisions.md log entry",
-          "status": "met",
-          "metBy": "codex-main",
+          "text": "Default, ordinary, Force, and Priority(n) contenders resolve deterministically while preserving every losing value and source span.",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "Recorded D-JOS-PRIORITY-SURFACE2=A in syntax-decisions.md and native-jetos plan.",
-          "at": "2026-07-11T22:12:35.119Z"
+          "evidence": "",
+          "at": "2026-07-16T06:28:45.953Z"
         },
         {
           "n": 3,
-          "text": "jet devtools grammars regenerated",
-          "status": "met",
-          "metBy": "codex-main",
+          "text": "An ordinary option path ending in priority remains ordinary data and cannot be mistaken for the expert wrapper.",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "Rebuilt jet and regenerated all editor grammar sections after syntax registry update.",
-          "at": "2026-07-11T22:12:35.294Z"
+          "evidence": "",
+          "at": "2026-07-16T06:28:45.953Z"
         },
         {
           "n": 4,
-          "text": "snapshots re-blessed",
-          "status": "met",
-          "metBy": "codex-main",
+          "text": "Explain JSON, terminal output, and Studio projection show stable module ids, all contenders, disabled contributors, and the winning reason from one fact model.",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "Ratification adds staged typed vocabulary only; no diagnostic snapshot changed. cargo test --test decisions passes 2/2.",
-          "at": "2026-07-11T22:12:35.473Z"
+          "evidence": "",
+          "at": "2026-07-16T06:28:45.953Z"
+        },
+        {
+          "n": 5,
+          "text": "Conflict, merge-order, import-order, disable, invalid-weight, formatter, diagnostic-snapshot, and native realization tests prove only the selected value reaches generation output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T06:28:45.953Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-env-model/src/ModuleEval/Types.rs",
+        "crates/jetpack/src/JetOS/options_rendering.rs",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:03:40.282Z",
       "updated": "2026-07-16",
@@ -14389,10 +14882,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "No owner gate -- pure test infrastructure. Extract the ad hoc QEMU boot/assert code already used by module vmtest.<name> and individual P1 vmtest scenarios into one shared harness: a boot driver (QEMU launch + serial capture), a typed assertion library (login prompt, desktop-session readiness per D-JOS-DESKTOPPROOF1=C, app-presence, rollback-window health checks), and a replayable proof-artifact writer under systems/vm-tests/. Exit: at least one existing card-specific vmtest call site is ported onto the shared harness with identical proof output; new image/lifecycle/acceptance cards call the same entry point instead of reimplementing boot/assert plumbing. Verify: harness unit tests for assertion parsing plus one real-QEMU smoke run producing a proof artifact.",
+      "plan": "Audit all current QEMU and proof call sites, then consolidate boot, serial capture, typed assertions, timeout, cleanup, and proof publication behind one harness. Preserve honest real-guest versus plumbing classification. Port module vmtest and one P1 scenario first, then delete duplicate drivers. Parser unit tests and one real QEMU run prove login, desktop readiness, app presence, rollback-window health, exact source/generation fingerprints, replay, failure cleanup, and one canonical boot-driver call path.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -14431,7 +14930,14 @@
           "at": "2026-07-16T05:01:37.898Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "crates/jetpack/src/JetOS/vm_commands.rs",
+        "crates/jetpack/src/JetOS/iso_vm_commands.rs",
+        "crates/jet-env-model/src/ModuleEval/Types.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:03:43.839Z",
       "updated": "2026-07-16",
@@ -14448,10 +14954,24 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "D-JOS-NETWORK1=B is already ratified (this resolves the card prior stale OWNER-GATE note) -- no ballot needed. Build order: inline net.* fields in system.<host> (net.hostname, net.wifi, net.firewall, net.bluetooth) matching existing convention; portable pieces as name-referenced modules (vpn.<name>, printing.<name>) reused across hosts, matching user.<name>/theme.<name>; net.firewall accepts a typed Firewall.nftables family for expert rule sets. Zero-declaration default: NM+DHCP, deny-inbound firewall, CUPS+Avahi discovery, bluetooth on. Exit: a zero-declaration host gets working NM+DHCP+firewall+CUPS+Avahi+bluetooth in a vmtest; a vpn.<name> module reused across two hosts both connect; an expert nftables override renders correctly.",
-      "blockedBy": [],
+      "plan": "Implement D-JOS-NETWORK1=B with inline net.* fields, not network.*, plus reusable vpn.<name> and printing.<name> modules. Zero declaration yields NetworkManager with DHCP, deny-inbound firewall, CUPS and Avahi discovery, and Bluetooth. Expert Firewall.nftables values remain typed and source-visible. Systemd c0a11ldt, graphical substrate c0eli2fh, and harness c0yry94n prove defaults, two-host VPN reuse, printing discovery, Bluetooth, firewall rejection, offline behavior, and exact nftables rendering.",
+      "blockedBy": [
+        "c0a11ldt",
+        "c0eli2fh",
+        "c0yry94n"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 criteria audit: replaced stale or tautological checklist with functional, executable acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -14461,42 +14981,58 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "Inline net.* fields plus reusable vpn.<name> and printing.<name> modules parse and check; network.* receives the migration diagnostic instead of remaining an alias.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:24:07.758Z"
+          "at": "2026-07-16T06:28:46.138Z"
         },
         {
           "n": 2,
-          "text": "syntax-decisions.md log entry",
+          "text": "A zero-declaration native guest proves NetworkManager DHCP, deny-inbound firewall, CUPS plus Avahi discovery, and Bluetooth defaults.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:24:07.758Z"
+          "at": "2026-07-16T06:28:46.138Z"
         },
         {
           "n": 3,
-          "text": "jet devtools grammars regenerated",
+          "text": "One vpn.<name> module reused by two hosts connects in both guests while retaining distinct host secrets and receipts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:24:07.758Z"
+          "at": "2026-07-16T06:28:46.138Z"
         },
         {
           "n": 4,
-          "text": "snapshots re-blessed",
+          "text": "A typed Firewall.nftables expert value renders exact rules, rejects invalid rules before realization, and appears in explain provenance.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:24:07.758Z"
+          "at": "2026-07-16T06:28:46.138Z"
+        },
+        {
+          "n": 5,
+          "text": "Offline, firewall-denial, printer-discovery, Bluetooth, VPN-failure rollback, and real-guest tests run through the shared VM harness.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T06:28:46.138Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jet-env-model/src/ModuleEval/System.rs",
+        "crates/jetpack/src/JetOS/system_facts.rs",
+        "crates/jetpack/src/JetOS/desktop_store_vm.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:03:54.158Z",
       "updated": "2026-07-16",
@@ -14511,15 +15047,21 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "D-JOS-APPSTORE1=D is ratified -- no owner gate (this resolves the card prior stale OWNER-GATE note). Build order: an Apps view inside the one Studio shell (not a second app) with full storefront browse (featured, categories, screenshots) sourced from the #323 package-search backend; one-click Install writes the declarative user.<name>.apps diff (D-JOS-APPMODULE1=B shape) and applies through the D-JOS-USERAPPLY1 profile engine; View source is always available, never forced. Depends on #323 (search backend) and #235 (Studio shell to host the view). Exit: browsing installs an app by writing a visible source diff and applying it through the profile engine; View source shows the exact diff on demand.",
+      "plan": "Implement D-JOS-APPSTORE1=D as an Apps view inside the one Studio shell. Browse from the canonical typed search index c0om2gxe; install by writing a reviewed user.<name>.packages source diff and applying through profile engine c03asgps. Do not invent user.<name>.apps or an imperative installer database. Featured rows, categories, screenshots, source view, offline state, failed apply, rollback, and re-projection tests prove storefront ease and exact expert auditability.",
       "blockedBy": [
-        "#323",
-        "#235"
+        "c0om2gxe",
+        "c6q02qhw",
+        "c03asgps"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
@@ -14563,7 +15105,14 @@
           "at": "2026-07-16T05:02:00.418Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/jetos-studio.md",
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "crates/jetpack/src/JetOS/options_rendering.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:03:58.591Z",
       "updated": "2026-07-16",
@@ -14580,13 +15129,19 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "Ungated slice, build now: first-boot detection reads the #326 scanned hardware.<host> facts and offers proprietary-driver/codec choices; accepting writes back into the host declarative config through the existing apply path (D-JOS-USERAPPLY1-class, never an imperative side-channel) -- always reproducible, never a silent mutation. Gated slice, needs a D-WD7 Studio-view ballot before building: the first-boot welcome SCREEN itself, if it requires a new Studio view distinct from the ratified guided-control-center/Apps-view set. Raise that ballot before any GUI work; the backend detect-and-apply logic has no gate and can ship standalone first (for example via CLI).",
+      "plan": "Retain the shipped first-boot JSON and installed Studio projection as the initial slice. Consume checked hardware.<host> facts from c0rvu7rz, derive relevant proprietary driver and codec offers, and turn acceptance into a visible host config.jet diff through the existing source transaction and apply path. Never mutate an installed system directly. D-WD7-WELCOME1 remains the sole owner gate for the welcome-screen placement. Reboot idempotency, decline, offline metadata, stale scan, source diff, apply failure, and rollback tests cover the backend before the gated view ships.",
       "blockedBy": [
-        "#326",
-        "#235"
+        "c0rvu7rz",
+        "c6q02qhw"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -14625,7 +15180,14 @@
           "at": "2026-07-16T05:01:59.779Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/jetos-studio.md",
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/studio_projection.rs",
+        "crates/jetpack/src/JetOS/etc_boot_facts.rs",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:11.371Z",
       "updated": "2026-07-16",
@@ -14642,14 +15204,24 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "D-JOS-BACKUP1=C is already ratified (this resolves the card prior stale OWNER-GATE note) -- no ballot needed. Backup/snapshot reuses the workload.<name> mechanism (the #324 Container/MicroVM backend enum) -- the backend enum gains .Snapshot and .EncryptedRemote. Restore goes through the existing jet os rollback verb, no new CLI surface; shares mounts/secrets/health/resources/proof fields with every other workload kind. Depends on #324 (workload mechanism), #471 (VM harness) for restore-proof verification, and #469 (user env) for per-user restore scope. Exit: a .Snapshot workload backs up a fixture path on a schedule and jet os rollback restores it; an .EncryptedRemote workload round-trips through a fake remote in a test.",
+      "plan": "Implement D-JOS-BACKUP1=C by extending the one workload.<name> backend enum with Snapshot and EncryptedRemote. Share mounts, secrets, schedule, health, resources, proof, generation identity, and rollback with c0ppv63p; scope user data through c03asgps. The existing projection script is not a backup. Local snapshot and fake-remote tests plus c0yry94n guest proof cover encrypted round trip, schedule, interrupted transfer, stale snapshot, retention, restore through existing rollback, and isolation between users.",
       "blockedBy": [
-        "#324",
-        "#469",
-        "#471"
+        "c0ppv63p",
+        "c03asgps",
+        "c0yry94n"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 criteria audit: replaced stale or tautological checklist with functional, executable acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e7-planner",
+          "text": "E7 plan audit: reconciled current implementation, ratified law, stable blockers, exact refs, and executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -14659,42 +15231,58 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "Snapshot and EncryptedRemote are backends of the existing workload.<name> enum and share mounts, secrets, schedule, health, resources, proof, and generation identity.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:22:44.109Z"
+          "at": "2026-07-16T06:28:46.316Z"
         },
         {
           "n": 2,
-          "text": "syntax-decisions.md log entry",
+          "text": "A scheduled local snapshot preserves declared paths, honors retention, records immutable source and closure facts, and restores through existing rollback.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:22:44.109Z"
+          "at": "2026-07-16T06:28:46.316Z"
         },
         {
           "n": 3,
-          "text": "jet devtools grammars regenerated",
+          "text": "An encrypted backup round-trips through a fake remote without exposing plaintext data or secret material in logs and artifacts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:22:44.109Z"
+          "at": "2026-07-16T06:28:46.316Z"
         },
         {
           "n": 4,
-          "text": "snapshots re-blessed",
+          "text": "Interrupted upload, corrupt snapshot, stale source, failed health, and unavailable remote each leave the prior generation and user data intact.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T21:22:44.109Z"
+          "at": "2026-07-16T06:28:46.316Z"
+        },
+        {
+          "n": 5,
+          "text": "A native two-user guest proves restore isolation, replayable proof, and shared VM-harness coverage without a backup-specific lifecycle engine.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T06:28:46.316Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-7/native-jetos.md",
+        "crates/jetpack/src/JetOS/module_storage_workload.rs",
+        "crates/jetpack/src/JetOS/generations_activation.rs",
+        "crates/jetpack/src/JetOS/vm_proof.rs",
+        "crates/jetpack/src/JetOS/user_flatpak_perf.rs",
+        "tests/jetpack_jetos.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:15.477Z",
       "updated": "2026-07-16",
@@ -23800,6 +24388,11 @@
         {
           "at": "2026-07-16",
           "by": "claude-main",
+          "text": "Fix committed (semantic build IDs + renameat2 NOREPLACE publication). Orchestrator reviewed diff: rerun-if-changed covers all hashed roots recursively, executable hash kept fail-closed, forgery ratchets intact. Independent adversarial diff review + final full gate running in parallel."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
           "text": "Sol worker dispatched per vetted plan: deterministic concurrent regression (no sleeps) → root-cause identity/publication race → atomic publication keyed on stable facts; forged/stale/drift rejection preserved."
         },
         {
@@ -23812,38 +24405,38 @@
         {
           "n": 1,
           "text": "A deterministic concurrent regression reproduces the incompatible report reuse failure without timing sleeps.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "sol-w7-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:13.182Z"
+          "evidence": "perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load (tests/cli.rs) red at base (report count 2 vs 1), green after fix; BudgetStore concurrent_report_publication_is_atomic_and_exact uses barriers — no timing sleeps.",
+          "at": "2026-07-16T07:14:03.048Z"
         },
         {
           "n": 2,
           "text": "Report identity and atomic publication are stable under load; exact compatible reports reuse and partial/torn files never do.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "sol-w7-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:13.182Z"
+          "evidence": "Identity keyed on embedded semantic build IDs (framed sorted sources + rustc/target/flags/profile/features, per-input rerun-if-changed); publication renameat2(RENAME_NOREPLACE) after temp+perms+fsync; losing writer verifies exact canonical winner; two-writer/one-reader regression proves no torn read.",
+          "at": "2026-07-16T07:14:03.190Z"
         },
         {
           "n": 3,
           "text": "Forged, stale, source/target/compiler/provider-drift reports remain rejected with existing diagnostics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "sol-w7-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:13.182Z"
+          "evidence": "Forged-cache (allocation+scene), stale-history, provenance-forge, unreadable-identity, parallel-unlink, hash-corrupt-artifact rejection tests all green; cache_identity_covers_every_ratified_digest proves every ratified digest still shifts identity; executable hashing retained as fail-closed readability check; no diagnostics changed.",
+          "at": "2026-07-16T07:14:03.331Z"
         },
         {
           "n": 4,
           "text": "Repeated parallel focused runs, CLI target, independent review, and full verification pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "sol-w7-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:13.182Z"
+          "evidence": "Three parallel focused rounds of the probe trio 9/9; full cli target 135/135 in full shell (202s).",
+          "at": "2026-07-16T07:14:03.469Z"
         }
       ],
       "refs": [],
@@ -25826,11 +26419,11 @@
         {
           "n": 1,
           "text": "Every changed corpus fixture compiles against current ratified Core surface and still exercises its original soundness/parity property.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-660-builder",
-          "verifiedBy": null,
-          "evidence": "7 fixture stems updated to current ratified Core surface (sha256 [U8]/Digest256.bytes().len()/.hex(), ^stream tcp_reply ownership, bar_text [DataGroup], generated X25519/SigningKey types); each keeps its original coverage per builder rationale; sema_soundness 7/7.",
-          "at": "2026-07-16T05:39:08.620Z"
+          "verifiedBy": "claude-main",
+          "evidence": "Adversarial-review findings resolved: pipeline fixture now consumes DataJoin fields + Option arms byte-mirroring canonical data_pipeline.jet (orchestrator diff-checked); sign fixture limitation documented honestly — safe API has no fixed-seed constructor, RFC 8032 vectors pinned in tests/fixtures/crypto_bridge_entropy.rs cover derivation correctness, differential fixture owes parity only. Post-fix sema_soundness 7/7 full shell.",
+          "at": "2026-07-16T06:05:47.055Z"
         },
         {
           "n": 2,
@@ -25885,6 +26478,11 @@
         {
           "at": "2026-07-16",
           "by": "claude-main",
+          "text": "W5 reconciliation landed: 17 evidence-cited matrix rows added (AUDITED now 63; jetpack_truth 3/3 green incl. new canonical_product_ownership_is_split acceptance test); capability ledger reconciled (digest-only where content matched; honest corrections: measured-adaptation→manual fidelity, bounded-logic→finite core.solve, semantic-merge→implemented, canonical-product-split→proven/shipped with stale slice-3 rationale removed; tier-parity owner #125→#392; core-concurrency owner #126→#527 residual=Windows IOCP; core.auth→claim.core-security). truthfulness 14/15 — last failure is generic-modules done-owner; cut residual card #674, repoint worker dispatched."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
           "text": "Sol worker dispatched: evidence-first matrix rows for #359/#419, digest reconciliation, tier-parity fix, syntax-decisions.md clerical items; Tower decisions[] drift (D-ALLOC1/D-NOALLOC-SEM1) to be reported for CLI add."
         },
         {
@@ -25907,29 +26505,29 @@
         {
           "n": 1,
           "text": "#359/#419 matrix rows cite real verified behavior and hostile evidence; no done state is treated as proof by itself.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:29:17.439Z"
+          "status": "verified",
+          "metBy": "sol-w5-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Orchestrator independent rerun: jetpack_truth 3/3 green.",
+          "at": "2026-07-16T06:38:28.459Z"
         },
         {
           "n": 2,
           "text": "Each capability digest update is tied to reviewed canonical content and unchanged valid claim semantics, or the claim/status is corrected instead.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:29:17.439Z"
+          "status": "verified",
+          "metBy": "sol-w5-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Orchestrator independent rerun: truthfulness 15/15; check-capability-ledger --check exit 0 ('capability claims: explicit, owned, and current'); hostile fixtures 11/11 rejected.",
+          "at": "2026-07-16T06:38:28.596Z"
         },
         {
           "n": 3,
           "text": "tier-parity owner/card status is internally consistent and no open claim is owned by done work.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:29:17.439Z"
+          "status": "verified",
+          "metBy": "sol-w5-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Orchestrator verified: D-ALLOC1 backfilled as owner verdict D-VERDICT-648-1 on #648 citing docs entry (D-NOALLOC-SEM1 confirmed archived-ratified, no action); residual card #674 cut and claim repointed; ledger checker green on my rerun.",
+          "at": "2026-07-16T06:38:28.731Z"
         },
         {
           "n": 4,
@@ -26700,6 +27298,27 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-16T04:49:08.316Z",
+      "updated": "2026-07-16"
+    },
+    {
+      "id": "c0vj7cg5",
+      "num": 674,
+      "title": "Complete generic-module const values, bounds, and recursive instantiation",
+      "body": "Generic-module value parameters remain restricted to Bool, Int, Char, String, or fieldless enums rather than general const-generic value types; full bound and recursive instantiation coverage remains unproven. Owns the complete-instantiation and generic-modules capability-claim residual after #91 closed (gap anchor: crates/jet-sema/src/Sema/Bundle/GenericModules.rs value-parameter restriction; E0856 family). Done = general const-generic value parameters per ratified surface, bound + recursive instantiation proven by the generics complete-instantiation acceptance test, capability claims repointed and green.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-16T06:31:30.155Z",
       "updated": "2026-07-16"
     }
   ],
@@ -46171,6 +46790,440 @@
       "comment": "A — regions implicit and scope-inferred by default; explicit #Region(r) expert tier (respelled by D-BLOCKPLANE1); arena :: mem.Arena.new(capacity: N); arena.alloc(value) returns scope-bound view (escape E0631, use-after-reset/free E0632); arenas live flat in core.mem; not #Unsafe. Historical backfill: ratified 2026-06-19, recorded in docs/spec/syntax-decisions.md (Arenas & regions entry); board decisions[] was missing the record (cited by #648/#644). D-NOALLOC-SEM1 needs no backfill: exists archived, ratified A 2026-07-04.",
       "created": "2026-07-16T05:35:55.950Z",
       "ratifiedAt": "2026-07-16"
+    },
+    {
+      "id": "D-JOS-MIGRATIONVERB1",
+      "cardId": "c0j57gh4",
+      "group": "tooling",
+      "title": "Name the NixOS comparison migration command",
+      "gist": "Choose the explicit `jet os` command that may reach the migration-only NixOS backend.",
+      "lesson": "`jet os import` translates existing NixOS source into Jet configuration. The migration comparison backend has a different job: after import, it builds a clearly labeled NixOS guest and captures boot proof for comparison. `jet os proof` remains native-jetos proof; comparison artifacts live only under the migration output.\n\nOnly `jet os migrate compare-nixos` may enter `nixos_backend`. Native plan, build, switch, image, and proof dispatch must reject that backend before work. Existing `--out` and `--json` controls remain canonical. Offline mode succeeds only with every locked input present. The choice below decides whether successful comparison always includes boot proof or may stop after building.",
+      "explainer": "",
+      "story": "Mara imports a laptop configuration, builds native jetos, then creates one NixOS comparison guest. She reads its separate receipt and boot proof without mistaking it for a native generation.",
+      "inWild": "jet os import ~/nixos --host laptop --write --out ./migrated\njet os migrate compare-nixos laptop --out ./compare --json",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Build and boot-prove every comparison",
+          "detail": "The command builds the NixOS guest, boots it, verifies guest identity, and then publishes artifacts. There is no successful unproved comparison state.",
+          "technical": "Success atomically publishes `<out>/nixos/laptop/system.qcow2`, `proof.json`, and `receipt.json`, prints all three paths, and exits 0. Missing locked offline input prints `migration comparison unavailable offline: <input>` and exits 2. Any native command attempting this backend prints `NixOS backend is migration-only; use jet os migrate compare-nixos` and exits 2.",
+          "code": "$ jet os migrate compare-nixos laptop --out ./compare\nbuilt NixOS comparison: ./compare/nixos/laptop/system.qcow2\nboot proof: ./compare/nixos/laptop/proof.json\nreceipt: ./compare/nixos/laptop/receipt.json\n$ echo $?\n0"
+        },
+        {
+          "key": "B",
+          "name": "Build by default, prove with --proof",
+          "detail": "The command publishes a labeled comparison guest after building. `--proof` boots it and adds proof before success.",
+          "technical": "Build-only success publishes the image and receipt with `proofState: not-run`. `--proof` publishes all three A artifacts. Offline and forbidden-backend errors match A.",
+          "code": "jet os migrate compare-nixos laptop --out ./compare\njet os migrate compare-nixos laptop --out ./compare --proof --json"
+        },
+        {
+          "key": "C",
+          "name": "Plan by default, build with --write",
+          "detail": "The default prints the comparison plan. `--write` builds and automatically boot-proves before publication.",
+          "technical": "Plan exits 0 without artifact paths. `--write` has A success and error behavior.",
+          "code": "jet os migrate compare-nixos laptop --out ./compare\njet os migrate compare-nixos laptop --out ./compare --write --json"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Database migration tools",
+          "note": "Legacy comparison is named explicitly and stored apart from production verification.",
+          "code": "migrate compare --legacy"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A comparison guest is useful only when it actually boots and proves its NixOS identity. Automatic proof prevents a built file from being mistaken for verified comparison evidence.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A successful unproved image creates a weaker state that users can mistake for comparison evidence."
+          },
+          {
+            "key": "C",
+            "reason": "The dedicated compare command already states intent; an additional write gate duplicates the existing migration boundary."
+          }
+        ],
+        "tradeoff": "Every successful comparison includes a guest boot. That is acceptable because boot behavior is the fact this oracle exists to compare."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T06:33:19.654Z"
+    },
+    {
+      "id": "D-JOS-IMAGEFORMAT2",
+      "cardId": "c0qs8j6u",
+      "group": "tooling",
+      "title": "Fix the `jet os image --format` values",
+      "gist": "Add `--format` to `jet os image` and choose its stable native-image value vocabulary.",
+      "lesson": "`jet os image` currently has no public `--format` selector. This decision adds one for native operating-system artifacts. D-JPK-IMAGE1 remains separate: `jet image` builds OCI layouts and does not gain these values.\n\nEach format packages one already-built system generation. Bare `jet os image <host>` keeps ISO as the default. A successful command atomically changes an artifact from `staged` to `built` only after format validation and proof. Cross-architecture requests must produce matching kernel, initrd, firmware, and boot metadata or fail before staging. No aliases or hidden normalization are included in any option.",
+      "explainer": "",
+      "story": "Inez uses one router generation for an installer ISO, a VM disk, an SD card, and a netboot tree. Each artifact has the same source and closure identity.",
+      "inWild": "jet os image router --format sd --arch aarch64 --out ./images",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "iso | qcow | raw | sd | netboot",
+          "detail": "Short stable media names cover installer, VM, disk, card, and network boot. Bare image defaults to `iso`. No other spelling is accepted.",
+          "technical": "Success prints artifact and proof paths and exits 0. Proof JSON records `state: built`, canonical format, architecture, source, generation, closure, tools, hash, and boot result. An incomplete directory remains `state: staged`, is not published, and exits 1. Unsupported architecture prints `image format <format> cannot build <arch>: missing matching <asset>` and exits 2.",
+          "code": "$ jet os image router --format sd --arch aarch64 --out ./images\nbuilt sd image: ./images/jetos-router-sd.img\nproof: ./images/jetos-router-sd.proof.json\n$ echo $?\n0"
+        },
+        {
+          "key": "B",
+          "name": "iso | qcow2 | raw | sdcard | pxe",
+          "detail": "Use ecosystem-specific names. The values are longer and mix file-format, medium, and protocol vocabulary.",
+          "technical": "Default, state transition, architecture errors, artifacts, proof, and exits match A. Only these exact values parse.",
+          "code": "jet os image router --format sdcard\njet os image router --format pxe"
+        },
+        {
+          "key": "C",
+          "name": "installer | vm | disk | card | network",
+          "detail": "Use purpose names instead of artifact names. This reads naturally but hides whether the VM artifact is QCOW or another format.",
+          "technical": "`vm` fixes QCOW and `disk` fixes raw. All proof and error behavior matches A.",
+          "code": "jet os image router --format card\njet os image router --format network"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "QEMU",
+          "note": "The file format is commonly called qcow2, while a short CLI value can remain canonical if diagnostics teach it.",
+          "code": "qemu-img create -f qcow2 disk.qcow2"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The values are compact, technically exact, and stable across local and automated use. They map directly to artifact and proof identities without aliases.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The vocabulary mixes implementation names and delivery concepts while making common values longer."
+          },
+          {
+            "key": "C",
+            "reason": "Purpose names conceal the actual artifact format that automation must consume."
+          }
+        ],
+        "tradeoff": "`qcow` is shorter than the common file extension `qcow2`. That is acceptable because help and artifact paths show the exact output while the public value stays concise."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T06:33:19.826Z"
+    },
+    {
+      "id": "D-JOS-LIFECYCLE1",
+      "cardId": "c0svh6c4",
+      "group": "safety",
+      "title": "Set generation retention and automatic-upgrade policy",
+      "gist": "Choose exact lifecycle fields and whether automatic upgrades are enabled by default.",
+      "lesson": "`packages.generations.*` selects protected system-generation roots. E7 plans and explains those roots; the shared E4 Hangar collector deletes only unprotected objects. `deploy.autoUpgrade.*` schedules the existing native sequence: `jet os build`, `jet os proof`, then `jet os switch`. This ballot does not add an update command.\n\nAn enabled schedule persists while the user is logged out through the platform user scheduler. No Jet privileged daemon remains resident. Build and proof run without privilege; switch requests one-shot activation authority. Privilege failure leaves the built candidate current-proof intact and the live generation unchanged. Offline input gaps, stale proof, failed health, and rollback each produce explicit receipts and terminal output.",
+      "explainer": "",
+      "story": "Sam keeps ten rollback generations on a laptop. An operator uses the same fields for a weekly proved update window, without installing a privileged updater daemon.",
+      "inWild": "module system.laptop {\n  options: [\n    packages.generations.keep: 10,\n    packages.generations.keepYoungerThan: \"30d\",\n    deploy.autoUpgrade.enable: false,\n    deploy.autoUpgrade.schedule: \"Sun 03:00\",\n    deploy.autoUpgrade.healthFor: \"10m\",\n  ]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Visible retention, automatic upgrade off",
+          "detail": "Init writes all fields into the system module with `enable: false`. Experts turn on the same schedule; it continues while logged out.",
+          "technical": "Plan output lists every kept and collectible generation with reason, scheduled next run, offline input state, candidate, proof fingerprint, activation authority, health window, and rollback target. Missing offline input prints `auto-upgrade: no change; locked input unavailable offline: <input>` and exits 0 with a no-change receipt. Privilege denial exits 2 and retains the candidate. Stale proof refuses switch with exit 2. Failed health rolls back, prints both generation names, writes rollback receipt, and exits 1.",
+          "code": "module system.laptop {\n  options: [\n    packages.generations.keep: 10,\n    packages.generations.keepYoungerThan: \"30d\",\n    deploy.autoUpgrade.enable: false,\n    deploy.autoUpgrade.schedule: \"Sun 03:00\",\n    deploy.autoUpgrade.healthFor: \"10m\",\n  ]\n}"
+        },
+        {
+          "key": "B",
+          "name": "Security scope enabled weekly",
+          "detail": "Init enables a logged-out weekly security schedule. All other fields and failure behavior match A.",
+          "technical": "`deploy.autoUpgrade.scope: .Security` requires locked provider security classification. Unknown classification becomes offline-style no-change, never a broad upgrade.",
+          "code": "module system.laptop {\n  options: [\n    packages.generations.keep: 10,\n    packages.generations.keepYoungerThan: \"30d\",\n    deploy.autoUpgrade.enable: true,\n    deploy.autoUpgrade.scope: .Security,\n    deploy.autoUpgrade.schedule: \"Sun 03:00\",\n    deploy.autoUpgrade.healthFor: \"10m\",\n  ]\n}"
+        },
+        {
+          "key": "C",
+          "name": "Retention fields only",
+          "detail": "The system module owns retention, but scheduling remains external. Operators invoke existing build, proof, and switch commands.",
+          "technical": "Generation plan and Hangar behavior match A. No `deploy.autoUpgrade.*` fields or scheduler receipts exist.",
+          "code": "module system.laptop {\n  options: [\n    packages.generations.keep: 10,\n    packages.generations.keepYoungerThan: \"30d\",\n  ]\n}\njet os build laptop\njet os proof laptop\njet os switch laptop"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "systemd user timers",
+          "note": "A user timer starts a short-lived job and does not require a resident privileged service.",
+          "code": "systemctl --user start jetos-update.timer"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Retention and update intent stay fully visible, while unattended system mutation remains opt-in. The same fields give experts schedules, offline behavior, proof, health, and rollback control.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Default unattended activation changes a machine without the owner first choosing that policy."
+          },
+          {
+            "key": "C",
+            "reason": "Removing source scheduling forces durable system intent into external automation."
+          }
+        ],
+        "tradeoff": "Beginners must enable automatic updates themselves. That is acceptable because init and Studio can present the choice without silently activating it."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T06:33:20.000Z"
+    },
+    {
+      "id": "D-JOS-SERVICELOG1",
+      "cardId": "c0uzefny",
+      "group": "tooling",
+      "title": "Name the native service journal command",
+      "gist": "Choose whether runtime journals use `jet os logs` or a nested service command.",
+      "lesson": "Native service journals differ from `jet dev` output and Jetpack build logs. One JetOS journal backend owns storage, permission checks, generation identity, unit normalization, time filtering, follow mode, remote transport, and JSON rows.\n\nA bare unit like `web` normalizes to `web.service`; an explicit suffix such as `backup.timer` remains unchanged. Without `--host`, the selected local `system.<host>` is used. `--host prod-1` must resolve a declared fleet host and its ratified local authority binding before transport. Remote rows use the same schema as local rows. The examples below are product-copy requirements, not invented diagnostic codes. Card #329 must allocate any missing registered codes in `diagnostics.md` and add UI snapshots before implementation.",
+      "explainer": "",
+      "story": "Noah sees a failed web-service health check, reads its current-generation journal, follows the restart, then exports identical rows from a remote host as JSON.",
+      "inWild": "jet os logs web --since 10m\njet os logs web --host prod-1 --generation current --follow --json",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet os logs <unit>",
+          "detail": "The unit is positional and normalizes to a systemd unit. Expert filters extend the same local or authorized remote query.",
+          "technical": "Each JSON line is `{\"host\":String,\"generation\":String,\"unit\":String,\"at\":String,\"cursor\":String,\"stream\":String,\"level\":String,\"message\":String}`. Normal completion exits 0. Unknown unit, denied journal access, unknown host, and stale generation exit 2. Remote connection failure or follow disconnect prints the last cursor and exits 1. Card #329 owns code registration plus diagnostics.md and UI snapshots for any message lacking an exact existing code.",
+          "code": "$ jet os logs web --generation g42\njet os logs: unknown unit `web`; resolved `web.service` is not present in generation `g42`\n\n$ jet os logs web --host prod-1\njet os logs: access denied for `web.service` on host `prod-1`; check the local host authority binding\n\n$ jet os logs web --host prod-1 --follow\njet os logs: host `prod-1` became unavailable; resume with cursor `s=42`"
+        },
+        {
+          "key": "B",
+          "name": "jet os service logs <unit>",
+          "detail": "A service namespace owns the same normalization, authority, schema, errors, resume cursor, and exits.",
+          "technical": "Behavior and exact product copy are identical to A after dispatch. Card #329 owns missing diagnostic registration and snapshots.",
+          "code": "jet os service logs web --host prod-1 --follow --json"
+        },
+        {
+          "key": "C",
+          "name": "jet os logs --unit <name>",
+          "detail": "The unit is explicit as a flag. Omitting it queries every authorized unit in the selected generation.",
+          "technical": "Schema, authority, normalization, exact product copy, cursor, and exits match A. Whole-generation access uses the same permission boundary.",
+          "code": "jet os logs --unit web --since 10m\njet os logs --generation current --json"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "systemd",
+          "note": "`journalctl -u` queries the same journal by unit; Jet can make the unit positional for its common path.",
+          "code": "journalctl -u web --since -10m"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The canonical `jet os` boundary distinguishes runtime journals, and the positional unit keeps the beginner path direct. Expert filters remain on one backend and schema.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A service namespace adds ceremony before any other service subcommands are ratified."
+          },
+          {
+            "key": "C",
+            "reason": "A required flag burdens the dominant one-unit query and invites accidental whole-journal reads."
+          }
+        ],
+        "tradeoff": "The command reserves `jet os logs` for service journals rather than all OS logs. That is acceptable because boot and proof facts already have `jet os proof`."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T06:33:20.168Z"
+    },
+    {
+      "id": "D-JOS-USERREMOVAL1",
+      "cardId": "c06lehoq",
+      "group": "safety",
+      "title": "Protect live system accounts during declarative removal",
+      "gist": "Choose how `users.<name>` absence revokes login while preserving or deliberately disposing of home data.",
+      "lesson": "`users.<name>` describes a live system account. It is distinct from portable `user.<name>` profiles. When a live account disappears from merged configuration, JetOS may revoke login and preserve the home automatically. Any archive or destruction intent lives in the separate `users.removals` tombstone collection; the removed `users.sam` declaration does not coexist with a nested removal field.\n\nA tombstone binds name, expected user ID, expected home, action, reason, source revision, and live fingerprint. It remains in source until an action receipt exists. The generation ledger retains UID reservation and home disposition after source cleanup. Repeated switches are idempotent. Noninteractive activation cannot invent confirmation. Archive and destruction require current backup proof; stale identity, missing proof, or changed home refuses action.",
+      "explainer": "",
+      "story": "Ari removes a contractor from the system. Login stops on the next switch, but the home remains until an explicit reviewed archive or destruction action completes.",
+      "inWild": "module system.laptop {\n  options: [\n    users.removals: [\n      \"sam\": [expectedUid: 1004, expectedHome: \"/home/sam\", action: .PreserveHome, reason: \"contract ended\"],\n    ],\n  ]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Absence locks and preserves; tombstones govern disposal",
+          "detail": "Removing `users.sam` locks login and preserves its home and UID reservation. `users.removals[\"sam\"]` is needed only to preserve explicitly, archive, or destroy with audit facts.",
+          "technical": "`.PreserveHome` needs identity facts and reason. `.Archive` additionally needs destination and current backup proof. `.DestroyHome` needs current backup proof and reason. Plan prints account, UID, home, action, backup proof, repeat state, and rollback limit. Stale identity or backup exits 2. Archive/destruction failure exits 1 with live data unchanged. Success writes action and UID-tombstone receipts; repeated switch exits 0 no-change.",
+          "code": "module system.laptop {\n  options: [\n    users.removals: [\n      \"sam\": [expectedUid: 1004, expectedHome: \"/home/sam\", action: .Archive, destination: \"backup.staff\", backupProof: \"sha256:...\", reason: \"contract ended\"],\n    ],\n  ]\n}"
+        },
+        {
+          "key": "B",
+          "name": "A tombstone is required before declaration removal",
+          "detail": "Removing `users.sam` without a matching `users.removals` row is a plan error. The row chooses preserve, archive, or destroy.",
+          "technical": "Lifetime, UID reservation, stale checks, backup proof, repeat behavior, receipts, and exits match A.",
+          "code": "users.removals: [\"sam\": [expectedUid: 1004, expectedHome: \"/home/sam\", action: .PreserveHome, reason: \"contract ended\"]]"
+        },
+        {
+          "key": "C",
+          "name": "Absence locks and creates an archive-required tombstone",
+          "detail": "Removing the declaration locks login immediately and creates a pending durable tombstone. Later noninteractive switches refuse until source supplies archive proof.",
+          "technical": "The generated pending state cannot archive or destroy. Source must adopt it with exact identity and backup fields.",
+          "code": "plan: lock sam; preserve /home/sam; create pending removal receipt\nfix: add users.removals[\"sam\"] with archive proof"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unix account administration",
+          "note": "Locking an account and deleting its home are separate operations because their recovery properties differ.",
+          "code": "usermod --lock sam\nuserdel --remove sam"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Login authority is revoked immediately while data and UID ownership remain safe. A separate source tombstone provides one audited path for preserve, archive, or destruction without reviving the removed account declaration.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Requiring a source tombstone before absence delays immediate login revocation when the owner removes a user declaration."
+          },
+          {
+            "key": "C",
+            "reason": "A generated pending tombstone creates split truth: source says the account is gone while durable semantic removal intent exists only in generated state."
+          }
+        ],
+        "tradeoff": "Preserved homes and UID reservations remain until an explicit tombstone action is reviewed. That is acceptable because storage and later cleanup are recoverable, while premature identity reuse or deletion is not."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T06:33:20.337Z"
+    },
+    {
+      "id": "D-JOS-ETCMANAGE1",
+      "cardId": "c039kz2t",
+      "group": "safety",
+      "title": "Place and govern declared `/etc` files",
+      "gist": "Choose the exact source home and managed-by-default law for `/etc` entries.",
+      "lesson": "No ratified source namespace currently owns arbitrary `/etc` entries, so this ballot chooses one. Entries live inside a complete `module system.<host>` options map. Each entry has a relative path, ownership, mode as a decimal integer, and exactly one content input: inline `contents`, project `source`, or mutable `seed`.\n\nManaged entries use contents or source and are backed by the immutable generation. `/etc/<path>` is a JetOS-owned symlink to that backing file. Mutable entries use seed, are copied once to `/var/lib/jetos/etc/<entry>`, and `/etc/<path>` links there.\n\nManaged and mutable paths cannot overlap by equality or ancestry. Removing a managed entry deletes only its owned link. Removing a mutable entry preserves backing data unless a later decision governs deletion. The samples require exact product copy. Card #401 must allocate missing diagnostic codes, register them in `diagnostics.md`, and add UI snapshots.",
+      "explainer": "",
+      "story": "Lee manages SSH configuration exactly from source, while one upstream daemon must retain a live-edited state file under `/etc`.",
+      "inWild": "module system.laptop {\n  options: [\n    filesystem.etc: [\n      sshd: [path: \"ssh/sshd_config\", source: ./sshd_config, mode: 384, user: \"root\", group: \"root\"],\n      database: [path: \"database/state\", seed: ./initial, mutable: true, mode: 384, user: \"database\", group: \"database\"],\n    ],\n  ]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "filesystem.etc map",
+          "detail": "Named entries live under the full-word filesystem family. Managed is default; mutable requires `mutable: true` and seed.",
+          "technical": "`contents`, `source`, and `seed` are mutually exclusive. Seed requires mutable; contents/source reject mutable. Absolute, parent, NUL, duplicate, symlink-escape, file-directory overlap, managed-mutable ancestry overlap, unknown user/group, invalid mode, and stale mutable fingerprints fail during plan. Plan prints backing path, link target, action, ownership, seed fingerprint, drift, and rollback. Card #401 owns missing diagnostic registration and snapshots.",
+          "code": "module system.laptop {\n  options: [\n    filesystem.etc: [\n      sshd: [path: \"ssh/sshd_config\", source: ./sshd_config, mode: 384, user: \"root\", group: \"root\"],\n    ],\n  ]\n}\n\njet os plan: `/etc/ssh` overlaps `/etc/ssh/sshd_config`\n  `filesystem.etc.sshDir` owns the directory path\n  `filesystem.etc.sshd` owns the file path\nfix: keep one owner or move one path\n\njet os plan: mutable `/etc/database/state` changed since this plan\n  expected seed fingerprint: sha256:old\n  live fingerprint: sha256:new\nfix: review the live file and run `jet os plan` again"
+        },
+        {
+          "key": "B",
+          "name": "system.files.etc map",
+          "detail": "The identical entry law lives under a system-files family. The path repeats both files and etc.",
+          "technical": "All exclusivity, backing, link, deletion, exact product copy, diagnostics, plan, drift, and rollback behavior matches A.",
+          "code": "module system.laptop { options: [system.files.etc: [sshd: [path: \"ssh/sshd_config\", source: ./sshd_config, mode: 384, user: \"root\", group: \"root\"]]] }"
+        },
+        {
+          "key": "C",
+          "name": "etc map",
+          "detail": "A short top-level map owns the identical law. It adds a new root beside full-word system namespaces.",
+          "technical": "All behavior and diagnostic discipline matches A.",
+          "code": "module system.laptop { options: [etc: [sshd: [path: \"ssh/sshd_config\", source: ./sshd_config, mode: 384, user: \"root\", group: \"root\"]]] }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "Declared `/etc` entries are generation-managed by default; mutable service state normally lives elsewhere.",
+          "code": "environment.etc.\"ssh/sshd_config\".source = ./sshd_config;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The full-word filesystem family states the domain clearly and keeps managed files reproducible. Explicit mutable entries retain expert compatibility with complete drift evidence.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The repeated `files.etc` path adds words without adding a semantic boundary."
+          },
+          {
+            "key": "C",
+            "reason": "A new short root conflicts with the established full-word namespace direction."
+          }
+        ],
+        "tradeoff": "Each entry needs a semantic name and a path. That is acceptable because stable names improve merge provenance while paths remain exact filesystem facts."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T06:33:20.515Z"
+    },
+    {
+      "id": "D-JPK-PROFILECOLLISION1",
+      "cardId": "c0esko6c",
+      "group": "safety",
+      "title": "Resolve shared package-profile path collisions",
+      "gist": "Choose the shared `profile.<name>` law when composed packages provide the same path.",
+      "lesson": "D-JPK-PROFILE1=D creates one profile generation engine for `jet profile`, JetOS systems, tools, and `user.<name>`. Collision law therefore belongs to shared E4 card #425. It does not reuse option priority.\n\nA complete `module profile.<name>` names real package identities and an optional Jet bracket map from exact relative path to selected package. Non-identical file collisions fail without a selection. Identical regular files deduplicate only when bytes and mode match. Directories compose recursively. File-directory, symlink-target, and type collisions fail. A selection binds path, selected package identity, all contender identities, and locked object digests; stale inputs refuse reuse. Samples below define product copy without inventing codes. Card #425 must allocate missing registered codes in `diagnostics.md` and add UI snapshots.",
+      "explainer": "",
+      "story": "Priya composes a tool profile used by `jet profile`, a JetOS host, and a user environment. Two packages provide `bin/editor`; one reviewed rule must behave identically everywhere.",
+      "inWild": "module profile.workstation {\n  packages: [packages.helix, packages.compatEditors]\n  collisions: [\n    \"bin/editor\": packages.helix,\n  ]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Exact-path provider map",
+          "detail": "Unresolved collisions fail. `collisions` selects one real package identity for one exact path, and the rule applies in every product view.",
+          "technical": "Plan rows contain path, type, every package identity and digest, identical/directory status, selected provider, stale status, and downstream views. Success receipt repeats the locked row. Missing selection, stale provider, file-directory conflict, or conflicting symlink exits 2. Identical files and composed directories need no source rule. Card #425 owns code registration, diagnostics.md entries, and snapshots.",
+          "code": "module profile.workstation {\n  packages: [packages.helix, packages.compatEditors]\n  collisions: [\n    \"bin/editor\": packages.helix,\n  ]\n}\n\nprofile collision at `bin/editor` needs a provider\n  packages.helix: sha256:aaa\n  packages.compatEditors: sha256:bbb\nfix: add `\"bin/editor\": packages.helix` to `collisions`\n\nprofile collision selection for `bin/editor` is stale\n  selected packages.helix: expected sha256:aaa, locked sha256:ccc\nfix: run `jet profile plan workstation` and review the new contenders\n\nprofile path `share/icons` is both a file and a directory\n  packages.iconBlob: file\n  packages.desktopTheme: directory\nfix: remove, rename, or adapt one package; a provider selection cannot change path type"
+        },
+        {
+          "key": "B",
+          "name": "Fail and require package output renaming",
+          "detail": "There is no collision map. Any non-identical overlap must be fixed by selecting different packages or a source-backed package adapter with renamed outputs.",
+          "technical": "Identical and directory rules, exact product copy, and diagnostic discipline match A. Adapter identity and renamed paths appear in normal receipts.",
+          "code": "module profile.workstation {\n  packages: [packages.helix, packages.compatEditorsRenamed]\n}"
+        },
+        {
+          "key": "C",
+          "name": "First package wins each exact path",
+          "detail": "Package list order selects the first provider for every non-identical file collision. Plans list each implicit winner, but source has no path-specific review.",
+          "technical": "Identical, directory, file-directory, symlink, stale, plan, receipt, and diagnostic rules match A. Reordering packages changes selected providers and generation identity.",
+          "code": "module profile.workstation {\n  packages: [packages.helix, packages.compatEditors]\n  collisionOrder: .FirstPackage\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix profiles",
+          "note": "Package priorities can select winners broadly; exact-path Jet rules retain narrower review evidence.",
+          "code": "lib.setPrio 10 package"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "An exact-path map records the narrow ambiguity once and produces identical results for Jet, JetOS, tools, and users. It never lets one broad priority or list order silently decide unrelated paths.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Renaming or excluding a whole package is unnecessary when one exact overlap has a safe reviewed provider."
+          },
+          {
+            "key": "C",
+            "reason": "List order is structural and can change for unrelated reasons, so it is weak collision intent."
+          }
+        ],
+        "tradeoff": "Every intentional non-identical file overlap needs one map entry. That is acceptable because each overlap changes the executable profile surface."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T06:56:42.547Z"
     }
   ],
   "questions": [
@@ -47016,6 +48069,713 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T07:17:25.301Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JPK-PROFILECOLLISION1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T07:17:25.199Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JOS-ETCMANAGE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T07:16:39.748Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JOS-ETCMANAGE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:14:58.021Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0dl51v1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T07:14:57.353Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JOS-USERREMOVAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T07:14:57.075Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JOS-SERVICELOG1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T07:14:56.881Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JOS-LIFECYCLE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T07:14:56.474Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JOS-IMAGEFORMAT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T07:14:56.003Z",
+      "by": "sol-root",
+      "action": "decision.update",
+      "ref": "D-JOS-MIGRATIONVERB1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T07:14:03.470Z",
+      "by": "sol-w7-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0dl51v1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T07:14:03.331Z",
+      "by": "sol-w7-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0dl51v1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T07:14:03.190Z",
+      "by": "sol-w7-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0dl51v1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T07:14:03.048Z",
+      "by": "sol-w7-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0dl51v1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T07:10:16.194Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JPK-PROFILECOLLISION1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:10:16.092Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-ETCMANAGE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:10:15.988Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-USERREMOVAL1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:10:15.879Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-SERVICELOG1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:05:59.182Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0233d1b",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T07:05:08.575Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JPK-PROFILECOLLISION1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:05:08.470Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-ETCMANAGE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:05:08.369Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-USERREMOVAL1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:05:08.265Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-SERVICELOG1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:05:08.160Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-LIFECYCLE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:05:08.051Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-IMAGEFORMAT2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T07:05:07.945Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-MIGRATIONVERB1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T06:57:31.879Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0233d1b",
+      "note": "phase,plan,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T06:56:42.547Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JPK-PROFILECOLLISION1",
+      "note": "Resolve shared package-profile path collisions (draft)"
+    },
+    {
+      "at": "2026-07-16T06:56:42.446Z",
+      "by": "sol-e7-planner",
+      "action": "decision.delete",
+      "ref": "D-JOS-PROFILECOLLISION1",
+      "note": "Resolve package profile path collisions"
+    },
+    {
+      "at": "2026-07-16T06:56:42.348Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-ETCMANAGE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T06:56:42.247Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-USERREMOVAL1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T06:56:42.141Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-SERVICELOG1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T06:56:42.031Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-LIFECYCLE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T06:56:41.927Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-IMAGEFORMAT2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T06:56:41.818Z",
+      "by": "sol-e7-planner",
+      "action": "decision.update",
+      "ref": "D-JOS-MIGRATIONVERB1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T06:38:28.731Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0xmzy4p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T06:38:28.596Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0xmzy4p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T06:38:28.459Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0xmzy4p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T06:38:28.327Z",
+      "by": "sol-w5-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0xmzy4p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T06:38:28.195Z",
+      "by": "sol-w5-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0xmzy4p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T06:38:28.052Z",
+      "by": "sol-w5-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0xmzy4p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T06:35:06.122Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0j57gh4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:35:05.936Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c06lehoq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:35:05.749Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c039kz2t",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:35:05.565Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0233d1b",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:33:20.686Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JOS-PROFILECOLLISION1",
+      "note": "Resolve package profile path collisions (draft)"
+    },
+    {
+      "at": "2026-07-16T06:33:20.515Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JOS-ETCMANAGE1",
+      "note": "Choose the default ownership of declared /etc files (draft)"
+    },
+    {
+      "at": "2026-07-16T06:33:20.337Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JOS-USERREMOVAL1",
+      "note": "Protect account data during declarative removal (draft)"
+    },
+    {
+      "at": "2026-07-16T06:33:20.168Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JOS-SERVICELOG1",
+      "note": "Choose the service log command (draft)"
+    },
+    {
+      "at": "2026-07-16T06:33:20.001Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JOS-LIFECYCLE1",
+      "note": "Set generation retention and upgrade defaults (draft)"
+    },
+    {
+      "at": "2026-07-16T06:33:19.826Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JOS-IMAGEFORMAT2",
+      "note": "Expose bootable image formats (draft)"
+    },
+    {
+      "at": "2026-07-16T06:33:19.654Z",
+      "by": "sol-e7-planner",
+      "action": "decision.add",
+      "ref": "D-JOS-MIGRATIONVERB1",
+      "note": "Name the explicit NixOS comparison command (draft)"
+    },
+    {
+      "at": "2026-07-16T06:31:49.414Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0xmzy4p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T06:31:30.155Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0vj7cg5",
+      "note": "Complete generic-module const values, bounds, and recursive instantiation"
+    },
+    {
+      "at": "2026-07-16T06:28:46.316Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0i0ho3h",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:28:46.138Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0pfsrnc",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:28:45.953Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0by6tvm",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:28:45.772Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c04de5hj",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:28:45.590Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T06:24:46.266Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0i0ho3h",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:46.086Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0m3ug2h",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:45.909Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0qqwe62",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:45.728Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0pfsrnc",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:45.551Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0yry94n",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:45.369Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0by6tvm",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:45.189Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c03asgps",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:45.007Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0kbaab0",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:24:44.820Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0j57gh4",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:11.791Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0hzhedp",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:11.608Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0gtqigv",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:11.429Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0fp9sb3",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:11.243Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0eli2fh",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:11.063Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0dhzann",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:10.885Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0cc6n6t",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:10.702Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0b698t4",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:10.520Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0a11ldt",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:10.340Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c08vpj75",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:10.152Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c07p2e72",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:09.965Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c06lehoq",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:22:09.782Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c05iu605",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:20:26.762Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c04de5hj",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:41.674Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c07p2e72",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:41.493Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c06lehoq",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:41.305Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c05iu605",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:41.117Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c04de5hj",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:40.932Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c039kz2t",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:40.750Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0233d1b",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:40.568Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c05hqpe6",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:40.385Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c04du0jb",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:40.208Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c038yftr",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:19:40.025Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:45.657Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:45.474Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:45.285Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:45.112Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:44.926Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0rvu7rz",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:44.747Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:44.572Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0ppv63p",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:44.387Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:44.205Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c0nlrm12",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:17:44.029Z",
+      "by": "sol-e7-planner",
+      "action": "card.update",
+      "ref": "c6q02qhw",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T06:05:47.055Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0vkhjuk",
+      "note": "#1"
+    },
     {
       "at": "2026-07-16T05:53:58.013Z",
       "by": "sol-w6-reviewer",
@@ -49808,713 +51568,6 @@
       "action": "card.criteria-add",
       "ref": "c0j678mt",
       "note": "#2 CI gate wired: any PR touching a ported subsystem must run t"
-    },
-    {
-      "at": "2026-07-16T04:46:16.861Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0j678mt",
-      "note": "#1 The harness runs the full golden + tests/ui + examples corpu"
-    },
-    {
-      "at": "2026-07-16T04:46:16.739Z",
-      "by": "fable-clerk",
-      "action": "card.add",
-      "ref": "c0j678mt",
-      "note": "Bootstrap validation harness — differential proof vs the Rust-hosted compiler"
-    },
-    {
-      "at": "2026-07-16T04:46:16.617Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c08olnwg",
-      "note": "#4 compiler-speed.md's exit criteria (clean/incremental medians"
-    },
-    {
-      "at": "2026-07-16T04:46:16.494Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c08olnwg",
-      "note": "#3 Every subsystem-port card created after this one cites the r"
-    },
-    {
-      "at": "2026-07-16T04:46:16.366Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c08olnwg",
-      "note": "#2 The Stage-0 corpus is checked in (or referenced) with a benc"
-    },
-    {
-      "at": "2026-07-16T04:46:16.235Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c08olnwg",
-      "note": "#1 docs/plans/epoch-9/self-hosted-architecture.md exists with o"
-    },
-    {
-      "at": "2026-07-16T04:46:16.105Z",
-      "by": "fable-clerk",
-      "action": "card.add",
-      "ref": "c08olnwg",
-      "note": "Compile-speed architecture bets baked into the self-host design"
-    },
-    {
-      "at": "2026-07-16T04:46:15.979Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xty2bs",
-      "note": "#4 The freeze is ratified via owner ballot; any future TIR chan"
-    },
-    {
-      "at": "2026-07-16T04:46:15.850Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xty2bs",
-      "note": "#3 The R12 differential-gate test explicitly asserts JIT-lens a"
-    },
-    {
-      "at": "2026-07-16T04:46:15.714Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xty2bs",
-      "note": "#2 A TIR versioning policy is written (TIR v1, additive-only wi"
-    },
-    {
-      "at": "2026-07-16T04:46:15.580Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xty2bs",
-      "note": "#1 docs/spec/tir.md exists, documents every TIR node/instructio"
-    },
-    {
-      "at": "2026-07-16T04:46:15.449Z",
-      "by": "fable-clerk",
-      "action": "card.add",
-      "ref": "c0xty2bs",
-      "note": "TIR spec freeze — the lens contract for self-hosting"
-    },
-    {
-      "at": "2026-07-16T04:46:15.317Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#6 The bootstrap validation harness (#new card below) runs a di"
-    },
-    {
-      "at": "2026-07-16T04:46:15.193Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#5 The full existing test harness (golden tests, tests/ui snaps"
-    },
-    {
-      "at": "2026-07-16T04:46:15.070Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#4 Sema remains the sole gatekeeper for the self-hosted backend"
-    },
-    {
-      "at": "2026-07-16T04:46:14.943Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#3 Each ported subsystem carries query-based incremental memoiz"
-    },
-    {
-      "at": "2026-07-16T04:46:14.817Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#2 Stage discipline proven: stage0 (pinned Rust-built jet) comp"
-    },
-    {
-      "at": "2026-07-16T04:46:14.683Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#1 D-SELFHOST1 charter, the I6 restatement for Jet compiler sou"
-    },
-    {
-      "at": "2026-07-16T04:46:14.554Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0p12web",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:14.397Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#5 docs/plans/epoch-3/async-networking.md and platform-support "
-    },
-    {
-      "at": "2026-07-16T04:46:14.268Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#4 Port shutdown completes cleanly with no dangling completions"
-    },
-    {
-      "at": "2026-07-16T04:46:14.144Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#3 Cancel and deadline-wake fire exactly once per operation; op"
-    },
-    {
-      "at": "2026-07-16T04:46:14.023Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#2 Real socket readiness parks tasks without blocking worker th"
-    },
-    {
-      "at": "2026-07-16T04:46:13.898Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#1 cfg(windows) IOCP registration, completion dispatch, cancell"
-    },
-    {
-      "at": "2026-07-16T04:46:13.773Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0fylvpy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:13.623Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#6 Independent reviewer confirms #436's parser/sema/codegen exh"
-    },
-    {
-      "at": "2026-07-16T04:46:13.491Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#5 Win64 and x86 cdecl/stdcall/fastcall/system calling conventi"
-    },
-    {
-      "at": "2026-07-16T04:46:13.365Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#4 Raw status/out-pointer poison-byte safety and borrowed non-n"
-    },
-    {
-      "at": "2026-07-16T04:46:13.245Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#3 Capture-free pure callbacks are proven correct under reentra"
-    },
-    {
-      "at": "2026-07-16T04:46:13.118Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#2 Struct and fieldless+payload enum layout (size, alignment, o"
-    },
-    {
-      "at": "2026-07-16T04:46:12.988Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#1 Native Windows x64 and x86 CI link production-generated Jet "
-    },
-    {
-      "at": "2026-07-16T04:46:12.860Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0eaqe17",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:12.706Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cq3bd4",
-      "note": "#6 Independent reviewer confirms #436's parser/sema/codegen exh"
-    },
-    {
-      "at": "2026-07-16T04:46:12.579Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cq3bd4",
-      "note": "#5 Default C/system and every supported macOS calling conventio"
-    },
-    {
-      "at": "2026-07-16T04:46:12.451Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cq3bd4",
-      "note": "#4 Raw status/out-pointer poison-byte safety and borrowed non-n"
-    },
-    {
-      "at": "2026-07-16T04:46:12.327Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cq3bd4",
-      "note": "#3 Capture-free pure callbacks are proven correct under reentra"
-    },
-    {
-      "at": "2026-07-16T04:46:12.191Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cq3bd4",
-      "note": "#2 Struct and fieldless+payload enum layout (size, alignment, f"
-    },
-    {
-      "at": "2026-07-16T04:46:12.066Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cq3bd4",
-      "note": "#1 Native macOS CI (x86_64 and aarch64) links production-genera"
-    },
-    {
-      "at": "2026-07-16T04:46:11.938Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0cq3bd4",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:11.777Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0zdbl2x",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:11.626Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zqnb18",
-      "note": "#5 Independent reviewer confirms no host escape across all thre"
-    },
-    {
-      "at": "2026-07-16T04:46:11.498Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zqnb18",
-      "note": "#4 The sandbox-status facade is fully replaced: no code path re"
-    },
-    {
-      "at": "2026-07-16T04:46:11.369Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zqnb18",
-      "note": "#3 Windows restricted token + Job Object + ACL projection denie"
-    },
-    {
-      "at": "2026-07-16T04:46:11.240Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zqnb18",
-      "note": "#2 macOS native sandbox profile enforces the same filesystem/ne"
-    },
-    {
-      "at": "2026-07-16T04:46:11.113Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zqnb18",
-      "note": "#1 Linux sandbox (namespaces, private proc/dev, read-only closu"
-    },
-    {
-      "at": "2026-07-16T04:46:10.985Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0zqnb18",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:10.832Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0t4root",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:10.680Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wa2hf8",
-      "note": "#5 A deliberate canary PR that breaks a previously-unrun target"
-    },
-    {
-      "at": "2026-07-16T04:46:10.556Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wa2hf8",
-      "note": "#4 Nightly workflow (full suite + perf ratchet + fuzz cadence +"
-    },
-    {
-      "at": "2026-07-16T04:46:10.425Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wa2hf8",
-      "note": "#3 The frozen tools/Tower/Tower.mjs CI step is gone, replaced b"
-    },
-    {
-      "at": "2026-07-16T04:46:10.299Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wa2hf8",
-      "note": "#2 cargo build is clean under -Dwarnings on Linux and macOS; ev"
-    },
-    {
-      "at": "2026-07-16T04:46:10.168Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wa2hf8",
-      "note": "#1 PR CI executes every tests/*.rs target; the shard-completene"
-    },
-    {
-      "at": "2026-07-16T04:46:10.040Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:09.878Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0h1r3b8",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:09.728Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c144",
-      "note": "#5 docs state editor wiring status precisely: VS Code + Zed sup"
-    },
-    {
-      "at": "2026-07-16T04:46:09.604Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c144",
-      "note": "#4 D-DBG2 --raw-frames expert view verified against the native "
-    },
-    {
-      "at": "2026-07-16T04:46:09.457Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c144",
-      "note": "#3 tests/debug_native.rs gains protocol-level DAP tests (initia"
-    },
-    {
-      "at": "2026-07-16T04:46:09.325Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c144",
-      "note": "#2 Zed editor DAP wiring reaches the same breakpoint/step/local"
-    },
-    {
-      "at": "2026-07-16T04:46:09.195Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c144",
-      "note": "#1 VS Code launch config using the DAP server sets a breakpoint"
-    },
-    {
-      "at": "2026-07-16T04:46:09.067Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c144",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:46:08.917Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0m9tjqj",
-      "note": "#3 files.watch (D-FSWATCH1/D-WATCH-SCOPE1) composes file, proce"
-    },
-    {
-      "at": "2026-07-16T04:46:08.790Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0m9tjqj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T04:44:24.791Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0t6owk6",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T04:44:24.638Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-666-1",
-      "note": "One compiler core, two lenses. JIT lens = rapid dev work people love in python/typescript; AOT lens = highly optimized ship binary at the cost of longer build time. Same compiler core prevents drift: there should NEVER be a difference in supported features/functionality between JIT and AOT."
-    },
-    {
-      "at": "2026-07-16T04:44:24.511Z",
-      "by": "fable-clerk",
-      "action": "decision.update",
-      "ref": "D-AOT-CRANELIFT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:37:45.320Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0dl51v1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:37:24.662Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c067p6dz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T04:37:24.494Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0xmzy4p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T04:37:24.332Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0vkhjuk",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T04:34:51.427Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0xmzy4p",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:34:51.282Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0vkhjuk",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:34:34.504Z",
-      "by": "fable-clerk",
-      "action": "card.add",
-      "ref": "c0xhhjch",
-      "note": "Board readiness: every epoch planned, every card implementation-ready"
-    },
-    {
-      "at": "2026-07-16T04:34:31.084Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0av6fpb",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:33:09.680Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0rxl8sx",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:33:09.534Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0v1baa5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:32:57.642Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0ts6uv1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:32:57.497Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c021vh50",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:32:46.375Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c067p6dz",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:22:42.279Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-EPOCHBOUNDARY1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-16T04:21:43.956Z",
-      "by": "sol-root",
-      "action": "decision.update",
-      "ref": "D-JPK-EPOCHBOUNDARY1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-16T04:21:05.650Z",
-      "by": "sol-root",
-      "action": "decision.update",
-      "ref": "D-JPK-EPOCHBOUNDARY1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:20:29.473Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BUILD-DEFAULT1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-16T04:17:31.738Z",
-      "by": "sol-root",
-      "action": "card.update",
-      "ref": "c0yzg1yu",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T04:13:02.440Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-QUANTITY-CONVERT1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-16T04:01:33.687Z",
-      "by": "sol-e4-planner",
-      "action": "decision.update",
-      "ref": "D-JPK-EPOCHBOUNDARY1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T03:59:44.629Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0gvkibe",
-      "note": "plan,criteria,refs,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:59:44.377Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0kxss7s",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:59:06.642Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0gvkibe",
-      "note": "plan,criteria,refs,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:59:06.391Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0kxss7s",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:59:06.145Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0qj346l",
-      "note": "plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:57:19.295Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0gvkibe",
-      "note": "plan,criteria,refs,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:57:19.054Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0kxss7s",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:57:18.794Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0qj346l",
-      "note": "plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:57:18.554Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c04x8do3",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:57:18.314Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c002osb3",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:56:33.082Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0gvkibe",
-      "note": "plan,criteria,refs,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:56:32.838Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0kxss7s",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:56:32.585Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0qj346l",
-      "note": "plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:56:32.350Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c04x8do3",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:56:32.112Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c002osb3",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T03:56:31.867Z",
-      "by": "sol-e4-planner",
-      "action": "card.update",
-      "ref": "c0mwowfx",
-      "note": "blockedBy,refs,logEntry"
     }
   ],
   "nextNum": 368,
