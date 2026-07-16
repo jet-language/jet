@@ -45,7 +45,7 @@ machinery.
 | Interfaces panel | Jet traits (projection shipped #316) | surface panel UI (M3) |
 | Event dispatchers | core.event (projection shipped #311) | surface panel UI (M3) |
 | Call In Editor | `jet run` / `#Test` + Canvas run HUD (#317) | verify interactively (M1) |
-| Variable metadata (instance-editable, tooltips, categories) | doc comments + attributes — partially exists, partially **gated** | ballot D-CANVASMETA1 (M3) |
+| Variable metadata (instance-editable, tooltips, categories) | doc comments + ratified `#Meta` typed fields (D-CANVASMETA1=B) — implementation remains partial | metadata implementation (M3) |
 | Reparenting | traits/composition; no BP-style inheritance to repair | not applicable |
 | 3-way merge tool | plain text merge — free | document as advantage (M3) |
 | My Blueprint categories | My Canvas sidebar groups | maturity pass (M3) |
@@ -70,9 +70,8 @@ that drives the served Canvas with real mouse/keyboard events, reads pixels
 and DOM, asserts resulting source text, and runs in CI via
 `scripts/agent/verify-full.sh`.
 
-- Browser strategy needs one decision (ballot D-CANVASTEST1): dev-shell
-  chromium + zero-npm-dep CDP pipe driver (rec), vs playwright-core dev-dep,
-  vs WebDriver BiDi/firefox.
+- Browser strategy is settled by D-CANVASTEST1=A: dev-shell Chromium plus the
+  repo-owned zero-npm-dependency CDP pipe driver.
 - Editor exposes dev-mode test hooks (pin screen positions, node bounds,
   staged-node registry) — hooks are dev-only, never product surface.
 - Matrix upgrade: ratchet-class column (interaction / protocol / projection /
@@ -123,8 +122,8 @@ The known unfinished graph work, now interaction-verified:
   name/type/default/docs; function signature/pure/visibility; node values)
   with every field either live or absent — no dead controls.
 - Variable/function metadata surface (categories, tooltips from doc comments,
-  editor-exposure flags): needs ballot **D-CANVASMETA1** for any new
-  attribute syntax; doc-comment-derived parts are ungated.
+  editor-exposure flags): D-CANVASMETA1=B ratifies one `#Meta` attribute with
+  sema-checked typed fields; the Canvas implementation remains M3 work.
 - Project-wide find/references/rename UI (semindex exists; make the UX real).
 - Review view: git diff panel with per-hunk graph highlight (our answer to
   the BP diff tool — text diff plus graph overlay).
@@ -165,12 +164,12 @@ text-review-first collaboration flows. Card them, freeze them until M5 exits.
 
 | Ballot | Decides | Blocks |
 |---|---|---|
-| D-CANVASSTATE1 (queued, on #368) | disabled / debug-only node source spelling | node-state UI (M2) |
-| D-CANVASTEST1 (new) | interaction-harness browser + driver strategy | M0 |
-| D-CANVASMETA1 (new) | variable/function metadata attribute surface | metadata parts of M3 |
-| D-CANVAS-MULTIEXEC1 (queued, on #391) | multiple-exec-IN convergence semantics over source-backed spans | multi-exec build (M2) |
-| D-CANVAS-COPYPASTE1 (new) | paste/duplicate source spelling (binding-name cloning, offset, staged materialization) | copy/paste card (M2) |
-| D-CANVAS-DEBUG-UX1 (new) | debugger backing: native lldb/DAP session vs interpreter overlay for exec pulse and watches | debugger suite (M3) |
+| D-CANVASSTATE1=D (ratified, on #368) | `#Off` and `#DebugOnly` statement attributes | resolved; node-state UI implementation remains M2 |
+| D-CANVASTEST1=A (ratified) | dev-shell Chromium with a repo-owned zero-npm-dependency CDP pipe driver | resolved; M0 is not ballot-blocked |
+| D-CANVASMETA1=B (ratified) | one `#Meta` attribute with sema-checked typed fields | resolved; metadata implementation remains M3 |
+| D-CANVAS-MULTIEXEC1=E (ratified, on #391) | second exec drop opens one no-write preview: extract by default, exact-body helper reuse or explicit warned duplication | resolved; multi-exec build (M2) is not ballot-blocked |
+| D-CANVAS-COPYPASTE1=E (ratified) | source-text paste with atomic rename, post-selection insertion, staged fallback, rename chips, and explicit paste-as-staged | resolved; #489 implementation remains M2 |
+| D-CANVAS-DEBUG-UX1=D (ratified) | one UX: native lldb/DAP for compiled runs, the executing tier's own session under `jet dev`; no session means no pulse | resolved; debugger implementation remains M3 |
 
 ## Re-baseline reconciliation (2026-07-10)
 
@@ -182,19 +181,22 @@ matrix preamble for the gesture-vs-protocol rule it added. Consequences:
   M1 is not accepted while it is open. Its catalog-vs-real-exports
   cross-check test lands with it.
 - **Data-pin drag-to-wire moves into M1.** The Blueprint-signature gesture has
-  no gesture scenario and two open type bugs (js.rs:3723 fn-value-where-Int,
-  js.rs:3599 wrong-type inline editors). New card covers gesture + client-side
+  no gesture scenario and two open type bugs
+  (`crates/jet-canvas/src/js/inspector-connections.js::completeConnection`
+  fn-value-where-Int and
+  `crates/jet-canvas/src/js/inspector-connections.js::updateDetails` wrong-type
+  inline editors). New card covers gesture + client-side
   type gate + refusal scenario.
 - **#375 is real but unclosed** — its scenarios pass live; verify and close,
   do not re-implement.
-- **M2 gains explicit rows**: marquee select + copy/paste/duplicate (finishes
-  #272 under the interaction bar; paste spelling gated by D-CANVAS-COPYPASTE1),
+- **M2 gains explicit rows**: marquee select + copy/paste/duplicate (owned by
+  #489 under ratified D-CANVAS-COPYPASTE1=E),
   node-drag reposition gesture verification (#368's free-placement claim),
   switch/loop insert gestures (named in #376's exit criteria).
 - **M3 gains the debugger.** Every debugger row is projection-only or
   ui-shell-only; the debug rail buttons have zero behavior tests. A dedicated
   card drives breakpoints, stepping, active-node pulse, watches, and call
-  stack to gesture coverage, gated by D-CANVAS-DEBUG-UX1.
+  stack to gesture coverage under ratified D-CANVAS-DEBUG-UX1=D.
 - **M4 sharpens #382**: LOD/virtualization downgraded to planned; re-verify
   with measured frame-time on the generated big project, not string checks.
 - **Architecture cards** (from the editor-architecture section of

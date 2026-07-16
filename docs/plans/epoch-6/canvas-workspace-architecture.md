@@ -13,8 +13,8 @@ file belongs to a package/workspace, or selected explicitly from Canvas.
 
 ## Current Limit
 
-- `Source/CmdDevWeb.rs` serves `/canvas` for one watched file.
-- `Source/Canvas.rs` exposes one `source_id`, one `revision`, one graph
+- `crates/jet-devserver/src/WebHost.rs` serves `/canvas` for one watched file.
+- `crates/jet-devserver/src/Canvas.rs` exposes one `source_id`, one `revision`, one graph
   document, one-file transactions, one-file source control, and placeholder
   package action audit fields.
 - `docs/reference/canvas-protocol.md` names the right law: Canvas has no parser,
@@ -251,37 +251,43 @@ and the target seams that keep full parity work from becoming shotgun surgery.
 
 ### What Canvas is made of today
 
-Rust (source truth + projection + transactions), ~10.2k lines across 12 files:
+Rust (source truth + projection + transactions), ~10.5k lines across 13 files:
 
-- `Source/Canvas.rs` (28) — thin module root.
-- `Source/Canvas/graph_projection.rs` (1487) — AST/HIR → graph JSON. Decides node
+- `crates/jet-devserver/src/Canvas.rs` (20) — thin module root.
+- `crates/jet-devserver/src/Canvas/graph_projection.rs` (1583) — AST/HIR → graph JSON. Decides node
   `archetype` (`entry` / `control` / `function_exec` / `function_pure` / value)
   and `kind`. This is the real "semantic node layer."
-- `Source/Canvas/graph_json.rs` (804), `graph_helpers.rs` (572) — JSON shapes.
-- `Source/Canvas/edit_actions.rs` (2278) — transaction bus. One `match op { ... }`
+- `crates/jet-devserver/src/Canvas/graph_json.rs` (815),
+  `crates/jet-devserver/src/Canvas/graph_helpers.rs` (588) — JSON shapes.
+- `crates/jet-devserver/src/Canvas/edit_actions.rs` (2301) — transaction bus. One `match op { ... }`
   (`insert_call`, `insert_branch`, `edit_inline_expr`, `rename_binding`,
   `edit_function_signature`, pattern-arm ops, multi-input ops, `replace_source`…).
-- `Source/Canvas/query_actions.rs` (1319) — palette/action database (`actions`
+- `crates/jet-devserver/src/Canvas/query_actions.rs` (1335) — palette/action database (`actions`
   op): project functions + core catalog + exclusion reasons.
-- `Source/Canvas/project_transactions.rs` (913), `project_scan.rs` (476) —
-  workspace layer.
-- `Source/Canvas/schema_api.rs` (960), `validation_json.rs` (622),
-  `debug_source_git.rs` (310), `html.rs` (386), `js.rs` (18).
+- `crates/jet-devserver/src/Canvas/project_transactions.rs` (929),
+  `crates/jet-devserver/src/Canvas/project_scan.rs` (553) — workspace layer.
+- `crates/jet-devserver/src/Canvas/schema_api.rs` (1022),
+  `crates/jet-devserver/src/Canvas/validation_json.rs` (608), and
+  `crates/jet-devserver/src/Canvas/debug_source_git.rs` (319).
+- `crates/jet-canvas/src/html.rs` (388) and `crates/jet-canvas/src/js.rs` (18)
+  own the browser shell and script assembly.
 
-Browser runtime, ~5.3k lines of JS concatenated by `js.rs::canvas_js()` into one
+Browser runtime, ~5.3k lines of JS concatenated by
+`crates/jet-canvas/src/js.rs::canvas_js()` into one
 IIFE (good: independently lintable files; bad: no module boundaries or exports —
 everything shares one closure scope):
 
-- `runtime-state.js` (172) — state + `window.__jetCanvasTest` hooks.
-- `editing-history.js` (666) — undo/redo/transaction posting.
-- `diagnostics-query.js` (470) — problems, check, jump.
-- `drawing-palette.js` (582) — context menu / palette.
-- `project-navigation.js` (650) — tabs, graph switch, project rail.
-- `graph-rendering.js` (1196) — canvas 2D immediate-mode draw + node style +
+- `crates/jet-canvas/src/js/runtime-state.js` (172) — state + `window.__jetCanvasTest` hooks.
+- `crates/jet-canvas/src/js/editing-history.js` (671) — undo/redo/transaction posting.
+- `crates/jet-canvas/src/js/diagnostics-query.js` (470) — problems, check, jump.
+- `crates/jet-canvas/src/js/drawing-palette.js` (582) — context menu / palette.
+- `crates/jet-canvas/src/js/project-navigation.js` (650) — tabs, graph switch, project rail.
+- `crates/jet-canvas/src/js/graph-rendering.js` (1196) — canvas 2D immediate-mode draw + node style +
   hit map + node-size measurement.
-- `inspector-connections.js` (674) — Details panel (`innerHTML` templates).
-- `input-events.js` (457) — pointer/keyboard.
-- `transactions-catalog.js` (402), `bootstrap.js` (41).
+- `crates/jet-canvas/src/js/inspector-connections.js` (674) — Details panel (`innerHTML` templates).
+- `crates/jet-canvas/src/js/input-events.js` (457) — pointer/keyboard.
+- `crates/jet-canvas/src/js/transactions-catalog.js` (402),
+  `crates/jet-canvas/src/js/bootstrap.js` (41).
 
 Test harness (the M0 win, real): `scripts/canvas-test/driver.mjs` (CDP pipe),
 `scenario.mjs` (1250, 28 scenarios), `run.mjs`; `tests/canvas_scenarios.rs`
@@ -320,7 +326,7 @@ render layer never re-derives style from `kind` string matching.
 
 ### Seam 2 — Semantic node layer (build the missing registry)
 
-New: `Source/Canvas/node_catalog.rs` — one descriptor table, the single source
+New: `crates/jet-devserver/src/Canvas/node_catalog.rs` — one descriptor table, the single source
 of truth for every node kind:
 
 ```
@@ -422,8 +428,8 @@ it and the gesture test asserts a row click selects the node — the same shape 
 every other panel, so the harness scenario is copy-adjust, not new machinery.
 
 ### Critical files
-- `Source/Canvas/graph_projection.rs`
-- `Source/Canvas/edit_actions.rs`
-- `Source/Canvas/query_actions.rs`
+- `crates/jet-devserver/src/Canvas/graph_projection.rs`
+- `crates/jet-devserver/src/Canvas/edit_actions.rs`
+- `crates/jet-devserver/src/Canvas/query_actions.rs`
 - `crates/jet-canvas/src/js/graph-rendering.js`
 - `crates/jet-canvas/src/js/inspector-connections.js`
