@@ -3879,7 +3879,9 @@ the selected object with `--no-deps`; `import` verifies it in quarantine before
 registration. `dump` and `restore` stream those same archive bytes through
 stdout/stdin. `copy` fuses export, transport, and import over an endpoint.
 `repair` verifies, then re-realizes or re-fetches corrupt objects. `sign`
-(re)signs an object or archive. This refines D-JPK-STORECLI1=D and
+(re)signs an object or archive. The shared archive format is a stability
+commitment: it carries a version field and has a compatibility rule from day
+one. This refines D-JPK-STORECLI1=D and
 D-CLI-STORE2=A while explicitly superseding any interpretation of
 `dump`/`restore` as a second raw single-object serialization format: Hangar has
 one archive backbone, not separate dump and export formats.
