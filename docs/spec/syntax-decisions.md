@@ -26,16 +26,10 @@ git history of this file. Canonical truth = `Syntax.rs` + this file
 
 **N2 — File extension**: `.jet`.
 
-**S54 / D-SHAPE-CASE1=C — One identifier-casing law, machine-enforced**
-*(ratified 2026-07-16, card #665; amends S54's PascalCase constants and its
-no-lint rule)*: one rule per grammatical category, zero exceptions. Type-like
-names are PascalCase: types, traits, enum variants, markers, unit-family names
-and their generated unit types, Config block types; effect and capability
-keywords stay PascalCase. Value-like names are snake_case: functions, methods,
-fields, locals, module paths, generic module templates, unit members, and
-constants. The compiler enforces the law; casing drift is a coded diagnostic,
-not a convention. Foreign names in FFI bindings need a narrow sanctioned
-escape — follow-up ballot D-SHAPE-CASE2 (card #665).
+**S54 — Naming convention**: PascalCase for types/traits/enums/constants;
+snake_case for functions, module path segments, locals. No naming lint in v1;
+`jet fmt` is layout-only. *(Open ballot D-SHAPE-CASE1 on card #665 proposes
+the single enforced casing law.)*
 
 **S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1)*: `JSON`,
 `TOML`, `YAML`, `CSV`, `IOError`, `UTF8Error`, `U8`. No PascalCase aliases.
@@ -1439,17 +1433,6 @@ hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
 `--allow-impure`. **D-CTFIND1/2**: `find(glob) -> [String]` builtin, sorted,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
 Shipped by #350.
-
-**D-MODCOMPUTE1=A — Computed module fields: pure dependency graph** *(ratified
-2026-07-16, card #673)*: a module field may use any Tier-0 pure expression,
-top-level immutable `comptime` values, pure helper call graphs, and sibling
-fields of the same module. Fields evaluate once, in deterministic dependency
-order; source order breaks independent ties. A cycle fails before any plan
-exists and prints the complete chain. Tier-1 and Tier-2 reads are rejected
-inside fields: locked external input reaches a field only through a top-level
-`comptime` binding (D-CTIO1) or the `fn build` input surface. No field gains
-`BuildContext`, `#Impure`, filesystem, network, environment, clock, or
-randomness authority.
 
 **D-METADEPTH1/2 — Metaprogramming ceiling**: read-only reflection + derives.
 Rung B granted: whole-program read-only reflection + structured diagnostics
@@ -3010,19 +2993,9 @@ default; D-BUILDPROFILE1's "never ambient env" rule is unchanged.
 card #666)*: “One compiler core, two lenses. JIT lens = rapid dev work people
 love in python/typescript; AOT lens = highly optimized ship binary at the cost
 of longer build time. Same compiler core prevents drift: there should NEVER be
-a difference in supported features/functionality between JIT and AOT.” D-AOT-CRANELIFT1
-(below) decided the remaining AOT mechanism; it does not create a third
-product lens or a feature/functionality split.
-
-**D-AOT-CRANELIFT1=B — Cranelift emits the fast AOT debug profile** *(ratified
-2026-07-16, card #666)*: on supported targets, `jet build --profile=debug`
-lowers the same sema-approved executable TIR through Cranelift to object code
-and links, with no generated Rust and no rustc. Unsupported targets fall back
-to rustc opt-level 0 and report that fallback in `jet explain build`; they
-never lose features or silently change optimization intent. Optimized AOT
-(`jet build`, `--release`) keeps the rustc backend. Both backends face R12
-differential tests; behavior and diagnostics are identical, only wait time
-differs.
+a difference in supported features/functionality between JIT and AOT.” The
+open D-AOT-CRANELIFT1 ballot decides the remaining AOT mechanism; it may not
+create a third product lens or a feature/functionality split.
 
 ```text
 $ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)
@@ -3470,6 +3443,49 @@ D-JOS-NIXBACKEND1=C as a product and replacement-proof backend. Its hidden
 NixOS realization may support migration only; it cannot build native jetos or
 close D-JOS-PARITYBAR1.
 
+**D-JOS-MIGRATIONVERB1=A** *(ratified 2026-07-16, card #415)*: `jet os migrate
+compare-nixos <host> --out <dir>` is the one command that may reach the
+migration-only NixOS backend. It builds the NixOS guest, boots it, verifies
+guest identity, and only then publishes artifacts (system image, boot proof,
+receipt). There is no successful unproved comparison state.
+
+**D-JOS-IMAGEFORMAT2=A** *(ratified 2026-07-16, card #325)*: `jet os image`
+takes `--format iso | qcow | raw | sd | netboot`; a bare `jet os image`
+defaults to `iso`. No other spelling is accepted. Every image publishes its
+proof artifact alongside the file.
+
+**D-JOS-LIFECYCLE1=A** *(ratified 2026-07-16, card #327)*: visible retention,
+automatic upgrade off. `jet os init` writes all lifecycle fields into the
+system module: `packages.generations.keep`, `packages.generations.keepYoungerThan`,
+`deploy.autoUpgrade.enable: false`, `deploy.autoUpgrade.schedule`, and
+`deploy.autoUpgrade.healthFor`. Experts flip `enable` on the same schedule;
+upgrades continue while logged out.
+
+**D-JOS-SERVICELOG1=A** *(ratified 2026-07-16, card #329)*: runtime journals
+read via `jet os logs <unit>`. The positional unit normalizes to a systemd
+unit (`web` resolves to `web.service`). Expert filters (`--generation`,
+`--host`, `--follow`) extend the same local or authorized remote query;
+denials and host loss are explicit errors, with a resume cursor on `--follow`.
+
+**D-JOS-USERREMOVAL1=A** *(ratified 2026-07-16, card #404)*: absence locks and
+preserves. Removing `users.<name>` revokes login but preserves the home and
+UID reservation. `users.removals["name"]` is required only to explicitly
+preserve, archive, or destroy, and carries audit facts (expectedUid,
+expectedHome, action, destination, backupProof, reason).
+
+**D-JOS-ETCMANAGE1=A** *(ratified 2026-07-16, card #401)*: declared `/etc`
+entries live under the `filesystem.etc` map as named entries (path, source,
+mode, user, group). Managed is the default; a mutable entry requires
+`mutable: true` plus a seed, and live drift from the seed fingerprint blocks
+the plan until reviewed. One owner per path: directory/file overlaps are plan
+errors.
+
+**D-WD7-WELCOME1=B** *(ratified 2026-07-16, card #474)*: the first-boot
+driver/codec offer is an inline state on the ratified Studio control center,
+not a dedicated welcome view. A dismissible "Detected hardware" panel sits at
+the top of the normal host/generation/proof home until its offers are
+installed or dismissed; a later boot with unchanged hardware shows no panel.
+
 ### CLI & tooling
 
 **D-SHAPE-EXPOSE1=A — Every interface lens preserves the exact callable
@@ -3798,17 +3814,6 @@ single package-profile declaration; `user.<name>` composes profiles by reference
 `jet profile plan/build/switch/rollback/generations` and `jetos user` share one
 identity, atomic-switch, history, collision, and GC-root engine. Composed profiles
 have one history across both product views; non-jetos platforms retain parity.
-
-**D-JPK-PROFILECOLLISION1=A — exact-path provider map** *(ratified 2026-07-16,
-card #425)*: when composed packages provide different files at the same path,
-the plan fails and names every contender with its content digest; the
-profile's `collisions:` map selects one provider per exact path. A selection
-is recorded with all contender digests in the lock; if a contender's file
-changes, the pick is stale and refused (exit 2) until re-reviewed.
-Byte-identical files deduplicate, directories merge recursively, and
-file/directory or symlink-target mismatches always fail — a provider selection
-cannot change a path's type. The rule applies identically to `jet profile`,
-JetOS systems, tools, and `user.<name>`.
 
 **D-JPK-TRUSTROOT1=D — TUF root plus hybrid publisher identity**: registry
 authority uses a toolchain-pinned TUF root with offline threshold keys,
