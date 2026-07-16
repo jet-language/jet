@@ -58,7 +58,7 @@ Required node fields: `id`, `kind`, `mode`, `objective`, `depends_on`, `paths`, 
 
 Kinds are `investigate`, `design`, `implement`, `test`, `review`, `verify`, `synthesize`, or `gate`. Modes are `read`, `write`, or `verify`.
 
-Every dependency must exist and the graph must be acyclic. Every meaningful write needs a downstream `review` node assigned to the single Sol reviewer, and a write workflow needs at least one fresh-context Sol review. A review packet must not contain the implementer's reasoning or desired verdict. Reuse Sol for fixes; never create a second reviewer. Sol uses GPT-5.6 rather than Terra when model selection exists, with only low, medium, or high reasoning.
+Every dependency must exist and the graph must be acyclic. Shared-workspace write nodes must be dependency-ordered; widen a coherent packet to a card batch or group instead of launching concurrent writers. Every meaningful write needs a downstream `review` node assigned to the single Sol reviewer, and a write workflow needs at least one fresh-context Sol review. A review packet must not contain the implementer's reasoning or desired verdict. Reuse Sol for fixes; never create a second reviewer. Sol uses GPT-5.6 rather than Terra when model selection exists, with only low, medium, or high reasoning. Record the native agent thread ID as `worker`; this supports consistency checks but is not model attestation, so retain native spawn evidence.
 
 ## Worker brief
 

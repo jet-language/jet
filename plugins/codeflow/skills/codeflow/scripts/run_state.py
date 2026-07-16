@@ -73,6 +73,12 @@ def atomic_write_json(path: Path, value: Any) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         try:
             os.unlink(temp_name)
@@ -217,11 +223,17 @@ def validate_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(node["fresh_context"], bool):
             raise CodeflowError(f"{node_id}.fresh_context must be boolean")
         if node["mode"] == "write":
+            if any(path == "." for path in paths):
+                raise CodeflowError(f"{node_id}.paths must be explicit for write nodes")
+            for path in paths:
+                _, resolved = resolve_artifact(Path(workspace), path, f"{node_id}.paths")
+                reject_ledger_target(Path(workspace), resolved, f"{node_id}.paths")
             scopes = [normalize_rel_path(item, f"{node_id}.write_scope") for item in require_string_list(node.get("write_scope"), f"{node_id}.write_scope", nonempty=True)]
             if any(scope == "." or path_contains(".codeflow", scope) for scope in scopes):
                 raise CodeflowError(f"{node_id}.write_scope cannot include the Codeflow ledger or entire workspace")
             for scope in scopes:
-                resolve_artifact(Path(workspace), scope, f"{node_id}.write_scope")
+                _, resolved = resolve_artifact(Path(workspace), scope, f"{node_id}.write_scope")
+                reject_ledger_target(Path(workspace), resolved, f"{node_id}.write_scope")
             if any(not any(path_contains(path, scope) for path in paths) for scope in scopes):
                 raise CodeflowError(f"{node_id}.write_scope must be contained by paths")
             node["write_scope"] = scopes
@@ -277,9 +289,8 @@ def validate_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
     for index, left in enumerate(writers):
         for right in writers[index + 1 :]:
             ordered = left["id"] in ancestors[right["id"]] or right["id"] in ancestors[left["id"]]
-            overlap = any(paths_overlap(a, b) for a in left["write_scope"] for b in right["write_scope"])
-            if overlap and not ordered:
-                raise CodeflowError(f"unordered write scopes overlap: {left['id']} and {right['id']}")
+            if not ordered:
+                raise CodeflowError(f"shared-workspace write nodes must be ordered: {left['id']} and {right['id']}")
 
     reviews = [node for node in nodes if node["kind"] == "review" and node["mode"] == "verify"]
     if writers and not any(node["fresh_context"] for node in reviews):
@@ -313,8 +324,11 @@ def load_run(run_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     if set(state.get("nodes", {})) != expected:
         raise CodeflowError("run state does not match workflow nodes")
     state.setdefault("cycles", 0)
+    state.setdefault("reviewer_worker", None)
     for item in state["nodes"].values():
         item.setdefault("acceptance", [])
+        item.setdefault("sequence", item.get("attempts", 0))
+        item.setdefault("snapshot", None)
     return workflow, state
 
 
@@ -399,6 +413,12 @@ def resolve_artifact(workspace: Path, value: str, field: str) -> tuple[str, Path
     return rel, resolved
 
 
+def reject_ledger_target(workspace: Path, resolved: Path, field: str) -> None:
+    relative = resolved.relative_to(workspace.resolve())
+    if relative.parts and relative.parts[0] == ".codeflow":
+        raise CodeflowError(f"{field} resolves into the Codeflow ledger")
+
+
 def digest_path(path: Path) -> str:
     if not path.exists():
         raise CodeflowError(f"artifact does not exist: {path}")
@@ -427,8 +447,18 @@ def snapshot_workspace(workspace: Path) -> dict[str, list[int | str]]:
     snapshot: dict[str, list[int | str]] = {}
     root = workspace.resolve()
     for current, directories, files in os.walk(root, followlinks=False):
-        directories[:] = [name for name in directories if name not in {".git", ".codeflow"}]
         current_path = Path(current)
+        kept_directories: list[str] = []
+        for name in directories:
+            if name in {".git", ".codeflow"}:
+                continue
+            path = current_path / name
+            if path.is_symlink():
+                stat = path.lstat()
+                snapshot[path.relative_to(root).as_posix()] = ["symlink-dir", os.readlink(path), stat.st_mtime_ns]
+            else:
+                kept_directories.append(name)
+        directories[:] = kept_directories
         for name in files:
             path = current_path / name
             relative = path.relative_to(root).as_posix()
@@ -436,7 +466,7 @@ def snapshot_workspace(workspace: Path) -> dict[str, list[int | str]]:
             if path.is_symlink():
                 snapshot[relative] = ["symlink", os.readlink(path), stat.st_mtime_ns]
             else:
-                snapshot[relative] = ["file", stat.st_size, stat.st_mtime_ns, stat.st_mode]
+                snapshot[relative] = ["file", digest_path(path), stat.st_mode]
     return snapshot
 
 
@@ -546,6 +576,7 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
         "workflow_sha256": digest_json(normalized_workflow),
         "workflow": normalized_workflow,
         "cycles": 0,
+        "reviewer_worker": None,
         "nodes": {
             node["id"]: {
                 "status": "pending",
@@ -559,6 +590,7 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
                 "acceptance": [],
                 "failure_digests": [],
                 "snapshot": None,
+                "sequence": 0,
             }
             for node in normalized_workflow["nodes"]
         },
@@ -596,8 +628,10 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
     if item["attempts"] >= effective_attempts(workflow, node):
         raise CodeflowError(f"node {args.node_id} exhausted its attempt budget")
     if node["kind"] == "review":
-        if args.worker != "sol-review":
-            raise CodeflowError("review nodes must be assigned to the single sol-review worker")
+        if state["reviewer_worker"] is None:
+            state["reviewer_worker"] = args.worker
+        elif state["reviewer_worker"] != args.worker:
+            raise CodeflowError("all review nodes must reuse the single Sol agent thread")
         upstream_writers = [
             dependency
             for dependency in dependency_ancestors(workflow, args.node_id)
@@ -606,17 +640,28 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
         if any(state["nodes"][writer]["worker"] == args.worker for writer in upstream_writers):
             raise CodeflowError("Sol review must use a different worker than implementation")
     if node["mode"] == "write":
-        snapshot_rel = f"snapshots/{args.node_id}-attempt-{item['attempts'] + 1}.json"
+        snapshot_rel = f"snapshots/{args.node_id}-execution-{item['sequence'] + 1}.json"
         atomic_write_json(run_dir / snapshot_rel, snapshot_workspace(Path(workflow["workspace"])))
         item["snapshot"] = snapshot_rel
     item["status"] = "running"
     item["attempts"] += 1
+    item["sequence"] += 1
     item["worker"] = args.worker
     item["started_at"] = utc_now()
     item["finished_at"] = None
-    add_event(state, "node-started", args.node_id, f"attempt {item['attempts']} by {args.worker}")
+    add_event(
+        state,
+        "node-started",
+        args.node_id,
+        f"execution {item['sequence']}, budget attempt {item['attempts']} by {args.worker}",
+    )
     save_run(run_dir, state)
-    return {"node": args.node_id, "status": "running", "attempt": item["attempts"]}
+    return {
+        "node": args.node_id,
+        "status": "running",
+        "attempt": item["attempts"],
+        "execution": item["sequence"],
+    }
 
 
 @locked_command
@@ -627,12 +672,16 @@ def cmd_finish(args: argparse.Namespace) -> dict[str, Any]:
     item = state["nodes"][args.node_id]
     raw_report = read_json(Path(args.report))
     report, artifact_digests = validate_report(raw_report, node, workflow)
+    actual_changes: set[str] = set()
     if node["mode"] == "write":
         if not item.get("snapshot"):
             raise CodeflowError(f"write node {args.node_id} has no start snapshot")
         before = read_json(run_dir / item["snapshot"])
         after = snapshot_workspace(Path(workflow["workspace"]))
         actual_changes = changed_since(before, after)
+        for path in actual_changes:
+            _, resolved = resolve_artifact(Path(workflow["workspace"]), path, "actual workspace change")
+            reject_ledger_target(Path(workflow["workspace"]), resolved, "actual workspace change")
         outside_scope = sorted(
             path
             for path in actual_changes
@@ -661,7 +710,7 @@ def cmd_finish(args: argparse.Namespace) -> dict[str, Any]:
         return {"node": args.node_id, "status": item["status"], "idempotent": True}
     if item["status"] != "running":
         raise CodeflowError(f"node {args.node_id} is not running: {item['status']}")
-    result_rel = f"results/{args.node_id}-attempt-{item['attempts']}.json"
+    result_rel = f"results/{args.node_id}-execution-{item['sequence']}.json"
     result_path = run_dir / result_rel
     if result_path.exists():
         if digest_json(read_json(result_path)) != report_sha:
@@ -679,7 +728,12 @@ def cmd_finish(args: argparse.Namespace) -> dict[str, Any]:
     add_event(state, f"node-{report['status']}", args.node_id, report["summary"])
     refresh_ready(workflow, state)
     save_run(run_dir, state)
-    return {"node": args.node_id, "status": item["status"], "run_status": state["status"]}
+    return {
+        "node": args.node_id,
+        "status": item["status"],
+        "run_status": state["status"],
+        "observed_changes": sorted(actual_changes),
+    }
 
 
 @locked_command
@@ -729,6 +783,8 @@ def cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
                 item["status"] = "pending"
                 item["worker"] = None
                 item["started_at"] = None
+                item["attempts"] = max(0, item["attempts"] - 1)
+                item["snapshot"] = None
                 interrupted = True
                 add_event(state, "node-interrupted", node_id, "stale running node returned to queue")
         if item["status"] == "passed":
@@ -805,6 +861,7 @@ def cmd_sync(args: argparse.Namespace) -> dict[str, Any]:
                 "acceptance": [],
                 "failure_digests": [],
                 "snapshot": None,
+                "sequence": 0,
             }
         elif state["nodes"][node["id"]]["status"] == "ready":
             state["nodes"][node["id"]]["status"] = "pending"

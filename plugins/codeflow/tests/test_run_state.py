@@ -156,7 +156,7 @@ class CodeflowStateTests(unittest.TestCase):
         second["depends_on"] = ["inspect"]
         overlap["nodes"].insert(2, second)
         overlap["nodes"][-1]["depends_on"] = ["implement", "implement-two"]
-        with self.assertRaisesRegex(run_state.CodeflowError, "write scopes overlap"):
+        with self.assertRaisesRegex(run_state.CodeflowError, "write nodes must be ordered"):
             run_state.validate_workflow(overlap)
 
     def test_write_requires_fresh_downstream_review(self):
@@ -350,15 +350,18 @@ class CodeflowStateTests(unittest.TestCase):
         run_dir = self.init_run()
         self.pass_inspect(run_dir)
         self.pass_implementation(run_dir)
-        with self.assertRaisesRegex(run_state.CodeflowError, "single sol-review"):
-            self.start(run_dir, "review", "second-reviewer")
-
         state_path = run_dir / "run.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        state["nodes"]["implement"]["worker"] = "sol-review"
+        state["reviewer_worker"] = "native-sol-thread"
+        run_state.atomic_write_json(state_path, state)
+        with self.assertRaisesRegex(run_state.CodeflowError, "single Sol agent thread"):
+            self.start(run_dir, "review", "second-reviewer-thread")
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["nodes"]["implement"]["worker"] = "native-sol-thread"
         run_state.atomic_write_json(state_path, state)
         with self.assertRaisesRegex(run_state.CodeflowError, "different worker"):
-            self.start(run_dir, "review", "sol-review")
+            self.start(run_dir, "review", "native-sol-thread")
 
     def test_resume_checks_report_integrity_and_noop_is_stable(self):
         run_dir = self.init_run()
@@ -374,10 +377,17 @@ class CodeflowStateTests(unittest.TestCase):
         self.assertEqual([], resumed["invalidated"])
         self.assertEqual(completions_before, completions_after)
 
-        (run_dir / state_after["nodes"]["review"]["report"]).unlink()
+        report_path = run_dir / state_after["nodes"]["review"]["report"]
+        tampered = json.loads(report_path.read_text(encoding="utf-8"))
+        tampered["summary"] = "tampered after completion"
+        report_path.write_text(json.dumps(tampered), encoding="utf-8")
         resumed = run_state.cmd_resume(argparse.Namespace(run_dir=str(run_dir), stale_after=0))
         self.assertEqual(["review"], resumed["invalidated"])
         self.assertEqual(["review"], run_state.cmd_ready(argparse.Namespace(run_dir=str(run_dir)))["ready"])
+        started = self.start(run_dir, "review", "sol-review")
+        self.assertEqual(2, started["execution"])
+        result = self.finish(run_dir, "review", self.report(acceptance=self.workflow["acceptance"]), "review-recovered.json")
+        self.assertEqual("complete", result["run_status"])
 
     def test_actual_out_of_scope_write_is_rejected(self):
         run_dir = self.init_run()
@@ -389,6 +399,21 @@ class CodeflowStateTests(unittest.TestCase):
         with self.assertRaisesRegex(run_state.CodeflowError, "actual changes outside write scope"):
             self.finish(run_dir, "implement", report, "actual-scope.json")
 
+    def test_stale_final_attempt_can_be_recovered(self):
+        workflow = copy.deepcopy(self.workflow)
+        workflow["nodes"][0]["max_attempts"] = 1
+        run_dir = self.init_run(workflow, "stale-final")
+        first = self.start(run_dir, "inspect")
+        self.assertEqual(1, first["execution"])
+        state_path = run_dir / "run.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["nodes"]["inspect"]["started_at"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        run_state.atomic_write_json(state_path, state)
+        run_state.cmd_resume(argparse.Namespace(run_dir=str(run_dir), stale_after=60))
+        second = self.start(run_dir, "inspect")
+        self.assertEqual(1, second["attempt"])
+        self.assertEqual(2, second["execution"])
+
     def test_symlink_scope_and_control_character_are_rejected(self):
         outside = self.root / "outside"
         outside.mkdir()
@@ -399,6 +424,15 @@ class CodeflowStateTests(unittest.TestCase):
         workflow["nodes"][2]["paths"] = ["src/link/feature.txt"]
         with self.assertRaisesRegex(run_state.CodeflowError, "escapes workspace"):
             run_state.validate_workflow(workflow)
+
+        (self.workspace / ".codeflow").mkdir()
+        (self.workspace / "ledger-link").symlink_to(self.workspace / ".codeflow", target_is_directory=True)
+        ledger = copy.deepcopy(self.workflow)
+        ledger["nodes"][1]["paths"] = ["ledger-link/result.json"]
+        ledger["nodes"][1]["write_scope"] = ["ledger-link/result.json"]
+        ledger["nodes"][2]["paths"] = ["ledger-link/result.json"]
+        with self.assertRaisesRegex(run_state.CodeflowError, "resolves into the Codeflow ledger"):
+            run_state.validate_workflow(ledger)
         with self.assertRaisesRegex(run_state.CodeflowError, "control character"):
             run_state.normalize_rel_path("src/bad\x00name", "test")
 
