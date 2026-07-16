@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 667,
-    "rev": 8102,
+    "rev": 8104,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40763,6 +40763,144 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-16T01:32:08.878Z"
+    },
+    {
+      "id": "D-BUILD-DEFAULT1",
+      "cardId": "c0zmoznd",
+      "group": "tooling",
+      "title": "Default build profile for everyday commands",
+      "gist": "Which build profile the everyday commands (jet run, jet dev, jet build) use by default.",
+      "lesson": "Today the unnamed Default profile optimizes: opt-level 2, thin-LTO, and strip (Source/main.rs). Every `jet run`, `jet dev`, and `jet build` pays optimizer time, even a first hello-world run.\n\nR8 says the default leans toward speed, but that speed is the runtime binary's, not the compile. In the edit-run loop, compile time is the speed a beginner actually feels.\n\nD-BUILDPROFILE1 stays intact: profiles are still selected by explicit flag, never ambient env. This ballot only changes what the unnamed Default profile contains; `--release` remains the optimized profile.",
+      "explainer": "",
+      "story": "Sam is learning Jet and runs `jet run hello.jet` after almost every edit. Each run waits on the optimizer before printing one line, so the loop feels sluggish from the first program.",
+      "inWild": "// tool.jet — a small CLI a developer iterates on all day\nfn run() {\n  let rows = read_csv(\"data.csv\")\n  print(\"processed {rows.len()} rows\")\n}\n\n$ jet run tool.jet            # inner dev loop, run hundreds of times a day\n$ jet build --release tool.jet   # the one shipping build",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fast-codegen default, optimize behind --release",
+          "detail": "The unnamed Default profile becomes opt-level 0, codegen-units 256, no LTO. `--release` selects the optimized, thin-LTO, stripped profile that is the default today.",
+          "code": "# Today (optimized default): the edit-run loop pays the optimizer each time\n$ jet run hello.jet\nHello, world!          # ~450 ms   (illustrative)\n\n# Option A: opt-level 0, codegen-units 256, no LTO\n$ jet run hello.jet\nHello, world!          # ~150 ms   (illustrative)\n\n# Shipping build — one flag, fully optimized + thin-LTO + strip\n$ jet build --release hello.jet\n$ ./hello              # same fast binary today's default produced"
+        },
+        {
+          "key": "B",
+          "name": "Split by command: run/dev fast, build optimized",
+          "detail": "`jet run` and `jet dev` compile at opt-level 0; `jet build` keeps the optimized profile. An explicit `--profile`/`--release` flag overrides either command's default.",
+          "code": "# Option B: the command decides the profile\n$ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)\n$ jet dev  hello.jet   # fast: opt-level 0         ~150 ms (illustrative)\n$ jet build hello.jet  # optimized: -O + thin-LTO  ~450 ms (illustrative)\n\n# Override either way with an explicit profile flag\n$ jet build --profile=debug hello.jet   # fast build of a build artifact\n$ jet run   --release       hello.jet   # optimized one-off run"
+        },
+        {
+          "key": "C",
+          "name": "Keep optimized-everywhere default (status quo)",
+          "detail": "Every everyday command keeps opt-level 2, thin-LTO, and strip. Fast compiles stay opt-in behind `--profile=debug`.",
+          "code": "# Option C: every everyday command optimizes (today's behavior)\n$ jet run hello.jet\nHello, world!          # ~450 ms   (illustrative)\n$ jet build hello.jet\n$ ./hello              # ~450 ms build; fast small binary\n\n# Fast compile only if you remember the opt-in flag\n$ jet run --profile=debug hello.jet\nHello, world!          # ~150 ms   (illustrative)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust / cargo",
+          "note": "`cargo build` is unoptimized debug by default; `cargo build --release` opts into optimization. Jet's Default profile is the opposite today, optimizing on every build.",
+          "code": "cargo build            # debug, fast compile\ncargo build --release  # optimized"
+        },
+        {
+          "lang": "Zig",
+          "note": "`zig build` produces a Debug binary by default; `-Doptimize=ReleaseFast` is the opt-in. Fast iterate, explicit ship.",
+          "code": "zig build\nzig build -Doptimize=ReleaseFast"
+        },
+        {
+          "lang": "Go",
+          "note": "`go build` has no user-picked optimize/debug split. It is fast by default, with no separate optimized build command in the everyday loop.",
+          "code": "go build ./..."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes the loop beginners run hundreds of times a day instant, and keeps the optimized binary one keystroke away as `--release`.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two profiles by command means `jet run` and `jet build` of one file can produce different binaries, so a bug seen under one may vanish under the other."
+          },
+          {
+            "key": "C",
+            "reason": "The common path stays slow: every first `jet run` pays optimizer time the beginner never asked for."
+          }
+        ],
+        "tradeoff": "A default binaries run slower than today's until `--release`. Everyday commands exist for iterating, not shipping, so compile speed is the right default there."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T01:44:57.595Z"
+    },
+    {
+      "id": "D-AOT-CRANELIFT1",
+      "cardId": "c0zmoznd",
+      "group": "tooling",
+      "title": "Cranelift AOT backend for debug/default builds",
+      "gist": "Whether `jet build` debug/default lowers TIR through Cranelift to object code, taking rustc off the debug path.",
+      "lesson": "Cranelift is already an I6-ratified dependency for the dev JIT (D-JITDEP1). This ballot extends that scope: the same backend would produce shippable-on-disk `jet build` debug artifacts, not just in-memory JIT code.\n\nR12 makes the AOT path a third consumer of the same executable TIR. It must prove stdout, stderr, exit code, panic, and side-effect parity through the golden suite, with rustc as the reference.\n\nI2 keeps rustc as the safety net: any construct Cranelift cannot lower falls through to rustc by a named internal reason, so no program ever fails to build for backend reasons.",
+      "explainer": "",
+      "story": "Priya iterates on a CLI tool, running `jet build` in her inner loop. The generated Rust is milliseconds, but shelling out to rustc dominates each build, even though sema already checked everything.",
+      "inWild": "// app.jet — sema resolves every type, ownership fact, and mangle into TIR\nfn run() {\n  let rows = load(\"data.csv\")\n  print(\"processed {rows.len()} rows\")\n}\n\n$ jet build app.jet           # debug build, run over and over\n$ jet build --release app.jet   # shipping build",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cranelift AOT for debug/default, automatic rustc fallback",
+          "detail": "`jet build` (debug/default) lowers TIR to object code with Cranelift and links it. A construct Cranelift cannot lower falls back to rustc with a named reason (I2). `--release` stays on rustc/LLVM.",
+          "code": "# Option A: debug build goes TIR -> Cranelift -> object -> link, no rustc\n$ jet build app.jet\n$ ./app\nprocessed 1240 rows            # identical output to a rustc build\n\n# ~5x faster debug build (illustrative) — rustc is off the path\n\n# Unsupported construct: transparent fallback, named reason (verbose)\n$ jet build --verbose app.jet\nnote: backend fell back to rustc for `f128` math (cranelift: no f128 lowering)\n$ ./app\nprocessed 1240 rows            # same result on either backend\n\n# Shipping build is unchanged:\n$ jet build --release app.jet  # rustc/LLVM optimizing backend"
+        },
+        {
+          "key": "B",
+          "name": "Cranelift AOT opt-in only",
+          "detail": "`jet build` stays on rustc by default; Cranelift AOT is reached through an explicit opt-in (a profile or flag, spelling deferred to a follow-up). Debug builds are fast only when the developer asks.",
+          "code": "# Option B: rustc is the default AOT backend; Cranelift is opt-in\n$ jet build app.jet                    # rustc, same as today\n$ jet build <opt-in-cranelift> app.jet   # fast Cranelift object\n$ ./app\nprocessed 1240 rows                    # identical output"
+        },
+        {
+          "key": "C",
+          "name": "No Cranelift AOT — rustc stays the only AOT path",
+          "detail": "`jet build` always emits generated Rust and shells rustc, debug and release alike. Cranelift stays JIT-only, powering `jet dev` reloads but never producing a `jet build` artifact.",
+          "code": "# Option C: today's behavior kept\n$ jet build app.jet          # app.jet -> generated .rs -> rustc -> link\n$ ./app\nprocessed 1240 rows\n# Cranelift never touches jet build; only jet dev uses it."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rustc cranelift backend",
+          "note": "rustc already ships a Cranelift codegen backend for faster debug builds, keeping LLVM for release. This is that split, owned by Jet instead of delegated to rustc.",
+          "code": "rustc -Zcodegen-backend=cranelift   # debug\nrustc                               # LLVM (release)"
+        },
+        {
+          "lang": "Go",
+          "note": "Go's own compiler emits object code directly and never shells a second optimizer for debug builds. Fast builds come from owning the backend.",
+          "code": "go build ./..."
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig's self-hosted backend emits machine code without LLVM for debug, falling to LLVM only for release. Same fast-debug, optimized-release shape.",
+          "code": "zig build                         # self-hosted backend\nzig build -Doptimize=ReleaseFast  # LLVM"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A takes the redundant rustc verify-and-optimize pass off the build developers run most, and the named fallback keeps every program buildable.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Opt-in means the default `jet build` keeps paying rustc; almost nobody flips a backend flag, so the common path stays as slow as today."
+          },
+          {
+            "key": "C",
+            "reason": "Keeps rustc on the debug path permanently, so the AOT Cranelift scope this ballot would grant goes entirely unused."
+          }
+        ],
+        "tradeoff": "Debug binaries use Cranelift codegen, roughly comparable to rustc opt-level 0 at runtime. The golden and differential suites carry the parity risk of a third TIR consumer (R12)."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T01:44:57.715Z"
     }
   ],
   "questions": [
@@ -41597,6 +41735,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T01:44:57.715Z",
+      "by": "fable-clerk",
+      "action": "decision.add",
+      "ref": "D-AOT-CRANELIFT1",
+      "note": "Cranelift AOT backend for debug/default builds"
+    },
+    {
+      "at": "2026-07-16T01:44:57.595Z",
+      "by": "fable-clerk",
+      "action": "decision.add",
+      "ref": "D-BUILD-DEFAULT1",
+      "note": "Default build profile for everyday commands"
+    },
     {
       "at": "2026-07-16T01:38:26.355Z",
       "by": "fable-clerk",
@@ -45082,20 +45234,6 @@
       "action": "card.add",
       "ref": "c067p6dz",
       "note": "Full suite red: cli budget tests race copied-compiler exec (ETXTBSY)"
-    },
-    {
-      "at": "2026-07-15T14:24:53.553Z",
-      "by": "fable-burndown",
-      "action": "card.claim",
-      "ref": "c0yt35t8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T14:24:31.614Z",
-      "by": "fable-burndown",
-      "action": "card.claim",
-      "ref": "c0ajdb8z",
-      "note": ""
     }
   ],
   "nextNum": 368,

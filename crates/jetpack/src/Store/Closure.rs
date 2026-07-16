@@ -987,6 +987,15 @@ fn validate_record_store_proof(
     if store_validates_complete_closure(roots, record, &meta, &producer) {
         Ok(())
     } else {
+        let local = roots.hangar_dir().join(OBJECTS_DIR).join(&record.primary);
+        eprintln!(
+            "JETDBG proof-fail id={} provider={} authority={:?} meta.out={} primary={} local={} out_exists={} rehash={:?}",
+            record.id, producer.provider,
+            producer.facts.get("closure.authority"),
+            meta.out, record.primary, local.display(),
+            std::path::Path::new(&meta.out).exists(),
+            super::super::Envelope::try_output_hash_of_in_hangar(&meta.out, &roots.hangar_dir(), !meta.platform_artifact_kind.is_empty()),
+        );
         Err(format!(
             "closure record `{}` has no dependency references or store-validated closure proof",
             record.id
