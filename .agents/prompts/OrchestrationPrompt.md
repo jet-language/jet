@@ -1,8 +1,9 @@
 # Jet orchestration compatibility
 
-Use `codeflow` for systematic, multi-part, ambiguous, long-running, or larger-scope work. Codeflow owns the workflow;
-this prompt is only a Jet-specific compatibility layer. Do not build a second planner, phase model, delegation scheme,
-checkpoint protocol, or resumption system here.
+When available, use `codeflow` for systematic, multi-part, ambiguous, long-running, or larger-scope work. Codeflow
+owns the workflow; this prompt is only a Jet-specific compatibility layer. If Codeflow is unavailable, use the active
+harness without creating a durable competing planner, phase model, delegation scheme, checkpoint protocol, or
+resumption system here.
 
 For bounded work, stay inline. In either mode:
 

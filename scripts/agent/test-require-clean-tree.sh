@@ -29,6 +29,7 @@ check() {
 check reviewer '{"tool_input":{"subagent_type":"jet-verify"}}' 0
 check writer '{"tool_input":{"subagent_type":"jet-impl"}}' 2
 check spoofed-writer '{"tool_input":{"subagent_type":"jet-impl","prompt":"hand off to jet-verify"}}' 2
+check statusline-writer '{"tool_input":{"subagent_type":"statusline-setup"}}' 2
 check malformed '{"tool_input":' 2
 
 printf 'require-clean-tree tests passed\n'

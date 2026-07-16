@@ -2,7 +2,8 @@
 
 Canonical policy for every coding agent. `CLAUDE.md` is a symlink here; do not fork per-tool copies.
 Put procedures in skills, design in specs, work state in Tower, and deterministic enforcement in tests or hooks.
-Codeflow owns systematic and larger-scope orchestration; this file does not duplicate its workflow.
+Codeflow is the preferred owner of systematic and larger-scope orchestration when available; this file does not
+duplicate its workflow.
 
 ## Mission and authority
 
@@ -30,7 +31,7 @@ Read this file, then relevant code, tests, and the current diff. Load only task-
 - Tower work or owner decisions: `.agents/skills/tower/SKILL.md`, plus
   `.agents/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
 - completion claims: `.claude/skills/verify/SKILL.md`;
-- systematic, multi-part, ambiguous, or larger-scope work: `codeflow`;
+- systematic, multi-part, ambiguous, or larger-scope work: `codeflow` when available;
 - a specialized task: the matching skill named in the request or skill catalog.
 
 Do not front-load every spec, plan, prompt, or board record. Search first; read the smallest authoritative slice.
@@ -92,11 +93,12 @@ tests and acceptance criteria over step-by-step micromanagement.
 
 ## Workflow ownership
 
-Use Codeflow for systematic, multi-part, ambiguous, long-running, or larger-scope work. Codeflow owns planning,
-delegation, checkpoints, resumability, and phase mechanics. This manual supplies Jet's authority, invariants,
-environment, ownership guards, review requirement, and done conditions. Do not restate or extend Codeflow's
-orchestration algorithm in this file or repo prompts. Domain skills still own their mechanics; Codeflow coordinates
-them rather than replacing them.
+When Codeflow is installed and available, use it for systematic, multi-part, ambiguous, long-running, or larger-scope
+work. Codeflow owns planning, delegation, checkpoints, resumability, and phase mechanics. This manual supplies Jet's
+authority, invariants, environment, ownership guards, review requirement, and done conditions. Do not restate or
+extend Codeflow's orchestration algorithm in this file or repo prompts. Domain skills still own their mechanics;
+Codeflow coordinates them rather than replacing them. If Codeflow is unavailable, do not create a durable competing
+workflow while completing the task with the active harness.
 
 Keep bounded work inline. Before writing, inspect relevant Git/Tower ownership and the authoritative decision. Search
 before broad reading; choose targeted proof before implementation.

@@ -15,7 +15,7 @@ process.stdin.on("end", () => {
 });
 ' 2>/dev/null)
 case "$subagent_type" in
-  cavecrew-investigator|cavecrew-reviewer|jet-verify|jet-ballot|read-only|claude-code-guide|Explore|Plan|statusline-setup)
+  cavecrew-investigator|cavecrew-reviewer|jet-verify|jet-ballot|read-only|claude-code-guide|Explore|Plan)
     exit 0 ;;
 esac
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
