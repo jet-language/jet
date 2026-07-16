@@ -73,20 +73,25 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 
 D-DEP-GC1=A has one dependency-free collector implementation in
 `crates/jet-rt/src/__gc.rs`. `jet-rt` exposes that module directly to dev/JIT;
-codegen embeds the same source inside the private `jet_gc` module for AOT.
-The pre-#658 `core.gc` adapter delegates to it without defining another heap.
+codegen embeds the same source inside private `jet_traced_heap` for AOT and
+strips it until #658 emits scoped-GC operations. The pre-#658 `core.gc`/`Gc<T>`
+adapter remains isolated and unchanged; it is not this substrate and carries
+no scoped-GC correctness claim. #658 owns its retirement.
 
 Object identities are monotonic and never reused. RAII root handles keep an
 object live; traced edges are sorted, deduplicated, bounded, and accepted only
 when every target is present in the same heap. A safepoint marks from current
 roots, follows that metadata, and reclaims unreachable objects in identity
-order. Active object access defers reclamation to the next safepoint. Finalizers
-run at most once in the same identity order. Finalizer and value-drop panics are
-caught and reported internally; a payload poisoned by unwinding is never given
-to its finalizer. Dropping the heap drains remaining objects under the same
-policy. Handles may cross tasks or threads; all payload access is serialized,
-and conflicting, stale, malformed, poisoned, over-limit, or impossible state
-fails closed through the private `Fault` result.
+order. Active object access is a temporary mark root, so its transitive children
+survive the safepoint too. A mutation reserves its source version, pins current
+and proposed targets, edits the payload, then commits metadata; reentrant or
+concurrent rewrites fail, and conflict, type failure, or unwind leaves the old
+graph intact. Finalizers run at most once in identity order. Finalizer and
+value-drop panics are caught and reported internally; a payload poisoned by
+unwinding is never given to its finalizer. Dropping the heap drains remaining
+objects under the same policy. Handles may cross tasks or threads; all payload
+access is serialized, and conflicting, stale, malformed, poisoned, over-limit,
+or impossible state fails closed through the private `Fault` result.
 
 This substrate defines no Jet policy or source surface. #658 owns scoped
 promotion and `core.gc`/`Gc<T>` retirement; #659 owns tracing and reports.

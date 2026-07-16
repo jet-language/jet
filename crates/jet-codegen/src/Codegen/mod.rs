@@ -368,17 +368,16 @@ const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
-/// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
-const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
-/// Pre-#658 compatibility only. #658 retires this source-facing wrapper.
-const GC_ADAPTER_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
+/// D-OPTGC1: legacy explicit wrapper. #658 owns its retirement.
+const GC_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
+/// D-DEP-GC1=A: exact jet-rt source ready for #658's private AOT lowering.
+const TRACED_HEAP_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
 
-fn push_gc_prelude(out: &mut String) {
-    out.push_str("mod jet_gc {\n");
-    out.push_str(GC_RUNTIME_PRELUDE);
-    out.push('\n');
-    out.push_str(GC_ADAPTER_PRELUDE);
+fn push_gc_preludes(out: &mut String) {
+    out.push_str("mod jet_traced_heap {\n");
+    out.push_str(TRACED_HEAP_PRELUDE);
     out.push_str("\n}\n");
+    out.push_str(GC_PRELUDE);
 }
 /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): the `layout NAME { … }`
 /// constraint-solver runtime (`jet_layout`). Pure safe Rust (no `unsafe`), so —
@@ -490,41 +489,45 @@ fn strip_unused_mem_prelude(out: String) -> String {
     s
 }
 
-/// D-OPTGC1: strip `mod jet_gc { … }` when the program never references `jet_gc::`.
+/// Strip legacy and private GC modules independently. Before #658, private
+/// collector is always stripped; after #658, only its lowered uses retain it.
 fn strip_unused_gc_prelude(out: String) -> String {
-    let Some(start) = out.find("mod jet_gc") else {
-        return out;
-    };
-    let bytes = out.as_bytes();
-    let mut depth = 0usize;
-    let mut seen = false;
-    let mut end = out.len();
-    let mut i = start;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                seen = true;
-            }
-            b'}' => {
-                depth -= 1;
-                if seen && depth == 0 {
-                    end = i + 1;
-                    break;
+    fn strip(out: String, module: &str, reference: &str) -> String {
+        let Some(start) = out.find(module) else {
+            return out;
+        };
+        let bytes = out.as_bytes();
+        let mut depth = 0usize;
+        let mut seen = false;
+        let mut end = out.len();
+        let mut i = start;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => {
+                    depth += 1;
+                    seen = true;
                 }
+                b'}' => {
+                    depth -= 1;
+                    if seen && depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+            i += 1;
         }
-        i += 1;
+        if out[..start].contains(reference) || out[end..].contains(reference) {
+            return out;
+        }
+        let mut stripped = out[..start].to_string();
+        stripped.push_str(out[end..].trim_start_matches('\n'));
+        stripped
     }
-    let used = out[..start].contains("jet_gc::") || out[end..].contains("jet_gc::");
-    if used {
-        return out;
-    }
-    let mut s = out[..start].to_string();
-    let rest = out[end..].trim_start_matches('\n');
-    s.push_str(rest);
-    s
+
+    let out = strip(out, "mod jet_gc", "jet_gc::");
+    strip(out, "mod jet_traced_heap", "jet_traced_heap::")
 }
 
 /// D-FLAGSHIP-RAYLIB1=A: the raylib bridge carries vetted FFI `unsafe`.
@@ -861,7 +864,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    push_gc_prelude(&mut out);
+    push_gc_preludes(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push('\n');
 
@@ -967,26 +970,44 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
+    #[allow(dead_code)]
+    mod embedded_traced_heap {
+        include!("../../../jet-rt/src/__gc.rs");
+    }
+
     #[test]
-    fn gc_runtime_source_is_shared_by_aot_and_jit() {
+    fn private_gc_runtime_is_aot_ready_without_replacing_legacy_surface() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let runtime = std::fs::read_to_string(root.join("../jet-rt/src/__gc.rs")).unwrap();
-        let adapter = std::fs::read_to_string(root.join("src/Prelude/Gc.rs")).unwrap();
-        assert_eq!(GC_RUNTIME_PRELUDE, runtime);
-        assert_eq!(GC_ADAPTER_PRELUDE, adapter);
+        let legacy = std::fs::read_to_string(root.join("src/Prelude/Gc.rs")).unwrap();
+        assert_eq!(TRACED_HEAP_PRELUDE, runtime);
+        assert_eq!(GC_PRELUDE, legacy);
 
         let mut emitted = String::new();
-        push_gc_prelude(&mut emitted);
-        assert!(emitted.starts_with("mod jet_gc {\n"));
+        push_gc_preludes(&mut emitted);
+        assert!(emitted.starts_with("mod jet_traced_heap {\n"));
         assert_eq!(emitted.matches(runtime.as_str()).count(), 1);
-        assert_eq!(emitted.matches(adapter.as_str()).count(), 1);
+        assert_eq!(emitted.matches(legacy.as_str()).count(), 1);
 
         let unused = strip_unused_gc_prelude(format!("{emitted}fn main() {{}}\n"));
         assert!(!unused.contains("mod jet_gc"));
-        let used = strip_unused_gc_prelude(format!(
+        assert!(!unused.contains("mod jet_traced_heap"));
+        let legacy_used = strip_unused_gc_prelude(format!(
             "{emitted}fn main() {{ jet_gc::gc_collect(); }}\n"
         ));
-        assert!(used.contains("mod jet_gc"));
+        assert!(legacy_used.contains("mod jet_gc"));
+        assert!(!legacy_used.contains("mod jet_traced_heap"));
+        let private_used = strip_unused_gc_prelude(format!(
+            "{emitted}fn main() {{ let _ = jet_traced_heap::Collector::new(); }}\n"
+        ));
+        assert!(!private_used.contains("mod jet_gc"));
+        assert!(private_used.contains("mod jet_traced_heap"));
+
+        let collector = embedded_traced_heap::Collector::new();
+        let root = collector.allocate(1_u64).unwrap();
+        let id = root.id();
+        drop(root);
+        assert_eq!(collector.collect().unwrap().reclaimed, vec![id]);
     }
 
     #[test]
@@ -1045,10 +1066,10 @@ mod tests {
             format!("{core}{runtime_control}{observe}"),
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 106_731, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 106_304, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "816440ced28850b548a433b6c2c62fce7e43276f29fc49dd25bac0400d945f85",
+            "ba9e9adf8b288e25f2d054ee06f913496623e6176babcd8058d20442501fb0e4",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
@@ -1204,7 +1225,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    push_gc_prelude(&mut out);
+    push_gc_preludes(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if any_property_test(&tests) {
@@ -1610,7 +1631,7 @@ pub fn emit_bundle_dbg(
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    push_gc_prelude(&mut out);
+    push_gc_preludes(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
         push_corelib_prelude(&mut out);
@@ -1736,7 +1757,7 @@ pub fn emit_bundle_tests_cov(
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    push_gc_prelude(&mut out);
+    push_gc_preludes(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {
@@ -1924,7 +1945,7 @@ pub fn emit_bundle_fuzz(
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    push_gc_prelude(&mut out);
+    push_gc_preludes(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
@@ -2168,7 +2189,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     push_prelude(&mut out);
     out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
-    push_gc_prelude(&mut out);
+    push_gc_preludes(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {

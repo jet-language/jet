@@ -1,7 +1,7 @@
-//! D-DEP-GC1=A: private, dependency-free tracing collector substrate.
-//!
-//! Frontend policy and automatic promotion live elsewhere. This module owns
-//! only stable identities, roots, traced edges, safepoints, and reclamation.
+// D-DEP-GC1=A: private, dependency-free tracing collector substrate.
+//
+// Frontend policy and automatic promotion live elsewhere. This module owns
+// only stable identities, roots, traced edges, safepoints, and reclamation.
 
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,6 +33,9 @@ pub enum Fault {
     UnknownObject(ObjectId),
     DanglingEdge { from: ObjectId, to: ObjectId },
     RootCountOverflow(ObjectId),
+    PinCountOverflow(ObjectId),
+    MutationConflict(ObjectId),
+    VersionOverflow(ObjectId),
     PayloadPoisoned(ObjectId),
     BorrowConflict(ObjectId),
     TypeMismatch(ObjectId),
@@ -66,6 +69,9 @@ struct Object {
 
 struct Entry {
     roots: usize,
+    pins: usize,
+    version: u64,
+    reserved: bool,
     edges: Vec<ObjectId>,
     object: Arc<Object>,
 }
@@ -151,6 +157,9 @@ impl Collector {
             id,
             Entry {
                 roots: 1,
+                pins: 0,
+                version: 0,
+                reserved: false,
                 edges: Vec::new(),
                 object: Arc::new(Object {
                     value: Mutex::new(Box::new(value)),
@@ -185,7 +194,12 @@ impl Collector {
         let mut stack: Vec<ObjectId> = state
             .entries
             .iter()
-            .filter_map(|(id, entry)| (entry.roots != 0).then_some(*id))
+            .filter_map(|(id, entry)| {
+                (entry.roots != 0
+                    || entry.pins != 0
+                    || Arc::strong_count(&entry.object) != 1)
+                    .then_some(*id)
+            })
             .rev()
             .collect();
 
@@ -293,8 +307,25 @@ impl<T: Any + Send> Root<T> {
         edges: &[ObjectId],
         edit: impl FnOnce(&mut T) -> R,
     ) -> Result<R, Fault> {
-        replace_edges(&self.heap, self.id, edges)?;
-        access_mut(&self.heap, self.id, edit)
+        let reservation = reserve_mutation(&self.heap, self.id, edges)?;
+        let object = lookup(&self.heap, self.id)?;
+        let mut guard = match object.value.try_lock() {
+            Ok(value) => value,
+            Err(TryLockError::WouldBlock) => return Err(Fault::BorrowConflict(self.id)),
+            Err(TryLockError::Poisoned(_)) => return Err(Fault::PayloadPoisoned(self.id)),
+        };
+        let value = guard
+            .downcast_mut::<T>()
+            .ok_or(Fault::TypeMismatch(self.id))?;
+        match catch_unwind(AssertUnwindSafe(|| edit(value))) {
+            Ok(result) => {
+                drop(guard);
+                drop(object);
+                reservation.commit()?;
+                Ok(result)
+            }
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 }
 
@@ -343,6 +374,34 @@ impl<T: Any + Send> Edge<T> {
 }
 
 fn replace_edges(heap: &Arc<Heap>, from: ObjectId, edges: &[ObjectId]) -> Result<(), Fault> {
+    let normalized = normalize_edges(edges)?;
+    let mut state = heap.state.lock().map_err(|_| Fault::HeapPoisoned)?;
+    let source = state
+        .entries
+        .get(&from)
+        .ok_or(Fault::UnknownObject(from))?;
+    if source.reserved {
+        return Err(Fault::MutationConflict(from));
+    }
+    let next_version = source
+        .version
+        .checked_add(1)
+        .ok_or(Fault::VersionOverflow(from))?;
+    for child in &normalized {
+        if !state.entries.contains_key(child) {
+            return Err(Fault::UnknownObject(*child));
+        }
+    }
+    let source = state
+        .entries
+        .get_mut(&from)
+        .expect("collector source validated");
+    source.edges = normalized;
+    source.version = next_version;
+    Ok(())
+}
+
+fn normalize_edges(edges: &[ObjectId]) -> Result<Vec<ObjectId>, Fault> {
     if edges.len() > MAX_EDGES_PER_OBJECT {
         return Err(Fault::TooManyEdges {
             count: edges.len(),
@@ -352,22 +411,119 @@ fn replace_edges(heap: &Arc<Heap>, from: ObjectId, edges: &[ObjectId]) -> Result
     let mut normalized = edges.to_vec();
     normalized.sort_unstable();
     normalized.dedup();
+    Ok(normalized)
+}
 
-    let mut state = heap.state.lock().map_err(|_| Fault::HeapPoisoned)?;
-    if !state.entries.contains_key(&from) {
-        return Err(Fault::UnknownObject(from));
-    }
-    for child in &normalized {
-        if !state.entries.contains_key(child) {
-            return Err(Fault::UnknownObject(*child));
+struct MutationReservation {
+    heap: Arc<Heap>,
+    from: ObjectId,
+    edges: Vec<ObjectId>,
+    pinned: Vec<ObjectId>,
+    version: u64,
+    active: bool,
+}
+
+impl MutationReservation {
+    fn commit(mut self) -> Result<(), Fault> {
+        let mut state = self.heap.state.lock().map_err(|_| Fault::HeapPoisoned)?;
+        let source = state
+            .entries
+            .get(&self.from)
+            .ok_or(Fault::UnknownObject(self.from))?;
+        if !source.reserved || source.version != self.version {
+            return Err(Fault::MutationConflict(self.from));
         }
+        let next_version = source
+            .version
+            .checked_add(1)
+            .ok_or(Fault::VersionOverflow(self.from))?;
+        for child in &self.edges {
+            if !state.entries.contains_key(child) {
+                return Err(Fault::UnknownObject(*child));
+            }
+        }
+        let source = state
+            .entries
+            .get_mut(&self.from)
+            .expect("collector source pinned");
+        source.edges = std::mem::take(&mut self.edges);
+        source.version = next_version;
+        source.reserved = false;
+        for id in &self.pinned {
+            let entry = state.entries.get_mut(id).expect("collector pin retained");
+            entry.pins = entry.pins.saturating_sub(1);
+        }
+        drop(state);
+        self.active = false;
+        Ok(())
+    }
+}
+
+impl Drop for MutationReservation {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let mut state = match self.heap.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(source) = state.entries.get_mut(&self.from) {
+            if source.reserved && source.version == self.version {
+                source.reserved = false;
+            }
+        }
+        for id in &self.pinned {
+            if let Some(entry) = state.entries.get_mut(id) {
+                entry.pins = entry.pins.saturating_sub(1);
+            }
+        }
+    }
+}
+
+fn reserve_mutation(
+    heap: &Arc<Heap>,
+    from: ObjectId,
+    edges: &[ObjectId],
+) -> Result<MutationReservation, Fault> {
+    let edges = normalize_edges(edges)?;
+    let mut state = heap.state.lock().map_err(|_| Fault::HeapPoisoned)?;
+    let source = state
+        .entries
+        .get(&from)
+        .ok_or(Fault::UnknownObject(from))?;
+    if source.reserved {
+        return Err(Fault::MutationConflict(from));
+    }
+    let version = source.version;
+    let mut pinned = source.edges.clone();
+    pinned.extend(edges.iter().copied());
+    pinned.push(from);
+    pinned.sort_unstable();
+    pinned.dedup();
+    for id in &pinned {
+        let entry = state.entries.get(id).ok_or(Fault::UnknownObject(*id))?;
+        if entry.pins == usize::MAX {
+            return Err(Fault::PinCountOverflow(*id));
+        }
+    }
+    for id in &pinned {
+        state.entries.get_mut(id).expect("collector pin validated").pins += 1;
     }
     state
         .entries
         .get_mut(&from)
         .expect("collector source validated")
-        .edges = normalized;
-    Ok(())
+        .reserved = true;
+    drop(state);
+    Ok(MutationReservation {
+        heap: Arc::clone(heap),
+        from,
+        edges,
+        pinned,
+        version,
+        active: true,
+    })
 }
 
 fn lookup(heap: &Arc<Heap>, id: ObjectId) -> Result<Arc<Object>, Fault> {

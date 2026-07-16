@@ -1,5 +1,9 @@
-use jet_rt::__gc::{Collector, Fault};
+use jet_rt::__gc::{Collector, Edge, Fault};
 use std::sync::{Arc, Barrier, Mutex};
+
+struct Holder {
+    child: Edge<u64>,
+}
 
 #[test]
 fn roots_edges_and_cycles_collect_at_safepoints() {
@@ -109,37 +113,195 @@ fn roots_cross_threads_and_unwind_releases_them() {
 }
 
 #[test]
-fn active_access_defers_sweep_and_nested_mutation_fails_fast() {
+fn active_unreachable_parent_keeps_transitive_children_live() {
     let collector = Collector::new();
-    let root = collector.allocate(3_u64).unwrap();
-    let conflict = root
-        .edit(|_| root.edit(|value| *value += 1).unwrap_err())
-        .unwrap();
-    assert_eq!(conflict, Fault::BorrowConflict(root.id()));
-
-    let id = root.id();
-    let edge = root.edge();
-    drop(root);
+    let parent = collector.allocate(3_u64).unwrap();
+    let child = collector.allocate(4_u64).unwrap();
+    let parent_id = parent.id();
+    let child_id = child.id();
+    parent.replace_edges(&[child_id]).unwrap();
+    let parent_edge = parent.edge();
+    drop(parent);
+    drop(child);
     let entered = Arc::new(Barrier::new(2));
     let release = Arc::new(Barrier::new(2));
     let worker_entered = Arc::clone(&entered);
     let worker_release = Arc::clone(&release);
     let worker = std::thread::spawn(move || {
-        edge.read(|value| {
+        parent_edge
+            .read(|value| {
             worker_entered.wait();
             worker_release.wait();
             *value
         })
-        .unwrap()
+            .unwrap()
     });
 
     entered.wait();
     let first = collector.collect().unwrap();
     assert_eq!(first.reclaimed, Vec::new());
-    assert_eq!(first.deferred, vec![id]);
+    assert_eq!(first.reachable, 2);
+    assert_eq!(first.deferred, Vec::new());
     release.wait();
     assert_eq!(worker.join().unwrap(), 3);
-    assert_eq!(collector.collect().unwrap().reclaimed, vec![id]);
+    assert_eq!(
+        collector.collect().unwrap().reclaimed,
+        vec![parent_id, child_id]
+    );
+}
+
+#[test]
+fn edit_with_edges_commits_only_after_successful_mutation() {
+    let collector = Collector::new();
+    let parent = collector.allocate(1_u64).unwrap();
+    let old_child = collector.allocate(2_u64).unwrap();
+    let new_child = collector.allocate(3_u64).unwrap();
+    let parent_id = parent.id();
+    let old_id = old_child.id();
+    let new_id = new_child.id();
+    parent.replace_edges(&[old_id]).unwrap();
+    drop(old_child);
+    drop(new_child);
+
+    let conflict = parent
+        .edit(|_| {
+            parent
+                .edit_with_edges(&[new_id], |value| *value = 9)
+                .unwrap_err()
+        })
+        .unwrap();
+    assert_eq!(conflict, Fault::BorrowConflict(parent_id));
+    let after_conflict = collector.collect().unwrap();
+    assert_eq!(after_conflict.reclaimed, vec![new_id]);
+    assert_eq!(after_conflict.reachable, 2);
+    drop(parent);
+    assert_eq!(
+        collector.collect().unwrap().reclaimed,
+        vec![parent_id, old_id]
+    );
+
+    let collector = Collector::new();
+    let parent = collector.allocate(1_u64).unwrap();
+    let old_child = collector.allocate(2_u64).unwrap();
+    let new_child = collector.allocate(3_u64).unwrap();
+    let parent_id = parent.id();
+    let old_id = old_child.id();
+    let new_id = new_child.id();
+    parent.replace_edges(&[old_id]).unwrap();
+    drop(old_child);
+    drop(new_child);
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        parent
+            .edit_with_edges(&[new_id], |value| {
+                *value = 9;
+                std::panic::panic_any("mutation failure");
+            })
+            .unwrap();
+    }));
+    assert!(panicked.is_err());
+    let after_panic = collector.collect().unwrap();
+    assert_eq!(after_panic.reclaimed, vec![new_id]);
+    assert_eq!(after_panic.reachable, 2);
+    drop(parent);
+    assert_eq!(
+        collector.collect().unwrap().reclaimed,
+        vec![parent_id, old_id]
+    );
+}
+
+#[test]
+fn reentrant_edge_rewrite_cannot_overwrite_reserved_graph() {
+    let collector = Collector::new();
+    let old_child = collector.allocate(2_u64).unwrap();
+    let new_child = collector.allocate(3_u64).unwrap();
+    let old_id = old_child.id();
+    let new_id = new_child.id();
+    let parent = collector
+        .allocate(Holder {
+            child: old_child.edge(),
+        })
+        .unwrap();
+    let parent_id = parent.id();
+    parent.replace_edges(&[old_id]).unwrap();
+    drop(old_child);
+    drop(new_child);
+
+    parent
+        .edit_with_edges(&[old_id], |holder| {
+            assert_eq!(holder.child.read(|value| *value).unwrap(), 2);
+            assert_eq!(
+                parent.replace_edges(&[new_id]),
+                Err(Fault::MutationConflict(parent_id))
+            );
+        })
+        .unwrap();
+
+    let after = collector.collect().unwrap();
+    assert_eq!(after.reclaimed, vec![new_id]);
+    assert_eq!(after.reachable, 2);
+    drop(parent);
+    assert_eq!(
+        collector.collect().unwrap().reclaimed,
+        vec![old_id, parent_id]
+    );
+}
+
+#[test]
+fn concurrent_rewrite_cannot_drop_payload_held_old_edge() {
+    let collector = Collector::new();
+    let old_child = collector.allocate(2_u64).unwrap();
+    let new_child = collector.allocate(3_u64).unwrap();
+    let old_id = old_child.id();
+    let new_id = new_child.id();
+    let parent = collector
+        .allocate(Holder {
+            child: old_child.edge(),
+        })
+        .unwrap();
+    let parent_id = parent.id();
+    parent.replace_edges(&[old_id]).unwrap();
+    let worker_parent = parent.try_clone().unwrap();
+    drop(old_child);
+    drop(new_child);
+
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let worker_entered = Arc::clone(&entered);
+    let worker_release = Arc::clone(&release);
+    let worker = std::thread::spawn(move || {
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            worker_parent
+                .edit_with_edges(&[new_id], |holder| {
+                    worker_entered.wait();
+                    worker_release.wait();
+                    assert_eq!(holder.child.read(|value| *value).unwrap(), 2);
+                    std::panic::panic_any("abort reserved mutation");
+                })
+                .unwrap();
+        }));
+        assert!(panicked.is_err());
+    });
+
+    entered.wait();
+    assert_eq!(
+        parent.replace_edges(&[new_id]),
+        Err(Fault::MutationConflict(parent_id))
+    );
+    let during = collector.collect().unwrap();
+    assert_eq!(during.reclaimed, Vec::new());
+    assert_eq!(during.reachable, 3);
+    release.wait();
+    worker.join().unwrap();
+
+    let after = collector.collect().unwrap();
+    assert_eq!(after.reclaimed, vec![new_id]);
+    assert_eq!(after.reachable, 2);
+    drop(parent);
+    assert_eq!(
+        collector.collect().unwrap().reclaimed,
+        vec![old_id, parent_id]
+    );
 }
 
 #[test]
