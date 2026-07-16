@@ -248,12 +248,10 @@ saved :: ~name    // fresh, independent value; `name` still usable after
 ### Named views, not raw references
 
 Raw reference syntax is not first-class: `-> &T` return types, `&T` struct
-fields, and `#Ref` provenance are not in the grammar. Named `View<T>` and
-`ViewMut<T>` values may cross a parameter, return, or field boundary when sema
-proves the owner outlives the view; `ViewMut<T>` additionally requires unique
-mutable access. Every public boundary exposes queryable, semver-pinned
-provenance naming the owner relationship (D-MEM-VIEWRET1). An ordinary field
-still owns its value:
+fields, and `#Ref` provenance are not in the grammar. Named views stay local
+until the public-boundary work can carry queryable, semver-pinned owner
+provenance through sema, compiler APIs, and TIR (#643). Returning or storing a
+view is **E2305** today. An ordinary field still owns its value:
 
 ```jet
 struct Span { text: String, meta: String }
@@ -294,22 +292,16 @@ operation that may resize or relocate its storage is rejected while a view is
 live (**E0212**). Arena reset/free invalidates its views; a later read is
 **E0632**. Facts end at lexical scope. At control-flow joins, invalidation on
 any reachable branch survives; loops use the same conservative rule across
-iterations. Captures, fields, calls, generic substitution, trait dispatch, and
-task boundaries preserve the fact rather than rebuilding it from a type name.
-Tasks and channels reject a captured view once as **E1102**.
+iterations. Captures, fields, and task boundaries preserve the fact rather than
+rebuilding it from a type name. Tasks and channels reject a captured view once
+as **E1102**. Public calls, returns, stored fields, generic substitution, and
+trait dispatch remain rejected until #643 carries the same fact through those
+boundaries.
 
-A function returning a view publishes a sema summary containing the source
-parameter position and field/index/range projection. Calls instantiate that
-summary with the caller's place, so renaming, generics, and module boundaries
-cannot erase provenance. All return paths must agree on one source; otherwise
-the boundary is rejected instead of choosing a lifetime. This public source
-identity is queryable and semver-pinned.
-
-TIR receives only sema-approved view types and lowering flags. It does not
-infer owners, overlap, lifetimes, or escape safety. AOT and dev execution lower
-the same checked TIR, so neither backend may accept a program the other rejects.
-Generated Rust references are one representation of these facts, never their
-definition.
+TIR receives only sema-approved local lowering flags. It does not infer owners,
+overlap, lifetimes, or escape safety, and no returned-view signature is admitted
+yet. Generated Rust references are one representation of local facts, never
+their definition.
 
 ### Zero-copy string views
 
@@ -328,12 +320,9 @@ print("padded still readable: {padded}")   // reading the owner still works
 (examples/features/memory/string_view.jet) A local view may chain another
 `.trim()/.after()/.before()`, be interpolated (`"{domain}"`), or be copied into
 an owned `String` with `~`. It may also be rebound, passed, stored, or returned
-when the owner-outlives proof succeeds; at a public boundary, the compiler
-infers the owner relationship and exposes it as queryable, semver-pinned
-provenance. **E2307** reports only an escape that would outlive the owner or a
-boundary where the compiler cannot infer, prove, and stabilize that
-provenance. `[T]` slice views
-follow the same rule, reported as **E2305**. Either kind of view crossing a `tasks.spawn`/
+only within the same local scope. **E2307** reports an unsupported string-view
+escape or use. `[T]` slice-view boundaries are **E2305** until #643. Either kind
+of view crossing a `tasks.spawn`/
 `Sender.send` boundary is reported once, as **E1102** (unsendable value) —
 a task or channel moves owned data between threads, and a view can't cross
 without ownership.

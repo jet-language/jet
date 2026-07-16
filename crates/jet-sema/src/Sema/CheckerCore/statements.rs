@@ -38,6 +38,7 @@ impl<'a> Checker<'a> {
                         self.infer(value);
                         return;
                     }
+                    self.check_lvalue_change(target, "be assigned");
                     let vt = self.infer(value);
                     self.note_move_if_direct_ident(value);
                     // D-UNINIT-SENTINEL1: a plain `name = …` initializes a `:= uninit`
@@ -63,7 +64,6 @@ impl<'a> Checker<'a> {
                     match target {
                         LValue::Local { name, name_span } => {
                             let name_span = *name_span;
-                            self.check_owner_change(name, "be replaced", name_span);
                             if self.lambda_mut_borrow_active(name) {
                                 self.diags.push(aliasing_while_mut(name, name_span));
                             }
@@ -715,13 +715,17 @@ impl<'a> Checker<'a> {
                             // and a fresh `.view(...)` call made right in the
                             // `return` (`return incidents.view(0..2)`) — the latter
                             // needs `view_call_source` directly.
-                            if let Expr::Ident(n, nspan) = &*e {
-                                if self.is_list_view(n) {
-                                    self.report_view_escape(n, "be returned", *nspan);
-                                }
-                            } else if let Some(et) = et.as_ref() {
-                                if let Some((place, _)) = self.returned_view_source(e, et) {
+                            if matches!(&rt, Type::Apply { name, .. } if name == "View") {
+                                if let Expr::Ident(n, nspan) = &*e {
+                                    if self.is_list_view(n) {
+                                        self.report_view_escape(n, "be returned", *nspan);
+                                    } else {
+                                        self.report_view_return_boundary(e.span());
+                                    }
+                                } else if let Some((place, _)) = self.view_call_source(e) {
                                     self.report_view_owns_return(&place, e.span());
+                                } else {
+                                    self.report_view_return_boundary(e.span());
                                 }
                             }
                             // D-MEM1 stage S5: no dedicated "returning a string

@@ -9,10 +9,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
-use crate::AST::{
-    AccessConvention, Expr, ExternFn, Func, Stmt, Type, VariantPayload, ViewReturnProjection,
-    ViewReturnSource,
-};
+use crate::AST::{AccessConvention, Expr, ExternFn, Func, Stmt, Type, VariantPayload};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -33,8 +30,6 @@ pub(crate) struct MethodSig {
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
-    /// #649: returned-view owner parameter plus projection, inferred from all returns.
-    pub(crate) view_return_source: Option<ViewReturnSource>,
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse` method — return cannot be silently ignored (E0419).
     pub(crate) must_use: bool,
 }
@@ -322,7 +317,6 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
         defaults: non_self_params
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
-        view_return_source: infer_view_return_source(f),
         must_use: f.is_must_use,
     }
 }
@@ -353,7 +347,6 @@ fn func_to_sig(f: &Func) -> FuncSig {
             .iter()
             .map(|p| (p.name.clone(), p.default.is_some()))
             .collect(),
-        view_return_source: infer_view_return_source(f),
         defaults: f
             .params
             .iter()
@@ -374,109 +367,6 @@ fn func_to_sig(f: &Func) -> FuncSig {
     }
 }
 
-/// Public lifetime fact for calls that return a view rooted in one parameter.
-/// This is intentionally a tiny source-level summary: owner identity is the
-/// parameter slot, never a generated-Rust lifetime or variable spelling.
-fn infer_view_return_source(f: &Func) -> Option<ViewReturnSource> {
-    fn expr_source(expr: &Expr, params: &[crate::AST::Param]) -> Option<ViewReturnSource> {
-        match expr {
-            Expr::Ident(name, _) => params
-                .iter()
-                .position(|param| param.name == *name)
-                .map(|param| ViewReturnSource {
-                    param,
-                    projections: Vec::new(),
-                }),
-            Expr::Field(base, field, _) => {
-                let mut source = expr_source(base, params)?;
-                source
-                    .projections
-                    .push(ViewReturnProjection::Field(field.clone()));
-                Some(source)
-            }
-            Expr::Index { base, .. } => {
-                let mut source = expr_source(base, params)?;
-                source.projections.push(ViewReturnProjection::Index);
-                Some(source)
-            }
-            Expr::Slice { base, .. } => {
-                let mut source = expr_source(base, params)?;
-                source.projections.push(ViewReturnProjection::Range);
-                Some(source)
-            }
-            Expr::MethodCall { receiver, method, .. } if method == crate::Syntax::METHOD_VIEW => {
-                let mut source = expr_source(receiver, params)?;
-                source.projections.push(ViewReturnProjection::Range);
-                Some(source)
-            }
-            _ => None,
-        }
-    }
-
-    fn visit(
-        stmts: &[Stmt],
-        params: &[crate::AST::Param],
-        found: &mut Vec<Option<ViewReturnSource>>,
-    ) {
-        for stmt in stmts {
-            match stmt {
-                Stmt::Return(expr, _) => {
-                    found.push(expr.as_ref().and_then(|e| expr_source(e, params)))
-                }
-                Stmt::If(branch) => {
-                    visit(&branch.then_body, params, found);
-                    if let Some(else_branch) = &branch.else_branch {
-                        match else_branch {
-                            crate::AST::ElseBranch::ElseIf(branch) => {
-                                visit(
-                                    std::slice::from_ref(&Stmt::If((**branch).clone())),
-                                    params,
-                                    found,
-                                )
-                            }
-                            crate::AST::ElseBranch::Else(body) => visit(body, params, found),
-                        }
-                    }
-                }
-                Stmt::While { body, .. }
-                | Stmt::For { body, .. }
-                | Stmt::Loop { body, .. }
-                | Stmt::Unsafe { body, .. }
-                | Stmt::Impure { body, .. }
-                | Stmt::Reactive { body, .. }
-                | Stmt::Shield { body, .. }
-                | Stmt::Off { body, .. }
-                | Stmt::DebugOnly { body, .. }
-                | Stmt::Region { body, .. }
-                | Stmt::TaskGroup { body, .. }
-                | Stmt::Layout { body, .. }
-                | Stmt::Caps { body, .. } => visit(body, params, found),
-                Stmt::Switch { arms, else_body, .. } => {
-                    for arm in arms {
-                        visit(&arm.body, params, found);
-                    }
-                    if let Some(body) = else_body {
-                        visit(body, params, found);
-                    }
-                }
-                Stmt::CountedLoop { step, body, .. } => {
-                    visit(body, params, found);
-                    visit(std::slice::from_ref(step.as_ref()), params, found);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let mut returns = Vec::new();
-    visit(&f.body, &f.params, &mut returns);
-    let first = returns.first()?.clone()?;
-    returns
-        .into_iter()
-        .all(|candidate| candidate.as_ref() == Some(&first))
-        .then_some(first)
-}
-
 fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
     FuncSig {
         params: ef
@@ -492,7 +382,6 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
             })
             .collect(),
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
-        view_return_source: None,
         defaults: ef.params.iter().map(|_| None).collect(),
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
@@ -672,6 +561,12 @@ pub(crate) enum ViewKind {
     Matrix,
 }
 
+impl ViewKind {
+    fn is_named_window(self) -> bool {
+        matches!(self, Self::List | Self::Buffer | Self::Matrix)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewAccess {
     Read,
@@ -697,6 +592,8 @@ pub(crate) enum ViewProjection {
     Field(String),
     Index(Span),
     Range(Span),
+    /// Arena allocation sites create disjoint fresh storage by definition.
+    Fresh(Span),
 }
 
 #[derive(Debug, Clone)]
@@ -707,6 +604,9 @@ pub(crate) struct ViewPlace {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ViewFact {
+    /// Definition identity of the view binding itself. Prevents a non-view
+    /// shadow with the same spelling from exposing an outer fact.
+    binding_span: Span,
     place: ViewPlace,
     kind: ViewKind,
     access: ViewAccess,
@@ -732,6 +632,11 @@ impl ViewFactGraph {
             .find_map(|(binding, fact)| (binding == name).then_some(fact))
     }
 
+    fn current_for_binding(&self, name: &str, binding_span: Span) -> Option<&ViewFact> {
+        self.current(name)
+            .filter(|fact| fact.binding_span == binding_span)
+    }
+
     fn push(&mut self, name: String, fact: ViewFact) {
         self.bindings.push((name, fact));
     }
@@ -739,12 +644,19 @@ impl ViewFactGraph {
     fn leave_scope(&mut self, depth: usize) {
         self.bindings.retain(|(_, fact)| fact.scope_len < depth);
     }
+
+    fn invalidate_owner(&mut self, owner: &ViewOwnerId, verb: &str, span: Span) {
+        for (_, fact) in &mut self.bindings {
+            if &fact.place.owner == owner && fact.invalidated.is_none() {
+                fact.invalidated = Some((verb.to_string(), span));
+            }
+        }
+    }
 }
 
 impl ViewPlace {
-    /// Conservative source-place overlap. Different fields are disjoint;
-    /// dynamic indexes/ranges overlap unless their exact source fact proves a
-    /// distinct fixed projection. D-SHAPE-PLACE1 may refine index equality.
+    /// Conservative source-place overlap. Different fields and distinct fresh
+    /// arena allocations are disjoint; dynamic indexes and ranges overlap.
     fn overlaps(&self, other: &ViewPlace) -> bool {
         if self.owner != other.owner {
             return false;
@@ -752,7 +664,7 @@ impl ViewPlace {
         for (left, right) in self.projections.iter().zip(&other.projections) {
             match (left, right) {
                 (ViewProjection::Field(a), ViewProjection::Field(b)) if a != b => return false,
-                (ViewProjection::Index(a), ViewProjection::Index(b)) if a != b => return false,
+                (ViewProjection::Fresh(a), ViewProjection::Fresh(b)) if a != b => return false,
                 _ => {}
             }
         }
@@ -766,6 +678,7 @@ mod view_fact_graph_tests {
 
     fn fact(owner_span: usize, scope_len: usize, kind: ViewKind) -> ViewFact {
         ViewFact {
+            binding_span: Span::new(owner_span + 10, owner_span + 11),
             place: ViewPlace {
                 owner: ViewOwnerId {
                     name: "owner".to_string(),
@@ -792,10 +705,34 @@ mod view_fact_graph_tests {
     }
 
     #[test]
+    fn non_view_binding_identity_hides_stale_same_spelling_fact() {
+        let mut graph = ViewFactGraph::default();
+        graph.push("window".to_string(), fact(1, 1, ViewKind::List));
+        assert!(graph
+            .current_for_binding("window", Span::new(99, 100))
+            .is_none());
+    }
+
+    #[test]
     fn stable_owner_identity_distinguishes_same_spelling() {
         let a = fact(1, 1, ViewKind::Buffer).place;
         let b = fact(2, 1, ViewKind::Matrix).place;
         assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn invalidation_uses_owner_identity_not_spelling() {
+        let mut graph = ViewFactGraph::default();
+        let outer = fact(1, 1, ViewKind::Arena);
+        let inner = fact(2, 2, ViewKind::Arena);
+        let inner_owner = inner.place.owner.clone();
+        graph.push("outer".to_string(), outer);
+        graph.push("inner".to_string(), inner);
+
+        graph.invalidate_owner(&inner_owner, "reset", Span::new(40, 41));
+
+        assert!(graph.current("outer").unwrap().invalidated.is_none());
+        assert!(graph.current("inner").unwrap().invalidated.is_some());
     }
 
     #[test]
@@ -805,6 +742,32 @@ mod view_fact_graph_tests {
         a.projections.push(ViewProjection::Field("left".to_string()));
         b.projections.push(ViewProjection::Field("right".to_string()));
         assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn dynamic_indexes_are_conservatively_overlapping() {
+        let mut a = fact(1, 1, ViewKind::List).place;
+        let mut b = a.clone();
+        a.projections.push(ViewProjection::Index(Span::new(20, 21)));
+        b.projections.push(ViewProjection::Index(Span::new(30, 31)));
+        assert!(a.overlaps(&b));
+    }
+
+    #[test]
+    fn fresh_arena_allocations_are_disjoint() {
+        let mut a = fact(1, 1, ViewKind::Arena).place;
+        let mut b = a.clone();
+        a.projections.push(ViewProjection::Fresh(Span::new(20, 21)));
+        b.projections.push(ViewProjection::Fresh(Span::new(30, 31)));
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn buffer_and_matrix_use_named_window_boundary() {
+        assert!(ViewKind::Buffer.is_named_window());
+        assert!(ViewKind::Matrix.is_named_window());
+        assert!(!ViewKind::Arena.is_named_window());
+        assert!(!ViewKind::String.is_named_window());
     }
 }
 

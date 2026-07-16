@@ -2520,6 +2520,11 @@ impl<'a> Checker<'a> {
             // `mut self` methods change the receiver: it must be changeable,
             // free of an active `for` borrow, and not aliased by an argument.
             if msig.self_conv == Some(AccessConvention::Write) {
+                self.check_expr_change(
+                    receiver,
+                    &format!("be changed by `.{method}()`"),
+                    span,
+                );
                 if let Some(root) = expr_root_ident(receiver) {
                     let root = root.to_string();
                     if self.iter_borrowed.contains(&root) {

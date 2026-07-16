@@ -38,11 +38,6 @@ pub struct FuncSig {
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,
-    /// #649: sema provenance summary. When this function returns a value or
-    /// view derived from one parameter without changing owner identity, this
-    /// is that parameter's zero-based index. Call checking instantiates the
-    /// source place; TIR never infers it.
-    pub view_return_source: Option<ViewReturnSource>,
     /// S61: default expressions for parameters that have them, parallel to `params`.
     pub defaults: Vec<Option<Expr>>,
     /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
@@ -53,20 +48,6 @@ pub struct FuncSig {
     /// variadic. Call-site checking (E1313) and codegen's per-arity
     /// monomorphization both key off this.
     pub variadic_bounds: Option<Vec<String>>,
-}
-
-/// Sema-only public provenance summary for a returned view.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ViewReturnSource {
-    pub param: usize,
-    pub projections: Vec<ViewReturnProjection>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ViewReturnProjection {
-    Field(String),
-    Index,
-    Range,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

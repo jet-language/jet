@@ -68,15 +68,6 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_shared_ty(&ty, cx)
         || is_covered_pool_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
-        || is_covered_view_ty(&ty, cx)
-}
-
-/// `View<T>` is sema-approved borrowed storage. TIR renders it as `&[T]` and
-/// never derives provenance; admitting the type only exposes facts sema has
-/// already validated.
-pub(crate) fn is_covered_view_ty(ty: &Type, cx: &Cx) -> bool {
-    matches!(ty, Type::Apply { name, args }
-        if name == "View" && args.len() == 1 && collection_elem_covered(&args[0], cx))
 }
 
 pub(crate) fn is_covered_event_ty(ty: &Type, cx: &Cx) -> bool {

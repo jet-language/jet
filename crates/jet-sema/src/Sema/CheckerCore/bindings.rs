@@ -463,7 +463,7 @@ impl<'a> Checker<'a> {
             // into `list`. E2305 fires the same way E0631 does for arena views —
             // rebinding a live view to a second name is itself an escape (views
             // are non-reassignable non-escaping locals, I8), not re-tracked.
-            if let Some((place, kind)) = self.returned_view_source(&b.init, &final_ty) {
+            if let Some((place, kind)) = self.view_call_source(&b.init) {
                 self.record_list_view(&b.name, place, kind, b.name_span);
             } else if let Expr::Ident(src, src_span) = &b.init {
                 if self.is_list_view(src) {

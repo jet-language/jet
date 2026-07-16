@@ -349,63 +349,6 @@ fn run() {
     jet::compile(src).expect("expired view must not keep owner borrowed");
 }
 
-/// #649: a public function summary identifies the parameter and window
-/// projection that own its returned view. The caller enforces that fact.
-#[test]
-fn returned_view_keeps_call_argument_borrowed() {
-    let src = r#"
-fn first(xs: [Int]) -> View<Int> {
-    return xs.view(0..1)
-}
-
-fn run() {
-    xs := [1, 2, 3]
-    window :: first(xs)
-    xs.push(4)
-    print(window.len())
-}
-"#;
-    let diags = jet::compile(src).expect_err("returned view must retain argument provenance");
-    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
-}
-
-#[test]
-fn returned_parameter_view_is_valid_while_owner_lives() {
-    let src = r#"
-fn first(xs: [Int]) -> View<Int> {
-    return xs.view(0..1)
-}
-
-fn run() {
-    xs :: [1, 2, 3]
-    window :: first(xs)
-    print(window.len())
-}
-"#;
-    jet::compile(src).expect("caller-owned source outlives returned view");
-}
-
-/// #649: type substitution cannot erase provenance. A generic identity call
-/// on `View<T>` still points at the original list.
-#[test]
-fn generic_passthrough_preserves_view_provenance() {
-    let src = r#"
-fn keep<T>(value: T) -> T {
-    return value
-}
-
-fn run() {
-    xs := [1, 2, 3]
-    first :: xs.view(0..1)
-    window :: keep(^first)
-    xs.push(4)
-    print(window.len())
-}
-"#;
-    let diags = jet::compile(src).expect_err("generic passthrough must retain provenance");
-    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
-}
-
 /// #649: owner identity includes field projections; a view into a field keeps
 /// that field's enclosing owner from changing storage.
 #[test]
@@ -427,53 +370,70 @@ fn run() {
 }
 
 #[test]
-fn method_return_preserves_receiver_projection() {
+fn field_assignment_conflicts_with_live_view() {
     let src = r#"
 struct Bucket {
     values: [Int]
 }
 
-impl Bucket {
-    fn first(self) -> View<Int> {
-        return self.values.view(0..1)
-    }
-}
-
 fn run() {
     bucket := Bucket.{ values: [1, 2, 3] }
-    window :: bucket.first()
-    bucket.values.push(4)
+    window :: bucket.values.view(0..1)
+    bucket.values = [4, 5]
     print(window.len())
 }
 "#;
-    let diags = jet::compile(src).expect_err("method return must retain receiver provenance");
+    let diags = jet::compile(src).expect_err("field assignment must conflict with view");
     assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
 }
 
 #[test]
-fn trait_method_return_preserves_receiver_provenance() {
+fn write_argument_conflicts_with_live_view() {
     let src = r#"
-trait Windowed {
-    fn first(self) -> View<Int>
-}
-
-struct Bucket {
-    values: [Int]
-}
-
-impl Bucket.Windowed {
-    fn first(self) -> View<Int> {
-        return self.values.view(0..1)
-    }
+fn edit(xs: &[Int]) {
+    print(xs.len())
 }
 
 fn run() {
-    bucket := Bucket.{ values: [1, 2, 3] }
-    window :: bucket.first()
-    bucket.values.push(4)
+    xs := [1, 2, 3]
+    window :: xs.view(0..1)
+    edit(&xs)
     print(window.len())
 }
 "#;
-    let diags = jet::compile(src).expect_err("trait return must retain receiver provenance");
+    let diags = jet::compile(src).expect_err("write argument must conflict with view");
     assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}
+
+#[test]
+fn returned_parameter_view_is_rejected_until_public_provenance_lands() {
+    let src = r#"
+fn first(xs: [Int]) -> View<Int> {
+    return xs.view(0..1)
+}
+
+fn run() {
+    print(0)
+}
+"#;
+    let diags = jet::compile(src).expect_err("returned views remain a checked boundary");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "got {diags:?}");
+}
+
+#[test]
+fn nested_returned_view_form_is_rejected() {
+    let src = r#"
+fn choose(xs: [Int]) -> View<Int> {
+    if true {
+        return xs.view(0..1)
+    }
+    return xs.view(1..2)
+}
+
+fn run() {
+    print(0)
+}
+"#;
+    let diags = jet::compile(src).expect_err("all returned-view paths must be rejected");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "got {diags:?}");
 }

@@ -2,9 +2,7 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::is_type_var_name;
 use crate::Syntax;
-use crate::AST::{
-    AccessConvention, Expr, Lambda, Type, VariantPayload, ViewReturnProjection,
-};
+use crate::AST::{AccessConvention, Expr, Lambda, LValue, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -48,18 +46,15 @@ impl<'a> Checker<'a> {
     pub(crate) fn record_arena_view(&mut self, name: &str, arena: String, span: Span) {
         let place = ViewPlace {
             owner: self.owner_id(&arena),
-            projections: vec![ViewProjection::Index(span)],
+            projections: vec![ViewProjection::Fresh(span)],
         };
         self.record_view(name, place, ViewKind::Arena, ViewAccess::Write, span);
     }
 
     /// E0632: when `arena` is `reset`/`free`d, every live view into it dies.
     pub(crate) fn kill_views_of_arena(&mut self, arena: &str, verb: &str, span: Span) {
-        for (_, fact) in &mut self.view_facts.bindings {
-            if fact.place.owner.name == arena && fact.invalidated.is_none() {
-                fact.invalidated = Some((verb.to_string(), span));
-            }
-        }
+        let owner = self.owner_id(arena);
+        self.view_facts.invalidate_owner(&owner, verb, span);
     }
 
     /// E0632: reading a view whose arena was already `reset`/`free`d.
@@ -91,9 +86,6 @@ impl<'a> Checker<'a> {
         let Some(fact) = self.view_fact(name).cloned() else {
             return;
         };
-        if what == "be returned" && fact.place.owner.origin != ViewOwnerOrigin::Local {
-            return;
-        }
         match fact.kind {
             ViewKind::Arena => self.diags.push(Diagnostic::error(
                 "E0631",
@@ -190,6 +182,7 @@ impl<'a> Checker<'a> {
             ));
         }
         let fact = ViewFact {
+            binding_span: span,
             place,
             kind,
             access,
@@ -200,7 +193,8 @@ impl<'a> Checker<'a> {
     }
 
     fn view_fact(&self, name: &str) -> Option<&ViewFact> {
-        self.view_facts.current(name)
+        let binding = self.lookup(name)?;
+        self.view_facts.current_for_binding(name, binding.def_span)
     }
 
     pub(crate) fn view_kind(&self, name: &str) -> Option<ViewKind> {
@@ -245,6 +239,10 @@ impl<'a> Checker<'a> {
                     let _ = span.start;
                     out.push_str("[…]");
                 }
+                ViewProjection::Fresh(span) => {
+                    let _ = span.start;
+                    out.push_str("[fresh]");
+                }
             }
         }
         out
@@ -285,6 +283,32 @@ impl<'a> Checker<'a> {
         self.view_fact(name).is_some()
     }
 
+    pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
+        if let Some(place) = self.place_from_expr(expr) {
+            self.check_place_change(&place, action, span);
+        }
+    }
+
+    pub(crate) fn check_lvalue_change(&mut self, target: &LValue, action: &str) {
+        let place = match target {
+            LValue::Local { name, .. } => Some(ViewPlace {
+                owner: self.owner_id(name),
+                projections: Vec::new(),
+            }),
+            LValue::Index { base, span, .. } => self.place_from_expr(base).map(|mut place| {
+                place.projections.push(ViewProjection::Index(*span));
+                place
+            }),
+            LValue::Field { base, field, .. } => self.place_from_expr(base).map(|mut place| {
+                place.projections.push(ViewProjection::Field(field.clone()));
+                place
+            }),
+        };
+        if let Some(place) = place {
+            self.check_place_change(&place, action, target.span());
+        }
+    }
+
     /// Reject moves, replacement, and storage-changing methods while any view
     /// into the owner remains live. Reads stay legal; facts vanish on scope exit.
     pub(crate) fn check_owner_change(&mut self, owner: &str, action: &str, span: Span) {
@@ -292,13 +316,17 @@ impl<'a> Checker<'a> {
             owner: self.owner_id(owner),
             projections: Vec::new(),
         };
+        self.check_place_change(&owner_place, action, span);
+    }
+
+    fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
         let Some((view, access, place)) = self
             .view_facts
             .bindings
             .iter()
             .rev()
             .find(|(_, fact)| {
-                fact.place.overlaps(&owner_place) && fact.invalidated.is_none()
+                fact.place.overlaps(changed) && fact.invalidated.is_none()
             })
             .map(|(name, fact)| (name.clone(), fact.access, Self::place_name(&fact.place)))
         else {
@@ -309,14 +337,15 @@ impl<'a> Checker<'a> {
         } else {
             "read view"
         };
+        let changed_name = Self::place_name(changed);
         self.diags.push(Diagnostic::error(
             "E0212",
-            format!("`{owner}` cannot {action} while `{view}` is still looking into it"),
+            format!("`{changed_name}` cannot {action} while `{view}` is still looking into it"),
             format!(
                 "`{view}` is a live {access} into `{place}`; changing or moving the owner could invalidate that view"
             ),
             format!(
-                "finish using `{view}` before changing or moving `{owner}`, narrow the view's scope, or make an owned copy"
+                "finish using `{view}` before changing `{changed_name}`, narrow the view's scope, or make an owned copy"
             ),
             Some(span),
         ));
@@ -365,98 +394,6 @@ impl<'a> Checker<'a> {
         Some((place, kind))
     }
 
-    /// Instantiate a callee's sema-owned public provenance summary at this
-    /// call site. Used only when the inferred result is a `View<T>`.
-    pub(crate) fn returned_view_source(
-        &self,
-        init: &Expr,
-        result: &Type,
-    ) -> Option<(ViewPlace, ViewKind)> {
-        if !matches!(result, Type::Apply { name, .. } if name == "View") {
-            return None;
-        }
-        if let Some(source) = self.view_call_source(init) {
-            return Some(source);
-        }
-        let (source, arg_expr, arg_span) = match init {
-            Expr::Call(call) => {
-                let source = self.funcs.get(&call.name)?.view_return_source.clone()?;
-                let arg = call.args.get(source.param)?;
-                (source, &arg.expr, arg.span)
-            }
-            Expr::MethodCall {
-                receiver,
-                method,
-                args,
-                recv_type: Some(type_name),
-                ..
-            } => {
-                let (source, has_self) = self.method_view_return_source(type_name, method)?;
-                if has_self && source.param == 0 {
-                    (source, receiver.as_ref(), receiver.span())
-                } else {
-                    let arg_index = source.param.saturating_sub(usize::from(has_self));
-                    let arg = args.get(arg_index)?;
-                    (source, &arg.expr, arg.span)
-                }
-            }
-            _ => return None,
-        };
-        let (mut place, kind) = self
-            .view_call_source(arg_expr)
-            .or_else(|| {
-                let place = self.place_from_expr(arg_expr)?;
-                let kind = self.view_kind_for_place(&place);
-                Some((place, kind))
-            })?;
-        for projection in &source.projections {
-            place.projections.push(match projection {
-                ViewReturnProjection::Field(field) => ViewProjection::Field(field.clone()),
-                ViewReturnProjection::Index => ViewProjection::Index(arg_span),
-                ViewReturnProjection::Range => ViewProjection::Range(arg_span),
-            });
-        }
-        Some((place, kind))
-    }
-
-    fn method_view_return_source(
-        &self,
-        type_name: &str,
-        method: &str,
-    ) -> Option<(ViewReturnSource, bool)> {
-        if let Some(sig) = self.registry.method(type_name, method) {
-            return sig
-                .view_return_source
-                .clone()
-                .map(|source| (source, sig.self_conv.is_some()));
-        }
-        let modules = self.modules?;
-        for &index in self.imports.values() {
-            if self.type_is_pub_in(index, type_name) {
-                if let Some(sig) = modules[index].registry.method(type_name, method) {
-                    if let Some(source) = sig.view_return_source.clone() {
-                        return Some((source, sig.self_conv.is_some()));
-                    }
-                }
-            }
-        }
-        let trait_method = self.trait_reg.traits.get(type_name)?.methods.get(method)?;
-        if !matches!(&trait_method.return_type, Some(Type::Apply { name, .. }) if name == "View") {
-            return None;
-        }
-        let self_param = trait_method
-            .params
-            .iter()
-            .position(|param| param.name == Syntax::KW_SELF)?;
-        Some((
-            ViewReturnSource {
-                param: self_param,
-                projections: Vec::new(),
-            },
-            true,
-        ))
-    }
-
     /// Record `name` as a view into `owner`, declared at the current scope depth.
     pub(crate) fn record_list_view(
         &mut self,
@@ -470,7 +407,7 @@ impl<'a> Checker<'a> {
 
     /// True if `name` is currently a live `View<T>` binding.
     pub(crate) fn is_list_view(&self, name: &str) -> bool {
-        self.view_kind(name) == Some(ViewKind::List)
+        self.view_kind(name).is_some_and(ViewKind::is_named_window)
     }
 
     /// E2305: `return list.view(a..b)` made fresh right in the `return` — `owner`
@@ -479,9 +416,6 @@ impl<'a> Checker<'a> {
     /// owns`) for the "fresh call in return" shape; `report_list_view_escape`
     /// above covers the "already-bound name" shape.
     pub(crate) fn report_view_owns_return(&mut self, place: &ViewPlace, span: Span) {
-        if place.owner.origin != ViewOwnerOrigin::Local {
-            return;
-        }
         let owner = &place.owner.name;
         self.diags.push(Diagnostic::error(
             "E2305",
@@ -494,6 +428,16 @@ impl<'a> Checker<'a> {
                 owner
             ),
             "return an owned copy (drop `.view(...)` for a copying slice `[a..b]`, or `.map(...)` it into an owned list), or accept the source as a parameter so the caller keeps owning it".to_string(),
+            Some(span),
+        ));
+    }
+
+    pub(crate) fn report_view_return_boundary(&mut self, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E2305",
+            "returned views need a stable owner relationship".to_string(),
+            "public view provenance is not carried through compiler APIs and TIR yet, so this return could outlive its owner".to_string(),
+            "keep the view local, or return an owned copy instead".to_string(),
             Some(span),
         ));
     }
@@ -1186,7 +1130,7 @@ impl<'a> Checker<'a> {
             AccessConvention::Move | AccessConvention::Write
         ) {
             if let Expr::Ident(name, span) = &arg.expr {
-                if self.is_arena_view(name) {
+                if self.is_view(name) && !self.is_string_view(name) {
                     let verb = if matches!(arg.convention, AccessConvention::Move) {
                         "be given away"
                     } else {

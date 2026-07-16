@@ -1963,7 +1963,6 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .iter()
                             .map(|p| (p.name.clone(), p.default.is_some()))
                             .collect(),
-                        view_return_source: None,
                         defaults: f
                             .params
                             .iter()

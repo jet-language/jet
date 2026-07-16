@@ -956,18 +956,6 @@ fn sh_typed_text_default_matches_compiled_binary() {
     assert_eq!(stats.manifested, 0);
 }
 
-#[test]
-fn view_provenance_default_matches_compiled_binary() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_dev_view_provenance_{}",
-        std::process::id()
-    ));
-    let stats = check_dev_default_stem(0, "collections/dynamic-array-view", &dir, &[]);
-    assert_eq!(stats.ran, 1);
-    assert_eq!(stats.boundary, 0);
-    assert_eq!(stats.manifested, 0);
-}
-
 /// Every example that runs in the interpreter and has a checked-in
 /// `expected/*.out` golden (the executable spec, I5) must match it byte for
 /// byte — a cheap check that needs no rustc. Examples that hit a boundary, or
