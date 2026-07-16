@@ -498,7 +498,7 @@ fits(3000millimeter)
 
 alt_km: Kilometer = 1500meter
 // error: 1500 meter is not an exact number of kilometer
-// fix: Kilometer.from_meter_rounded(1500meter, .Nearest)
+// fix: Kilometer.from_meter_rounded(1500meter, .NearestEven)
 
 # package.jet
 policy: .{ explicit_units: true }

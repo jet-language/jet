@@ -163,8 +163,10 @@ useful schemas or fixture-backed models without the live store, sandbox, cache,
 registry, or provider behavior required for a package-manager completion claim.
 The binding parity/acceptance plan is
 [`world-class-package-manager.md`](../../docs/plans/epoch-4/world-class-package-manager.md):
-full pinned Nix package-manager compatibility plus the best compatible features
-from other ecosystems, closed only by live, hostile, cross-platform evidence.
+Epoch 4 closes 20 live functional package-manager lanes plus the best compatible
+features from other ecosystems and reports the actual sandbox class.
+`D-JPK-EPOCHBOUNDARY1=B` reserves hostile Linux/macOS/Windows isolation and the
+full Nix-replacement claim for Epoch 8 card #398.
 
 **jetos** is Epoch 7. It builds on jetpack and owns declarative OS activation,
 proof-before-switch, generations, installable images, source-backed Studio, and

@@ -95,7 +95,7 @@ These are source-backed defects, not roadmap speculation:
 - `crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:123-141` and
   related data helpers execute “lazy” work eagerly; joins return grouped counts
   rather than typed joined rows.
-- `Source/Debug/Dap.rs:14-16,84-255` has no real editor acceptance; the shipped
+- `crates/jet-debug/src/Dap.rs` has no real editor acceptance; the shipped
   adapter is minimal and one-threaded. `crates/jet-queries/src/lib.rs:79-185`
   remains LSP-only and whole-document despite #209's shared incremental exit.
 - `Source/CmdCompile.rs:613-726,834-894` lacks the promised testing and project
