@@ -1,6 +1,6 @@
 # Epoch 4 completion truth matrix
 
-Audit date: 2026-07-11. This file freezes the exact 42-card Epoch 4 audit set:
+Audit date: 2026-07-16. This file freezes the exact 48-card Epoch 4 audit set:
 historical completion claims, reopened #6/#330, and this stop-line card (#418).
 A `done` card proves only its narrow row below. It never
 proves the broader package-manager capability owned by a named successor.
@@ -65,6 +65,8 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #476 | live | `examples/features/jetpack/task_runner.jet` | `#Task` entry dispatch (D-JPK-TASKRUN1) across AOT and interpreter tiers; not scheduling or remote run. |
 | #477 | live | `crates/jetpack/src/CLI/tool.rs` | On-demand `jetpack tool` run/install for built-in providers (D-JPK-TOOLRUN1); external-provider realization (E1298) not yet live. |
 | #478 | live | `crates/jetpack/src/CLI/run_enter_dev.rs` | Monorepo `--filter`/`-p` package selection (D-JPK-SELECTOR1) for local dev/run; narrow workspace-local selector only. |
+| #359 | live | `crates/jetpack/src/Shell.rs` | Hybrid bash/zsh/fish prompt only: live env, path, git, command lifecycle, Ctrl-G, strip, and NO_COLOR. Regression 33e2df42d pins the real PTY git branch; no general shell-runtime claim. |
+| #419 | live | `tests/build_graph.rs`, `crates/jetpack/src/Recipe.rs` | One BuildPlan IR plus complete ActionKey: recipe lowering, action kinds, dependency outputs, env allowlist, helper versions, exact source, and FrontEndCompletion gate. Regression 0e3c158db; Store ingest remains #393. |
 
 ## Stop-line consequences
 

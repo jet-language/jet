@@ -1476,11 +1476,11 @@ mod tests {
     }
 
     #[test]
-    fn tolerates_nix_warning_between_multiline_realization_lines() {
+    fn tolerates_nix_hard_link_noise_between_multiline_realization_lines() {
         let spec = classify("nixpkgs:fastfetch").unwrap();
         let stdout = "[\n\
              {\"drvPath\":\"/nix/store/abc-fastfetch.drv\",\n\
-             warning: ignoring untrusted substituter\n\
+             \"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n\
              \"outputs\":{\"out\":\"/nix/store/abc-fastfetch-2.0\"}}\n\
              ]\n";
         let r = parse_realization(&spec, stdout).unwrap();

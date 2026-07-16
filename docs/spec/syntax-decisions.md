@@ -882,6 +882,16 @@ proc macros and Tier 4 grammar/sigil changes rejected — even for experts.
 
 ### Markers & attributes
 
+**D-SHAPE2=A — One applied-rule marker** *(ratified 2026-07-14, card #534)*:
+`@Rule` is the one target syntax for applying a typed rule to the next
+declaration, expression, or brace scope. Braces show extent; the rule name
+states behavior; each rule declares its legal attachment targets. Authority-
+bearing rules require a visible brace scope, reason, and audit treatment, and
+`@Unsafe` remains the sole user-written unsafe gate. This decision frees `#`
+without assigning it another meaning. Card #534 still owns implementation;
+until that migration lands, the accepted source grammar remains the legacy
+D-MARKER-FAMILY1 plane below.
+
 **D-MARKER-FAMILY1 — Two-plane sigil law**: **`@` states a checkable
 contract** about the declaration it precedes (`@Pure`, `@MustUse`, `@Codable`,
 `@Pre`, `@Persist`); **`#` is a directive** — changes what compiles, when code
@@ -4246,7 +4256,6 @@ implementation milestone is pending.
 | --- | -------- | --------- |
 | D-SHAPE-DUNDER2 | who owns the `__name` namespace | **Epoch 3** — Tower #601 |
 | D-SHAPE-MODULEINTERNAL1 | how `module _name` participates in discovery | **Epoch 3** — Tower #602 |
-| D-SHAPE-QUANTITY1 | who owns dimensional algebra | **Epoch 3** — Tower #576 |
 
 Blocked follow-ups stay on Tower planning cards and remain outside the owner
 queue. They enter this table only after their blockers resolve and the ballot

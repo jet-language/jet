@@ -233,6 +233,8 @@ mod tests {
             r#"{"buildInputs":["fd",1],"shellHook":""}"#,
             r#"{"buildInputs":[]}"#,
             r#"{"buildInputs":[],"shellHook":false}"#,
+            "{\"buildInputs\":[],\"shellHook\":\"raw\nnewline\"}",
+            r#"{"buildInputs":1,"buildInputs":[],"shellHook":""}"#,
         ] {
             assert!(
                 matches!(parse_facts_json(input), Err(ProviderError::BadOutput(_))),

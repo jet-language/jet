@@ -78,7 +78,7 @@ impl Parser {
         c
     }
     fn skip_ws(&mut self) {
-        while matches!(self.peek(), Some(c) if c.is_whitespace()) {
+        while matches!(self.peek(), Some(' ' | '\t' | '\n' | '\r')) {
             self.pos += 1;
         }
     }
@@ -116,7 +116,9 @@ impl Parser {
                 return Err("expected `:` after object key".into());
             }
             let val = self.value()?;
-            map.insert(key, val);
+            if map.insert(key.clone(), val).is_some() {
+                return Err(format!("duplicate object key `{key}`"));
+            }
             self.skip_ws();
             match self.bump() {
                 Some(',') => continue,
@@ -166,6 +168,9 @@ impl Parser {
                     Some('u') => out.push(self.unicode_escape()?),
                     _ => return Err("invalid escape in string".into()),
                 },
+                Some(c) if c <= '\u{1f}' => {
+                    return Err("unescaped control character in string".into())
+                }
                 Some(c) => out.push(c),
                 None => return Err("unterminated string".into()),
             }
@@ -205,14 +210,51 @@ impl Parser {
 
     fn number(&mut self) -> Result<Json, String> {
         let start = self.pos;
-        while matches!(self.peek(), Some(c) if c.is_ascii_digit() || "-+.eE".contains(c)) {
+        if self.peek() == Some('-') {
             self.pos += 1;
         }
+        match self.peek() {
+            Some('0') => self.pos += 1,
+            Some('1'..='9') => {
+                self.pos += 1;
+                while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                    self.pos += 1;
+                }
+            }
+            _ => return Err("invalid number".into()),
+        }
+        if matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+            return Err("leading zero in number".into());
+        }
+        if self.peek() == Some('.') {
+            self.pos += 1;
+            if !matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                return Err("expected digit after decimal point".into());
+            }
+            while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                self.pos += 1;
+            }
+        }
+        if matches!(self.peek(), Some('e' | 'E')) {
+            self.pos += 1;
+            if matches!(self.peek(), Some('+' | '-')) {
+                self.pos += 1;
+            }
+            if !matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                return Err("expected digit in number exponent".into());
+            }
+            while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                self.pos += 1;
+            }
+        }
         let slice: String = self.chars[start..self.pos].iter().collect();
-        slice
+        let number = slice
             .parse::<f64>()
-            .map(Json::Num)
-            .map_err(|_| format!("invalid number `{slice}`"))
+            .map_err(|_| format!("invalid number `{slice}`"))?;
+        if !number.is_finite() {
+            return Err(format!("number `{slice}` is out of range"));
+        }
+        Ok(Json::Num(number))
     }
 
     fn boolean(&mut self) -> Result<Json, String> {
@@ -284,7 +326,11 @@ fn is_known_provider_noise(line: &str) -> bool {
     let Some((store, link)) = path.rsplit_once("/.links/") else {
         return false;
     };
-    !store.is_empty() && !link.is_empty() && !link.contains('/') && !path.contains('"')
+    store.starts_with('/')
+        && store.ends_with("/store")
+        && !path.contains('"')
+        && link.len() == 52
+        && link.chars().all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
 }
 
 /// Filter only known line-oriented Nix noise, then parse the remaining text
@@ -358,6 +404,12 @@ mod tests {
         assert!(parse("not json").is_err());
         assert!(parse("").is_err());
         assert!(parse("[1,2").is_err());
+        assert!(parse("01").is_err());
+        assert!(parse("1.").is_err());
+        assert!(parse("1e").is_err());
+        assert!(parse("\"raw\nnewline\"").is_err());
+        assert!(parse(r#"{"a":1,"a":2}"#).is_err());
+        assert!(parse("{}\u{00a0}").is_err());
     }
 
     #[test]
@@ -408,6 +460,16 @@ mod tests {
     #[test]
     fn filtered_strict_rejects_malformed_prefix_then_valid_payload() {
         assert!(parse_lenient(&format!("{{malformed\n{PAYLOAD}\n")).is_err());
+    }
+
+    #[test]
+    fn filtered_strict_does_not_discard_similar_unknown_lines() {
+        for unknown in [
+            "\"relative/.links/not-nix-noise\" has maximum number of links",
+            "\"/evil\\\"/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links",
+        ] {
+            assert!(parse_lenient(&format!("{unknown}\n{PAYLOAD}\n")).is_err());
+        }
     }
 
     #[test]
