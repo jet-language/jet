@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 676,
-    "rev": 9248,
+    "rev": 9260,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26237,7 +26237,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Implement only D-DEP-GC1=A's internal std collector substrate for later frontend use. Provide one std/mem-owned traced heap with stable object identity, traced edges, roots, cycle collection, safepoints, deterministic finalization policy, panic/unwind cleanup, and defined task/thread interaction. Expose a private compiler/runtime API consumed by #658 and prove equivalent TIR/AOT/dev behavior. Keep the collector dependency-free and bounded/fail-closed on malformed metadata or impossible invariants. This card does not add package/source GC scope, automatic promotion, public `Gc<T>` migration, or `jet gc report`; #658 and #659 own those surfaces.",
       "blockedBy": [],
@@ -26288,47 +26288,47 @@
         {
           "n": 1,
           "text": "One private std/mem collector implements traced identity, edges, roots, cycles, safepoints, and deterministic reclamation without an external dependency.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T02:44:34.316Z"
+          "status": "verified",
+          "metBy": "codex-gc-646",
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review traced mark/sweep identity and deterministic lifecycle",
+          "at": "2026-07-16T17:44:16.989Z"
         },
         {
           "n": 2,
           "text": "Panic/unwind, task/thread interaction, root changes, cyclic graphs, and malformed metadata are bounded, fail closed, and independently tested.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T02:44:34.317Z"
+          "status": "verified",
+          "metBy": "codex-gc-646",
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review reproduced and cleared active-child, mutation atomicity, reentrancy, and concurrency P0s",
+          "at": "2026-07-16T17:44:17.234Z"
         },
         {
           "n": 3,
           "text": "The private collector API is the sole backend consumed by #658; TIR, AOT, and jet dev execute equivalent collector behavior.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T02:44:34.317Z"
+          "status": "verified",
+          "metBy": "codex-gc-646",
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review confirmed exact private source seam and no duplicate backend claim",
+          "at": "2026-07-16T17:44:17.479Z"
         },
         {
           "n": 4,
           "text": "No package/module/function/block policy, automatic frontend promotion, public wrapper retirement, trace command, or report surface lands on this card.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T02:44:34.317Z"
+          "status": "verified",
+          "metBy": "codex-gc-646",
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review confirmed legacy Prelude and Items surface byte-identical; #658 scope preserved",
+          "at": "2026-07-16T17:44:17.724Z"
         },
         {
           "n": 5,
           "text": "Targeted collector tests, hostile tests, docs of the private contract, independent review, and full repository verification pass.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T02:44:34.317Z"
+          "status": "verified",
+          "metBy": "codex-gc-646",
+          "verifiedBy": "codex-memory-review",
+          "evidence": "fresh adversarial review plus material-fix recheck clean",
+          "at": "2026-07-16T17:44:17.970Z"
         }
       ],
       "refs": [
@@ -50207,6 +50207,90 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T17:44:18.231Z",
+      "by": "codex-memory-review",
+      "action": "card.update",
+      "ref": "c03lc2y3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T17:44:17.970Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c03lc2y3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-16T17:44:17.724Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c03lc2y3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T17:44:17.479Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c03lc2y3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T17:44:17.234Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c03lc2y3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T17:44:16.990Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c03lc2y3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T17:44:16.768Z",
+      "by": "codex-gc-646",
+      "action": "card.update",
+      "ref": "c03lc2y3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T17:44:16.485Z",
+      "by": "codex-gc-646",
+      "action": "card.criteria-meet",
+      "ref": "c03lc2y3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-16T17:44:16.229Z",
+      "by": "codex-gc-646",
+      "action": "card.criteria-meet",
+      "ref": "c03lc2y3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T17:44:15.981Z",
+      "by": "codex-gc-646",
+      "action": "card.criteria-meet",
+      "ref": "c03lc2y3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T17:44:15.741Z",
+      "by": "codex-gc-646",
+      "action": "card.criteria-meet",
+      "ref": "c03lc2y3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T17:44:15.496Z",
+      "by": "codex-gc-646",
+      "action": "card.criteria-meet",
+      "ref": "c03lc2y3",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-16T16:42:10.966Z",
       "by": "codex-gc-646",
       "action": "card.update",
@@ -53621,90 +53705,6 @@
       "action": "card.update",
       "ref": "c0qs8j6u",
       "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:54.669Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ppv63p",
-      "note": "#4 vmtest: a MicroVM-backend workload boots via QEMU/cloud-hype"
-    },
-    {
-      "at": "2026-07-16T05:01:54.549Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ppv63p",
-      "note": "#3 vmtest: a Container-backend workload starts, is reachable, a"
-    },
-    {
-      "at": "2026-07-16T05:01:54.429Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ppv63p",
-      "note": "#2 Workload generations reuse the #402 activation engine genera"
-    },
-    {
-      "at": "2026-07-16T05:01:54.311Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ppv63p",
-      "note": "#1 A workload.<name> with a Container-backend value and a workl"
-    },
-    {
-      "at": "2026-07-16T05:01:54.191Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0ppv63p",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:54.045Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c05hqpe6",
-      "note": "#4 vmtest: switching only the kernel-profile enum across all th"
-    },
-    {
-      "at": "2026-07-16T05:01:53.915Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c05hqpe6",
-      "note": "#3 An expert override (for example a custom sysctl value) shows"
-    },
-    {
-      "at": "2026-07-16T05:01:53.782Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c05hqpe6",
-      "note": "#2 zram/swap with a memory cap and sysctl (vm.swappiness) rende"
-    },
-    {
-      "at": "2026-07-16T05:01:53.665Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c05hqpe6",
-      "note": "#1 The kernel profile enum (safe/lts/performance) selects the c"
-    },
-    {
-      "at": "2026-07-16T05:01:53.543Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c05hqpe6",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:53.398Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c04du0jb",
-      "note": "#4 Per-user app modules can reference declared flatpak apps for"
-    },
-    {
-      "at": "2026-07-16T05:01:53.281Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c04du0jb",
-      "note": "#3 vmtest: declaring and removing flatpak refs in config.jet ap"
     }
   ],
   "nextNum": 368,
