@@ -172,6 +172,7 @@ fn run() {
                         .iter()
                         .map(|p| (p.name.clone(), p.default.is_some()))
                         .collect(),
+                    view_return_source: None,
                     defaults: f
                         .params
                         .iter()
@@ -251,6 +252,7 @@ fn run() {
                         .iter()
                         .map(|p| (p.name.clone(), p.default.is_some()))
                         .collect(),
+                    view_return_source: None,
                     defaults: f
                         .params
                         .iter()
@@ -322,6 +324,7 @@ fn run() {
                         .iter()
                         .map(|p| (p.name.clone(), p.default.is_some()))
                         .collect(),
+                    view_return_source: None,
                     defaults: f
                         .params
                         .iter()

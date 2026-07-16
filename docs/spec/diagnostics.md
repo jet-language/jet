@@ -236,6 +236,7 @@ renumbered, and no new `W` code may be allocated.
 | E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
 | E0211 | sema  | `~x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-SHAPE-COPY1=A, supersedes D-CAP2/D-MEM1/S4) |
+| E0212 | sema  | an owner is moved, replaced, or resized while a live view still points into its storage (D-MEM1 S9, card #649) |
 | L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |
@@ -857,6 +858,7 @@ named cell.
 | E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`~x`) before crossing. |
 | E2305 | A `View<T>` would outlive its owner, or the compiler cannot infer, prove, and stabilize its owner provenance at a public parameter/return/field. | Named views may be rebound, passed, stored, and returned, but sema must prove the owner lives longer; compiler-inferred public provenance is part of the API contract. | Tie the view unambiguously to a caller-owned value, or cross the boundary with an owned copy (`~view`). |
 | E2307 | A string view would outlive its owning `String`, or the compiler cannot infer, prove, and stabilize its owner provenance at a public parameter/return/field. | String views may be rebound, passed, stored, and returned under the same owner-outlives-view proof; compiler-inferred public provenance is part of the API contract. | Tie the view unambiguously to a caller-owned `String`, or materialize an owned `String` with `~view`. |
+| E0212 | An owner is moved, replaced, or resized while a live view still points into it. | The operation could move or destroy the storage that the view reads or edits; Jet rejects before lowering instead of relying on a backend borrow error. | Finish using the view before changing the owner, narrow the view's scope, or make an owned copy. |
 
 ## Library authoring diagnostics (E2-M6)
 

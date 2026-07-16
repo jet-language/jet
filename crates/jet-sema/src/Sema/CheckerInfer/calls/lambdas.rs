@@ -138,6 +138,24 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let taken = take_set.contains(name);
+                    if self.is_view(name) {
+                        if self.is_task_spawn {
+                            self.report_unsendable(
+                                name,
+                                &cap_ty,
+                                SendabilityProblem {
+                                    root: None,
+                                    path: Vec::new(),
+                                    kind: SendProblemKind::ViewBorrow,
+                                },
+                                SendCrossing::TaskCapture,
+                                lam.span,
+                            );
+                        } else {
+                            self.report_view_escape(name, "be captured by a stored lambda", lam.span);
+                        }
+                        continue;
+                    }
                     if self.is_task_spawn {
                         // D-MEM1 stage S5: a string view (`Binding.string_view`)
                         // is `Type::String` at the type level — the general
@@ -148,13 +166,7 @@ impl<'a> Checker<'a> {
                         // can't cross into a spawned task's `'static` closure any
                         // more than a `View<T>` can (I2: this must be caught here,
                         // never surface as a real rustc lifetime rejection).
-                        let problem = if self.is_string_view(name) {
-                            Some(SendabilityProblem {
-                                root: None,
-                                path: Vec::new(),
-                                kind: SendProblemKind::ViewBorrow,
-                            })
-                        } else if !cap_sendable {
+                        let problem = if !cap_sendable {
                             self.sendability_problem(&cap_ty, taken).or_else(|| {
                                 Some(SendabilityProblem {
                                     root: None,

@@ -770,7 +770,7 @@ impl<'a> Checker<'a> {
                 // D-DYNARRAY1: E2305 — storing a `View<T>` in a struct field
                 // would let the struct outlive the list it borrows from.
                 if self.is_list_view(vname) {
-                    self.report_list_view_escape(vname, "be stored in a struct field", *vspan);
+                    self.report_view_escape(vname, "be stored in a struct field", *vspan);
                 }
                 // D-MEM1 stage S5: no dedicated check here — the general
                 // E2307 check on the `Expr::Ident` read (the field value was

@@ -20,6 +20,11 @@ impl<'a> Checker<'a> {
                 if let Some(root) = expr_root_ident(receiver) {
                     let root = root.to_string();
                     let rspan = receiver.span();
+                    self.check_owner_change(
+                        &root,
+                        &format!("be changed by `.{method}()`"),
+                        rspan,
+                    );
                     if self.iter_borrowed.contains(&root) {
                         self.diags.push(collection_changed_in_loop(&root, rspan));
                     }

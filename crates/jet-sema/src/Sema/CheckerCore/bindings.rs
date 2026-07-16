@@ -453,7 +453,7 @@ impl<'a> Checker<'a> {
             // non-escaping locals, I8).
             if let Some(arena) = self.arena_alloc_source(&b.init) {
                 b.arena_view = true;
-                self.record_arena_view(&b.name, arena);
+                self.record_arena_view(&b.name, arena, b.name_span);
             } else if let Expr::Ident(src, src_span) = &b.init {
                 if self.is_arena_view(src) {
                     self.report_view_escape(src, "be stored in another binding", *src_span);
@@ -463,11 +463,11 @@ impl<'a> Checker<'a> {
             // into `list`. E2305 fires the same way E0631 does for arena views —
             // rebinding a live view to a second name is itself an escape (views
             // are non-reassignable non-escaping locals, I8), not re-tracked.
-            if let Some(owner) = self.view_call_source(&b.init) {
-                self.record_list_view(&b.name, owner);
+            if let Some((place, kind)) = self.returned_view_source(&b.init, &final_ty) {
+                self.record_list_view(&b.name, place, kind, b.name_span);
             } else if let Expr::Ident(src, src_span) = &b.init {
                 if self.is_list_view(src) {
-                    self.report_list_view_escape(src, "be stored in another binding", *src_span);
+                    self.report_view_escape(src, "be stored in another binding", *src_span);
                 }
             }
             // D-MEM1 stage S5: `x :: s.trim()` / `x :: s.after(sep)` / `x ::
@@ -482,7 +482,7 @@ impl<'a> Checker<'a> {
             if !b.mutable {
                 if let Some(owner) = self.string_view_call_source(&b.init) {
                     b.string_view = true;
-                    self.record_string_view(&b.name, owner);
+                    self.record_string_view(&b.name, owner, b.name_span);
                 }
             }
             // No dedicated "rebound to another binding" check here — the general

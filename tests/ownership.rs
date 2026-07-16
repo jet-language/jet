@@ -278,3 +278,202 @@ msg: String :: "hello"
         d.fix
     );
 }
+
+/// D-MEM1 S9 / #649: owner storage cannot move while a read view still points
+/// into it. Jet must reject before TIR/rustc.
+#[test]
+fn moving_list_owner_with_live_view_is_error() {
+    let src = r#"
+fn consume(xs: ^[Int]) {
+    print(xs.len())
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    window :: xs.view(0..1)
+    consume(^xs)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("moving a viewed owner must fail");
+    assert!(diags.iter().any(|d| d.code == "E0212"));
+}
+
+/// D-MEM1 S9 / #649: any list operation that may change backing storage is
+/// exclusive with a live view.
+#[test]
+fn resizing_list_owner_with_live_view_is_error() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    window :: xs.view(0..1)
+    xs.push(4)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("resizing a viewed owner must fail");
+    assert!(diags.iter().any(|d| d.code == "E0212"));
+}
+
+/// D-MEM1 S9 / #649: replacing an owner invalidates every view, so assignment
+/// is rejected while a view remains live.
+#[test]
+fn replacing_list_owner_with_live_view_is_error() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    window :: xs.view(0..1)
+    xs = [4, 5, 6]
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("replacing a viewed owner must fail");
+    assert!(diags.iter().any(|d| d.code == "E0212"));
+}
+
+/// D-MEM1 S9 / #649: view facts end at lexical scope. Mutating owner after
+/// nested view dies is valid.
+#[test]
+fn owner_can_resize_after_view_scope_ends() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    if true {
+        window :: xs.view(0..1)
+        print(window.len())
+    }
+    xs.push(4)
+    print(xs.len())
+}
+"#;
+    jet::compile(src).expect("expired view must not keep owner borrowed");
+}
+
+/// #649: a public function summary identifies the parameter and window
+/// projection that own its returned view. The caller enforces that fact.
+#[test]
+fn returned_view_keeps_call_argument_borrowed() {
+    let src = r#"
+fn first(xs: [Int]) -> View<Int> {
+    return xs.view(0..1)
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    window :: first(xs)
+    xs.push(4)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("returned view must retain argument provenance");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}
+
+#[test]
+fn returned_parameter_view_is_valid_while_owner_lives() {
+    let src = r#"
+fn first(xs: [Int]) -> View<Int> {
+    return xs.view(0..1)
+}
+
+fn run() {
+    xs :: [1, 2, 3]
+    window :: first(xs)
+    print(window.len())
+}
+"#;
+    jet::compile(src).expect("caller-owned source outlives returned view");
+}
+
+/// #649: type substitution cannot erase provenance. A generic identity call
+/// on `View<T>` still points at the original list.
+#[test]
+fn generic_passthrough_preserves_view_provenance() {
+    let src = r#"
+fn keep<T>(value: T) -> T {
+    return value
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    first :: xs.view(0..1)
+    window :: keep(^first)
+    xs.push(4)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("generic passthrough must retain provenance");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}
+
+/// #649: owner identity includes field projections; a view into a field keeps
+/// that field's enclosing owner from changing storage.
+#[test]
+fn field_view_blocks_owner_resize() {
+    let src = r#"
+struct Bucket {
+    values: [Int]
+}
+
+fn run() {
+    bucket := Bucket.{ values: [1, 2, 3] }
+    window :: bucket.values.view(0..1)
+    bucket.values.push(4)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("field owner mutation must conflict with view");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}
+
+#[test]
+fn method_return_preserves_receiver_projection() {
+    let src = r#"
+struct Bucket {
+    values: [Int]
+}
+
+impl Bucket {
+    fn first(self) -> View<Int> {
+        return self.values.view(0..1)
+    }
+}
+
+fn run() {
+    bucket := Bucket.{ values: [1, 2, 3] }
+    window :: bucket.first()
+    bucket.values.push(4)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("method return must retain receiver provenance");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}
+
+#[test]
+fn trait_method_return_preserves_receiver_provenance() {
+    let src = r#"
+trait Windowed {
+    fn first(self) -> View<Int>
+}
+
+struct Bucket {
+    values: [Int]
+}
+
+impl Bucket.Windowed {
+    fn first(self) -> View<Int> {
+        return self.values.view(0..1)
+    }
+}
+
+fn run() {
+    bucket := Bucket.{ values: [1, 2, 3] }
+    window :: bucket.first()
+    bucket.values.push(4)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("trait return must retain receiver provenance");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}

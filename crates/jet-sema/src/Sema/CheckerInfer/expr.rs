@@ -496,7 +496,10 @@ impl<'a> Checker<'a> {
                 // call arguments, plain assignment, struct fields not already
                 // caught earlier, …) — every one of them reads this same
                 // `Expr::Ident` node to get the name's value.
-                if self.is_string_view(name) && !self.allow_string_view_read {
+                if self.is_string_view(name)
+                    && !self.allow_string_view_read
+                    && !self.lambda_escapes
+                {
                     self.report_string_view_unsupported_use(name, "be used directly here", *span);
                 }
                 if let Some(info) = self.lookup(name).cloned() {

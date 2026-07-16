@@ -268,6 +268,49 @@ fn describe(source: String, kind: String) {
 "many owners, one value," reach for `Shared<T>` or `Pool<T>`/`Id<T>` (below)
 instead of a raw stored reference.
 
+#### Unified provenance and alias model (D-MEM1/S9, #649)
+
+Sema keeps one fact graph for every borrowed window, independent of its runtime
+representation. String windows, list `View<T>`, arena allocations, and existing
+buffer or matrix window APIs enter the same graph. A type-specific side table
+must not decide lifetime or alias safety.
+
+An **owner** is identified by its declaration, not its spelling. A local owner
+uses its definition identity, a public function owner uses its zero-based
+parameter position, and a static owner uses its static declaration. Shadowing a
+name therefore creates a different owner. A **place** is an owner plus an
+ordered field, index, or range projection. A **window** names the part of that
+place a view can observe. Reborrowing a view preserves the original owner and
+appends projections; it never invents a new owner.
+
+Each view fact records its place, read or write access, lexical extent, source
+kind, and invalidation state. Read views may overlap. A write view is unique:
+it may not overlap any live read or write view. Different known fields are
+disjoint; ranges and indices overlap unless sema can prove otherwise. When in
+doubt, sema treats places as overlapping.
+
+Moving or replacing an owner, writing an overlapping place, or calling an
+operation that may resize or relocate its storage is rejected while a view is
+live (**E0212**). Arena reset/free invalidates its views; a later read is
+**E0632**. Facts end at lexical scope. At control-flow joins, invalidation on
+any reachable branch survives; loops use the same conservative rule across
+iterations. Captures, fields, calls, generic substitution, trait dispatch, and
+task boundaries preserve the fact rather than rebuilding it from a type name.
+Tasks and channels reject a captured view once as **E1102**.
+
+A function returning a view publishes a sema summary containing the source
+parameter position and field/index/range projection. Calls instantiate that
+summary with the caller's place, so renaming, generics, and module boundaries
+cannot erase provenance. All return paths must agree on one source; otherwise
+the boundary is rejected instead of choosing a lifetime. This public source
+identity is queryable and semver-pinned.
+
+TIR receives only sema-approved view types and lowering flags. It does not
+infer owners, overlap, lifetimes, or escape safety. AOT and dev execution lower
+the same checked TIR, so neither backend may accept a program the other rejects.
+Generated Rust references are one representation of these facts, never their
+definition.
+
 ### Zero-copy string views
 
 `String.trim()`/`.after(sep)`/`.before(sep)` bound to a local return a

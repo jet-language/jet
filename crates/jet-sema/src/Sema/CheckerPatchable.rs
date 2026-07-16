@@ -136,6 +136,7 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                     self_conv: Some(AccessConvention::Read),
                     param_info: vec![("patch".to_string(), false)],
                     defaults: vec![None],
+                    view_return_source: None,
                     must_use: false,
                 },
             );
@@ -152,6 +153,7 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                     self_conv: None,
                     param_info: vec![("new".to_string(), false), ("old".to_string(), false)],
                     defaults: vec![None, None],
+                    view_return_source: None,
                     must_use: false,
                 },
             );
@@ -170,6 +172,7 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                     self_conv: Some(AccessConvention::Read),
                     param_info: vec![("other".to_string(), false)],
                     defaults: vec![None],
+                    view_return_source: None,
                     must_use: false,
                 },
             );

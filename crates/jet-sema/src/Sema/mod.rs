@@ -9,7 +9,10 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
-use crate::AST::{AccessConvention, Expr, ExternFn, Func, Stmt, Type, VariantPayload};
+use crate::AST::{
+    AccessConvention, Expr, ExternFn, Func, Stmt, Type, VariantPayload, ViewReturnProjection,
+    ViewReturnSource,
+};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -30,6 +33,8 @@ pub(crate) struct MethodSig {
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
+    /// #649: returned-view owner parameter plus projection, inferred from all returns.
+    pub(crate) view_return_source: Option<ViewReturnSource>,
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse` method — return cannot be silently ignored (E0419).
     pub(crate) must_use: bool,
 }
@@ -317,6 +322,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
         defaults: non_self_params
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
+        view_return_source: infer_view_return_source(f),
         must_use: f.is_must_use,
     }
 }
@@ -347,6 +353,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
             .iter()
             .map(|p| (p.name.clone(), p.default.is_some()))
             .collect(),
+        view_return_source: infer_view_return_source(f),
         defaults: f
             .params
             .iter()
@@ -367,6 +374,109 @@ fn func_to_sig(f: &Func) -> FuncSig {
     }
 }
 
+/// Public lifetime fact for calls that return a view rooted in one parameter.
+/// This is intentionally a tiny source-level summary: owner identity is the
+/// parameter slot, never a generated-Rust lifetime or variable spelling.
+fn infer_view_return_source(f: &Func) -> Option<ViewReturnSource> {
+    fn expr_source(expr: &Expr, params: &[crate::AST::Param]) -> Option<ViewReturnSource> {
+        match expr {
+            Expr::Ident(name, _) => params
+                .iter()
+                .position(|param| param.name == *name)
+                .map(|param| ViewReturnSource {
+                    param,
+                    projections: Vec::new(),
+                }),
+            Expr::Field(base, field, _) => {
+                let mut source = expr_source(base, params)?;
+                source
+                    .projections
+                    .push(ViewReturnProjection::Field(field.clone()));
+                Some(source)
+            }
+            Expr::Index { base, .. } => {
+                let mut source = expr_source(base, params)?;
+                source.projections.push(ViewReturnProjection::Index);
+                Some(source)
+            }
+            Expr::Slice { base, .. } => {
+                let mut source = expr_source(base, params)?;
+                source.projections.push(ViewReturnProjection::Range);
+                Some(source)
+            }
+            Expr::MethodCall { receiver, method, .. } if method == crate::Syntax::METHOD_VIEW => {
+                let mut source = expr_source(receiver, params)?;
+                source.projections.push(ViewReturnProjection::Range);
+                Some(source)
+            }
+            _ => None,
+        }
+    }
+
+    fn visit(
+        stmts: &[Stmt],
+        params: &[crate::AST::Param],
+        found: &mut Vec<Option<ViewReturnSource>>,
+    ) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Return(expr, _) => {
+                    found.push(expr.as_ref().and_then(|e| expr_source(e, params)))
+                }
+                Stmt::If(branch) => {
+                    visit(&branch.then_body, params, found);
+                    if let Some(else_branch) = &branch.else_branch {
+                        match else_branch {
+                            crate::AST::ElseBranch::ElseIf(branch) => {
+                                visit(
+                                    std::slice::from_ref(&Stmt::If((**branch).clone())),
+                                    params,
+                                    found,
+                                )
+                            }
+                            crate::AST::ElseBranch::Else(body) => visit(body, params, found),
+                        }
+                    }
+                }
+                Stmt::While { body, .. }
+                | Stmt::For { body, .. }
+                | Stmt::Loop { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Impure { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Off { body, .. }
+                | Stmt::DebugOnly { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::TaskGroup { body, .. }
+                | Stmt::Layout { body, .. }
+                | Stmt::Caps { body, .. } => visit(body, params, found),
+                Stmt::Switch { arms, else_body, .. } => {
+                    for arm in arms {
+                        visit(&arm.body, params, found);
+                    }
+                    if let Some(body) = else_body {
+                        visit(body, params, found);
+                    }
+                }
+                Stmt::CountedLoop { step, body, .. } => {
+                    visit(body, params, found);
+                    visit(std::slice::from_ref(step.as_ref()), params, found);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut returns = Vec::new();
+    visit(&f.body, &f.params, &mut returns);
+    let first = returns.first()?.clone()?;
+    returns
+        .into_iter()
+        .all(|candidate| candidate.as_ref() == Some(&first))
+        .then_some(first)
+}
+
 fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
     FuncSig {
         params: ef
@@ -382,6 +492,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
             })
             .collect(),
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
+        view_return_source: None,
         defaults: ef.params.iter().map(|_| None).collect(),
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
@@ -549,36 +660,152 @@ pub(crate) struct LocalInfo {
     single_use_span: Option<Span>,
 }
 
-/// D-ALLOC2 (ratified 2026-06-21): bookkeeping for an arena-`view` binding —
-/// what `x :: arena.alloc(v)` produced. The view points into `arena`'s storage
-/// and is valid only inside the region (the lexical scope of the `arena`
-/// binding, or an explicit `region`); the checker forbids it escaping (E0631)
-/// or being used after `arena` is `reset`/`free`d (E0632).
-#[derive(Debug, Clone)]
-pub(crate) struct ArenaViewInfo {
-    /// The arena this view points into.
-    arena: String,
-    /// `scopes.len()` at the view's declaration — the region floor a use must
-    /// stay within. Cleared when that scope is popped.
-    scope_len: usize,
-    /// Set when the backing arena was `reset`/`free`d after this view was made:
-    /// `(verb, span_of_reset_or_free)`. Any later *read* of the view is E0632.
-    dead: Option<(String, Span)>,
+/// D-MEM1 S9 / #649: one source-level fact graph for every borrowed window.
+/// Representation-specific flags may still guide lowering, but soundness uses
+/// only these sema facts and never asks rustc to discover an invalid alias.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewKind {
+    Arena,
+    List,
+    String,
+    Buffer,
+    Matrix,
 }
 
-/// D-DYNARRAY1 (ratified 2026-07-01): bookkeeping for a `View<T>` binding —
-/// what `x :: list.view(a..b)` produced. The view points into `list`'s backing
-/// storage and is valid only inside the lexical scope that owns `list`; the
-/// checker forbids it escaping (returned, stored in another binding, stored in
-/// a struct field) via E2305. Crossing a task/channel boundary is covered
-/// separately by the general sendability check (`SendProblemKind::ViewBorrow`),
-/// not this map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewAccess {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewOwnerOrigin {
+    Local,
+    Parameter(usize),
+    Static,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ViewOwnerId {
+    name: String,
+    def_span: Span,
+    origin: ViewOwnerOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ViewProjection {
+    Field(String),
+    Index(Span),
+    Range(Span),
+}
+
 #[derive(Debug, Clone)]
-pub(crate) struct ListViewInfo {
-    /// The list this view points into.
-    owner: String,
-    /// `scopes.len()` at the view's declaration — cleared when that scope pops.
+pub(crate) struct ViewPlace {
+    owner: ViewOwnerId,
+    projections: Vec<ViewProjection>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ViewFact {
+    place: ViewPlace,
+    kind: ViewKind,
+    access: ViewAccess,
+    /// `scopes.len()` at declaration; facts disappear with their binding.
     scope_len: usize,
+    /// Owner operation that invalidated storage, when invalidation is allowed
+    /// to happen (arena reset/free). Ordinary owner writes/moves are rejected.
+    invalidated: Option<(String, Span)>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ViewFactGraph {
+    /// Ordered by declaration. Reverse lookup preserves shadowing; scope pop
+    /// removes only facts declared at that depth and reveals outer facts again.
+    bindings: Vec<(String, ViewFact)>,
+}
+
+impl ViewFactGraph {
+    fn current(&self, name: &str) -> Option<&ViewFact> {
+        self.bindings
+            .iter()
+            .rev()
+            .find_map(|(binding, fact)| (binding == name).then_some(fact))
+    }
+
+    fn push(&mut self, name: String, fact: ViewFact) {
+        self.bindings.push((name, fact));
+    }
+
+    fn leave_scope(&mut self, depth: usize) {
+        self.bindings.retain(|(_, fact)| fact.scope_len < depth);
+    }
+}
+
+impl ViewPlace {
+    /// Conservative source-place overlap. Different fields are disjoint;
+    /// dynamic indexes/ranges overlap unless their exact source fact proves a
+    /// distinct fixed projection. D-SHAPE-PLACE1 may refine index equality.
+    fn overlaps(&self, other: &ViewPlace) -> bool {
+        if self.owner != other.owner {
+            return false;
+        }
+        for (left, right) in self.projections.iter().zip(&other.projections) {
+            match (left, right) {
+                (ViewProjection::Field(a), ViewProjection::Field(b)) if a != b => return false,
+                (ViewProjection::Index(a), ViewProjection::Index(b)) if a != b => return false,
+                _ => {}
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod view_fact_graph_tests {
+    use super::*;
+
+    fn fact(owner_span: usize, scope_len: usize, kind: ViewKind) -> ViewFact {
+        ViewFact {
+            place: ViewPlace {
+                owner: ViewOwnerId {
+                    name: "owner".to_string(),
+                    def_span: Span::new(owner_span, owner_span + 1),
+                    origin: ViewOwnerOrigin::Local,
+                },
+                projections: Vec::new(),
+            },
+            kind,
+            access: ViewAccess::Read,
+            scope_len,
+            invalidated: None,
+        }
+    }
+
+    #[test]
+    fn nested_shadow_reveals_outer_fact_after_scope_exit() {
+        let mut graph = ViewFactGraph::default();
+        graph.push("window".to_string(), fact(1, 1, ViewKind::List));
+        graph.push("window".to_string(), fact(2, 2, ViewKind::String));
+        assert_eq!(graph.current("window").map(|f| f.kind), Some(ViewKind::String));
+        graph.leave_scope(2);
+        assert_eq!(graph.current("window").map(|f| f.kind), Some(ViewKind::List));
+    }
+
+    #[test]
+    fn stable_owner_identity_distinguishes_same_spelling() {
+        let a = fact(1, 1, ViewKind::Buffer).place;
+        let b = fact(2, 1, ViewKind::Matrix).place;
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn different_fields_do_not_alias() {
+        let mut a = fact(1, 1, ViewKind::List).place;
+        let mut b = a.clone();
+        a.projections.push(ViewProjection::Field("left".to_string()));
+        b.projections.push(ViewProjection::Field("right".to_string()));
+        assert!(!a.overlaps(&b));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -765,25 +992,9 @@ pub(crate) struct Checker<'a> {
     /// or reset in this scope — maps name → verb ("free"/"reset").
     /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
     freed_allocators: HashMap<String, String>,
-    /// D-ALLOC2 (ratified 2026-06-21): arena-`view` bindings in scope — a binding
-    /// `x :: arena.alloc(v)` holds a scope-bound view into `arena`. Maps the view
-    /// name → which arena it points into (for E0631 escape / E0632 use-after-reset).
-    arena_views: HashMap<String, ArenaViewInfo>,
-    /// D-DYNARRAY1 (ratified 2026-07-01): `View<T>` bindings in scope — a binding
-    /// `x :: list.view(a..b)` holds a scope-bound window into `list`'s backing
-    /// storage. Maps the view name → which list it points into (for E2305
-    /// escape). Mirrors `arena_views`'s shape; kept separate so the arena
-    /// mechanism (E0631/E0632, its own wording and drop-tracking) stays untouched.
-    list_views: HashMap<String, ListViewInfo>,
-    /// D-MEM1 stage S5 (2026-07-04): string-`view` bindings in scope — a binding
-    /// `x :: s.trim()` / `x :: s.after(sep)` / `x :: s.before(sep)` holds a
-    /// scope-bound `&str` window into `s`'s backing storage (codegen: `b.string_view`).
-    /// Maps the view name → which `String` it points into (for E2307 escape).
-    /// Mirrors `list_views`'s shape exactly; kept separate so `ListViewInfo`'s
-    /// wording stays owner-type-agnostic in the shared struct but the two kinds
-    /// of view (list window vs string window) never alias in one map (I8: one
-    /// owner-tracking shape per kind, not one shared namespace).
-    string_views: HashMap<String, ListViewInfo>,
+    /// D-MEM1 S9 / #649: sole provenance/alias state for arena, list, string,
+    /// buffer, matrix, and future named mutable views.
+    view_facts: ViewFactGraph,
     /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: `:= uninit`
     /// bindings not yet definitely written — maps name → the decl span. A read
     /// while still in this map is E0420 (write-before-read proof); a write
@@ -793,8 +1004,8 @@ pub(crate) struct Checker<'a> {
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.
     borrow_ctx: bool,
-    /// D-MEM1 stage S5: true only while inferring a string-view name (see
-    /// `string_views`) in one of the TWO positions its bare `&str` Rust place
+    /// D-MEM1 stage S5: true only while inferring a string-view fact in one of
+    /// the TWO positions its bare `&str` Rust place
     /// actually supports — the receiver of a chained `.trim()`/`.after()`/
     /// `.before()`, or the operand of `copy`. The general `Expr::Ident` arm
     /// reports E2307 whenever it reads a string-view name and this is false —

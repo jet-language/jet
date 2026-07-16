@@ -63,6 +63,7 @@ impl<'a> Checker<'a> {
                     match target {
                         LValue::Local { name, name_span } => {
                             let name_span = *name_span;
+                            self.check_owner_change(name, "be replaced", name_span);
                             if self.lambda_mut_borrow_active(name) {
                                 self.diags.push(aliasing_while_mut(name, name_span));
                             }
@@ -716,10 +717,12 @@ impl<'a> Checker<'a> {
                             // needs `view_call_source` directly.
                             if let Expr::Ident(n, nspan) = &*e {
                                 if self.is_list_view(n) {
-                                    self.report_list_view_escape(n, "be returned", *nspan);
+                                    self.report_view_escape(n, "be returned", *nspan);
                                 }
-                            } else if let Some(owner) = self.view_call_source(e) {
-                                self.report_view_owns_return(&owner, e.span());
+                            } else if let Some(et) = et.as_ref() {
+                                if let Some((place, _)) = self.returned_view_source(e, et) {
+                                    self.report_view_owns_return(&place, e.span());
+                                }
                             }
                             // D-MEM1 stage S5: no dedicated "returning a string
                             // view" check here — the general E2307 check on the

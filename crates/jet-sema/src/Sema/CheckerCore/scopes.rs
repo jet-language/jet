@@ -17,17 +17,9 @@ impl<'a> Checker<'a> {
         }
 
         pub(crate) fn drop_scope_no_obligation_checks(&mut self) {
-            // D-ALLOC2: arena `view`s declared in the scope being popped leave their
-            // region here — drop their bookkeeping so a same-named binding in an
-            // outer scope isn't mistaken for the view. The arena binding itself
-            // lives in `self.scopes`, so it pops alongside.
+            // #649: every view kind leaves the one fact graph at lexical scope end.
             let depth = self.scopes.len();
-            self.arena_views.retain(|_, v| v.scope_len < depth);
-            // D-DYNARRAY1: `View<T>` bindings leave scope the same way arena views do.
-            self.list_views.retain(|_, v| v.scope_len < depth);
-            // D-MEM1 S5: string-`view` bindings (`.trim()`/`.after()`/`.before()`)
-            // leave scope the same way.
-            self.string_views.retain(|_, v| v.scope_len < depth);
+            self.view_facts.leave_scope(depth);
             self.scopes.pop();
             self.lambda_mut_borrow_stack.pop();
             self.ct_scopes.pop();

@@ -2,7 +2,9 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::is_type_var_name;
 use crate::Syntax;
-use crate::AST::{AccessConvention, Expr, Lambda, Type, VariantPayload};
+use crate::AST::{
+    AccessConvention, Expr, Lambda, Type, VariantPayload, ViewReturnProjection,
+};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -43,32 +45,28 @@ impl<'a> Checker<'a> {
     }
 
     /// Record `name` as a view into `arena`, declared at the current scope depth.
-    pub(crate) fn record_arena_view(&mut self, name: &str, arena: String) {
-        let scope_len = self.scopes.len();
-        self.arena_views.insert(
-            name.to_string(),
-            ArenaViewInfo {
-                arena,
-                scope_len,
-                dead: None,
-            },
-        );
+    pub(crate) fn record_arena_view(&mut self, name: &str, arena: String, span: Span) {
+        let place = ViewPlace {
+            owner: self.owner_id(&arena),
+            projections: vec![ViewProjection::Index(span)],
+        };
+        self.record_view(name, place, ViewKind::Arena, ViewAccess::Write, span);
     }
 
     /// E0632: when `arena` is `reset`/`free`d, every live view into it dies.
     pub(crate) fn kill_views_of_arena(&mut self, arena: &str, verb: &str, span: Span) {
-        for v in self.arena_views.values_mut() {
-            if v.arena == arena && v.dead.is_none() {
-                v.dead = Some((verb.to_string(), span));
+        for (_, fact) in &mut self.view_facts.bindings {
+            if fact.place.owner.name == arena && fact.invalidated.is_none() {
+                fact.invalidated = Some((verb.to_string(), span));
             }
         }
     }
 
     /// E0632: reading a view whose arena was already `reset`/`free`d.
     pub(crate) fn check_view_use(&mut self, name: &str, span: Span) {
-        if let Some(info) = self.arena_views.get(name) {
-            if let Some((verb, _kill_span)) = &info.dead {
-                let arena = info.arena.clone();
+        if let Some(info) = self.view_fact(name) {
+            if let Some((verb, _kill_span)) = &info.invalidated {
+                let arena = info.place.owner.name.clone();
                 let verb = verb.clone();
                 self.diags.push(Diagnostic::error(
                     "E0632",
@@ -90,30 +88,238 @@ impl<'a> Checker<'a> {
     /// E0631: a view named `name` is escaping its region (used where it would
     /// outlive `arena`). `what` describes the escape site for the message.
     pub(crate) fn report_view_escape(&mut self, name: &str, what: &str, span: Span) {
-        let arena = self
-            .arena_views
-            .get(name)
-            .map(|v| v.arena.clone())
-            .unwrap_or_else(|| "its arena".to_string());
-        self.diags.push(Diagnostic::error(
-            "E0631",
-            format!("`{}` cannot be shared — it does not live long enough to {}", name, what),
-            format!(
-                "`{}` is a view into `{}`; sharing it outside the region would let it outlive `{}` and point into freed memory",
-                name, arena, arena
-            ),
-            format!(
-                "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
-                name, arena, Syntax::SIGIL_COPY
-            ),
-            Some(span),
-        ));
+        let Some(fact) = self.view_fact(name).cloned() else {
+            return;
+        };
+        if what == "be returned" && fact.place.owner.origin != ViewOwnerOrigin::Local {
+            return;
+        }
+        match fact.kind {
+            ViewKind::Arena => self.diags.push(Diagnostic::error(
+                "E0631",
+                format!("`{}` cannot be shared — it does not live long enough to {}", name, what),
+                format!(
+                    "`{}` is a view into `{}`; sharing it outside the region would let it outlive `{}` and point into freed memory",
+                    name, fact.place.owner.name, fact.place.owner.name
+                ),
+                format!(
+                    "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
+                    name, fact.place.owner.name, Syntax::SIGIL_COPY
+                ),
+                Some(span),
+            )),
+            ViewKind::String => self.report_string_view_unsupported_use(name, what, span),
+            ViewKind::List | ViewKind::Buffer | ViewKind::Matrix => {
+                self.diags.push(Diagnostic::error(
+                    "E2305",
+                    format!(
+                        "`{}` cannot be shared — it does not live long enough to {}",
+                        name, what
+                    ),
+                    format!(
+                        "`{}` is a view into `{}`; sharing it outside `{}`'s scope would let it outlive its owner and point into freed storage",
+                        name, fact.place.owner.name, fact.place.owner.name
+                    ),
+                    format!(
+                        "keep `{}` inside `{}`'s scope, or copy what you need before it leaves",
+                        name, fact.place.owner.name
+                    ),
+                    Some(span),
+                ));
+            }
+        }
     }
 
     /// True if `name` is currently a live arena view. Used to gate escape checks
     /// at the use sites (return / bind / move-arg / struct field).
     pub(crate) fn is_arena_view(&self, name: &str) -> bool {
-        self.arena_views.contains_key(name)
+        self.view_kind(name) == Some(ViewKind::Arena)
+    }
+
+    fn owner_id(&self, owner: &str) -> ViewOwnerId {
+        let def_span = self
+            .lookup(owner)
+            .map(|info| info.def_span)
+            .unwrap_or_else(|| Span::new(0, 0));
+        if self.consts.contains_key(owner) {
+            ViewOwnerId {
+                name: owner.to_string(),
+                def_span,
+                origin: ViewOwnerOrigin::Static,
+            }
+        } else if self.lookup(owner).is_some_and(|info| info.param_conv.is_some()) {
+            let index = self
+                .funcs
+                .get(&self.fn_name)
+                .and_then(|sig| sig.param_info.iter().position(|(name, _)| name == owner))
+                .unwrap_or(0);
+            ViewOwnerId {
+                name: owner.to_string(),
+                def_span,
+                origin: ViewOwnerOrigin::Parameter(index),
+            }
+        } else {
+            ViewOwnerId {
+                name: owner.to_string(),
+                def_span,
+                origin: ViewOwnerOrigin::Local,
+            }
+        }
+    }
+
+    fn record_view(
+        &mut self,
+        name: &str,
+        place: ViewPlace,
+        kind: ViewKind,
+        access: ViewAccess,
+        span: Span,
+    ) {
+        if self.view_facts.bindings.iter().any(|(_, fact)| {
+            fact.invalidated.is_none()
+                && fact.place.overlaps(&place)
+                && (fact.access == ViewAccess::Write || access == ViewAccess::Write)
+        }) {
+            let place_name = Self::place_name(&place);
+            self.diags.push(Diagnostic::error(
+                "E0212",
+                format!("`{place_name}` already has a live view that conflicts with `{name}`"),
+                "many read views may overlap, but an exclusive mutable view cannot overlap any other live view".to_string(),
+                "finish using the earlier view before creating this one, or make an owned copy".to_string(),
+                Some(span),
+            ));
+        }
+        let fact = ViewFact {
+            place,
+            kind,
+            access,
+            scope_len: self.scopes.len(),
+            invalidated: None,
+        };
+        self.view_facts.push(name.to_string(), fact);
+    }
+
+    fn view_fact(&self, name: &str) -> Option<&ViewFact> {
+        self.view_facts.current(name)
+    }
+
+    pub(crate) fn view_kind(&self, name: &str) -> Option<ViewKind> {
+        self.view_fact(name).map(|fact| fact.kind)
+    }
+
+    fn view_kind_for_place(&self, place: &ViewPlace) -> ViewKind {
+        if let Some((_, fact)) = self
+            .view_facts
+            .bindings
+            .iter()
+            .rev()
+            .find(|(_, fact)| {
+                fact.place.owner.def_span == place.owner.def_span
+                    && fact.place.projections == place.projections
+            })
+        {
+            return fact.kind;
+        }
+        match self.lookup(&place.owner.name).map(|info| &info.ty) {
+            Some(Type::Named(name)) if name == Syntax::TYPE_BYTE_BUFFER => ViewKind::Buffer,
+            Some(Type::Apply { name, .. }) if matches!(name.as_str(), "Matrix" | "Tensor") => {
+                ViewKind::Matrix
+            }
+            _ => ViewKind::List,
+        }
+    }
+
+    fn place_name(place: &ViewPlace) -> String {
+        let mut out = place.owner.name.clone();
+        for projection in &place.projections {
+            match projection {
+                ViewProjection::Field(field) => {
+                    out.push('.');
+                    out.push_str(field);
+                }
+                ViewProjection::Index(span) => {
+                    let _ = span.start;
+                    out.push_str("[…]");
+                }
+                ViewProjection::Range(span) => {
+                    let _ = span.start;
+                    out.push_str("[…]");
+                }
+            }
+        }
+        out
+    }
+
+    fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
+        match expr {
+            Expr::Ident(name, _) => self
+                .view_fact(name)
+                .map(|fact| fact.place.clone())
+                .or_else(|| {
+                    (self.lookup(name).is_some() || self.consts.contains_key(name))
+                        .then(|| ViewPlace {
+                            owner: self.owner_id(name),
+                            projections: Vec::new(),
+                        })
+                }),
+            Expr::Field(base, field, _) => {
+                let mut place = self.place_from_expr(base)?;
+                place.projections.push(ViewProjection::Field(field.clone()));
+                Some(place)
+            }
+            Expr::Index { base, span, .. } => {
+                let mut place = self.place_from_expr(base)?;
+                place.projections.push(ViewProjection::Index(*span));
+                Some(place)
+            }
+            Expr::Slice { base, span, .. } => {
+                let mut place = self.place_from_expr(base)?;
+                place.projections.push(ViewProjection::Range(*span));
+                Some(place)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_view(&self, name: &str) -> bool {
+        self.view_fact(name).is_some()
+    }
+
+    /// Reject moves, replacement, and storage-changing methods while any view
+    /// into the owner remains live. Reads stay legal; facts vanish on scope exit.
+    pub(crate) fn check_owner_change(&mut self, owner: &str, action: &str, span: Span) {
+        let owner_place = ViewPlace {
+            owner: self.owner_id(owner),
+            projections: Vec::new(),
+        };
+        let Some((view, access, place)) = self
+            .view_facts
+            .bindings
+            .iter()
+            .rev()
+            .find(|(_, fact)| {
+                fact.place.overlaps(&owner_place) && fact.invalidated.is_none()
+            })
+            .map(|(name, fact)| (name.clone(), fact.access, Self::place_name(&fact.place)))
+        else {
+            return;
+        };
+        let access = if access == ViewAccess::Write {
+            "exclusive mutable view"
+        } else {
+            "read view"
+        };
+        self.diags.push(Diagnostic::error(
+            "E0212",
+            format!("`{owner}` cannot {action} while `{view}` is still looking into it"),
+            format!(
+                "`{view}` is a live {access} into `{place}`; changing or moving the owner could invalidate that view"
+            ),
+            format!(
+                "finish using `{view}` before changing or moving `{owner}`, narrow the view's scope, or make an owned copy"
+            ),
+            Some(span),
+        ));
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -122,13 +328,9 @@ impl<'a> Checker<'a> {
     //
     // A view's Rust value is a genuine borrowed slice (`&[T]`, elided
     // lifetime — see `Context::rust_type`'s `View` arm) so it is exactly as
-    // sound as an arena view; the tracking below is the same shape as
-    // `arena_views` (E0631/E0632, above) reusing its *reasoning*: the owner
-    // list is made and freed inside this function, so a view into it can't
-    // outlive that scope. Kept as a separate map (not a refactor of
-    // `arena_views`) so the well-tested arena mechanism's wording/drop-
-    // tracking stays untouched — I8's "one owner-tracking shape," not one
-    // shared struct.
+    // sound as an arena view. List, arena, string, buffer, and matrix windows
+    // share one provenance graph; only product diagnostics and lowering flags
+    // differ.
     //
     // E2305 fires when a view escapes: returned, rebound to another local, or
     // stored in a struct field. Crossing a task/channel boundary is instead
@@ -142,7 +344,7 @@ impl<'a> Checker<'a> {
     /// function's return/scope exit). A parameter or const outlives the call,
     /// so a view into it is sound without tracking (mirrors `E2301`'s
     /// param/const exemption in `view_return_local_owner`).
-    pub(crate) fn view_call_source(&self, init: &Expr) -> Option<String> {
+    pub(crate) fn view_call_source(&self, init: &Expr) -> Option<(ViewPlace, ViewKind)> {
         let Expr::MethodCall {
             receiver, method, ..
         } = init
@@ -152,56 +354,123 @@ impl<'a> Checker<'a> {
         if method != Syntax::METHOD_VIEW {
             return None;
         }
-        let Expr::Ident(name, _) = receiver.as_ref() else {
-            return None;
+        let mut place = self.place_from_expr(receiver)?;
+        let kind = match receiver.as_ref() {
+            Expr::Ident(name, _) => self
+                .view_kind(name)
+                .unwrap_or_else(|| self.view_kind_for_place(&place)),
+            _ => self.view_kind_for_place(&place),
         };
-        if self.consts.contains_key(name) {
+        place.projections.push(ViewProjection::Range(init.span()));
+        Some((place, kind))
+    }
+
+    /// Instantiate a callee's sema-owned public provenance summary at this
+    /// call site. Used only when the inferred result is a `View<T>`.
+    pub(crate) fn returned_view_source(
+        &self,
+        init: &Expr,
+        result: &Type,
+    ) -> Option<(ViewPlace, ViewKind)> {
+        if !matches!(result, Type::Apply { name, .. } if name == "View") {
             return None;
         }
-        if let Some(info) = self.lookup(name) {
-            if info.param_conv.is_some() {
-                return None;
+        if let Some(source) = self.view_call_source(init) {
+            return Some(source);
+        }
+        let (source, arg_expr, arg_span) = match init {
+            Expr::Call(call) => {
+                let source = self.funcs.get(&call.name)?.view_return_source.clone()?;
+                let arg = call.args.get(source.param)?;
+                (source, &arg.expr, arg.span)
+            }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                recv_type: Some(type_name),
+                ..
+            } => {
+                let (source, has_self) = self.method_view_return_source(type_name, method)?;
+                if has_self && source.param == 0 {
+                    (source, receiver.as_ref(), receiver.span())
+                } else {
+                    let arg_index = source.param.saturating_sub(usize::from(has_self));
+                    let arg = args.get(arg_index)?;
+                    (source, &arg.expr, arg.span)
+                }
+            }
+            _ => return None,
+        };
+        let (mut place, kind) = self
+            .view_call_source(arg_expr)
+            .or_else(|| {
+                let place = self.place_from_expr(arg_expr)?;
+                let kind = self.view_kind_for_place(&place);
+                Some((place, kind))
+            })?;
+        for projection in &source.projections {
+            place.projections.push(match projection {
+                ViewReturnProjection::Field(field) => ViewProjection::Field(field.clone()),
+                ViewReturnProjection::Index => ViewProjection::Index(arg_span),
+                ViewReturnProjection::Range => ViewProjection::Range(arg_span),
+            });
+        }
+        Some((place, kind))
+    }
+
+    fn method_view_return_source(
+        &self,
+        type_name: &str,
+        method: &str,
+    ) -> Option<(ViewReturnSource, bool)> {
+        if let Some(sig) = self.registry.method(type_name, method) {
+            return sig
+                .view_return_source
+                .clone()
+                .map(|source| (source, sig.self_conv.is_some()));
+        }
+        let modules = self.modules?;
+        for &index in self.imports.values() {
+            if self.type_is_pub_in(index, type_name) {
+                if let Some(sig) = modules[index].registry.method(type_name, method) {
+                    if let Some(source) = sig.view_return_source.clone() {
+                        return Some((source, sig.self_conv.is_some()));
+                    }
+                }
             }
         }
-        Some(name.clone())
+        let trait_method = self.trait_reg.traits.get(type_name)?.methods.get(method)?;
+        if !matches!(&trait_method.return_type, Some(Type::Apply { name, .. }) if name == "View") {
+            return None;
+        }
+        let self_param = trait_method
+            .params
+            .iter()
+            .position(|param| param.name == Syntax::KW_SELF)?;
+        Some((
+            ViewReturnSource {
+                param: self_param,
+                projections: Vec::new(),
+            },
+            true,
+        ))
     }
 
     /// Record `name` as a view into `owner`, declared at the current scope depth.
-    pub(crate) fn record_list_view(&mut self, name: &str, owner: String) {
-        let scope_len = self.scopes.len();
-        self.list_views
-            .insert(name.to_string(), ListViewInfo { owner, scope_len });
+    pub(crate) fn record_list_view(
+        &mut self,
+        name: &str,
+        place: ViewPlace,
+        kind: ViewKind,
+        span: Span,
+    ) {
+        self.record_view(name, place, kind, ViewAccess::Read, span);
     }
 
     /// True if `name` is currently a live `View<T>` binding.
     pub(crate) fn is_list_view(&self, name: &str) -> bool {
-        self.list_views.contains_key(name)
-    }
-
-    /// E2305: a `View<T>` named `name` is escaping the scope of the list it
-    /// borrows from. `what` describes the escape site for the message.
-    pub(crate) fn report_list_view_escape(&mut self, name: &str, what: &str, span: Span) {
-        let owner = self
-            .list_views
-            .get(name)
-            .map(|v| v.owner.clone())
-            .unwrap_or_else(|| "its owner".to_string());
-        self.diags.push(Diagnostic::error(
-            "E2305",
-            format!(
-                "`{}` cannot be shared — it does not live long enough to {}",
-                name, what
-            ),
-            format!(
-                "`{}` is a view into `{}` (`.view(...)`); sharing it outside `{}`'s scope would let it outlive the list and point into freed memory",
-                name, owner, owner
-            ),
-            format!(
-                "keep `{}` inside `{}`'s scope, or copy what you need with `.map(...)` or indexing before it leaves",
-                name, owner
-            ),
-            Some(span),
-        ));
+        self.view_kind(name) == Some(ViewKind::List)
     }
 
     /// E2305: `return list.view(a..b)` made fresh right in the `return` — `owner`
@@ -209,7 +478,11 @@ impl<'a> Checker<'a> {
     /// E2301's exact wording (`this view points into X, which this function
     /// owns`) for the "fresh call in return" shape; `report_list_view_escape`
     /// above covers the "already-bound name" shape.
-    pub(crate) fn report_view_owns_return(&mut self, owner: &str, span: Span) {
+    pub(crate) fn report_view_owns_return(&mut self, place: &ViewPlace, span: Span) {
+        if place.owner.origin != ViewOwnerOrigin::Local {
+            return;
+        }
+        let owner = &place.owner.name;
         self.diags.push(Diagnostic::error(
             "E2305",
             format!(
@@ -231,8 +504,8 @@ impl<'a> Checker<'a> {
     // into `s` instead of an owned `String`. Unlike `View<T>` (a distinct Jet
     // type), `String` stays ONE type end to end (D-MEM1 gallery: "one String
     // type") — so the view-ness lives on the *binding* (`Binding::string_view`,
-    // set below), not on the value's static type. Tracking mirrors `list_views`
-    // exactly (same shape, same E-code family): E2307 fires on escape
+    // set below), not on the value's static type. The shared fact graph reports
+    // E2307 on escape
     // (returned, rebound, stored in a struct field); crossing a task boundary
     // is caught separately at the capture-check site (`CheckerInfer/calls.rs`)
     // since a plain `Type::String` carries no view marker for the general
@@ -244,7 +517,7 @@ impl<'a> Checker<'a> {
     /// local (dies at this function's return/scope exit). A parameter or const
     /// outlives the call, so a view into it is sound without tracking (mirrors
     /// `view_call_source`'s exemption).
-    pub(crate) fn string_view_call_source(&self, init: &Expr) -> Option<String> {
+    pub(crate) fn string_view_call_source(&self, init: &Expr) -> Option<ViewPlace> {
         let Expr::MethodCall {
             receiver,
             method,
@@ -277,20 +550,18 @@ impl<'a> Checker<'a> {
         if info.param_conv.is_some() {
             return None;
         }
-        Some(name.clone())
+        self.place_from_expr(receiver)
     }
 
     /// Record `name` as a string view into `owner`, declared at the current
     /// scope depth.
-    pub(crate) fn record_string_view(&mut self, name: &str, owner: String) {
-        let scope_len = self.scopes.len();
-        self.string_views
-            .insert(name.to_string(), ListViewInfo { owner, scope_len });
+    pub(crate) fn record_string_view(&mut self, name: &str, place: ViewPlace, span: Span) {
+        self.record_view(name, place, ViewKind::String, ViewAccess::Read, span);
     }
 
     /// True if `name` is currently a live string-view binding.
     pub(crate) fn is_string_view(&self, name: &str) -> bool {
-        self.string_views.contains_key(name)
+        self.view_kind(name) == Some(ViewKind::String)
     }
 
     /// E2307: a string view named `name` was used somewhere only its full
@@ -313,9 +584,13 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         let owner = self
-            .string_views
-            .get(name)
-            .map(|v| v.owner.clone())
+            .view_facts
+            .bindings
+            .iter()
+            .rev()
+            .find_map(|(binding, fact)| {
+                (binding == name).then(|| fact.place.owner.name.clone())
+            })
             .unwrap_or_else(|| "its owner".to_string());
         self.diags.push(Diagnostic::error(
             "E2307",
@@ -493,6 +768,7 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+        self.check_owner_change(&name, "be moved", span);
         if let Some(info) = self.lookup(&name) {
             if info.decl_loop_depth < self.loop_depth {
                 self.diags.push(Diagnostic::error(

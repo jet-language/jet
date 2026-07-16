@@ -184,6 +184,47 @@ fn run() {
 }
 
 #[test]
+fn reset_on_branch_invalidates_view_at_join() {
+    let src = r#"
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    if true {
+        arena.reset()
+    }
+    print(x)
+}
+"#;
+    assert!(
+        error_codes(src).contains(&"E0632".to_string()),
+        "a reset on a reachable branch must invalidate at the join"
+    );
+}
+
+#[test]
+fn reset_in_loop_invalidates_view_after_loop() {
+    let src = r#"
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    loop {
+        arena.reset()
+        break
+    }
+    print(x)
+}
+"#;
+    assert!(
+        error_codes(src).contains(&"E0632".to_string()),
+        "a reset in a loop must invalidate after the loop"
+    );
+}
+
+#[test]
 fn explicit_region_spans_two_arenas() {
     let src = r#"
 use core.mem
