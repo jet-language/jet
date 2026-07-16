@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 675,
-    "rev": 8998,
+    "rev": 9070,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -263,9 +263,14 @@
       "epoch": "e8",
       "phase": "ready",
       "priority": "P1",
-      "plan": "Current baseline: the std-only native lldb backend, line map, shared Inferior transport, DAP JSON-over-stdio server, Jet-only frame projection, and D-DBG2 raw-frames terminal view already ship. Remaining work is editor and real-protocol closure only. Wire VS Code and Zed to launch jet debug --dap without a second debugger mechanism. Add one production-generated FFI plus task fixture that the interpreter declines with E2203, then drive initialize, launch, setBreakpoints, configurationDone, continue, stackTrace, scopes, variables, output, disconnect, malformed framing, debugger absence, and debuggee exit through tests/debug.rs against live lldb on Linux and macOS. Prove beginner defaults expose Jet source, Jet frames, locals, and fixes only; prove expert terminal --raw-frames remains explicit and DAP never leaks raw Rust frames. Bound every adapter/debuggee wait and reap both processes on failure. Update both editor READMEs and debugger reference law with exact support: VS Code and Zed over lldb on Linux/macOS; Windows and gdb remain outside this card. No new syntax, dependency, command vocabulary, or owner gate.",
+      "plan": "Implement the complete ratified D-DBG-DAP1=A profile as one projection of the existing debugger model. Preserve the shipped std-only lldb backend, Inferior transport, line map, terminal commands, and DAP stdio skeleton, then close every missing protocol capability in crates/jet-debug. Enforce strict byte-counted Content-Length framing, positive correlated sequence IDs, bounded JSON, one response per accepted request, Jet-owned structured errors, and the Start to Initialized to Configuring to Stopped or Running to Terminated state machine; no user code runs before configurationDone and advertised capabilities equal behavior. Support launch args, cwd, env; verified same-user local attach; replacement source breakpoints with conditions, hit counts, and logpoints; all-stop Jet-task threads; Jet-only stacks, scopes, nested variables; bounded read-only Jet evaluation; panic, error, and signal filters; pause; restart; cancellation; progress; timeouts; ordered output; and exact exit or signal status. Attach verifies process identity, executable build ID, source hashes, architecture, image, and matching jetmap before target mutation. Disconnect terminates launched targets and continues attached targets. Restart rebuilds through the same pipeline, preserves source breakpoints, and invalidates every object reference. Default output hides generated Rust, helpers, backend values, addresses, secrets, and raw text; explicit showRawFrames appends marked raw frames and scopes without changing semantics. Truthfully reject mutation, memory access, reverse execution, disassembly, remote transport, reverse requests, telemetry, and every unsupported request. Vendor a pinned Microsoft DAP schema; model-test every legal and illegal state transition and reference lifetime; drive current VS Code and Zed clients plus live native lldb without skip on supported Linux/macOS hosts using production FFI/task programs. Bound and reap adapter, debugger, launched, and attached processes on every failure. No new syntax or dependency gate.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "Fresh-review repair: expanded #12 to the complete ratified D-DBG-DAP1=A lifecycle, capability, attach, privacy, schema, client, and conformance contract; corrected tests/debug.rs criteria."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e8-planner",
@@ -320,48 +325,66 @@
       "criteria": [
         {
           "n": 1,
-          "text": "VS Code launch config using the DAP server sets a breakpoint, steps, and inspects locals on a Jet program using FFI/tasks (the interpreter declines these with E2203).",
+          "text": "DAP framing, request correlation, bounded JSON, one-response law, Jet-owned errors, and every legal/illegal Start→Initialized→Configuring→Stopped/Running→Terminated transition pass a pinned-schema model suite; advertised capabilities exactly match implemented requests.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:09.195Z"
+          "at": "2026-07-16T08:50:03.543Z"
         },
         {
           "n": 2,
-          "text": "Zed editor DAP wiring reaches the same breakpoint/step/locals proof via editors/zed config.",
+          "text": "Launch proves explicit args/cwd/env, replacement source breakpoints with conditions/hit counts/logpoints, configurationDone-before-user-code, pause, filters, cancellation, progress, timeouts, ordered output, and exact exit/signal status against production-generated Jet.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:09.325Z"
+          "at": "2026-07-16T08:50:03.543Z"
         },
         {
           "n": 3,
-          "text": "tests/debug_native.rs gains protocol-level DAP tests (initialize/launch/setBreakpoints/continue/stackTrace/scopes/variables), not just lldb-command-level tests.",
+          "text": "True local same-user attach verifies PID identity, executable build ID, source hashes, architecture, process image, and matching .jetmap before mutation; disconnect continues attached targets and terminates launched targets.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:09.457Z"
+          "at": "2026-07-16T08:50:03.543Z"
         },
         {
           "n": 4,
-          "text": "D-DBG2 --raw-frames expert view verified against the native backend and documented in docs/reference.",
+          "text": "All-stop Jet-task threads, Jet-only stacks/scopes/nested variables, and bounded read-only Jet evaluation work on FFI/task programs the interpreter declines; panic/error/signal stops remain Jet-owned.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:09.604Z"
+          "at": "2026-07-16T08:50:03.543Z"
         },
         {
           "n": 5,
-          "text": "docs state editor wiring status precisely: VS Code + Zed supported; gdb and Windows explicitly out of scope for this card.",
+          "text": "Restart rebuilds through the canonical pipeline, preserves source breakpoints, invalidates every old object reference, and rejects stale references deterministically.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:09.727Z"
+          "at": "2026-07-16T08:50:03.543Z"
+        },
+        {
+          "n": 6,
+          "text": "Default DAP output leaks no generated Rust names/paths, helper threads, backend values, addresses, secrets, or raw backend text; showRawFrames only appends clearly marked raw frames/scopes, and unsupported advanced requests are reported truthfully.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:50:03.543Z"
+        },
+        {
+          "n": 7,
+          "text": "Current VS Code and Zed clients complete launch, attach, breakpoint, step, locals, evaluation, restart, and disconnect flows through tests/debug.rs and live lldb without skip on supported Linux/macOS hosts; all processes are timeout-bounded and reaped.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:50:03.543Z"
         }
       ],
       "needsAcceptance": false,
@@ -378,7 +401,8 @@
         "editors/zed/wasm-src/src/lib.rs",
         "editors/zed/languages/jet/config.toml",
         "editors/zed/README.md",
-        "docs/spec/syntax-decisions.md"
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
       ]
     },
     {
@@ -399,6 +423,11 @@
         "c0075iyb"
       ],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -477,7 +506,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-pkg-model/src/Prelude/Http.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs",
+        "tests/corelib.rs",
+        "tests/http_server_lifecycle.rs"
+      ]
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -496,6 +532,11 @@
         "c0184j6s"
       ],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -594,7 +635,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs",
+        "tests/crypto_entropy.rs",
+        "examples/features/crypto/crypto_envelope.jet"
+      ]
     },
     {
       "milestoneId": null,
@@ -904,6 +952,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "fable-clerk",
           "text": "Clerical sweep: criteria 1+3 are proxy-tracking over #296/#298/#300/#301 (no work here). Criterion 2 is the ONLY live scope: DB drivers, compression, linalg have NO canonical card anywhere on the board (checked all 246) — spawn/point canonical cards or record explicit non-goals, then close."
         },
@@ -1001,7 +1054,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs",
+        "tests/corelib.rs"
+      ]
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -1021,6 +1080,11 @@
         "c008rjua"
       ],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -1176,7 +1240,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "crates/jet-foundation/src/WebPartition.rs",
+        "crates/jet-sema/src/Sema/WebPartition.rs",
+        "crates/jet-codegen/src/Codegen/Web.rs",
+        "tests/web_partition.rs",
+        "tests/web_build.rs",
+        "examples/features/web/ui_web_reactive.jet"
+      ]
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -1693,6 +1764,11 @@
       ],
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
           "at": "2026-07-15",
           "by": "sol-e3-planner",
           "text": "[plan-vetted] Existing closure criteria and integrated progress remain exact. No new owner gate; advanced to ready for generic derive/JIT completion."
@@ -1773,7 +1849,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "crates/jet-comptime/src/Comptime/Reflect.rs",
+        "crates/jet-sema/src/Sema/Registration/Serde.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs",
+        "examples/features/serde/user_derive.jet",
+        "tests/ui/E2710_derive_body_error.jet"
+      ]
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -1983,6 +2065,11 @@
       "plan": "Finish one layered product on the shipped Core spine: core.reactive signals -> typed UI tree/renderer seam -> typed styles/layout -> ownable kit -> motion -> accessibility gates -> native/web/TUI backends. Reconcile all ratified D-REACTUI/D-UITREE/STYLE/MOTION/A11Y/OSTARGET/WEB decisions and current #123 hybrid web backend. Close missing renderer/backend breadth, ownership cleanup, event propagation, focus/keyboard/screen-reader behavior, deterministic animation time, hot reload, platform packaging, and AOT/dev parity. No backend may create a second component model or hidden state graph.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -2210,7 +2297,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "crates/jet-sema/src/Sema/CheckerCoreLib/reactive.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+        "tests/tir_data_math_reactive.rs",
+        "examples/features/ui/reactive.jet",
+        "examples/features/ui/ui_view_tree.jet"
+      ]
     },
     {
       "milestoneId": null,
@@ -2227,6 +2320,11 @@
       "plan": "Reconcile this card to ratified D-ADAPTRT1=C: Epoch 3 ships no automatic battery/network/load/carbon scheduler or platform-signal providers. Preserve the explicit manual core.perf fidelity API only. Verify default_fidelity/override/reset, validation, process/thread visibility, deterministic AOT/dev behavior, audit/observe output, and zero hidden environment reads. Remove stale docs/examples claiming automatic adaptation; future provider work needs a new ratified card.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -2398,7 +2496,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs",
+        "tests/corelib.rs",
+        "examples/features/tooling/fidelity.jet",
+        "tests/fuzz/sema/valid/ex_tooling_fidelity.jet"
+      ]
     },
     {
       "milestoneId": null,
@@ -2415,6 +2519,11 @@
       "plan": "Reconcile the stale 'full logic subset' claim to D-SOLVER-LIB1: ship only core.solve's explicit finite Solver state, deterministic insertion-order require checks, ordinary Bool values, failure_count, and status. No language-level unification, backtracking, multi-answer execution, hidden search, or syntax. Prove deterministic seed behavior, constraint order, repeated solve/status, invalid inputs, performance bounds, AOT/dev parity, docs/examples, then remove claims that a Prolog-class subset shipped.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -2529,7 +2638,12 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-jit/src/Solver.rs",
+        "crates/jet-codegen/src/Codegen/TIR/subset/handles.rs",
+        "tests/corelib.rs"
+      ]
     },
     {
       "milestoneId": null,
@@ -2546,6 +2660,11 @@
       "plan": "Finish structural merge through the existing typed Merge substrate in jet-pkg-model/env-model, not text rewriting. Define semantic identity for every supported contribution; prove associative/deterministic merge, conflict diagnostics with full provenance, priority/override law, list/map/scalar behavior, overlay/workspace/config integration, serialization stability, and hostile order permutations. Keep source formatting/layout flexible and preserve one canonical semantic graph. Reconcile current implementation and docs before adding any new merge key or syntax.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -2733,7 +2852,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "Source/CmdStructuralMerge.rs",
+        "crates/jet-pkg-model/src/Merge.rs",
+        "crates/jetpack/src/Merge.rs",
+        "tests/structural_merge.rs",
+        "docs/spec/syntax-decisions.md"
+      ]
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -2750,6 +2875,11 @@
       "plan": "Use D-FFI-UNIFY1=A as one foreign-namespace architecture: generated typed stubs and binders feed a common checked FFI boundary, while each language adapter owns transport details. Finish canonical descriptor, ownership/error/layout conversion, safe-vs-#Unsafe boundary, build/cache/provenance, package provider integration, and per-language capability reporting. Reconcile Python A, external provider A, existing C/Rust/npm/JS/Swift law, and active polyglot phase cards. Keep compiler seams dependency-free; foreign dependencies live in generated bridge/runtime packages.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -2874,7 +3004,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/AST/ffi.rs",
+        "crates/jet-sema/src/Sema/FFI.rs",
+        "crates/jet-pkg-model/src/FFI.rs",
+        "tests/cffi_native_matrix.rs",
+        "examples/features/lowlevel/ffi.jet"
+      ]
     },
     {
       "id": "c0cevzhr",
@@ -2891,6 +3028,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -3038,7 +3180,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "Source/LSP/Server.rs",
+        "Source/LSP/Features.rs",
+        "Source/LSP/Position.rs",
+        "Source/LSP/SymbolDB.rs",
+        "tests/lsp.rs",
+        "docs/spec/syntax-decisions.md"
+      ]
     },
     {
       "id": "c0wa2hf8",
@@ -3051,10 +3200,15 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Current baseline: D-CI3 already runs the repository full verifier on every push and pull request; nightly already runs rotating-seed sema fuzzing and the performance ratchet. Preserve that coverage while implementing the still-unbuilt D-CI1 and D-CI2 law. Split the every-change verifier into explicit, balanced jobs only where it reduces latency, and add one checked shard inventory that maps every tests/*.rs target exactly once; keep a final completeness gate so no target can disappear. Add cargo fmt --check, clippy correctness/suspicious, and Linux plus macOS -Dwarnings builds. Encode the card-referenced #[expect] rule in a focused source audit; AGENTS.md remains the operating manual. Remove any obsolete tools/Tower invocation and run node Tower/tower.mjs lint --docs plus status read-only. Extend the scheduled lane to a full Ubuntu/macOS verifier, coverage artifact and pinned floor, existing fuzz seed artifact, and existing perf ratchet; prove the ratchet with a temporary injected regression and restore exact baseline bytes. Do not let CI create Tower cards automatically: external job credentials must not gain board-write authority, and run reports/artifacts already preserve the evidence. Finish with one throwaway canary change that breaks a formerly uncovered target, capture the failed run URL, then restore it. No new compiler dependency or owner gate.",
+      "plan": "Implement D-CI1=A and D-CI2=A as the single authoritative CI contract. The current workflow already invokes the full verifier and nightly fuzz/perf pieces; reuse those jobs, do not create a parallel full-suite law. Every proposed change runs the complete executable suite on the exact candidate revision. Sharding may reduce wall time only: maintain a checked inventory mapping every tests/*.rs target exactly once and a completeness gate that fails on omission or duplication. Add required grammar-drift proof using tests/grammar.rs and a deterministic documentation-build gate covering links, doctests, stale examples, and the currently ratified documentation command behavior without reopening deferred D-DOC-GEN1 implementation. Add rustfmt, curated correctness/suspicious clippy, and Linux/macOS -Dwarnings; every intentional #[expect] has a live #card reason and fails when unfulfilled. Use only live read-only Tower lint/status paths; CI receives no board-write authority. Nightly adds the supported Linux/macOS full-suite matrix, pinned performance regression harness and ratchets, bounded rotating-seed fuzz cadence, and coverage artifact plus ratchet floor. Preserve seed, toolchain, candidate revision, shard map, test list, coverage, benchmark samples, and run URLs as durable artifacts. Prove the perf ratchet with an injected regression then exact restoration, and prove change-gate completeness with a throwaway canary failure then restoration. Remove obsolete tools/Tower teaching and fold the D-CI3 workflow comment into D-CI1 rather than maintaining two competing laws. No compiler dependency or owner gate.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "Fresh-review repair: made D-CI1 the one authoritative full-change law; added grammar/documentation gates and complete nightly Linux/macOS, perf, fuzz, coverage evidence; retained D-CI2 and read-only Tower."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e8-planner",
@@ -3096,61 +3250,73 @@
       "criteria": [
         {
           "n": 1,
-          "text": "PR CI executes every tests/*.rs target; the shard-completeness meta-test is green and enforced (no unassigned new test file merges silently).",
+          "text": "Every proposed change runs the complete tests/*.rs executable suite on the exact candidate revision; any shards are latency-only, and a checked inventory rejects every omitted or duplicate target.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:10.168Z"
+          "at": "2026-07-16T08:50:03.791Z"
         },
         {
           "n": 2,
-          "text": "cargo build is clean under -Dwarnings on Linux and macOS; every #[expect] carries a card-referenced reason.",
+          "text": "Grammar generated sections are rebuilt/compared through tests/grammar.rs, and deterministic documentation build, link, doctest, and stale-example checks block the same change gate.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:10.299Z"
+          "at": "2026-07-16T08:50:03.791Z"
         },
         {
           "n": 3,
-          "text": "The frozen tools/Tower/Tower.mjs CI step is gone, replaced by node Tower/tower.mjs status, and that step is green.",
+          "text": "Linux and macOS change jobs pass rustfmt, curated correctness/suspicious clippy, and -Dwarnings; every #[expect] has a live #card reason and unfulfilled expectations fail.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:10.425Z"
+          "at": "2026-07-16T08:50:03.791Z"
         },
         {
           "n": 4,
-          "text": "Nightly workflow (full suite + perf ratchet + fuzz cadence + coverage) runs green end-to-end once; the perf ratchet demonstrably fails on a deliberately injected slowdown, then is reverted.",
+          "text": "CI uses only the live Tower CLI for read-only lint/status and has no board-write credentials or automatic card mutation; obsolete tools/Tower paths are absent.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:10.556Z"
+          "at": "2026-07-16T08:50:03.791Z"
         },
         {
           "n": 5,
-          "text": "A deliberate canary PR that breaks a previously-unrun target (e.g. tests/repl.rs) goes red under the new CI; the run link is recorded on this card, then the canary is closed.",
+          "text": "Nightly runs the full suite on supported Linux/macOS, the pinned performance ratchet, bounded rotating-seed fuzzing, and coverage with an enforced floor; durable artifacts record revision, toolchains, seeds, samples, coverage, and run URLs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:10.680Z"
+          "at": "2026-07-16T08:50:03.791Z"
+        },
+        {
+          "n": 6,
+          "text": "A temporary performance regression makes the ratchet fail and exact restoration makes it pass; a temporary formerly-uncovered test failure makes the change gate fail and exact restoration makes it pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:50:03.791Z"
         }
       ],
       "needsAcceptance": false,
       "refs": [
         ".github/workflows/ci.yml",
         "scripts/agent/verify-full.sh",
+        "tests/grammar.rs",
+        "tests/release_gates.rs",
         "Cargo.toml",
         "clippy.toml",
         "AGENTS.md",
         "tests/fuzz_sema.rs",
         "tools/perf/ci-perf-check.sh",
         "tools/perf/baseline.json",
-        "Tower/tower.mjs"
+        "Tower/tower.mjs",
+        "docs/spec/syntax-decisions.md"
       ],
       "workOrder": 503
     },
@@ -3400,6 +3566,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "fable-clerk",
           "text": "Clerical sweep: absorbs #307 (per #307's own 2026-07-09 reopen note). Preserved #307 line items: polars/pandas parity bar with typed-selector-compile-error framing; filter/select/sort pipelines; inner/left joins; pivot; median/quantiles/std/variance; describe; rolling/window aggregations; datetime columns; Parquet/Arrow IO; lazy-vs-eager ship-or-non-goal (owner ballot, unraised); Python/R/GPU bridge I6 ballots (unraised)."
         },
@@ -3498,7 +3669,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/data_reflect.rs",
+        "tests/tir_control_and_data.rs",
+        "examples/features/tooling/data_core.jet"
+      ]
     },
     {
       "id": "c9q0534j",
@@ -3516,6 +3693,11 @@
       "workOrder": 76,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -3611,7 +3793,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/game_checks.rs",
+        "examples/features/game/core_game_headless.jet",
+        "tests/fuzz/sema/differential/ex_game_core_game_headless.jet"
+      ]
     },
     {
       "id": "caq065h8",
@@ -3629,6 +3817,11 @@
       "workOrder": 79,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -3724,7 +3917,12 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/TargetProfile.rs",
+        "crates/jet-sema/src/Sema/OsTarget.rs",
+        "tests/target_profiles.rs"
+      ]
     },
     {
       "id": "cbq06v8j",
@@ -4501,7 +4699,7 @@
       "id": "c0fiunwy",
       "num": 286,
       "title": "First-party typed Event and Hook system",
-      "body": "Design and implement Jet's first-party event system as a core language/runtime/library feature, not a Canvas subset. Source plan: docs/plans/epoch-3/first-party-event-system.md. Scope: typed Event<T>, Hook<T,R>, subscription handles, owner lifetimes, sync/async dispatch, ordering, cancellation, backpressure, typed failure policy, structured-concurrency integration, diagnostics, debugger traces, and Canvas projection. Acceptance: owner semantic decision ratified; follow-up syntax/API ballots raised for any user-typeable surface; tests cover subscribe/emit, owner cleanup, once, priority, reentrancy, async backpressure, fallible handlers, hooks, diagnostics, and Canvas graph projection.",
+      "body": "Design and finish Jet’s first-party typed Event and Hook system on the existing runtime, ownership, effects, debugger, and Canvas facts. Scope: typed Event<T>, DecisionHook<T,E>, subscription and EventScope lifetimes, deterministic ordering/once/priority/reentrancy, bounded async dispatch and backpressure, structured cancellation/deadlines/close, typed failure policy, HookDecision continuation, diagnostics, debugger traces, and Canvas projection. D-EVENT1=D, D-EVENT2=A, and D-EVENT-CONTINUE1=C are binding; no new signal/reactive mechanism or stale external plan document is authoritative. Acceptance follows the card checklist and current refs.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
@@ -4513,6 +4711,16 @@
       "workOrder": 64,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[stale-body] Removed nonexistent historical plan path; body now points to ratified event laws and live refs."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -4666,7 +4874,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/reactive.rs",
+        "tests/tir_data_math_reactive.rs",
+        "examples/features/ui/events.jet"
+      ]
     },
     {
       "id": "c0m9tjqj",
@@ -4677,12 +4891,17 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "ready",
       "priority": "P1",
       "plan": "Current source already ships D-FSOPS1, D-FSWATCH1, and the owners D-WATCH-SCOPE1 comment: core.watcher owns file, process, and port handles; core.event scopes own callbacks; core.files/core.path own filesystem operations. Do not rebuild or rename this surface. Remaining closure is proof and truth reconciliation. First run the existing files_depth and watcher goldens plus corelib, parity, and path_durability tests against the production prelude. Verify the watcher example exercises recursive file changes, process exit, port readiness, WatchSet composition, scoped callbacks, cancellation/drop, and documented std-only polling fidelity without shell polling or silent platform claims. Obtain native Windows evidence for lexical path normalization and write_atomic replacement/durability already met on Linux; preserve collision-safe temp cleanup and permission behavior. Audit docs/reference/core-library.md and syntax-decisions against the actual core.watcher names and Event callback law. If any behavior is missing, repair the single existing implementation in FsIoEnvOsTesting.rs and ReactiveEventWatch.rs; add no alias, module, dependency, or new ballot. A different reviewer validates native evidence and every remaining criterion before closure.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "Fresh-review repair: no active assignee and only independent/native verification remains; corrected building to ready."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e8-planner",
@@ -4811,6 +5030,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -5231,7 +5455,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/encoding-decisions.md",
+        "docs/reference/core-library.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs",
+        "examples/features/serde/encoding_breadth.jet",
+        "tests/corelib.rs"
+      ]
     },
     {
       "id": "c0wx96s2",
@@ -5248,6 +5479,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -5368,7 +5604,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-foundation/src/generated/UnicodeTables.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs",
+        "examples/features/text/unicode_text_audit.jet",
+        "tests/data/unicode/GraphemeBreakTest.txt"
+      ]
     },
     {
       "id": "c0z3l25j",
@@ -5385,6 +5627,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -5621,7 +5868,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/NetHttp.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/DnsResolverPolicy.rs",
+        "tests/corelib.rs",
+        "tests/net_tls.rs"
+      ]
     },
     {
       "id": "c0075iyb",
@@ -5638,6 +5891,11 @@
       "blockedBy": [],
       "assignee": "terra-301-builder",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -5838,7 +6096,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-pkg-model/src/Prelude/Http.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs",
+        "tests/http_server_lifecycle.rs",
+        "examples/features/net/http_rest_service.jet"
+      ],
       "claimedAt": "2026-07-13T00:07:48.610Z"
     },
     {
@@ -5856,6 +6121,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -6094,7 +6364,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-pkg-model/src/Prelude/Crypto.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs",
+        "tests/crypto_entropy.rs",
+        "examples/features/crypto/crypto_suite.jet"
+      ]
     },
     {
       "id": "c06tng04",
@@ -6113,6 +6389,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced four blank checklist rows with measurable core.data completion criteria."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -6174,39 +6460,49 @@
       "criteria": [
         {
           "n": 1,
-          "text": "",
+          "text": "Typed Table, Series, schema, missingness, joins, grouping, aggregation, statistics, plotting, and bounded streaming execute through one Core data model.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "",
+          "at": "2026-07-16T09:03:03.244Z"
         },
         {
           "n": 2,
-          "text": "",
+          "text": "Schema, nullability, width, precision, ownership, and large-input failures are typed, Jet-owned, deterministic, and covered by hostile tests.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "",
+          "at": "2026-07-16T09:03:03.244Z"
         },
         {
           "n": 3,
-          "text": "",
+          "text": "Python, R, and GPU acceleration uses canonical FFI with explicit copy, trust, availability, fallback, and native-replacement status; unavailable bridges fail honestly.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "",
+          "at": "2026-07-16T09:03:03.244Z"
         },
         {
           "n": 4,
-          "text": "",
+          "text": "Executable data examples, Core reference/rubric, AOT/dev parity, focused tests, independent review, and full repository verification pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "",
+          "at": "2026-07-16T09:03:03.244Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/core-library.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/data_reflect.rs",
+        "tests/tir_control_and_data.rs",
+        "examples/features/tooling/data_pipeline.jet"
+      ]
     },
     {
       "id": "c0nlrm12",
@@ -8279,6 +8575,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "sol-e3-planner",
           "text": "[plan-vetted] Cleared orphan blocker; narrowed plan to remaining verification/polish with real Ghostty+fish proof."
         },
@@ -8442,7 +8743,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "crates/jet-cli/src/Help/mod.rs",
+        "crates/jet-cli/src/Help/Interactive.rs",
+        "crates/jet-cli/src/Help/Render.rs",
+        "tests/help_pty.rs",
+        "tests/cli/question_mark_help.txt"
+      ]
     },
     {
       "id": "c_audit_367_q80zrm",
@@ -9881,6 +10188,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
           "at": "2026-07-14",
           "by": "codex-main",
           "text": "[handoff] Stale fable-main claim released. Resume pass-5 typed decode/data pipeline. First fix known EncodingLite RenameAll interpreter mismatch; inspect committed partial files and existing parity evidence before edits."
@@ -10006,7 +10318,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/spec/architecture.md",
+        "docs/spec/spec.md",
+        "crates/jet-codegen/src/Prelude/Core.rs",
+        "crates/jet-jit/src/jit/lower_ctx.rs",
+        "tests/ui/bigint_unsupported_op.jet",
+        "tests/fuzz/sema/differential/ex_text_bigint.jet"
+      ]
     },
     {
       "id": "c0to4gms",
@@ -10416,11 +10735,16 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "D-JPK-EPOCHBOUNDARY1=B is ratified: this Epoch 8 card is the sole owner of complete hostile Linux, macOS, and Windows package-sandbox proof and the full isolation parity claim. E4 cards retain functional behavior and honest sandbox-class reporting; do not move or duplicate their implementation here. Start from the current RuntimePolicy facade and Recipe execution path. Replace detection and ordinary Command execution with one action runner that enters a real OS boundary before executing untrusted work: Linux namespaces plus private proc/dev, read-only inputs, writable scratch/output, no-new-privileges, and network only for fixed-output fetch; macOS native sandbox profile with matching authority; Windows restricted token, Job Object, ACL projection, handle scrub, and descendant cleanup. Apply D-JPK-SANDBOX2=D exactly: non-executing copy/prebuilt verification may proceed; fetched or transitive executable work must use strong confinement, then a trusted substitute or approved remote builder, then fail closed. An exact digest/capability/reviewer/expiry local first-party grant remains audited, private, untrusted, and never publishable. Run one shared hostile corpus for path/symlink escape, host reads, sibling writes, undeclared executables, ptrace/device access, network, child/daemon escape, cancellation, crash cleanup, and false status on native Linux, macOS, and Windows. Status, dossier, JSON, diagnostics, and docs must report the boundary actually entered; no model, cfg, or detection-only proof closes a criterion. Independent platform review gates the full-isolation claim. No new syntax or dependency is assumed; ballot first if implementation discovers either.",
+      "plan": "D-JPK-EPOCHBOUNDARY1=B makes this Epoch 8 card the sole complete hostile Linux/macOS/Windows package-isolation proof and full-isolation claim. Reuse the current RuntimePolicy and Recipe action seams, but replace detection/ordinary Command execution with one runner that enters the real boundary before untrusted code. Linux uses namespaces, private proc/dev, read-only inputs, writable scratch/output, no-new-privileges, and network only for fixed-output fetch. macOS uses a native sandbox profile with the same file, process, device, and network authority. Windows launches under a capability-less AppContainer token with no internetClient, privateNetworkClientServer, enterpriseAuthentication, broadFileSystemAccess, or device capability; ACL-project only declared read inputs and writable scratch/output, place the whole descendant tree in a kill-on-close Job Object, and scrub inheritable handles and environment. Prove Windows network denial explicitly with hostile loopback, LAN, DNS, and public TCP/UDP attempts, plus child escape and handle smuggling; a status flag or restricted token alone is not isolation. Apply D-JPK-SANDBOX2=D exactly: non-executing copy/prebuilt verification may proceed; fetched/transitive executable actions require strong confinement, then a trusted substitute or approved remote builder, then fail closed. Exact digest/capability/reviewer/expiry local first-party grants remain audited, private, untrusted, non-publishable, and never widen Windows AppContainer/network authority silently. One shared native corpus attacks paths, symlinks, host/sibling writes, undeclared executables, ptrace/devices, network, child/daemon escape, cancellation, crash cleanup, and false status on all three OSes. Human/JSON/dossier/docs report only the boundary actually entered. Independent platform review gates the full-isolation claim. Ballot first for any new syntax/dependency.",
       "blockedBy": [],
       "workOrder": 505,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "Fresh-review repair: Windows boundary now explicitly requires a capability-less AppContainer token plus Job/ACL/handle containment and native network-denial attacks."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e8-planner",
@@ -10446,48 +10770,57 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Linux sandbox (namespaces, private proc/dev, read-only closure, writable scratch/output, network only for fixed-output fetch, no-new-privileges) resists the full hostile corpus (path/symlink escape, host reads, sibling writes, undeclared executables, ptrace/device access, network, daemon leak) on native Linux CI.",
+          "text": "Native Linux namespaces/private proc-dev/read-only closure/writable scratch-output/no-new-privileges boundary resists the complete hostile corpus; network is available only to fixed-output fetch.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:11.113Z"
+          "at": "2026-07-16T08:50:04.286Z"
         },
         {
           "n": 2,
-          "text": "macOS native sandbox profile enforces the same filesystem/network/process restrictions and resists the same hostile corpus on native macOS CI.",
+          "text": "Native macOS sandbox profile enforces the same file/process/device/network authority and resists the same hostile corpus without status-only or model-only proof.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:11.240Z"
+          "at": "2026-07-16T08:50:04.286Z"
         },
         {
           "n": 3,
-          "text": "Windows restricted token + Job Object + ACL projection denies network and enforces the same isolation guarantees, resisting the same hostile corpus on native windows-latest CI.",
+          "text": "Native Windows executes every hostile recipe inside a capability-less AppContainer token with ACL-projected inputs/scratch/output, kill-on-close Job Object, scrubbed handles/environment, and no network capabilities; loopback, LAN, DNS, public TCP/UDP, child escape, and handle-smuggling attacks all fail at the OS boundary.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:11.368Z"
+          "at": "2026-07-16T08:50:04.286Z"
         },
         {
           "n": 4,
-          "text": "The sandbox-status facade is fully replaced: no code path reports a package as sandboxed without the enforced OS primitive actually active.",
+          "text": "D-JPK-SANDBOX2 substitute-first/fail-closed law is end-to-end: non-executing steps proceed, executable steps require strong isolation or trusted substitute/remote builder, and local grants remain digest/capability/reviewer/expiry-bound private untrusted outputs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:11.497Z"
+          "at": "2026-07-16T08:50:04.286Z"
         },
         {
           "n": 5,
-          "text": "Independent reviewer confirms no host escape across all three platforms using the hostile corpus; docs name the exact per-platform guarantee (no overstatement).",
+          "text": "No command, JSON, dossier, cache record, or audit path reports sandboxed unless the named OS primitive was entered successfully; failure and cleanup are Jet-owned and deterministic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:11.626Z"
+          "at": "2026-07-16T08:50:04.286Z"
+        },
+        {
+          "n": 6,
+          "text": "Independent reviewers validate native hostile receipts for Linux, macOS, and Windows and confirm docs/claims state the exact per-platform guarantee without overstatement.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:50:04.286Z"
         }
       ],
       "needsAcceptance": false,
@@ -13891,6 +14224,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "fable-clerk",
           "text": "Clerical sweep: sequence after #560 shape-law umbrella and corelib audits — Core packages rewritten as ordinary Jet source before the shape migration would be written twice."
         },
@@ -13946,7 +14284,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-3/universal-language-core.md",
+        "docs/reference/core-library.md",
+        "crates/jet-sema/src/Sema/CheckerCoreLib.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib",
+        "tests/corelib.rs"
+      ]
     },
     {
       "id": "c0frdmrx",
@@ -13968,6 +14312,11 @@
       "workOrder": 69,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -14034,7 +14383,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-3/universal-language-core.md",
+        "crates/jet-devserver/src/WebHost.rs",
+        "crates/jet-codegen/src/Codegen/Web.rs",
+        "tests/web_dev.rs",
+        "tests/web_build.rs"
+      ]
     },
     {
       "id": "c0hxraci",
@@ -14047,13 +14402,18 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "ready",
       "priority": "P1",
-      "plan": "docs/plans/epoch-3/universal-language-core.md#ul6--unified-watch-dev-server-and-hot-replacement",
+      "plan": "Reuse the existing incremental dependency graph in DevService and sema HotSwap; do not add another watcher. Inventory imports, assets, HTML/styles, manifests, locks, generated source, build inputs, and target facts as typed roots with exact reverse dependencies. Make jet run --watch and jet dev consume the same invalidation engine. Handle rename/delete, crash/reconnect, typed @persist migration, and transactional client/server replacement; unsupported replacement restarts or fails honestly. Prove real browser and native sessions, bounded edit-to-visible evidence, deterministic receipts, cleanup, and AOT/dev semantic parity.",
       "blockedBy": [
         "c0cevzhr"
       ],
       "workOrder": 85,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced link-only placeholder with implementation-ready shared watch/dev/hot-replacement plan."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -14062,9 +14422,62 @@
       ],
       "created": "2026-07-09T23:22:09.059Z",
       "updated": "2026-07-16",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One typed dependency graph records imports, assets, HTML/styles, manifests, locks, generated source, build inputs, and target facts with deterministic reverse edges and receipts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:58:25.976Z"
+        },
+        {
+          "n": 2,
+          "text": "jet run --watch and jet dev use the same engine; rename, delete, atomic save, crash, reconnect, and stale-event races invalidate exactly the affected closure.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:58:26.137Z"
+        },
+        {
+          "n": 3,
+          "text": "Typed @persist migration and client/server hot replacement commit transactionally; unsupported or failed replacement leaves the prior session valid and reports restart or failure honestly.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:58:26.296Z"
+        },
+        {
+          "n": 4,
+          "text": "Real browser and native matrices prove edit-to-visible budgets, cleanup, reconnect, deterministic output, and equivalent observable semantics after AOT rebuild.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:58:26.456Z"
+        },
+        {
+          "n": 5,
+          "text": "Focused dev, web-dev, watcher, persistence, and hostile invalidation tests, docs, independent review, and full repository verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:58:26.612Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-3/universal-language-core.md",
+        "crates/jet-env-model/src/ModuleEval/DevService.rs",
+        "crates/jet-sema/src/Sema/HotSwap.rs",
+        "tests/dev.rs",
+        "tests/web_dev.rs",
+        "examples/features/io/watcher.jet"
+      ]
     },
     {
       "id": "c0md55xu",
@@ -14084,6 +14497,11 @@
       "workOrder": 66,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -14145,7 +14563,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-3/universal-language-core.md",
+        "docs/spec/performance-budget-decisions.md",
+        "crates/jet-foundation/src/PerformanceBudget.rs",
+        "Source/CmdBudget.rs",
+        "tests/performance_budget_providers.rs"
+      ]
     },
     {
       "id": "c0ok76h1",
@@ -14165,6 +14589,11 @@
       "workOrder": 70,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -14231,7 +14660,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-3/universal-language-core.md",
+        "crates/jet-repl/src/lib.rs",
+        "crates/jet-repl/src/Interactive.rs",
+        "crates/jet-repl/src/Render.rs",
+        "tests/repl.rs"
+      ]
     },
     {
       "id": "c0r5ttg9",
@@ -14253,6 +14688,11 @@
       "workOrder": 67,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -14319,7 +14759,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-3/universal-language-core.md",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs",
+        "tests/tir_control_and_data.rs",
+        "examples/features/tooling/data_core.jet"
+      ]
     },
     {
       "id": "c0todzv8",
@@ -14341,6 +14787,11 @@
       "workOrder": 68,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -14407,7 +14858,13 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-3/universal-language-core.md",
+        "crates/jet-sema/src/Sema/CheckerTaskGroup.rs",
+        "crates/jetpack/src/Services.rs",
+        "tests/jetpack_services.rs",
+        "tests/fuzz/sema/valid/ex_concurrency_taskgroup.jet"
+      ]
     },
     {
       "id": "c01lj8gw",
@@ -14777,10 +15234,15 @@
       "milestoneId": null,
       "phase": "building",
       "priority": "P1",
-      "plan": "Current baseline: commit 884df04d already makes empty and data-only leases succeed on non-Linux; preserve that repair and the existing Linux protected mount backend. D-JPK-EXECLEASE1=A is ratified, so the remaining executable path is fixed: implement one ExecWrapperStrategy backed by a root-owned macOS LaunchDaemon and Windows LocalSystem service, not a weaker wrapper or fail-open path. Define authenticated local IPC; independently re-open and verify locked object digest, executable identity, and lease request inside the service privilege domain; project a protected lease tree; impersonate the calling user or session for execution; scrub inherited handles, environment, PATH, cwd, and service authority; bind every process descendant to lease lifetime; revoke and clean on normal exit, cancellation, crash, disconnect, timeout, and reboot recovery. Direct jetpack run and nested PATH execution must survive original-object rename, symlink, content, directory, hardlink, and time-of-check/time-of-use attacks. Missing service, authentication failure, drift, or cleanup failure emits existing E1292 what/why/fix plus JSON and audit facts, never raw platform text or an unsandboxed fallback. Add installer registration/uninstall and doctor status using the existing platform packaging seam; run native Ubuntu regression plus macOS and Windows hostile runtime jobs. Reconcile the package security contract and D-JPK-EXECLEASE1 law. No new syntax or dependency is assumed; ballot first if a new authority surface or external dependency appears.",
+      "plan": "Preserve commit 884df04d for non-Linux empty/data-only leases and the Linux private read-only mount. D-JPK-EXECLEASE1=A fixes the remaining design. This card owns new product artifacts; no existing packaging/service seam is assumed. Add a narrowly scoped jetpack executable-lease client/service protocol, a root-owned macOS service binary plus signed installer package and LaunchDaemon plist, and a Windows service binary plus signed MSI/service registration and uninstall path. One explicit administrator approval installs them. Authenticate only local callers. In the service privilege domain, reopen the locked object, independently verify digest and executable identity, copy bytes to a caller-unwritable protected lease directory, then launch under the caller UID/session/token with no root/SYSTEM privileges, service handles, privilege-sensitive environment, mutable package path, or network capability. Protected lease bins precede only approved inherited/system PATH. The service never resolves packages, evaluates source, builds arbitrary requests, or accesses network; native loopback/LAN/DNS/public socket attacks must fail. Bind the shell and every descendant to lease lifetime; revoke/delete on normal exit, cancellation, crash, disconnect, timeout, service restart, uninstall, and reboot recovery. Direct jetpack run and nested jet env PATH execution resist rename, symlink, hardlink, content, directory, and time-of-check/time-of-use swaps. Reserve unused E1300 as the dedicated executable-lease service diagnostic family entry, with exact what/why/fix, JSON projection, `jet explain`, and snapshots for missing/stopped service, authentication failure, unverifiable bytes, failed isolation/network denial, and cleanup failure; E1292 remains package-signing entropy only. Doctor/audit names service/toolchain version, caller/child identity, stripped authority, PATH, network denial, verified handoff, and same-user redirect protection. Native Ubuntu regression plus macOS/Windows install/service/hostile runtime CI and independent review close the card. Ballot first for new syntax/dependency.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "Fresh-review repair: plan now owns genuinely new macOS/Windows service/install artifacts, explicit network denial, and dedicated unused E1300 diagnostic/snapshots; E1292 misuse removed."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e8-planner",
@@ -14820,48 +15282,57 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Data-only and empty-output leases succeed on Linux, macOS, and Windows; missing-output and integrity failure semantics remain fail-closed.",
+          "text": "Data-only and empty-output leases succeed natively on Linux, macOS, and Windows while missing output, mutation, and integrity failures remain fail-closed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T20:38:18.676Z"
+          "at": "2026-07-16T08:50:04.535Z"
         },
         {
           "n": 2,
-          "text": "Direct jetpack run and nested PATH execution through jet env obey the ratified platform guarantee under original-output rename, symlink, content, and directory swap attacks.",
+          "text": "A signed macOS installer/package registers a root-owned LaunchDaemon and service binary; signed uninstall removes registration and protected lease artifacts without residue.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T20:38:18.828Z"
+          "at": "2026-07-16T08:50:04.535Z"
         },
         {
           "n": 3,
-          "text": "The selected backend cannot leak service authority or mutable original package paths to children; capability absence and detected drift use registered Jet diagnostics with snapshots.",
+          "text": "A signed Windows MSI registers a LocalSystem service binary and recovery policy; signed uninstall removes registration and protected lease artifacts without residue.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T20:38:18.982Z"
+          "at": "2026-07-16T08:50:04.535Z"
         },
         {
           "n": 4,
-          "text": "Native Ubuntu, macOS, and Windows CI execute the runtime lease proof; static platform audit remains green.",
+          "text": "Authenticated service handoff independently verifies locked bytes, launches as caller with scrubbed authority/PATH/handles/environment and zero network access, binds all descendants to lease lifetime, and survives hostile rename/symlink/hardlink/content/directory/TOCTOU attacks in direct run and nested jet env PATH flows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T20:38:19.129Z"
+          "at": "2026-07-16T08:50:04.535Z"
         },
         {
           "n": 5,
-          "text": "Syntax decisions, package-manager security contract, installer or platform law, and expert audit output docs exactly match the ratified outcome.",
+          "text": "Dedicated E1300 what/why/fix, JSON, jet explain, and snapshots cover unavailable service, authentication, verification, isolation/network, and cleanup failures; E1292 remains exclusively signing entropy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-10T20:38:19.279Z"
+          "at": "2026-07-16T08:50:04.535Z"
+        },
+        {
+          "n": 6,
+          "text": "Native Ubuntu regression plus macOS and Windows installer/service/hostile runtime jobs pass; independent review verifies offline behavior, network denial, identities, cleanup/recovery, doctor/audit facts, and current law/docs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:50:04.535Z"
         }
       ],
       "refs": [
@@ -16010,6 +16481,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "fable-clerk",
           "text": "Clerical sweep: sequence after #534/#562 — @Numeric capability spelling may need to conform to the one-@Rule-marker law; doing it earlier risks respelling."
         },
@@ -16074,7 +16550,13 @@
           "at": "2026-07-15T23:56:21.244Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-sema/src/Sema/CheckerInfer/binary.rs",
+        "crates/jet-foundation/src/Syntax.rs",
+        "tests/ui/math_operator_mismatch.jet",
+        "examples/features/operators/chained_comparison.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-12T00:09:36.517Z",
       "updated": "2026-07-16",
@@ -16095,6 +16577,11 @@
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced retired or nonexistent reference with exact live source, spec, example, and test anchors."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -16201,8 +16688,12 @@
         }
       ],
       "refs": [
-        "docs/proposals/polyglot.md",
-        "docs/spec/syntax-decisions.md"
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/AST/ffi.rs",
+        "crates/jet-sema/src/Sema/FFI.rs",
+        "tests/cffi_native_matrix.rs",
+        "tests/ui/ffi_asm_no_unsafe_gate.jet",
+        "examples/features/lowlevel/polyglot_go/main.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T00:54:48.236Z",
@@ -16350,6 +16841,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced retired or nonexistent reference with exact live source, spec, example, and test anchors."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -16543,7 +17039,11 @@
         }
       ],
       "refs": [
-        "docs/proposals/polyglot.md"
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-pkg-model/src/FFI.rs",
+        "crates/jet-sema/src/Sema/FFI.rs",
+        "tests/cffi_native_matrix.rs",
+        "examples/features/lowlevel/polyglot_go/main.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T00:54:48.431Z",
@@ -16565,6 +17065,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced retired or nonexistent reference with exact live source, spec, example, and test anchors."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -16657,7 +17162,11 @@
         }
       ],
       "refs": [
-        "docs/proposals/polyglot.md"
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-pkg-model/src/FFI.rs",
+        "crates/jet-pkg-model/src/FortranBind.rs",
+        "tests/cffi_native_matrix.rs",
+        "examples/features/lowlevel/polyglot_fortran/main.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T00:54:48.527Z",
@@ -16684,6 +17193,11 @@
       "workOrder": 83,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced retired or nonexistent reference with exact live source, spec, example, and test anchors."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -16811,7 +17325,11 @@
         }
       ],
       "refs": [
-        "docs/proposals/framework-lessons.md"
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-sema/src/Sema/CheckerSchedule.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+        "tests/jetpack_tasks.rs",
+        "tests/ui/schedule_every_without_task.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T01:09:49.290Z",
@@ -16834,6 +17352,11 @@
       "workOrder": 30,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced retired or nonexistent reference with exact live source, spec, example, and test anchors."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -16997,7 +17520,11 @@
         }
       ],
       "refs": [
-        "docs/proposals/framework-lessons.md"
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs",
+        "crates/jet-sema/src/Sema/CheckerValidate.rs",
+        "crates/jet-devserver/src/LiveInspect.rs",
+        "tests/corelib.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T02:44:52.267Z",
@@ -17019,6 +17546,11 @@
       "workOrder": 84,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced retired or nonexistent reference with exact live source, spec, example, and test anchors."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -17113,7 +17645,11 @@
         }
       ],
       "refs": [
-        "docs/proposals/polyglot.md"
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-pkg-model/src/FFI.rs",
+        "crates/jet-pkg-model/src/DotNetBind.rs",
+        "tests/cffi_native_matrix.rs",
+        "examples/features/lowlevel/polyglot_dotnet/main.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T02:44:52.361Z",
@@ -17741,10 +18277,15 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Verification and parity closure over shipped code. The current scheduler already contains a real cfg(windows) IOCP backend: CreateIoCompletionPort registration, overlapped WSARecv readiness, PostQueuedCompletionStatus wake, GetQueuedCompletionStatus dispatch, CancelIoEx cancellation, deadline packets, stale-completion rejection, terminal failure state, cleanup counters, and shutdown. tests/scheduler_native.rs asserts emitted selection and the windows-latest job runs the focused IOCP lifecycle test. Do not reimplement it. First prove crates/jet-codegen/src/scheduler/io.rs and emitted Prelude/Scheduler.rs stay behaviorally identical through the existing generation/parity mechanism; no handwritten fork may drift. On native Windows, compile production-generated Jet task/socket code and prove readiness parks without blocking workers; wake, cancellation, deadline, deregistration, and terminal failure complete exactly once; stale packets never target reused registrations; allocation, stream clone, interest, and completion counts return to zero under scale; and shutdown joins without hang. Require the CI job and test selection to fail rather than skip when Windows is selected, with bounded timeouts and durable commit/toolchain/arch/command/run evidence. Re-run AOT versus jet dev task/channel behavior so R12 stays intact and audit the I1 vetted native region. Correct docs/spec/spec.md, docs/reference/core-library.md, and async-networking.md: Windows selects IOCP now; portable poll remains only for unsupported targets. Independent reviewer checks native evidence, emitted/runtime parity, false-green cfgs, cleanup, and docs. No syntax, dependency, or owner gate.",
+      "plan": "Verification closure over two distinct already-shipped scheduler bodies. crates/jet-codegen/src/scheduler/io.rs is the runtime body and crates/jet-codegen/src/Prelude/Scheduler.rs is the emitted-program body; there is no current generator to trust or document. Build one paired IOCP conformance matrix that runs the same scenario vectors and observable assertions against both bodies and fails when either drifts. Cover registration, overlapped WSARecv readiness, completion dispatch, external wake, cancellation, deadline race, deregistration, stale packet rejection after registration reuse, terminal poller failure, scale, balanced operation/stream/interest retirement, and shutdown. On native windows-latest, compile and run production-generated Jet task/socket programs so the emitted body proves real sockets park tasks without blocking workers; separately execute the jet-codegen internal IOCP tests so the runtime body proves the same lifecycle. Windows-selected jobs must fail on missing runner, target, test, socket execution, or scenario; cfg presence, string scans, cross-compilation, skipped tests, and one-body inference close nothing. Compare AOT and jet dev observable stdout/stderr/exit/diagnostics/side effects under R12 and audit the scheduler native region under I1. Preserve already-correct IOCP docs; #527 remains open only for paired-body drift protection, native non-skip receipts, and independent claim closure. Record candidate revision, Windows/arch/toolchain, exact commands, scenario counts, counters, and run URL. No syntax, dependency, docs-generation mechanism, or owner gate.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "Fresh-review repair: removed nonexistent generation/doc work; replaced implementation criteria with residual paired-body conformance, real Windows non-skip execution, R12/I1, cleanup, and evidence only."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e8-planner",
@@ -17754,60 +18295,58 @@
       "criteria": [
         {
           "n": 1,
-          "text": "cfg(windows) IOCP registration, completion dispatch, cancellation, deadline wake, deregistration, and terminal shutdown are implemented without changing Jet task/channel/taskgroup syntax.",
+          "text": "One paired IOCP conformance matrix drives identical registration/readiness/wake/cancel/deadline/deregister/stale/fatal/scale/cleanup/shutdown scenarios against scheduler/io.rs and Prelude/Scheduler.rs and fails on behavioral drift.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:13.898Z"
+          "at": "2026-07-16T08:50:04.785Z"
         },
         {
           "n": 2,
-          "text": "Real socket readiness parks tasks without blocking worker threads, proven on native windows-latest CI (the portable-poll fallback is no longer selected on Windows).",
+          "text": "Native Windows runs production-generated Jet socket/task programs through the emitted Prelude IOCP body; real readiness parks without blocking workers and no portable fallback or skip is selected.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:14.022Z"
+          "at": "2026-07-16T08:50:04.785Z"
         },
         {
           "n": 3,
-          "text": "Cancel and deadline-wake fire exactly once per operation; operation allocation/retirement stays balanced (no leak) under a stress test.",
+          "text": "Native Windows separately executes the jet-codegen internal IOCP body with the same lifecycle scenarios; missing target/tool/test/socket execution is a hard failure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:14.144Z"
+          "at": "2026-07-16T08:50:04.785Z"
         },
         {
           "n": 4,
-          "text": "Port shutdown completes cleanly with no dangling completions or hung worker threads.",
+          "text": "Both bodies prove exactly-once cancellation/deadline completion, stale-packet rejection after reuse, terminal failure propagation, zero leaked operations/streams/interests/completions under scale, and bounded clean shutdown.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:14.268Z"
+          "at": "2026-07-16T08:50:04.785Z"
         },
         {
           "n": 5,
-          "text": "docs/plans/epoch-3/async-networking.md and platform-support docs state Windows IOCP as the real backend; no portable-fallback language remains for Windows.",
+          "text": "AOT and jet dev observable behavior remains identical under R12, I1 native-region audit passes, and durable receipts record candidate revision, Windows architecture/toolchain, commands, scenario counts, counters, and run URL for independent claim review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:14.397Z"
+          "at": "2026-07-16T08:50:04.785Z"
         }
       ],
       "refs": [
-        "crates/jet-codegen/src/scheduler.rs",
         "crates/jet-codegen/src/scheduler/io.rs",
         "crates/jet-codegen/src/Prelude/Scheduler.rs",
         "tests/scheduler_native.rs",
         "tests/dev.rs",
         ".github/workflows/ci.yml",
-        "docs/plans/epoch-3/async-networking.md",
         "docs/spec/spec.md",
-        "docs/reference/core-library.md"
+        "docs/spec/capability-claim-manifest.json"
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T02:47:09.812Z",
@@ -17954,6 +18493,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "fable-clerk",
           "text": "Clerical sweep: #360 and any interactive-TTY card consume this Theme; mechanical rollout, do early."
         },
@@ -18015,7 +18559,13 @@
           "at": "2026-07-14T11:48:05.348Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jet-cli/src/Help/Render.rs",
+        "crates/jet-repl/src/Render.rs",
+        "crates/jetpack/src/JetOS/theme_fleet_lifecycle.rs",
+        "tests/help_pty.rs",
+        "tests/cli.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-14T11:44:28.016Z",
       "updated": "2026-07-16",
@@ -19415,6 +19965,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced retired or nonexistent reference with exact live source, spec, example, and test anchors."
+        },
+        {
+          "at": "2026-07-16",
           "by": "sol-e3-planner",
           "text": "[plan-vetted] Propagated D-DX5-HOOK1=A and corrected host ownership to jet-pkg-model WASM component substrate. No new owner gate; advanced to ready."
         }
@@ -19470,7 +20025,9 @@
         "docs/spec/architecture.md",
         "docs/spec/spec.md",
         "docs/spec/syntax-decisions.md",
-        "crates/jet-driver/src/Prelude/Plugin.rs"
+        "crates/jet-pkg-model/src/Prelude/Plugin.rs",
+        "crates/jet-codegen/src/Codegen/Plugin.rs",
+        "tests/ui/plugin_e1260_unsupported_shape/main.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T14:09:00.927Z",
@@ -21503,13 +22060,16 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "ready",
       "priority": "P0",
-      "plan": "Ratified quantity laws now fix the foundation: D-SHAPE-QUANTITY1=A gives compiler-owned zero-cost dimensions; D-QUANTITY-DECL1=A extends closed `@UnitFamily` declarations with exact rational scale/offset metadata; D-QUANTITY-TYPE1=A supplies compiler-known `Quantity<Dimension, Kind>` bounds; D-QUANTITY-POINT1=A generates concrete Point/Delta types and their closed algebra. D-SHAPE-CONVERT1 still requires destination-owned, source-named conversions. D-QUANTITY-CONVERT1 remains the sole owner gate for written versus type-total implicit conversion, deterministic mixed-arithmetic representation/unit laws, affine result-unit laws, rounding, overflow, and the scoped `explicit_units` policy. After ratification, implement the complete declaration, sema, conversion, API/Codable/semver, diagnostics, inspect, examples, grammar, and AOT/dev vertical.",
-      "blockedBy": [
-        "D-QUANTITY-CONVERT1"
-      ],
+      "plan": "All quantity choices are ratified. Implement D-SHAPE-QUANTITY1=A compiler-owned zero-cost dimensions, D-QUANTITY-DECL1=A exact scale/offset declarations, D-QUANTITY-TYPE1=A generic Dimension/Kind bounds, D-QUANTITY-POINT1=A Point/Delta algebra, and D-QUANTITY-CONVERT1=B exact same-dimension implicit conversion in mixed arithmetic, arguments, and bindings. The finer operand unit wins mixed arithmetic; equal scales keep the left unit. Point conversion applies scale plus offset and Delta conversion applies scale only. Sema never rounds silently: inexact or overflowing boundaries reject with the destination-owned from_* or from_*_rounded fix. package.jet explicit_units and narrower #Policy(explicit_units) require written conversions through the normal policy ladder. Finish declaration, sema, API/Codable/semver, diagnostics, inspect, examples, grammar, and AOT/dev parity without a second conversion path.",
+      "blockedBy": [],
       "workOrder": 47.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[ratification] D-QUANTITY-CONVERT1=B is canonical; cleared stale decision blocker and rebased plan on exact implicit/finer-unit/#Policy law."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -24236,6 +24796,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "sol-e3-planner",
           "text": "[plan-vetted] Added shared formatter attachment fix plan with token-order proof."
         },
@@ -24279,7 +24844,13 @@
           "at": "2026-07-15T08:56:40.021Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jet-parser/src/Formatter/mod.rs",
+        "crates/jet-parser/src/Formatter/Statements.rs",
+        "tests/fmt.rs",
+        "tests/support/fmt_lossless.rs",
+        "examples/features/memory/shared_transact.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T08:55:48.945Z",
       "updated": "2026-07-16",
@@ -24716,6 +25287,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "claude-main",
           "text": "Review findings 1+3 fixed: 36-combo CARGO_PROFILE_* matrix + RUSTC_WRAPPER/WORKSPACE_WRAPPER + target-spec .json body now in semantic facts with rerun-if-env-changed; both install_immutable reuse-vouch paths dir-sync before Ok(false). Targeted green: concurrent_report_publication_is_atomic_and_exact 1/1, cache_identity_covers_every_ratified_digest 1/1. NOTE: sol workers for this slice were killed externally twice (owner codex-desktop concurrent agents live); orchestrator applied the two scoped edits directly per sol-skill escalation rule. Final full gate restarted."
         },
@@ -24778,7 +25354,13 @@
           "at": "2026-07-16T07:14:03.469Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/performance-budget-decisions.md",
+        "Source/CmdBudget.rs",
+        "Source/BudgetStore.rs",
+        "tests/cli.rs",
+        "tests/performance_budget_providers.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T18:57:09.810Z",
       "updated": "2026-07-16",
@@ -24800,6 +25382,11 @@
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "claude-main",
@@ -24859,7 +25446,12 @@
           "at": "2026-07-16T00:09:13.479Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jetpack/src/Provider.rs",
+        "tests/jetpack_dispatch.rs",
+        "tests/fixtures/jetpack-diagnostics/tool_provider_unavailable.stderr",
+        "docs/spec/diagnostics.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T18:59:43.052Z",
       "updated": "2026-07-16",
@@ -24881,6 +25473,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -24975,7 +25572,13 @@
           "at": "2026-07-16T00:03:36.768Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/spec.md",
+        "crates/jet-sema/src/Sema/CheckerOwnership.rs",
+        "tests/ownership.rs",
+        "examples/features/memory/ownership.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:04.630Z",
       "updated": "2026-07-16",
@@ -24998,6 +25601,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-ratifier",
@@ -25101,7 +25709,14 @@
           "at": "2026-07-16T00:03:37.006Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/spec.md",
+        "crates/jet-sema/src/Sema/CheckerOwnership.rs",
+        "tests/ui/view_outlives_owner.jet",
+        "tests/ownership.rs",
+        "examples/features/memory/string_view.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:04.748Z",
       "updated": "2026-07-16",
@@ -25232,6 +25847,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "fable-clerk",
           "text": "Clerical sweep: sequence after #657's common applicability matrix to avoid a second policy-merge mechanism (I8)."
         },
@@ -25338,7 +25958,14 @@
           "at": "2026-07-16T00:03:37.237Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/spec.md",
+        "crates/jet-sema/src/Sema/CheckerOwnership.rs",
+        "crates/jet-codegen/src/Prelude/Mem.rs",
+        "tests/tir_unsafe_and_runtime.rs",
+        "tests/ui/lowlevel_from_addr_without_unsafe.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:05.002Z",
       "updated": "2026-07-16",
@@ -25573,6 +26200,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "owner",
           "text": "Verdict recorded (D-VERDICT-648-1): A — regions implicit and scope-inferred by default; explicit #Region(r) expert tier (respelled by D-BLOCKPLANE1); arena :: mem.Arena.new(capacity: N); arena.alloc(value) returns scope-bound view (escape E0631, use-after-reset/free E0632); arenas live flat in core.mem; not #Unsafe. Historical backfill: ratified 2026-06-19, recorded in docs/spec/syntax-decisions.md (Arenas & regions entry); board decisions[] was missing the record (cited by #648/#644). D-NOALLOC-SEM1 needs no backfill: exists archived, ratified A 2026-07-04."
         },
@@ -25630,7 +26262,13 @@
           "at": "2026-07-16T00:09:14.317Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-codegen/src/Prelude/Mem.rs",
+        "tests/ownership.rs",
+        "examples/features/memory/arena.jet",
+        "examples/features/memory/pool_stale_id.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:05.377Z",
       "updated": "2026-07-16",
@@ -25651,6 +26289,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -25709,7 +26352,14 @@
           "at": "2026-07-16T00:03:37.696Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/spec.md",
+        "crates/jet-sema/src/Sema/CheckerOwnership.rs",
+        "tests/ownership.rs",
+        "tests/ui/view_outlives_owner.jet",
+        "tests/ui/arena_view_after_reset.jet",
+        "examples/features/memory/string_view.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:05.496Z",
       "updated": "2026-07-16",
@@ -25780,6 +26430,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "sol-e3-planner",
           "text": "[plan-vetted] Added fail-closed ingest plan; silent hash/registration short-circuit eliminated at shared root."
         }
@@ -25822,7 +26477,13 @@
           "at": "2026-07-16T00:09:14.684Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jetpack/src/Store/Ingest.rs",
+        "crates/jetpack/src/Store.rs",
+        "crates/jetpack/src/Store/Tests.rs",
+        "crates/jet-pkg-model/src/Envelope.rs",
+        "tests/jetpack_hangar_store_v2.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T20:01:44.200Z",
       "updated": "2026-07-16",
@@ -26739,6 +27400,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
+        {
+          "at": "2026-07-16",
           "by": "claude-main",
           "text": "Adversarial review (independent sol): harness CLEAN, expected-output changes all derived from implementation (envelope 192 = 82 header + 80 stanza + 4 len + 10 pt + 16 tag; 616 was stale), 5 frontend rejections intended. TWO coverage findings: pipeline fixture lost DataJoin field/Option-arm typing (joins only reach data.count); sign fixture lost fixed RFC8032 seed→pubkey relation (correlated keygen/sign/verify defects could self-pass). Fix worker dispatched; C1 verification held until findings repaired + re-checked."
         },
@@ -26796,7 +27462,13 @@
           "at": "2026-07-16T00:29:17.203Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "tests/sema_soundness.rs",
+        "tests/fuzz/sema/valid/ex_crypto_hash.jet",
+        "tests/fuzz/sema/valid/ex_net_http_rest_service.jet",
+        "tests/fuzz/sema/valid/ex_tooling_data_pipeline.jet",
+        "docs/reference/core-library.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T23:47:25.156Z",
       "updated": "2026-07-16",
@@ -26818,6 +27490,11 @@
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "claude-main",
@@ -26882,7 +27559,13 @@
           "at": "2026-07-16T00:29:17.439Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "tests/jetpack_truth.rs",
+        "tests/truthfulness.rs",
+        "docs/spec/capability-claim-manifest.json",
+        "docs/reference/capability-claims.md",
+        "docs/plans/epoch-3/capability-ledger-report.json"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T23:47:25.281Z",
       "updated": "2026-07-16",
@@ -26906,6 +27589,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Added exact current source, spec, example, and test anchors; plan semantics unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -26950,7 +27638,13 @@
           "at": "2026-07-16T00:29:17.673Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "tests/lsp.rs",
+        "Source/LSP/Features.rs",
+        "crates/jet-sema/src/Sema/CheckerOwnership.rs",
+        "docs/spec/syntax-decisions.md",
+        "tests/ui/string_view_outlives_owner.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T23:47:40.474Z",
       "updated": "2026-07-16",
@@ -27053,6 +27747,11 @@
       "log": [
         {
           "at": "2026-07-16",
+          "by": "sol-e3-refs",
+          "text": "[plan-metadata] Replaced three blank checklist rows with measurable isolation criteria."
+        },
+        {
+          "at": "2026-07-16",
           "by": "sol-e3-planner",
           "text": "[plan-vetted] Root cause confirmed in source: HOME/helper tests use STORE_LOCK while signing tests use a separate KEYS_LOCK. Planned one-lock test-only fix; production signing remains untouched."
         }
@@ -27060,27 +27759,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "",
+          "text": "Each key-rotation test uses an isolated HOME, key directory, and helper process environment; no process-global path mutation can race sibling tests.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "",
+          "at": "2026-07-16T09:03:03.434Z"
         },
         {
           "n": 2,
-          "text": "",
+          "text": "key_rotation_warns_not_errors deterministically returns success with the intended warning, preserves key material, and distinguishes real signing failures.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "",
+          "at": "2026-07-16T09:03:03.434Z"
         },
         {
           "n": 3,
-          "text": "",
+          "text": "Repeated parallel pkg runs, the focused test target, independent review, and full repository verification pass without serialization or weakened assertions.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "",
+          "at": "2026-07-16T09:03:03.434Z"
         }
       ],
       "refs": [
@@ -27783,41 +28485,77 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Per area (build entry; generated source additive+lock+--locked; authority tiers 0/1/2 + #Impure permits + dependency-deny + provenance; observe/enforce ProgramInfo + b.error; build scope grant chain; nine typed targets; declared actions; toolchains/probes; execution cache/scheduler; graph inspection UX; legacy interop; plugins (rides #549); front-end toolkit (rides #129); DSL blocks): probe the ratified behavior with a targeted test or command; where shipped, record evidence; where missing/partial, mint a scoped gap card in e5. Diagnostics claimed by spec (E35xx) must each have a tests/ui snapshot (I4).",
+      "plan": "Audit first; do not rebuild the fn-build arc. Build a decision-to-evidence matrix for every ratified build-system law in syntax-decisions.md and metaprogramming.md sections 12 and 15. For each law, trace the existing crates/jet-comptime Build implementation through driver materialization and Source/CmdCompile.rs, then run the smallest targeted test or command that proves the public behavior. Credit shipped behavior and retired-card evidence. When behavior is absent or narrower than the ratified law, add one narrowly scoped Epoch 5 gap card with exact dependencies, criteria, and refs; never duplicate an existing owner. Audit E3501-E3505, E3512, and E3530 separately for registration, reachable what/why/fix output, and pinned coverage. Finish with a board reconciliation showing every audited row as shipped evidence or one residual card. This card produces an evidence ledger and gap cards only; it changes no compiler behavior.",
       "blockedBy": [],
       "workOrder": 200,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "mira-e5-planner",
+          "text": "[e5-plan] Rebased as audit-only evidence ledger. Exact build seams, diagnostics, duplicate avoidance, and residual-card rules now pinned."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "Every §15/§12 area has recorded evidence (test/command output) or a filed gap card; none left unprobed.",
+          "text": "Every ratified build-entry, generation, authority, observation, scope, typed-graph, action, toolchain, probe, cache, scheduler, inspection, interop, plugin, frontend, and DSL-block law has one current implementation/test evidence row or one existing/new residual card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:49:07.918Z"
+          "at": "2026-07-16T09:02:32.926Z"
         },
         {
           "n": 2,
-          "text": "Every E35xx diagnostic the spec names has a tests/ui snapshot or a gap card (I4).",
+          "text": "Each evidence row traces the real path from crates/jet-comptime/src/Comptime/Build through jet-driver and Source/CmdCompile.rs and records a targeted reproducible command or test result; retired-card claims alone are not accepted.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:49:08.058Z"
+          "at": "2026-07-16T09:02:32.926Z"
         },
         {
           "n": 3,
-          "text": "Board reconciliation note: retired done cards cross-referenced; no duplicate e5 card minted for shipped behavior.",
+          "text": "E3501-E3505, E3512, and E3530 are each checked for diagnostics.md registration, reachable Jet-owned what/why/fix output, and pinned test coverage; every missing cell has one scoped gap card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:49:08.185Z"
+          "at": "2026-07-16T09:02:32.926Z"
+        },
+        {
+          "n": 4,
+          "text": "Every residual gap card names only unshipped behavior, carries stable blockers plus exact refs and acceptance criteria, and does not duplicate #549, #129, another open card, or credited shipped work.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T09:02:32.926Z"
+        },
+        {
+          "n": 5,
+          "text": "Final reconciliation maps every audit row to evidence or a residual card, cross-references retired owners, and leaves Tower lint clean with no broad fn-build reimplementation card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T09:02:32.926Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-5/metaprogramming.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md",
+        "crates/jet-comptime/src/Comptime/Build.rs",
+        "crates/jet-comptime/src/Comptime/Build/context.rs",
+        "crates/jet-comptime/src/Comptime/Build/plan_graph.rs",
+        "crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs",
+        "Source/CmdCompile.rs",
+        "tests/build_entry.rs",
+        "tests/build_graph.rs",
+        "tests/diagnostics_coverage.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:49:07.785Z",
       "updated": "2026-07-16"
@@ -27826,39 +28564,96 @@
       "id": "c0cqh9xs",
       "num": 673,
       "title": "Computed module fields and pure-eval pull-up",
-      "body": "Owner-chosen direction (recorded): full computed modules — expressions in module { } fields — with pure-eval pulled up from post-v1; 4-stage arc; extend the shipped comptime substrate, never greenfield; pack.jet->env.jet is a clean break with no alias. Spelling/semantics for computed fields are NOT yet ratified — ballot required before any code.",
+      "body": "Owner direction is full computed module fields by extending the shipped comptime evaluator. Current crates/jet-env-model ModuleEval already evaluates many non-package field expressions, including if/else and pure function calls, and rejects known ambient calls with E3402. The unratified residual is the complete Tier-0 binding/dependency law, cycle behavior, Tier-1 boundary, and exact diagnostics. env.jet/config.jet are canonical; no pack.jet alias.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
-      "plan": "BALLOT FIRST: mint the computed-module-fields decision (evaluation model, allowed expression tier, error surface, interaction with fn build authority tiers) via jet-ballot; card stays planning until ratified. After ratification: staged implementation extending crates/jet-comptime (Purity.rs tier machinery, Methods.rs builtins), sema wiring, diagnostics + snapshots, golden examples per stage.",
-      "blockedBy": [],
+      "plan": "BALLOT FIRST: D-MODCOMPUTE1 decides the residual law while preserving shipped expression evaluation. Until ratified, change no source acceptance. After ratification, extend the existing crates/jet-env-model/src/ModuleEval path and shared jet-comptime interpreter; do not add a second evaluator or parser. First pin a truth matrix for literals, if/else, pure functions, top-level const/comptime bindings, sibling fields, cycles, Tier-1 reads, Tier-2 denial, fuel/errors, and every Env/System/Image/Fleet/VM-test consumer. Then implement only missing selected behavior with front-end validation before evaluation, deterministic dependency order, and one registered what/why/fix diagnostic per distinct rule. Preserve packages/imports special forms and fn-build authority separation. Prove identical checked results through direct ModuleEval, jetpack/jetos commands, and driver consumers; add examples and snapshots only for new user-visible behavior. Remove stale docs claiming literal-only fields or paths under Source/Jetpack. No Syntax.rs or grammar regeneration unless the ratification actually adds user-typeable spelling.",
+      "blockedBy": [
+        "D-MODCOMPUTE1"
+      ],
       "workOrder": 210,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "mira-e5-planner",
+          "text": "[e5-plan] Rebased on shipped jet-env-model ModuleEval. Residual decision gate, shared-evaluator path, truth matrix, consumers, and diagnostics now exact."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "Computed-module-fields ballot minted (gist/story/worked options/rec) and ratified before any implementation.",
+          "text": "D-MODCOMPUTE1 is ballot-ready, reviewed against current ModuleEval behavior and ratified before any new source acceptance; the card is blocked only by that live decision meanwhile.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:49:08.441Z"
+          "at": "2026-07-16T09:03:57.430Z"
         },
         {
           "n": 2,
-          "text": "Each ratified stage lands end-to-end (parser->sema->comptime->diagnostics+ui snapshots->golden example) before the next begins.",
+          "text": "A pre-change matrix proves what already ships for literals, if/else, pure functions, bindings, sibling references, cycles, Tier-1 reads, Tier-2 denial, fuel, and all module-plan consumers, preventing reimplementation or accidental regression.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:49:08.567Z"
+          "at": "2026-07-16T09:03:57.431Z"
+        },
+        {
+          "n": 3,
+          "text": "The selected law is implemented through crates/jet-env-model ModuleEval and the shared jet-comptime interpreter with front-end type/purity validation, deterministic dependency order, no duplicate evaluator, and no fn-build authority leak.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T09:03:57.431Z"
+        },
+        {
+          "n": 4,
+          "text": "Every new rejection has a registered diagnostics.md what/why/fix entry and pinned snapshot; cycles name the full chain, impure calls name the call path, and rustc/codegen never decides module semantics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T09:03:57.431Z"
+        },
+        {
+          "n": 5,
+          "text": "Targeted tests cover direct ModuleEval plus Env, System, Image, Fleet, VM-test, jetpack/jetos, locked/offline behavior selected by the ballot, and stale documentation; examples show the beginner default and expert audit output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T09:03:57.431Z"
+        },
+        {
+          "n": 6,
+          "text": "Full verification passes with existing package/import special forms unchanged, current shipped computed expressions preserved, and no pack.jet alias, duplicate parser, placeholder, or unratified syntax.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T09:03:57.431Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md",
+        "docs/spec/spec.md",
+        "docs/plans/epoch-5/metaprogramming.md",
+        "crates/jet-env-model/src/ModuleEval/mod.rs",
+        "crates/jet-env-model/src/ModuleEval/Eval.rs",
+        "crates/jet-env-model/src/ModuleEval/Source.rs",
+        "crates/jet-comptime/src/Comptime/mod.rs",
+        "crates/jet-comptime/src/Comptime/Purity.rs",
+        "tests/fleet.rs",
+        "tests/image.rs",
+        "tests/workspace_crates.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:49:08.316Z",
       "updated": "2026-07-16"
@@ -46929,10 +47724,10 @@
         },
         {
           "key": "B",
-          "name": "Exact implicit conversion with canonical rational results",
-          "detail": "Same-dimension code omits a conversion only when it is total for the complete source type. Mixed arithmetic uses a canonical base-unit exact-rational intermediate. It is expression-only and cannot become a field, ordinary argument, return, public type, or wire value. It may flow directly into one destination-owned checked or rounded conversion call, which chooses storage and ends the intermediate. The scoped `explicit_units` policy requires written calls.",
-          "technical": "The compiler-inserted step is exactly the destination-owned `Destination.from_source` semantic operation with syntax omitted. It uses the same normalized scale, offset, provenance, and diagnostics. Expected-type coercion is allowed only when sema proves that operation succeeds for every value of the source representation. It never inserts a value-dependent or fallible coercion. Mixed linear plus or minus linear uses a base linear exact-rational intermediate. Delta plus or minus Delta uses a base Delta intermediate. Point plus or minus Delta and Delta plus Point use a base Point intermediate. Point minus Point uses a base Delta intermediate. Point inputs use scale plus offset; every Delta uses scale only. Point plus Point and Delta minus Point remain errors. The intermediate uses an arbitrary-precision signed numerator and positive denominator, reduced by their greatest common divisor. It has no numeric overflow and no public or Codable form. Sema rejects binding, field, collection, ordinary argument, return, export, or serialization boundaries. The sole boundary exemption is the direct argument of a destination-owned checked or rounded conversion from A; that call consumes the intermediate and produces a concrete representation. `policy: .{ explicit_units: true }` sets the package floor. Post-D-SHAPE2 `@Policy(explicit_units)` may strengthen a module, function, or block. Neither form may weaken the package floor.",
-          "code": "segment :: 1meter\ncalibration :: 1foot\nwire_mm :: Millimeter.from_meter(segment + calibration)?\n// exact 1631/1250 meter intermediate; direct conversion argument is allowed\n\nstart :: CelsiusPoint.from_float(20.0)?\nrise :: FahrenheitDelta.from_float(9.0)?\nwire_next :: CelsiusPoint.from_kelvin_point(start + rise)?\nwire_prior :: CelsiusPoint.from_kelvin_point(start - rise)?\n// the intermediate uses the Kelvin base; one call chooses Celsius storage\n\npub fn total_mm(a: Meter, b: Foot) -> Millimeter ? {\n    Millimeter.from_meter(a + b)?\n}\n// Public API and Codable see only Millimeter. The intermediate has no wire form.\n\n# package.jet\npolicy: .{ explicit_units: true }\n\n@Policy(explicit_units)\nmodule dosing\n\nsegment + calibration\n// error[E0127]: explicit_units requires a written conversion\n// fix: Meter.from_foot(calibration)?"
+          "name": "Exact implicit conversion by default; explicit-only policy opt-in",
+          "detail": "Same-dimension units convert implicitly wherever the conversion is exact. Mixed arithmetic chooses the finer operand unit so ordinary integral measurements stay exact; equal scales keep the left unit. Exact destination coercions also work for bindings and arguments. The compiler never rounds silently: if exactness cannot be proven, E0127 names the checked or rounded destination-owned conversion to write. Teams may require written conversions with the explicit_units policy at package, module, function, or block scope.",
+          "technical": "Implicit conversion uses the same normalized family scale, offset, provenance, overflow, and diagnostic facts as the destination-owned source-named conversion call. Linear and Delta arithmetic chooses the finer scale; equal scales keep the left unit. Point plus or minus Delta and Delta plus Point use the Point unit, while Point minus Point returns the paired Delta. Point conversion applies scale plus offset; Delta applies scale only. Binding and argument coercion is inserted only when sema proves the concrete value/expression or complete source domain converts exactly; otherwise E0127 requires an explicit checked or rounded call. Point plus Point and Delta minus Point remain errors. `policy: .{ explicit_units: true }` sets the package floor. `#Policy(explicit_units)` may strengthen a module, function, or block; narrower scopes cannot weaken the inherited floor.",
+          "code": "inner_diameter_mm :: 42millimeter\nlength_m :: 3meter\ntotal :: length_m + inner_diameter_mm\n// 3042millimeter: the finer unit wins, exactly\n\nfn cut(width: Millimeter) { ... }\ncut(length_m)\n// exact meter -> millimeter argument conversion\n\nwhole_km: Kilometer :: 1500meter\n// error[E0127]: Meter cannot convert exactly to whole Kilometer\n// fix: Kilometer.from_meter_rounded(1500meter, .NearestEven, digits: 0)?\n\n# package.jet\npolicy: .{ explicit_units: true }\n\n#Policy(explicit_units)\nmodule dosing"
         },
         {
           "key": "C",
@@ -47329,60 +48124,63 @@
     {
       "id": "D-MODCOMPUTE1",
       "cardId": "c0cqh9xs",
-      "group": "syntax",
-      "title": "Computed module fields: evaluation tier, cycle law, and error surface",
-      "gist": "The evaluation law for expressions in module block fields: which comptime tier is allowed, how cycles between fields fail, and the beginner error on a rejected expression.",
-      "lesson": "The owner chose the direction: full computed modules, with pure-eval pulled up from post-v1, extending the shipped comptime substrate rather than a new one. Today module fields accept only literals. The comptime interpreter already exists: a fuel-limited sema tree-walker (S26), a purity check that rejects impure calls as E0951 (Purity.rs), and effect tiers set by D-CTEFFECT1. This ballot fixes how far a field expression may reach, the cycle law, and the error surface. The options span how far full reaches.",
+      "group": "runtime",
+      "title": "Computed module fields: dependency and effect law",
+      "gist": "Choose whether computed module fields may depend on other fields and whether locked file or network reads belong in their default evaluation.",
+      "lesson": "A computed module field is a configuration value produced by an expression during planning. Jet already evaluates many field expressions through its shared compile-time interpreter. Literals, conditionals, and pure helper calls work today. This ballot does not invent another evaluator or another field spelling.\n\nPure evaluation means the answer depends only on declared values and pure code. A dependency graph records which field needs which other field. Jet can evaluate that graph in dependency order. A loop such as `name` needing `label` while `label` needs `name` has no first value, so planning must reject it and print the full loop.\n\nTier 1 operations read external inputs reproducibly. Examples are embedding a file or fetching content with a required hash. The lock records those exact inputs. Tier 2 operations read ambient state such as an environment variable or unpinned network response. They remain forbidden in module fields under every option.\n\nThe choice matters because module files are read as declarations. Beginners need ordinary values and pure helpers to work without build-policy ceremony. Experts need deterministic ordering, exact provenance, and a clear boundary between configuration evaluation and the separate `fn build` authority model.",
       "explainer": "",
-      "story": "Marco maintains a jetpack package. Today his `pkg.jet` version is the literal `\"1.4.0\"`, duplicated in a banner string elsewhere. He wants to write the version once as a constant and compute both fields from it, so a release bump touches one line.",
-      "inWild": "A `pkg.jet` sets `version: base_version` and `banner: \"pkg \" + base_version`, where `base_version` is a `comptime` constant. The question is what a field expression may reference and evaluate.",
+      "story": "Mara declares one development environment. Its label, prompt, and banner share a computed release name. She wants one source value, clear cycle errors, and no surprising host reads when CI evaluates the same file.",
+      "inWild": "comptime release = \"1.4.0\"\n\nmodule env.dev {\n  label: \"ledger \" + release\n  prompt: label + \" > \"\n}",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Any Tier-0 pure comptime expression",
-          "detail": "A field may hold any Tier-0 pure comptime expression: literals, `const`/`comptime` references, arithmetic, string and `if` expressions, and wholly-pure function call graphs. This is the law D-GENMOD-VALUE1 already applies to generic value parameters. Fields evaluate once at sema, with no I/O. Fields that reference each other in a loop are a compile error naming the chain.",
-          "code": "pkg.jet\n  comptime base = \"1.4.0\"\n  version: base\n  banner:  \"pkg \" + base + \" ready\"   # -> \"pkg 1.4.0 ready\"\n\nBoth fields evaluate once at sema.\n\nViolation: a field calls an impure function.\n  version: read_env(\"VERSION\")\n\nerror[E0951]: comptime code reaches an impure operation\n  --> pkg.jet: field `version`\n   = this field runs at compile time; `read_env` reads ambient state\n   = fix: use a `comptime` constant or a pure expression\n\nViolation: two fields reference each other.\n  a: b\n  b: a\nerror (E0855-class): circular field evaluation: a -> b -> a"
+          "name": "Pure dependency graph",
+          "detail": "Fields may use any Tier-0 pure expression, top-level immutable compile-time values, pure helper call graphs, and other fields in the same module. Jet evaluates dependencies in deterministic order. A cycle fails before a plan exists and names the complete chain. Tier-1 and Tier-2 reads are rejected.",
+          "technical": "Reuse jet-env-model ModuleEval and jet-comptime. Build a field dependency graph after front-end name/type/purity validation. Evaluate each node once in topological order, using source order to break independent ties. No field gains BuildContext, #Impure, filesystem, network, environment, clock, or randomness authority. Allocate and snapshot exact cycle and forbidden-tier diagnostics before implementation.",
+          "code": "comptime release = \"1.4.0\"\nmodule env.dev {\n  label: \"ledger \" + release\n  prompt: label + \" > \"\n}\n\n$ jet env\nlabel: ledger 1.4.0\nprompt: ledger 1.4.0 >\n\nmodule env.bad { a: b, b: a }\nError: module fields form a cycle: `a -> b -> a`\n Why: each field needs another field before either has a value\n Fix: remove one dependency or compute both from one top-level `comptime` value"
         },
         {
           "key": "B",
-          "name": "Literals plus a fixed pure-stdlib whitelist",
-          "detail": "A field may hold literals, `const` references, and a fixed whitelist of pure stdlib calls (string concat, path join, arithmetic). No user function calls, no general expression evaluation. The accepted set is closed and named in the diagnostic.",
-          "code": "pkg.jet\n  version: \"1.4.0\"\n  banner:  concat(\"pkg \", \"1.4.0\", \" ready\")   # whitelisted call\n\nViolation: a user function call is not on the whitelist.\n  version: derive_version()\n\nerror: this call is not allowed in a module field\n   = allowed here: literals, const references, and the pure\n     stdlib whitelist (concat, join, add, sub, ...)\n   = fix: replace with a whitelisted expression or a literal"
+          "name": "Independent pure fields",
+          "detail": "Fields may use Tier-0 expressions, top-level immutable compile-time values, and pure helper calls, but cannot name another field. Each field evaluates independently, so module-field cycles cannot exist. Shared values must be lifted to a top-level `comptime` binding.",
+          "technical": "Reuse the current per-field evaluator with a validated top-level immutable environment. Reject a field name during expression resolution. Tier-1 and Tier-2 remain forbidden. `fn build` authority stays separate.",
+          "code": "comptime release = \"1.4.0\"\nmodule env.dev {\n  label: \"ledger \" + release\n  prompt: label + \" > \"\n}\nError: module field `prompt` cannot read sibling field `label`\n Why: each field evaluates independently\n Fix: compute the shared text in a top-level `comptime` value"
         },
         {
           "key": "C",
-          "name": "Tier-0 plus Tier-1 locked reads",
-          "detail": "Everything in A, plus Tier-1 hashed-reproducible reads inside fields: `find(glob)`, `embed_file`, `fetch(url, sha256:)`. Each read is recorded to `.jet/lock` for provenance (D-CTEFFECT1). A field can list members from `find(\"packages/*\")`. Tier-2 ambient stays excluded.",
-          "code": "pkg.jet\n  comptime base = \"1.4.0\"\n  version: base\n  members: find(\"packages/*\")     # Tier-1: recorded to .jet/lock\n\n.jet/lock gains:\n  field members: find(\"packages/*\") -> [app, core, ui]  (hash ...)\n\nViolation: a Tier-2 ambient read (still excluded).\n  token: read_env(\"TOKEN\")\n\nerror[E0951]: comptime code reaches an impure operation\n   = `read_env` is Tier-2 ambient; module fields allow only\n     Tier-0 pure and Tier-1 locked reads\n   = fix: use find/embed_file/fetch(sha256:) or a pure expression"
+          "name": "Graph plus locked reads",
+          "detail": "Everything in A also permits Tier-1 file discovery, embedding, and hash-pinned fetches. Every external input is recorded in the unified lock and reproduced offline. Tier-2 ambient reads remain forbidden.",
+          "technical": "Field identity and plan provenance include the exact Tier-1 operation, normalized declared path or URL, content digest, lock schema, and dependency graph. Missing or changed locked inputs fail closed under --locked/offline. No Tier-1 operation falls through to host state or fn-build grants.",
+          "code": "module env.dev {\n  banner: embed_file(\"./banner.txt\")\n  prompt: banner + \" > \"\n}\n// .jet/lock records the declared path and exact content digest\n\nmodule env.bad { token: env_var(\"TOKEN\") }\nError: `env_var` is ambient and cannot run in a module field\n Why: module fields allow only locked external inputs\n Fix: pass a declared value or move the operation to an authorized `fn build` action"
         }
       ],
       "comparisons": [
         {
-          "lang": "Cargo.toml",
-          "note": "Cargo manifests are literal-only. Version and deps cannot be computed, so projects duplicate the version across files or add a build script to inject it.",
-          "code": "version = \"1.4.0\"   # no expression allowed"
+          "lang": "Nix",
+          "note": "Nix lets configuration values depend on other values, but filesystem and import effects can be less obvious at the use site.",
+          "code": "let release = \"1.4.0\"; in { label = \"ledger ${release}\"; }"
         },
         {
-          "lang": "Nix",
-          "note": "Nix evaluates arbitrary expressions in config fields, including filesystem reads and imports. That is powerful, but it pulls I/O and evaluation order into what reads as static config.",
-          "code": "version = base + \".0\";\nsrcs = builtins.readDir ./packages;"
+          "lang": "Cargo",
+          "note": "Cargo manifests keep fields independent and literal-like; shared computation usually moves into a separate build script.",
+          "code": "version = \"1.4.0\""
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A directly matches the recorded direction: pure-eval pulled up. It reuses the Tier-0 pure interpreter that D-GENMOD-VALUE1 already runs for value parameters, so module fields and value parameters share one evaluation law (I8).",
+        "why": "A completes the owner's pure-computed direction with one existing interpreter. Shared field dependencies stay natural for beginners, while experts receive deterministic graph order and exact cycle evidence without granting host authority.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Forbids user pure functions, so it cannot express the owner's full computed modules; Marco must inline string concatenation and still cannot factor logic into a helper."
+            "reason": "It makes harmless field reuse indirect. Users must lift values out of the module solely to avoid a dependency graph the planner can prove safely."
           },
           {
             "key": "C",
-            "reason": "Pulls Tier-1 filesystem and network reads plus `.jet/lock` provenance into manifest evaluation, so a static-looking field can read files or fetch. Better as a later opt-in ballot than the first law."
+            "reason": "It mixes pure declarations with external input authority. Locked reads remain available through explicit build and input surfaces without widening every module field."
           }
         ],
-        "tradeoff": "A evaluates once at sema and never reads the filesystem, so a field cannot be computed from `find(\"packages/*\")`. A project that wants a find-driven member list waits for a Tier-1 extension ballot."
+        "tradeoff": "A field name becomes part of other fields' dependency graph, so renaming it can break those dependents. That coupling is acceptable because it is explicit, checked, and reported before any plan runs."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -48691,6 +49489,510 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T09:13:49.817Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0fiunwy",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-07-16T09:12:06.979Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0d1a7ds",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T09:12:06.795Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0oqtn3i",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T09:12:06.616Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T09:12:06.432Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0qdl0gg",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T09:12:06.243Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0xede68",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T09:12:06.058Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0vt1qwz",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T09:12:05.881Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0skyr40",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T09:10:09.502Z",
+      "by": "codex-root",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-CONVERT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T09:07:45.069Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0t6owk6",
+      "note": "plan,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T09:07:25.274Z",
+      "by": "mira-e5-planner",
+      "action": "decision.update",
+      "ref": "D-MODCOMPUTE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T09:05:49.966Z",
+      "by": "mira-e5-planner",
+      "action": "decision.update",
+      "ref": "D-MODCOMPUTE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T09:03:57.431Z",
+      "by": "mira-e5-planner",
+      "action": "card.update",
+      "ref": "c0cqh9xs",
+      "note": "body,plan,criteria,refs,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T09:03:03.434Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0a11xwo",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T09:03:03.244Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c06tng04",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T09:02:32.926Z",
+      "by": "mira-e5-planner",
+      "action": "card.update",
+      "ref": "c03yjo5l",
+      "note": "plan,criteria,refs,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T09:01:48.151Z",
+      "by": "mira-e5-planner",
+      "action": "decision.update",
+      "ref": "D-MODCOMPUTE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T08:58:26.612Z",
+      "by": "sol-e3-refs",
+      "action": "card.criteria-add",
+      "ref": "c0hxraci",
+      "note": "#5 Focused dev, web-dev, watcher, persistence, and hostile inva"
+    },
+    {
+      "at": "2026-07-16T08:58:26.456Z",
+      "by": "sol-e3-refs",
+      "action": "card.criteria-add",
+      "ref": "c0hxraci",
+      "note": "#4 Real browser and native matrices prove edit-to-visible budge"
+    },
+    {
+      "at": "2026-07-16T08:58:26.296Z",
+      "by": "sol-e3-refs",
+      "action": "card.criteria-add",
+      "ref": "c0hxraci",
+      "note": "#3 Typed @persist migration and client/server hot replacement c"
+    },
+    {
+      "at": "2026-07-16T08:58:26.137Z",
+      "by": "sol-e3-refs",
+      "action": "card.criteria-add",
+      "ref": "c0hxraci",
+      "note": "#2 jet run --watch and jet dev use the same engine; rename, del"
+    },
+    {
+      "at": "2026-07-16T08:58:25.977Z",
+      "by": "sol-e3-refs",
+      "action": "card.criteria-add",
+      "ref": "c0hxraci",
+      "note": "#1 One typed dependency graph records imports, assets, HTML/sty"
+    },
+    {
+      "at": "2026-07-16T08:58:25.814Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0hxraci",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:25.629Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0wwekr6",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:25.448Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0xmzy4p",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:25.263Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0vkhjuk",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:25.078Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c08wtn3k",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:24.897Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c09minfo",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:24.718Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c07nt4xr",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:24.541Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c01gqgxn",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:24.366Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0x9dh3l",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:24.187Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0vb511d",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:24.005Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0rxl8sx",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:23.821Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0dl51v1",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:23.640Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c021vh50",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:23.459Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c02ydczm",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:23.278Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c11pkkov",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:23.096Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0todzv8",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:22.919Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0r5ttg9",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:22.741Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0ok76h1",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:22.567Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0md55xu",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:22.390Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0frdmrx",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:22.212Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0ddul2b",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:22.034Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:21.849Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:21.673Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c06tng04",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:21.494Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:21.313Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:21.134Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:20.953Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0wx96s2",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:20.776Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:20.596Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0fiunwy",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:20.419Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "caq065h8",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:20.236Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c9q0534j",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:20.052Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c8q043mt",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:19.873Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:19.699Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "caffiunify",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:19.522Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:19.340Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c2yj0nk5",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:19.154Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:18.976Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c2qj06uq",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:18.791Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c2lizsmx",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:18.615Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c2fizfx3",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:18.434Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c29iz43a",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:18.252Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "csivxv0",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:58:18.075Z",
+      "by": "sol-e3-refs",
+      "action": "card.update",
+      "ref": "c164",
+      "note": "logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:50:04.785Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0fylvpy",
+      "note": "plan,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:50:04.535Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0t4root",
+      "note": "plan,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:50:04.286Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0zqnb18",
+      "note": "plan,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:50:04.039Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:50:03.791Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "plan,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:50:03.543Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c144",
+      "note": "plan,refs,criteria,logEntry"
+    },
     {
       "at": "2026-07-16T08:41:54.830Z",
       "by": "e9-plan-builder",
@@ -51686,510 +52988,6 @@
       "action": "card.criteria-add",
       "ref": "c0ewd6kd",
       "note": "#2 Gesture scenario does the same under jet dev and asserts the"
-    },
-    {
-      "at": "2026-07-16T04:52:34.028Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ewd6kd",
-      "note": "#1 Gesture scenario sets a breakpoint via the graph, runs the p"
-    },
-    {
-      "at": "2026-07-16T04:52:33.905Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0ewd6kd",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:33.757Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ocarv7",
-      "note": "#6 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Cut/cop"
-    },
-    {
-      "at": "2026-07-16T04:52:33.636Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ocarv7",
-      "note": "#5 Gesture scenario uses Ctrl+Shift+V or the context-menu Paste"
-    },
-    {
-      "at": "2026-07-16T04:52:33.515Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ocarv7",
-      "note": "#4 Gesture scenario asserts rename chips appear after an auto-r"
-    },
-    {
-      "at": "2026-07-16T04:52:33.389Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ocarv7",
-      "note": "#3 Gesture scenario pastes a selection with unresolved inputs a"
-    },
-    {
-      "at": "2026-07-16T04:52:33.266Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ocarv7",
-      "note": "#2 Gesture scenario copies a self-contained selection and paste"
-    },
-    {
-      "at": "2026-07-16T04:52:33.141Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0ocarv7",
-      "note": "#1 Gesture scenario marquee-drags over 3 nodes and asserts all "
-    },
-    {
-      "at": "2026-07-16T04:52:33.015Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0ocarv7",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:32.864Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0tfsrts",
-      "note": "#4 Regression scenario reproduces the js.rs:3599 case, typing a"
-    },
-    {
-      "at": "2026-07-16T04:52:32.739Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0tfsrts",
-      "note": "#3 Regression scenario reproduces the js.rs:3723 case, rewiring"
-    },
-    {
-      "at": "2026-07-16T04:52:32.617Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0tfsrts",
-      "note": "#2 Gesture scenario drags from a data output pin to an incompat"
-    },
-    {
-      "at": "2026-07-16T04:52:32.491Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0tfsrts",
-      "note": "#1 Gesture scenario drags from a data output pin to a compatibl"
-    },
-    {
-      "at": "2026-07-16T04:52:32.365Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0tfsrts",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:32.216Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zpnwk9",
-      "note": "#6 Gesture scenario picks duplicate inline instead and asserts "
-    },
-    {
-      "at": "2026-07-16T04:52:32.095Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zpnwk9",
-      "note": "#5 Gesture scenario picks call existing fn when the converged s"
-    },
-    {
-      "at": "2026-07-16T04:52:31.973Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zpnwk9",
-      "note": "#4 Gesture scenario accepts the default with Enter and asserts "
-    },
-    {
-      "at": "2026-07-16T04:52:31.852Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zpnwk9",
-      "note": "#3 Gesture scenario drags a second exec wire onto a node alread"
-    },
-    {
-      "at": "2026-07-16T04:52:31.732Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zpnwk9",
-      "note": "#2 Gesture scenario inserts a loop and asserts labeled body and"
-    },
-    {
-      "at": "2026-07-16T04:52:31.608Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zpnwk9",
-      "note": "#1 Gesture scenario inserts a switch statement with 3 arms and "
-    },
-    {
-      "at": "2026-07-16T04:52:31.487Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0zpnwk9",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:31.265Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0oeg3vh",
-      "note": "#4 Any Gecko-only scenario failure discovered is filed as a sep"
-    },
-    {
-      "at": "2026-07-16T04:52:31.139Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0oeg3vh",
-      "note": "#3 The lane fails the suite, not skips, when geckodriver or Fir"
-    },
-    {
-      "at": "2026-07-16T04:52:31.014Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0oeg3vh",
-      "note": "#2 This lane is wired into scripts/agent/verify-full.sh or the "
-    },
-    {
-      "at": "2026-07-16T04:52:30.880Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0oeg3vh",
-      "note": "#1 A geckodriver-backed driver implementing the same interface "
-    },
-    {
-      "at": "2026-07-16T04:52:30.760Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0oeg3vh",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:30.613Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0y9w2ur",
-      "note": "#6 A catalog-vs-real-exports cross-check test fails if any cata"
-    },
-    {
-      "at": "2026-07-16T04:52:30.491Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0y9w2ur",
-      "note": "#5 Scenario else_pin_move_existing_into_arm: wiring else to an "
-    },
-    {
-      "at": "2026-07-16T04:52:30.373Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0y9w2ur",
-      "note": "#4 Scenario else_pin_insert_into_arm: dragging from an else exe"
-    },
-    {
-      "at": "2026-07-16T04:52:30.249Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0y9w2ur",
-      "note": "#3 Scenario builtin_print_row_inserts_print: clicking the top P"
-    },
-    {
-      "at": "2026-07-16T04:52:30.125Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0y9w2ur",
-      "note": "#2 Scenario menu_ranking_print: querying print surfaces the pri"
-    },
-    {
-      "at": "2026-07-16T04:52:29.996Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0y9w2ur",
-      "note": "#1 Scenario menu_shows_only_functions_and_variables: right-clic"
-    },
-    {
-      "at": "2026-07-16T04:52:29.864Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0y9w2ur",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:29.714Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0lc8k7l",
-      "note": "#5 A property-style test over the full catalog asserts needs_un"
-    },
-    {
-      "at": "2026-07-16T04:52:29.591Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0lc8k7l",
-      "note": "#4 Gesture scenario inserts a method_only entry and asserts it "
-    },
-    {
-      "at": "2026-07-16T04:52:29.465Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0lc8k7l",
-      "note": "#3 Gesture scenario wires a staged nodes required pin and asser"
-    },
-    {
-      "at": "2026-07-16T04:52:29.345Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0lc8k7l",
-      "note": "#2 Gesture scenario inserts a needs_canvas_defaults entry from "
-    },
-    {
-      "at": "2026-07-16T04:52:29.223Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0lc8k7l",
-      "note": "#1 Palette shows needs_canvas_defaults and method_only core ent"
-    },
-    {
-      "at": "2026-07-16T04:52:29.095Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0lc8k7l",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:28.946Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0898o9k",
-      "note": "#5 docs/reference/canvas-parity.md Stmt Off and Stmt DebugOnly "
-    },
-    {
-      "at": "2026-07-16T04:52:28.824Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0898o9k",
-      "note": "#4 Undo restores exact prior source for each of the three toggl"
-    },
-    {
-      "at": "2026-07-16T04:52:28.698Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0898o9k",
-      "note": "#3 Gesture scenario toggles a disabled or debug-only node back "
-    },
-    {
-      "at": "2026-07-16T04:52:28.580Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0898o9k",
-      "note": "#2 Gesture scenario right-clicks a statement node, picks Debug "
-    },
-    {
-      "at": "2026-07-16T04:52:28.451Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0898o9k",
-      "note": "#1 Gesture scenario right-clicks a statement node, picks Disabl"
-    },
-    {
-      "at": "2026-07-16T04:52:28.330Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0898o9k",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:28.187Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zti5r8",
-      "note": "#5 Owner acceptance script 5, jet-new to a working two-function"
-    },
-    {
-      "at": "2026-07-16T04:52:28.062Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zti5r8",
-      "note": "#4 A one-command demo entry is documented in docs/reference and"
-    },
-    {
-      "at": "2026-07-16T04:52:27.942Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zti5r8",
-      "note": "#3 Gesture scenario opens the keyboard cheat-sheet overlay and "
-    },
-    {
-      "at": "2026-07-16T04:52:27.819Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zti5r8",
-      "note": "#2 Gesture scenario opens the tour project fresh, drives the gu"
-    },
-    {
-      "at": "2026-07-16T04:52:27.693Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0zti5r8",
-      "note": "#1 examples/canvas-tour or equivalent path exists with a workin"
-    },
-    {
-      "at": "2026-07-16T04:52:27.567Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0zti5r8",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:27.418Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0yl88cz",
-      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Large g"
-    },
-    {
-      "at": "2026-07-16T04:52:27.290Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0yl88cz",
-      "note": "#4 This scenario runs in scripts/agent/verify-full.sh and fails"
-    },
-    {
-      "at": "2026-07-16T04:52:27.159Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0yl88cz",
-      "note": "#3 Gesture scenario selects nodes at low zoom and asserts title"
-    },
-    {
-      "at": "2026-07-16T04:52:27.036Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0yl88cz",
-      "note": "#2 Gesture scenario pans and zooms across the full project and "
-    },
-    {
-      "at": "2026-07-16T04:52:26.914Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0yl88cz",
-      "note": "#1 A fixture generator produces a 300-function Jet project (com"
-    },
-    {
-      "at": "2026-07-16T04:52:26.792Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0yl88cz",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:26.640Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xhxzyu",
-      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md gains o"
-    },
-    {
-      "at": "2026-07-16T04:52:26.509Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xhxzyu",
-      "note": "#4 Gesture scenario scopes palette search to one module and ass"
-    },
-    {
-      "at": "2026-07-16T04:52:26.386Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xhxzyu",
-      "note": "#3 Gesture scenario renames a function used across all 3 files,"
-    },
-    {
-      "at": "2026-07-16T04:52:26.264Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xhxzyu",
-      "note": "#2 Gesture scenario inserts a call to a function defined in fil"
-    },
-    {
-      "at": "2026-07-16T04:52:26.133Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0xhxzyu",
-      "note": "#1 Gesture scenario on a 3-file fixture workspace switches file"
-    },
-    {
-      "at": "2026-07-16T04:52:26.011Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0xhxzyu",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:25.858Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wbf3js",
-      "note": "#4 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Trait/i"
-    },
-    {
-      "at": "2026-07-16T04:52:25.589Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wbf3js",
-      "note": "#3 Gesture scenario opens the module/package browser and assert"
-    },
-    {
-      "at": "2026-07-16T04:52:25.463Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wbf3js",
-      "note": "#2 Gesture scenario opens the Events panel for a type with core"
-    },
-    {
-      "at": "2026-07-16T04:52:25.343Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0wbf3js",
-      "note": "#1 Gesture scenario opens the Traits panel, selects a trait wit"
-    },
-    {
-      "at": "2026-07-16T04:52:25.219Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0wbf3js",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:25.067Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0v5rsny",
-      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md gains o"
-    },
-    {
-      "at": "2026-07-16T04:52:24.939Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0v5rsny",
-      "note": "#4 docs/reference documents the text-diff-over-binary-asset adv"
-    },
-    {
-      "at": "2026-07-16T04:52:24.811Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0v5rsny",
-      "note": "#3 Gesture scenario compares two revisions from source-control "
-    },
-    {
-      "at": "2026-07-16T04:52:24.690Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0v5rsny",
-      "note": "#2 Gesture scenario asserts each shown diff hunk highlights the"
     }
   ],
   "nextNum": 368,
