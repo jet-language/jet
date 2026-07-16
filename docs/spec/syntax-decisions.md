@@ -468,6 +468,50 @@ fn mystery<Q: Quantity<Length, .Linear>>() -> Q { Meter.from_int(1)? }
 // fix: accept a unit-bearing input or return Meter
 ```
 
+**D-QUANTITY-CONVERT1=B — exact implicit conversion with canonical rational
+results** *(ratified 2026-07-16, card #603)*: same-dimension arithmetic omits
+a conversion only when it is total for the complete source type — the
+compiler-inserted step is exactly the destination-owned D-SHAPE-CONVERT1
+`Destination.from_source` operation with syntax omitted, never a
+value-dependent or fallible coercion. Mixed-unit arithmetic uses a canonical
+base-unit exact-rational intermediate (arbitrary-precision numerator over
+positive denominator, reduced by their GCD) that stays inside the expression;
+Point uses scale plus offset, Delta uses scale only, following
+D-QUANTITY-POINT1's algebra. The intermediate is expression-only — it cannot
+become a field, ordinary argument, return, public type, or wire value; its
+sole boundary exemption is flowing directly into one destination-owned
+checked or rounded conversion call, which ends it and chooses storage. A
+non-exact conversion is a compile error naming the `from_*_rounded` fix —
+never a silent round. This amends E0127 for commensurable units: mixed
+arithmetic between units of the same dimension is no longer rejected outright,
+only when no total conversion or exact intermediate exists. Per
+D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in `pkg.jet`
+restores explicit-only conversion at the package floor, and post-D-SHAPE2
+`@Policy(explicit_units)` may strengthen a narrower scope; neither form may
+weaken the package floor.
+
+```jet
+segment :: 1meter
+calibration :: 1foot
+wire_mm :: Millimeter.from_meter(segment + calibration)?
+// exact 1631/1250 meter intermediate; direct conversion argument is allowed
+
+pub fn total_mm(a: Meter, b: Foot) -> Millimeter ? {
+    Millimeter.from_meter(a + b)?
+}
+// Public API and Codable see only Millimeter; the intermediate has no wire form
+
+# pkg.jet
+policy: .{ explicit_units: true }
+
+@Policy(explicit_units)
+module dosing
+
+segment + calibration
+// error[E0127]: explicit_units requires a written conversion
+// fix: Meter.from_foot(calibration)?
+```
+
 **D-TYPEALIAS1 — Aliases**: `alias X = Y` transparent aliases, scoped to
 shortening generic spellings only — not primitive/unit newtypes (use
 `distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A**: `[T]`, `[K: V]`, `*T`
@@ -2927,6 +2971,27 @@ D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
 the power surface is additive generated modules/overlays, registered
 targets/actions, read-only program/build graph enforcement, DSL blocks, and
 front-end APIs.
+
+**D-BUILD-DEFAULT1=B — default profile split by command** *(ratified
+2026-07-16, card #666)*: `jet run` and `jet dev` compile at the fast profile
+(opt-level 0, codegen-units 256, no LTO); `jet build` keeps the optimized
+profile (opt-level 2, thin-LTO, strip) unchanged from D-BUILDPROFILE1. An
+explicit `--profile=<name>`/`--release` flag overrides either command's
+default; D-BUILDPROFILE1's "never ambient env" rule is unchanged. The owner's
+same-day verdict D-VERDICT-666-1 ("one compiler, two lenses" — the JIT lens is
+rapid dev, the AOT lens is the optimized ship binary, and the two lenses must
+never differ in supported features or functionality) names the JIT lens as
+the mechanism behind `run`/`dev`'s speed; the open D-AOT-CRANELIFT1 ballot
+decides the remaining mechanism question for `build`.
+
+```text
+$ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)
+$ jet dev  hello.jet   # fast: opt-level 0         ~150 ms (illustrative)
+$ jet build hello.jet  # optimized: -O + thin-LTO  ~450 ms (illustrative)
+
+$ jet build --profile=debug hello.jet   # fast build of a build artifact
+$ jet run   --release       hello.jet   # optimized one-off run
+```
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `@PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.
