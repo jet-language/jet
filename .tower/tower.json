@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 667,
-    "rev": 8105,
+    "rev": 8112,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15182,16 +15182,20 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Current D-EFF1 already infers every function's full effect row; an explicit exact `--[Effects]->` annotation is an upper bound, not granted authority. D-EFFECT-OMIT1 decides only whether private/public source may omit that known row. After ratification, preserve one solver across higher-order functions, traits, generics, open rows, denial, public API snapshots, expanded LSP/inspect views, semver drift, and call-path provenance. `core.files.read` infers Fs.Read; pure `->` never hides forbidden effects. Card remains planning on the reviewed ballot.",
+      "plan": "D-EFFECT-OMIT1=A is ratified: ordinary private and public functions may omit an effect row; sema still infers the complete row, public API snapshots store its normalized form, and semver rejects drift. Explicit `--[Effects]->` remains an optional upper bound, while `--[]->` is an explicit purity proof. D-EFF3 remains unchanged: static calls use each implementation's inferred row and dynamic dispatch uses the trait method's declared bound. After #543 lands the exact effect-arrow spelling, implement one solver across higher-order functions, traits, generics, open rows, denial, expanded inspect/LSP output, call-path provenance, diagnostics, snapshots, examples, and AOT/dev parity.",
       "blockedBy": [
-        "c03teoty",
-        "D-EFFECT-OMIT1"
+        "c03teoty"
       ],
       "workOrder": 36.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[plan-reconciled] D-EFFECT-OMIT1=A is ratified and removed from blockers. Plan now records inferred private/public rows, optional explicit bounds, public snapshot/semver law, and retained #543 dependency."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -16366,18 +16370,20 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "D-SHAPE-QUANTITY1=A establishes compiler-owned zero-cost dimensions; D-QUAL3 preserves concrete named units; D-SHAPE-CONVERT1 already settles destination-owned, source-named conversions, so no conversion ballot remains. Three genuine source gates remain: exact scaled/affine UnitFamily declarations and cross-package identity; generic public dimension/kind bounds while concrete APIs stay named; affine Point/Delta concrete representation and algebra. After review/ratification, implement exact rational scale/offset, public/API/Codable/semver facts, diagnostics, inspect, examples, grammars, and AOT/dev parity.",
+      "plan": "Ratified quantity laws now fix the foundation: D-SHAPE-QUANTITY1=A gives compiler-owned zero-cost dimensions; D-QUANTITY-DECL1=A extends closed `@UnitFamily` declarations with exact rational scale/offset metadata; D-QUANTITY-TYPE1=A supplies compiler-known `Quantity<Dimension, Kind>` bounds; D-QUANTITY-POINT1=A generates concrete Point/Delta types and their closed algebra. D-SHAPE-CONVERT1 still requires destination-owned, source-named conversions. D-QUANTITY-CONVERT1 remains the sole owner gate for written versus type-total implicit conversion, deterministic mixed-arithmetic representation/unit laws, affine result-unit laws, rounding, overflow, and the scoped `explicit_units` policy. After ratification, implement the complete declaration, sema, conversion, API/Codable/semver, diagnostics, inspect, examples, grammar, and AOT/dev vertical.",
       "blockedBy": [
-        "D-SHAPE-QUANTITY1",
-        "D-QUANTITY-DECL1",
-        "D-QUANTITY-TYPE1",
-        "D-QUANTITY-POINT1"
+        "D-QUANTITY-CONVERT1"
       ],
       "workOrder": 60.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[plan-reconciled] Removed four ratified blockers and stale no-ballot claim. D-QUANTITY-CONVERT1 is the sole live owner gate; plan now names its exact conversion/result/rounding/overflow/policy scope."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -20456,6 +20462,11 @@
       "assignee": "claude-main",
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "Independently verified green (biyudozjv fresh-context pass): hangar-seeded fixtures + observed-at seam land; top_level_jet_run_nixpkgs, offline tamper, env_dev_trust all green. Pattern 3 + Pattern 5 complete. The deleted/tampered-rebuild reds that surfaced during verification were a distinct production defect (#652), now fixed separately."
+        },
+        {
           "at": "2026-07-15",
           "by": "owner",
           "text": "Accepted — closed (no formal ballot)."
@@ -20480,7 +20491,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-15T20:01:44.068Z",
-      "updated": "2026-07-15",
+      "updated": "2026-07-16",
       "claimedAt": "2026-07-15T20:14:45.913Z"
     },
     {
@@ -40633,33 +40644,33 @@
       "cardId": "c0t6owk6",
       "group": "syntax",
       "title": "How does a value change from one unit to another?",
-      "gist": "Choose how a value in one unit becomes a value in another unit of the same dimension, and what happens when that conversion cannot be exact.",
-      "lesson": "D-SHAPE-CONVERT1 already fixed the direction of every typed conversion: the destination owns it and names the source, as in `Kilometer.from_meter(x)`. That vote did not decide two things a unit system needs.\n\nFirst: may the compiler convert same-dimension units on its own? The ratified `@UnitFamily` rule (D-QUANTITY-DECL1) gives it every exact rational scale and offset in advance, so it can. D-QUAL3 currently rejects cross-unit mixing through E0127.\n\nSecond: what happens when a conversion loses information? On a value stored as a whole number, 1500 meter is not a whole kilometer. The conversion can fail, or the caller can pick a rounding.\n\nThe safety line that matters is exact versus lossy, not implicit versus explicit. A conversion by exact ratio changes spelling, never meaning; a lossy one changes the value and must stay visible. The ratified policy ladder (D-PACKAGE-POLICY-SCOPE1) gives teams that want ceremony a scoped opt-in to explicit-only.",
+      "gist": "Choose whether same-dimension units convert only through written calls or also through compiler-proven exact coercions, including the exact result type for mixed arithmetic.",
+      "lesson": "A unit conversion has two separate jobs. It changes the scale, and it stores the result in a numeric representation. `Foot` to `Meter` uses an exact rational scale, but a whole-number result cannot hold every foot value exactly.\n\nA compiler-inserted conversion must therefore be total for the source type. Total means every possible source value succeeds. It cannot depend on a runtime value, round, or overflow. A written checked conversion may return `?` because the caller chose a possibly failing boundary.\n\nD-SHAPE-CONVERT1 already fixes one conversion mechanism. The destination owns a source-named operation, such as `Meter.from_foot(x)?`. An omitted conversion must invoke that same operation with the same scale, offset, and representation rules. It is not a second conversion path.\n\nMixed arithmetic also needs one result law. Choosing the finer operand is insufficient for rational scales such as meter and foot. A canonical exact-rational intermediate can represent every pair without rounding or numeric overflow. It stays inside the expression until one destination-owned call chooses a stored representation.\n\nAffine families distinguish points from deltas. Point conversion uses scale and offset. Delta conversion uses scale only. Point plus or minus Delta yields Point; Point minus Point yields Delta. Their result-unit rules must preserve that distinction.\n\nThe ratified policy ladder lets a package or narrower scope require written conversions. The default can stay ceremony-free while audited code makes every unit boundary visible.",
       "explainer": "",
-      "story": "Priya writes a drone mapping tool. Her lidar reports altitude in meters; the flight-plan service returns each leg in kilometers. She adds a leg to a sensor reading, and later prints a rounded kilometer label for the map.",
-      "inWild": "// Family declared per D-QUANTITY-DECL1; Meter and Kilometer are distinct types.\nleg :: 2kilometer           // from the flight-plan service\nsensor_alt :: 1500meter     // from the lidar\nreport(leg, sensor_alt)",
+      "story": "Priya combines a one-meter survey segment with a one-foot calibration offset. The arithmetic must mean the same thing for every runtime value. Later she writes a whole-millimeter field, so she chooses an explicit checked or rounded conversion there.",
+      "inWild": "segment :: 1meter\ncalibration :: 1foot\nwire_mm :: Millimeter.from_meter(segment + calibration)?\n// arithmetic uses exact 1631/1250 meter internally; one checked call chooses storage",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Explicit conversion everywhere; exact or it fails; named rounded form for loss",
-          "detail": "A cross-unit conversion is always a written destination-owned call from D-SHAPE-CONVERT1. The compiler never converts units on its own, so mixing stays E0127 at every site. An exact conversion succeeds; one that cannot be represented exactly returns a fallible result handled with `?`. Deliberate loss is a separate, total call that names a rounding policy.",
-          "technical": "Sema uses the exact rational scale/offset from D-QUANTITY-DECL1. `Destination.from_source(v)` is a checked conversion using the normal `?` result and succeeds only when the value is exactly representable. `Destination.from_source_rounded(v, .Nearest | .Up | .Down, digits: n)` is total. Point conversions apply scale and offset; delta conversions apply scale only. D-QUAL3 and E0127 stay unchanged.",
-          "code": "// Every mixed-unit site writes the conversion.\ninner_diameter :: 42millimeter\nlength :: 3meter\n\ntotal :: Millimeter.from_meter(length)? + inner_diameter   // 3042millimeter\n\nlength + inner_diameter\n// error[E0127]: cannot add Meter and Millimeter\n// fix: convert one side first, e.g. Millimeter.from_meter(length)?\n\n// Deliberate lossy conversion names its rounding and is total.\nlabel :: Kilometer.from_meter_rounded(1500meter, .Nearest)   // 2kilometer"
+          "name": "Written conversion at every unit boundary",
+          "detail": "Every cross-unit boundary uses the destination-owned source-named call. Exact conversion is checked with `?`. Deliberate rounding uses a separate checked call that names its rounding mode. Mixed-unit arithmetic remains E0127 until one operand is converted.",
+          "technical": "`Destination.from_source(v)?` evaluates the exact rational scale and offset, then fails if the destination representation cannot hold the exact result or overflows. `Destination.from_source_rounded(v, mode, digits: n)?` permits only the requested precision loss and still fails on overflow. `n` is a nonnegative count of destination decimal places; integer destinations require zero. Modes are `.TowardZero`, `.Floor`, `.Ceiling`, and `.NearestEven`. Floor moves toward negative infinity; ceiling moves toward positive infinity. Nearest-even sends an exact tie to the even retained digit, so -2.5 becomes -2 and -3.5 becomes -4. Point conversion applies scale plus offset. Delta conversion applies scale only. Same-unit algebra allows Point plus or minus Delta, Delta plus Point, Point minus Point, and Delta plus or minus Delta. Point plus Point and Delta minus Point remain errors.",
+          "code": "inner :: 42millimeter\nlength :: 3meter\n\ntotal :: Millimeter.from_meter(length)? + inner\n\nlength + inner\n// error[E0127]: cannot add Meter and Millimeter\n// fix: convert one side first\n\nlabel :: Kilometer.from_meter_rounded(1500meter, .NearestEven, digits: 0)?\n// 2kilometer; overflow still returns an error"
         },
         {
           "key": "B",
-          "name": "Implicit exact conversion by default; policy opt-in to explicit-only",
-          "detail": "Same-dimension units interconvert on their own wherever the conversion is exact: mixed arithmetic, argument passing, and binding all just work. Mixed arithmetic lands on the finer operand's unit so whole-number values stay exact; equal scales keep the left unit. A conversion that cannot be exact is a compile error naming the rounded fix — the compiler never rounds silently. The ratified policy ladder scopes an explicit-only opt-in for teams that want every conversion written.",
-          "technical": "Sema inserts exact scale/offset coercions from family metadata; the finer-unit result rule is deterministic and keeps integer stores lossless. Point-to-point conversion applies scale plus offset; deltas, including the delta in point-plus-delta, apply scale only; point plus point stays rejected. This amends E0127 for commensurable units. `policy: .{ explicit_units: true }` in package.jet, or post-D-SHAPE2 `@Policy(explicit_units)` at module, function, or block, restores E0127 in that scope with the named-conversion fix. Lossy conversion is always the explicit rounded call.",
-          "code": "// Pragmatic default: the family already knows the exact ratios.\ninner_diameter :: 42millimeter\nlength :: 3meter\n\ntotal :: length + inner_diameter        // 3042millimeter — finer unit wins, exact\nclearance :: bore - shaft               // fine across any exact same-dimension pair\n\nfn fits(depth: Meter) -> Bool { depth > 0meter }\nfits(3000millimeter)                    // argument converts exactly to 3meter\n\n// Never a silent round: non-exact implicit conversion is rejected.\nalt_km :: Kilometer = 1500meter\n// error: 1500 meter is not an exact number of kilometer\n// fix: Kilometer.from_meter_rounded(1500meter, .Nearest)\n\n# package.jet\npolicy: .{ explicit_units: true }\n\n@Policy(explicit_units)\nmodule dosing\n\nlength + inner_diameter\n// error[E0127]: cannot add Meter and Millimeter (explicit_units in force)\n// declared at: package.jet:4 (package policy:)\n// fix: Millimeter.from_meter(length)?"
+          "name": "Exact implicit conversion with canonical rational results",
+          "detail": "Same-dimension code omits a conversion only when it is total for the complete source type. Mixed arithmetic uses a canonical base-unit exact-rational intermediate. It is expression-only and cannot become a field, argument, return, public type, or wire value. One destination-owned checked call chooses storage at that boundary. The scoped `explicit_units` policy requires written calls.",
+          "technical": "The compiler-inserted step is exactly the destination-owned `Destination.from_source` semantic operation with syntax omitted. It uses the same normalized scale, offset, provenance, and diagnostics. Expected-type coercion is allowed only when sema proves that operation succeeds for every value of the source representation. It never inserts a value-dependent or fallible coercion. Mixed linear plus or minus linear uses a base linear exact-rational intermediate. Delta plus or minus Delta uses a base Delta intermediate. Point plus or minus Delta and Delta plus Point use a base Point intermediate. Point minus Point uses a base Delta intermediate. Point inputs use scale plus offset; every Delta uses scale only. Point plus Point and Delta minus Point remain errors. The intermediate uses an arbitrary-precision signed numerator and positive denominator, reduced by their greatest common divisor. It has no numeric overflow and no public or Codable form. Sema rejects binding, field, collection, argument, return, export, or serialization boundaries until a destination-owned checked or rounded call from A chooses a concrete representation. `policy: .{ explicit_units: true }` sets the package floor. Post-D-SHAPE2 `@Policy(explicit_units)` may strengthen a module, function, or block. Neither form may weaken the package floor.",
+          "code": "segment :: 1meter\ncalibration :: 1foot\nwire_mm :: Millimeter.from_meter(segment + calibration)?\n// exact 1631/1250 meter intermediate; checked Millimeter storage\n\nstart :: CelsiusPoint.from_float(20.0)?\nrise :: FahrenheitDelta.from_float(9.0)?\nwire_next :: CelsiusPoint.from_kelvin_point(start + rise)?\nwire_prior :: CelsiusPoint.from_kelvin_point(start - rise)?\n// the intermediate uses the Kelvin base; one call chooses Celsius storage\n\npub fn total_mm(a: Meter, b: Foot) -> Millimeter {\n    Millimeter.from_meter(a + b)?\n}\n// Public API and Codable see only Millimeter. The intermediate has no wire form.\n\n# package.jet\npolicy: .{ explicit_units: true }\n\n@Policy(explicit_units)\nmodule dosing\n\nsegment + calibration\n// error[E0127]: explicit_units requires a written conversion\n// fix: Meter.from_foot(calibration)?"
         },
         {
           "key": "C",
-          "name": "Read a quantity as a number in a unit; no typed unit-to-unit value",
-          "detail": "Follow the ratified Duration rule (D-SHAPE-DURATIONCONVERT1) for every quantity. You never turn a Meter value into a Kilometer value. You read a quantity as a plain checked number in a chosen unit under one fixed contract, and reconstruct a typed value if you need one. One conversion mechanism covers Duration and all units.",
-          "technical": "`value.in(unit)` returns a whole `Int`, truncates toward zero, and fails on overflow, exactly as Duration does today. A fractional read uses a separate ratio reader. Holding a converted typed value requires a `Destination.from_*` reconstruction from the read number. No same-dimension typed conversion and no implicit coercion exist; E0127 stays unchanged.",
-          "code": "// Read as a number in a chosen unit; the result is an Int, not a Meter.\nleg_m :: leg.in(.Meters)?             // 2000\n\n// Combining across units: read both into a common unit first.\ntotal :: Meter.from_int(leg.in(.Meters)? + alt.in(.Meters)?)?\n\n// Holding kilometers means a round-trip through a number.\nlabel :: Kilometer.from_float(alt.in_ratio(.Kilometers))"
+          "name": "Implicit only when an existing operand type is total",
+          "detail": "The compiler may omit a conversion only when one existing operand type can represent every value of the other type exactly and without overflow. Mixed arithmetic prefers the left unit when both directions are total, uses the sole total direction when only one exists, and otherwise reports E0127. This avoids a new rational result representation but rejects common rational pairs.",
+          "technical": "Sema tests totality over the full numeric source domain, never the current runtime value. Linear and Delta arithmetic considers the left result unit before the right. Point plus or minus Delta uses the Point unit. Delta plus Point uses the Point unit. Point minus Point considers the left Point unit before the right and returns its paired Delta. If no candidate conversion is total, the expression is rejected. Ordinary destination-owned checked and rounded calls use A's overflow and rounding laws. The `explicit_units` policy disables every omitted conversion.",
+          "code": "small :: 3meter\nfine :: 42millimeter\n\nsmall + fine\n// accepted only if one complete backing type can hold both domains\n\n1meter + 1foot\n// error[E0127]: neither existing result type is total for this pair\n// fix: write a checked conversion; no implicit result exists here"
         }
       ],
       "comparisons": [
@@ -40676,18 +40687,18 @@
       ],
       "rec": "B",
       "recommendation": {
-        "why": "The family declaration already fixes every exact ratio in advance, so an exact conversion carries no information the reader lacks — the units are in the types. B lets pragmatic work read like the arithmetic it is, while the exact-only rule keeps the real hazard, silent precision loss, impossible. Teams that want written conversions get them scoped through the ratified policy ladder instead of a language-wide ceremony tax.",
+        "why": "B makes mixed-unit arithmetic total and deterministic for every rational family relation. It preserves exact meaning without choosing behavior from runtime values. One destination-owned conversion law serves written calls, compiler omission, affine points, and deltas. Beginners get direct arithmetic, while experts can require written boundaries with the ratified policy ladder.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "A taxes every mixed-unit site with a named call the compiler could prove exact itself, which punishes exactly the pragmatic measurement code units exist for. Its safety benefit over B is spelling, not meaning: B already refuses every non-exact conversion."
+            "reason": "A repeats a written call at every proven unit boundary and keeps ordinary same-dimension arithmetic noisy, even when an exact canonical result exists."
           },
           {
             "key": "C",
-            "reason": "C cannot hold a converted value as a typed unit without a reconstruction round-trip and drops the destination-owned typed result that every other Jet conversion produces."
+            "reason": "C is type-safe but rejects common whole-number pairs such as meter and foot because neither existing operand representation is total for the other."
           }
         ],
-        "tradeoff": "Under B an API accepts any commensurable unit, so a reviewer sees a scale multiply only through types, not spelling. The exact-only rule, the finer-unit result law, and `jet explain` provenance carry that visibility; `explicit_units` restores written conversions where a team wants them."
+        "tradeoff": "B's exact rational intermediate cannot cross a storage, function, public application programming interface, or wire boundary. One checked destination-owned call must end each mixed-unit expression before that boundary."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -41740,6 +41751,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T02:07:32.352Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06qg7a2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:07:32.196Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06qg7a2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:00:26.106Z",
+      "by": "sol-e3-planner",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-CONVERT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T01:58:29.654Z",
+      "by": "sol-e3-planner",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-CONVERT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T01:54:05.802Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c0t6owk6",
+      "note": "phase,plan,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T01:53:17.463Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c0t32dtn",
+      "note": "phase,plan,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T01:50:31.658Z",
+      "by": "sol-e3-planner",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-CONVERT1",
+      "note": ""
+    },
     {
       "at": "2026-07-16T01:50:21.376Z",
       "by": "claude-main",
@@ -45190,55 +45250,6 @@
       "action": "card.criteria-meet",
       "ref": "c067p6dz",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-15T14:49:18.840Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c067p6dz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T14:49:18.712Z",
-      "by": "sol-638-builder",
-      "action": "card.criteria-meet",
-      "ref": "c067p6dz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-15T14:41:58.236Z",
-      "by": "claude-main",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-VIEWMUT1",
-      "note": "How do I edit through a borrowed window?"
-    },
-    {
-      "at": "2026-07-15T14:38:48.492Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-add",
-      "ref": "c067p6dz",
-      "note": "#3 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-15T14:38:24.958Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-add",
-      "ref": "c067p6dz",
-      "note": "#2 Targeted cli budget tests pass, including the two repaired t"
-    },
-    {
-      "at": "2026-07-15T14:38:01.478Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-add",
-      "ref": "c067p6dz",
-      "note": "#1 Every tests/cli.rs site that executes a freshly copied compi"
-    },
-    {
-      "at": "2026-07-15T14:37:37.841Z",
-      "by": "fable-burndown",
-      "action": "card.claim",
-      "ref": "c067p6dz",
-      "note": ""
     }
   ],
   "nextNum": 368,

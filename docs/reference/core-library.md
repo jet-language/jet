@@ -2483,12 +2483,13 @@ those bytes with `core.compress.gzip`.
 D-STDLIBLEDGER1 keeps this reference to built modules only. It is not a
 have/have-not ledger of missing domains.
 
-D-OPTGC1 keeps garbage collection behind automatic scoped `#Policy(gc)`
-selection. The collector is an internal std implementation; `core.gc` and
-`Gc<T>` are not public source surfaces.
+D-OPTGC1 selects automatic scoped `#Policy(gc)` as the sole source path. The
+current compiler still exposes `core.gc`/`Gc<T>` until Tower #646 implements
+that ratified retirement; this built-module ledger records current behavior,
+not the pending target surface.
 
 `core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
-`core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`,
+`core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`, `core.gc`,
 `core.solve`, `core.data`, `core.files`, `core.path`, `core.url`, `core.mime`,
 `core.watcher`, `core.net`, `core.scope`, `core.args`, `core.term`,
 `core.reflect`, `core.encoding`, `core.encoding.json`, `core.encoding.jsonl`,
