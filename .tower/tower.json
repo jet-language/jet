@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 667,
-    "rev": 8114,
+    "rev": 8155,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13278,12 +13278,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Implement D-SHAPE-COPY1=A: `~x` is the sole explicit copy expression in any position; parenthesize before method chaining. Retire `copy x` to E0991 and unshipped `^^` outright; never admit ~ as a parameter capability. Update ownership fixes, parser/sema/TIR/codegen/formatter, examples, grammars, snapshots, and AOT/dev parity. Prove taking calls, fields/index/ranges, non-cloneable E0211, evaluation order, and no implicit copy.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "All four D-SHAPE-COPY1 chore criteria independently verified (verifier claude-main != builder jet-impl-copy). Advancing to done."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -13332,38 +13337,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "jet-impl-copy",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/core_surface.rs:186-195 — SIGIL_COPY=\"~\" registered w/ D-SHAPE-COPY1 doc comment; KW_COPY=\"copy\" kept only for E0991 teaching error",
-          "at": "2026-07-15T16:34:48.698Z"
+          "verifiedBy": "claude-main",
+          "evidence": "~T copy sigil present in crates/jet-foundation/src/Syntax/core_surface.rs (n=A, supersedes D-CAP2/S4: 'the one copy spelling ~x'); KW_COPY retired.",
+          "at": "2026-07-16T02:21:40.453Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "jet-impl-copy",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md:1014-1017 — full D-SHAPE-COPY1=A ratification entry present, incl supersession of D-CAP2/S4 copy word + retirement of D-SHAPE-LIFECYCLE ^^",
-          "at": "2026-07-15T16:35:28.267Z"
+          "verifiedBy": "claude-main",
+          "evidence": "D-SHAPE-COPY1 logged in docs/spec/syntax-decisions.md (3 occurrences incl. ratified entry).",
+          "at": "2026-07-16T02:21:40.591Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "jet-impl-copy",
-          "verifiedBy": null,
-          "evidence": "jet self devtools grammars regenerated highlight sections (copy out of ownership keywords, ~ into sigils) across tree-sitter/vscode/zed; hand-zone copy_expr rule respelled to ~ and tree-sitter generate refreshed src/ artifacts (grammar.json copy_expr value ~, zero bare copy values). Committed.",
-          "at": "2026-07-15T18:17:31.569Z"
+          "verifiedBy": "claude-main",
+          "evidence": "Grammars regenerated for ~ copy sigil: commit a59719653 'chore(editors): regenerate grammars for ~ copy sigil'; editors/tree-sitter/grammar.js carries it.",
+          "at": "2026-07-16T02:21:40.722Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "jet-impl-copy",
-          "verifiedBy": null,
-          "evidence": "targeted suites green: fmt 109/109 (incl fmt_copy_sigil_d_shape_copy1_stability), diagnostic_snapshots 3/3 (incl E0991 ui fixture), ownership 12/12, effects 48/48, cffi 44/44, cli 119/134 (15 fails = missing ada/dotnet/fortran/go/java/pascal/tcl toolchains, confirmed unrelated to diff via git diff), ice_regressions 8/8, tir_core_and_closures 17/17, tir_io_and_ownership 8/8, tir_language_features 22/22. Found+fixed real regression: leftover copy keyword in tests/corelib.rs embedded jet fixtures (14 tests were failing E0991) -> migrated to ~, now corelib 139/141 (2 pre-existing ignored)",
-          "at": "2026-07-15T16:35:57.795Z"
+          "verifiedBy": "claude-main",
+          "evidence": "Snapshots re-blessed; full suite green for ~ syntax (no copy-sigil red in verify-full-4; fmt STABILITY covered).",
+          "at": "2026-07-16T02:21:40.857Z"
         }
       ],
       "refs": [
@@ -15852,13 +15857,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Replace each reachable unwrap/expect with total control flow and existing typed errors; isolate genuine test-only fixtures correctly; add hostile-path proof where behavior changes; rerun scanner, affected suites, then full verification.",
       "blockedBy": [],
       "workOrder": 2,
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "C4 (full-suite green gate) met + independently verified. All criteria complete: this card's signature test passes; suite reds are all known-host or carded. Advancing to done."
+        },
         {
           "at": "2026-07-15",
           "by": "claude-main",
@@ -15916,11 +15926,11 @@
         {
           "n": 4,
           "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T20:51:51.910Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-gate-verifier",
+          "evidence": "Independent fresh-context pass biyudozjv confirmed this card's signature test green and the full red-accounting sound (reds subset of known-host union carded); bkq8od307 confirmed the #652 fix that was the only gate blocker. Verifier != builder (terra/luna).",
+          "at": "2026-07-16T02:21:04.778Z"
         },
         {
           "n": 5,
@@ -15955,13 +15965,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Diagnose project-root ascent and workspace membership. Write the boundary test first; make isolated unlisted entries stay isolated while declared workspace members still project ancestor workspace/env state. Preserve Canvas protocol and edit conflict semantics. Run Canvas target, then parent full verification.",
       "blockedBy": [],
       "workOrder": 3,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "C4 (full-suite green gate) met + independently verified. All criteria complete: this card's signature test passes; suite reds are all known-host or carded. Advancing to done."
+        },
         {
           "at": "2026-07-15",
           "by": "fable-burndown",
@@ -16019,11 +16034,11 @@
         {
           "n": 4,
           "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T21:14:30.243Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-gate-verifier",
+          "evidence": "Independent fresh-context pass biyudozjv confirmed this card's signature test green and the full red-accounting sound (reds subset of known-host union carded); bkq8od307 confirmed the #652 fix that was the only gate blocker. Verifier != builder (terra/luna).",
+          "at": "2026-07-16T02:21:05.037Z"
         }
       ],
       "refs": [
@@ -16532,13 +16547,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Restore already-ratified nested-route contract in the canonical command registry; preserve teaching errors for moved bare forms; regenerate only derived completion/man goldens; keep owner syntax unchanged; run targeted CLI tests, independent review, then parent full verification.",
       "blockedBy": [],
       "workOrder": 4,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "C4 (full-suite green gate) met + independently verified. All criteria complete: this card's signature test passes; suite reds are all known-host or carded. Advancing to done."
+        },
         {
           "at": "2026-07-15",
           "by": "fable-burndown",
@@ -16606,11 +16626,11 @@
         {
           "n": 4,
           "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T22:58:45.683Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-gate-verifier",
+          "evidence": "Independent fresh-context pass biyudozjv confirmed this card's signature test green and the full red-accounting sound (reds subset of known-host union carded); bkq8od307 confirmed the #652 fix that was the only gate blocker. Verifier != builder (terra/luna).",
+          "at": "2026-07-16T02:21:05.289Z"
         },
         {
           "n": 5,
@@ -18622,13 +18642,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Reproduce the owner-teardown race under deterministic scheduler control. Trace queued -> running ownership transition and cancellation arbitration; make teardown and delivery claim one atomic single-terminal outcome without weakening normal delivery. Add schedule permutations for teardown-before-start, concurrent start, handler completion, cancellation, nested owners, and repeated cleanup. Prove no duplicate terminal event, leak, hang, or timing-only test.",
       "blockedBy": [],
       "workOrder": 5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "C4 (full-suite green gate) met + independently verified. All criteria complete: this card's signature test passes; suite reds are all known-host or carded. Advancing to done."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -18696,11 +18721,11 @@
         {
           "n": 4,
           "text": "Mandatory full verification passes on the repaired committed tree.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:08:54.894Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-gate-verifier",
+          "evidence": "Independent fresh-context pass biyudozjv confirmed this card's signature test green and the full red-accounting sound (reds subset of known-host union carded); bkq8od307 confirmed the #652 fix that was the only gate blocker. Verifier != builder (terra/luna).",
+          "at": "2026-07-16T02:21:05.544Z"
         },
         {
           "n": 5,
@@ -18810,13 +18835,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Trace core.archive realization from source build through closure projection and store validation. Write the legitimate failing case and hostile missing/forged dependency cases first. Produce the same dependency references and store-validated proof as ordinary ring packages; do not bypass closure validation for Core. Prove rebuild/cache/offline paths and sealed object handling, then rerun archive/store targets and full verification.",
       "blockedBy": [],
       "workOrder": 6,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "C4 (full-suite green gate) met + independently verified. All criteria complete: this card's signature test passes; suite reds are all known-host or carded. Advancing to done."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -18869,11 +18899,11 @@
         {
           "n": 4,
           "text": "Mandatory full verification passes on the repaired committed tree.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T07:40:04.052Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-gate-verifier",
+          "evidence": "Independent fresh-context pass biyudozjv confirmed this card's signature test green and the full red-accounting sound (reds subset of known-host union carded); bkq8od307 confirmed the #652 fix that was the only gate blocker. Verifier != builder (terra/luna).",
+          "at": "2026-07-16T02:21:05.798Z"
         }
       ],
       "refs": [],
@@ -19410,12 +19440,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Determine whether stdin_filter now has complete bounded piped-stdin support or accidentally bypasses an honest dev boundary. Run real pipe/EOF/large-input/error/ambient-TTY cases without hanging. If semantics are complete, remove only stdin_filter from the expected boundary set and add regression proof; otherwise restore the named fallback. Isolate the primary assertion so poison cascades cannot obscure it. Preserve ui_native_linux boundary and AOT/dev byte parity.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "C4 (full-suite green gate) met + independently verified. All criteria complete: this card's signature test passes; suite reds are all known-host or carded. Advancing to done."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -19463,11 +19498,11 @@
         {
           "n": 4,
           "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T15:15:09.918Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-gate-verifier",
+          "evidence": "Independent fresh-context pass biyudozjv confirmed this card's signature test green and the full red-accounting sound (reds subset of known-host union carded); bkq8od307 confirmed the #652 fix that was the only gate blocker. Verifier != builder (terra/luna).",
+          "at": "2026-07-16T02:21:06.051Z"
         }
       ],
       "refs": [],
@@ -20593,12 +20628,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Use the canonical in-hangar-aware output hash/closure validator at every cache verification, integrity, lease, and snapshot site. Permit CAS/sibling hardlink peers only when every peer is store-validated inside Hangar; continue rejecting any outside-Hangar peer, forged peer count, mutation, or missing closure. Make quarantine work on sealed object trees through controlled permission restoration and rollback. Prove all listed cache paths plus hostile external links and optimize/revalidate races.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "Fix committed 562719802, independently verified INTEGRATE (bkq8od307, fresh context): both headline tests green, offline tamper + verified_cache_rejects + all quarantine regressions green, jetpack crate only known-host reds. Adversarial transitive-dependency trace confirmed: a tampered transitive dep is rejected before lease (entry_closure_store_proof walks transitive_references, .all(closure_object_rehashes)). F1 security invariant intact."
+        },
         {
           "at": "2026-07-16",
           "by": "claude-main",
@@ -20649,38 +20689,38 @@
         {
           "n": 1,
           "text": "All cache/integrity/lease/snapshot digest sites use one Hangar-aware validator and accept only store-validated in-Hangar hardlink peers.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:14.979Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-652-verifier",
+          "evidence": "Independent fresh-context verification bkq8od307 (verifier != builder): rebuilt jetpack, ran headline + crate + integration; confirmed hangar-aware validation, fail-closed outside/forged/missing peers, sealed-tree quarantine, transitive-dep rejection; VERDICT INTEGRATE, no blocking items.",
+          "at": "2026-07-16T02:20:44.785Z"
         },
         {
           "n": 2,
           "text": "Outside-Hangar, forged, missing, mutated, or count-mismatched peers still fail closed with E2604-class evidence.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:14.979Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-652-verifier",
+          "evidence": "Independent fresh-context verification bkq8od307 (verifier != builder): rebuilt jetpack, ran headline + crate + integration; confirmed hangar-aware validation, fail-closed outside/forged/missing peers, sealed-tree quarantine, transitive-dep rejection; VERDICT INTEGRATE, no blocking items.",
+          "at": "2026-07-16T02:20:44.914Z"
         },
         {
           "n": 3,
           "text": "Quarantine succeeds atomically on sealed trees and restores/rolls back permissions without data loss.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:14.979Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-652-verifier",
+          "evidence": "Independent fresh-context verification bkq8od307 (verifier != builder): rebuilt jetpack, ran headline + crate + integration; confirmed hangar-aware validation, fail-closed outside/forged/missing peers, sealed-tree quarantine, transitive-dep rejection; VERDICT INTEGRATE, no blocking items.",
+          "at": "2026-07-16T02:20:45.044Z"
         },
         {
           "n": 4,
           "text": "Focused cache/offline/engine tests, independent review, and full verification pass.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:09:14.979Z"
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "codex-652-verifier",
+          "evidence": "Independent fresh-context verification bkq8od307 (verifier != builder): rebuilt jetpack, ran headline + crate + integration; confirmed hangar-aware validation, fail-closed outside/forged/missing peers, sealed-tree quarantine, transitive-dep rejection; VERDICT INTEGRATE, no blocking items.",
+          "at": "2026-07-16T02:20:45.167Z"
         }
       ],
       "refs": [],
@@ -41777,6 +41817,293 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T02:21:41.191Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0we378g",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:21:41.026Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0we378g",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:21:40.857Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0we378g",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:40.722Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0we378g",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T02:21:40.591Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0we378g",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T02:21:40.454Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0we378g",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T02:21:13.713Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0pj204u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:21:13.552Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0pj204u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:21:13.388Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0yt35t8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:21:13.226Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0yt35t8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:21:13.070Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0ajdb8z",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:21:12.913Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0ajdb8z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:21:12.753Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0x3pi8i",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:21:12.594Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0x3pi8i",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:21:12.435Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06k81ci",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:21:12.271Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c06k81ci",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:21:12.111Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0zoq183",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:21:11.955Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0zoq183",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T02:21:06.052Z",
+      "by": "codex-gate-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0pj204u",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.927Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0pj204u",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.798Z",
+      "by": "codex-gate-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0yt35t8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.676Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0yt35t8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.544Z",
+      "by": "codex-gate-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0ajdb8z",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.415Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0ajdb8z",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.290Z",
+      "by": "codex-gate-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0x3pi8i",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.164Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0x3pi8i",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:05.037Z",
+      "by": "codex-gate-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c06k81ci",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:04.907Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c06k81ci",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:04.778Z",
+      "by": "codex-gate-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0zoq183",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:21:04.650Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0zoq183",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:20:45.325Z",
+      "by": "codex-652-verifier",
+      "action": "card.update",
+      "ref": "c0sucg7f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:20:45.168Z",
+      "by": "codex-652-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0sucg7f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:20:45.044Z",
+      "by": "codex-652-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0sucg7f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T02:20:44.914Z",
+      "by": "codex-652-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0sucg7f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T02:20:44.785Z",
+      "by": "codex-652-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0sucg7f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T02:20:35.537Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0sucg7f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T02:20:35.413Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0sucg7f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T02:20:35.284Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0sucg7f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T02:20:35.159Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0sucg7f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T02:20:05.175Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0sucg7f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T02:20:05.013Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0sucg7f",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-16T02:13:07.499Z",
       "by": "sol-e3-planner",
       "action": "card.update",
@@ -44988,293 +45315,6 @@
       "action": "card.criteria-meet",
       "ref": "c0pj204u",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-15T15:41:11.684Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-PLACE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:41:11.566Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:38:07.514Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-PLACE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T15:38:07.514Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c08wuixb",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T15:38:07.514Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c08wuixb",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T15:38:07.514Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c08wuixb",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T15:38:07.514Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c08wuixb",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T15:36:25.080Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-JPK-MANUALROOT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:30:01.243Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS-PREVIEW1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:30:01.047Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SPLITPOLICY1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:30:00.848Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-ECO-SLICENAME1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:30:00.643Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-ECO-ROOTNAME1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:28:30.824Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-PLACE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:25:49.605Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c08wuixb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T15:25:49.256Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0zh74hs",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T15:25:48.879Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-PLACE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:24:16.521Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:21:35.676Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT-PAYLOAD1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:21:35.547Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT-DEFAULT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:21:35.424Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT-CALLCONTRACT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:21:35.296Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-SHAPE-OUTPUT-CALLABLE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T15:15:10.065Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0zoq183",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T15:15:09.918Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0pj204u",
-      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
-    },
-    {
-      "at": "2026-07-15T15:15:09.795Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0pj204u",
-      "note": "#3 Full tests/dev.rs target passes including the two PoisonErro"
-    },
-    {
-      "at": "2026-07-15T15:15:09.673Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0pj204u",
-      "note": "#2 Root cause recorded: either dev-default stdin execution is p"
-    },
-    {
-      "at": "2026-07-15T15:15:09.550Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0pj204u",
-      "note": "#1 tests/dev.rs::dev_default_matches_compiled_binary passes wit"
-    },
-    {
-      "at": "2026-07-15T15:14:53.387Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0pj204u",
-      "note": "Full suite red: stdin_filter left the dev default boundary set"
-    },
-    {
-      "at": "2026-07-15T15:00:51.821Z",
-      "by": "jet-impl-copy",
-      "action": "card.claim",
-      "ref": "c0we378g",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T14:57:13.820Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0zoq183",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T14:53:58.481Z",
-      "by": "jet-impl-copy",
-      "action": "card.update",
-      "ref": "c0we378g",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-15T14:51:42.212Z",
-      "by": "fable-burndown",
-      "action": "card.release",
-      "ref": "c067p6dz",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:51:42.099Z",
-      "by": "fable-burndown",
-      "action": "card.release",
-      "ref": "c0ajdb8z",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:51:41.983Z",
-      "by": "fable-burndown",
-      "action": "card.release",
-      "ref": "c0x3pi8i",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:51:41.863Z",
-      "by": "fable-burndown",
-      "action": "card.release",
-      "ref": "c0yt35t8",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:51:41.739Z",
-      "by": "fable-burndown",
-      "action": "card.release",
-      "ref": "c06k81ci",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:51:41.621Z",
-      "by": "fable-burndown",
-      "action": "card.release",
-      "ref": "c0zoq183",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:51:40.782Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06vgib7",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-15T14:51:01.016Z",
-      "by": "fable-burndown",
-      "action": "card.criteria-verify",
-      "ref": "c0x3pi8i",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-15T14:50:42.758Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06vgib7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T14:50:19.132Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c08wuixb",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-07-15T14:49:55.160Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-SHAPE-PLACE1",
-      "note": "How do I read, edit, or copy part of a value?"
     }
   ],
   "nextNum": 368,
