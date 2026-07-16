@@ -1,81 +1,90 @@
-# Compiler self-speed: beating Rust compile times
+# Compiler speed: the two-lens law and the self-hosted era
 
-Goal: `jet` compiles much faster than `cargo`/`rustc`. Plan of record, 2026-07-16.
+Plan of record, 2026-07-16 (reframed same day per owner direction).
 
-## Where the time goes today
+## The law (owner, 2026-07-16)
 
-Jet's front end (lex → parse → sema → codegen) is milliseconds. 90%+ of
-`jet run`/`jet build` wall-time is the shelled-out rustc — and today the
-default profile hands rustc **optimized** flags.
+One compiler core, two lenses. The **JIT lens** gives the rapid dev loop people
+love in Python/TypeScript. The **AOT lens** produces a highly optimized binary
+when the program is ready — longer build time is an accepted cost, not a bug.
+There is **never** a difference in supported features or behavior between the
+lenses; both consume the same executable TIR from the same front end (R12 is
+the enforcement mechanism). Compile-speed work therefore has two distinct
+targets:
 
-- **Default profile is optimized.** `Source/main.rs:223-330`: `BuildProfile::Default`
-  = opt-level 2 + thin-LTO + strip on every everyday build. A `--profile=debug`
-  (opt-level 0) exists but is opt-in.
-- **rustc runs un-tuned.** `Source/CmdCompile.rs::build`: no codegen-units, no
-  incremental, no fast linker (mold/lld), no target-cpu.
-- **Stdlib recompiles every build.** The prelude is emitted as source text into
-  the generated program (`crates/jet-codegen/src/Prelude/`); no precompiled
-  rlib/metadata artifact exists.
-- **Cache is all-or-nothing.** `Source/BuildCache.rs` keys
-  sha256(generated rust + profile) → whole binary; any edit = full rustc rebuild.
-- **rustc time is unmeasured.** `PhaseTiming` (`JET_TIMING=1`) laps
-  load/sema/ffi/codegen but never the rustc/link step that dominates.
-- **Front end is serial**; `jet-queries` demand cache is wired into the LSP only,
-  not the batch compile path.
+1. **Dev velocity** — won by JIT-lens coverage and latency, not by
+   de-optimizing AOT.
+2. **AOT build time in the self-hosted era** — won by architecture choices we
+   bake in now, so the self-hosted compiler never inherits rustc's fate.
 
-## Why Jet can structurally win
+## Interim reality (transpile era)
 
-Sema owns all checking (R1/R2, I3): every type, ownership fact, and mangle is
-resolved in TIR before emission. rustc's borrow-check, trait solving, and
-inference on the generated code are 100% redundant verification (R5/I2 keeps it
-as a hidden verifier). A native backend drops TIR straight to object code and
-deletes that whole phase; short-run, we stop asking rustc to optimize when we
-only want to run.
+While AOT rides generated Rust through hidden rustc, optimized AOT build time
+has a floor we do not control (rustc re-parses and re-verifies everything, then
+LLVM optimizes). Interim levers, all invariant-clean:
 
-## Stages
+- Instrument the rustc/link step (`PhaseTiming` never laps it today) + a
+  compiler self-speed benchmark corpus vs cargo in CI. You can't beat a number
+  you don't record.
+- Fast linker (mold → lld → system), tuned rustc flags.
+- Precompiled stdlib object store keyed on (prelude, rustc identity, profile) —
+  the prelude currently recompiles from source text on every build. R10
+  pay-for-what-you-call preserved.
+- Promote the jet-queries demand cache (LSP-only today) onto the batch compile
+  path: per-module memoized lex/parse/check, invalidate dependents only.
+- Hand-rolled (I6) parallel per-module front end; deterministic diagnostics.
+- Widen JIT TIR coverage so `jet dev` reloads never touch rustc for pure-Jet
+  programs.
 
-**Stage 0 — instrument (un-gated, first).** Lap rustc + link in PhaseTiming.
-Add a compiler self-speed benchmark corpus (hello / 1k / 10k / 50k LOC, single-
-and multi-module, clean + incremental) measured against equivalent cargo builds
-in CI. Exit: 100% of wall-time attributed; medians recorded. (The perf.<role>
-budget system measures user programs, not compiler self-speed — reuse its
-vocabulary only.)
+Open ballots on card #666 decide the product questions: which lens each
+everyday command uses (D-BUILD-DEFAULT1) and whether a fast-AOT tier is a
+product tier at all under the two-lens law (D-AOT-CRANELIFT1).
 
-**Stage 1 — dev-loop dominance.**
-- 1a *(owner-gate D-BUILD-DEFAULT ballot)*: default `jet run`/`jet dev`/`jet build`
-  → opt-level 0, codegen-units 256, no LTO; optimized moves behind `--release`.
-  Exit: hello clean build ≤150 ms; default build beats `cargo build` (debug) on
-  every corpus entry.
-- 1b *(un-gated)*: prefer mold → lld → system linker; tune rustc flags.
-  Exit: ≥2× link-time cut where available.
-- 1c *(un-gated)*: precompiled stdlib object store keyed on
-  (prelude, rustc identity, profile) under ~/.cache/jet; user code `--extern`s
-  it. Constraint R10 pay-for-what-you-call. Exit: prelude cost ~0 warm.
-- 1d *(un-gated)*: promote jet-queries onto the batch path — per-module
-  memoized lex/parse/check, invalidate dependents only. Constraint R12 parity +
-  identical diagnostics to clean check. Exit: incremental re-check ≤20 ms @10k LOC.
-- 1e *(un-gated)*: hand-rolled (I6) scoped-thread parallel per-module front end;
-  deterministic diagnostic order. Exit: front end scales with cores.
-- 1f: widen JIT TIR coverage so more `jet dev` reloads never touch rustc.
+## Self-hosted era: why Jet's compiler won't be slow like rustc
 
-**Stage 2 — AOT dominance.**
-- 2a *(owner-gate)*: Cranelift AOT debug tier — `jet build` (debug) lowers
-  TIR → Cranelift → object → link; rustc leaves the debug path. Falls back to
-  rustc by named unsupported reason (I2). R12: third TIR consumer, full parity
-  proof. Exit: debug builds ≥5× faster than cargo debug; zero golden diffs.
-- 2b *(owner-gate, post-2a)*: native optimizing release path; until it lands,
-  rustc stays the release backend.
+rustc is slow for identifiable, avoidable reasons. Each is a design bet the
+self-hosted compiler makes now, while the architecture is still cheap to shape:
+
+1. **No redundant verification.** rustc re-checks what its own front end
+   already knows (and in our transpile era, re-checks what Jet's sema already
+   proved). In the self-hosted compiler, sema remains the single gatekeeper
+   (R2); the backend consumes proven TIR and emits code — no borrow-check, no
+   trait-solve, no inference at emit (I3 carried forward).
+2. **Query-based incrementality from day one.** rustc retrofitted incremental
+   compilation onto a batch design and it still invalidates coarsely. Jet's
+   front end is already organized around jet-queries; the self-hosted compiler
+   keeps function/module-granular memoization as its spine, so an edit
+   re-checks the touched item plus dependents, not the world.
+3. **Parallel by construction.** Per-module lex/parse/sema fan-out with one
+   serial cross-module resolve point; no global mutable context like rustc's.
+4. **Monomorphization under our control.** Share generic instances, outline
+   cold ones, cap duplication — the classic LLVM-input blowup rustc suffers is
+   a policy choice we own in TIR lowering.
+5. **Tiered backends off one TIR.** The JIT lens (Cranelift) and the AOT lens
+   (optimizing backend) are two consumers of the same executable TIR. Feature
+   parity is structural — one front end, one TIR — and enforced by the R12
+   differential gates (same program, same output, every tier).
+6. **Optimization budget is spent where the user said it matters.** AOT may be
+   slow because it is the ship step; the perf.<role> budget vocabulary lets an
+   expert dial optimization scope, while the beginner default just works.
+
+Exit criteria for the self-hosted compiler (measured by the Stage-0 corpus):
+clean-build and incremental-build medians better than equivalent cargo builds
+at every corpus size for the dev/JIT path; AOT optimized builds within a stated
+factor of cargo release while producing competitive binaries; zero R12 parity
+diffs across lenses on the golden suite.
 
 ## Honest physics
 
-"Much faster" means compile time. Debug/dev loop: 5–20× is realistic (strictly
-less work). Release while rustc is the optimizer: parity at best — same LLVM
-plus a transpile hop; claiming otherwise is dishonest. The generated-Rust
-round-trip has a floor (rustc re-parses everything); only 2a/2b remove it.
+Dev loop: strictly less work than rustc (no re-verify, no optimizer, cached
+stdlib, incremental sema) — large multiples are realistic. Optimized AOT in
+the transpile era: parity with cargo release at best; claiming otherwise is
+dishonest. Self-hosted optimized AOT: the optimizer pass is irreducible —
+"faster than rustc release" comes from skipping redundant front-end work and
+better incrementality, not from skipping optimization the owner asked for.
 
-## Gates queued
+## Board
 
-Ballots: default-profile flip (1a) and Cranelift AOT debug tier (2a) — both on
-the plan's Tower card. mold/lld are subprocess tools like rustc, not linked
-crates (I6-clean). Cranelift is already I6-ratified for the JIT (D-JITDEP1);
-AOT is a new scope, hence the 2a ballot.
+Card #666 (interim + instrumentation + ballots). Epoch e9 (Bootstrapping)
+cards carry the self-hosted architecture bets; the e9 readiness wave folds
+this plan's self-hosted section into its cards.
