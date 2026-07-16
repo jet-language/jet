@@ -508,6 +508,78 @@ fn build_enforces_deterministic_fail_budgets_and_reuses_relevant_identity() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load() {
+    let bin_dir = isolated_cwd("perf_report_compiler_identity");
+    let compiler = bin_dir.join("jet-semantic-a");
+    let padded_compiler = bin_dir.join("jet-semantic-b");
+    fs::copy(jet(), &compiler).unwrap();
+    fs::copy(jet(), &padded_compiler).unwrap();
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&padded_compiler)
+        .unwrap()
+        .write_all(b"nonsemantic linker padding")
+        .unwrap();
+    assert_ne!(
+        jet::SHA256::sha256_file_hex(&compiler).unwrap(),
+        jet::SHA256::sha256_file_hex(&padded_compiler).unwrap(),
+        "controlled compiler copies must have different file bytes",
+    );
+
+    let workspace = benchmark_budget_project("perf_report_compiler_identity");
+    let seeded = Command::new(&compiler)
+        .args(["bench", "src/main.jet"])
+        .current_dir(&workspace)
+        .output()
+        .unwrap();
+    assert_eq!(
+        seeded.status.code(), Some(0),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&seeded.stdout),
+        String::from_utf8_lossy(&seeded.stderr),
+    );
+    assert_eq!(fs::read_dir(workspace.join(".jet/perf/reports")).unwrap().count(), 1);
+
+    let start = std::sync::Barrier::new(3);
+    let outputs = std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            start.wait();
+            Command::new(&compiler)
+                .args(["bench", "src/main.jet"])
+                .current_dir(&workspace)
+                .output()
+                .unwrap()
+        });
+        let second = scope.spawn(|| {
+            start.wait();
+            Command::new(&padded_compiler)
+                .args(["bench", "src/main.jet"])
+                .current_dir(&workspace)
+                .output()
+                .unwrap()
+        });
+        start.wait();
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+
+    for output in outputs {
+        assert_eq!(
+            output.status.code(), Some(0),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("ns/iter"), "compatible report reran benchmark workload");
+    }
+    assert_eq!(
+        fs::read_dir(workspace.join(".jet/perf/reports")).unwrap().count(),
+        1,
+        "nonsemantic compiler bytes must not invalidate compatible report identity",
+    );
+}
+
+#[test]
 fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = benchmark_budget_project("budget_bench_measurement");
@@ -792,7 +864,9 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
     let bin_dir = isolated_cwd("budget_unlinked_compiler_binary");
     let copied = bin_dir.join("jet-running-unlinked");
     fs::copy(jet(), &copied).unwrap();
-    let expected = jet::SHA256::sha256_file_hex(&copied).unwrap();
+    let expected_compiler = env!("JET_COMPILER_BUILD_ID").to_string();
+    let expected_stdlib = env!("JET_STDLIB_BUILD_ID").to_string();
+    let expected_runner = env!("JET_RUNNER_BUILD_ID").to_string();
     let children = dirs.iter().map(|dir| {
         spawn_with_retry(Command::new(&copied)
             .args(["budget", "check", "--json"])
@@ -810,9 +884,9 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
         jet_foundation::PerformanceBudget::verify_budget_report(&CanonicalJson::Object(report.clone()).bytes()).unwrap();
         let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
         let CanonicalJson::Object(toolchain) = &content["toolchain"] else { panic!("toolchain object") };
-        assert_eq!(toolchain["compiler_build_id"], CanonicalJson::String(expected.clone()));
-        assert_eq!(toolchain["runner_id"], CanonicalJson::String(expected.clone()));
-        assert_eq!(toolchain["stdlib_id"], CanonicalJson::String(expected.clone()));
+        assert_eq!(toolchain["compiler_build_id"], CanonicalJson::String(expected_compiler.clone()));
+        assert_eq!(toolchain["runner_id"], CanonicalJson::String(expected_runner.clone()));
+        assert_eq!(toolchain["stdlib_id"], CanonicalJson::String(expected_stdlib.clone()));
         let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject object") };
         let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("artifact object") };
         let artifact_path = dir.join("build/main");

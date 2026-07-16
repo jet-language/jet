@@ -435,6 +435,15 @@ fn nullable_text<'a>(value:Option<&'a CanonicalJson>,name:&str)->Result<Option<&
 fn require_text(fields:&BTreeMap<String,CanonicalJson>,key:&str,expected:&str)->Result<(),String>{if text(fields.get(key),key)?==expected{Ok(())}else{Err(format!("{key} mismatch"))}}
 
 #[cfg(test)]thread_local!{static FORCE_UNSUPPORTED_MUTATION:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
+#[cfg(test)]
+#[derive(Clone)]
+struct PublicationGate{name:String,reached:std::sync::Arc<std::sync::Barrier>,release:std::sync::Arc<std::sync::Barrier>}
+#[cfg(test)]
+static PUBLICATION_GATE:std::sync::Mutex<Option<PublicationGate>>=std::sync::Mutex::new(None);
+#[cfg(test)]
+fn before_immutable_publish(name:&str){let gate=PUBLICATION_GATE.lock().unwrap().as_ref().filter(|gate|gate.name==name).cloned();if let Some(gate)=gate{gate.reached.wait();gate.release.wait();}}
+#[cfg(not(test))]
+fn before_immutable_publish(_: &str){}
 fn mutation_supported()->Result<(),String>{
     #[cfg(target_os="linux")]{#[cfg(test)]if FORCE_UNSUPPORTED_MUTATION.with(std::cell::Cell::get){return Err("performance baseline mutation is enabled only on Linux until equivalent umask and durability guarantees are ratified".into())}Ok(())}
     #[cfg(not(target_os="linux"))]{Err("performance baseline mutation is enabled only on Linux until equivalent umask and durability guarantees are ratified".into())}
@@ -464,7 +473,7 @@ fn temp(dir:&File,bytes:&[u8])->Result<(File,String),String>{mutation_supported(
 #[cfg(unix)]fn unlink_checked(dir:&File,name:&str)->Result<(),String>{mutation_supported()?;use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn unlinkat(fd:i32,path:*const i8,flags:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in artifact name")?;if unsafe{unlinkat(dir.as_raw_fd(),name.as_ptr(),0)}==0{dir.sync_all().map_err(|e|e.to_string())}else{Err(format!("cannot remove unreferenced object: {}",std::io::Error::last_os_error()))}}
 #[cfg(not(unix))]fn unlink_checked(_: &File,_:&str)->Result<(),String>{Err("secure unlink unavailable on this platform".into())}
 
-fn install_immutable(dir:&File,name:&str,bytes:&[u8],verify:impl Fn(&[u8])->Result<(),String>)->Result<bool,String>{mutation_supported()?;match read_regular(dir,name){Ok(existing)=>{verify(&existing)?;if existing==bytes{return Ok(false)}return Err("immutable artifact differs from candidate".into())},Err(e)if !e.contains("No such file")=>return Err(e),Err(_)=>{}}let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn linkat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8,flags:i32)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{linkat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr(),0)}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);if error.kind()==ErrorKind::AlreadyExists{let existing=read_regular(dir,name)?;verify(&existing)?;if existing==bytes{return Ok(false)}}return Err(format!("cannot atomically install artifact: {error}"));}unlink(dir,&tmp);dir.sync_all().map_err(|e|e.to_string())?;Ok(true)}#[cfg(not(unix))]{let _=tmp;Err("atomic no-replace unavailable on this platform".into())}}
+fn install_immutable(dir:&File,name:&str,bytes:&[u8],verify:impl Fn(&[u8])->Result<(),String>)->Result<bool,String>{mutation_supported()?;match read_regular(dir,name){Ok(existing)=>{verify(&existing)?;if existing==bytes{return Ok(false)}return Err("immutable artifact differs from candidate".into())},Err(e)if !e.contains("No such file")=>return Err(e),Err(_)=>{}}let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;before_immutable_publish(name);#[cfg(target_os="linux")]{use std::ffi::CString;use std::os::fd::AsRawFd;const RENAME_NOREPLACE:u32=1;extern "C"{fn renameat2(oldfd:i32,old:*const i8,newfd:i32,new:*const i8,flags:u32)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{renameat2(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr(),RENAME_NOREPLACE)}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);if error.kind()==ErrorKind::AlreadyExists{let existing=read_regular(dir,name)?;verify(&existing)?;if existing==bytes{return Ok(false)}}return Err(format!("cannot atomically install artifact: {error}"));}dir.sync_all().map_err(|e|e.to_string())?;Ok(true)}#[cfg(not(target_os="linux"))]{let _=(dir,name,tmp);Err("atomic no-replace unavailable on this platform".into())}}
 
 fn replace_atomic(dir:&File,name:&str,bytes:&[u8])->Result<(),String>{mutation_supported()?;let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn renameat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{renameat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr())}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);return Err(format!("cannot atomically replace manifest: {error}"));}dir.sync_all().map_err(|e|e.to_string())?;Ok(())}#[cfg(not(unix))]{let _=(dir,name,tmp);Err("atomic replacement unavailable on this platform".into())}}
 
@@ -566,6 +575,38 @@ mod tests {
         assert!(install_immutable(&dir,"a.json",b"two\n",|_|Ok(())).is_err());
         symlink("/etc/passwd",root.join("objects/evil.json")).unwrap();
         assert!(read_regular(&dir,"evil.json").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os="linux")]
+    #[test]
+    fn concurrent_report_publication_is_atomic_and_exact() {
+        let root=std::env::temp_dir().join(format!("jet-budget-store-concurrent-{}-{}",std::process::id(),NONCE.fetch_add(1,Ordering::Relaxed)));
+        std::fs::create_dir(&root).unwrap();
+        let(bytes,id,_,_)=valid_report("concurrent");
+        let store=std::sync::Arc::new(BudgetStore::new(&root));
+        let bytes=std::sync::Arc::new(bytes);
+        store.dir(&[".jet","perf","reports"],true,0o755).unwrap();
+        let reached=std::sync::Arc::new(std::sync::Barrier::new(3));
+        let release=std::sync::Arc::new(std::sync::Barrier::new(3));
+        *PUBLICATION_GATE.lock().unwrap()=Some(PublicationGate{name:format!("{id}.json"),reached:reached.clone(),release:release.clone()});
+        struct Reset;impl Drop for Reset{fn drop(&mut self){*PUBLICATION_GATE.lock().unwrap()=None;}}let _reset=Reset;
+
+        let writers=(0..2).map(|_|{
+            let store=store.clone();let bytes=bytes.clone();
+            std::thread::spawn(move||store.write_report(&bytes))
+        }).collect::<Vec<_>>();
+        reached.wait();
+        let reader={let root=root.clone();let reader_id=id.clone();std::thread::spawn(move||{let dir=open_dir_chain(&root,&[".jet","perf","reports"],false,0o755).unwrap();read_regular(&dir,&format!("{reader_id}.json"))})};
+        assert!(reader.join().unwrap().unwrap_err().contains("No such file"));
+        release.wait();
+
+        let mut created=writers.into_iter().map(|writer|writer.join().unwrap().unwrap().1).collect::<Vec<_>>();
+        created.sort();
+        assert_eq!(created,vec![false,true]);
+        let published=std::fs::read(&root.join(format!(".jet/perf/reports/{id}.json"))).unwrap();
+        verify_budget_report(&published).unwrap();
+        assert_eq!(published,*bytes);
         std::fs::remove_dir_all(root).unwrap();
     }
 
