@@ -1013,6 +1013,12 @@ mod tests {
             format!("{core}{runtime_control}{observe}"),
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
+        assert_eq!(emitted.len(), 106_731, "split changed prelude byte length");
+        assert_eq!(
+            crate::SHA256::sha256_hex(emitted.as_bytes()),
+            "816440ced28850b548a433b6c2c62fce7e43276f29fc49dd25bac0400d945f85",
+            "split changed historical prelude bytes, order, or boundary newline"
+        );
     }
 
     fn checked_generic_bundle(src: &str, root: &str) -> crate::AST::ProgramBundle {
