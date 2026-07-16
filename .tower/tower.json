@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 678,
-    "rev": 9300,
+    "rev": 9318,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25723,7 +25723,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P0",
       "plan": "D-MEM-PARAM1=A preserves current D-MEM1 law: an unmarked parameter is a read borrow, lowers without clone/RC/allocation, and cannot write, consume, escape, or outlive the caller. This is reconciliation work, not a new ownership implementation. Update ratified law/docs and public contract snapshots, then add focused regressions for String/list/struct reads, E0205 write fixes using &, E0209 take rejection, nested calls, generics, closures, AOT/dev parity, and generated Rust borrow shape. Remove stale copy-on-write audit text.",
       "blockedBy": [],
@@ -25765,72 +25765,72 @@
           "text": "D-MEM-PARAM1=A and D-MEM1 agree everywhere: unmarked parameters are read borrows; & writes and ^ takes remain explicit.",
           "status": "verified",
           "metBy": "codex-memory-642",
-          "verifiedBy": "codex-root-review",
-          "evidence": "Independent diff review and exact parameter-mode proof.",
-          "at": "2026-07-16T18:41:01.168Z"
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review traced all signature and call-lowering conventions",
+          "at": "2026-07-16T18:44:59.215Z"
         },
         {
           "n": 2,
           "text": "String, list, struct, generic, method, closure, and nested-call regressions prove no clone, reference count, hidden allocation, write, take, or escape on the unmarked path.",
           "status": "verified",
           "metBy": "codex-memory-642",
-          "verifiedBy": "codex-root-review",
-          "evidence": "Independent ownership, TIR, and exact AOT regressions green.",
-          "at": "2026-07-16T18:41:01.386Z"
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review found and cleared field, closure/task, indirect-call, generic-bound and variadic gaps",
+          "at": "2026-07-16T18:44:59.433Z"
         },
         {
           "n": 3,
           "text": "E0205/E0209 diagnostics and fix text point to & or ^ correctly, with registered UI snapshots and no rustc leakage.",
           "status": "verified",
           "metBy": "codex-memory-642",
-          "verifiedBy": "codex-root-review",
-          "evidence": "Independent snapshot/diff review; no rustc leakage in exact proofs.",
-          "at": "2026-07-16T18:41:01.598Z"
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review inspected exact diagnostics and independently reran scoped UI/ownership proof",
+          "at": "2026-07-16T18:44:59.663Z"
         },
         {
           "n": 4,
           "text": "Generated Rust shape, TIR, AOT/dev parity, docs/spec/examples, independent verification, and full repository verification pass.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-memory-review",
+          "evidence": "independent AOT, ownership and cargo-check reruns green; material fix review clean",
+          "at": "2026-07-16T18:44:59.895Z"
         },
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
           "status": "verified",
           "metBy": "codex-memory-642",
-          "verifiedBy": "codex-root-review",
-          "evidence": "Syntax entry reviewed.",
-          "at": "2026-07-16T18:41:01.810Z"
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review confirms semantic-only change requires no registry edit",
+          "at": "2026-07-16T18:45:00.129Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
           "status": "verified",
           "metBy": "codex-memory-642",
-          "verifiedBy": "codex-root-review",
-          "evidence": "Ratified log reviewed.",
-          "at": "2026-07-16T18:41:02.023Z"
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review confirms documented law matches implementation",
+          "at": "2026-07-16T18:45:00.354Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
           "status": "verified",
           "metBy": "codex-memory-642",
-          "verifiedBy": "codex-root-review",
-          "evidence": "No grammar artifact change required.",
-          "at": "2026-07-16T18:41:02.267Z"
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review confirms no grammar-affecting surface change",
+          "at": "2026-07-16T18:45:00.591Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
           "status": "verified",
           "metBy": "codex-memory-642",
-          "verifiedBy": "codex-root-review",
-          "evidence": "Targeted snapshots reviewed.",
-          "at": "2026-07-16T18:41:02.476Z"
+          "verifiedBy": "codex-memory-review",
+          "evidence": "review confirms new snapshots cover every new diagnostic path",
+          "at": "2026-07-16T18:45:00.825Z"
         }
       ],
       "refs": [
@@ -50504,6 +50504,132 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T18:45:01.080Z",
+      "by": "codex-memory-review",
+      "action": "card.update",
+      "ref": "c0vb511d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T18:45:00.825Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-16T18:45:00.591Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-16T18:45:00.355Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-16T18:45:00.129Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-16T18:44:59.895Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T18:44:59.664Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T18:44:59.433Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T18:44:59.215Z",
+      "by": "codex-memory-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T18:44:59.000Z",
+      "by": "codex-memory-642",
+      "action": "card.update",
+      "ref": "c0vb511d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T18:44:58.743Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-16T18:44:58.509Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-16T18:44:58.290Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-16T18:44:58.065Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-16T18:44:57.846Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-16T18:44:57.619Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T18:44:57.380Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T18:44:57.152Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-16T18:41:02.862Z",
       "by": "codex-root-review",
       "action": "card.update",
@@ -53876,132 +54002,6 @@
       "action": "card.update",
       "ref": "c06eyg3s",
       "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:12:23.080Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0b4rcuh",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:11:31.609Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0ewd6kd",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:10:40.233Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0ocarv7",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:09:02.627Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0tfsrts",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:08:10.621Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0zpnwk9",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:07:12.309Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0oeg3vh",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:06:23.558Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0y9w2ur",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:05:29.937Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0lc8k7l",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:03:55.092Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0898o9k",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:03:08.900Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0zti5r8",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:02:26.841Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0xhhjch",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T05:02:13.098Z",
-      "by": "sol-e6-planner",
-      "action": "card.update",
-      "ref": "c0yl88cz",
-      "note": "plan,refs,criteria,blockedBy,phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T05:02:00.709Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0i0ho3h",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:02:00.560Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0pfsrnc",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T05:02:00.418Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qqwe62",
-      "note": "#4 Storefront browse (featured/categories/screenshots) is sourc"
-    },
-    {
-      "at": "2026-07-16T05:02:00.291Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qqwe62",
-      "note": "#3 View source shows the exact generated diff on demand, never "
-    },
-    {
-      "at": "2026-07-16T05:02:00.172Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qqwe62",
-      "note": "#2 One-click Install writes a declarative diff into user.<name>"
-    },
-    {
-      "at": "2026-07-16T05:02:00.052Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qqwe62",
-      "note": "#1 The Apps view lives inside the one Studio shell -- verified "
     }
   ],
   "nextNum": 368,
