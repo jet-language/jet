@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 674,
-    "rev": 8478,
+    "rev": 8587,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7870,7 +7870,7 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Scenarios pattern-arm-add-edit-remove, pattern-arm-invalid-refused, and multi-input-append-remove already pass live (scripts/canvas-test/scenario.mjs; tests/canvas_scenarios.rs::pattern_arm_add_edit_remove, multi_input_append_remove) and the matrix rows Pattern arm authoring, Pattern forms, Multi-input pins already read shipped in docs/plans/epoch-6/canvas-blueprint-parity-matrix.md. Remaining scope is verification, not reimplementation: confirm criterion 1 (stable title/metadata for pattern-test branches vs shipped transactions) against crates/jet-devserver/src/Canvas/graph_projection.rs, confirm invalid pattern refs roll back cleanly on E0305, and close the card. Multi-exec-pin scope moved to #391 per the 2026-07-09 owner correction.",
       "blockedBy": [],
       "assignee": "terra-375-builder",
       "log": [
@@ -7896,7 +7896,7 @@
         }
       ],
       "created": "2026-07-09T14:08:57.486Z",
-      "updated": "2026-07-14",
+      "updated": "2026-07-16",
       "criteria": [
         {
           "n": 1,
@@ -7937,7 +7937,7 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 19,
+      "workOrder": 300,
       "claimedAt": "2026-07-10T17:56:14.645Z"
     },
     {
@@ -7951,7 +7951,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Each M2 claimed row in docs/plans/epoch-6/canvas-blueprint-parity-matrix.md gets one scripts/canvas-test/scenario.mjs gesture scenario plus a tests/canvas_scenarios.rs entry: promote-pin-to-variable, cast/conversion insertion, collapse/expand, math-expression inline chip edit, node docs hover (tooltip from doc comment), keyboard-only authoring (search, palette insert, undo, redo, node nudge). LOD/virtualization is deferred to #382, which owns it after the 2026-07-10 re-baseline. The data-rewire-to-fn-symbol bug (js.rs:3723) and wrong-type inline editor accept (js.rs:3599) are fixed by #488 this card only adds regression coverage once #488 lands, no duplicate fix work.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -7977,11 +7977,57 @@
         }
       ],
       "created": "2026-07-09T14:08:57.554Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "scripts/canvas-test/scenario.mjs gains promote-pin-to-variable and cast-conversion-insertion gesture scenarios; tests/canvas_scenarios.rs runs both and asserts the resulting Jet source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:22.390Z"
+        },
+        {
+          "n": 2,
+          "text": "collapse/expand and math-expression inline-edit gesture scenarios pass, asserting DOM state and Jet source round-trip through the formatter.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:22.513Z"
+        },
+        {
+          "n": 3,
+          "text": "node docs hover scenario asserts a doc-comment-derived tooltip renders on pointer hover for a project function and a core catalog entry.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:22.637Z"
+        },
+        {
+          "n": 4,
+          "text": "keyboard-only authoring scenario drives search, palette insert, undo, redo, and node nudge via keyboard events only, with no pointer events, and asserts the resulting source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:22.765Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md rows for these capabilities move from claimed to shipped with an interaction ratchet citing the new scenario names.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:22.886Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 48
+      "workOrder": 309
     },
     {
       "id": "c0stzzp4",
@@ -7994,8 +8040,10 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
-      "blockedBy": [],
+      "plan": "D-CANVASMETA1=B shipped (attribute Meta with category and tunable fields; docs/spec/syntax-decisions.md around line 872) and Off/DebugOnly shipped (#385) so metadata and node-state surfaces are ungated. Build the Details panel atop #493s field-descriptor renderer (crates/jet-canvas/src/js/inspector-connections.js) instead of hand-rolled innerHTML, per canvas-workspace-architecture.md migration step 5, so every field is either apply_op-live or absent. Cover per-selection editing: variable name, type, default, docs; function signature, purity, visibility; node values; Meta category and tunable checkboxes. Remove the PROOF/REVISION panel and raw COMMAND rows from default non-developer-mode UI per the #368 R4 follow-up.",
+      "blockedBy": [
+        "c06eyg3s"
+      ],
       "assignee": null,
       "log": [
         {
@@ -8020,11 +8068,57 @@
         }
       ],
       "created": "2026-07-09T14:09:30.914Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Details panel for a variable, a function, and a node each render exclusively through the #493 field-descriptor renderer; grep of crates/jet-canvas/src/js/inspector-connections.js confirms zero remaining per-selection innerHTML template strings.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:23.149Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario edits variable name, type, default, and doc comment through Details and asserts each write lands in Jet source via the existing edit transactions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:23.274Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario edits function signature, purity marker, and visibility through Details and asserts resulting Jet source and reprojection.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:23.397Z"
+        },
+        {
+          "n": 4,
+          "text": "Gesture scenario toggles Meta category and tunable through Details checkboxes and asserts a Meta attribute is written or updated per D-CANVASMETA1 grammar.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:23.527Z"
+        },
+        {
+          "n": 5,
+          "text": "A scenario confirms the PROOF/REVISION panel and raw COMMAND rows are absent from default UI, asserting the relevant DOM ids are not present without developer mode enabled.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:23.655Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 49
+      "workOrder": 308
     },
     {
       "id": "c0u0y3s6",
@@ -8037,7 +8131,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "crates/jet-semindex already answers references and rename queries used by existing codemod paths (matrix row Find references/rename, status claimed/projection). This card is UX only: project-wide search panel, find-references-from-any-node-or-variable action, rename-with-diff-preview surfaced in the Canvas shell, wired to the existing engine, no new query or rename logic.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8053,11 +8147,48 @@
         }
       ],
       "created": "2026-07-09T14:09:30.986Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario opens project-wide search, types a function name, and asserts results spanning at least two files in a multi-file fixture project.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:23.929Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario runs find-references from a selected node or variable and asserts the results panel lists every real reference, checked against tests/canvas.rs projection.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:24.053Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario runs rename on a function used in 3 files, previews a diff for all 3, confirms, and asserts each files Jet source updates and stays sema-clean.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:24.173Z"
+        },
+        {
+          "n": 4,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Find references/rename and Find in graph/project rows move to shipped with an interaction ratchet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:24.294Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 50
+      "workOrder": 311
     },
     {
       "id": "c0v5rsny",
@@ -8070,7 +8201,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Text diff is structurally free since Jet source is plain text under Git build a review panel around the existing Git text diff (crates/jet-devserver/src/Canvas/debug_source_git.rs, /canvas/source-control) instead of a custom binary-asset diff UI. Add per-hunk graph highlight, mapping each diff hunks line range back to graph nodes via existing source-span data in graph_projection.rs, plus a revision-compare picker over Git history.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8081,11 +8212,57 @@
         }
       ],
       "created": "2026-07-09T14:09:31.055Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario edits a function via the graph, opens the review view, and asserts the text diff panel shows the exact hunk for that edit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:24.568Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario asserts each shown diff hunk highlights the corresponding node or nodes in the graph pane, checked via a graph query, not a visual-only assertion.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:24.690Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario compares two revisions from source-control history and asserts the diff panel updates to that pair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:24.810Z"
+        },
+        {
+          "n": 4,
+          "text": "docs/reference documents the text-diff-over-binary-asset advantage, matching the exit criterion stated in the card body.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:24.939Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md gains or updates a review-view row at shipped with an interaction ratchet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:25.066Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 51
+      "workOrder": 312
     },
     {
       "id": "c0wbf3js",
@@ -8098,7 +8275,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Trait projection (kind trait_interface and trait_impl, graph_projection.rs around lines 219-254) and event-dispatcher projection (event_dispatcher_facts, graph_projection.rs around line 283) already ship structurally under #316 and #311. This card is pure surfacing: three panels, Traits (implemented/required methods, impl-stub creation via the existing create_trait_impl transaction), Events (core.event emit/subscribe facts), and a module/package browser (jetpack deps plus core modules with docs, reusing project_scan.rs facts), wired into the Canvas shell.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8109,11 +8286,48 @@
         }
       ],
       "created": "2026-07-09T14:09:31.125Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario opens the Traits panel, selects a trait with a missing method, and asserts a stub-creation click writes the create_trait_impl transactions Jet source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:25.342Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario opens the Events panel for a type with core.event dispatchers and asserts emit/subscribe rows match graph_projection.rs event_dispatcher_facts for that source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:25.463Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario opens the module/package browser and asserts it lists jetpack deps from project_scan.rs plus core modules with doc-comment text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:25.588Z"
+        },
+        {
+          "n": 4,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Trait/impl authoring and Event dispatchers/interfaces rows move to shipped with an interaction ratchet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:25.857Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 52
+      "workOrder": 313
     },
     {
       "id": "c0xhxzyu",
@@ -8126,7 +8340,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "The project-layer read model already exists (crates/jet-devserver/src/Canvas/project_scan.rs, project_transactions.rs; /canvas/project shipped 2026-07-08 per canvas-workspace-architecture.md Shipped Slice). This card wires the UI: file-switching tabs (project-navigation.js already has tab/rail scaffolding), cross-file function graphs via source_id-qualified /canvas/graph, cross-file insert using existing import synthesis, workspace-wide search scoping built on #378, and palette scoping by module.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8137,11 +8351,57 @@
         }
       ],
       "created": "2026-07-09T14:09:31.196Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario on a 3-file fixture workspace switches files via tabs and asserts each tabs graph matches that files functions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:26.132Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario inserts a call to a function defined in file B while editing file A, asserts an import is synthesized and the call node appears wired.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:26.263Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario renames a function used across all 3 files, reusing #378 rename, and asserts all 3 files update and stay sema-clean.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:26.385Z"
+        },
+        {
+          "n": 4,
+          "text": "Gesture scenario scopes palette search to one module and asserts only that modules entries and the core catalog appear.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:26.509Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md gains or updates a multi-file navigation row at shipped with an interaction ratchet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:26.640Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 53
+      "workOrder": 315
     },
     {
       "id": "c0yl88cz",
@@ -8154,7 +8414,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Generate a 300-function fixture project and drive pan/zoom/select across it in the scenario harness while asserting a frame-time budget via the CDP driver (scripts/canvas-test/driver.mjs). Re-verify virtualization and LOD with real measured numbers, not grep this row is deferred here from #376 per the 2026-07-10 re-baseline note that M4 sharpens #382 to re-verify with measured frame-time.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8165,11 +8425,57 @@
         }
       ],
       "created": "2026-07-09T14:09:31.262Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A fixture generator produces a 300-function Jet project (committed fixture or generated at test time) and it opens in Canvas without error.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:26.914Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario pans and zooms across the full project and asserts per-frame time stays under a stated budget, recorded via the CDP drivers timing hooks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:27.036Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario selects nodes at low zoom and asserts title-bar-only LOD rendering activates, measured via a detail-level query, not a string grep.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:27.159Z"
+        },
+        {
+          "n": 4,
+          "text": "This scenario runs in scripts/agent/verify-full.sh and fails the suite, not skips, if the budget regresses or the harness is unavailable.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:27.290Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Large graph virtualization and LOD row moves from planned to shipped with an interaction ratchet citing measured frame-time.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:27.418Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 54
+      "workOrder": 316
     },
     {
       "id": "c0zti5r8",
@@ -8182,7 +8488,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Add a canvas-tour example project under examples/ (I5: examples are the executable spec) with a guided overlay driven by local view state, not new source semantics. Doc-comment-derived hovers built by #377 and #380 plus a keyboard cheat-sheet overlay round out onboarding. Provide a one-command demo entry. Sequenced last: needs M2-M4 panels and gestures in place for the tour to demonstrate them.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8198,11 +8504,57 @@
         }
       ],
       "created": "2026-07-09T14:09:31.337Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "examples/canvas-tour or equivalent path exists with a working two-function Jet program and passes the existing golden-example check.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:27.693Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario opens the tour project fresh, drives the guided overlay through at least 3 steps such as insert node, wire, run, and asserts each steps DOM state and resulting source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:27.819Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario opens the keyboard cheat-sheet overlay and asserts it lists the real bound shortcuts cross-checked against input-events.js, not hardcoded prose.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:27.942Z"
+        },
+        {
+          "n": 4,
+          "text": "A one-command demo entry is documented in docs/reference and runnable without extra setup beyond the standard dev shell.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:28.062Z"
+        },
+        {
+          "n": 5,
+          "text": "Owner acceptance script 5, jet-new to a working two-function graph program with no text editor, is drafted as a ballot per canvas-blueprint-epoch.md milestone-exit process rule.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:28.187Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 55
+      "workOrder": 318
     },
     {
       "id": "c00zbmhz",
@@ -8236,7 +8588,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Off/DebugOnly shipped (#385, D-CANVASSTATE1=D). This card is pure Canvas UI: add right-click Disable and Debug only menu entries writing Off/DebugOnly via a new edit_actions.rs transaction reusing the existing statement-attribute write pattern, grey-plus-badge rendering in graph-rendering.js, and toggle-off removing the attribute. Upgrade the Stmt Off and Stmt DebugOnly rows in docs/reference/canvas-parity.md from readonly.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8252,11 +8604,57 @@
         }
       ],
       "created": "2026-07-09T15:42:06.995Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario right-clicks a statement node, picks Disable, and asserts an Off attribute is written before the statement and the node renders greyed with an off badge.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:28.451Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario right-clicks a statement node, picks Debug only, and asserts a DebugOnly attribute is written and the node renders a hazard-stripe badge.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:28.579Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario toggles a disabled or debug-only node back off and asserts the attribute is removed from source and the badge disappears.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:28.698Z"
+        },
+        {
+          "n": 4,
+          "text": "Undo restores exact prior source for each of the three toggle scenarios above.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:28.824Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/reference/canvas-parity.md Stmt Off and Stmt DebugOnly rows cite the new interaction scenarios instead of badge UI pending.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:28.946Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 18
+      "workOrder": 303
     },
     {
       "id": "c0lc8k7l",
@@ -8269,7 +8667,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "482 needs_canvas_defaults plus 33 method_only core-catalog entries, 68 percent of the catalog, are currently excluded from the palette. The product answer, already decided in the card body, is to insert them as staged nodes using the existing canvas-only dashed unwired mechanism with typed unconnected input pins, materializing to source on first required-pin wire. method_only entries stage with an unconnected receiver pin. needs_unsafe_region, type_member, type_only, and value_only stay excluded this card per I1 and the M6 deferral no ballot needed.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8285,11 +8683,57 @@
         }
       ],
       "created": "2026-07-09T15:48:26.547Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Palette shows needs_canvas_defaults and method_only core entries as normal, not greyed, rows; the canvas core-catalog unavailable_reason_code distribution for these two classes drops to zero excluded.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:29.222Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario inserts a needs_canvas_defaults entry from the palette and asserts it lands as a staged dashed node with typed unconnected input pins, writing no source yet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:29.344Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario wires a staged nodes required pin and asserts materialization: an insert transaction writes real Jet source and the dashed styling clears.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:29.465Z"
+        },
+        {
+          "n": 4,
+          "text": "Gesture scenario inserts a method_only entry and asserts it stages with an unconnected receiver pin, then materializes correctly when the receiver is wired.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:29.591Z"
+        },
+        {
+          "n": 5,
+          "text": "A property-style test over the full catalog asserts needs_unsafe_region, type_member, type_only, and value_only entries keep their unavailable_reason_code unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:29.714Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 20
+      "workOrder": 304
     },
     {
       "id": "c0y9w2ur",
@@ -8302,7 +8746,7 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "Purge foreign or bridge symbol leakage such as FOREIGN_PRINTLN from the core catalog in jet-foundation math_layout.rs and add a catalog-vs-real-exports cross-check test. Enforce the menu-content rule: right-click, dragged-pin, and wire context menus show only insertable functions and variables, moving all commands out to toolbar/command palette only. Fix the fuzzy scorer for word-boundary and prefix dominance and title-over-subtitle ranking. Fix the wrong-callee defect so the top Print row inserts print, never canvas_value::summarize via the extensibility action path, and every activation yields a visible node or visible diagnostic. Fix branch-arm wiring so drag-from-else creates into the else arm, and wiring else to an existing statement moves it into the arm via an arm-scoped reorder_statements extension.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8323,11 +8767,66 @@
         }
       ],
       "created": "2026-07-09T17:26:33.348Z",
-      "updated": "2026-07-11",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Scenario menu_shows_only_functions_and_variables: right-click, pin-drag, and wire menus contain zero command rows across a representative query set.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:29.996Z"
+        },
+        {
+          "n": 2,
+          "text": "Scenario menu_ranking_print: querying print surfaces the print row first with zero command rows in the results.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:30.125Z"
+        },
+        {
+          "n": 3,
+          "text": "Scenario builtin_print_row_inserts_print: clicking the top Print row inserts print source, never canvas_value::summarize or any other wrong callee.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:30.248Z"
+        },
+        {
+          "n": 4,
+          "text": "Scenario else_pin_insert_into_arm: dragging from an else exec pin creates the new node inside the else block, asserted by source span.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:30.373Z"
+        },
+        {
+          "n": 5,
+          "text": "Scenario else_pin_move_existing_into_arm: wiring else to an existing statement moves that statement into the arm, asserted by resulting source order.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:30.491Z"
+        },
+        {
+          "n": 6,
+          "text": "A catalog-vs-real-exports cross-check test fails if any catalog entry has no matching real sema export, guarding against the println-class phantom-symbol bug.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:30.613Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 15
+      "workOrder": 305
     },
     {
       "id": "c0oeg3vh",
@@ -8340,7 +8839,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "All existing verification is Chromium-only via scripts/canvas-test/driver.mjs, the CDP pipe driver strategy already in use. Add a geckodriver, nixpkgs dev shell, WebDriver-classic lane reusing the existing scenario API in scripts/canvas-test/scenario.mjs for the 5 seed scenarios, open, pan/zoom, click-select, palette insert, undo, plus pin-drag and menu-insert. Run it nightly or full-suite only if runtime cost is high. Any Gecko-only breakage becomes a separate P0 defect card, not a fix-in-place here.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8356,11 +8855,48 @@
         }
       ],
       "created": "2026-07-09T17:27:07.580Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A geckodriver-backed driver implementing the same interface as driver.mjs exists under scripts/canvas-test and runs the 5 seed scenarios plus pin-drag and menu-insert against Firefox or Gecko.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:30.879Z"
+        },
+        {
+          "n": 2,
+          "text": "This lane is wired into scripts/agent/verify-full.sh or the nightly/full tier, with the chosen tier documented in the card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:31.014Z"
+        },
+        {
+          "n": 3,
+          "text": "The lane fails the suite, not skips, when geckodriver or Firefox is unavailable, matching the M0 hardening rule against silent skip.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:31.139Z"
+        },
+        {
+          "n": 4,
+          "text": "Any Gecko-only scenario failure discovered is filed as a separate P0 card rather than patched inside this card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:31.265Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 21
+      "workOrder": 302
     },
     {
       "id": "c0zpnwk9",
@@ -8373,7 +8909,7 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "canvas-blueprint-epoch",
+      "plan": "D-CANVAS-MULTIEXEC1=E ratified: convergence preview, extract-to-function by default via the existing extract-selection transaction with Enter accepting, plus expert alternatives call existing fn via a span-match query after formatting, and duplicate inline as an explicit escape hatch with a divergence warning. Build (1) generalized multi-exec-OUT: switch arms, loop body/done, and early returns project as N labeled exec outs, extending the existing branch and pattern-arm exec-out mechanism; (2) multi-exec-IN convergence: dropping a second exec wire onto a node opens the ratified preview, pre-selected extract with the name field focused, backed by a span-match query against existing helper bodies for the call-existing option, and the shipped extract-to-function transaction for both the default and duplicate-inline paths.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -8403,11 +8939,66 @@
         }
       ],
       "created": "2026-07-09T17:40:53.264Z",
-      "updated": "2026-07-11",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario inserts a switch statement with 3 arms and asserts 3 labeled exec-out pins project, each wired independently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:31.608Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario inserts a loop and asserts labeled body and done exec-out pins project distinctly.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:31.731Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario drags a second exec wire onto a node already targeted by one and asserts the convergence preview opens with the extract diff pre-selected and the name field focused.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:31.852Z"
+        },
+        {
+          "n": 4,
+          "text": "Gesture scenario accepts the default with Enter and asserts the shared span becomes a named helper function called from both sites, matching D-CANVAS-MULTIEXEC1 option A exact diff shape.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:31.972Z"
+        },
+        {
+          "n": 5,
+          "text": "Gesture scenario picks call existing fn when the converged span matches a prior helpers body post-formatting, and asserts both sites call that existing function with no new function created.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:32.094Z"
+        },
+        {
+          "n": 6,
+          "text": "Gesture scenario picks duplicate inline instead and asserts the span is copied into both sites verbatim with no shared helper, per the explicit divergence path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:32.215Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 64
+      "workOrder": 314
     },
     {
       "id": "c0rb4k1d",
@@ -12642,15 +13233,53 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
-      "plan": null,
+      "plan": "Add a real pointer-drag interaction from a data output pin to a compatible input pin, writing the wired-source transaction on drop. A client-side type gate refuses an incompatible drop in-UI before sema and shows the reason. This fixes js.rs:3723 by checking pin type compatibility client-side before drop instead of after sema, and js.rs:3599 by type-gating the inline editors accepted input set to the pins type.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario drags from a data output pin to a compatible input pin and asserts the wire-write transaction lands correct Jet source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:32.491Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario drags from a data output pin to an incompatible input pin and asserts the drop is refused in-UI with the reason shown, and no sema round-trip occurs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:32.617Z"
+        },
+        {
+          "n": 3,
+          "text": "Regression scenario reproduces the js.rs:3723 case, rewiring a function symbol into an Int-typed pin, and asserts it is refused client-side rather than silently inserted as a mismatched value.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:32.738Z"
+        },
+        {
+          "n": 4,
+          "text": "Regression scenario reproduces the js.rs:3599 case, typing a wrong-type value into an inline editor, and asserts the editor rejects it client-side before any transaction posts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:32.863Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-11T01:43:00.387Z",
-      "updated": "2026-07-11"
+      "updated": "2026-07-16",
+      "workOrder": 307
     },
     {
       "id": "c0ocarv7",
@@ -12663,7 +13292,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-CANVAS-COPYPASTE1=E ratified: source-text clipboard as the one path across graph, other files, and plain text; atomic first-free-suffix rename on a materializing paste; insertion after the selections span; staged fallback using the #388 mechanism when inputs are unresolved; non-blocking rename chips after a materializing paste where click or F2 runs the existing rename transaction and more than 3 renames coalesce to one pill; and an explicit stage modifier, Ctrl+Shift+V or a context-menu Paste as staged entry. Marquee drag selects, reusing the existing marquee drag mode in input-events.js; shift-add and ctrl-toggle modify selection. Finishes #272 under the interaction bar.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -12682,11 +13311,67 @@
           "text": "D-CANVAS-COPYPASTE1 queued (rec D: source-text clipboard + suffix rename + stage-when-unresolved)."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario marquee-drags over 3 nodes and asserts all 3 are selected; shift-click adds a 4th, ctrl-click toggles one off.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:33.141Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario copies a self-contained selection and pastes it, asserting source-text clipboard content, atomic first-free-suffix rename on colliding bindings, and insertion immediately after the selections span.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:33.266Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario pastes a selection with unresolved inputs and asserts it lands as a staged node using the #388 mechanism, writing no source until wired.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:33.389Z"
+        },
+        {
+          "n": 4,
+          "text": "Gesture scenario asserts rename chips appear after an auto-renamed paste, clicking one runs the real rename transaction, and a paste with more than 3 renames coalesces chips into one expandable pill.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:33.515Z"
+        },
+        {
+          "n": 5,
+          "text": "Gesture scenario uses Ctrl+Shift+V or the context-menu Paste as staged entry on a self-contained selection and asserts it stages instead of materializing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:33.636Z"
+        },
+        {
+          "n": 6,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Cut/copy/paste/duplicate row moves from planned to shipped with an interaction ratchet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:33.756Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-11T01:43:02.255Z",
-      "updated": "2026-07-11"
+      "updated": "2026-07-16",
+      "workOrder": 310
     },
     {
       "id": "c0ewd6kd",
@@ -12699,7 +13384,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-CANVAS-DEBUG-UX1=D ratified: one debugger UX behind one seam, backend chosen by what is executing. Compiled target uses the existing jet debug lldb/DAP backend with real frames mapped via the existing source map; under jet dev, the tier-0/tier-1 engine that is actually running reports its own stops, values, and taken path, joining the existing R12 parity batteries so backend drift fails tests. The engine is always named on screen. Wire the 6 dead buttons in crates/jet-canvas/src/html.rs around lines 319-324, debug-break, watch, step, next, continue, stop, to this backend. Breakpoints and watches stay local span-anchored state per D-CANVAS-DEBUGSTATE1, driving both backends identically.",
       "blockedBy": [],
       "assignee": null,
       "log": [
@@ -12718,11 +13403,67 @@
           "text": "D-CANVAS-DEBUG-UX1 queued (rec A: native lldb/DAP session — liveness never faked)."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Gesture scenario sets a breakpoint via the graph, runs the program on the compiled target, and asserts the debug rail buttons drive a real lldb/DAP session with the active-node highlight following real stops.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:34.028Z"
+        },
+        {
+          "n": 2,
+          "text": "Gesture scenario does the same under jet dev and asserts the tier-0/1 engine reports its own real stops and values, with an on-screen engine-name chip distinguishing it from the compiled-target session.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:34.147Z"
+        },
+        {
+          "n": 3,
+          "text": "Gesture scenario adds a watch and asserts displayed values are real, matching for both backends given identical source-level input per R12 parity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:34.266Z"
+        },
+        {
+          "n": 4,
+          "text": "Gesture scenario asserts call-stack frames map correctly to source spans for both backends.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:34.391Z"
+        },
+        {
+          "n": 5,
+          "text": "Debug facts, stop span, value render, taken path, join the existing R12 parity battery so a backend behavior drift between compiled and jet-dev execution fails a test.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:34.513Z"
+        },
+        {
+          "n": 6,
+          "text": "docs/plans/epoch-6/canvas-blueprint-parity-matrix.md debugger rows for step/next/continue/stop, breakpoints/watches, active node/wire pulse, and call stack move to shipped with interaction ratchets.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:34.633Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-11T01:43:06.038Z",
-      "updated": "2026-07-11"
+      "updated": "2026-07-16",
+      "workOrder": 317
     },
     {
       "id": "c0b4rcuh",
@@ -12735,15 +13476,62 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
-      "plan": null,
+      "plan": "Migration steps 1-3 from canvas-workspace-architecture.md Editor Architecture section. Step 1: introduce crates/jet-devserver/src/Canvas/node_catalog.rs, one NodeDescriptor table with archetype, glyph, header, hover, palette metadata, projection function, transaction op, and default editors, served as JSON; have graph_projection.rs stamp a node_descriptor_id per node; prove via unchanged tests/canvas.rs snapshots. Step 2: point crates/jet-canvas/src/js/graph-rendering.js style, glyph, and hover lookups at the descriptor table, deleting the parallel per-kind if-chains; existing gesture scenarios stay green. Step 3: route crates/jet-canvas/src/js/drawing-palette.js ranking through descriptor.palette and migrate the catalog-vs-real-exports cross-check test added by #389 to use the registry as its data source. Structurally fixes the #389 class of bug, projects-but-no-style or inserts-but-never-in-menu, going forward.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "crates/jet-devserver/src/Canvas/node_catalog.rs exists with a NodeDescriptor table covering every current node kind; tests/canvas.rs snapshot output is byte-identical before and after step 1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:34.904Z"
+        },
+        {
+          "n": 2,
+          "text": "The per-kind if-chain for style, glyph, and hover is deleted from graph-rendering.js; those values come only from the descriptor table, verified by a test that a new descriptor-only kind renders without a JS code change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:35.030Z"
+        },
+        {
+          "n": 3,
+          "text": "drawing-palette.js ranking reads descriptor.palette; the catalog-vs-real-exports cross-check test from #389 passes against the registry as its data source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:35.152Z"
+        },
+        {
+          "n": 4,
+          "text": "All existing scripts/canvas-test scenarios pass unchanged after each of the 3 migration steps.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:35.271Z"
+        },
+        {
+          "n": 5,
+          "text": "Adding a new node kind is demonstrated to require only an edit to node_catalog.rs plus one gesture scenario, evidenced by a throwaway test kind or a file-diff note in the card log.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:35.390Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-11T01:43:23.224Z",
-      "updated": "2026-07-11"
+      "updated": "2026-07-16",
+      "workOrder": 306
     },
     {
       "id": "c06eyg3s",
@@ -12756,15 +13544,53 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "Migration step 5 from canvas-workspace-architecture.md Editor Architecture section. Replace per-selection innerHTML template building in crates/jet-canvas/src/js/inspector-connections.js with a label, value, editable, apply_op field-descriptor array per selection type, node, variable, function, rendered by one shared renderer function. Every field is either live with apply_op wired to a real transaction or absent from the array entirely, making #377 no-dead-controls bar structural rather than a one-time audit.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A single shared render function turns a label, value, editable, apply_op array into Details DOM rows plus Apply buttons; inspector-connections.js contains zero remaining per-selection innerHTML template literals for field rendering.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:35.671Z"
+        },
+        {
+          "n": 2,
+          "text": "Node, variable, and function selection each supply their field-descriptor array from existing selection data; existing Details gesture scenarios click-select-details and rename-variable-sidebar pass unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:35.799Z"
+        },
+        {
+          "n": 3,
+          "text": "A test asserts every entry in a field-descriptor array either has a non-null apply_op or is marked not editable, so no entry can silently render a dead control.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:35.925Z"
+        },
+        {
+          "n": 4,
+          "text": "A new panel built as a descriptor array against the same renderer is demonstrated or documented as directly reusable, evidenced in the card log.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T04:52:36.049Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-11T01:43:25.116Z",
-      "updated": "2026-07-11"
+      "updated": "2026-07-16",
+      "workOrder": 301
     },
     {
       "id": "c11pkkov",
@@ -23891,6 +24717,11 @@
       "workOrder": 2.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "fable-clerk",
+          "text": "e6 wave applied: 19 cards planned+criteria (89 criteria), workOrder 300-318, ZERO open gates (all six D-CANVAS* ballots already ratified 2026-07-11), #384 frozen untouched."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -44401,6 +45232,769 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T04:53:40.035Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0xhhjch",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T04:52:36.049Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c06eyg3s",
+      "note": "#4 A new panel built as a descriptor array against the same ren"
+    },
+    {
+      "at": "2026-07-16T04:52:35.925Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c06eyg3s",
+      "note": "#3 A test asserts every entry in a field-descriptor array eithe"
+    },
+    {
+      "at": "2026-07-16T04:52:35.799Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c06eyg3s",
+      "note": "#2 Node, variable, and function selection each supply their fie"
+    },
+    {
+      "at": "2026-07-16T04:52:35.671Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c06eyg3s",
+      "note": "#1 A single shared render function turns a label, value, editab"
+    },
+    {
+      "at": "2026-07-16T04:52:35.547Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c06eyg3s",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:35.391Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0b4rcuh",
+      "note": "#5 Adding a new node kind is demonstrated to require only an ed"
+    },
+    {
+      "at": "2026-07-16T04:52:35.272Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0b4rcuh",
+      "note": "#4 All existing scripts/canvas-test scenarios pass unchanged af"
+    },
+    {
+      "at": "2026-07-16T04:52:35.153Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0b4rcuh",
+      "note": "#3 drawing-palette.js ranking reads descriptor.palette; the cat"
+    },
+    {
+      "at": "2026-07-16T04:52:35.030Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0b4rcuh",
+      "note": "#2 The per-kind if-chain for style, glyph, and hover is deleted"
+    },
+    {
+      "at": "2026-07-16T04:52:34.905Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0b4rcuh",
+      "note": "#1 crates/jet-devserver/src/Canvas/node_catalog.rs exists with "
+    },
+    {
+      "at": "2026-07-16T04:52:34.780Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0b4rcuh",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:34.633Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ewd6kd",
+      "note": "#6 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md debugge"
+    },
+    {
+      "at": "2026-07-16T04:52:34.513Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ewd6kd",
+      "note": "#5 Debug facts, stop span, value render, taken path, join the e"
+    },
+    {
+      "at": "2026-07-16T04:52:34.392Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ewd6kd",
+      "note": "#4 Gesture scenario asserts call-stack frames map correctly to "
+    },
+    {
+      "at": "2026-07-16T04:52:34.267Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ewd6kd",
+      "note": "#3 Gesture scenario adds a watch and asserts displayed values a"
+    },
+    {
+      "at": "2026-07-16T04:52:34.147Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ewd6kd",
+      "note": "#2 Gesture scenario does the same under jet dev and asserts the"
+    },
+    {
+      "at": "2026-07-16T04:52:34.028Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ewd6kd",
+      "note": "#1 Gesture scenario sets a breakpoint via the graph, runs the p"
+    },
+    {
+      "at": "2026-07-16T04:52:33.905Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0ewd6kd",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:33.757Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ocarv7",
+      "note": "#6 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Cut/cop"
+    },
+    {
+      "at": "2026-07-16T04:52:33.636Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ocarv7",
+      "note": "#5 Gesture scenario uses Ctrl+Shift+V or the context-menu Paste"
+    },
+    {
+      "at": "2026-07-16T04:52:33.515Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ocarv7",
+      "note": "#4 Gesture scenario asserts rename chips appear after an auto-r"
+    },
+    {
+      "at": "2026-07-16T04:52:33.389Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ocarv7",
+      "note": "#3 Gesture scenario pastes a selection with unresolved inputs a"
+    },
+    {
+      "at": "2026-07-16T04:52:33.266Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ocarv7",
+      "note": "#2 Gesture scenario copies a self-contained selection and paste"
+    },
+    {
+      "at": "2026-07-16T04:52:33.141Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0ocarv7",
+      "note": "#1 Gesture scenario marquee-drags over 3 nodes and asserts all "
+    },
+    {
+      "at": "2026-07-16T04:52:33.015Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0ocarv7",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:32.864Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0tfsrts",
+      "note": "#4 Regression scenario reproduces the js.rs:3599 case, typing a"
+    },
+    {
+      "at": "2026-07-16T04:52:32.739Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0tfsrts",
+      "note": "#3 Regression scenario reproduces the js.rs:3723 case, rewiring"
+    },
+    {
+      "at": "2026-07-16T04:52:32.617Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0tfsrts",
+      "note": "#2 Gesture scenario drags from a data output pin to an incompat"
+    },
+    {
+      "at": "2026-07-16T04:52:32.491Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0tfsrts",
+      "note": "#1 Gesture scenario drags from a data output pin to a compatibl"
+    },
+    {
+      "at": "2026-07-16T04:52:32.365Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0tfsrts",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:32.216Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zpnwk9",
+      "note": "#6 Gesture scenario picks duplicate inline instead and asserts "
+    },
+    {
+      "at": "2026-07-16T04:52:32.095Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zpnwk9",
+      "note": "#5 Gesture scenario picks call existing fn when the converged s"
+    },
+    {
+      "at": "2026-07-16T04:52:31.973Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zpnwk9",
+      "note": "#4 Gesture scenario accepts the default with Enter and asserts "
+    },
+    {
+      "at": "2026-07-16T04:52:31.852Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zpnwk9",
+      "note": "#3 Gesture scenario drags a second exec wire onto a node alread"
+    },
+    {
+      "at": "2026-07-16T04:52:31.732Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zpnwk9",
+      "note": "#2 Gesture scenario inserts a loop and asserts labeled body and"
+    },
+    {
+      "at": "2026-07-16T04:52:31.608Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zpnwk9",
+      "note": "#1 Gesture scenario inserts a switch statement with 3 arms and "
+    },
+    {
+      "at": "2026-07-16T04:52:31.487Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0zpnwk9",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:31.265Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0oeg3vh",
+      "note": "#4 Any Gecko-only scenario failure discovered is filed as a sep"
+    },
+    {
+      "at": "2026-07-16T04:52:31.139Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0oeg3vh",
+      "note": "#3 The lane fails the suite, not skips, when geckodriver or Fir"
+    },
+    {
+      "at": "2026-07-16T04:52:31.014Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0oeg3vh",
+      "note": "#2 This lane is wired into scripts/agent/verify-full.sh or the "
+    },
+    {
+      "at": "2026-07-16T04:52:30.880Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0oeg3vh",
+      "note": "#1 A geckodriver-backed driver implementing the same interface "
+    },
+    {
+      "at": "2026-07-16T04:52:30.760Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0oeg3vh",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:30.613Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0y9w2ur",
+      "note": "#6 A catalog-vs-real-exports cross-check test fails if any cata"
+    },
+    {
+      "at": "2026-07-16T04:52:30.491Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0y9w2ur",
+      "note": "#5 Scenario else_pin_move_existing_into_arm: wiring else to an "
+    },
+    {
+      "at": "2026-07-16T04:52:30.373Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0y9w2ur",
+      "note": "#4 Scenario else_pin_insert_into_arm: dragging from an else exe"
+    },
+    {
+      "at": "2026-07-16T04:52:30.249Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0y9w2ur",
+      "note": "#3 Scenario builtin_print_row_inserts_print: clicking the top P"
+    },
+    {
+      "at": "2026-07-16T04:52:30.125Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0y9w2ur",
+      "note": "#2 Scenario menu_ranking_print: querying print surfaces the pri"
+    },
+    {
+      "at": "2026-07-16T04:52:29.996Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0y9w2ur",
+      "note": "#1 Scenario menu_shows_only_functions_and_variables: right-clic"
+    },
+    {
+      "at": "2026-07-16T04:52:29.864Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0y9w2ur",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:29.714Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0lc8k7l",
+      "note": "#5 A property-style test over the full catalog asserts needs_un"
+    },
+    {
+      "at": "2026-07-16T04:52:29.591Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0lc8k7l",
+      "note": "#4 Gesture scenario inserts a method_only entry and asserts it "
+    },
+    {
+      "at": "2026-07-16T04:52:29.465Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0lc8k7l",
+      "note": "#3 Gesture scenario wires a staged nodes required pin and asser"
+    },
+    {
+      "at": "2026-07-16T04:52:29.345Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0lc8k7l",
+      "note": "#2 Gesture scenario inserts a needs_canvas_defaults entry from "
+    },
+    {
+      "at": "2026-07-16T04:52:29.223Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0lc8k7l",
+      "note": "#1 Palette shows needs_canvas_defaults and method_only core ent"
+    },
+    {
+      "at": "2026-07-16T04:52:29.095Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0lc8k7l",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:28.946Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0898o9k",
+      "note": "#5 docs/reference/canvas-parity.md Stmt Off and Stmt DebugOnly "
+    },
+    {
+      "at": "2026-07-16T04:52:28.824Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0898o9k",
+      "note": "#4 Undo restores exact prior source for each of the three toggl"
+    },
+    {
+      "at": "2026-07-16T04:52:28.698Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0898o9k",
+      "note": "#3 Gesture scenario toggles a disabled or debug-only node back "
+    },
+    {
+      "at": "2026-07-16T04:52:28.580Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0898o9k",
+      "note": "#2 Gesture scenario right-clicks a statement node, picks Debug "
+    },
+    {
+      "at": "2026-07-16T04:52:28.451Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0898o9k",
+      "note": "#1 Gesture scenario right-clicks a statement node, picks Disabl"
+    },
+    {
+      "at": "2026-07-16T04:52:28.330Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0898o9k",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:28.187Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zti5r8",
+      "note": "#5 Owner acceptance script 5, jet-new to a working two-function"
+    },
+    {
+      "at": "2026-07-16T04:52:28.062Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zti5r8",
+      "note": "#4 A one-command demo entry is documented in docs/reference and"
+    },
+    {
+      "at": "2026-07-16T04:52:27.942Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zti5r8",
+      "note": "#3 Gesture scenario opens the keyboard cheat-sheet overlay and "
+    },
+    {
+      "at": "2026-07-16T04:52:27.819Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zti5r8",
+      "note": "#2 Gesture scenario opens the tour project fresh, drives the gu"
+    },
+    {
+      "at": "2026-07-16T04:52:27.693Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0zti5r8",
+      "note": "#1 examples/canvas-tour or equivalent path exists with a workin"
+    },
+    {
+      "at": "2026-07-16T04:52:27.567Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0zti5r8",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:27.418Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0yl88cz",
+      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Large g"
+    },
+    {
+      "at": "2026-07-16T04:52:27.290Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0yl88cz",
+      "note": "#4 This scenario runs in scripts/agent/verify-full.sh and fails"
+    },
+    {
+      "at": "2026-07-16T04:52:27.159Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0yl88cz",
+      "note": "#3 Gesture scenario selects nodes at low zoom and asserts title"
+    },
+    {
+      "at": "2026-07-16T04:52:27.036Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0yl88cz",
+      "note": "#2 Gesture scenario pans and zooms across the full project and "
+    },
+    {
+      "at": "2026-07-16T04:52:26.914Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0yl88cz",
+      "note": "#1 A fixture generator produces a 300-function Jet project (com"
+    },
+    {
+      "at": "2026-07-16T04:52:26.792Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0yl88cz",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:26.640Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0xhxzyu",
+      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md gains o"
+    },
+    {
+      "at": "2026-07-16T04:52:26.509Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0xhxzyu",
+      "note": "#4 Gesture scenario scopes palette search to one module and ass"
+    },
+    {
+      "at": "2026-07-16T04:52:26.386Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0xhxzyu",
+      "note": "#3 Gesture scenario renames a function used across all 3 files,"
+    },
+    {
+      "at": "2026-07-16T04:52:26.264Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0xhxzyu",
+      "note": "#2 Gesture scenario inserts a call to a function defined in fil"
+    },
+    {
+      "at": "2026-07-16T04:52:26.133Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0xhxzyu",
+      "note": "#1 Gesture scenario on a 3-file fixture workspace switches file"
+    },
+    {
+      "at": "2026-07-16T04:52:26.011Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0xhxzyu",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:25.858Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0wbf3js",
+      "note": "#4 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Trait/i"
+    },
+    {
+      "at": "2026-07-16T04:52:25.589Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0wbf3js",
+      "note": "#3 Gesture scenario opens the module/package browser and assert"
+    },
+    {
+      "at": "2026-07-16T04:52:25.463Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0wbf3js",
+      "note": "#2 Gesture scenario opens the Events panel for a type with core"
+    },
+    {
+      "at": "2026-07-16T04:52:25.343Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0wbf3js",
+      "note": "#1 Gesture scenario opens the Traits panel, selects a trait wit"
+    },
+    {
+      "at": "2026-07-16T04:52:25.219Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0wbf3js",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:25.067Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0v5rsny",
+      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md gains o"
+    },
+    {
+      "at": "2026-07-16T04:52:24.939Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0v5rsny",
+      "note": "#4 docs/reference documents the text-diff-over-binary-asset adv"
+    },
+    {
+      "at": "2026-07-16T04:52:24.811Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0v5rsny",
+      "note": "#3 Gesture scenario compares two revisions from source-control "
+    },
+    {
+      "at": "2026-07-16T04:52:24.690Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0v5rsny",
+      "note": "#2 Gesture scenario asserts each shown diff hunk highlights the"
+    },
+    {
+      "at": "2026-07-16T04:52:24.568Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0v5rsny",
+      "note": "#1 Gesture scenario edits a function via the graph, opens the r"
+    },
+    {
+      "at": "2026-07-16T04:52:24.443Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0v5rsny",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:24.295Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0u0y3s6",
+      "note": "#4 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Find re"
+    },
+    {
+      "at": "2026-07-16T04:52:24.174Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0u0y3s6",
+      "note": "#3 Gesture scenario runs rename on a function used in 3 files, "
+    },
+    {
+      "at": "2026-07-16T04:52:24.053Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0u0y3s6",
+      "note": "#2 Gesture scenario runs find-references from a selected node o"
+    },
+    {
+      "at": "2026-07-16T04:52:23.930Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0u0y3s6",
+      "note": "#1 Gesture scenario opens project-wide search, types a function"
+    },
+    {
+      "at": "2026-07-16T04:52:23.803Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0u0y3s6",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:23.656Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0stzzp4",
+      "note": "#5 A scenario confirms the PROOF/REVISION panel and raw COMMAND"
+    },
+    {
+      "at": "2026-07-16T04:52:23.527Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0stzzp4",
+      "note": "#4 Gesture scenario toggles Meta category and tunable through D"
+    },
+    {
+      "at": "2026-07-16T04:52:23.397Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0stzzp4",
+      "note": "#3 Gesture scenario edits function signature, purity marker, an"
+    },
+    {
+      "at": "2026-07-16T04:52:23.275Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0stzzp4",
+      "note": "#2 Gesture scenario edits variable name, type, default, and doc"
+    },
+    {
+      "at": "2026-07-16T04:52:23.149Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0stzzp4",
+      "note": "#1 Details panel for a variable, a function, and a node each re"
+    },
+    {
+      "at": "2026-07-16T04:52:23.030Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0stzzp4",
+      "note": "plan,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-16T04:52:22.886Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0h41rrl",
+      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md rows fo"
+    },
+    {
+      "at": "2026-07-16T04:52:22.766Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0h41rrl",
+      "note": "#4 keyboard-only authoring scenario drives search, palette inse"
+    },
+    {
+      "at": "2026-07-16T04:52:22.637Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0h41rrl",
+      "note": "#3 node docs hover scenario asserts a doc-comment-derived toolt"
+    },
+    {
+      "at": "2026-07-16T04:52:22.513Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0h41rrl",
+      "note": "#2 collapse/expand and math-expression inline-edit gesture scen"
+    },
+    {
+      "at": "2026-07-16T04:52:22.390Z",
+      "by": "fable-clerk",
+      "action": "card.criteria-add",
+      "ref": "c0h41rrl",
+      "note": "#1 scripts/canvas-test/scenario.mjs gains promote-pin-to-variab"
+    },
+    {
+      "at": "2026-07-16T04:52:22.259Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0h41rrl",
+      "note": "plan,workOrder"
+    },
+    {
+      "at": "2026-07-16T04:52:22.112Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0fzoku6",
+      "note": "plan,workOrder"
+    },
+    {
       "at": "2026-07-16T04:49:47.567Z",
       "by": "fable-clerk",
       "action": "question.add",
@@ -47136,769 +48730,6 @@
       "action": "card.update",
       "ref": "c0bfdd1e",
       "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T01:24:52.587Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0t32dtn",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T01:24:41.786Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-SHAPE-PLACE2",
-      "note": "What carries a window across an API boundary?"
-    },
-    {
-      "at": "2026-07-16T01:23:55.660Z",
-      "by": "fable-clerk",
-      "action": "question.answer",
-      "ref": "q359beh7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T01:23:55.536Z",
-      "by": "fable-clerk",
-      "action": "decision.update",
-      "ref": "D-QUANTITY-CONVERT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T01:18:17.496Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "b1siym42",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T01:18:01.239Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c02r8oga",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T01:18:01.239Z",
-      "by": "owner",
-      "action": "card.criteria-bypass",
-      "ref": "c02r8oga",
-      "note": "owner bypass"
-    },
-    {
-      "at": "2026-07-16T01:17:54.608Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0sucg7f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T01:17:54.608Z",
-      "by": "owner",
-      "action": "card.criteria-bypass",
-      "ref": "c0sucg7f",
-      "note": "owner bypass"
-    },
-    {
-      "at": "2026-07-16T01:14:03.898Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q359beh7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T01:08:16.045Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c08wuixb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T01:08:11.394Z",
-      "by": "sol-e3-planner",
-      "action": "decision.update",
-      "ref": "D-QUANTITY-DECL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-16T01:07:34.876Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c02r8oga",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-16T01:07:34.708Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c02r8oga",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T01:07:34.542Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0a11xwo",
-      "note": "Test isolation: key_rotation_warns_not_errors flakes on HOME/helper race"
-    },
-    {
-      "at": "2026-07-16T01:06:48.565Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PACKAGE-POLICY-SCOPE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-16T01:05:48.962Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EFFECT-OMIT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-16T01:05:48.962Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t32dtn",
-      "note": "#8 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-16T01:05:48.962Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t32dtn",
-      "note": "#7 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-16T01:05:48.962Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t32dtn",
-      "note": "#6 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-16T01:05:48.962Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t32dtn",
-      "note": "#5 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-16T01:05:43.557Z",
-      "by": "sol-e3-planner",
-      "action": "decision.update",
-      "ref": "D-QUANTITY-DECL1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T01:05:43.452Z",
-      "by": "sol-e3-planner",
-      "action": "decision.update",
-      "ref": "D-EFFECT-OMIT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-16T01:04:10.448Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-QUANTITY-DECL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-16T01:03:24.986Z",
-      "by": "fable-clerk",
-      "action": "decision.add",
-      "ref": "D-QUANTITY-CONVERT1",
-      "note": "How does a value change from one unit to another?"
-    },
-    {
-      "at": "2026-07-16T01:02:39.181Z",
-      "by": "fable-clerk",
-      "action": "decision.add",
-      "ref": "D-PACKAGE-POLICY-SCOPE1",
-      "note": "Package-echelon spelling for scoped policy settings"
-    },
-    {
-      "at": "2026-07-16T01:02:25.655Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-QUANTITY-TYPE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-16T01:01:49.888Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-QUANTITY-POINT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-16T01:01:49.888Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t6owk6",
-      "note": "#9 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-16T01:01:49.888Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t6owk6",
-      "note": "#8 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-16T01:01:49.888Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t6owk6",
-      "note": "#7 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-16T01:01:49.888Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0t6owk6",
-      "note": "#6 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-16T00:57:29.438Z",
-      "by": "sol-e3-planner",
-      "action": "decision.update",
-      "ref": "D-QUANTITY-DECL1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T00:57:29.341Z",
-      "by": "sol-e3-planner",
-      "action": "decision.update",
-      "ref": "D-EFFECT-OMIT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T00:57:29.242Z",
-      "by": "sol-e3-planner",
-      "action": "decision.update",
-      "ref": "D-QUANTITY-POINT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-16T00:57:29.145Z",
-      "by": "sol-e3-planner",
-      "action": "decision.update",
-      "ref": "D-QUANTITY-TYPE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-16T00:57:19.487Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-16T00:56:38.331Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0t6owk6",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:38.179Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0t32dtn",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:38.025Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0zdv8vm",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:37.878Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0kn6oul",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:37.727Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c02rqnrd",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:37.576Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0bfdd1e",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:37.430Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c06tng04",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:37.283Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "csivxv0",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:37.129Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c164",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:36.978Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:36.821Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0oqtn3i",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:36.670Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0qdl0gg",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:36.522Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0xede68",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:36.371Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0wwekr6",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:36.225Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0ddul2b",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:36.081Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:35.937Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:35.784Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:35.646Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c9q0534j",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:35.492Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "caffiunify",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:35.343Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0vt1qwz",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:35.204Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0skyr40",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:35.062Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c2fizfx3",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:34.918Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c2qj06uq",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:34.768Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0ok76h1",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:34.625Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0frdmrx",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:34.482Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:34.336Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0r5ttg9",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:34.191Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0md55xu",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:34.038Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0d1a7ds",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:33.888Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0fiunwy",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:33.738Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c29iz43a",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:33.598Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c8q043mt",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:33.451Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0wx96s2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:33.297Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:33.146Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0184j6s",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:32.981Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:32.833Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0cevzhr",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:32.693Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0rb4k1d",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:32.544Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0x9dh3l",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:32.396Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c01gqgxn",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:32.247Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c07nt4xr",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:32.102Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c05n5x5o",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:31.957Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c03lc2y3",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:31.803Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0vb511d",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:31.660Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c09minfo",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:31.522Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0q35155",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:31.374Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0qptf0n",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:31.228Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c11pkkov",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:31.079Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c03qvxt7",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:30.938Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0mrovih",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:30.797Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0q52kwp",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:30.656Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0n183gm",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:30.509Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0zh74hs",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:30.361Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0njy69h",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:30.216Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0qlg5mi",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:30.075Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0a689h5",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:29.931Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0cztb5h",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:29.775Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c03teoty",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:29.630Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c00lmm2k",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:29.483Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c06vgib7",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:29.335Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c08wuixb",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:29.198Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0c9vzub",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:29.057Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c083ne8x",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:28.907Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0n6vj96",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:28.752Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c06h4p4q",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:28.602Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c038fme7",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:28.452Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c09re2dk",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:28.309Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c02ydczm",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:28.169Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0l5fmyy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-16T00:56:28.015Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0z3l25j",
-      "note": "workOrder,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:56:27.869Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c2lizsmx",
-      "note": "workOrder"
     }
   ],
   "nextNum": 368,
