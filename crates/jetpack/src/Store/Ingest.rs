@@ -97,7 +97,7 @@ pub fn quarantine_invalid_entry(
         if entry.id != expected_id || Path::new(&entry.id).components().count() != 1 {
             return Err(std::io::Error::other("invalid cache record identity"));
         }
-        Closure::recover_closure_journal_unlocked(roots)?;
+        let graph = Closure::closure_graph_structure_unlocked(roots)?;
         let Some(current) = list_unlocked(roots)
             .into_iter()
             .find(|candidate| candidate.id == entry.id)
@@ -118,7 +118,13 @@ pub fn quarantine_invalid_entry(
         if current.id != current_expected_id {
             return Err(std::io::Error::other("invalid cache record identity"));
         }
-        let proof = verify_cache_entry(roots, &current, &current.reference, expectation);
+        let proof = verify_cache_entry_with_graph(
+            roots,
+            &current,
+            &current.reference,
+            expectation,
+            Some(&graph),
+        );
         if proof.trusted() {
             return Ok(());
         }

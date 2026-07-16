@@ -391,36 +391,24 @@ mod tests {
         assert!(proof.unsigned_local_allowed);
         assert!(verified(&roots, reference, &expectation));
 
+        // A tampered or deleted local output is not a verified cache hit:
+        // `find_verified_by_reference` reports it as `Ok(None)` (no hit) rather
+        // than a hard error, so `realize_verified` reaches the fail-closed
+        // E2604 + quarantine path and can rebuild. The build-level rejection is
+        // proved end to end by the jet_build_never_reports_{deleted,tampered}
+        // integration tests; here we only pin the query contract.
         let payload = out.join("payload");
         let mut permissions = fs::metadata(&payload).unwrap().permissions();
         permissions.set_readonly(false);
         fs::set_permissions(&payload, permissions).unwrap();
         fs::write(&payload, "tampered").unwrap();
-        let error = find_verified_by_reference(&roots, reference, &expectation)
-            .err()
-            .unwrap();
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "closure record `{}` has no dependency references or store-validated closure proof",
-                entry.id
-            )
-        );
+        assert!(!verified(&roots, reference, &expectation));
 
         let mut permissions = fs::metadata(&out).unwrap().permissions();
         permissions.set_readonly(false);
         fs::set_permissions(&out, permissions).unwrap();
         fs::remove_dir_all(&out).unwrap();
-        let error = find_verified_by_reference(&roots, reference, &expectation)
-            .err()
-            .unwrap();
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "closure record `{}` has no dependency references or store-validated closure proof",
-                entry.id
-            )
-        );
+        assert!(!verified(&roots, reference, &expectation));
     }
 
     #[test]

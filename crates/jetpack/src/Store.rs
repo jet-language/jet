@@ -715,6 +715,23 @@ pub fn verify_cache_entry(
     expected_reference: &str,
     expectation: &CacheExpectation,
 ) -> CacheVerification {
+    let graph = Closure::closure_graph_structure(roots).ok();
+    verify_cache_entry_with_graph(
+        roots,
+        entry,
+        expected_reference,
+        expectation,
+        graph.as_ref(),
+    )
+}
+
+fn verify_cache_entry_with_graph(
+    roots: &Roots,
+    entry: &StoreEntry,
+    expected_reference: &str,
+    expectation: &CacheExpectation,
+    graph: Option<&Closure::ClosureGraph>,
+) -> CacheVerification {
     let out = Path::new(&entry.out);
     let output_exists = out.exists();
     let output_digest = output_exists
@@ -745,7 +762,9 @@ pub fn verify_cache_entry(
                 .owned_output
                 .as_ref()
                 .is_some_and(|path| path == Path::new(&entry.out)));
-    let closure = output_exists && closure_is_reachable(roots, entry);
+    let closure = output_exists
+        && closure_is_reachable(roots, entry)
+        && graph.is_some_and(|graph| Closure::entry_closure_store_proof(roots, graph, entry));
     CacheVerification {
         output_exists,
         output_digest,
@@ -1112,11 +1131,14 @@ pub fn find_verified_by_reference(
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
     let _global = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
-    Closure::lifecycle_closure_graph_unlocked(roots)?;
+    let graph = Closure::closure_graph_structure_unlocked(roots)?;
     let entry = list_unlocked(roots)
         .into_iter()
         .filter(|entry| entry.reference == reference)
-        .filter(|entry| verify_cache_entry(roots, entry, reference, expectation).trusted())
+        .filter(|entry| {
+            verify_cache_entry_with_graph(roots, entry, reference, expectation, Some(&graph))
+                .trusted()
+        })
         .max_by_key(|entry| entry.last_used_at);
     let Some(entry) = entry else {
         return Ok(None);
@@ -1463,9 +1485,9 @@ pub fn realize_verified(
     ctx: &super::Provider::Ctx<'_>,
     request: RealizeRequest<'_>,
 ) -> Result<VerifiedRealization, RealizeError> {
-    // WAL is authority. Recover package projections and fail closed on
-    // incomplete legacy producer records before any cache lookup can bypass it.
-    closure_graph(roots).map_err(RealizeError::Store)?;
+    // WAL is authority. Recover package projections before cache verification;
+    // selected-candidate proofs run below so invalid bytes can be quarantined.
+    Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
     let (reference, expectation) = match request {
         RealizeRequest::Package { spec, table } => (
             spec.raw.clone(),

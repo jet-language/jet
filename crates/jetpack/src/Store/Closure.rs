@@ -149,10 +149,81 @@ pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     })
 }
 
+pub fn closure_graph_structure(roots: &Roots) -> std::io::Result<ClosureGraph> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        closure_graph_structure_unlocked(roots)
+    })
+}
+
+pub(super) fn closure_graph_structure_unlocked(
+    roots: &Roots,
+) -> std::io::Result<ClosureGraph> {
+    migrate_closure_graph_unlocked(roots).map(|(_, graph)| graph)
+}
+
 pub(super) fn lifecycle_closure_graph_unlocked(roots: &Roots) -> std::io::Result<ClosureGraph> {
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     validate_graph_store_proofs(roots, &graph, false).map_err(std::io::Error::other)?;
     Ok(graph)
+}
+
+pub(super) fn entry_closure_store_proof(
+    roots: &Roots,
+    graph: &ClosureGraph,
+    entry: &StoreEntry,
+) -> bool {
+    let Some(record) = graph.records.get(&entry.id) else {
+        return false;
+    };
+    let mut outputs = entry.named_outputs.clone();
+    outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
+    if record.primary != entry.envelope.output_hash
+        || record.action_key != entry_action_key(entry)
+        || record.outputs != outputs
+        || record.references != entry.references.iter().cloned().collect()
+    {
+        return false;
+    }
+    graph
+        .transitive_references(&record.primary)
+        .into_iter()
+        .all(|digest| closure_object_rehashes(roots, graph, &digest))
+}
+
+fn closure_object_rehashes(roots: &Roots, graph: &ClosureGraph, digest: &str) -> bool {
+    let Some(object) = graph.objects.get(digest) else {
+        return false;
+    };
+    let owners = graph
+        .records
+        .values()
+        .filter(|record| record.outputs.values().any(|output| output == digest));
+    let mut found_owner = false;
+    for record in owners {
+        found_owner = true;
+        let Some(meta) = parse_meta(&record.package_meta) else {
+            return false;
+        };
+        if !Ingest::try_entry_output_hash(roots, &store_entry_from_meta(&record.id, &meta))
+            .is_ok_and(|actual| actual == digest)
+        {
+            return false;
+        }
+    }
+    if found_owner {
+        return true;
+    }
+    let path = Path::new(&object.path);
+    if path.is_file() {
+        return SHA256::sha256_file_hex(path)
+            .is_ok_and(|actual| format!("sha256-{actual}") == digest);
+    }
+    super::super::Envelope::try_output_hash_of_in_hangar(
+        &object.path,
+        &roots.hangar_dir(),
+        false,
+    )
+    .is_ok_and(|actual| actual == digest)
 }
 
 pub fn direct_references_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
