@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -78,6 +80,50 @@ def atomic_write_json(path: Path, value: Any) -> None:
             pass
 
 
+@contextlib.contextmanager
+def run_lock(run_dir: Path):
+    """Serialize ledger transactions across coordinator processes."""
+    lock_path = run_dir / ".run.lock"
+    try:
+        handle = lock_path.open("a+b")
+    except OSError as exc:
+        raise CodeflowError(f"cannot open run lock {lock_path}: {exc}") from exc
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            if lock_path.stat().st_size == 0:
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def locked_command(function):
+    @functools.wraps(function)
+    def wrapper(args: argparse.Namespace):
+        with run_lock(Path(args.run_dir)):
+            return function(args)
+
+    return wrapper
+
+
 def require_string_list(value: Any, field: str, *, nonempty: bool = False) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
         raise CodeflowError(f"{field} must be a list of nonempty strings")
@@ -87,6 +133,8 @@ def require_string_list(value: Any, field: str, *, nonempty: bool = False) -> li
 
 
 def normalize_rel_path(value: str, field: str) -> str:
+    if any(ord(character) < 32 for character in value):
+        raise CodeflowError(f"{field} contains a control character")
     if "\\" in value:
         raise CodeflowError(f"{field} must use forward slashes: {value}")
     path = PurePosixPath(value)
@@ -161,6 +209,8 @@ def validate_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
             raise CodeflowError(f"{node_id}.objective must be a nonempty string")
         require_string_list(node["depends_on"], f"{node_id}.depends_on")
         paths = [normalize_rel_path(item, f"{node_id}.paths") for item in require_string_list(node["paths"], f"{node_id}.paths", nonempty=True)]
+        for path in paths:
+            resolve_artifact(Path(workspace), path, f"{node_id}.paths")
         node["paths"] = paths
         require_string_list(node["acceptance"], f"{node_id}.acceptance", nonempty=True)
         require_string_list(node["forbidden"], f"{node_id}.forbidden", nonempty=True)
@@ -168,6 +218,10 @@ def validate_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
             raise CodeflowError(f"{node_id}.fresh_context must be boolean")
         if node["mode"] == "write":
             scopes = [normalize_rel_path(item, f"{node_id}.write_scope") for item in require_string_list(node.get("write_scope"), f"{node_id}.write_scope", nonempty=True)]
+            if any(scope == "." or path_contains(".codeflow", scope) for scope in scopes):
+                raise CodeflowError(f"{node_id}.write_scope cannot include the Codeflow ledger or entire workspace")
+            for scope in scopes:
+                resolve_artifact(Path(workspace), scope, f"{node_id}.write_scope")
             if any(not any(path_contains(path, scope) for path in paths) for scope in scopes):
                 raise CodeflowError(f"{node_id}.write_scope must be contained by paths")
             node["write_scope"] = scopes
@@ -227,28 +281,40 @@ def validate_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
             if overlap and not ordered:
                 raise CodeflowError(f"unordered write scopes overlap: {left['id']} and {right['id']}")
 
-    verifiers = [
-        node
-        for node in nodes
-        if node["kind"] in {"review", "verify"} and node["mode"] == "verify" and node["fresh_context"]
-    ]
+    reviews = [node for node in nodes if node["kind"] == "review" and node["mode"] == "verify"]
+    if writers and not any(node["fresh_context"] for node in reviews):
+        raise CodeflowError("write workflows need a fresh Sol review node")
     for writer in writers:
-        if not any(writer["id"] in ancestors[verifier["id"]] for verifier in verifiers):
-            raise CodeflowError(f"write node {writer['id']} needs a downstream fresh review or verify node")
+        if not any(writer["id"] in ancestors[review["id"]] for review in reviews):
+            raise CodeflowError(f"write node {writer['id']} needs a downstream Sol review node")
 
     return workflow
 
 
 def load_run(run_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
-    workflow = validate_workflow(read_json(run_dir / "workflow.json"))
     state = read_json(run_dir / "run.json")
     if state.get("schema_version") != SCHEMA_VERSION:
         raise CodeflowError("unsupported run schema")
+    if "workflow" in state:
+        workflow = validate_workflow(state["workflow"])
+    else:
+        workflow = validate_workflow(read_json(run_dir / "workflow.json"))
+        state["workflow"] = workflow
     if state.get("workflow_sha256") != digest_json(workflow):
-        raise CodeflowError("workflow.json changed without sync")
+        raise CodeflowError("run state contains a mismatched workflow")
+    export = run_dir / "workflow.json"
+    try:
+        export_matches = digest_json(read_json(export)) == state["workflow_sha256"]
+    except CodeflowError:
+        export_matches = False
+    if not export_matches:
+        atomic_write_json(export, workflow)
     expected = {node["id"] for node in workflow["nodes"]}
     if set(state.get("nodes", {})) != expected:
         raise CodeflowError("run state does not match workflow nodes")
+    state.setdefault("cycles", 0)
+    for item in state["nodes"].values():
+        item.setdefault("acceptance", [])
     return workflow, state
 
 
@@ -283,9 +349,22 @@ def refresh_ready(workflow: dict[str, Any], state: dict[str, Any]) -> None:
             continue
         deps_passed = all(state["nodes"][dep]["status"] == "passed" for dep in node["depends_on"])
         item["status"] = "ready" if deps_passed else "pending"
-    if all(item["status"] == "passed" for item in state["nodes"].values()):
+    if all(item["status"] == "passed" for item in state["nodes"].values()) and not uncovered_acceptance(workflow, state):
         state["status"] = "complete"
         add_event(state, "run-complete")
+
+
+def covered_acceptance(workflow: dict[str, Any], state: dict[str, Any]) -> set[str]:
+    covered: set[str] = set()
+    for item in state["nodes"].values():
+        if item["status"] == "passed":
+            covered.update(item.get("acceptance", []))
+    return covered
+
+
+def uncovered_acceptance(workflow: dict[str, Any], state: dict[str, Any]) -> list[str]:
+    covered = covered_acceptance(workflow, state)
+    return [criterion for criterion in workflow["acceptance"] if criterion not in covered]
 
 
 def node_by_id(workflow: dict[str, Any], node_id: str) -> dict[str, Any]:
@@ -293,6 +372,18 @@ def node_by_id(workflow: dict[str, Any], node_id: str) -> dict[str, Any]:
         if node["id"] == node_id:
             return node
     raise CodeflowError(f"unknown node: {node_id}")
+
+
+def dependency_ancestors(workflow: dict[str, Any], node_id: str) -> set[str]:
+    result: set[str] = set()
+    pending = list(node_by_id(workflow, node_id)["depends_on"])
+    while pending:
+        dependency = pending.pop()
+        if dependency in result:
+            continue
+        result.add(dependency)
+        pending.extend(node_by_id(workflow, dependency)["depends_on"])
+    return result
 
 
 def effective_attempts(workflow: dict[str, Any], node: dict[str, Any]) -> int:
@@ -332,8 +423,32 @@ def digest_path(path: Path) -> str:
     return digest.hexdigest()
 
 
-def validate_report(report: dict[str, Any], node: dict[str, Any], workspace: Path) -> tuple[dict[str, Any], dict[str, str]]:
-    required = {"status", "summary", "evidence", "artifacts", "checks", "changed_paths", "findings", "risks", "next"}
+def snapshot_workspace(workspace: Path) -> dict[str, list[int | str]]:
+    snapshot: dict[str, list[int | str]] = {}
+    root = workspace.resolve()
+    for current, directories, files in os.walk(root, followlinks=False):
+        directories[:] = [name for name in directories if name not in {".git", ".codeflow"}]
+        current_path = Path(current)
+        for name in files:
+            path = current_path / name
+            relative = path.relative_to(root).as_posix()
+            stat = path.lstat()
+            if path.is_symlink():
+                snapshot[relative] = ["symlink", os.readlink(path), stat.st_mtime_ns]
+            else:
+                snapshot[relative] = ["file", stat.st_size, stat.st_mtime_ns, stat.st_mode]
+    return snapshot
+
+
+def changed_since(before: dict[str, Any], after: dict[str, Any]) -> set[str]:
+    return {path for path in set(before) | set(after) if before.get(path) != after.get(path)}
+
+
+def validate_report(
+    report: dict[str, Any], node: dict[str, Any], workflow: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, str]]:
+    report.setdefault("acceptance", [])
+    required = {"status", "summary", "acceptance", "evidence", "artifacts", "checks", "changed_paths", "findings", "risks", "next"}
     if set(report) != required:
         missing = required - set(report)
         unknown = set(report) - required
@@ -350,6 +465,10 @@ def validate_report(report: dict[str, Any], node: dict[str, Any], workspace: Pat
     evidence = require_string_list(report["evidence"], "report.evidence")
     if report["status"] == "passed" and not evidence:
         raise CodeflowError("passed report requires evidence")
+    acceptance = require_string_list(report["acceptance"], "report.acceptance")
+    unknown_acceptance = set(acceptance) - set(workflow["acceptance"])
+    if unknown_acceptance:
+        raise CodeflowError(f"report maps unknown acceptance criteria: {', '.join(sorted(unknown_acceptance))}")
     for field in ("findings", "risks", "next"):
         if not isinstance(report[field], list):
             raise CodeflowError(f"report.{field} must be a list")
@@ -360,8 +479,12 @@ def validate_report(report: dict[str, Any], node: dict[str, Any], workspace: Pat
             raise CodeflowError("each report check needs command, status, and detail")
         if check["status"] not in {"passed", "failed", "not-run"}:
             raise CodeflowError("check status must be passed, failed, or not-run")
-        if any(not isinstance(check[key], str) for key in ("command", "detail")):
-            raise CodeflowError("check command and detail must be strings")
+        if not isinstance(check["command"], str) or not check["command"].strip() or not isinstance(check["detail"], str):
+            raise CodeflowError("check command must be nonempty and detail must be a string")
+    if report["status"] == "passed" and any(check["status"] != "passed" for check in report["checks"]):
+        raise CodeflowError("passed report cannot contain failed or not-run checks")
+    if report["status"] == "passed" and node["mode"] == "verify" and not report["checks"]:
+        raise CodeflowError("passed verify report requires at least one green check")
 
     artifacts = require_string_list(report["artifacts"], "report.artifacts")
     changed = require_string_list(report["changed_paths"], "report.changed_paths")
@@ -369,7 +492,7 @@ def validate_report(report: dict[str, Any], node: dict[str, Any], workspace: Pat
     artifact_digests: dict[str, str] = {}
     if report["status"] == "passed":
         for value in artifacts:
-            rel, resolved = resolve_artifact(workspace, value, "report.artifacts")
+            rel, resolved = resolve_artifact(Path(workflow["workspace"]), value, "report.artifacts")
             if not any(path_contains(scope, rel) for scope in node["paths"]):
                 raise CodeflowError(f"artifact outside node paths: {rel}")
             normalized_artifacts.append(rel)
@@ -382,6 +505,7 @@ def validate_report(report: dict[str, Any], node: dict[str, Any], workspace: Pat
         raise CodeflowError("read and verify nodes cannot report changed paths")
     if node["mode"] == "write":
         for rel in normalized_changed:
+            resolve_artifact(Path(workflow["workspace"]), rel, "report.changed_paths")
             if not any(path_contains(scope, rel) for scope in node["write_scope"]):
                 raise CodeflowError(f"changed path outside write scope: {rel}")
     report["artifacts"] = normalized_artifacts
@@ -408,6 +532,8 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
         raise CodeflowError(f"run already exists: {run_dir}")
     run_dir.mkdir(parents=True)
     (run_dir / "results").mkdir()
+    (run_dir / "incoming").mkdir()
+    (run_dir / "snapshots").mkdir()
     normalized_workflow = json.loads(canonical_bytes(workflow).decode("utf-8"))
     atomic_write_json(run_dir / "workflow.json", normalized_workflow)
     now = utc_now()
@@ -418,6 +544,8 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "workflow_sha256": digest_json(normalized_workflow),
+        "workflow": normalized_workflow,
+        "cycles": 0,
         "nodes": {
             node["id"]: {
                 "status": "pending",
@@ -428,7 +556,9 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
                 "report": None,
                 "report_sha256": None,
                 "artifact_digests": {},
+                "acceptance": [],
                 "failure_digests": [],
+                "snapshot": None,
             }
             for node in normalized_workflow["nodes"]
         },
@@ -439,6 +569,7 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
     return {"run_dir": str(run_dir), "run_id": run_id, "status": state["status"]}
 
 
+@locked_command
 def cmd_ready(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     workflow, state = load_run(run_dir)
@@ -449,6 +580,7 @@ def cmd_ready(args: argparse.Namespace) -> dict[str, Any]:
     return {"run_id": state["run_id"], "ready": [node["id"] for node in ready], "dispatch": ready[:limit]}
 
 
+@locked_command
 def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     workflow, state = load_run(run_dir)
@@ -463,6 +595,20 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
         raise CodeflowError(f"node {args.node_id} is not ready: {item['status']}")
     if item["attempts"] >= effective_attempts(workflow, node):
         raise CodeflowError(f"node {args.node_id} exhausted its attempt budget")
+    if node["kind"] == "review":
+        if args.worker != "sol-review":
+            raise CodeflowError("review nodes must be assigned to the single sol-review worker")
+        upstream_writers = [
+            dependency
+            for dependency in dependency_ancestors(workflow, args.node_id)
+            if node_by_id(workflow, dependency)["mode"] == "write"
+        ]
+        if any(state["nodes"][writer]["worker"] == args.worker for writer in upstream_writers):
+            raise CodeflowError("Sol review must use a different worker than implementation")
+    if node["mode"] == "write":
+        snapshot_rel = f"snapshots/{args.node_id}-attempt-{item['attempts'] + 1}.json"
+        atomic_write_json(run_dir / snapshot_rel, snapshot_workspace(Path(workflow["workspace"])))
+        item["snapshot"] = snapshot_rel
     item["status"] = "running"
     item["attempts"] += 1
     item["worker"] = args.worker
@@ -473,13 +619,43 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
     return {"node": args.node_id, "status": "running", "attempt": item["attempts"]}
 
 
+@locked_command
 def cmd_finish(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     workflow, state = load_run(run_dir)
     node = node_by_id(workflow, args.node_id)
     item = state["nodes"][args.node_id]
     raw_report = read_json(Path(args.report))
-    report, artifact_digests = validate_report(raw_report, node, Path(workflow["workspace"]))
+    report, artifact_digests = validate_report(raw_report, node, workflow)
+    if node["mode"] == "write":
+        if not item.get("snapshot"):
+            raise CodeflowError(f"write node {args.node_id} has no start snapshot")
+        before = read_json(run_dir / item["snapshot"])
+        after = snapshot_workspace(Path(workflow["workspace"]))
+        actual_changes = changed_since(before, after)
+        outside_scope = sorted(
+            path
+            for path in actual_changes
+            if not any(path_contains(scope, path) for scope in node["write_scope"])
+        )
+        if outside_scope:
+            raise CodeflowError(f"actual changes outside write scope: {', '.join(outside_scope)}")
+        unreported = sorted(
+            path
+            for path in actual_changes
+            if not any(path_contains(reported, path) for reported in report["changed_paths"])
+        )
+        if unreported:
+            raise CodeflowError(f"actual changes missing from report: {', '.join(unreported)}")
+        unsupported = sorted(
+            reported
+            for reported in report["changed_paths"]
+            if not any(path_contains(reported, path) for path in actual_changes)
+        )
+        if unsupported:
+            raise CodeflowError(f"reported paths have no observed change: {', '.join(unsupported)}")
+        if report["status"] == "passed" and not actual_changes:
+            raise CodeflowError("passed write report requires an observed workspace change")
     report_sha = digest_json(report)
     if item["status"] in TERMINAL and item["report_sha256"] == report_sha:
         return {"node": args.node_id, "status": item["status"], "idempotent": True}
@@ -497,6 +673,7 @@ def cmd_finish(args: argparse.Namespace) -> dict[str, Any]:
     item["report"] = result_rel
     item["report_sha256"] = report_sha
     item["artifact_digests"] = artifact_digests
+    item["acceptance"] = report["acceptance"]
     if report["status"] == "failed":
         item["failure_digests"].append(report_sha)
     add_event(state, f"node-{report['status']}", args.node_id, report["summary"])
@@ -505,6 +682,7 @@ def cmd_finish(args: argparse.Namespace) -> dict[str, Any]:
     return {"node": args.node_id, "status": item["status"], "run_status": state["status"]}
 
 
+@locked_command
 def cmd_retry(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     workflow, state = load_run(run_dir)
@@ -516,8 +694,11 @@ def cmd_retry(args: argparse.Namespace) -> dict[str, Any]:
     if item["attempts"] >= effective_attempts(workflow, node):
         raise CodeflowError(f"node {args.node_id} exhausted its attempt budget")
     failures = item.get("failure_digests", [])
-    if len(failures) >= 2 and failures[-1] == failures[-2] and not args.force_no_progress:
-        raise CodeflowError(f"node {args.node_id} repeated the same failure; use new evidence or --force-no-progress")
+    if len(failures) >= 2 and failures[-1] == failures[-2]:
+        raise CodeflowError(f"node {args.node_id} repeated the same failure without progress")
+    if state["cycles"] >= workflow["limits"]["max_cycles"]:
+        raise CodeflowError("run exhausted its repair-cycle budget")
+    state["cycles"] += 1
     item["status"] = "pending"
     item["worker"] = None
     item["started_at"] = None
@@ -525,6 +706,8 @@ def cmd_retry(args: argparse.Namespace) -> dict[str, Any]:
     item["report"] = None
     item["report_sha256"] = None
     item["artifact_digests"] = {}
+    item["acceptance"] = []
+    item["snapshot"] = None
     state["status"] = "active"
     add_event(state, "node-retried", args.node_id)
     refresh_ready(workflow, state)
@@ -532,11 +715,13 @@ def cmd_retry(args: argparse.Namespace) -> dict[str, Any]:
     return {"node": args.node_id, "status": item["status"], "attempts": item["attempts"]}
 
 
+@locked_command
 def cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     workflow, state = load_run(run_dir)
     now = datetime.now(timezone.utc)
     invalid: set[str] = set()
+    interrupted = False
     for node_id, item in state["nodes"].items():
         if item["status"] == "running":
             started = datetime.fromisoformat(item["started_at"])
@@ -544,8 +729,17 @@ def cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
                 item["status"] = "pending"
                 item["worker"] = None
                 item["started_at"] = None
+                interrupted = True
                 add_event(state, "node-interrupted", node_id, "stale running node returned to queue")
         if item["status"] == "passed":
+            try:
+                report = read_json(run_dir / item["report"])
+                report_valid = digest_json(report) == item["report_sha256"]
+            except (CodeflowError, TypeError):
+                report_valid = False
+            if not report_valid:
+                invalid.add(node_id)
+                continue
             for rel, expected in item.get("artifact_digests", {}).items():
                 try:
                     _, path = resolve_artifact(Path(workflow["workspace"]), rel, "stored artifact")
@@ -566,14 +760,18 @@ def cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
             item["report"] = None
             item["report_sha256"] = None
             item["artifact_digests"] = {}
+            item["acceptance"] = []
+            item["attempts"] = 0
+            item["snapshot"] = None
             add_event(state, "node-invalidated", node_id, "artifact or upstream evidence changed")
-    if state["status"] != "cancelled":
+    if state["status"] != "cancelled" and (invalid or interrupted or state["status"] != "complete"):
         state["status"] = "active"
     refresh_ready(workflow, state)
     save_run(run_dir, state)
     return {"run_id": state["run_id"], "status": state["status"], "invalidated": sorted(invalid)}
 
 
+@locked_command
 def cmd_sync(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     old_workflow, state = load_run(run_dir)
@@ -604,19 +802,23 @@ def cmd_sync(args: argparse.Namespace) -> dict[str, Any]:
                 "report": None,
                 "report_sha256": None,
                 "artifact_digests": {},
+                "acceptance": [],
                 "failure_digests": [],
+                "snapshot": None,
             }
         elif state["nodes"][node["id"]]["status"] == "ready":
             state["nodes"][node["id"]]["status"] = "pending"
-    atomic_write_json(run_dir / "workflow.json", normalized)
+    state["workflow"] = normalized
     state["workflow_sha256"] = digest_json(normalized)
     state["status"] = "active"
     add_event(state, "workflow-synced", detail=f"{len(new_nodes) - len(old_nodes)} nodes added")
     refresh_ready(normalized, state)
     save_run(run_dir, state)
+    atomic_write_json(run_dir / "workflow.json", normalized)
     return {"run_id": state["run_id"], "nodes": len(new_nodes), "status": state["status"]}
 
 
+@locked_command
 def cmd_cancel(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     _, state = load_run(run_dir)
@@ -642,13 +844,16 @@ def status_payload(workflow: dict[str, Any], state: dict[str, Any]) -> dict[str,
         "goal": workflow["goal"],
         "status": state["status"],
         "updated_at": state["updated_at"],
+        "cycles": state["cycles"],
         "counts": counts,
+        "uncovered_acceptance": uncovered_acceptance(workflow, state),
         "ready": sorted(node_id for node_id, item in state["nodes"].items() if item["status"] == "ready"),
         "failed": sorted(node_id for node_id, item in state["nodes"].items() if item["status"] == "failed"),
         "blocked": sorted(node_id for node_id, item in state["nodes"].items() if item["status"] == "blocked"),
     }
 
 
+@locked_command
 def cmd_status(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir)
     workflow, state = load_run(run_dir)
@@ -685,7 +890,6 @@ def build_parser() -> argparse.ArgumentParser:
     retry.add_argument("run_dir")
     retry.add_argument("node_id")
     retry.add_argument("--allow-blocked", action="store_true")
-    retry.add_argument("--force-no-progress", action="store_true")
     retry.set_defaults(func=cmd_retry)
     resume = sub.add_parser("resume", help="recover stale work and revalidate artifacts")
     resume.add_argument("run_dir")

@@ -36,7 +36,7 @@ The coordinator owns workflow compilation, ledger mutation, integration, and fin
       "paths": ["src/feature.py", "tests/test_feature.py"],
       "write_scope": ["src/feature.py", "tests/test_feature.py"],
       "acceptance": ["Targeted test passes"],
-      "forbidden": ["reset unrelated changes", "spawn subagents"],
+      "forbidden": ["reset unrelated changes", "touch .codeflow", "spawn subagents"],
       "fresh_context": false
     },
     {
@@ -58,7 +58,7 @@ Required node fields: `id`, `kind`, `mode`, `objective`, `depends_on`, `paths`, 
 
 Kinds are `investigate`, `design`, `implement`, `test`, `review`, `verify`, `synthesize`, or `gate`. Modes are `read`, `write`, or `verify`.
 
-Every dependency must exist and the graph must be acyclic. Every meaningful write needs a downstream fresh `review` or `verify` node. A review packet must not contain the implementer's reasoning or desired verdict.
+Every dependency must exist and the graph must be acyclic. Every meaningful write needs a downstream `review` node assigned to the single Sol reviewer, and a write workflow needs at least one fresh-context Sol review. A review packet must not contain the implementer's reasoning or desired verdict. Reuse Sol for fixes; never create a second reviewer. Sol uses GPT-5.6 rather than Terra when model selection exists, with only low, medium, or high reasoning.
 
 ## Worker brief
 
@@ -74,12 +74,15 @@ Send the packet plus:
 
 Workers must surface blockers immediately. They never stage, commit, reset, restore, integrate, edit the ledger, or expand their authority unless the packet explicitly grants that action.
 
+Packet scope follows coherent ownership, dependencies, and verification cost. It may represent one card, a batch or group, or multiple cards; do not force one-card implementation or review packets.
+
 ## Worker report
 
 ```json
 {
   "status": "passed",
   "summary": "What was established or changed",
+  "acceptance": ["Externally checkable condition"],
   "evidence": ["path:line and observed fact", "test command and result"],
   "artifacts": ["src/feature.py", "tests/test_feature.py"],
   "checks": [
@@ -92,7 +95,7 @@ Workers must surface blockers immediately. They never stage, commit, reset, rest
 }
 ```
 
-`status` is `passed`, `failed`, or `blocked`. Passed reports require nonempty evidence. Artifact and changed paths are workspace-relative, cannot escape the workspace, and must fit the packet's declared paths. The ledger computes hashes; workers do not.
+`status` is `passed`, `failed`, or `blocked`. Passed reports require nonempty evidence, cannot contain failed or skipped checks, and map any satisfied top-level criteria in `acceptance` using exact strings from the workflow. Passed verification reports require at least one green check. Artifact and changed paths are workspace-relative, cannot escape the workspace, and must fit the packet's declared paths. The ledger computes hashes; workers do not.
 
 Reviewer findings should include severity, location, failure mode, evidence, and required fix. “Looks good” without rerun proof is not a passed review.
 
@@ -104,8 +107,8 @@ Nodes move through:
 
 `failed -> ready` is allowed while attempts remain. `blocked` requires changed authority or external state before retry. Resume may move stale `running` to `ready`, and may invalidate `passed` nodes whose artifacts changed. Invalidation cascades to downstream nodes.
 
-Only the coordinator mutates `run.json`. Writes are atomic. Events retain transition evidence. `cancelled` is a run state, never a successful node state.
+Only the coordinator mutates `run.json`. Cross-process locking covers each load-change-save transaction; replacement is atomic. The canonical workflow is embedded in the same atomic ledger; `workflow.json` is a repaired inspection copy, so an interrupted sync cannot strand the run between files. Write nodes get start snapshots that reconcile actual workspace changes with their scope and report. Events retain transition evidence. `cancelled` is a run state, never a successful node state.
 
 ## Acceptance ledger
 
-Before final completion, map every top-level acceptance item to one or more passed node evidence entries. A passed graph without full acceptance coverage remains incomplete.
+Before final completion, map every top-level acceptance item to one or more passed node reports. The state tool refuses to complete a passed graph with uncovered acceptance criteria.

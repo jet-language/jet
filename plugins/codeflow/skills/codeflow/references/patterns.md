@@ -4,7 +4,7 @@ Select by dependency shape, not task size labels.
 
 ## Direct
 
-One coherent edit, one owner, cheap proof. Coordinator inspects, changes, and verifies. Add a fresh read-only reviewer when requested or when the change is meaningful under repository policy.
+One coherent edit, one owner, cheap proof. Coordinator inspects, changes, and verifies. Add Sol as the fresh read-only reviewer when requested or when the change is meaningful under repository policy.
 
 ## Loop
 
@@ -18,9 +18,9 @@ Keep one writer. Each repair cycle must cite a new failing check or reviewer fin
 
 Use when independent specialties improve coverage.
 
-`parallel scouts -> coordinator synthesis -> writer(s) -> fresh reviewer -> repairs -> reviewer recheck`
+`parallel scouts -> coordinator synthesis -> writer(s) -> fresh Sol review -> repairs -> Sol recheck`
 
-Examples: repository map + test strategy + compatibility research; correctness + security + performance review. Scouts return evidence, not prose volume.
+Examples: repository map + test strategy + compatibility research; correctness + security + performance review. Scouts return evidence, not prose volume. Packets follow coherent dependency and ownership boundaries: they may cover one card, a batch, a related group, or multiple cards.
 
 ## Batch
 
@@ -36,7 +36,7 @@ Use only when several plausible approaches have materially different correctness
 2. A separate judge scores them against predeclared criteria.
 3. Coordinator chooses or combines compatible parts and records why.
 4. One writer implements the selected design.
-5. A fresh reviewer validates the implementation, not the popularity of the design.
+5. Sol validates the implementation, not the popularity of the design.
 
 Never let candidate agents edit the shared tree in parallel.
 

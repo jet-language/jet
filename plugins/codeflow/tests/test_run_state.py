@@ -2,6 +2,8 @@ import argparse
 import copy
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -82,10 +84,11 @@ class CodeflowStateTests(unittest.TestCase):
         )
         return Path(result["run_dir"])
 
-    def report(self, status="passed", *, artifacts=None, changed=None, summary="proof recorded"):
+    def report(self, status="passed", *, acceptance=None, artifacts=None, changed=None, summary="proof recorded"):
         return {
             "status": status,
             "summary": summary,
+            "acceptance": acceptance or [],
             "evidence": ["independent command passed"] if status == "passed" else ["failure reproduced"],
             "artifacts": artifacts or [],
             "checks": [{"command": "test command", "status": "passed" if status == "passed" else "failed", "detail": "observed"}],
@@ -107,9 +110,9 @@ class CodeflowStateTests(unittest.TestCase):
         self.finish(run_dir, "inspect", self.report())
 
     def pass_implementation(self, run_dir):
+        self.start(run_dir, "implement", "writer")
         (self.workspace / "src" / "feature.txt").write_text("feature\n", encoding="utf-8")
         (self.workspace / "tests" / "test_feature.txt").write_text("proof\n", encoding="utf-8")
-        self.start(run_dir, "implement", "writer")
         self.finish(
             run_dir,
             "implement",
@@ -129,8 +132,8 @@ class CodeflowStateTests(unittest.TestCase):
         self.assertEqual(["implement"], run_state.cmd_ready(argparse.Namespace(run_dir=str(run_dir)))["ready"])
         self.pass_implementation(run_dir)
         self.assertEqual(["review"], run_state.cmd_ready(argparse.Namespace(run_dir=str(run_dir)))["ready"])
-        self.start(run_dir, "review", "fresh-reviewer")
-        result = self.finish(run_dir, "review", self.report())
+        self.start(run_dir, "review", "sol-review")
+        result = self.finish(run_dir, "review", self.report(acceptance=self.workflow["acceptance"]))
         self.assertEqual("complete", result["run_status"])
         status = run_state.cmd_status(argparse.Namespace(run_dir=str(run_dir)))
         self.assertEqual("complete", status["status"])
@@ -159,7 +162,7 @@ class CodeflowStateTests(unittest.TestCase):
     def test_write_requires_fresh_downstream_review(self):
         workflow = copy.deepcopy(self.workflow)
         workflow["nodes"][-1]["fresh_context"] = False
-        with self.assertRaisesRegex(run_state.CodeflowError, "downstream fresh"):
+        with self.assertRaisesRegex(run_state.CodeflowError, "fresh Sol review"):
             run_state.validate_workflow(workflow)
 
     def test_finish_is_idempotent_for_identical_report(self):
@@ -175,8 +178,8 @@ class CodeflowStateTests(unittest.TestCase):
         run_dir = self.init_run()
         self.pass_inspect(run_dir)
         self.pass_implementation(run_dir)
-        self.start(run_dir, "review", "reviewer")
-        self.finish(run_dir, "review", self.report())
+        self.start(run_dir, "review", "sol-review")
+        self.finish(run_dir, "review", self.report(acceptance=self.workflow["acceptance"]))
         (self.workspace / "src" / "feature.txt").write_text("changed\n", encoding="utf-8")
         resumed = run_state.cmd_resume(argparse.Namespace(run_dir=str(run_dir), stale_after=0))
         self.assertEqual(["implement", "review"], resumed["invalidated"])
@@ -200,14 +203,92 @@ class CodeflowStateTests(unittest.TestCase):
         self.start(run_dir, "inspect")
         self.finish(run_dir, "inspect", failure, "failure-one.json")
         run_state.cmd_retry(
-            argparse.Namespace(run_dir=str(run_dir), node_id="inspect", allow_blocked=False, force_no_progress=False)
+            argparse.Namespace(run_dir=str(run_dir), node_id="inspect", allow_blocked=False)
         )
         self.start(run_dir, "inspect")
         self.finish(run_dir, "inspect", failure, "failure-two.json")
         with self.assertRaisesRegex(run_state.CodeflowError, "same failure"):
             run_state.cmd_retry(
-                argparse.Namespace(run_dir=str(run_dir), node_id="inspect", allow_blocked=False, force_no_progress=False)
+                argparse.Namespace(run_dir=str(run_dir), node_id="inspect", allow_blocked=False)
             )
+
+    def test_repair_cycle_budget_is_enforced(self):
+        workflow = copy.deepcopy(self.workflow)
+        workflow["limits"]["max_cycles"] = 1
+        run_dir = self.init_run(workflow, "cycle-budget")
+        self.start(run_dir, "inspect")
+        self.finish(run_dir, "inspect", self.report(status="failed", summary="first failure"), "cycle-one.json")
+        run_state.cmd_retry(argparse.Namespace(run_dir=str(run_dir), node_id="inspect", allow_blocked=False))
+        self.start(run_dir, "inspect")
+        second = self.report(status="failed", summary="different failure")
+        second["evidence"] = ["different evidence"]
+        self.finish(run_dir, "inspect", second, "cycle-two.json")
+        with self.assertRaisesRegex(run_state.CodeflowError, "repair-cycle budget"):
+            run_state.cmd_retry(argparse.Namespace(run_dir=str(run_dir), node_id="inspect", allow_blocked=False))
+
+    def test_passed_report_rejects_bad_checks_and_unknown_acceptance(self):
+        run_dir = self.init_run()
+        self.start(run_dir, "inspect")
+        bad_check = self.report()
+        bad_check["checks"][0]["status"] = "failed"
+        with self.assertRaisesRegex(run_state.CodeflowError, "cannot contain failed"):
+            self.finish(run_dir, "inspect", bad_check, "bad-check.json")
+        unknown = self.report(acceptance=["invented criterion"])
+        with self.assertRaisesRegex(run_state.CodeflowError, "unknown acceptance"):
+            self.finish(run_dir, "inspect", unknown, "bad-acceptance.json")
+
+    def test_completion_requires_acceptance_coverage(self):
+        run_dir = self.init_run()
+        self.pass_inspect(run_dir)
+        self.pass_implementation(run_dir)
+        self.start(run_dir, "review", "sol-review")
+        result = self.finish(run_dir, "review", self.report())
+        self.assertEqual("active", result["run_status"])
+        status = run_state.cmd_status(argparse.Namespace(run_dir=str(run_dir)))
+        self.assertEqual(self.workflow["acceptance"], status["uncovered_acceptance"])
+
+    def test_cli_transactions_preserve_concurrent_finishes(self):
+        workflow = copy.deepcopy(self.workflow)
+        workflow["nodes"] = [
+            {
+                "id": "left",
+                "kind": "investigate",
+                "mode": "read",
+                "objective": "Inspect left",
+                "depends_on": [],
+                "paths": ["src"],
+                "acceptance": ["Return left evidence"],
+                "forbidden": ["edit files", "spawn subagents"],
+                "fresh_context": True,
+            },
+            {
+                "id": "right",
+                "kind": "investigate",
+                "mode": "read",
+                "objective": "Inspect right",
+                "depends_on": [],
+                "paths": ["tests"],
+                "acceptance": ["Return right evidence"],
+                "forbidden": ["edit files", "spawn subagents"],
+                "fresh_context": True,
+            },
+        ]
+        workflow["acceptance"] = ["left covered", "right covered"]
+        run_dir = self.init_run(workflow, "parallel-run")
+        self.start(run_dir, "left", "left-worker")
+        self.start(run_dir, "right", "right-worker")
+        left = self.write_json("left.json", self.report(acceptance=["left covered"]))
+        right = self.write_json("right.json", self.report(acceptance=["right covered"]))
+        commands = [
+            [sys.executable, str(SCRIPT), "finish", str(run_dir), "left", str(left)],
+            [sys.executable, str(SCRIPT), "finish", str(run_dir), "right", str(right)],
+        ]
+        processes = [subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for command in commands]
+        results = [process.communicate(timeout=10) for process in processes]
+        self.assertEqual([0, 0], [process.returncode for process in processes], results)
+        status = run_state.cmd_status(argparse.Namespace(run_dir=str(run_dir)))
+        self.assertEqual("complete", status["status"])
+        self.assertEqual({"passed": 2}, status["counts"])
 
     def test_report_path_traversal_and_scope_escape_are_rejected(self):
         run_dir = self.init_run()
@@ -264,6 +345,87 @@ class CodeflowStateTests(unittest.TestCase):
         status = run_state.cmd_status(argparse.Namespace(run_dir=str(run_dir)))
         self.assertEqual("cancelled", status["status"])
         self.assertEqual(["inspect"], status["blocked"])
+
+    def test_sol_is_single_and_distinct_from_writer(self):
+        run_dir = self.init_run()
+        self.pass_inspect(run_dir)
+        self.pass_implementation(run_dir)
+        with self.assertRaisesRegex(run_state.CodeflowError, "single sol-review"):
+            self.start(run_dir, "review", "second-reviewer")
+
+        state_path = run_dir / "run.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["nodes"]["implement"]["worker"] = "sol-review"
+        run_state.atomic_write_json(state_path, state)
+        with self.assertRaisesRegex(run_state.CodeflowError, "different worker"):
+            self.start(run_dir, "review", "sol-review")
+
+    def test_resume_checks_report_integrity_and_noop_is_stable(self):
+        run_dir = self.init_run()
+        self.pass_inspect(run_dir)
+        self.pass_implementation(run_dir)
+        self.start(run_dir, "review", "sol-review")
+        self.finish(run_dir, "review", self.report(acceptance=self.workflow["acceptance"]))
+        state_before = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        completions_before = sum(event["event"] == "run-complete" for event in state_before["events"])
+        resumed = run_state.cmd_resume(argparse.Namespace(run_dir=str(run_dir), stale_after=0))
+        state_after = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        completions_after = sum(event["event"] == "run-complete" for event in state_after["events"])
+        self.assertEqual([], resumed["invalidated"])
+        self.assertEqual(completions_before, completions_after)
+
+        (run_dir / state_after["nodes"]["review"]["report"]).unlink()
+        resumed = run_state.cmd_resume(argparse.Namespace(run_dir=str(run_dir), stale_after=0))
+        self.assertEqual(["review"], resumed["invalidated"])
+        self.assertEqual(["review"], run_state.cmd_ready(argparse.Namespace(run_dir=str(run_dir)))["ready"])
+
+    def test_actual_out_of_scope_write_is_rejected(self):
+        run_dir = self.init_run()
+        self.pass_inspect(run_dir)
+        self.start(run_dir, "implement", "writer")
+        (self.workspace / "src" / "feature.txt").write_text("feature\n", encoding="utf-8")
+        (self.workspace / "outside.txt").write_text("unexpected\n", encoding="utf-8")
+        report = self.report(artifacts=["src/feature.txt"], changed=["src/feature.txt"])
+        with self.assertRaisesRegex(run_state.CodeflowError, "actual changes outside write scope"):
+            self.finish(run_dir, "implement", report, "actual-scope.json")
+
+    def test_symlink_scope_and_control_character_are_rejected(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (self.workspace / "src" / "link").symlink_to(outside, target_is_directory=True)
+        workflow = copy.deepcopy(self.workflow)
+        workflow["nodes"][1]["paths"] = ["src/link/feature.txt"]
+        workflow["nodes"][1]["write_scope"] = ["src/link/feature.txt"]
+        workflow["nodes"][2]["paths"] = ["src/link/feature.txt"]
+        with self.assertRaisesRegex(run_state.CodeflowError, "escapes workspace"):
+            run_state.validate_workflow(workflow)
+        with self.assertRaisesRegex(run_state.CodeflowError, "control character"):
+            run_state.normalize_rel_path("src/bad\x00name", "test")
+
+    def test_sync_is_recoverable_if_export_is_stale(self):
+        run_dir = self.init_run()
+        adapted = copy.deepcopy(self.workflow)
+        adapted["nodes"].insert(
+            1,
+            {
+                "id": "extra",
+                "kind": "investigate",
+                "mode": "read",
+                "objective": "Inspect another path",
+                "depends_on": [],
+                "paths": ["tests"],
+                "acceptance": ["Return evidence"],
+                "forbidden": ["edit files", "spawn subagents"],
+                "fresh_context": True,
+            },
+        )
+        path = self.write_json("sync-recovery.json", adapted)
+        run_state.cmd_sync(argparse.Namespace(run_dir=str(run_dir), workflow=str(path)))
+        (run_dir / "workflow.json").write_text("{}", encoding="utf-8")
+        status = run_state.cmd_status(argparse.Namespace(run_dir=str(run_dir)))
+        self.assertEqual("active", status["status"])
+        repaired = json.loads((run_dir / "workflow.json").read_text(encoding="utf-8"))
+        self.assertEqual(4, len(repaired["nodes"]))
 
 
 if __name__ == "__main__":
