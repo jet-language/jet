@@ -1243,6 +1243,87 @@ fn dev_default_runs_env_program_via_aot_fallback() {
     assert_eq!(got, expected);
 }
 
+/// D-SHAPE-PLACE1=A (#613): safe structural splitting follows the sema-proved
+/// place identity and live range, not adjacent AST bindings. AOT and default
+/// dev must preserve intervening effects and nested-field owner identity.
+#[test]
+fn place_split_planner_preserves_order_and_nested_owners() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping place split AOT/dev regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_place_split_planner_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("place_split.jet");
+    fs::write(
+        &file,
+        r#"struct Holder { values: [Int] }
+fn run() {
+    values := [1, 2, 3, 4]
+    first :: &values[0]
+    print("between root")
+    last :: &values[3]
+    first = 8
+    last = 9
+    print("root: {first},{last}")
+
+    adjacent := Holder.{ values: [10, 11, 12, 13] }
+    adjacent_first :: &adjacent.values[0..1]
+    adjacent_last :: &adjacent.values[2..3]
+    adjacent_first[0] = 18
+    adjacent_last[0] = 19
+    print("nested adjacent: {adjacent_first[0]},{adjacent_last[0]}")
+
+    interleaved := Holder.{ values: [20, 21, 22, 23] }
+    interleaved_first :: &interleaved.values[0..1]
+    print("between nested")
+    interleaved_last :: &interleaved.values[2..3]
+    interleaved_first[0] = 28
+    interleaved_last[0] = 29
+    print("nested interleaved: {interleaved_first[0]},{interleaved_last[0]}")
+
+    reused := [30, 31]
+    reused_first :: &reused[0]
+    reused_bridge :: &reused[1]
+    print("reuse first: {reused_first}")
+    reused_again :: &reused[0]
+    reused_bridge = 38
+    reused_again = 39
+    print("reuse final: {reused_again},{reused_bridge}")
+
+    replaced := [40, 41]
+    before_replace :: &replaced[0]
+    print("before replace: {before_replace}")
+    replaced = [42, 43]
+    after_replace :: &replaced[1]
+    #DebugOnly { print("unrelated debug") }
+    after_replace = 49
+    print("after replace: {after_replace}")
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let expected = compiled_binary_output(&dir, "place_split", 0, "place_split", &shown);
+    assert_eq!(
+        expected.stdout,
+        "between root\nroot: 8,9\nnested adjacent: 18,19\nbetween nested\nnested interleaved: 28,29\nreuse first: 30\nreuse final: 39,38\nbefore replace: 40\nunrelated debug\nafter replace: 49\n"
+    );
+    let got = match dev_iteration_with_timeout("place_split", &shown, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev rejected place split: {diags:?}"),
+    };
+    assert_eq!(got, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn json_coerce_audit_uses_transparent_aot_fallback() {
     let dir = std::env::temp_dir().join(format!(

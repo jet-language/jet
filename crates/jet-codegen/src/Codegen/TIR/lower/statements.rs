@@ -31,33 +31,40 @@ use std::collections::HashMap;
 
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 2 } else { 1 });
+    let mut split_views = split_view_plan(stmts, cx);
     let mut index = 0;
     while index < stmts.len() {
-        if let Some(mut group) = split_view_group(stmts, index, cx) {
+        if let Some(view) = split_views.remove(&index) {
             if cx.debug_linemap {
-                out.push(TStmt::LineMarker(group[0].line));
+                out.push(TStmt::LineMarker(view.candidate.line));
             }
-            let owner = lower_expr(&group[0].owner, cx, env);
-            group.sort_by_key(|view| view.start);
-            let mut views = Vec::with_capacity(group.len());
-            for view in &group {
-                let place = if view.single {
-                    format!("(*{})", mangle(&view.name))
-                } else {
-                    mangle(&view.name)
-                };
-                env.bind(&view.name, place, view.ty.clone());
-                views.push((
-                    view.name.clone(),
-                    view.start,
-                    view.end,
-                    view.single,
-                    view.write,
-                    view.line,
-                ));
-            }
-            out.push(TStmt::SplitViews { owner, views });
-            index += group.len();
+            let candidate = view.candidate;
+            let place = if candidate.single {
+                format!("(*{})", mangle(&candidate.name))
+            } else {
+                mangle(&candidate.name)
+            };
+            env.bind(&candidate.name, place, candidate.ty.clone());
+            out.push(TStmt::SplitViews {
+                owner: view
+                    .initialize
+                    .then(|| lower_expr(&candidate.owner, cx, env)),
+                root: view.root,
+                len: view.len,
+                source: view.source,
+                source_start: view.source_start,
+                before: view.before,
+                split_tail: view.split_tail,
+                segment: view.segment,
+                after: view.after,
+                name: candidate.name,
+                start: candidate.start,
+                end: candidate.end,
+                single: candidate.single,
+                write: candidate.write,
+                line: candidate.line,
+            });
+            index += 1;
             continue;
         }
         let s = &stmts[index];
@@ -73,8 +80,9 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
 
 #[derive(Clone)]
 struct SplitViewCandidate {
+    stmt_index: usize,
     owner: Expr,
-    owner_name: String,
+    owner_key: String,
     name: String,
     ty: Option<Type>,
     start: i64,
@@ -82,6 +90,27 @@ struct SplitViewCandidate {
     single: bool,
     write: bool,
     line: usize,
+    last_use: usize,
+}
+
+struct PlannedSplitView {
+    candidate: SplitViewCandidate,
+    initialize: bool,
+    root: String,
+    len: String,
+    source: String,
+    source_start: i64,
+    before: String,
+    split_tail: String,
+    segment: String,
+    after: String,
+}
+
+#[derive(Clone)]
+struct SplitRegion {
+    name: String,
+    start: i64,
+    end: Option<i64>,
 }
 
 fn const_place_bound(expr: &Expr) -> Option<i64> {
@@ -93,7 +122,23 @@ fn const_place_bound(expr: &Expr) -> Option<i64> {
     }
 }
 
-fn split_view_candidate(stmt: &Stmt, cx: &Cx) -> Option<SplitViewCandidate> {
+fn split_owner_key(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(format!("name:{name}")),
+        Expr::Field(base, field, _) => {
+            Some(format!("{}.field:{field}", split_owner_key(base)?))
+        }
+        Expr::Index { base, index, .. } => Some(format!(
+            "{}.index:{}",
+            split_owner_key(base)?,
+            const_place_bound(index)?
+        )),
+        Expr::Paren(inner, _) | Expr::Place(inner, _, _) => split_owner_key(inner),
+        _ => None,
+    }
+}
+
+fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<SplitViewCandidate> {
     let Stmt::Val(binding) = stmt else {
         return None;
     };
@@ -110,12 +155,11 @@ fn split_view_candidate(stmt: &Stmt, cx: &Cx) -> Option<SplitViewCandidate> {
         }
         _ => return None,
     };
-    let Expr::Ident(owner_name, _) = base else {
-        return None;
-    };
+    let owner_key = split_owner_key(base)?;
     Some(SplitViewCandidate {
+        stmt_index,
         owner: base.clone(),
-        owner_name: owner_name.clone(),
+        owner_key,
         name: binding.name.clone(),
         ty: binding.ty.clone(),
         start,
@@ -123,30 +167,135 @@ fn split_view_candidate(stmt: &Stmt, cx: &Cx) -> Option<SplitViewCandidate> {
         single,
         write: matches!(access, PlaceAccess::Write),
         line: crate::Diagnostics::span_line_col(&cx.src, binding.name_span.start).0,
+        last_use: stmt_index,
     })
 }
 
-fn split_view_group(stmts: &[Stmt], first: usize, cx: &Cx) -> Option<Vec<SplitViewCandidate>> {
-    let head = split_view_candidate(&stmts[first], cx)?;
-    let group: Vec<_> = stmts[first..]
+fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> {
+    let mut candidates: Vec<_> = stmts
         .iter()
-        .map_while(|stmt| {
-            let view = split_view_candidate(stmt, cx)?;
-            (view.owner_name == head.owner_name).then_some(view)
-        })
+        .enumerate()
+        .filter_map(|(index, stmt)| split_view_candidate(stmt, index, cx))
+        .filter(|view| view.start >= 0 && view.end >= view.start)
         .collect();
-    if group.len() < 2
-        || !group.iter().any(|view| view.write)
-        || group.iter().enumerate().any(|(i, a)| {
-            group
-                .iter()
-                .skip(i + 1)
-                .any(|b| !(a.end < b.start || b.end < a.start))
-        })
-    {
-        return None;
+    for candidate in &mut candidates {
+        candidate.last_use = stmts[candidate.stmt_index + 1..]
+            .iter()
+            .enumerate()
+            .filter(|(_, stmt)| crate::Sema::stmt_references_name_exact(stmt, &candidate.name))
+            .map(|(offset, _)| candidate.stmt_index + 1 + offset)
+            .next_back()
+            .unwrap_or(candidate.stmt_index);
     }
-    Some(group)
+
+    let mut parent: Vec<usize> = (0..candidates.len()).collect();
+    fn find(parent: &mut [usize], mut index: usize) -> usize {
+        while parent[index] != index {
+            parent[index] = parent[parent[index]];
+            index = parent[index];
+        }
+        index
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let a = find(parent, a);
+        let b = find(parent, b);
+        if a != b {
+            parent[b] = a;
+        }
+    }
+    for a in 0..candidates.len() {
+        for b in a + 1..candidates.len() {
+            let earlier = &candidates[a];
+            let later = &candidates[b];
+            if earlier.owner_key == later.owner_key
+                && earlier.last_use >= later.stmt_index
+                && (earlier.write || later.write)
+                && (earlier.end < later.start || later.end < earlier.start)
+            {
+                union(&mut parent, a, b);
+            }
+        }
+    }
+
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for index in 0..candidates.len() {
+        let root = find(&mut parent, index);
+        groups.entry(root).or_default().push(index);
+    }
+    let mut groups: Vec<_> = groups.into_values().collect();
+    groups.sort_by_key(|group| {
+        group
+            .iter()
+            .map(|&index| candidates[index].stmt_index)
+            .min()
+            .unwrap_or(usize::MAX)
+    });
+    let mut planned = HashMap::new();
+    for (plan_index, mut group) in groups.into_iter().enumerate() {
+        if group.len() < 2
+            || group.iter().enumerate().any(|(i, &a)| {
+                group.iter().skip(i + 1).any(|&b| {
+                    let a = &candidates[a];
+                    let b = &candidates[b];
+                    !(a.end < b.start || b.end < a.start)
+                })
+            })
+        {
+            continue;
+        }
+        group.sort_by_key(|&index| candidates[index].stmt_index);
+        let root = format!("__jet_place_plan_{plan_index}_root");
+        let len = format!("__jet_place_plan_{plan_index}_len");
+        let mut regions = vec![SplitRegion {
+            name: root.clone(),
+            start: 0,
+            end: None,
+        }];
+        for (step, candidate_index) in group.into_iter().enumerate() {
+            let candidate = candidates[candidate_index].clone();
+            let Some(region_index) = regions.iter().position(|region| {
+                candidate.start >= region.start
+                    && region.end.is_none_or(|end| candidate.end <= end)
+            }) else {
+                continue;
+            };
+            let region = regions.remove(region_index);
+            let prefix = format!("__jet_place_plan_{plan_index}_{step}_before");
+            let split_tail = format!("__jet_place_plan_{plan_index}_{step}_tail");
+            let segment = format!("__jet_place_plan_{plan_index}_{step}_segment");
+            let suffix = format!("__jet_place_plan_{plan_index}_{step}_after");
+            if candidate.start > region.start {
+                regions.push(SplitRegion {
+                    name: prefix.clone(),
+                    start: region.start,
+                    end: Some(candidate.start - 1),
+                });
+            }
+            if region.end.is_none_or(|end| candidate.end < end) {
+                regions.push(SplitRegion {
+                    name: suffix.clone(),
+                    start: candidate.end + 1,
+                    end: region.end,
+                });
+            }
+            planned.insert(
+                candidate.stmt_index,
+                PlannedSplitView {
+                    candidate,
+                    initialize: step == 0,
+                    root: root.clone(),
+                    len: len.clone(),
+                    source: region.name,
+                    source_start: region.start,
+                    before: prefix,
+                    split_tail,
+                    segment,
+                    after: suffix,
+                },
+            );
+        }
+    }
+    planned
 }
 
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {

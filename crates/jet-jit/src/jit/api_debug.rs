@@ -143,7 +143,11 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
     for stmt in stmts {
         out.push(format!("TStmt::{}", jit_stmt_tag(stmt)));
         match stmt {
-            TStmt::SplitViews { owner, .. } => collect_expr_ops(owner, out),
+            TStmt::SplitViews {
+                owner: Some(owner),
+                ..
+            } => collect_expr_ops(owner, out),
+            TStmt::SplitViews { owner: None, .. } => {}
             TStmt::Let { init, .. }
             | TStmt::TupleDestructure { init, .. }
             | TStmt::StructDestructure { init, .. }

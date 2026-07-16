@@ -1878,11 +1878,8 @@ fn describe<T: [Renderable, Loud]>(item: T) -> String {
 
 #[test]
 fn fmt_preserves_view_call_range_args() {
-    // D-DYNARRAY1: `.view(a..b)` parses its two args from `start..end`, not a
-    // comma list — the formatter's generic call-arg printer would otherwise
-    // silently rewrite `.view(0..9)` into the unparseable `.view(0, 9)`
-    // (own-CLAUDE-memory rule: new syntax needs a formatter round-trip test,
-    // not just a parser).
+    // D-SHAPE-PLACE1=A: `.view(a..b)` is retained only so sema can teach E0214,
+    // but formatter recovery must still preserve the retired source losslessly.
     let src = "\
 fn run() {
     incidents: [Int] := [1, 2, 3]
@@ -1895,8 +1892,8 @@ fn run() {
 
 #[test]
 fn retired_view_keyword_is_an_ordinary_identifier() {
-    // D-MEM1 retired `view` as a keyword. D-DYNARRAY1's `.view(a..b)` is an
-    // ordinary method name and must not reserve the word everywhere else.
+    // D-SHAPE-PLACE1=A: retired `.view(a..b)` is an ordinary method parse used
+    // for E0214 teaching and must not reserve `view` everywhere else.
     let src = "\
 fn run() {
     view :: 7
@@ -1906,6 +1903,22 @@ fn run() {
 }
 ";
     assert_fmt_stable(src, "retired view keyword as ordinary identifier");
+}
+
+#[test]
+fn fmt_place_access_stability() {
+    // D-SHAPE-PLACE1=A: formatting once must retain every bare/read, `&` write,
+    // and `~` owned-copy token; formatting twice must be byte-identical.
+    let src = "\
+fn run() {
+    values := [1, 2, 3, 4]
+    read :: values[0..1]
+    edit :: &values[2..3].sort()
+    owned :: ~values[0..1]
+    print(\"{read.len()},{edit.len()},{owned.len()}\")
+}
+";
+    assert_fmt_stable(src, "place access");
 }
 
 #[test]

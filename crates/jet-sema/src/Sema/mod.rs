@@ -1173,6 +1173,13 @@ mod WebPartition;
 
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;
+
+/// Exact AST name-reference query used by codegen planning. Unlike conservative
+/// feature-discovery walkers, this is exhaustive over every statement/expression form.
+pub fn stmt_references_name_exact(stmt: &Stmt, name: &str) -> bool {
+    Captures::stmt_refs_name(stmt, name)
+}
+
 pub(crate) use CheckerCli::*;
 pub use CheckerCoreLib::*;
 pub(crate) use CheckerFieldPolicy::*;

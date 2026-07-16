@@ -650,13 +650,25 @@ pub enum TStmt {
         /// initialization. Empty for every untracked/non-Float binding.
         track_origin: Option<String>,
     },
-    /// D-SHAPE-PLACE1=A: two or more sema-proven disjoint constant index/range
-    /// windows over one list. Emission uses chained `split_at_mut`, so Rust
-    /// sees structural disjointness instead of being asked to rediscover it.
+    /// D-SHAPE-PLACE1=A: one acquisition in a sema-proven disjoint constant
+    /// index/range partition. The first acquisition initializes `root`; later
+    /// acquisitions split a retained region at their original statement.
     SplitViews {
-        owner: TExpr,
-        /// `(binding, inclusive start, inclusive end, single index, write, source line)`.
-        views: Vec<(String, i64, i64, bool, bool, usize)>,
+        owner: Option<TExpr>,
+        root: String,
+        len: String,
+        source: String,
+        source_start: i64,
+        before: String,
+        split_tail: String,
+        segment: String,
+        after: String,
+        name: String,
+        start: i64,
+        end: i64,
+        single: bool,
+        write: bool,
+        line: usize,
     },
     /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
     /// `BindPattern::Tuple`). Reproduces `emit_stmt`'s destructure form byte-for-byte:

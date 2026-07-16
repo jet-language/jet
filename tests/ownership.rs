@@ -583,7 +583,43 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("disjoint constant indexes must compile");
-    assert!(out.rust.contains("&mut __jet_place_segment_0[0]"), "{}", out.rust);
+    assert_eq!(out.rust.matches(".split_at_mut(").count(), 4, "{}", out.rust);
+    assert!(
+        out.rust.contains("let user_left = &mut __jet_place_plan_")
+            && out.rust.contains("let user_right = &mut __jet_place_plan_"),
+        "{}",
+        out.rust
+    );
+}
+
+#[test]
+fn disjoint_place_split_plans_follow_source_order() {
+    let src = r#"
+fn run() {
+    first_owner := [1, 2]
+    first_left :: &first_owner[0]
+    first_right :: &first_owner[1]
+    print(first_left + first_right)
+
+    second_owner := [3, 4]
+    second_left :: &second_owner[0]
+    second_right :: &second_owner[1]
+    print(second_left + second_right)
+}
+"#;
+    let out = jet::compile(src).expect("disjoint place plans must compile deterministically");
+    assert!(
+        out.rust
+            .contains("let __jet_place_plan_0_root = &mut (user_first_owner)"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust
+            .contains("let __jet_place_plan_1_root = &mut (user_second_owner)"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
