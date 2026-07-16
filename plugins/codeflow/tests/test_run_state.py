@@ -402,6 +402,7 @@ class CodeflowStateTests(unittest.TestCase):
     def test_stale_final_attempt_can_be_recovered(self):
         workflow = copy.deepcopy(self.workflow)
         workflow["nodes"][0]["max_attempts"] = 1
+        workflow["limits"]["max_cycles"] = 1
         run_dir = self.init_run(workflow, "stale-final")
         first = self.start(run_dir, "inspect")
         self.assertEqual(1, first["execution"])
@@ -413,6 +414,13 @@ class CodeflowStateTests(unittest.TestCase):
         second = self.start(run_dir, "inspect")
         self.assertEqual(1, second["attempt"])
         self.assertEqual(2, second["execution"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["nodes"]["inspect"]["started_at"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        run_state.atomic_write_json(state_path, state)
+        run_state.cmd_resume(argparse.Namespace(run_dir=str(run_dir), stale_after=60))
+        status = run_state.cmd_status(argparse.Namespace(run_dir=str(run_dir)))
+        self.assertEqual(["inspect"], status["blocked"])
+        self.assertEqual([], status["ready"])
 
     def test_symlink_scope_and_control_character_are_rejected(self):
         outside = self.root / "outside"

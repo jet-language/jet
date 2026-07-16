@@ -158,10 +158,6 @@ def path_contains(scope: str, candidate: str) -> bool:
     return candidate == scope or candidate.startswith(scope.rstrip("/") + "/")
 
 
-def paths_overlap(left: str, right: str) -> bool:
-    return path_contains(left, right) or path_contains(right, left)
-
-
 def validate_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
     allowed_top = {"schema_version", "goal", "workspace", "limits", "acceptance", "nodes"}
     unknown_top = set(workflow) - allowed_top
@@ -780,13 +776,19 @@ def cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
         if item["status"] == "running":
             started = datetime.fromisoformat(item["started_at"])
             if (now - started).total_seconds() >= args.stale_after:
-                item["status"] = "pending"
-                item["worker"] = None
-                item["started_at"] = None
-                item["attempts"] = max(0, item["attempts"] - 1)
-                item["snapshot"] = None
-                interrupted = True
-                add_event(state, "node-interrupted", node_id, "stale running node returned to queue")
+                if state["cycles"] >= workflow["limits"]["max_cycles"]:
+                    item["status"] = "blocked"
+                    item["finished_at"] = utc_now()
+                    add_event(state, "node-blocked", node_id, "stale recovery budget exhausted")
+                else:
+                    state["cycles"] += 1
+                    item["status"] = "pending"
+                    item["worker"] = None
+                    item["started_at"] = None
+                    item["attempts"] = max(0, item["attempts"] - 1)
+                    item["snapshot"] = None
+                    interrupted = True
+                    add_event(state, "node-interrupted", node_id, "stale running node returned to queue")
         if item["status"] == "passed":
             try:
                 report = read_json(run_dir / item["report"])
