@@ -367,6 +367,11 @@ pub fn quote(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
             '\r' => out.push_str("\\r"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            c if c <= '\u{1f}' => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c => out.push(c),
         }
     }
@@ -415,6 +420,8 @@ mod tests {
     #[test]
     fn roundtrips_quote() {
         assert_eq!(quote("a\"b\\c"), "\"a\\\"b\\\\c\"");
+        let controls = "\0\u{01}\u{08}\t\n\u{0c}\r\u{1f}";
+        assert_eq!(parse(&quote(controls)).unwrap().as_str().unwrap(), controls);
     }
 
     const LINK_NOISE: &str = "\"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links";
