@@ -390,7 +390,7 @@ call of it. `@[Patchable]` (D-PATCH1) excludes a computed field from `T.Patch`
 and from `apply`/`diff`/`merge`. `@[Codable]` encode calls the getter (the
 field appears in the wire output); decode never reads into it.
 
-**D-QUAL3 — Unit families**: `#UnitFamily(currency) { usd, eur, gbp }` mints
+**D-QUAL3 — Unit families**: `@UnitFamily(currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);
 cross-unit mixing reuses E0127. **D-UNITLIT1 — unit literals**: `500ms`,
 `12.50usd` resolve against in-scope family members (E0134 unknown suffix); no

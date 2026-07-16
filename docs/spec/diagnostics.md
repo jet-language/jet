@@ -196,7 +196,7 @@ renumbered, and no new `W` code may be allocated.
 | E0131 | sema  | `Float` and `Decimal` mixed (D-DECIMAL1) |
 | E0132 | sema  | `BigInt` and `Decimal` mixed (D-BIGINT1/D-DECIMAL1) |
 | E0133 | sema  | unsupported operator on `BigInt`/`Decimal` (D-BIGINT1/D-DECIMAL1) |
-| E0134 | sema  | a numeric literal's unit suffix isn't a `#UnitFamily` member in scope (D-UNITLIT1) |
+| E0134 | sema  | a numeric literal's unit suffix isn't an `@UnitFamily` member in scope (D-UNITLIT1) |
 | E0135 | sema  | a compile-time literal outside a range type's declared bounds (D-RANGETYPE1) |
 | E0136 | sema  | a runtime value constructed into a range type without the fallible `?` form (D-RANGETYPE1) |
 | E0137 | parse | a range type's declared bounds are empty/reversed (`lo > hi`) (D-RANGETYPE1) |

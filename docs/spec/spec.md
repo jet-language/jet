@@ -765,7 +765,7 @@ mode (structural check).
   the test fails with a `timeout: region took …` message. v1 ships **post-hoc**
   semantics: the region runs to completion, then its elapsed time is compared
   against the budget (it does not interrupt a hang — out of scope). `<dur>` is a
-  bare duration literal (`ns`/`us`/`ms`/`s`); it needs no `#UnitFamily` in scope.
+  bare duration literal (`ns`/`us`/`ms`/`s`); it needs no `@UnitFamily` in scope.
 - **`.skip { … }` / `.skip("reason") { … }`** — the region is **not executed**
   (emitted as a dead `if false` block, so it still type-checks). When `.skip` is
   the **first** statement the whole test is skipped: it reports `name: skip` and

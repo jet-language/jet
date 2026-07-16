@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 667,
-    "rev": 8104,
+    "rev": 8105,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20563,6 +20563,11 @@
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "Root cause CONFIRMED via instrumentation (not the quarantine logic): my F1 fix-round over-correction. realize_verified up-front FULL closure_graph (validate_graph_store_proofs) HARD-FAILS on a deleted/tampered LOCAL object ('no closure proof') BEFORE the cache-verifier can emit E2604 + quarantine, so rebuild never recovers. Original closure_graph_structure (recovery-only up-front) was correct; the reviewer's F1 was a false positive I over-corrected. Fix in flight: restore structure-only up-front recovery + move full closure-proof validation (incl. transitive deps, F1's real concern) to the per-candidate verify/lease site. Instrumentation removed from tree (73c009e3d). Diagnosis done in main thread since workers kept hitting the time ceiling mid-build."
+        },
         {
           "at": "2026-07-16",
           "by": "claude-main",
@@ -41736,6 +41741,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T01:50:21.376Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0sucg7f",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-16T01:44:57.715Z",
       "by": "fable-clerk",
       "action": "decision.add",
@@ -45227,13 +45239,6 @@
       "action": "card.claim",
       "ref": "c067p6dz",
       "note": ""
-    },
-    {
-      "at": "2026-07-15T14:37:01.835Z",
-      "by": "fable-burndown",
-      "action": "card.add",
-      "ref": "c067p6dz",
-      "note": "Full suite red: cli budget tests race copied-compiler exec (ETXTBSY)"
     }
   ],
   "nextNum": 368,
