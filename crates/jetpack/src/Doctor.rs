@@ -54,11 +54,9 @@ pub fn run(project: &Path, online: bool) -> Report {
 fn check_hangar(roots: &Store::Roots) -> Check {
     let hangar = roots.hangar_dir();
     if !hangar.exists() {
-        return degraded(
-            "hangar",
-            "absent; no package store has been initialized",
-            "realize a package to initialize the Hangar",
-        );
+        // A fresh machine has no Hangar yet; that is normal, not a health
+        // problem — the first realize creates it.
+        return ok("hangar", "absent; nothing realized yet");
     }
     match super::RuntimePolicy::lock_state(&roots.root.join(".locks/hangar.lock")) {
         Ok(super::RuntimePolicy::LockState::Held) => {
@@ -78,15 +76,13 @@ fn check_hangar(roots: &Store::Roots) -> Check {
         }
     }
     let rd = match fs::read_dir(&hangar) { Ok(rd) => rd, Err(e) => return broken("hangar", format!("unreadable ({})", e.kind()), "restore read access to the Jetpack root") };
-    let graph = match Store::closure_graph_read_only(roots) {
-        Ok(graph) => graph,
-        Err(error) => {
-            return degraded(
-                "hangar",
-                format!("closure journal needs recovery ({error})"),
-                "run `jetpack hangar recover`, then rerun `jetpack doctor`",
-            );
-        }
+    // A journal that needs recovery must not shadow the per-object scan: a
+    // specific finding (corrupt digest, missing output) is the actionable
+    // diagnosis, so scan first and report the journal only when the objects
+    // themselves check out.
+    let (graph, closure_error) = match Store::closure_graph_read_only(roots) {
+        Ok(graph) => (graph, None),
+        Err(error) => (Store::ClosureGraph::default(), Some(error)),
     };
     let entries = Store::list_read_only(roots);
     let known: BTreeMap<_, _> = entries.iter().map(|e| (e.id.as_str(), e)).collect();
@@ -126,6 +122,13 @@ fn check_hangar(roots: &Store::Roots) -> Check {
             Ok(_) => return degraded("hangar", format!("object `{id}` failed its content digest"), "remove the corrupt object with `jetpack clean`, then realize it again"),
             Err(_) => return degraded("hangar", format!("object `{id}` cannot be hashed safely"), "remove the corrupt object with `jetpack clean`, then realize it again"),
         }
+    }
+    if let Some(error) = closure_error {
+        return degraded(
+            "hangar",
+            format!("closure journal needs recovery ({error})"),
+            "run `jetpack hangar recover`, then rerun `jetpack doctor`",
+        );
     }
     ok("hangar", format!("{objects} object(s) readable and content-verified"))
 }
@@ -396,7 +399,9 @@ mod tests {
         let root = std::env::temp_dir().join(format!("doctor-absent-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let roots = Store::Roots { root: root.clone(), dev_mode: false };
-        assert_eq!(check_hangar(&roots).health, Health::Degraded);
+        // A never-initialized store is a normal fresh-machine state, not a
+        // health finding; the check must stay read-only either way.
+        assert_eq!(check_hangar(&roots).health, Health::Healthy);
         assert!(!root.exists());
     }
 }
