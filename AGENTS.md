@@ -10,13 +10,12 @@ reach for another language. The front end owns all semantics and every
 error message; rustc is a hidden verifier/optimizer. A human **owner**
 has final say on all user-facing syntax.
 
-## Read order (before any work)
+## Consult these files as needed
 
 1. docs/spec/philosophy.md — ranked priorities; settles all arguments
 2. docs/spec/syntax-decisions.md — what syntax you may use; never invent any
 3. docs/spec/architecture.md — pipeline + rules R1–R12
 4. docs/spec/diagnostics.md — error voice + format; snapshot-pinned
-5. docs/spec/roadmap.md — current milestone and exit criteria
 
 ## Command environment
 
@@ -193,13 +192,7 @@ owner says "stop caveman" / "normal mode".
 ## Sub-agent delegation
 
 Spawn sub-agents for parallelisable or context-heavy work rather than doing
-everything in one context window. Match the model to the task:
-
-| Model | When to use |
-|-------|-------------|
-| `haiku` | Mechanical, read-only tasks: grep, file lookup, snapshot diffing, doc summarisation |
-| `sonnet` | Default for most implementation sub-tasks: writing Rust, sema passes, codegen, tests |
-| `opus` | Hard reasoning: type-system design, architecture decisions, tricky sema edge cases, design reviews |
+everything in one context window. Match the model effort to the task.
 
 Rules:
 - **Checkpoint-commit before delegating.** A sub-agent `git restore` has
@@ -230,7 +223,7 @@ Rules:
 ## Git workflow
 
 Work directly on the current branch. Do not create new branches, worktrees,
-or forks unless the owner explicitly asks for one.
+or forks unless the owner explicitly asks for one. If it would be genuinely useful to speed up work efficacy & efficiency, you may request the owner's approval.
 
 ## Style
 

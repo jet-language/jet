@@ -65,6 +65,42 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 ));
             }
         }
+        TStmt::SplitViews { owner, views } => {
+            let owner = emit_tir_expr(owner, cx);
+            for (_, start, end, _, line) in views {
+                out.push_str(&format!(
+                    "{}jet_check_view_bounds(({}).len() as i64, {}, {}, {:?}, {});\n",
+                    pad, owner, start, end, cx.file, line
+                ));
+            }
+            let mut previous_end = -1i64;
+            let mut rest = owner.clone();
+            for (index, (name, start, end, write, _)) in views.iter().enumerate() {
+                let after = format!("__jet_place_after_{}", index);
+                let segment = format!("__jet_place_segment_{}", index);
+                let next = format!("__jet_place_rest_{}", index);
+                let gap = start - previous_end - 1;
+                out.push_str(&format!(
+                    "{}let (_, {}) = ({}).split_at_mut({}usize);\n",
+                    pad, after, rest, gap
+                ));
+                out.push_str(&format!(
+                    "{}let ({}, {}) = ({}).split_at_mut({}usize);\n",
+                    pad,
+                    segment,
+                    next,
+                    after,
+                    end - start + 1
+                ));
+                if *write {
+                    out.push_str(&format!("{}let {} = {};\n", pad, mangle(name), segment));
+                } else {
+                    out.push_str(&format!("{}let {} = &*{};\n", pad, mangle(name), segment));
+                }
+                rest = next;
+                previous_end = *end;
+            }
+        }
         TStmt::Assign {
             place,
             op,
