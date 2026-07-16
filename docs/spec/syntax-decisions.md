@@ -397,6 +397,77 @@ cross-unit mixing reuses E0127. **D-UNITLIT1 — unit literals**: `500ms`,
 implicit cross-unit conversion; `e`+digits reserved for float exponents.
 Dot-construction `px.{100}` also valid.
 
+**D-QUANTITY-DECL1=A — scaled and affine units extend `@UnitFamily`**
+*(ratified 2026-07-16, card #603)*: the post-D-SHAPE2 `@UnitFamily` typed
+rule gains one canonical `base` and exact rational `scale`/`offset`
+metadata per member; D-QUAL3's family and generated-type semantics are
+unchanged. Conversion is `canonical = stored * scale + offset`, inverse
+`(canonical - offset) / scale`; metadata normalizes to arbitrary-precision
+rationals at compile time. A family is closed in its declaring package — no
+downstream reopening syntax; duplicate bases or members are errors, and a
+same-spelled member in another family is a distinct type, never silently
+unified. API snapshots record dimension, base, scale, offset, and package
+provenance so conflicts fail and changes are semver-visible.
+
+```jet
+@UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+    foot(scale: 381/1250)
+}
+
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+// kelvin = celsius * 1 + 27315/100
+```
+
+**D-QUANTITY-POINT1=A — affine units generate concrete Point and Delta
+types** *(ratified 2026-07-16, card #603)*: each affine unit generates two
+concrete named types (e.g. `CelsiusPoint`, `CelsiusDelta`) via the existing
+named-constructor (D-API-CTOR1) and destination-owned source-named
+conversion (D-SHAPE-CONVERT1) laws — neither law is amended. They share an
+erased numeric representation but carry distinct nominal/API/Codable
+identity. Sema closes the algebra: Point plus Delta yields Point, Point
+minus Point yields Delta, Delta plus Delta yields Delta; Point plus Point
+and Delta minus Point are rejected. D-QUANTITY-DECL1 family metadata applies
+scale+offset to Point conversions and scale-only to Delta conversions.
+
+```jet
+target :: CelsiusPoint.from_float(200.0)?
+tolerance :: CelsiusDelta.from_float(5.0)?
+next :: target + tolerance
+drift :: next - target
+
+FahrenheitPoint.from_celsius_point(target)?
+FahrenheitDelta.from_celsius_delta(tolerance)?
+
+target + target
+// error: two Temperature points cannot be added
+// fix: subtract them for a delta, or add a CelsiusDelta
+```
+
+**D-QUANTITY-TYPE1=A — generic APIs bound dimension and kind via
+`Quantity<Dimension, Kind>`** *(ratified 2026-07-16, card #603)*: concrete
+unit APIs keep their D-QUAL3 named types and D-QUANTITY-POINT1's Point/Delta
+split. A reusable generic function instead names a compiler-known
+`Quantity<Dimension, Kind>` bound — a compile-time bound, not a runtime
+wrapper. Monomorphization retains the concrete unit and Point/Delta
+representation selected at each call site; Codable uses that concrete
+instantiation's wire rule, and API snapshots record the normalized
+dimension, kind, and input/output relations. Every input/output must
+determine one concrete unit and kind; an undetermined result is rejected.
+
+```jet
+fn mean<Q: Quantity<Length, .Linear>>(xs: [Q]) -> Q { xs.mean() }
+fn shift<P: Quantity<Temperature, .Point>, D: Quantity<Temperature, .Delta>>(p: P, d: D) -> P { p + d }
+
+fn mystery<Q: Quantity<Length, .Linear>>() -> Q { Meter.from_int(1)? }
+// error: return unit is not determined by the signature
+// fix: accept a unit-bearing input or return Meter
+```
+
 **D-TYPEALIAS1 — Aliases**: `alias X = Y` transparent aliases, scoped to
 shortening generic spellings only — not primitive/unit newtypes (use
 `distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A**: `[T]`, `[K: V]`, `*T`
@@ -844,6 +915,43 @@ ladder. At package scope, each setting uses the coherent Package `policy:`
 surface owned by its policy decision; the common ladder does not mint a second
 manifest spelling.
 
+**D-PACKAGE-POLICY-SCOPE1=A — package `policy:` holds a typed field value**
+*(ratified 2026-07-16, card #657)*: the package-echelon `policy:` field
+settled by D-POLICY-WORD1 holds a typed `.{ ... }` value whose governance
+keys are ordinary fields, written like every other Package role field
+(`identity:`, `sources:`, D-SHAPE5a) — not the `#Policy(...)` marker
+call. Each package-field key maps to the identical key the source-scope
+`#Policy(...)` marker uses, so `no_alloc: true` in `policy:` and
+`#Policy(no_alloc)` on a block/function/module are the same key in two
+echelon-appropriate spellings, and `jet explain` unifies provenance across
+the whole D-MARK-SCOPE1 ladder. Package policy may only tighten safety — it
+can forbid unsafe code but can never authorize an unsafe operation; that
+still requires a written `#Unsafe("reason")` block or function. Reuse across
+a monorepo is reached through the ratified `jet split` (D-ECO-SPLITPOLICY1),
+which extracts a shared `policy:` value into a named `Config` when needed;
+`policy:` itself does not compose a `use:` list of named profiles.
+
+```jet
+# package.jet — policy: reads like every other typed Package field
+identity: .{ name: "meter", version: "1.0.0" }
+sources:  .{ roots: ["Source"] }
+policy:   .{
+    no_alloc: true
+    zero_rc: true
+    arena_bounded: 65536
+    unsafe: .Forbid
+}
+
+# Source/sensor.jet — a module tightens one key with the source marker
+#Policy(arena_bounded(2048))
+module sensor
+
+# Package policy may only tighten safety, never authorize it:
+policy: .{ unsafe: .Allow }
+// error: package policy cannot authorize unsafe — write #Unsafe("reason")
+// at the exact block or function instead
+```
+
 **D-MEM-FACTS1=B — transitive memory facts** *(ratified 2026-07-15, card
 #644)*: `no_alloc`, `zero_rc`, and `arena_bounded(N)` are explicit memory facts
 on the D-MARK-SCOPE1 ladder. Each fact checks every reachable call, including
@@ -1146,6 +1254,29 @@ types (`@Pure fn(T) -> U`, `#(Net) fn(T) -> U`; call-site check E0747) and
 
 **D-EFF3 — Traits**: a trait method may declare an effect upper bound — both
 the impl obligation (E0742) and the dispatch contract for trait objects.
+
+**D-EFFECT-OMIT1=A — inferred effects may stay unwritten** *(ratified
+2026-07-16, card #570)*: private and public ordinary functions may omit an
+effect bound; `->` is only the return arrow and never asserts purity — a
+function is pure when its inferred row is empty, or when an explicit
+`--[]->` bounds it empty. Public API snapshots store the inferred normalized
+row and provenance, and semver rejects row changes; an explicit row is
+always available as an upper bound (`--[Fs.Read]->`). D-EFF3 is unchanged:
+static calls use each implementation's inferred row, while a trait method
+used through dynamic dispatch keeps its declared upper-bound contract.
+
+```jet
+fn twice(n: Int) -> Int { n * 2 }
+// inferred []: pure
+
+pub fn load(path: String) -> String { core.files.read(path)? }
+// API snapshot: load --[Fs.Read]-> String
+
+pub fn bounded(path: String) --[Fs.Read]-> String { core.files.read(path)? }
+fn hash(text: String) --[]-> Int { text.length() }
+
+trait Renderer { fn render(self) --[Gpu]-> Image }
+```
 
 **D-PROP1 / D-PROP2 — Prohibition**: `#(!Net)` — the fn and every reachable
 callee must not use the effect (E0749).
