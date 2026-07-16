@@ -46,6 +46,36 @@ fn main() {
     for key in ["RUSTC", "TARGET", "HOST", "PROFILE", "OPT_LEVEL", "DEBUG", "CARGO_CFG_TARGET_FEATURE", "CARGO_ENCODED_RUSTFLAGS"] {
         println!("cargo:rerun-if-env-changed={key}");
     }
+    for key in profile_override_keys() {
+        println!("cargo:rerun-if-env-changed={key}");
+    }
+    if let Some(spec) = target_spec_path() {
+        println!("cargo:rerun-if-changed={}", spec.display());
+    }
+}
+
+/// Profile/toolchain env overrides that change compiler semantics without
+/// touching any source input; each must feed the semantic IDs and re-trigger
+/// this script. Cargo has no wildcard rerun-if-env-changed, so enumerate.
+fn profile_override_keys() -> Vec<String> {
+    let mut keys = vec!["RUSTC_WRAPPER".to_string(), "RUSTC_WORKSPACE_WRAPPER".to_string()];
+    for profile in ["RELEASE", "DEV", "TEST", "BENCH"] {
+        for setting in [
+            "PANIC", "OVERFLOW_CHECKS", "DEBUG_ASSERTIONS", "LTO", "CODEGEN_UNITS",
+            "OPT_LEVEL", "DEBUG", "STRIP", "INCREMENTAL",
+        ] {
+            keys.push(format!("CARGO_PROFILE_{profile}_{setting}"));
+        }
+    }
+    keys
+}
+
+/// A TARGET naming a custom `.json` target spec carries semantics in the file
+/// body, not the name.
+fn target_spec_path() -> Option<std::path::PathBuf> {
+    let target = std::env::var("TARGET").ok()?;
+    let path = std::path::PathBuf::from(&target);
+    (target.ends_with(".json") && path.is_file()).then_some(path)
 }
 
 fn build_facts() -> std::io::Result<Vec<(String, String)>> {
@@ -59,6 +89,13 @@ fn build_facts() -> std::io::Result<Vec<(String, String)>> {
         facts.push((key.into(), std::env::var(key).unwrap_or_default()));
     }
     facts.extend(std::env::vars().filter(|(key, _)| key.starts_with("CARGO_FEATURE_")));
+    for key in profile_override_keys() {
+        let value = std::env::var(&key).unwrap_or_default();
+        facts.push((key, value));
+    }
+    if let Some(spec) = target_spec_path() {
+        facts.push(("TARGET_SPEC_JSON".into(), std::fs::read_to_string(spec)?));
+    }
     facts.sort();
     Ok(facts)
 }
