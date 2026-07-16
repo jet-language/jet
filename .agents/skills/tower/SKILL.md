@@ -178,8 +178,8 @@ manual detach any more — let the decision retire on its own, or
 
 ## Rules
 
-- Use GPT-5.6 Sol by default at low, medium, or high effort only. Use Terra only
-  for a recorded task-specific advantage, never as a standard reviewer.
+- Use GPT-5.6 Sol exclusively at low, medium, or high effort only. Do not route
+  work or review to another model family.
 - One implementer owns a coherent change. One fresh Sol reviewer follows;
   implementer fixes findings and Sol rechecks. Reviewer never implements.
 - Parallelise only disjoint in-scope cards; one agent layer. Worktrees are

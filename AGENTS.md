@@ -82,11 +82,9 @@ Violating an invariant means stop and fix it.
 
 ## GPT-5.6 model policy
 
-Use GPT-5.6 Sol by default; the `gpt-5.6` alias is Sol. Use only low, medium, or high effort: low for bounded
-mechanics, medium for normal implementation, and high for semantics, architecture, hard debugging, and review.
-
-Use Terra only when a concrete task-specific reason makes it better than Sol; record that reason. Terra is not part
-of the standard review path. Use Luna only when the owner asks or measurements show a stable mechanical advantage.
+Use GPT-5.6 Sol exclusively; the `gpt-5.6` alias is Sol. Use only low, medium, or high effort: low for bounded
+mechanics, medium for normal implementation, and high for semantics, architecture, hard debugging, and review. Do not
+route implementation, orchestration, or review to another model family.
 
 Give agents a clear goal, relevant context, hard constraints, owned paths, and observable done conditions. Prefer
 tests and acceptance criteria over step-by-step micromanagement.

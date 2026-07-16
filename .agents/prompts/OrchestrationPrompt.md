@@ -8,8 +8,8 @@ resumption system here.
 For bounded work, stay inline. In either mode:
 
 - follow `AGENTS.md` authority, invariants, command environment, ownership guards, and done conditions;
-- use GPT-5.6 Sol with only low, medium, or high effort; Terra needs a recorded task-specific advantage and is never
-  the standard reviewer; Luna needs an owner request or measured stable mechanical advantage;
+- use GPT-5.6 Sol exclusively, with only low, medium, or high effort; do not route work or review to another model
+  family;
 - use `ponytail:ponytail` for the smallest complete implementation without cutting safety, ratified scope, proof, or
   end-to-end behavior;
 - let Tower skills own board mechanics and the verification skill own proof mechanics;

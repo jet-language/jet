@@ -48,12 +48,10 @@ Name and record worktrees/branches by card and owner. Integrate every successful
 
 ## Scope models
 
-Use GPT-5.6 Sol by default and state its effort in every brief. Use only low,
+Use GPT-5.6 Sol exclusively and state its effort in every brief. Use only low,
 medium, or high: low for bounded mechanics, medium for normal implementation,
-and high for architecture, compiler semantics, hard debugging, and review.
-Use Terra only for a recorded task-specific advantage over Sol, never as a
-standard reviewer. Luna requires an owner request or measured stable advantage on
-high-volume fully mechanical work.
+and high for architecture, compiler semantics, hard debugging, and review. Do
+not route any work or review to another model family.
 
 ## Enforce one agent layer
 
