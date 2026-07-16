@@ -400,10 +400,12 @@ function nowActivate() {
 
 function dutyDecision(d) {
   const c = cardById(d.cardId);
+  const st = qState(d);
   const node = el(`<button class="duty" style="display:block;width:100%;text-align:left">
       <div class="duty__top"><span class="duty__kind">Decide</span>
         <span class="num">${esc(d.id)}</span>
-        <span class="duty__meta">card ${c ? ticket(c) : '—'} · ${(d.options || []).length} options${d.rec ? ` · rec ${esc(d.rec)}` : ''}</span>${ageChip(d.created)}</div>
+        <span class="duty__meta">card ${c ? ticket(c) : '—'} · ${(d.options || []).length} options${d.rec ? ` · rec ${esc(d.rec)}` : ''}</span>
+        ${st ? `<span class="qchip qchip--${st}">${st === 'open' ? '✎ awaiting answer' : '✓ question answered'}</span>` : ''}${ageChip(d.created)}</div>
       <h2 class="duty__title">${esc(d.title)}</h2>
       ${d.gist ? `<p class="duty__gist">${esc(d.gist)}</p>` : ''}
       <div class="duty__actions"><span class="btn btn--red btn--sm">Decide →</span></div>
@@ -926,6 +928,12 @@ function facetBody(d, fk) {
   if (fk === 'detail') return `<p>${esc(d.detail).replace(/\n/g, '<br>')}</p>`;
   return '';
 }
+// question state of a ballot: '' | 'open' (awaiting an answer) | 'answered'
+function qState(d) {
+  const qs = ((cardById(d.cardId) || {}).questions || []).filter(q => q.decisionId === d.id);
+  if (!qs.length) return '';
+  return qs.some(q => q.status === 'open') ? 'open' : 'answered';
+}
 function recordLabel(ids) {
   if (!ids.length) return 'Record decisions';
   if (ids.length === 1) return `Record · ${ids[0]} = ${pick[ids[0]]}`;
@@ -948,7 +956,11 @@ function renderFocus() {
   f.innerHTML = `
     <div class="focustop">
       <span class="focustop__ctr">${focusIdx + 1} / ${focusIds.length}</span>
-      <div class="dots" id="f-dots">${focusIds.map((id, i) => `<button class="dot${i === focusIdx ? ' cur' : ''}${pick[id] ? ' picked' : ''}" data-i="${i}" title="${esc(id)}"></button>`).join('')}</div>
+      <div class="dots" id="f-dots">${focusIds.map((id, i) => {
+        const st = qState(S.decisions.find(x => x.id === id) || {});
+        const note = st === 'open' ? ' — question awaiting answer' : st === 'answered' ? ' — question answered' : '';
+        return `<button class="dot${i === focusIdx ? ' cur' : ''}${pick[id] ? ' picked' : ''}${st ? ' q-' + st : ''}" data-i="${i}" title="${esc(id + note)}"></button>`;
+      }).join('')}</div>
       <div class="focus__nav">
         <button class="btn btn--sm" id="f-prev" ${focusIdx === 0 ? 'disabled' : ''}>←</button>
         <button class="btn btn--sm" id="f-next" ${focusIdx === focusIds.length - 1 ? 'disabled' : ''}>→</button>
@@ -958,6 +970,7 @@ function renderFocus() {
     <div class="focusscroll"><div class="fdeck">
       <div class="fdeck__head"><span class="fdeck__id">${esc(d.id)}</span>
         <span class="fdeck__for">card ${c ? ticket(c) : '—'}${c ? ' · ' + esc(c.title) : ''}</span>
+        ${qState(d) ? `<span class="qchip qchip--${qState(d)}">${qState(d) === 'open' ? '✎ awaiting answer' : '✓ question answered'}</span>` : ''}
         ${d.rec ? `<span class="fdeck__rec">rec ${esc(d.rec)}</span>` : ''}</div>
       <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
       ${d.gist ? `<div class="fdeck__title">${esc(d.title)}</div>` : ''}
