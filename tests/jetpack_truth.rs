@@ -9,8 +9,31 @@ const MATRIX: &str = "docs/plans/epoch-4/truth-matrix.md";
 const AUDITED: &[u64] = &[
     3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194,
     195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215,
-    229, 231, 232, 233, 234, 242, 330, 359, 361, 418, 419, 476, 477, 478, 479,
+    229, 231, 232, 233, 234, 242, 330, 359, 361, 393, 394, 418, 419, 421, 424, 426,
+    476, 477, 478, 479, 539, 540, 541, 578, 582, 586, 605, 608, 611, 615,
 ];
+
+#[test]
+fn canonical_product_ownership_is_split() {
+    // CAPABILITY_CLAIM: claim.product-boundaries / canonical-product-split
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    let driver_manifest =
+        std::fs::read_to_string(root.join("crates/jet-driver/Cargo.toml")).unwrap();
+    let jetpack_manifest =
+        std::fs::read_to_string(root.join("crates/jetpack/Cargo.toml")).unwrap();
+    let jetos_manifest =
+        std::fs::read_to_string(root.join("crates/jetos/Cargo.toml")).unwrap();
+
+    assert_eq!(root_manifest.matches("[[bin]]").count(), 1);
+    assert!(root_manifest.contains("name = \"jet\""));
+    assert!(!root_manifest.contains("name = \"jetpack\""));
+    assert!(!root_manifest.contains("name = \"jetos\""));
+    assert!(jetpack_manifest.contains("name = \"jetpack\""));
+    assert!(jetos_manifest.contains("name = \"jetos\""));
+    assert!(driver_manifest.contains("jet-pkg-model"));
+    assert!(!driver_manifest.contains("jetpack ="));
+}
 
 #[test]
 fn truth_matrix_covers_every_done_epoch4_card() {

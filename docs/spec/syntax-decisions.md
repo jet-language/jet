@@ -3356,7 +3356,9 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   disk, logs in, launches Studio/desktop paths, checks packages/services/network
   and rollback, and records guest-bound artifacts. Fake-QEMU or host-only
   harness artifacts may test plumbing, but may not close replacement acceptance.
-- **D-JOS-NIXBACKEND1=C**: `jet os vm prove <host> --disk <path> --real`
+- **D-JOS-NIXBACKEND1=C** *(product/replacement use superseded; migration-only
+  under D-JOS-NATIVE1/D-JOS-NIXEVAL1/D-JOS-NIXBACKEND2)*:
+  `jet os vm prove <host> --disk <path> --real`
   realizes the system through a hidden NixOS backend — a generated
   `flake.nix`/`configuration.nix` under the Jetpack root, `nix build` for a
   bootable qcow2, and QEMU for the guest boot. The user only ever writes
@@ -3392,6 +3394,32 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   protocol components, source spans, proof widgets, and source transactions.
   Studio owns OS workflows; Canvas owns general source graph editing. Neither
   stores semantic state outside Jet source/proof artifacts.
+
+**jetos native decrees** *(ratified 2026-07-09, card #363)*:
+
+- **D-JOS-NATIVE1=A**: jetos is a from-scratch standalone OS. Building the
+  product through the NixOS module system is forbidden; the earlier `--real`
+  tier produced a reskinned NixOS and is not native jetos.
+- **D-JOS-STORE1=A**: Hangar is the on-disk store. During stage 1, nixpkgs
+  closures live under a Hangar-managed compatibility root; they re-root into
+  native Hangar layout later. D-ECO-HANGARPATH1 governs the current default
+  per-user platform path without changing this store-ownership law.
+- **D-JOS-NIXEVAL1=C**: no `nix` binary may appear anywhere in the product
+  path. Jetpack owns the nixpkgs evaluation, fetch, and build pipeline.
+- **D-JOS-PARITYBAR1=A**: native exit requires NixOS-class typed modules and
+  options, immutable generations, atomic activation, live switch, rollback,
+  and a fully declarative system; terminal and graphical baselines; one-line
+  GNOME, KDE, Hyprland, and Niri swaps across Wayland/X11; and the owner's
+  complete `~/nixos` configuration running natively. The whole system remains
+  user-config-driven, with defaults and Studio authoring available; module
+  breadth beyond that bar grows by demand.
+- **D-JOS-NIXBACKEND2=C**: the Jet-to-NixOS realizer survives only as a
+  clearly labeled migration tool.
+
+D-JOS-NATIVE1, D-JOS-NIXEVAL1, and D-JOS-NIXBACKEND2 explicitly supersede
+D-JOS-NIXBACKEND1=C as a product and replacement-proof backend. Its hidden
+NixOS realization may support migration only; it cannot build native jetos or
+close D-JOS-PARITYBAR1.
 
 ### CLI & tooling
 

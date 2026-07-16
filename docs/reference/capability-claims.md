@@ -32,9 +32,9 @@ are inventoried independently from their source registries by the same gate.
 | `claim.game-product` | Jet ships a playable game runtime plus source-backed editor workflow. |
 | `claim.plugin-ffi` | Foreign libraries use one typed, safe interop structure. |
 | `claim.embedded` | Typed target profiles produce real firmware and kernel artifacts. |
-| `claim.adaptive-runtime` | Runtime policy can adapt to measured environment facts. |
-| `claim.logic-programming` | Jet exposes the ratified bounded logic-programming subset. |
-| `claim.structural-merge` | Jet can merge programs by semantic identity. |
+| `claim.adaptive-runtime` | Applications choose runtime fidelity through one explicit manual signal. |
+| `claim.logic-programming` | `core.solve` records finite Boolean constraints deterministically. |
+| `claim.structural-merge` | Jet has a checked structural diff and merge path keyed by semantic identity. |
 | `claim.proof-replay` | `jet prove` combines contracts, effects, budgets, tests, and replay facts. |
 | `claim.performance-budgets` | Typed performance budgets are enforced against pinned baselines. |
 | `claim.product-boundaries` | `jet`, `jetpack`, and `jetos` have clean canonical ownership. |
