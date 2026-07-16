@@ -36,9 +36,9 @@ LLVM optimizes). Interim levers, all invariant-clean:
 - Widen JIT TIR coverage so `jet dev` reloads never touch rustc for pure-Jet
   programs.
 
-Open ballots on card #666 decide the product questions: which lens each
-everyday command uses (D-BUILD-DEFAULT1) and whether a fast-AOT tier is a
-product tier at all under the two-lens law (D-AOT-CRANELIFT1).
+D-BUILD-DEFAULT1=B settles everyday defaults: `jet run` and `jet dev` use the
+fast profile; `jet build` remains optimized. The remaining open ballot on card
+#666, D-AOT-CRANELIFT1, decides the AOT mechanism under the two-lens law.
 
 ## Self-hosted era: why Jet's compiler won't be slow like rustc
 

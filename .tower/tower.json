@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 675,
-    "rev": 8963,
+    "rev": 8975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -263,9 +263,14 @@
       "epoch": "e8",
       "phase": "ready",
       "priority": "P1",
-      "plan": "Native lldb backend + interpreter dispatch already shipped (2026-07-01, see card log). Remaining: (1) wire the existing Dap.rs JSON-over-stdio server into a VS Code launch config under editors/vscode, prove breakpoint/step/locals on an FFI+task program the interpreter declines with E2203; (2) same proof for Zed under editors/zed; (3) protocol-level DAP tests in tests/debug_native.rs beyond lldb-command-level (initialize/launch/setBreakpoints/continue/stackTrace/scopes/variables); (4) document D-DBG2 --raw-frames + editor wiring status in docs/reference. gdb/Windows stay explicitly out of scope (phase 1 = lldb/Linux+macOS).",
+      "plan": "Current baseline: the std-only native lldb backend, line map, shared Inferior transport, DAP JSON-over-stdio server, Jet-only frame projection, and D-DBG2 raw-frames terminal view already ship. Remaining work is editor and real-protocol closure only. Wire VS Code and Zed to launch jet debug --dap without a second debugger mechanism. Add one production-generated FFI plus task fixture that the interpreter declines with E2203, then drive initialize, launch, setBreakpoints, configurationDone, continue, stackTrace, scopes, variables, output, disconnect, malformed framing, debugger absence, and debuggee exit through tests/debug.rs against live lldb on Linux and macOS. Prove beginner defaults expose Jet source, Jet frames, locals, and fixes only; prove expert terminal --raw-frames remains explicit and DAP never leaks raw Rust frames. Bound every adapter/debuggee wait and reap both processes on failure. Update both editor READMEs and debugger reference law with exact support: VS Code and Zed over lldb on Linux/macOS; Windows and gdb remain outside this card. No new syntax, dependency, command vocabulary, or owner gate.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 planning rebase: shipped native/DAP backend credited; residual narrowed to live DAP lifecycle, editor wiring, bounded cleanup, and exact support docs. No new gate."
+        },
         {
           "at": "2026-07-12",
           "by": "owner",
@@ -360,7 +365,21 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "crates/jet-debug/src/Dap.rs",
+        "crates/jet-debug/src/Native.rs",
+        "crates/jet-debug/src/Inferior.rs",
+        "crates/jet-debug/src/LineMap.rs",
+        "crates/jet-debug/src/lib.rs",
+        "tests/debug.rs",
+        "editors/vscode/extension.js",
+        "editors/vscode/package.json",
+        "editors/vscode/README.md",
+        "editors/zed/wasm-src/src/lib.rs",
+        "editors/zed/languages/jet/config.toml",
+        "editors/zed/README.md",
+        "docs/spec/syntax-decisions.md"
+      ]
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -3032,10 +3051,15 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "CI + quality gates under D-CI1=A (full suite sharded on every PR; nightly perf/fuzz/coverage/multi-OS) and D-CI2=A (zero-warning gate with card-referenced #[expect]). Implement on master.\n\nBuild order:\n1. Warning sweep first (D-CI2): fix or #[expect(lint, reason = \"#<card>: <why>\")] every current warning across the workspace. Known: scrutinee_bool in crates/jet-jit/src/lib.rs:1916 gets #[expect(dead_code, reason = \"#125: JIT tier-1a scrutinee lowering, wired in next stage\")]. Rule goes in CLAUDE.md style section: dead code without a card-referenced expect is deletable on sight; expects self-expire (unfulfilled-expectation errors when the code goes live).\n2. Lint config: [workspace.lints] in root Cargo.toml — rust.warnings = deny in CI (via RUSTFLAGS=-Dwarnings in the workflow, not in the manifest, so local iteration stays friendly); clippy correctness+suspicious groups on, style/pedantic off (house conventions win). rustfmt.toml matching current formatting (verify `cargo fmt --check` is near-clean first; if a one-time format commit is needed it is its own mechanical commit, no logic changes).\n3. Shard the suite: 4 PR jobs with an explicit shard map (a checked-in list, e.g. tools/ci/shards.toml): shard-1 front-end (lexer/parser/fmt/grammar/ui/ui_lint/syntax_reconciliation...), shard-2 sema (ownership/generics/effects/typestate/pure/taint...), shard-3 codegen+examples (golden/canon/cross/corelib/release_gates...), shard-4 tooling (lsp/repl/debug/dev/jetpack/pkg/workspace/web_*/observe/cli...). Meta-test tools/ci/shards-complete (or tests/ci_shards.rs): every tests/*.rs file assigned to exactly one shard, fails on unassigned new files — no silent coverage loss, ever.\n4. Rewrite .github/workflows/ci.yml: keep nix toolchain job skeleton; PR = build + 4 shard jobs (nix develop -c cargo test --test <list>) + cargo fmt --check + clippy + tower status via NEW path (node Tower/tower.mjs status — the frozen tools/Tower/Tower.mjs step dies) + aarch64 QEMU smoke as today. Cache /nix and cargo target dir keyed on flake.lock+Cargo.lock so shard wall-clock stays near today's.\n5. Nightly workflow (.github/workflows/nightly.yml): full suite on ubuntu + macos; perf ratchet via tools/perf/ci-perf-check.sh against tools/perf/baseline.json (regression = red + auto card via tower CLI); fuzz cadence — run tests/fuzz_sema.rs in extended mode (env-gated iteration count) 30 min; coverage report (nix devshell tool; CI-side only, not a compiler dep — I6 untouched) published as artifact with a ratchet floor once a baseline exists.\n6. Failure→card automation: nightly failure step runs `node Tower/tower.mjs card add --kind bug ...` with the failing job link (guard against duplicates by title search first).\n7. Canary proof: after everything lands, a deliberate throwaway PR breaking a previously-unrun target (e.g. tests/repl.rs) must go red; record the run link on this card, then close the canary.\n\nExit criteria:\n- PR CI executes every tests/*.rs target (shard meta-test green and enforced).\n- cargo build clean under -Dwarnings on Linux+macOS; every expect carries a card reference.\n- Frozen tools/Tower path gone from CI; new tower status step green.\n- Nightly runs green end-to-end once; perf ratchet demonstrably fails on an injected slowdown (test the tester, then revert).\n- Canary PR proof recorded.\n\nGates: none — D-CI1/D-CI2 ratified 2026-07-05. Note: grammar-drift step from #210 joins the PR gate when #210 lands; leave a commented step referencing #210.\n\nDelegation: stage 1 sweep is mechanical (haiku/sonnet); stages 3–5 one sonnet agent (single-file workflow edits test poorly in parallel); verify by running the shard lists locally once (nix develop -c cargo test --test <shard list>) before pushing.",
+      "plan": "Current baseline: D-CI3 already runs the repository full verifier on every push and pull request; nightly already runs rotating-seed sema fuzzing and the performance ratchet. Preserve that coverage while implementing the still-unbuilt D-CI1 and D-CI2 law. Split the every-change verifier into explicit, balanced jobs only where it reduces latency, and add one checked shard inventory that maps every tests/*.rs target exactly once; keep a final completeness gate so no target can disappear. Add cargo fmt --check, clippy correctness/suspicious, and Linux plus macOS -Dwarnings builds. Encode the card-referenced #[expect] rule in a focused source audit; AGENTS.md remains the operating manual. Remove any obsolete tools/Tower invocation and run node Tower/tower.mjs lint --docs plus status read-only. Extend the scheduled lane to a full Ubuntu/macOS verifier, coverage artifact and pinned floor, existing fuzz seed artifact, and existing perf ratchet; prove the ratchet with a temporary injected regression and restore exact baseline bytes. Do not let CI create Tower cards automatically: external job credentials must not gain board-write authority, and run reports/artifacts already preserve the evidence. Finish with one throwaway canary change that breaks a formerly uncovered target, capture the failed run URL, then restore it. No new compiler dependency or owner gate.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 planning rebase: preserved shipped D-CI3 full-suite/fuzz/perf lanes; residual is D-CI1 shard completeness, D-CI2 warnings, macOS/coverage evidence, read-only Tower checks, and canary proof. Removed proposed CI-to-Tower writes; no authority ballot needed."
+        },
         {
           "at": "2026-07-07",
           "by": "canvas-agent",
@@ -3117,7 +3141,17 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        ".github/workflows/ci.yml",
+        "scripts/agent/verify-full.sh",
+        "Cargo.toml",
+        "clippy.toml",
+        "AGENTS.md",
+        "tests/fuzz_sema.rs",
+        "tools/perf/ci-perf-check.sh",
+        "tools/perf/baseline.json",
+        "Tower/tower.mjs"
+      ],
       "workOrder": 503
     },
     {
@@ -4628,10 +4662,15 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "building",
       "priority": "P1",
-      "plan": "Acceptance: core.files/core.path must beat Python pathlib, Go os/filepath, and Rust std::fs for ordinary scripting/build-tool work, while preserving Jet's one-path, safe-default, audit-friendly model.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md currently documents core.files as string-path helpers plus open/create/append streaming handles.\n- docs/spec/syntax-decisions.md records D-PATHFS1 typed Path (from/join/parent/extension/stem/write_atomic/walk) but still labels part of it unbuilt; code already contains Path TIR/prelude/sema hooks, so implementation must verify shipped behavior and fix docs drift.\n- D-FSWATCH1 is ratified as files.watch, with owner comment: include processes and ports now, not later. That requires a shared watch/event model, not only a filesystem helper.\n\nGates queued:\n- D-FSOPS1: exact deep filesystem/path operation surface and Path-vs-String model.\n- D-WATCH-SCOPE1: exact watch composition surface for files, process exit, and port readiness.\n\nImplementation plan after gates clear:\n1. Verification baseline: add/confirm focused tests for currently claimed Path API (Path.from, join, parent, extension, stem, write_atomic, walk), existing core.files helpers, and docs/API-freeze snapshots. Fix any docs/code mismatch before adding new surface.\n2. Data model: add typed Stat, FileKind, WalkEntry, TempFile/TempDir RAII handles, FileLock, WatchHandle, WatchEvent, WatchSet. Keep IOError product-copy shape; add diagnostics only for sema-visible misuse.\n3. Sema/API surface: register ratified functions/methods in CheckerCoreLib known-items, effect caps, target-profile availability, comptime impurity policy where relevant, and semantic-index/docs facts.\n4. Runtime/codegen: lower through TIR/prelude only; no codegen checks. Implement std-only filesystem ops first; platform-specific gaps become typed IOError variants or documented unsupported cases, never raw OS errors.\n5. Watch: implement debounced files.watch plus process/port watchers per ratified D-WATCH-SCOPE1. If a native OS watcher cannot be std-only on a platform, use the existing FFI-bridge dependency posture only after owner-approved dependency gate; otherwise ship a polling fallback only if the ballot allows it and report its fidelity in WatchEvent facts.\n6. Examples/goldens: publish_files.jet exercises create_dir_all, walk, stat, copy_dir, write_atomic, temp_dir cleanup; dev_runner_watch.jet exercises files/process/port watch without shell polling. Golden tests pin output; focused Rust tests cover edge cases.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effect table, syntax-decisions D-PATHFS1/D-FSOPS1/D-WATCH-SCOPE1 entries, and stdlib gap ledger (#310 if present).\n8. Verification: targeted tests for corelib/golden/dev/watch paths, then nix develop -c cargo build, hello.jet smoke, relevant examples, and final nix develop -c cargo test before closing.\n\nDevil-pass hardening:\n- Avoid two mechanisms: every string path entrypoint coerces to Path before audit/effects/codegen see it.\n- Avoid shell-shaped footguns: no blessed mkdir/cp/rm subprocess workaround remains in docs.\n- Avoid watch taxonomy sprawl: domain constructors return one shared event/watch abstraction.\n- Avoid silent platform drift: watch/stat/symlink fidelity is test-pinned or exposed as typed capability facts.",
+      "plan": "Current source already ships D-FSOPS1, D-FSWATCH1, and the owners D-WATCH-SCOPE1 comment: core.watcher owns file, process, and port handles; core.event scopes own callbacks; core.files/core.path own filesystem operations. Do not rebuild or rename this surface. Remaining closure is proof and truth reconciliation. First run the existing files_depth and watcher goldens plus corelib, parity, and path_durability tests against the production prelude. Verify the watcher example exercises recursive file changes, process exit, port readiness, WatchSet composition, scoped callbacks, cancellation/drop, and documented std-only polling fidelity without shell polling or silent platform claims. Obtain native Windows evidence for lexical path normalization and write_atomic replacement/durability already met on Linux; preserve collision-safe temp cleanup and permission behavior. Audit docs/reference/core-library.md and syntax-decisions against the actual core.watcher names and Event callback law. If any behavior is missing, repair the single existing implementation in FsIoEnvOsTesting.rs and ReactiveEventWatch.rs; add no alias, module, dependency, or new ballot. A different reviewer validates native evidence and every remaining criterion before closure.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 planning rebase: replaced stale pre-build plan and files.watch criterion with shipped core.watcher/Event law; only native durability evidence and independent closure remain. No new gate."
+        },
         {
           "at": "2026-07-12",
           "by": "owner",
@@ -4703,29 +4742,42 @@
           "metBy": "terra-288-builder",
           "verifiedBy": "sol-288-review",
           "evidence": "Independent Sol review found no issues; path_durability 2/2, TIR path test and jet-codegen check pass; explicit edge cases audited.",
-          "at": "2026-07-10T23:16:20.233Z"
+          "at": "2026-07-16T08:05:17.671Z"
         },
         {
           "n": 2,
-          "text": "write_atomic is collision-safe with RAII cleanup, file/parent durability, and atomic existing-target replacement on Unix and Windows.",
+          "text": "write_atomic is collision-safe with RAII cleanup, file and parent durability, permission preservation, and atomic existing-target replacement on Unix and Windows.",
           "status": "met",
           "metBy": "terra-288-builder",
           "verifiedBy": null,
           "evidence": "Commit c53c0cee: collision-safe create_new retry, RAII cleanup, permission preservation, file sync, atomic replace, Unix parent fsync, checked Windows ReplaceFileW/MoveFileExW paths; independent review clean; Linux path_durability 5/5. Native Windows regression added and awaiting windows-latest execution.",
-          "at": "2026-07-10T23:27:24.325Z"
+          "at": "2026-07-16T08:05:17.672Z"
         },
         {
           "n": 3,
-          "text": "files.watch (D-FSWATCH1/D-WATCH-SCOPE1) composes file, process-exit, and port-readiness watchers behind one shared WatchEvent/WatchHandle abstraction, with a golden-tested dev_runner_watch.jet example and no undocumented shell-polling fallback.",
+          "text": "core.watcher composes file-change, process-exit, and port-readiness WatchHandle values through WatchSet and scoped core.event callbacks; watcher.jet and focused tests prove events, cleanup, and the documented std-only polling fidelity with no shell fallback or stale files.watch teaching.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:08.917Z"
+          "at": "2026-07-16T08:05:17.672Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/FsIoEnvOsTesting.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+        "examples/features/io/files_depth.jet",
+        "examples/features/io/watcher.jet",
+        "examples/features/expected/io/files_depth.out",
+        "examples/features/expected/io/watcher.out",
+        "tests/corelib.rs",
+        "tests/path_durability.rs",
+        "tests/parity.rs",
+        ".github/workflows/ci.yml",
+        "docs/reference/core-library.md",
+        "docs/spec/syntax-decisions.md"
+      ]
     },
     {
       "id": "c0uxsyns",
@@ -10343,13 +10395,16 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp3--real-cross-platform-sandbox",
-      "blockedBy": [
-        "c0yxdqju"
-      ],
+      "plan": "D-JPK-EPOCHBOUNDARY1=B is ratified: this Epoch 8 card is the sole owner of complete hostile Linux, macOS, and Windows package-sandbox proof and the full isolation parity claim. E4 cards retain functional behavior and honest sandbox-class reporting; do not move or duplicate their implementation here. Start from the current RuntimePolicy facade and Recipe execution path. Replace detection and ordinary Command execution with one action runner that enters a real OS boundary before executing untrusted work: Linux namespaces plus private proc/dev, read-only inputs, writable scratch/output, no-new-privileges, and network only for fixed-output fetch; macOS native sandbox profile with matching authority; Windows restricted token, Job Object, ACL projection, handle scrub, and descendant cleanup. Apply D-JPK-SANDBOX2=D exactly: non-executing copy/prebuilt verification may proceed; fetched or transitive executable work must use strong confinement, then a trusted substitute or approved remote builder, then fail closed. An exact digest/capability/reviewer/expiry local first-party grant remains audited, private, untrusted, and never publishable. Run one shared hostile corpus for path/symlink escape, host reads, sibling writes, undeclared executables, ptrace/device access, network, child/daemon escape, cancellation, crash cleanup, and false status on native Linux, macOS, and Windows. Status, dossier, JSON, diagnostics, and docs must report the boundary actually entered; no model, cfg, or detection-only proof closes a criterion. Independent platform review gates the full-isolation claim. No new syntax or dependency is assumed; ballot first if implementation discovers either.",
+      "blockedBy": [],
       "workOrder": 505,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 planning rebase: applied D-JPK-EPOCHBOUNDARY1=B, removed completed #419 blocker, made #398 sole three-platform hostile isolation proof, and preserved exact D-JPK-SANDBOX2 substitute/grant law."
+        },
         {
           "at": "2026-07-12",
           "by": "owner",
@@ -10415,7 +10470,18 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "crates/jetpack/src/RuntimePolicy.rs",
+        "crates/jetpack/src/Recipe.rs",
+        "crates/jetpack/src/CLI/trust_env_build.rs",
+        "crates/jetpack/src/CLI/services_secrets_config.rs",
+        "crates/jetpack/src/Trust.rs",
+        "tests/build_sandbox.rs",
+        ".github/workflows/ci.yml",
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
+      ]
     },
     {
       "id": "c00wjjmo",
@@ -14666,10 +14732,15 @@
       "milestoneId": null,
       "phase": "building",
       "priority": "P1",
-      "plan": "Ungated first: fix non-Linux empty/data-only leases to return no wrappers instead of unconditional error. Executable behavior is gated by D-JPK-EXECLEASE1. After owner outcome, implement the selected cross-platform contract behind one ExecWrapperStrategy: A protected native lease service with caller impersonation and protected PATH; B explicit weaker same-user race guarantee with loud audit warning; or C fail-closed non-Linux executable leases and narrowed tier-1 law. Preserve Linux mount backend. Add direct and nested-PATH hostile swap proofs, platform-specific runtime CI, exact Jet diagnostic/snapshot, and current-law docs. Serialize Store.rs/tests/jetpack.rs against #465.",
+      "plan": "Current baseline: commit 884df04d already makes empty and data-only leases succeed on non-Linux; preserve that repair and the existing Linux protected mount backend. D-JPK-EXECLEASE1=A is ratified, so the remaining executable path is fixed: implement one ExecWrapperStrategy backed by a root-owned macOS LaunchDaemon and Windows LocalSystem service, not a weaker wrapper or fail-open path. Define authenticated local IPC; independently re-open and verify locked object digest, executable identity, and lease request inside the service privilege domain; project a protected lease tree; impersonate the calling user or session for execution; scrub inherited handles, environment, PATH, cwd, and service authority; bind every process descendant to lease lifetime; revoke and clean on normal exit, cancellation, crash, disconnect, timeout, and reboot recovery. Direct jetpack run and nested PATH execution must survive original-object rename, symlink, content, directory, hardlink, and time-of-check/time-of-use attacks. Missing service, authentication failure, drift, or cleanup failure emits existing E1292 what/why/fix plus JSON and audit facts, never raw platform text or an unsandboxed fallback. Add installer registration/uninstall and doctor status using the existing platform packaging seam; run native Ubuntu regression plus macOS and Windows hostile runtime jobs. Reconcile the package security contract and D-JPK-EXECLEASE1 law. No new syntax or dependency is assumed; ballot first if a new authority surface or external dependency appears.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 planning rebase: credited shipped data-only repair; residual now exactly D-JPK-EXECLEASE1=A privileged services, authenticated verification, caller impersonation, scrubbed process tree, E1292, installer/doctor, and native hostile proof."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -14748,7 +14819,17 @@
           "at": "2026-07-10T20:38:19.279Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jetpack/src/Store.rs",
+        "crates/jetpack/src/RuntimePolicy.rs",
+        "crates/jetpack/src/CLI/trust_env_build.rs",
+        "tests/jetpack.rs",
+        "tests/jetpack_platform.rs",
+        ".github/workflows/ci.yml",
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-10T18:57:34.825Z",
       "updated": "2026-07-16",
@@ -17270,12 +17351,18 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Reuse existing tests/os_native.rs, tests/os_interrupt_windows.rs, and platform CI lanes. Review against live production core.os runtime. Require actual native macOS and windows-latest executions with durable run evidence; preserve bounded timeout/kill/reap behavior. No new surface or dependency.",
+      "plan": "Verification-only closure. Production core.os facts, Unix SIGINT dispatch, Windows SetConsoleCtrlHandler dispatch, tests/os_native.rs, tests/os_interrupt_windows.rs, and macOS/windows-latest CI invocations already exist. Do not redesign the API or duplicate the runtime. Obtain durable native macOS evidence that production-generated Jet reports real host facts and runs ordered additive SIGINT handlers even when the first panics. Obtain durable native Windows evidence for the same facts plus real GenerateConsoleCtrlEvent CTRL_C_EVENT delivery through SetConsoleCtrlHandler. Audit false-green paths: both tests must compile generated Rust, invoke the child, wait for a ready marker, use the real native signal/control event, bound completion, kill and reap on timeout, and fail rather than skip when selected in CI. Confirm x86_64 and arm64 compiler/cfg compatibility where runners exist; no cross-target or static inference substitutes for execution. Repair only a reproduced platform defect in the existing FsIoEnvOsTesting runtime or focused test. Preserve D-OSFACTS1 surface and beginner one-call behavior; expert evidence records OS, arch, toolchain, commit, command, and run URL. Independent reviewer validates both native receipts and docs. No owner gate.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 plan vetted: card is verification-only over shipped core.os runtime/tests/CI; advanced planning to ready. No new gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -17314,7 +17401,15 @@
           "at": "2026-07-13T00:23:54.877Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/FsIoEnvOsTesting.rs",
+        "tests/os_native.rs",
+        "tests/os_interrupt_windows.rs",
+        "tests/corelib.rs",
+        ".github/workflows/ci.yml",
+        "docs/reference/core-library.md",
+        "docs/spec/syntax-decisions.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:23:47.234Z",
       "updated": "2026-07-16",
@@ -17331,10 +17426,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Reuse #436's existing C ABI parser/sema/codegen exhaustiveness and hostile negative gates; extend with native macOS runtime execution. Compile production Jet-generated Rust linked against real C (clang) on native macOS CI (x86_64 + aarch64); no new dependency; must not weaken #436's static gates.",
+      "plan": "Reuse completed #436 parser, sema, TIR/codegen, diagnostic, formatter, and hostile negative coverage as a proven prerequisite, not a live blocker. Add a non-skipping native macOS runtime row to tests/cffi_native_matrix.rs that compiles real Jet source through the production front end, compiles and archives a real C peer with Apple clang, links the emitted Rust, and runs the binary. Cover both x86_64-darwin and aarch64-darwin native runners with pinned Rust and C tool identities. The shared fixture must assert exact imported/exported function and static symbols; struct and fieldless plus payload enum size, alignment, offsets, and discriminants against C-computed values; capture-free pure callbacks under reentrant calls and concurrent foreign threads; raw status/out-pointer poison bytes on failure; borrowed non-null UTF-8 returns; and every macOS-supported default C/system ABI spelling. The job fails when tools, architecture rows, runtime execution, or cases are missing; no skip, cfg-only assertion, cross-runner inference, or fake compiler fixture counts. Preserve #436 hostile UI gates and I1 vetted FFI boundaries. Publish per-architecture command/toolchain/run artifacts and obtain an independent review comparing both native receipts. No new syntax, dependency, or gate.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 plan vetted: macOS C ABI card now names production fixture, x64/arm64 native rows, full hostile runtime matrix, no-skip oracle, and completed #436 as prerequisite only."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -17391,7 +17492,17 @@
           "at": "2026-07-16T04:46:12.706Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "tests/cffi_native_matrix.rs",
+        "tests/cffi.rs",
+        "crates/jet-foundation/src/AST/ffi.rs",
+        "crates/jet-parser/src/Parser/Items/external_tests_ffi.rs",
+        "crates/jet-sema/src",
+        "crates/jet-codegen/src",
+        ".github/workflows/ci.yml",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:25:40.165Z",
       "updated": "2026-07-16",
@@ -17408,10 +17519,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Reuse #436's existing C ABI parser/sema/codegen exhaustiveness and hostile negative gates; extend with native Windows runtime execution. Compile production Jet-generated Rust linked against real MSVC-compatible C on windows-latest CI for both x64 and x86; no new dependency; must not weaken #436's static gates.",
+      "plan": "Reuse completed #436 front-end, TIR/codegen, diagnostics, formatter, and hostile negative gates as a proven prerequisite, not a blocker. Extend tests/cffi_native_matrix.rs with two required native MSVC rows on windows-latest: x86_64-pc-windows-msvc and i686-pc-windows-msvc, using the matching Visual Studio developer environment, cl/lib or clang-cl, librarian, Rust target, and runnable binary. Compile real Jet through the production front end, compile and link a real C peer, then execute each architecture row. Assert exact undecorated/decorated imports and exports; C-computed struct and fieldless plus payload enum size, alignment, offsets, and discriminants; capture-free pure callbacks under reentrant and concurrent foreign-thread calls; status/out-pointer poison-byte safety; borrowed non-null UTF-8 returns; Win64 and x86 cdecl, stdcall, fastcall, system behavior with exact symbol spelling. Jobs fail on missing target/tool/runtime/case and upload architecture, tool identities, commands, and logs; no silent skip, cross-compile-only, cfg-only, static assertion, or fixture that bypasses Jet counts. Preserve #436 hostile UI and I1 boundary tests. Independent reviewer compares both receipts and checks every ABI row. No new syntax, dependency, or gate.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 plan vetted: Windows C ABI card now requires native MSVC x64 and runnable x86 rows, full layout/symbol/callback/out-pointer/string/ABI coverage, artifacts, and no-skip oracle."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -17468,7 +17585,17 @@
           "at": "2026-07-16T04:46:13.623Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "tests/cffi_native_matrix.rs",
+        "tests/cffi.rs",
+        "crates/jet-foundation/src/AST/ffi.rs",
+        "crates/jet-parser/src/Parser/Items/external_tests_ffi.rs",
+        "crates/jet-sema/src",
+        "crates/jet-codegen/src",
+        ".github/workflows/ci.yml",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:25:40.260Z",
       "updated": "2026-07-16",
@@ -17483,12 +17610,18 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Reuse the shared std-only CryptoEntropy provider and tests/crypto_entropy.rs. Add native platform runners/CI evidence for macOS Security.framework, Windows BCryptGenRandom, and WASI preview1 random_get. Preserve exact provider/error/no-fallback law and run full crypto vector/golden preservation matrix on each supported target where applicable.",
+      "plan": "Verification-led native matrix. The shared std-only entropy provider, macOS SecRandomCopyBytes path, Windows BCryptGenRandom path, WASI preview1 random_get path, fail-closed error type, consumer bridge tests, and D-CRYPTO-WASI-ALLOC2 lifecycle instrumentation already ship. Do not add a second provider or change the user API. Add required native CI rows for macOS x86_64 and arm64 plus Windows MSVC x86_64 and arm64 that run tests/crypto_entropy.rs against the real production module. Each row proves live nonzero bytes, exact requested length, zero length, concurrency and fork/process separation, injected terminal and partial failure with whole-attempt zeroization, no predictable fallback, and typed failure propagation through random bytes, nonces, keys, salts, envelopes, and package signing. Add a wasm32-wasip1 fixture executed by a pinned actual WASI runtime. Its host supplies preview1 random_get, scripts bounded EINTR and terminal failure, and records memory/lifecycle facts proving each exact-count ownership generation is volatile-zeroized and released before retry, at most seventeen calls occur, no failed or stale bytes escape, and zero length performs no provider call. Cross-compiled, cfg-only, host-native helper-only, environment-spoofed, skipped, or provider-string proof closes nothing. Preserve crypto vectors, goldens, dependency posture, I1 vetted region, and docs. Upload platform/arch/tool/runtime/commit/command receipts; independent reviewer validates every native row. CI/runtime tools are test infrastructure, not compiler dependencies. No owner gate.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 plan vetted: credited shipped entropy providers/lifecycle tests; residual is non-skipping native macOS/Windows and actual WASI preview1 execution plus all-consumer failure propagation. Advanced planning to ready; no gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -17536,7 +17669,17 @@
           "at": "2026-07-13T00:39:43.351Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs",
+        "crates/jet-pkg-model/src/Prelude/Crypto.rs",
+        "tests/crypto_entropy.rs",
+        "tests/fixtures/crypto_bridge_entropy.rs",
+        "tests/golden.rs",
+        ".github/workflows/ci.yml",
+        "docs/reference/core-library.md",
+        "docs/spec/syntax-decisions.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:39:33.065Z",
       "updated": "2026-07-16",
@@ -17551,12 +17694,18 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Implement cfg(windows) IOCP registration, completion dispatch, cancellation, deadline wake, deregistration, and terminal shutdown without changing Jet task/channel/taskgroup syntax. Add Windows CI that compiles and runs scheduler-native tests on Windows. Acceptance: real socket readiness parks tasks without blocking workers; cancel/deadline wake exactly once; operation allocation/retirement balances; port shutdown completes; no portable fallback is selected on Windows; docs name platform support honestly.",
+      "plan": "Verification and parity closure over shipped code. The current scheduler already contains a real cfg(windows) IOCP backend: CreateIoCompletionPort registration, overlapped WSARecv readiness, PostQueuedCompletionStatus wake, GetQueuedCompletionStatus dispatch, CancelIoEx cancellation, deadline packets, stale-completion rejection, terminal failure state, cleanup counters, and shutdown. tests/scheduler_native.rs asserts emitted selection and the windows-latest job runs the focused IOCP lifecycle test. Do not reimplement it. First prove crates/jet-codegen/src/scheduler/io.rs and emitted Prelude/Scheduler.rs stay behaviorally identical through the existing generation/parity mechanism; no handwritten fork may drift. On native Windows, compile production-generated Jet task/socket code and prove readiness parks without blocking workers; wake, cancellation, deadline, deregistration, and terminal failure complete exactly once; stale packets never target reused registrations; allocation, stream clone, interest, and completion counts return to zero under scale; and shutdown joins without hang. Require the CI job and test selection to fail rather than skip when Windows is selected, with bounded timeouts and durable commit/toolchain/arch/command/run evidence. Re-run AOT versus jet dev task/channel behavior so R12 stays intact and audit the I1 vetted native region. Correct docs/spec/spec.md, docs/reference/core-library.md, and async-networking.md: Windows selects IOCP now; portable poll remains only for unsupported targets. Independent reviewer checks native evidence, emitted/runtime parity, false-green cfgs, cleanup, and docs. No syntax, dependency, or owner gate.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e8-planner",
+          "text": "E8 planning rebase: real IOCP and CI already ship. Residual narrowed to emitted/source parity, non-skipping native Windows lifecycle evidence, R12/I1 checks, and stale portable-fallback docs. Advanced planning to ready; no gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -17606,9 +17755,14 @@
       ],
       "refs": [
         "crates/jet-codegen/src/scheduler.rs",
+        "crates/jet-codegen/src/scheduler/io.rs",
         "crates/jet-codegen/src/Prelude/Scheduler.rs",
         "tests/scheduler_native.rs",
-        "docs/plans/epoch-3/async-networking.md"
+        "tests/dev.rs",
+        ".github/workflows/ci.yml",
+        "docs/plans/epoch-3/async-networking.md",
+        "docs/spec/spec.md",
+        "docs/reference/core-library.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T02:47:09.812Z",
@@ -24367,6 +24521,11 @@
         {
           "at": "2026-07-16",
           "by": "claude-main",
+          "text": "Gate rerun found one more red: jetpack_engine doctor test vs 2026-07-15 'Jetpack hardening' WIP checkpoint — mutually contradictory contracts (unit pinned absent-hangar=degraded + closure check shadowed object digest findings vs standing integration contract). Reconciled to the standing contract: fresh store healthy (doctor still read-only, unit intent preserved), per-object scan wins over journal-recovery message. Doctor units 4/4, jetpack_engine 67/67. Hardening lane can re-ballot degraded-on-absent if genuinely wanted. Gate restarted."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
           "text": "C3 full gate deliberately deferred: verify-full is known-red on #660/#661 (sema_soundness + truthfulness). Fixing those first via sol workers, then one clean integrated gate closes #638/#635/#636/#637/#483 C-gate criteria together."
         },
         {
@@ -26972,16 +27131,20 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P1",
-      "plan": "Follow `docs/plans/compiler-speed.md` with measured evidence, not illustrative timings. First establish the self-speed corpus and stage timings for parse/sema/TIR/Rust emission/rustc/link plus cold/warm cache identities. Land ungated reductions that preserve behavior: linker/flag cleanup, reusable stdlib objects, relevant-digest cache reuse, incremental batch sema, and bounded parallel frontend work. D-BUILD-DEFAULT1 then selects the exact everyday profile law: A fast-codegen default, B command-split defaults, or C current optimized default. D-AOT-CRANELIFT1 independently selects A default Cranelift debug AOT with named rustc fallback, B opt-in Cranelift requiring a ballot for its exact existing-profile-compatible spelling, or C rustc-only AOT. Every backend consumes executable TIR and must match rustc across outputs, exits, diagnostics, side effects, debug info, cache invalidation, and host/target matrices; release remains the ratified optimized path unless the selected outcome says otherwise.",
+      "plan": "Follow docs/plans/compiler-speed.md with measured evidence. D-BUILD-DEFAULT1=B is controlling but unimplemented: jet run and jet dev use the fast opt-level-0 profile; jet build remains optimized; explicit --profile/--release overrides either default. D-VERDICT-666-1 requires one compiler core and exactly two feature-identical lenses: JIT for the rapid Python/TypeScript-like dev loop, AOT for highly optimized ship binaries with longer build time accepted. Establish the self-speed corpus and stage timings, then land ungated linker/flag cleanup, reusable stdlib objects, relevant-digest reuse, incremental batch sema, and bounded parallel frontend work. D-AOT-CRANELIFT1 remains the sole owner gate for the AOT mechanism; it may not create a third product lens or any JIT/AOT feature or functionality split. Every backend consumes executable TIR and must match outputs, exits, diagnostics, side effects, debug info, cache invalidation, and host/target matrices.",
       "blockedBy": [
-        "D-BUILD-DEFAULT1",
         "D-AOT-CRANELIFT1"
       ],
       "workOrder": 56.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-ratifier",
+          "text": "[ratification reconciliation] D-BUILD-DEFAULT1=B and D-VERDICT-666-1 recorded. Cleared only the build-default blocker; D-AOT-CRANELIFT1 remains open. No implementation criterion marked met."
+        },
         {
           "at": "2026-07-16",
           "by": "owner",
@@ -48205,6 +48368,90 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T08:15:02.551Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0fylvpy",
+      "note": "phase,plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:13:51.060Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0zdbl2x",
+      "note": "phase,plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:13:33.415Z",
+      "by": "sol-ratifier",
+      "action": "card.update",
+      "ref": "c0zmoznd",
+      "note": "phase,plan,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T08:12:03.900Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0eaqe17",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:11:14.571Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0cq3bd4",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:10:26.648Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0h1r3b8",
+      "note": "phase,plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:09:22.435Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0t4root",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:08:21.206Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0zqnb18",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T08:05:17.672Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "plan,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:03:52.636Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c067p6dz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T08:02:23.451Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-16T08:01:31.670Z",
+      "by": "sol-e8-planner",
+      "action": "card.update",
+      "ref": "c144",
+      "note": "plan,logEntry,refs"
+    },
+    {
       "at": "2026-07-16T07:39:02.272Z",
       "by": "sol-e7-planner",
       "action": "card.update",
@@ -51619,90 +51866,6 @@
       "action": "card.criteria-verify",
       "ref": "c0rxl8sx",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-16T04:49:16.477Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0rxl8sx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-16T04:49:16.344Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0v1baa5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T04:49:16.183Z",
-      "by": "sol-w3-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ts6uv1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-16T04:49:16.055Z",
-      "by": "sol-w3-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ts6uv1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-16T04:49:15.926Z",
-      "by": "sol-w3-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0ts6uv1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-16T04:49:08.722Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0xhhjch",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T04:49:08.567Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cqh9xs",
-      "note": "#2 Each ratified stage lands end-to-end (parser->sema->comptime"
-    },
-    {
-      "at": "2026-07-16T04:49:08.441Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0cqh9xs",
-      "note": "#1 Computed-module-fields ballot minted (gist/story/worked opti"
-    },
-    {
-      "at": "2026-07-16T04:49:08.316Z",
-      "by": "fable-clerk",
-      "action": "card.add",
-      "ref": "c0cqh9xs",
-      "note": "Computed module fields and pure-eval pull-up"
-    },
-    {
-      "at": "2026-07-16T04:49:08.185Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c03yjo5l",
-      "note": "#3 Board reconciliation note: retired done cards cross-referenc"
-    },
-    {
-      "at": "2026-07-16T04:49:08.058Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c03yjo5l",
-      "note": "#2 Every E35xx diagnostic the spec names has a tests/ui snapsho"
-    },
-    {
-      "at": "2026-07-16T04:49:07.918Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c03yjo5l",
-      "note": "#1 Every §15/§12 area has recorded evidence (test/command outpu"
     }
   ],
   "nextNum": 368,

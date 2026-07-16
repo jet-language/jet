@@ -392,9 +392,10 @@ field appears in the wire output); decode never reads into it.
 
 **D-QUAL3 — Unit families**: `@UnitFamily(currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);
-cross-unit mixing reuses E0127. **D-UNITLIT1 — unit literals**: `500ms`,
-`12.50usd` resolve against in-scope family members (E0134 unknown suffix); no
-implicit cross-unit conversion; `e`+digits reserved for float exponents.
+inexact, noncommensurable, or explicit-only cross-unit mixing reuses E0127;
+exact same-dimension conversion follows D-QUANTITY-CONVERT1. **D-UNITLIT1 —
+unit literals**: `500ms`, `12.50usd` resolve against in-scope family members
+(E0134 unknown suffix); `e`+digits reserved for float exponents.
 Dot-construction `px.{100}` also valid.
 
 **D-QUANTITY-DECL1=A — scaled and affine units extend `@UnitFamily`**
@@ -468,48 +469,46 @@ fn mystery<Q: Quantity<Length, .Linear>>() -> Q { Meter.from_int(1)? }
 // fix: accept a unit-bearing input or return Meter
 ```
 
-**D-QUANTITY-CONVERT1=B — exact implicit conversion with canonical rational
-results** *(ratified 2026-07-16, card #603)*: same-dimension arithmetic omits
-a conversion only when it is total for the complete source type — the
-compiler-inserted step is exactly the destination-owned D-SHAPE-CONVERT1
-`Destination.from_source` operation with syntax omitted, never a
-value-dependent or fallible coercion. Mixed-unit arithmetic uses a canonical
-base-unit exact-rational intermediate (arbitrary-precision numerator over
-positive denominator, reduced by their GCD) that stays inside the expression;
-Point uses scale plus offset, Delta uses scale only, following
-D-QUANTITY-POINT1's algebra. The intermediate is expression-only — it cannot
-become a field, ordinary argument, return, public type, or wire value; its
-sole boundary exemption is flowing directly into one destination-owned
-checked or rounded conversion call, which ends it and chooses storage. A
-non-exact conversion is a compile error naming the `from_*_rounded` fix —
-never a silent round. This amends E0127 for commensurable units: mixed
-arithmetic between units of the same dimension is no longer rejected outright,
-only when no total conversion or exact intermediate exists. Per
-D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in `pkg.jet`
-restores explicit-only conversion at the package floor, and post-D-SHAPE2
-`@Policy(explicit_units)` may strengthen a narrower scope; neither form may
-weaken the package floor.
+**D-QUANTITY-CONVERT1=B — implicit exact conversion by default; scoped
+explicit-only opt-in** *(ratified 2026-07-16, card #603)*: same-dimension units
+convert automatically in mixed arithmetic, argument passing, and binding when
+the conversion is exact. Mixed arithmetic uses the finer operand's unit so
+whole-number storage remains exact; equal scales keep the left operand's unit.
+Point conversion applies scale plus offset; Delta conversion, including the
+delta in Point-plus-Delta, applies scale only. Point plus Point remains
+rejected. The compiler never rounds silently: a conversion that cannot be
+represented exactly is a compile error naming the destination-owned
+`from_*_rounded` fix. This amends E0127 for exact commensurable-unit mixing;
+inexact mixing remains rejected.
+
+Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
+`package.jet` restores explicit-only conversion at package scope, and
+`#Policy(explicit_units)` does the same at module, function, or block scope.
+The normal D-MARK-SCOPE1 inheritance/provenance law applies.
 
 ```jet
-segment :: 1meter
-calibration :: 1foot
-wire_mm :: Millimeter.from_meter(segment + calibration)?
-// exact 1631/1250 meter intermediate; direct conversion argument is allowed
+inner_diameter :: 42millimeter
+length :: 3meter
+total :: length + inner_diameter
+// 3042millimeter — finer unit wins, exactly
 
-pub fn total_mm(a: Meter, b: Foot) -> Millimeter ? {
-    Millimeter.from_meter(a + b)?
-}
-// Public API and Codable see only Millimeter; the intermediate has no wire form
+fn fits(depth: Meter) -> Bool { depth > 0meter }
+fits(3000millimeter)
+// argument converts exactly to 3meter
 
-# pkg.jet
+alt_km: Kilometer = 1500meter
+// error: 1500 meter is not an exact number of kilometer
+// fix: Kilometer.from_meter_rounded(1500meter, .Nearest)
+
+# package.jet
 policy: .{ explicit_units: true }
 
-@Policy(explicit_units)
+#Policy(explicit_units)
 module dosing
 
-segment + calibration
+length + inner_diameter
 // error[E0127]: explicit_units requires a written conversion
-// fix: Meter.from_foot(calibration)?
+// fix: Millimeter.from_meter(length)?
 ```
 
 **D-TYPEALIAS1 — Aliases**: `alias X = Y` transparent aliases, scoped to
@@ -2987,12 +2986,15 @@ front-end APIs.
 (opt-level 0, codegen-units 256, no LTO); `jet build` keeps the optimized
 profile (opt-level 2, thin-LTO, strip) unchanged from D-BUILDPROFILE1. An
 explicit `--profile=<name>`/`--release` flag overrides either command's
-default; D-BUILDPROFILE1's "never ambient env" rule is unchanged. The owner's
-same-day verdict D-VERDICT-666-1 ("one compiler, two lenses" — the JIT lens is
-rapid dev, the AOT lens is the optimized ship binary, and the two lenses must
-never differ in supported features or functionality) names the JIT lens as
-the mechanism behind `run`/`dev`'s speed; the open D-AOT-CRANELIFT1 ballot
-decides the remaining mechanism question for `build`.
+default; D-BUILDPROFILE1's "never ambient env" rule is unchanged.
+
+**D-VERDICT-666-1 — one compiler, two lenses** *(owner verdict 2026-07-16,
+card #666)*: “One compiler core, two lenses. JIT lens = rapid dev work people
+love in python/typescript; AOT lens = highly optimized ship binary at the cost
+of longer build time. Same compiler core prevents drift: there should NEVER be
+a difference in supported features/functionality between JIT and AOT.” The
+open D-AOT-CRANELIFT1 ballot decides the remaining AOT mechanism; it may not
+create a third product lens or a feature/functionality split.
 
 ```text
 $ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)
@@ -3667,6 +3669,20 @@ the strong sandbox; unavailable backends try a trusted substitute or approved
 remote builder, then fail. A first-party local action may receive an exact,
 digest/capability/reviewer/expiry-bound `jet trust` grant; its outputs remain
 private and untrusted and never enter shared publication. CI denies by default.
+
+**D-JPK-EPOCHBOUNDARY1=B — functional package management in Epoch 4,
+cross-platform sandbox proof in Epoch 8** *(ratified 2026-07-16)*: #398 remains
+in Epoch 8 and is the sole owner of hostile Linux, macOS, and Windows child
+confinement proof. #395, #399, #422, #427, #429, #432, and #656 remain Epoch 4
+functional work; their sandbox-dependent hostile proof moves to #398 without
+duplicate implementation or a #398 blocker. Every Epoch 4 action reports the
+actual sandbox class it enforced, and a fallback never reports `sandboxed`.
+
+Epoch 4 exits on 20 functional lanes and may claim functional Jetpack package
+management. It may not claim full hostile isolation or complete Nix replacement
+parity. Those product claims remain unavailable until #398 passes in Epoch 8.
+This boundary changes proof ownership and claim scope only; it does not weaken
+D-JPK-SANDBOX2's safe defaults or permit an unproved isolation label.
 
 **D-JPK-MULTIUSER1=D — optional verifying shared-store broker**: per-user,
 rootless operation remains the default. `jetpack shared-store install` opts an
