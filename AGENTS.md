@@ -79,12 +79,11 @@ Violating an invariant means stop and fix it.
 
 ## GPT-5.6 model policy
 
-Use GPT-5.6 Sol by default; the `gpt-5.6` alias is Sol. Tune effort to risk: low for bounded mechanics, medium for
-normal implementation, high/xhigh for semantics and hard debugging, and max for the hardest architecture or review.
-Prefer changing Sol effort over changing model families.
+Use GPT-5.6 Sol by default; the `gpt-5.6` alias is Sol. Use only low, medium, or high effort: low for bounded
+mechanics, medium for normal implementation, and high for semantics, architecture, hard debugging, and review.
 
-Use Terra for the mandatory second review and otherwise only for a recorded task-specific advantage. Do not route
-to Terra from habit. Use Luna only when the owner asks or measurements show a stable high-volume mechanical advantage.
+Use Terra only when a concrete task-specific reason makes it better than Sol; record that reason. Terra is not part
+of the standard review path. Use Luna only when the owner asks or measurements show a stable mechanical advantage.
 
 Give agents a clear goal, relevant context, hard constraints, owned paths, and observable done conditions. Prefer
 tests and acceptance criteria over step-by-step micromanagement.
@@ -160,17 +159,13 @@ remove the worktree, and retain only the named handoff branch until resumed or a
 
 ## Review and verification
 
-Every completed change has one implementer and two fresh-context adversarial
-reviewers in this order:
+Every completed change has one implementer and one fresh-context Sol reviewer:
 
 1. **Sol reviewer:** inspect the diff, acceptance criteria, invariants, and test
    evidence; assume the patch is wrong; report only concrete findings.
 2. The implementer fixes findings; the Sol reviewer rechecks material fixes.
-3. **Terra reviewer:** independently inspect the resulting patch with the same
-   evidence and no access to the implementer's rationale.
-4. The implementer fixes findings; the Terra reviewer rechecks material fixes.
 
-Reviewers do not implement. They check missing paths, semantic and safety bugs,
+The reviewer does not implement. They check missing paths, semantic and safety bugs,
 false-green tests, stale decisions, accidental scope, duplicate mechanisms, and
 orphaned work. A green build never waives review.
 
@@ -179,7 +174,7 @@ Use targeted tests during implementation and review. Only the orchestrator runs
 runs it again. Keep normal parallelism unless reproducing a race.
 
 Done means: integrated code matches current authority; targeted tests pass;
-docs/examples/snapshots match behavior; both reviews close; Tower/task state is
+docs/examples/snapshots match behavior; the Sol review closes; Tower/task state is
 accurate; no owned worktree or temporary branch remains; and the final report
 names tests, commits, open gates, and any retained handoff branch.
 

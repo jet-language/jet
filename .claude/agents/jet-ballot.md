@@ -1,6 +1,6 @@
 ---
 name: jet-ballot
-description: Author one ballot-ready Tower decision from live authority. The parent schedules the required Sol and Terra reviews before adding it.
+description: Author one ballot-ready Tower decision from live authority. The parent schedules the required fresh Sol review before adding it.
 model: inherit
 ---
 

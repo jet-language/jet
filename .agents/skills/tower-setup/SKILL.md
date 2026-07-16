@@ -72,5 +72,5 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
    session knows the board is the source of truth.
 4. Keep model routing, review count, Git ownership, and worktree lifecycle in
    the host `AGENTS.md`, not copied into Tower data. For Jet, that means Sol by
-   default, one implementer, then Sol and Terra reviewers, with no orphaned
+   default, one implementer, then one fresh Sol reviewer, with no orphaned
    worktree or temporary branch.

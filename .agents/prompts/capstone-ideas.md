@@ -24,10 +24,9 @@ and diagnostics; rustc stays hidden; safety is default and expert control
 explicit; beginner ergonomics cannot hide runtime cost; each operation has one
 canonical mechanism; packaging and deployment remain approachable.
 
-One Sol author produces the design. A fresh Sol reviewer challenges coverage,
-benchmarks, and whether the projects expose real weaknesses; author fixes and
-reviewer rechecks. A fresh Terra reviewer independently challenges the revised
-design and rechecks fixes. Reviewers do not rewrite it.
+One Sol author produces the design. One fresh Sol reviewer challenges coverage,
+benchmarks, and whether the projects expose real weaknesses; the author fixes
+and the reviewer rechecks. The reviewer does not rewrite it.
 
 Recommend one primary and one secondary capstone. Include “Jet must improve
 before this is credible” and “this proves Jet's thesis if successful.” Expose

@@ -15,8 +15,8 @@ description: Verify a Jet compiler/stdlib change in THIS repo — the project-sp
 ## Test strategy
 
 - **Per card:** scoped targeted tests only —
-  `scripts/agent/jet-env cargo test --test <name>`. Fresh Sol then Terra
-  reviewers inspect the diff and re-run the relevant proof before close.
+  `scripts/agent/jet-env cargo test --test <name>`. One fresh Sol reviewer
+  inspects the diff and re-runs the relevant proof before close.
 - **Major-push closeout:** only the orchestrator runs
   `scripts/agent/jet-env full scripts/agent/verify-full.sh`, once on the push's
   closeout or blocking card. It uses a repo-local `TMPDIR` and normal test
@@ -26,17 +26,15 @@ description: Verify a Jet compiler/stdlib change in THIS repo — the project-sp
 
 ## Adversarial review gate
 
-Every completed change has one implementer and two reviewers. Both reviewers
-start fresh and receive only the diff, acceptance criteria, relevant authority
-and invariants, and test evidence. They assume the patch is wrong and seek
+Every completed change has one implementer and one fresh Sol reviewer. The
+reviewer receives only the diff, acceptance criteria, relevant authority and
+invariants, and test evidence; assumes the patch is wrong; and seeks
 concrete bugs, missed paths, false-green tests, invariant breaks, stale
 decisions, scope drift, duplicate mechanisms, and orphaned work. They never
 implement.
 
-Run a Sol reviewer first. The implementer fixes every material finding and Sol
-rechecks those fixes. Then run an independent Terra reviewer on the resulting
-patch. The implementer fixes its material findings and Terra rechecks them.
-Record both identities, model/effort, reviewed commit or diff, findings,
+The implementer fixes every material finding and Sol rechecks those fixes.
+Record reviewer identity, model/effort, reviewed commit or diff, findings,
 resolutions, and rerun evidence in Tower/PR handoff. Reviewer approval alone is
 not completion evidence; the orchestrator checks the integrated result.
 
@@ -130,7 +128,7 @@ expected runtime failure. It never creates a new expectation channel.
    a user diagnostic.
 5. Add the smallest regression fixture proving the former ICE is now either
    accepted end to end or rejected by a Jet diagnostic. Run its focused test plus
-   the relevant rustc-agreement/golden target, then Sol and Terra card reviews.
+   the relevant rustc-agreement/golden target, then the Sol card review.
 
 ## Runtime smoke test (always, for compiler changes)
 

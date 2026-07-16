@@ -39,8 +39,8 @@ per coherent change, path-scoped commits, recorded worktrees for concurrent
 writes, and immediate integration/cleanup. Do not introduce abstractions or
 dependencies merely to make the audit look substantial.
 
-Each change needs focused behavioral proof, then sequential fresh Sol and Terra
-reviews with implementer fixes and rechecks. Only the orchestrator runs a
+Each change needs focused behavioral proof, then one fresh Sol review with
+implementer fixes and Sol recheck. Only the orchestrator runs a
 major-push full suite.
 
 Write or update one dated audit under `docs/reviews/` only if a durable report is

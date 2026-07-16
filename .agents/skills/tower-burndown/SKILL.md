@@ -48,13 +48,11 @@ Name and record worktrees/branches by card and owner. Integrate every successful
 
 ## Scope models
 
-Use GPT-5.6 Sol by default and state its effort in every brief. Use low effort
-for bounded mechanics, medium for normal implementation, high/xhigh for
-architecture, compiler semantics, hard debugging, and first-pass review, and
-max for the hardest cases.
-Prefer changing Sol effort over changing model families. Terra performs the
-mandatory second review; use it elsewhere only for a recorded task-specific
-advantage. Luna requires an owner request or measured stable advantage on
+Use GPT-5.6 Sol by default and state its effort in every brief. Use only low,
+medium, or high: low for bounded mechanics, medium for normal implementation,
+and high for architecture, compiler semantics, hard debugging, and review.
+Use Terra only for a recorded task-specific advantage over Sol, never as a
+standard reviewer. Luna requires an owner request or measured stable advantage on
 high-volume fully mechanical work.
 
 ## Enforce one agent layer
@@ -89,7 +87,7 @@ Require:
 - docs/spec/examples/diagnostics required by repository invariants;
 - clean final diff and no unrelated edits.
 
-Never trust a builder's `done`. Assign a fresh Sol reviewer whose identity differs from the builder. It inspects the diff and evidence, targets false-green paths, and returns exact findings without implementing. Send findings to the same builder and recheck material fixes. Then assign a fresh Terra reviewer to independently repeat the gate on the resulting patch. The builder fixes its findings and Terra rechecks material fixes. Merge only after both reviews are clear.
+Never trust a builder's `done`. Assign one fresh Sol reviewer whose identity differs from the builder. It inspects the diff and evidence, targets false-green paths, and returns exact findings without implementing. Send findings to the same builder; Sol rechecks material fixes. Integrate only after the review is clear.
 
 ## Test budget
 
@@ -118,7 +116,7 @@ Tower is the recovery log. Update it at major checkpoints:
 - focused tests and temporary mutation evidence;
 - handoff before release/failure/capacity stop;
 - builder criteria met;
-- Sol review cleared, then Terra criteria verification cleared;
+- Sol review and criterion verification cleared;
 - merge commit and final lane.
 
 Use fresh revisions or optimistic concurrency where supported. Never hand-edit Tower data. If an agent fails, inspect its diff as untrusted inherited work, commit only a coherent owned checkpoint worth retaining, log what exists and what remains, remove its worktree, then hand the named branch to one replacement agent. Do not preserve an orphaned worktree indefinitely.
@@ -131,12 +129,12 @@ Do not mark owner-gated criteria met. Merge safe local containment if useful, th
 - Scout several adjacent cards in one read-only tranche.
 - Reuse completed agents for follow-up tasks when the harness limits threads.
 - Print only concise state deltas, not whole cards or logs.
-- Use exactly the required Sol review followed by Terra review; findings receive targeted rechecks before the next gate.
+- Use exactly one fresh Sol review; findings receive targeted rechecks.
 - Prefer evidence references, commit IDs, counts, and commands over narrative.
 - Keep the next safe lane prepared while active builders run.
 
 ## Completion
 
-A card is complete only when implementation is integrated, focused proof passes, all builder criteria are met, the Sol and Terra reviews clear in order, Tower is updated, and its worktree/temporary branch is deleted. A campaign is complete only when the requested scope is empty except frozen/owner-blocked cards, the orchestrator's major-push closeout suite has passed, and no claims, dirty worktrees, temporary branches, or artifacts are orphaned.
+A card is complete only when implementation is integrated, focused proof passes, all builder criteria are met, one fresh Sol review clears, Tower is updated, and its worktree/temporary branch is deleted. A campaign is complete only when the requested scope is empty except frozen/owner-blocked cards, the orchestrator's major-push closeout suite has passed, and no claims, dirty worktrees, temporary branches, or artifacts are orphaned.
 
 End with a terse report: cards closed, cards advanced, owner gates, focused/broader test results, current active claims, and worktree cleanup proof.

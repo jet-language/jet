@@ -77,20 +77,20 @@ surfaces, don't silence it.
    --ready`.
 4. Do the work per AGENTS.md with `ponytail:ponytail`: failing test first →
    smallest complete vertical implementation → scoped targeted tests → docs →
-   sequential Sol and Terra reviews. Only the
+   one fresh Sol review. Only the
    orchestrator runs the full suite, once after a major push on its closeout or
    blocking card; CI runs it again. Invariants I1–I8 hold. Delegate with the
    project agents (`jet-impl` implement, `jet-verify` review, `jet-ballot`
    ballots) when available. One implementer owns each coherent patch.
 5. Advance honestly, with attribution and a log entry:
    `tower card update '#N' --phase building --log "…" --by claude-main`.
-   `verify`→`done` only after sequential fresh Sol and Terra verification (verify skill;
+   `verify`→`done` only after one fresh Sol verification pass (verify skill;
    never trust a builder's green). Finish EVERY exit
    criterion before touching the next card; "step N done" ≠ card done.
    Cards with a machine-checked `criteria[]` list: meet each item as you land
    it (`tower card criteria '#N' --meet n --evidence "…" --by claude-main`),
-   log the Sol review, then get the Terra reviewer to record the final
-   independent criterion verification (`--verify n`) —
+   get the Sol reviewer to record the final independent criterion verification
+   (`--verify n`) —
    `--phase done` is refused (`E_CRITERIA`) while any item is unverified, and
    refused (`E_CRITERIA_SELF`) if the verifier is also the builder. A card
    flagged `needsAcceptance` mints an owner accept/bounce ballot once its
@@ -110,7 +110,7 @@ surfaces, don't silence it.
 parser→sema→codegen wired and reachable from real `.jet` source; every new
 diagnostic has a code in `docs/spec/diagnostics.md` **and** a `tests/ui`
 snapshot (I4); runnable example with golden output where user-visible (I5);
-  scoped targeted proof passes and fresh Sol then Terra reviewers clear it;
+  scoped targeted proof passes and one fresh Sol reviewer clears it;
 docs match behavior. Major-push closeout additionally requires the orchestrator's one full
 suite run. A ratified
 decision may sit unbuilt **only** while gated on an unratified upstream
@@ -178,10 +178,10 @@ manual detach any more — let the decision retire on its own, or
 
 ## Rules
 
-- Use GPT-5.6 Sol by default and tune its effort. Terra is the required second
-  reviewer and is otherwise used only for a recorded task-specific advantage.
-- One implementer owns a coherent change. Review in order: fresh Sol, fixes and
-  recheck, then fresh Terra, fixes and recheck. Reviewers never implement.
+- Use GPT-5.6 Sol by default at low, medium, or high effort only. Use Terra only
+  for a recorded task-specific advantage, never as a standard reviewer.
+- One implementer owns a coherent change. One fresh Sol reviewer follows;
+  implementer fixes findings and Sol rechecks. Reviewer never implements.
 - Parallelise only disjoint in-scope cards; one agent layer. Worktrees are
   allowed for write isolation, but successful work must be integrated promptly
   and every task-created worktree and temporary branch removed before close.

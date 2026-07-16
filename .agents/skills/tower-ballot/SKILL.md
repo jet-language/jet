@@ -48,10 +48,9 @@ differently.
 ## Required review pass
 
 The author is the sole implementer of the ballot. Before it reaches the owner,
-run two fresh-context reviews in order: Sol checks teaching quality, option
-completeness, governing decisions, and recommendation logic; the author fixes
-and Sol rechecks material findings; then Terra independently checks the revised
-ballot and rechecks its material findings. Reviewers do not rewrite the ballot.
+one fresh Sol reviewer checks teaching quality, option completeness, governing
+decisions, and recommendation logic; the author fixes findings and Sol rechecks
+material fixes. The reviewer does not rewrite the ballot.
 
 - **Plain language:** assume technical curiosity but no subject expertise.
   Prefer common words. Expand acronyms on first use. Define every unavoidable

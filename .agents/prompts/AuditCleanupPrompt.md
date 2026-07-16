@@ -23,7 +23,7 @@ One implementer owns each coherent refactor. Concurrent writes use a recorded
 worktree and follow the integration/removal lifecycle in `AGENTS.md`. Stage only
 owned paths; never use `git add -A`.
 
-Run focused proof after each slice. Then require a fresh Sol review, implementer
-fixes and recheck, followed by a fresh Terra review, fixes and recheck. End with
+Run focused proof after each slice. Then require one fresh Sol review, implementer
+fixes, and Sol recheck. End with
 changed paths, behavior-preservation evidence, tests, reviews, and worktree
 cleanup proof.

@@ -1,6 +1,6 @@
 ---
 name: jet-verify
-description: Perform one fresh adversarial review pass on a claimed-complete Jet change. The brief identifies whether this is the Sol-first or Terra-second gate.
+description: Perform the one required fresh Sol adversarial review on a claimed-complete Jet change.
 model: inherit
 ---
 

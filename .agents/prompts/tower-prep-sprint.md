@@ -15,8 +15,8 @@ relevant tests. For each card:
 - deduplicate overlapping cards and record the canonical card relationship;
 - release stale claims with an exact handoff.
 
-Use one author per plan/ballot. Each owner-facing ballot receives fresh Sol then
-Terra review, with author fixes and rechecks, before it enters the owner's queue.
+Use one author per plan/ballot. Each owner-facing ballot receives one fresh Sol
+review, with author fixes and Sol recheck, before it enters the owner's queue.
 Use Tower CLI/API only; never hand-edit `.tower/` JSON. No full suite and no
 write-capable code subagents.
 
