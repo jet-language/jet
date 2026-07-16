@@ -1118,6 +1118,9 @@ impl Cx {
             Type::Apply { name, args } if name == "View" && args.len() == 1 => {
                 format!("&[{}]", self.rust_type(&args[0]))
             }
+            Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
+                format!("&mut [{}]", self.rust_type(&args[0]))
+            }
             // D-TTLVAL1=A: Expiring<T> / Rotting<T>.
             Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => {
                 format!("JetExpiring<{}>", self.rust_type(&args[0]))

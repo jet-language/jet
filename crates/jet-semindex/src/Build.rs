@@ -1593,7 +1593,10 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         AST::Expr::Unary(_, inner, _) | AST::Expr::IncDec { operand: inner, .. } => {
             structural_slot(ctx, "operand", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
         }
-        AST::Expr::Deref(inner, _) | AST::Expr::RawOf(inner, _) | AST::Expr::Copy(inner, _) => {
+        AST::Expr::Deref(inner, _)
+        | AST::Expr::RawOf(inner, _)
+        | AST::Expr::Copy(inner, _)
+        | AST::Expr::Place(inner, _, _) => {
             structural_slot(ctx, "operand", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
         }
         AST::Expr::Index { base, index, .. } => {

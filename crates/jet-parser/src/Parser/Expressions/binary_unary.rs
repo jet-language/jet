@@ -394,6 +394,19 @@ impl<'a> Parser<'a> {
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::RawOf(Box::new(inner), full))
                 }
+                // D-SHAPE-PLACE1=A: `&place` is an expression-level exclusive
+                // write window. It is distinct from call-argument convention;
+                // sema proves the operand is a maximal place.
+                TokKind::Amp => {
+                    let span = self.bump().span;
+                    let inner = self.expr_unary(allow_struct_lit)?;
+                    let full = Span::new(span.start, inner.span().end);
+                    Ok(Expr::Place(
+                        Box::new(inner),
+                        crate::AST::PlaceAccess::Write,
+                        full,
+                    ))
+                }
                 // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
                 // expression form. Legal on any expression; most useful on a named
                 // binding. `.clone()` is not user-typable Jet syntax (I8).

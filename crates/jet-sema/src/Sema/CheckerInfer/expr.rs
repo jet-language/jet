@@ -796,6 +796,37 @@ impl<'a> Checker<'a> {
                 }
                 Some(inner_t)
             }
+            Expr::Place(inner, access, span) => {
+                if self.place_from_expr(inner).is_none() {
+                    self.diags.push(Diagnostic::error(
+                        "E0213",
+                        "a window must start from a place".to_string(),
+                        "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying".to_string(),
+                        "bind the call or temporary to a name first, then take a window into that name".to_string(),
+                        Some(*span),
+                    ));
+                    return None;
+                }
+                self.borrow_ctx = true;
+                let ty = self.infer(inner)?;
+                if matches!(inner.as_ref(), Expr::Slice { .. }) {
+                    let elem = match ty {
+                        Type::List(elem) => *elem,
+                        Type::FixedList { elem, .. } => *elem,
+                        other => return Some(other),
+                    };
+                    Some(Type::Apply {
+                        name: match access {
+                            crate::AST::PlaceAccess::Read => "View",
+                            crate::AST::PlaceAccess::Write => "ViewMut",
+                        }
+                        .to_string(),
+                        args: vec![elem],
+                    })
+                } else {
+                    Some(ty)
+                }
+            }
             Expr::PtrFromAddr {
                 alias,
                 alias_span,
@@ -1711,7 +1742,9 @@ impl<'a> Checker<'a> {
             }
             // D-DYNARRAY1: `window[i]` on a `View<T>` — read-only, same bounds
             // discipline as list indexing (runtime panic on out-of-range).
-            Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+            {
                 *kind = IndexKind::List;
                 if idx_ty != Type::Int {
                     self.diags.push(Diagnostic::error(

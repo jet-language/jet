@@ -2,8 +2,17 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::is_type_var_name;
 use crate::Syntax;
-use crate::AST::{AccessConvention, Expr, Lambda, LValue, Type, VariantPayload};
+use crate::AST::{AccessConvention, Expr, Lambda, LValue, Type, UnOp, VariantPayload};
 use std::collections::{HashMap, HashSet};
+
+fn const_place_int(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Int(value, _, _, _) => Some(*value),
+        Expr::Unary(UnOp::Neg, inner, _) => const_place_int(inner)?.checked_neg(),
+        Expr::Paren(inner, _) => const_place_int(inner),
+        _ => None,
+    }
+}
 
 impl<'a> Checker<'a> {
     // ──────────────────────────────────────────────────────────────────────
@@ -231,11 +240,11 @@ impl<'a> Checker<'a> {
                     out.push('.');
                     out.push_str(field);
                 }
-                ViewProjection::Index(span) => {
+                ViewProjection::Index { span, .. } => {
                     let _ = span.start;
                     out.push_str("[…]");
                 }
-                ViewProjection::Range(span) => {
+                ViewProjection::Range { span, .. } => {
                     let _ = span.start;
                     out.push_str("[…]");
                 }
@@ -248,7 +257,7 @@ impl<'a> Checker<'a> {
         out
     }
 
-    fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
+    pub(crate) fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
         match expr {
             Expr::Ident(name, _) => self
                 .view_fact(name)
@@ -265,16 +274,24 @@ impl<'a> Checker<'a> {
                 place.projections.push(ViewProjection::Field(field.clone()));
                 Some(place)
             }
-            Expr::Index { base, span, .. } => {
+            Expr::Index { base, index, span, .. } => {
                 let mut place = self.place_from_expr(base)?;
-                place.projections.push(ViewProjection::Index(*span));
+                place.projections.push(ViewProjection::Index {
+                    value: const_place_int(index),
+                    span: *span,
+                });
                 Some(place)
             }
-            Expr::Slice { base, span, .. } => {
+            Expr::Slice { base, start, end, span } => {
                 let mut place = self.place_from_expr(base)?;
-                place.projections.push(ViewProjection::Range(*span));
+                place.projections.push(ViewProjection::Range {
+                    start: const_place_int(start),
+                    end: const_place_int(end),
+                    span: *span,
+                });
                 Some(place)
             }
+            Expr::Place(inner, _, _) => self.place_from_expr(inner),
             _ => None,
         }
     }
@@ -296,13 +313,27 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_lvalue_change(&mut self, target: &LValue, action: &str) {
+        let through_write_view = match target {
+            LValue::Index { base, .. } | LValue::Field { base, .. } => {
+                expr_root_ident(base)
+                    .and_then(|name| self.view_fact(name))
+                    .is_some_and(|fact| fact.access == ViewAccess::Write)
+            }
+            LValue::Local { .. } => false,
+        };
+        if through_write_view {
+            return;
+        }
         let place = match target {
             LValue::Local { name, .. } => Some(ViewPlace {
                 owner: self.owner_id(name),
                 projections: Vec::new(),
             }),
-            LValue::Index { base, span, .. } => self.place_from_expr(base).map(|mut place| {
-                place.projections.push(ViewProjection::Index(*span));
+            LValue::Index { base, index, span, .. } => self.place_from_expr(base).map(|mut place| {
+                place.projections.push(ViewProjection::Index {
+                    value: const_place_int(index),
+                    span: *span,
+                });
                 place
             }),
             LValue::Field { base, field, .. } => self.place_from_expr(base).map(|mut place| {
@@ -379,7 +410,19 @@ impl<'a> Checker<'a> {
     /// function's return/scope exit). A parameter or const outlives the call,
     /// so a view into it is sound without tracking (mirrors `E2301`'s
     /// param/const exemption in `view_return_local_owner`).
-    pub(crate) fn view_call_source(&self, init: &Expr) -> Option<(ViewPlace, ViewKind)> {
+    pub(crate) fn view_call_source(
+        &self,
+        init: &Expr,
+    ) -> Option<(ViewPlace, ViewKind, ViewAccess)> {
+        if let Expr::Place(inner, access, _) = init {
+            let place = self.place_from_expr(inner)?;
+            let kind = self.view_kind_for_place(&place);
+            let access = match access {
+                crate::AST::PlaceAccess::Read => ViewAccess::Read,
+                crate::AST::PlaceAccess::Write => ViewAccess::Write,
+            };
+            return Some((place, kind, access));
+        }
         let Expr::MethodCall {
             receiver, method, ..
         } = init
@@ -396,8 +439,12 @@ impl<'a> Checker<'a> {
                 .unwrap_or_else(|| self.view_kind_for_place(&place)),
             _ => self.view_kind_for_place(&place),
         };
-        place.projections.push(ViewProjection::Range(init.span()));
-        Some((place, kind))
+        place.projections.push(ViewProjection::Range {
+            start: None,
+            end: None,
+            span: init.span(),
+        });
+        Some((place, kind, ViewAccess::Read))
     }
 
     /// Record `name` as a view into `owner`, declared at the current scope depth.
@@ -406,9 +453,10 @@ impl<'a> Checker<'a> {
         name: &str,
         place: ViewPlace,
         kind: ViewKind,
+        access: ViewAccess,
         span: Span,
     ) {
-        self.record_view(name, place, kind, ViewAccess::Read, span);
+        self.record_view(name, place, kind, access, span);
     }
 
     /// True if `name` is currently a live `View<T>` binding.

@@ -172,6 +172,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Clone(recv) => {
             format!("({}).clone()", emit_tir_expr(recv, cx))
         }
+        TExprKind::Borrow { place, mutable } => {
+            let place = emit_tir_expr(place, cx);
+            if *mutable {
+                format!("&mut ({place})")
+            } else {
+                format!("&({place})")
+            }
+        }
         // D-MEM1 stage S5: `copy d` on a string-view local — `.to_string()`,
         // not `.clone()` (see the node's doc comment for why).
         TExprKind::MaterializeView(recv) => {
@@ -439,6 +447,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // backing storage, it never makes a second copy of it.
                 TBuiltinOp::ViewNew { line } => format!(
                     "jet_view_new(&({}), {}, {}, {:?}, {})",
+                    recv,
+                    a(0),
+                    a(1),
+                    cx.file,
+                    line
+                ),
+                TBuiltinOp::ViewMutNew { line } => format!(
+                    "jet_view_mut_new(&mut ({}), {}, {}, {:?}, {})",
                     recv,
                     a(0),
                     a(1),

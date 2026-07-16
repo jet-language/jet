@@ -1690,6 +1690,24 @@ fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'
     }
     &xs[a as usize..=b as usize]
 }
+
+fn jet_view_mut_new<'a, T>(
+    xs: &'a mut [T],
+    a: i64,
+    b: i64,
+    file: &str,
+    line: u32,
+) -> &'a mut [T] {
+    let len = xs.len() as i64;
+    if a < 0 || b < 0 || a > b || b >= len {
+        jet_panic(
+            file,
+            line,
+            &format!("can't view {} items from {} to {} (inclusive)", len, a, b),
+        );
+    }
+    &mut xs[a as usize..=b as usize]
+}
 // D-DYNARRAY1: View<T> read-only closure surface. `xs` is already a borrow
 // (never `.clone()`d to an owned `Vec` first, unlike the `jet_list_*` family
 // above) — folding/mapping a view touches no allocation beyond the result.

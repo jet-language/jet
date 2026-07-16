@@ -1152,6 +1152,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
         | Expr::Try(inner, _, _) | Expr::Field(inner, _, _) => expr_handle_escape(inner, handle),

@@ -1343,6 +1343,12 @@ pub enum TExprKind {
     /// unconditionally; the TIR carries the lowered receiver and the result type
     /// (the receiver's type).
     Clone(Box<TExpr>),
+    /// D-SHAPE-PLACE1=A: a checked local whole/field/index place borrow.
+    /// Range places use `ViewNew`/`ViewMutNew` so bounds are checked once.
+    Borrow {
+        place: Box<TExpr>,
+        mutable: bool,
+    },
     /// D-MEM1 stage S5 (2026-07-04): `copy d` where `d` is a string-view local
     /// (`Binding.string_view`, a bare `&str` Rust place) — materializes it into
     /// an owned `String` via `.to_string()`. A plain `.clone()` (the `Clone`
@@ -2103,6 +2109,10 @@ pub enum TBuiltinOp {
     // `&[T]` receiver satisfies exactly as a `Vec<T>` does.
     /// `list.view(a..b)` → `jet_view_new(&(recv), a0, a1, file, line)`.
     ViewNew {
+        line: usize,
+    },
+    /// `&list[a..b]` → `jet_view_mut_new(&mut recv, a, b, file, line)`.
+    ViewMutNew {
         line: usize,
     },
 }

@@ -425,6 +425,7 @@ impl<'a> InlineAlwaysScan<'a> {
             Expr::ComptimeSplice { .. } => {}
             Expr::Paren(inner, _) => self.scan_expr(inner),
             Expr::IncDec { operand, .. } => self.scan_expr(operand),
+            Expr::Place(inner, _, _) => self.scan_expr(inner),
         }
     }
 }

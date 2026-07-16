@@ -401,6 +401,63 @@ fn run() {
     assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
 }
 
+#[test]
+fn bare_range_window_lowers_without_copy() {
+    let src = r#"
+fn run() {
+    xs :: [1, 2, 3]
+    window :: xs[0..1]
+    print(window[1])
+}
+"#;
+    let out = jet::compile(src).expect("bare range window must compile");
+    assert!(
+        out.rust.contains("let user_window = jet_view_new"),
+        "range acquisition must lower to a view: {}",
+        out.rust
+    );
+}
+
+#[test]
+fn whole_place_window_lowers_as_borrow() {
+    let src = r#"
+fn run() {
+    xs :: [1, 2, 3]
+    all :: xs
+    print(all.len())
+}
+"#;
+    let out = jet::compile(src).expect("whole place window must compile");
+    assert!(out.rust.contains("let user_all = &(user_xs)"), "{}", out.rust);
+}
+
+#[test]
+fn copied_range_is_owned_and_does_not_borrow_owner() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    copied :: ~xs[0..1]
+    xs.push(4)
+    print(copied.len() + xs.len())
+}
+"#;
+    jet::compile(src).expect("`~range` must stay an independent owned copy");
+}
+
+#[test]
+fn write_range_window_edits_owner() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    edit :: &xs[0..1]
+    edit[1] = 9
+    print(xs[1])
+}
+"#;
+    let out = jet::compile(src).expect("write range window must compile");
+    assert!(out.rust.contains("jet_view_mut_new"), "{}", out.rust);
+}
+
 /// D-MEM1 S9 / #649: any list operation that may change backing storage is
 /// exclusive with a live view.
 #[test]

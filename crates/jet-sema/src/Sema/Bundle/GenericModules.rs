@@ -95,6 +95,7 @@ fn substitute_expr(
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
         | Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)

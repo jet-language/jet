@@ -669,6 +669,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         Expr::Deref(inner, _) | Expr::RawOf(inner, _) => expr_in_subset(inner, cx, locals),
         // D-CAP2 (D-MEM1/S4): `copy x` — in-subset whenever `x` is.
         Expr::Copy(inner, _) => expr_in_subset(inner, cx, locals),
+        Expr::Place(inner, _, _) => expr_in_subset(inner, cx, locals),
         Expr::Paren(inner, _) => expr_in_subset(inner, cx, locals),
         // Everything else (tuples, …) is out.
         _ => false,

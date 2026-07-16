@@ -29,6 +29,7 @@ use crate::Codegen::TIR::render_require;
 use crate::Codegen::TIR::render_require_eq;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
@@ -292,6 +293,41 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 TExprKind::Clone(Box::new(operand))
             };
             TExpr { ty, kind }
+        }
+        Expr::Place(inner, access, span) => {
+            if let Expr::Slice { base, start, end, .. } = inner.as_ref() {
+                let recv = lower_expr(base, cx, env);
+                let elem = match &recv.ty {
+                    Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+                    _ => Type::Int,
+                };
+                let mutable = *access == crate::AST::PlaceAccess::Write;
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                TExpr {
+                    ty: Type::Apply {
+                        name: if mutable { "ViewMut" } else { "View" }.to_string(),
+                        args: vec![elem],
+                    },
+                    kind: TExprKind::BuiltinMethod {
+                        recv: Box::new(recv),
+                        op: if mutable {
+                            TBuiltinOp::ViewMutNew { line }
+                        } else {
+                            TBuiltinOp::ViewNew { line }
+                        },
+                        args: vec![lower_expr(start, cx, env), lower_expr(end, cx, env)],
+                    },
+                }
+            } else {
+                let place = lower_expr(inner, cx, env);
+                TExpr {
+                    ty: place.ty.clone(),
+                    kind: TExprKind::Borrow {
+                        place: Box::new(place),
+                        mutable: *access == crate::AST::PlaceAccess::Write,
+                    },
+                }
+            }
         }
         Expr::Binary(op, l, r, span) => {
             let lhs = lower_expr(l, cx, env);

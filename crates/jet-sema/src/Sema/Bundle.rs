@@ -321,6 +321,7 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
         | Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)

@@ -50,7 +50,7 @@ pub use lvalues::{LValue, IndexKind, MetaField, MetaAttr, MetaFacts, ForKind, Bi
 mod expressions;
 pub use expressions::{
     Call, CallArgFlags, CallArg, BinOp, UnOp, IncDecOp, StrFormat, StrPart, LambdaParam,
-    LambdaBody, LambdaMeta, Lambda, Expr,
+    LambdaBody, LambdaMeta, Lambda, PlaceAccess, Expr,
 };
 
 #[path = "AST/comptime.rs"]

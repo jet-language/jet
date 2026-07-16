@@ -448,6 +448,12 @@ impl<'a> Fmt<'a> {
                 self.write(Syntax::SIGIL_COPY);
                 self.fmt_expr(inner, Prec::Unary);
             }
+            Expr::Place(inner, access, _) => {
+                if *access == crate::AST::PlaceAccess::Write {
+                    self.write(Syntax::SIGIL_WRITE);
+                }
+                self.fmt_expr(inner, Prec::Unary);
+            }
             Expr::Field(base, field, span) => {
                 self.fmt_expr(base, Prec::Postfix);
                 // S69 (D-SG3): keep an author-placed break before `.field`.

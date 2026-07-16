@@ -231,7 +231,7 @@ pub fn builtin_method_return(
         Type::Named(n) if n == "X25519PublicKey" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
         Type::Named(n) if n == "PasswordHash" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
-        Type::Apply { name, args } if name == "View" => {
+        Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
             view_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         // D-HOLE1: `.map` on `T?` (no general "hole"/absent-propagating value type —
@@ -1458,7 +1458,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             }
         }
         // D-DYNARRAY1: `View<T>` arg types — read-only subset, mirrors `Type::List`.
-        Type::Apply { name, args } if name == "View" => {
+        Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "get" | "contains" => Some(vec![elem]),

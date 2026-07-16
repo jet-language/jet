@@ -729,6 +729,7 @@ pub(crate) fn collect_core_expr(
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)

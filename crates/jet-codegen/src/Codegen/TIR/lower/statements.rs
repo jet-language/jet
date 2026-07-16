@@ -196,6 +196,26 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     track_origin: None,
                 };
             }
+            // D-SHAPE-PLACE1=A: local place windows are references with no
+            // written Rust type clause. Range windows already behave as slices;
+            // whole/field/index windows bind a dereferenced transparent slot.
+            if let Expr::Place(inner, _, _) = &b.init {
+                let range = matches!(inner.as_ref(), Expr::Slice { .. });
+                let init = lower_expr(&b.init, cx, env);
+                let place = if range {
+                    mangle(&b.name)
+                } else {
+                    format!("(*{})", mangle(&b.name))
+                };
+                env.bind(&b.name, place, b.ty.clone());
+                return TStmt::Let {
+                    name: b.name.clone(),
+                    kw: "let",
+                    ty_clause: String::new(),
+                    init,
+                    track_origin: None,
+                };
+            }
             // D-MEM1 stage S5 (2026-07-04): a string-view binding (`x :: s.trim()` /
             // `x :: s.after(sep)` / `x :: s.before(sep)`; sema set `string_view`
             // after proving E2307-safety — see `CheckerCore.rs`'s binding check).

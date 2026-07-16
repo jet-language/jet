@@ -584,8 +584,12 @@ pub(crate) struct ViewOwnerId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ViewProjection {
     Field(String),
-    Index(Span),
-    Range(Span),
+    Index { value: Option<i64>, span: Span },
+    Range {
+        start: Option<i64>,
+        end: Option<i64>,
+        span: Span,
+    },
     /// Arena allocation sites create disjoint fresh storage by definition.
     Fresh(Span),
 }
@@ -658,6 +662,19 @@ impl ViewPlace {
         for (left, right) in self.projections.iter().zip(&other.projections) {
             match (left, right) {
                 (ViewProjection::Field(a), ViewProjection::Field(b)) if a != b => return false,
+                (ViewProjection::Index { value: Some(a), .. }, ViewProjection::Index { value: Some(b), .. }) if a != b => return false,
+                (
+                    ViewProjection::Index { value: Some(index), .. },
+                    ViewProjection::Range { start: Some(start), end: Some(end), .. },
+                )
+                | (
+                    ViewProjection::Range { start: Some(start), end: Some(end), .. },
+                    ViewProjection::Index { value: Some(index), .. },
+                ) if index < start || index > end => return false,
+                (
+                    ViewProjection::Range { start: Some(a_start), end: Some(a_end), .. },
+                    ViewProjection::Range { start: Some(b_start), end: Some(b_end), .. },
+                ) if a_end < b_start || b_end < a_start => return false,
                 (ViewProjection::Fresh(a), ViewProjection::Fresh(b)) if a != b => return false,
                 _ => {}
             }
@@ -742,8 +759,8 @@ mod view_fact_graph_tests {
     fn dynamic_indexes_are_conservatively_overlapping() {
         let mut a = fact(1, 1, ViewKind::List).place;
         let mut b = a.clone();
-        a.projections.push(ViewProjection::Index(Span::new(20, 21)));
-        b.projections.push(ViewProjection::Index(Span::new(30, 31)));
+        a.projections.push(ViewProjection::Index { value: None, span: Span::new(20, 21) });
+        b.projections.push(ViewProjection::Index { value: None, span: Span::new(30, 31) });
         assert!(a.overlaps(&b));
     }
 

@@ -164,6 +164,13 @@ pub struct Lambda {
     pub meta: LambdaMeta,
 }
 
+/// D-SHAPE-PLACE1=A: checked local access to a maximal place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaceAccess {
+    Read,
+    Write,
+}
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     /// String literal, possibly with interpolation parts.
@@ -263,6 +270,9 @@ pub enum Expr {
     /// E0209). Legal on any expression, most useful on a named binding.
     /// Lowers to Rust `x.clone()` (E0211 if the type isn't cloneable).
     Copy(Box<Expr>, Span),
+    /// Bare place acquisition is elaborated to `Read` by sema; written
+    /// `&place` parses as `Write`. This never carries call-argument meaning.
+    Place(Box<Expr>, PlaceAccess, Span),
     /// Field access: `v.field`.
     Field(Box<Expr>, String, Span),
     /// S71 (D-SG6): `base?.field` optional chaining. Yields a `T?` and
@@ -459,6 +469,7 @@ impl Expr {
             | Expr::Deref(_, s)
             | Expr::RawOf(_, s)
             | Expr::Copy(_, s)
+            | Expr::Place(_, _, s)
             | Expr::Field(_, _, s)
             | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }

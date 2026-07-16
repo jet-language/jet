@@ -195,6 +195,9 @@ impl<'a> Checker<'a> {
                                 Some(Type::List(_)) | Some(Type::FixedList { .. }) => {
                                     *kind = IndexKind::List
                                 }
+                                Some(Type::Apply { name, .. }) if name == "ViewMut" => {
+                                    *kind = IndexKind::List
+                                }
                                 Some(Type::Named(n)) if self.trait_reg.index_types.contains_key(n) => {
                                     *kind = IndexKind::User(n.clone());
                                 }
@@ -255,7 +258,10 @@ impl<'a> Checker<'a> {
                             // name must be changeable and not under a `for` borrow.
                             let base_is_pool =
                                 matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "Pool");
+                            let base_is_view_mut =
+                                matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "ViewMut");
                             if base_is_pool
+                                || base_is_view_mut
                                 || matches!(
                                     base_ty,
                                     Some(Type::Map { .. })
@@ -269,7 +275,7 @@ impl<'a> Checker<'a> {
                                         self.diags.push(collection_changed_in_loop(&root, *span));
                                     }
                                     if let Some(info) = self.lookup(&root) {
-                                        if !info.mutable {
+                                        if !base_is_view_mut && !info.mutable {
                                             let (code, why, fix) = if matches!(
                                                 info.param_conv,
                                                 Some(AccessConvention::Read)
@@ -379,6 +385,24 @@ impl<'a> Checker<'a> {
                                             type_fix_hint(&elem_ty, &vt),
                                             Some(value.span()),
                                         ));
+                                    }
+                                }
+                            } else if let Some(Type::Apply { name, args }) = base_ty {
+                                if name == "ViewMut" {
+                                    if let (Some(elem_ty), Some(vt)) = (args.first(), vt) {
+                                        if vt != *elem_ty {
+                                            self.diags.push(Diagnostic::error(
+                                                "E0108",
+                                                format!(
+                                                    "this view holds {}, not {}",
+                                                    elem_ty.show(),
+                                                    vt.show()
+                                                ),
+                                                "every item written through a view must keep the owner's element type".to_string(),
+                                                type_fix_hint(elem_ty, &vt),
+                                                Some(value.span()),
+                                            ));
+                                        }
                                     }
                                 }
                             } else if let Some(Type::Named(n)) = &base_ty {
@@ -776,7 +800,7 @@ impl<'a> Checker<'a> {
                                     } else {
                                         self.report_view_return_boundary(e.span());
                                     }
-                                } else if let Some((place, _)) = self.view_call_source(e) {
+                                } else if let Some((place, _, _)) = self.view_call_source(e) {
                                     self.report_view_owns_return(&place, e.span());
                                 } else {
                                     self.report_view_return_boundary(e.span());

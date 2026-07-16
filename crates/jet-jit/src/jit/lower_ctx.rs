@@ -1211,6 +1211,7 @@ impl LowerCtx<'_, '_> {
                     .ok_or_else(|| format!("jit unknown local `{place}`"))?;
                 Ok(self.b.use_var(var))
             }
+            TExprKind::Borrow { .. } => Err("jit place borrow unsupported".to_string()),
             TExprKind::Unary { op, operand } => {
                 let inner = self.lower_expr(operand)?;
                 Ok(match op {
@@ -1954,6 +1955,7 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::DequePeekBack => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::TryCollect => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewNew { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ViewMutNew { .. } => Err("jit builtin method unsupported".to_string()),
         }
     }
 
