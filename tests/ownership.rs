@@ -365,6 +365,42 @@ fn run() {
     assert!(diags.iter().any(|d| d.code == "E0212"));
 }
 
+/// D-SHAPE-PLACE1=A (#613): a bare range place is the read-window spelling.
+/// Moving its owner must fail in sema before TIR/rustc.
+#[test]
+fn moving_list_owner_with_bare_range_window_is_error() {
+    let src = r#"
+fn consume(xs: ^[Int]) {
+    print(xs.len())
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    window :: xs[0..1]
+    consume(^xs)
+    print(window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("moving a windowed owner must fail");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}
+
+/// D-SHAPE-PLACE1=A (#613): `&place` creates the exclusive write window.
+/// A later overlapping read window is rejected by the unified #649 graph.
+#[test]
+fn write_range_window_conflicts_with_overlapping_read_window() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    edit :: &xs[0..1]
+    read :: xs[1..2]
+    print(edit.len() + read.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("overlapping write/read windows must fail");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "got {diags:?}");
+}
+
 /// D-MEM1 S9 / #649: any list operation that may change backing storage is
 /// exclusive with a live view.
 #[test]
