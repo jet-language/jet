@@ -201,7 +201,8 @@ impl<'a> Checker<'a> {
                                     }
                                     // D-DYNARRAY1: `view.map(f: T -> R) -> [R]` — map-to-owned;
                                     // the result is a fresh owned list, never another View.
-                                    Type::Apply { name, .. } if name == "View" => {
+                                    Type::Apply { name, .. }
+                                        if matches!(name.as_str(), "View" | "ViewMut") => {
                                         refined_ret = Some(Type::List(Box::new((**r).clone())));
                                     }
                                     _ => {}

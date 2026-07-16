@@ -404,7 +404,7 @@ pub(crate) fn resolve_closure_op(
             // never the mutable-list form.
             if matches!(rty, Some(Type::Option(_))) {
                 TClosureOp::OptionMap
-            } else if matches!(&rty, Some(Type::Apply { name, .. }) if name == "View") {
+            } else if matches!(&rty, Some(Type::Apply { name, .. }) if matches!(name.as_str(), "View" | "ViewMut")) {
                 // D-DYNARRAY1: map-to-owned — never the `.clone()`-into-Vec form
                 // the other list ops use (`recv` is already a borrow, not owned).
                 TClosureOp::ViewMap
@@ -442,7 +442,7 @@ pub(crate) fn resolve_closure_op(
         "fold" => {
             // D-DYNARRAY1: a View's `recv` is already `&[T]` — fold it directly,
             // no `.clone()`-to-owned-Vec step.
-            if matches!(&rty, Some(Type::Apply { name, .. }) if name == "View") {
+            if matches!(&rty, Some(Type::Apply { name, .. }) if matches!(name.as_str(), "View" | "ViewMut")) {
                 TClosureOp::ViewFold
             } else {
                 TClosureOp::Fold

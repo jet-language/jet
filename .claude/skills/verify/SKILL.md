@@ -15,8 +15,8 @@ description: Verify a Jet compiler/stdlib change in THIS repo — the project-sp
 ## Test strategy
 
 - **Per card:** scoped targeted tests only —
-  `scripts/agent/jet-env cargo test --test <name>`. A reviewer other than the
-  implementer inspects the diff and re-runs the relevant proof before close.
+  `scripts/agent/jet-env cargo test --test <name>`. Fresh Sol then Terra
+  reviewers inspect the diff and re-run the relevant proof before close.
 - **Major-push closeout:** only the orchestrator runs
   `scripts/agent/jet-env full scripts/agent/verify-full.sh`, once on the push's
   closeout or blocking card. It uses a repo-local `TMPDIR` and normal test
@@ -26,20 +26,19 @@ description: Verify a Jet compiler/stdlib change in THIS repo — the project-sp
 
 ## Adversarial review gate
 
-Before claiming a meaningful change done, use a reviewer other than its
-implementer. Meaningful: compiler semantics, safety/ownership/FFI, runtime
-behavior, public contract, generated output, or more than one coherent
-implementation file. The reviewer starts fresh and receives only the diff,
-acceptance criteria, relevant invariants, and test evidence. Instruct it to
-assume the patch is wrong and seek concrete bugs, missed paths, false-green
-tests, invariant breaks, and scope drift; it must not implement.
+Every completed change has one implementer and two reviewers. Both reviewers
+start fresh and receive only the diff, acceptance criteria, relevant authority
+and invariants, and test evidence. They assume the patch is wrong and seek
+concrete bugs, missed paths, false-green tests, invariant breaks, stale
+decisions, scope drift, duplicate mechanisms, and orphaned work. They never
+implement.
 
-Implementer fixes every material finding. Reviewer re-checks material fixes.
-At per-card close, parent only inspects the review and evidence; reviewer green
-is never completion evidence by itself. Record reviewer identity, reviewed
-commit/diff, findings, and resolution in the card/PR handoff. Exempt only a
-one-file exact mechanical transformation with local proof; record the exemption
-rationale.
+Run a Sol reviewer first. The implementer fixes every material finding and Sol
+rechecks those fixes. Then run an independent Terra reviewer on the resulting
+patch. The implementer fixes its material findings and Terra rechecks them.
+Record both identities, model/effort, reviewed commit or diff, findings,
+resolutions, and rerun evidence in Tower/PR handoff. Reviewer approval alone is
+not completion evidence; the orchestrator checks the integrated result.
 
 ## Blessing snapshots and generated docs
 
@@ -131,7 +130,7 @@ expected runtime failure. It never creates a new expectation channel.
    a user diagnostic.
 5. Add the smallest regression fixture proving the former ICE is now either
    accepted end to end or rejected by a Jet diagnostic. Run its focused test plus
-   the relevant rustc-agreement/golden target, then independent card review.
+   the relevant rustc-agreement/golden target, then Sol and Terra card reviews.
 
 ## Runtime smoke test (always, for compiler changes)
 

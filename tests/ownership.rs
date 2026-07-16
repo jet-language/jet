@@ -458,6 +458,109 @@ fn run() {
     assert!(out.rust.contains("jet_view_mut_new"), "{}", out.rust);
 }
 
+#[test]
+fn disjoint_read_write_ranges_lower_to_safe_split() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3, 4]
+    edit :: &xs[0..1]
+    read :: xs[2..3]
+    edit[0] = 9
+    print(read[0])
+}
+"#;
+    let out = jet::compile(src).expect("disjoint read/write windows must compile");
+    assert!(out.rust.contains("split_at_mut"), "{}", out.rust);
+    assert!(!out.rust.contains("jet_view_mut_new(&mut user_xs"), "{}", out.rust);
+}
+
+#[test]
+fn disjoint_write_ranges_lower_to_safe_split() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3, 4]
+    left :: &xs[0..1]
+    right :: &xs[2..3]
+    left[0] = 8
+    right[0] = 9
+    print(left[0] + right[0])
+}
+"#;
+    let out = jet::compile(src).expect("disjoint write windows must compile");
+    assert!(out.rust.matches("split_at_mut").count() >= 2, "{}", out.rust);
+}
+
+#[test]
+fn touching_write_ranges_are_rejected_before_codegen() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    left :: &xs[0..1]
+    right :: &xs[1..2]
+    print(left.len() + right.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("inclusive ranges sharing an index overlap");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "{diags:?}");
+}
+
+#[test]
+fn write_window_cannot_cross_return_boundary() {
+    let src = r#"
+fn edit_first(xs: &[Int]) -> ViewMut<Int> {
+    return &xs[0..1]
+}
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("write view return must be rejected");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+}
+
+#[test]
+fn write_window_cannot_be_stored() {
+    let src = r#"
+struct Holder { window: ViewMut<Int> }
+fn run() {
+    xs := [1, 2, 3]
+    edit :: &xs[0..1]
+    holder :: Holder.{ window: edit }
+    print(holder.window.len())
+}
+"#;
+    let diags = jet::compile(src).expect_err("write view storage must be rejected");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+}
+
+#[test]
+fn write_window_cannot_cross_task_boundary() {
+    let src = r#"
+use core.tasks
+fn run() {
+    xs := [1, 2, 3]
+    edit :: &xs[0..1]
+    task :: tasks.spawn(() => edit.len())
+    print(task.join())
+}
+"#;
+    let diags = jet::compile(src).expect_err("write view task capture must be rejected");
+    assert!(diags.iter().any(|d| d.code == "E1102"), "{diags:?}");
+}
+
+#[test]
+fn write_window_cannot_cross_channel_boundary() {
+    let src = r#"
+use core.tasks
+fn run() {
+    xs := [1, 2, 3]
+    edit :: &xs[0..1]
+    (sender, channel) :: tasks.channel<ViewMut<Int>>()
+    sender.send(edit)
+}
+"#;
+    let diags = jet::compile(src).expect_err("write view channel send must be rejected");
+    assert!(diags.iter().any(|d| d.code == "E1102"), "{diags:?}");
+}
+
 /// D-MEM1 S9 / #649: any list operation that may change backing storage is
 /// exclusive with a live view.
 #[test]

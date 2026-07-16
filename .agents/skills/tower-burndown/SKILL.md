@@ -11,9 +11,9 @@ Act only as orchestrator. Inventory, prioritize, delegate, review, integrate, ve
 
 Read `../tower/SKILL.md` completely before acting. Its live-data, scope, lane, CLI, criteria, owner-gate, and done rules are mandatory.
 
-Read `../tower-ballot/SKILL.md` before raising or reviewing an owner decision. Read `../tower-setup/SKILL.md` only when Tower is missing or misconfigured. Also read the repository `AGENTS.md`, its required files, and any user-named orchestration prompt.
+Read `../tower-ballot/SKILL.md` before raising or reviewing an owner decision. Read `../tower-setup/SKILL.md` only when Tower is missing or misconfigured. Also read the repository `AGENTS.md` and any user-named prompt. Load domain specs only when the selected card triggers them.
 
-Inspect live Tower state, Git state, claims, worktrees, and running agents. Treat card state, decisions, criteria, logs, and current source as truth. Old plans and completion claims are evidence to verify, not facts to trust. Use `tower brief` for each selected card.
+Inspect live Tower state, Git state, claims, worktrees, and running agents. Treat ratified decisions and acceptance criteria as design authority; source is implementation state. Old plans and completion claims are evidence to verify, not facts to trust. Use `tower brief` for each selected card.
 
 Use caveman-compressed status, briefs, and agent reports unless the user requests normal prose.
 
@@ -44,23 +44,23 @@ Prefer direct current-branch work only when the checkout is clean and collision-
 - concurrent cards may touch nearby files;
 - a risky card needs independent review before integration.
 
-Name worktrees/branches by card. Merge every successful worktree, then immediately remove the worktree and delete its branch. Before ending, prove no skill-created worktree or branch remains. Never discard another agent's dirty work.
+Name and record worktrees/branches by card and owner. Integrate every successful worktree promptly, verify the integrated diff, then immediately remove the worktree and temporary branch. If work stops, commit only a coherent owned checkpoint, log exact resume state and owner, remove the worktree, and retain only the named branch. Before ending, prove no skill-created worktree remains. Never discard another agent's dirty work.
 
 ## Scope models
 
-Use only available 5.6 model tiers and state the tier in every brief:
-
-- **Luna:** read-only inventory, grep, stale-state reconciliation, simple docs/mechanical changes with obvious proof.
-- **Terra:** default implementation and review tier; ordinary Rust, tests, tooling, focused refactors.
-- **Sol:** architecture, security, type-system/sema, subtle correctness or false-green review, complex planning, cross-layer changes.
-
-Do not spend Sol on routine work. Escalate Terra work to Sol review when scope expands across layers, security boundaries, semantic phases, or complex test oracles.
+Use GPT-5.6 Sol by default and state its effort in every brief. Use low effort
+for bounded mechanics, medium for normal implementation, and high/xhigh for
+architecture, compiler semantics, hard debugging, and first-pass review.
+Prefer changing Sol effort over changing model families. Terra performs the
+mandatory second review; use it elsewhere only for a recorded task-specific
+advantage. Luna requires an owner request or measured stable advantage on
+high-volume fully mechanical work.
 
 ## Enforce one agent layer
 
 The orchestrator may spawn subagents. Subagents must never spawn subagents. State `no subagents` in every brief.
 
-Use at most the harness concurrency ceiling. Prefer multiple disjoint builders when the user prioritizes throughput. Reserve or rotate one slot for review as builders finish. If model capacity fails, preserve the claim/worktree and retry with another correctly scoped agent; do not duplicate ownership.
+Use at most the harness concurrency ceiling. One implementer owns each coherent change; parallel builders must have disjoint cards and paths. Reserve capacity for sequential reviews. If capacity fails, log a handoff and retry without duplicating ownership or leaving an untracked worktree.
 
 ## Prepare each card
 
@@ -69,7 +69,7 @@ Before implementation:
 1. Check owner gates, blockers, decisions, claims, and current source truth.
 2. Add measurable criteria if absent. Criteria must test behavior, not file existence or assertions.
 3. Claim the card with the builder identity.
-4. Create a clean checkpoint or isolated worktree.
+4. Create an isolated worktree for concurrent writes, or confirm direct-tree path ownership. Never use `git add -A`; stage only owned paths.
 5. Give one self-contained brief: goal, exact paths, ratified decisions, criteria, invariants, collision limits, focused tests, and `no full suite; orchestrator owns major-push closeout`.
 
 Use one compressed investigator for a tranche when it avoids repeated discovery. Do not spawn an agent for a single command.
@@ -88,7 +88,7 @@ Require:
 - docs/spec/examples/diagnostics required by repository invariants;
 - clean final diff and no unrelated edits.
 
-Never trust a builder's `done`. Assign an independent reviewer whose identity differs from the builder. The reviewer must inspect the diff and evidence, target false-green paths, and return exact findings. Send findings back to the same builder; re-review only changed findings plus regression risk. Merge only after no material findings remain.
+Never trust a builder's `done`. Assign a fresh Sol reviewer whose identity differs from the builder. It inspects the diff and evidence, targets false-green paths, and returns exact findings without implementing. Send findings to the same builder and recheck material fixes. Then assign a fresh Terra reviewer to independently repeat the gate on the resulting patch. The builder fixes its findings and Terra rechecks material fixes. Merge only after both reviews are clear.
 
 ## Test budget
 
@@ -117,10 +117,10 @@ Tower is the recovery log. Update it at major checkpoints:
 - focused tests and temporary mutation evidence;
 - handoff before release/failure/capacity stop;
 - builder criteria met;
-- independent criteria verified;
+- Sol review cleared, then Terra criteria verification cleared;
 - merge commit and final lane.
 
-Use fresh revisions or optimistic concurrency where supported. Never hand-edit Tower data. If an agent fails, preserve its worktree, inspect its diff as untrusted inherited work, log what exists/what remains, then hand the same card to one replacement agent.
+Use fresh revisions or optimistic concurrency where supported. Never hand-edit Tower data. If an agent fails, inspect its diff as untrusted inherited work, commit only a coherent owned checkpoint worth retaining, log what exists and what remains, remove its worktree, then hand the named branch to one replacement agent. Do not preserve an orphaned worktree indefinitely.
 
 Do not mark owner-gated criteria met. Merge safe local containment if useful, then leave the card building with an explicit owner handoff.
 
@@ -130,12 +130,12 @@ Do not mark owner-gated criteria met. Merge safe local containment if useful, th
 - Scout several adjacent cards in one read-only tranche.
 - Reuse completed agents for follow-up tasks when the harness limits threads.
 - Print only concise state deltas, not whole cards or logs.
-- Use one reviewer pass per card unless findings require a targeted re-review.
+- Use exactly the required Sol review followed by Terra review; findings receive targeted rechecks before the next gate.
 - Prefer evidence references, commit IDs, counts, and commands over narrative.
 - Keep the next safe lane prepared while active builders run.
 
 ## Completion
 
-A card is complete only when implementation is merged, focused proof passes, all builder criteria are met, a different agent verifies them, Tower is updated, and its worktree/branch is deleted. A campaign is complete only when the requested scope is empty except frozen/owner-blocked cards, the orchestrator's major-push closeout suite has passed, and no claims, dirty worktrees, or temporary artifacts are orphaned.
+A card is complete only when implementation is integrated, focused proof passes, all builder criteria are met, the Sol and Terra reviews clear in order, Tower is updated, and its worktree/temporary branch is deleted. A campaign is complete only when the requested scope is empty except frozen/owner-blocked cards, the orchestrator's major-push closeout suite has passed, and no claims, dirty worktrees, temporary branches, or artifacts are orphaned.
 
 End with a terse report: cards closed, cards advanced, owner gates, focused/broader test results, current active claims, and worktree cleanup proof.

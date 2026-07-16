@@ -1,4 +1,4 @@
-use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, Stmt, Type};
+use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, PlaceAccess, Stmt, Type, UnOp};
 use crate::Codegen::Cx;
 #[cfg(test)]
 use crate::Codegen::build_cx;
@@ -30,21 +30,111 @@ use crate::Syntax;
 use std::collections::HashMap;
 
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    if !cx.debug_linemap {
-        return stmts.iter().map(|s| lower_stmt(s, cx, env)).collect();
-    }
-    // D-DBG3 step 2 (dap-debugger): native `jet debug` build — interleave a
-    // `LineMarker` ahead of every statement so the generated Rust carries a
-    // rust-line -> jet-line table (`TStmt::LineMarker`'s doc). Off by default, so
-    // every other build (incl. the JIT tier, which never sets `debug_linemap`)
-    // is unaffected — `Vec<TStmt>` doubles in length ONLY on this path.
-    let mut out = Vec::with_capacity(stmts.len() * 2);
-    for s in stmts {
-        let line = crate::Diagnostics::span_line_col(&cx.src, s.span().start).0;
-        out.push(TStmt::LineMarker(line));
+    let mut out = Vec::with_capacity(stmts.len() * if cx.debug_linemap { 2 } else { 1 });
+    let mut index = 0;
+    while index < stmts.len() {
+        if let Some(mut group) = split_view_group(stmts, index, cx) {
+            if cx.debug_linemap {
+                out.push(TStmt::LineMarker(group[0].line));
+            }
+            let owner = lower_expr(&group[0].owner, cx, env);
+            group.sort_by_key(|view| view.start);
+            let mut views = Vec::with_capacity(group.len());
+            for view in &group {
+                env.bind(&view.name, mangle(&view.name), view.ty.clone());
+                views.push((
+                    view.name.clone(),
+                    view.start,
+                    view.end,
+                    view.write,
+                    view.line,
+                ));
+            }
+            out.push(TStmt::SplitViews { owner, views });
+            index += group.len();
+            continue;
+        }
+        let s = &stmts[index];
+        if cx.debug_linemap {
+            let line = crate::Diagnostics::span_line_col(&cx.src, s.span().start).0;
+            out.push(TStmt::LineMarker(line));
+        }
         out.push(lower_stmt(s, cx, env));
+        index += 1;
     }
     out
+}
+
+#[derive(Clone)]
+struct SplitViewCandidate {
+    owner: Expr,
+    owner_name: String,
+    name: String,
+    ty: Option<Type>,
+    start: i64,
+    end: i64,
+    write: bool,
+    line: usize,
+}
+
+fn const_place_bound(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Int(value, ..) => Some(*value),
+        Expr::Unary(UnOp::Neg, inner, _) => const_place_bound(inner)?.checked_neg(),
+        Expr::Paren(inner, _) => const_place_bound(inner),
+        _ => None,
+    }
+}
+
+fn split_view_candidate(stmt: &Stmt, cx: &Cx) -> Option<SplitViewCandidate> {
+    let Stmt::Val(binding) = stmt else {
+        return None;
+    };
+    let Expr::Place(inner, access, _) = &binding.init else {
+        return None;
+    };
+    let Expr::Slice {
+        base, start, end, ..
+    } = inner.as_ref()
+    else {
+        return None;
+    };
+    let Expr::Ident(owner_name, _) = base.as_ref() else {
+        return None;
+    };
+    Some(SplitViewCandidate {
+        owner: (**base).clone(),
+        owner_name: owner_name.clone(),
+        name: binding.name.clone(),
+        ty: binding.ty.clone(),
+        start: const_place_bound(start)?,
+        end: const_place_bound(end)?,
+        write: matches!(access, PlaceAccess::Write),
+        line: crate::Diagnostics::span_line_col(&cx.src, binding.name_span.start).0,
+    })
+}
+
+fn split_view_group(stmts: &[Stmt], first: usize, cx: &Cx) -> Option<Vec<SplitViewCandidate>> {
+    let head = split_view_candidate(&stmts[first], cx)?;
+    let group: Vec<_> = stmts[first..]
+        .iter()
+        .map_while(|stmt| {
+            let view = split_view_candidate(stmt, cx)?;
+            (view.owner_name == head.owner_name).then_some(view)
+        })
+        .collect();
+    if group.len() < 2
+        || !group.iter().any(|view| view.write)
+        || group.iter().enumerate().any(|(i, a)| {
+            group
+                .iter()
+                .skip(i + 1)
+                .any(|b| !(a.end < b.start || b.end < a.start))
+        })
+    {
+        return None;
+    }
+    Some(group)
 }
 
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
@@ -668,7 +758,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         Some(args[0].clone())
                     }
                     // D-DYNARRAY1: `loop x in window` — a `View<T>`'s element type.
-                    Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                    Type::Apply { name, args }
+                        if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 => {
                         Some(args[0].clone())
                     }
                     _ => None,

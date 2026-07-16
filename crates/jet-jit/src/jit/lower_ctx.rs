@@ -287,6 +287,9 @@ impl LowerCtx<'_, '_> {
                 self.vars.insert(TIR::local_place(name), var);
                 self.var_tys.insert(TIR::local_place(name), init.ty.clone());
             }
+            TStmt::SplitViews { .. } => {
+                return Err("jit split views unsupported".to_string());
+            }
             // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()`. The coverage gate
             // (`resident_safe_stmt`) admitted only this exact shape: a 2-element
             // `TupleDestructure` whose init is the `tasks.channel` producer, canonical

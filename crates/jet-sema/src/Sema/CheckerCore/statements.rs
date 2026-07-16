@@ -793,7 +793,7 @@ impl<'a> Checker<'a> {
                             // and a fresh `.view(...)` call made right in the
                             // `return` (`return incidents.view(0..2)`) — the latter
                             // needs `view_call_source` directly.
-                            if matches!(&rt, Type::Apply { name, .. } if name == "View") {
+                            if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                                 if let Expr::Ident(n, nspan) = &*e {
                                     if self.is_list_view(n) {
                                         self.report_view_escape(n, "be returned", *nspan);
@@ -1159,7 +1159,7 @@ impl<'a> Checker<'a> {
                                 // D-DYNARRAY1: `loop x in window` — a `View<T>` iterates its
                                 // elements read-only, same shape as `loop x in a_list`.
                                 Some(Type::Apply { name, args })
-                                    if name == "View" && args.len() == 1 =>
+                                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
                                 {
                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
                                 }

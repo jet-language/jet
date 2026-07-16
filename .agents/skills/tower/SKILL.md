@@ -56,13 +56,14 @@ surfaces, don't silence it.
 
 1. `tower status` for the overview, then answer any open questions first
    (`tower question list --open`).
-2. `tower brief --agent claude-main` — one call replaces reading
+2. `tower brief --agent <agent-name>` — one call replaces reading
    `status`/`next`/`card show`/`decision show`/`question list` separately:
-   picks the top card (or `tower brief '#N' --agent claude-main` for a
+   picks the top card (or `tower brief '#N' --agent <agent-name>` for a
    specific one) and claims it in the same step (claimed by someone else →
    `E_CLAIMED`, pick another). The packet is everything needed to start:
    card, live blockers, criteria, every linked decision verbatim, open
-   questions, refs, recent log, rules — no other reads needed.
+   questions, refs, recent log, and board rules. Inspect the relevant source,
+   tests, and only the authoritative spec sections the card triggers.
 3. **BALLOT FIRST — before any code on the card.** Enumerate every owner-gate
    it contains: new user-facing syntax, a new stdlib external dep (I6), an
    invariant carve-out, any owner-only approval. Queue EVERY gate as a
@@ -74,20 +75,22 @@ surfaces, don't silence it.
    structured recommendation); dense plain-language fields also fail. Save an
    unfinished one with `--draft`, finish later with `decision update <id>
    --ready`.
-4. Do the work per AGENTS.md: failing test first → spec → parser → sema →
-   codegen → scoped targeted tests → independent review → docs. Only the
+4. Do the work per AGENTS.md with `ponytail:ponytail`: failing test first →
+   smallest complete vertical implementation → scoped targeted tests → docs →
+   sequential Sol and Terra reviews. Only the
    orchestrator runs the full suite, once after a major push on its closeout or
    blocking card; CI runs it again. Invariants I1–I8 hold. Delegate with the
-   project agents (`jet-impl` implement, `jet-verify` verify, `jet-ballot`
-   ballots) — caveman + rules are baked into them.
+   project agents (`jet-impl` implement, `jet-verify` review, `jet-ballot`
+   ballots) when available. One implementer owns each coherent patch.
 5. Advance honestly, with attribution and a log entry:
    `tower card update '#N' --phase building --log "…" --by claude-main`.
-   `verify`→`done` only after real independent verification (verify skill;
+   `verify`→`done` only after sequential fresh Sol and Terra verification (verify skill;
    never trust a builder's green). Finish EVERY exit
    criterion before touching the next card; "step N done" ≠ card done.
    Cards with a machine-checked `criteria[]` list: meet each item as you land
    it (`tower card criteria '#N' --meet n --evidence "…" --by claude-main`),
-   then get a *different* agent/session to verify (`--verify n`) —
+   log the Sol review, then get the Terra reviewer to record the final
+   independent criterion verification (`--verify n`) —
    `--phase done` is refused (`E_CRITERIA`) while any item is unverified, and
    refused (`E_CRITERIA_SELF`) if the verifier is also the builder. A card
    flagged `needsAcceptance` mints an owner accept/bounce ballot once its
@@ -107,8 +110,8 @@ surfaces, don't silence it.
 parser→sema→codegen wired and reachable from real `.jet` source; every new
 diagnostic has a code in `docs/spec/diagnostics.md` **and** a `tests/ui`
 snapshot (I4); runnable example with golden output where user-visible (I5);
-scoped targeted proof passes and a different agent reviews it; docs match
-behavior. Major-push closeout additionally requires the orchestrator's one full
+  scoped targeted proof passes and fresh Sol then Terra reviewers clear it;
+docs match behavior. Major-push closeout additionally requires the orchestrator's one full
 suite run. A ratified
 decision may sit unbuilt **only** while gated on an unratified upstream
 decision — the owner's answer on an unblocked decision IS the "go".
@@ -175,9 +178,15 @@ manual detach any more — let the decision retire on its own, or
 
 ## Rules
 
-- Parallelise independent in-scope cards with sub-agents (`jet-impl` /
-  `jet-verify` / `jet-ballot`; opus for design); one layer deep; no worktrees
-  unless the owner asks. Checkpoint-commit before delegating.
+- Use GPT-5.6 Sol by default and tune its effort. Terra is the required second
+  reviewer and is otherwise used only for a recorded task-specific advantage.
+- One implementer owns a coherent change. Review in order: fresh Sol, fixes and
+  recheck, then fresh Terra, fixes and recheck. Reviewers never implement.
+- Parallelise only disjoint in-scope cards; one agent layer. Worktrees are
+  allowed for write isolation, but successful work must be integrated promptly
+  and every task-created worktree and temporary branch removed before close.
+- Never checkpoint with `git add -A`. Stage and commit only paths owned by the
+  task; never sweep another agent's work into a commit.
 - Always `--by <agent-name>` on writes; claims prevent double-work.
 - `--expect-rev N` for read-modify-write races (exit 2 → re-read, retry).
 - Don't close anything you haven't verified. If board and reality disagree,

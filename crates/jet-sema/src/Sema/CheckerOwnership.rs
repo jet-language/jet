@@ -930,7 +930,7 @@ impl<'a> Checker<'a> {
             // D-DYNARRAY1 (E2303, reported as E1102): a `View<T>` is a borrow into
             // its owner's backing storage — it can never cross a task/channel
             // boundary, the same rule a `-> view`/`ref` value already gets.
-            Type::Apply { name, .. } if name == "View" => Some(SendabilityProblem {
+            Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut") => Some(SendabilityProblem {
                 root: None,
                 path: Vec::new(),
                 kind: SendProblemKind::ViewBorrow,

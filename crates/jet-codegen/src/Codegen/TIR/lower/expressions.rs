@@ -1783,7 +1783,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 Type::Map { value, .. } => (**value).clone(),
                 Type::FixedList { elem, .. } => (**elem).clone(),
                 // D-DYNARRAY1: `window[i]` on a `View<T>`.
-                Type::Apply { name, args } if name == "View" && args.len() == 1 => args[0].clone(),
+                Type::Apply { name, args }
+                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                {
+                    args[0].clone()
+                }
                 _ => Type::Int,
             };
             // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
