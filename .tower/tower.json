@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 664,
-    "rev": 8067,
+    "nextNum": 665,
+    "rev": 8077,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15249,6 +15249,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-07-16T00:17:43.128Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:05:48.962Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:05:48.962Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:05:48.962Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:05:48.962Z"
         }
       ],
       "refs": [
@@ -17016,13 +17052,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P0",
       "plan": "Implement D-SHAPE-PLACE1=A as one place law across whole values, fields, indexes, and ranges: bare place is a read-only non-copying projection when sema can prove it; `&place` is an exclusive mutable projection; `~place` is an owned copy. Unify with #649 provenance/alias facts and D-MEM-VIEWRET1 public returned/stored views. Prove invalidation, resize, overlap, nested places, call effects, temporaries, branches, loops, generics, tasks, TIR/AOT/dev parity, diagnostics, docs/examples/grammars/snapshots. Remove local `.view()`/`.view_mut()` alternatives.",
       "blockedBy": [],
       "workOrder": 33,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "Scout mapped full surface (5-slice plan). BLOCKED on owner gate: D-SHAPE-PLACE1's 'retire View<T> surface' conflicts with ratified D-MEM-VIEWRET1 (View<T>/ViewMut<T> across returns/fields) and D-COMPUTE-TYPE1 (View<T> = sole compute projection). Marks are second-class (no store/return) so retiring View<T> outright deletes the only first-class window mechanism. Plus 5 load-bearing maximal-place-law edge cases (disjoint writes, window liveness, call-result copy, method-receiver write, calls in range bounds) the ratified text leaves open. Balloting as D-SHAPE-PLACE2 (coexist vs replace + law-details table). No implementation until owner rules."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -21390,12 +21431,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Fix canonicality once in shared `jet_auth_b64url_decode`: reject impossible residual lengths and any nonzero unused trailing bits before returning bytes, while preserving the accepted URL alphabet and unpadded canonical form. Audit every decoder caller so stricter rejection is intentional. In JWT verification, map signature-segment decode/canonicality failure to InvalidSignature without changing header or payload error contracts. Add exhaustive last-character alias regressions for both padding-bit widths, canonical RFC vectors, malformed alphabet/length cases, and an end-to-end token whose altered signature text formerly verified. Rebuild the include_str-embedded prelude before smoke tests. Reproduce the key_rotation flake independently; if it survives this fix, raise a separate root-cause card rather than folding unrelated signing nondeterminism into this patch.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "base64url decoder now rejects non-canonical encodings (nonzero trailing bits, bad chars, len%4==1); signature-part decode failure maps to InvalidSignature; sibling Source/Publish/Sign.rs base64 decoder tightened to exact-canonical. Orchestrator re-ran core_auth_verify_jwt 10/10 deterministic green after rebuild (was ~50% red). Changes committed via concurrent owner sweep 2268e8113/df4865d32. key_rotation flake diagnosed as separate HOME-race → #664."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -21441,6 +21487,27 @@
       "created": "2026-07-16T00:42:40.830Z",
       "updated": "2026-07-16",
       "claimedAt": "2026-07-16T00:43:06.062Z"
+    },
+    {
+      "id": "c0a11xwo",
+      "num": 664,
+      "title": "Test isolation: key_rotation_warns_not_errors flakes on HOME/helper race",
+      "body": "Full-suite flake (verify-full 2026-07-15, ~intermittent): tests/pkg.rs:3782 key_rotation_warns_not_errors reds with E1246 signature-verification-failed. NOT the base64url canonicality bug (#663) — canonical generated signatures don't explain genuine-signature mismatch. Worker diagnosis (isolated 10x green): process-global HOME race. Tests overwrite a cache-selected crypto helper while mutating HOME at tests/pkg.rs:73, but KEYS_LOCK (tests/pkg.rs:3423) guards only JET_KEYS_DIR; concurrent sign/verify select different real/fake helpers under parallel gate load. Fix: widen the test lock to cover HOME/helper selection, or make helper selection not read process-global HOME. Test-only; signing path fail-closed behavior untouched.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-16T01:07:34.542Z",
+      "updated": "2026-07-16"
     }
   ],
   "decisions": [
@@ -40158,9 +40225,11 @@
       },
       "hybrid": null,
       "checkInstructions": null,
-      "draft": true,
-      "status": "open",
-      "created": "2026-07-16T00:16:32.632Z"
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-16T00:16:32.632Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-16"
     },
     {
       "id": "D-QUANTITY-DECL1",
@@ -40168,42 +40237,42 @@
       "group": "syntax",
       "title": "How does a package declare scaled and affine units?",
       "gist": "Choose one declaration that gives units exact scale, optional offset, and stable cross-package identity.",
-      "lesson": "D-QUAL3 already mints concrete named types and literals: `#UnitFamily(currency) { usd, eur, gbp }`; `12.50usd` has type `Usd`, whose identity includes its canonical family/member declaration, not spelling alone. D-SHAPE-QUANTITY1 adds compiler-known dimensions. Scaled and affine units need exact rational metadata. Conversion direction is `canonical = stored * scale + offset`; inverse is `(canonical - offset) / scale`. Public API snapshots must record dimension, canonical base, scale, offset, and package provenance so conflicting declarations fail and changes are semver-visible.",
+      "lesson": "Under D-SHAPE2=A, D-QUAL3 retains its family semantics through the typed applied rule `@UnitFamily(currency) { usd, eur, gbp }`; `12.50usd` has type `Usd`, identified by its canonical family/member declaration. D-SHAPE-QUANTITY1 adds compiler-known dimensions. Scaled and affine units need exact rational metadata. Conversion is `canonical = stored * scale + offset`; inverse is `(canonical - offset) / scale`. API snapshots record dimension, base, scale, offset, and package provenance so conflicts fail and changes are semver-visible. This ballot changes unit metadata, not the D-SHAPE2 marker migration.",
       "explainer": "",
       "story": "A robotics package measures millimeters while a mapping package publishes meters. A climate package uses Celsius points and Kelvin deltas. Their values meet in one application. The compiler must prove compatible dimensions, apply exact conversions, and reject a second package that quietly redefines millimeter as 1/100 meter.",
-      "inWild": "Package `core.units.si` owns closed Length and Temperature families. Consumers write `use core.units.si as si` and refer to `si.Meter`; the family/member declaration remains the canonical identity. A package may declare its own family, but cannot reopen a foreign one.",
+      "inWild": "Package `core.units.si` owns closed Length and Temperature families through typed `@UnitFamily` rules. Consumers write `use core.units.si as si` and refer to `si.Meter`; the family/member declaration remains the canonical identity. A package may declare its own family, but cannot reopen a foreign one.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Extend closed #UnitFamily declarations",
-          "detail": "Extend the existing `#UnitFamily` declaration with one canonical base and exact rational scale/offset metadata. A family is closed in its declaring package; this option does not invent downstream reopening syntax. Other packages consume it through ordinary `use ... as ...` qualification or declare a distinct package-owned family. Existing nominal families such as currency stay unchanged.",
+          "name": "Extend closed @UnitFamily declarations",
+          "detail": "Extend the post-D-SHAPE2 `@UnitFamily` typed rule with one canonical base and exact rational scale/offset metadata. D-QUAL3's family and generated-type semantics remain unchanged. A family is closed in its declaring package; this option invents no downstream reopening syntax. Other packages consume it through ordinary `use ... as ...` qualification or declare a distinct package-owned family.",
           "technical": "For every member, `canonical = stored * scale + offset`; inverse conversion subtracts offset, then divides by scale. Metadata normalizes as arbitrary-precision rationals at compile time. Identity is the package-qualified family/member declaration. Duplicate bases or members are errors; a same-spelled member in another family is distinct, never silently unified.",
-          "code": "#UnitFamily(currency) { usd, eur, gbp }\nprice :: 12.50usd  // Usd; unchanged D-QUAL3 identity\n\n#UnitFamily(Length, base: meter) {\n    meter\n    millimeter(scale: 1/1000)\n    foot(scale: 381/1250)\n}\n\n#UnitFamily(Temperature, base: kelvin) {\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}\n// kelvin = celsius * 1 + 27315/100"
+          "code": "@UnitFamily(currency) { usd, eur, gbp }\nprice :: 12.50usd  // Usd; unchanged D-QUAL3 identity\n\n@UnitFamily(Length, base: meter) {\n    meter\n    millimeter(scale: 1/1000)\n    foot(scale: 381/1250)\n}\n\n@UnitFamily(Temperature, base: kelvin) {\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}\n// kelvin = celsius * 1 + 27315/100"
         },
         {
           "key": "B",
           "name": "Replace UnitFamily with dimension blocks",
-          "detail": "Introduce a dedicated `dimension` declaration. Choosing B explicitly supersedes D-QUAL3's `#UnitFamily` declaration and D-SHAPE2's allocation of that marker family; every existing family, including currency, migrates to a replacement nominal or dimensional block. This is a law change, not an alias.",
-          "technical": "Syntax.rs removes UnitFamily and reserves `dimension`, `base`, `unit`, `point`, and the nominal replacement. Formatter/codemod migrate old declarations; retired source follows normal retired-spelling diagnostics. Cross-package identity and the same exact canonical conversion formula match A.",
+          "detail": "Introduce a dedicated `dimension` declaration. Choosing B explicitly supersedes D-QUAL3's `@UnitFamily` mechanism after D-SHAPE2. It removes the UnitFamily Rule while retaining D-SHAPE2's one-`@` applied-rule system for every other Rule; `#` remains free. Every existing family, including currency, migrates to a replacement nominal or dimensional block.",
+          "technical": "Syntax.rs removes the UnitFamily Rule and reserves `dimension`, `base`, `unit`, `point`, and the nominal replacement. Formatter/codemod migrate old declarations; retired source follows normal retired-spelling diagnostics. Cross-package identity and the same exact canonical conversion formula match A.",
           "code": "dimension Length {\n    base Meter\n    unit Millimeter = Meter * 1/1000\n    unit Foot = Meter * 381/1250\n}\n\ndimension Temperature {\n    base Kelvin\n    point Celsius = Kelvin + 27315/100\n}\n\nnominal family currency { usd, eur, gbp }"
         },
         {
           "key": "C",
           "name": "Closed Core dimensional registry",
-          "detail": "Only Core may declare dimensions and dimensional units. Packages consume named dimensional types but cannot add them. Existing D-QUAL3 nominal families such as currency remain package declarations with their current identity.",
+          "detail": "Only Core may declare dimensions and dimensional units. Packages consume named dimensional types but cannot add them. Existing post-D-SHAPE2 D-QUAL3 nominal families remain package-owned `@UnitFamily` rules with their current semantics and identity.",
           "technical": "The compiler ships a versioned dimensional registry using the same canonical conversion formula. Package dimensional declarations are rejected. Registry changes follow toolchain compatibility; D-QUAL3 nominal family identity remains package-qualified.",
-          "code": "#UnitFamily(currency) { usd, eur, gbp }\nuse core.units.si as si\n\nfn distance() -> si.Meter { si.Meter.from_int(1)? }\n// A package dimensional declaration for Furlong is rejected; request a Core unit."
+          "code": "@UnitFamily(currency) { usd, eur, gbp }\nuse core.units.si as si\n\nfn distance() -> si.Meter { si.Meter.from_int(1)? }\n// A package dimensional declaration for Furlong is rejected; request a Core unit."
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "A gives D-SHAPE-QUANTITY1 exact compiler facts while extending Jet's existing unit declaration mechanism. Beginners consume generated named types; experts define closed package-owned domains with auditable identity.",
+        "why": "A adds exact dimensional metadata to the post-D-SHAPE2 D-QUAL3 `@UnitFamily` mechanism without changing its family or generated-type semantics. Beginners consume named types; experts define closed package-owned domains with auditable identity.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "B supersedes two ratified syntax laws and migrates every existing unit family without a semantic gain."
+            "reason": "B supersedes the ratified D-QUAL3 UnitFamily mechanism and migrates every existing family without a semantic gain."
           },
           {
             "key": "C",
@@ -40214,9 +40283,11 @@
       },
       "hybrid": null,
       "checkInstructions": null,
-      "draft": true,
-      "status": "open",
-      "created": "2026-07-16T00:16:32.847Z"
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-16T00:16:32.847Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-16"
     },
     {
       "id": "D-QUANTITY-TYPE1",
@@ -40398,8 +40469,10 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-16T01:02:39.181Z"
+      "status": "ratified",
+      "created": "2026-07-16T01:02:39.181Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-16"
     },
     {
       "id": "D-QUANTITY-CONVERT1",
@@ -41297,6 +41370,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T01:08:16.045Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c08wuixb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T01:08:11.394Z",
+      "by": "sol-e3-planner",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-DECL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T01:07:34.876Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02r8oga",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-16T01:07:34.708Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02r8oga",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T01:07:34.542Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0a11xwo",
+      "note": "Test isolation: key_rotation_warns_not_errors flakes on HOME/helper race"
+    },
+    {
+      "at": "2026-07-16T01:06:48.565Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PACKAGE-POLICY-SCOPE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-16T01:05:48.962Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EFFECT-OMIT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-16T01:05:48.962Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t32dtn",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-16T01:05:48.962Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t32dtn",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-16T01:05:48.962Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t32dtn",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-16T01:05:48.962Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t32dtn",
+      "note": "#5 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-16T01:05:43.557Z",
+      "by": "sol-e3-planner",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-DECL1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T01:05:43.452Z",
+      "by": "sol-e3-planner",
+      "action": "decision.update",
+      "ref": "D-EFFECT-OMIT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T01:04:10.448Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-QUANTITY-DECL1",
+      "note": "A"
+    },
     {
       "at": "2026-07-16T01:03:24.986Z",
       "by": "fable-clerk",
@@ -44698,104 +44869,6 @@
       "action": "card.update",
       "ref": "c0av6fpb",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:10.045Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:09.914Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2yj0nk5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:09.769Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2sj0bd9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:09.637Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1jixkit",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:05:59.042Z",
-      "by": "claude-main",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-COPY1",
-      "note": "What is the one way to write a copy?"
-    },
-    {
-      "at": "2026-07-15T13:57:59.855Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0mwjrp1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T13:57:59.722Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T13:57:18.114Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0mwjrp1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T13:57:17.967Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T13:57:17.841Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0m1zysi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T13:57:17.711Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0kxss7s",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T13:57:17.575Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0qj346l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T13:57:17.441Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c04x8do3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T13:56:59.151Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c002osb3",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
