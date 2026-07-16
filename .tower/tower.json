@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 664,
-    "rev": 8063,
+    "rev": 8067,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16398,6 +16398,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-07-16T00:34:26.767Z"
+        },
+        {
+          "n": 6,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:01:49.888Z"
+        },
+        {
+          "n": 7,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:01:49.888Z"
+        },
+        {
+          "n": 8,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:01:49.888Z"
+        },
+        {
+          "n": 9,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T01:01:49.888Z"
         }
       ],
       "refs": [
@@ -40235,8 +40271,10 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-16T00:16:33.051Z"
+      "status": "ratified",
+      "created": "2026-07-16T00:16:33.051Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-16"
     },
     {
       "id": "D-QUANTITY-POINT1",
@@ -40291,8 +40329,144 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-16T00:16:33.257Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-16"
+    },
+    {
+      "id": "D-PACKAGE-POLICY-SCOPE1",
+      "cardId": "c0bfdd1e",
+      "group": "syntax",
+      "title": "Package-echelon spelling for scoped policy settings",
+      "gist": "Choose the value shape of package.jet's policy: field that carries scoped settings like no_alloc, arena_bounded, gc, and unsafe.",
+      "lesson": "Jet's scoped settings (memory facts, gc, unsafe policy) share one placement ladder: block, function, module, package. At the three source scopes they are written as a `#Policy(...)` marker, for example `#Policy(no_alloc, arena_bounded(65536))`.\n\nThe package echelon is different. A package is described by fields in `package.jet`, such as `identity:` and `sources:`, each holding a typed `.{ ... }` value. Two prior rulings already fix where package policy lives: it belongs in the `policy:` field, not a floating marker above the fields. This ballot only decides the shape of the value that `policy:` field holds.\n\nThe nearest declaration of a key wins, unmentioned keys inherit, and `jet explain` reports the effective value plus every declaration it overrode. Package policy may only tighten safety: it can forbid unsafe code, but it can never authorize an unsafe operation, which still requires a written `#Unsafe` block or function.",
+      "explainer": "This is the package half of the ratified scope ladder. The owner ratified D-MARK-SCOPE1 with the note that package-level syntax must stay consistent within the package syntax; this ballot settles that exact spelling.",
+      "story": "Ravi ships firmware for a heap-less controller. He sets a package memory floor once in package.jet, tightens one sensor module to a smaller arena, and forbids unsafe code across the package. He needs the package spelling to read like the rest of package.jet and to trace back through jet explain when a setting surprises him.",
+      "inWild": "A firmware package sets no_alloc, zero_rc, arena_bounded(65536), and unsafe: forbid at the package. One sensor module tightens arena_bounded to 2048. A separate service package being ported from TypeScript sets a single gc key. Both use the same policy field.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Governance keys as typed fields on the policy value",
+          "detail": "The policy: field holds a typed Policy value. Each governance key is an ordinary field, matching how identity: and sources: are written. The source marker #Policy(no_alloc) and the package field no_alloc: true are the same key in two echelon-appropriate spellings.",
+          "technical": "The compiler maps each package policy field to the same key the source #Policy(...) marker uses, so the ladder and jet explain see one key. Package policy may tighten but not authorize unsafe. Reuse is reached through the ratified jet split, which extracts these fields into a Config.",
+          "code": "# package.jet — the package echelon uses the policy: field,\n# written like every other Package role field.\nidentity: .{ name: \"meter\", version: \"1.0.0\" }\nsources:  .{ roots: [\"Source\"] }\npolicy:   .{\n    no_alloc: true\n    zero_rc: true\n    arena_bounded: 65536\n    unsafe: .Forbid\n}\n\n# Source/sensor.jet — a module tightens one key with the source marker.\n#Policy(arena_bounded(2048))\nmodule sensor\n\nfn calibrate() -> Reading {\n    return sample_window()\n}\n\n$ jet explain marker Source/sensor.jet arena_bounded\neffective value: 2048\ndeclared at: Source/sensor.jet:1 (module)\noverrides:   package.jet:6 (package policy:)\n\n# The same field carries the wider family. A service ported\n# from TypeScript opts into GC with one key:\npolicy: .{ gc: true }\n\n# Package policy may only tighten safety, never authorize it:\npolicy: .{ unsafe: .Allow }\nerror[E0350]: package policy cannot authorize unsafe\n What: unsafe: .Allow would permit raw operations with no written audited region\n Why: each unsafe operation must sit inside a #Unsafe block or function\n Fix: keep unsafe: .Forbid at package scope, or write\n      #Unsafe(\"reason\") at the exact block or function"
+        },
+        {
+          "key": "B",
+          "name": "The #Policy(...) marker reused as the field value",
+          "detail": "The policy: field holds the exact #Policy(...) marker used at the source scopes. The key vocabulary is identical at every echelon, so a user learns one spelling. The trade is that policy: then reads unlike every other Package field, which holds a typed .{ ... } value.",
+          "technical": "The marker call becomes the field value. One key surface spans block, function, module, and package. Package policy still may tighten but not authorize unsafe. The Package record now holds two value shapes: typed .{ ... } for identity/sources and a #-marker for policy.",
+          "code": "# package.jet — the source marker itself becomes the field value.\nidentity: .{ name: \"meter\", version: \"1.0.0\" }\nsources:  .{ roots: [\"Source\"] }\npolicy:   #Policy(no_alloc, zero_rc, arena_bounded(65536), unsafe: .Forbid)\n\n# Source/sensor.jet — the identical marker spelling at the narrow scope.\n#Policy(arena_bounded(2048))\nmodule sensor\n\n$ jet explain marker Source/sensor.jet arena_bounded\neffective value: 2048\ndeclared at: Source/sensor.jet:1 (module)\noverrides:   package.jet:4 (package policy:)\n\n# One key vocabulary everywhere, but the record mixes value shapes:\nidentity: .{ name: \"meter\", version: \"1.0.0\" }   # typed value\npolicy:   #Policy(no_alloc)                        # marker value\n\n# unsafe still cannot widen at the package:\npolicy: #Policy(unsafe: .Allow)\nerror[E0350]: package policy cannot authorize unsafe\n Fix: keep unsafe: .Forbid, or write #Unsafe(\"reason\") at the exact site"
+        },
+        {
+          "key": "C",
+          "name": "Named Config profiles composed into policy",
+          "detail": "The policy: field composes named Config values plus inline keys. A profile such as NoHeap bundles several keys and can be shared across a monorepo's members. Even a one-key package must author or import a Config to use this path.",
+          "technical": "Config is the ratified vocabulary for a typed contribution of package facts. Here policy: takes a use: list of Config references plus inline overrides. jet explain names the contributing Config. A single package still writes a profile list even when one inline key would do.",
+          "code": "# Policies.jet — a reusable Config value.\nNoHeap: Config :: .{\n    no_alloc: true\n    zero_rc: true\n    arena_bounded: 65536\n}\n\n# package.jet — compose named Configs plus inline keys.\nidentity: .{ name: \"meter\", version: \"1.0.0\" }\nsources:  .{ roots: [\"Source\"] }\npolicy:   .{ use: [NoHeap], unsafe: .Forbid }\n\n# Source/sensor.jet\n#Policy(arena_bounded(2048))\nmodule sensor\n\n$ jet explain marker Source/sensor.jet arena_bounded\neffective value: 2048\ndeclared at: Source/sensor.jet:1 (module)\noverrides:   Policies.jet:4 (Config NoHeap, via package.jet:4)\n\n# A package with one key still needs a profile list:\npolicy: .{ use: [], unsafe: .Forbid }   # empty use: is ceremony for small packages"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust source sets lint levels with inner attributes, and Cargo added a manifest [lints] table for the package default. The manifest uses table keys, not a pasted attribute, so the package echelon reads like the rest of the manifest. This matches option A.",
+          "code": "// source scope\n#![deny(unsafe_code)]\n\n# Cargo.toml — package echelon, key/value table\n[lints.rust]\nunsafe_code = \"deny\""
+        },
+        {
+          "lang": "EditorConfig",
+          "note": "C# source suppresses a warning with a #pragma at the site, while the project sets the default severity with a key in .editorconfig. The project echelon uses a plain key, not the pragma spelling. This also matches option A.",
+          "code": "// source scope\n#pragma warning disable CA2000\n\n# .editorconfig — project echelon\ndotnet_diagnostic.CA2000.severity = error"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes policy: read like every other typed Package field, keeps each governance key identical to its source marker name, and reaches Config reuse through the already-ratified jet split. The owner's coherence note is satisfied without a second manifest spelling.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps one key vocabulary but places a #Policy(...) marker where every other Package field holds a typed value. The record then carries two value shapes and policy: reads unlike identity: and sources: beside it."
+          },
+          {
+            "key": "C",
+            "reason": "C forces even a one-key package to author or import a named Config. The ratified jet split already turns an A-shaped policy: field into a Config when reuse is needed, so C's sharing exists without a second inline spelling."
+          }
+        ],
+        "tradeoff": "A uses field spelling at the package and marker spelling at source, so a memory key has two echelon-appropriate forms. The compiler maps both to one key, and jet explain unifies provenance across the ladder."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
       "status": "open",
-      "created": "2026-07-16T00:16:33.257Z"
+      "created": "2026-07-16T01:02:39.181Z"
+    },
+    {
+      "id": "D-QUANTITY-CONVERT1",
+      "cardId": "c0t6owk6",
+      "group": "syntax",
+      "title": "How does a value change from one unit to another?",
+      "gist": "Choose how a value in one unit becomes a value in another unit of the same dimension, and what happens when that conversion cannot be exact.",
+      "lesson": "D-SHAPE-CONVERT1 already fixed the direction of every typed conversion: the destination owns it and names the source, as in `Kilometer.from_meter(x)`. That vote did not decide two things a unit system needs.\n\nFirst: may the compiler convert same-dimension units on its own? It knows Meter and Kilometer share a dimension and an exact ratio, so it could auto-convert when you mix or pass them. D-QUAL3 currently mints one distinct type per unit and rejects cross-unit mixing through E0127.\n\nSecond: what happens when a conversion loses information? On a value stored as a whole number, 1500 meter is not a whole kilometer. The conversion can fail, or the caller can pick a rounding.\n\nAffine units add one more rule from D-QUANTITY-POINT1: a point conversion applies scale and offset, a difference applies scale only. Whatever names POINT1 selects, this vote governs their exactness and direction.",
+      "explainer": "",
+      "story": "Priya writes a drone mapping tool. Her lidar reports altitude in meters; the flight-plan service returns each leg in kilometers. She adds a leg to a sensor reading, and later prints a rounded kilometer label for the map.",
+      "inWild": "// Family declared per D-QUANTITY-DECL1; Meter and Kilometer are distinct types.\nleg :: 2kilometer           // from the flight-plan service\nsensor_alt :: 1500meter     // from the lidar\nreport(leg, sensor_alt)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Explicit conversion; exact or it fails; a named rounded form for deliberate loss",
+          "detail": "A cross-unit conversion is an ordinary destination-owned conversion from D-SHAPE-CONVERT1, no new direction. The compiler never converts units on its own, so mixing stays E0127. An exact conversion succeeds; one that cannot be represented exactly in the destination returns a fallible result you handle with `?`. Deliberate loss is a separate, total call that names a rounding policy.",
+          "technical": "Sema uses the exact rational scale/offset from D-QUANTITY-DECL1. `Destination.from_source(v)` is total when the destination can hold the value exactly, otherwise fallible with a not-exact error. `Destination.from_source_rounded(v, .Nearest | .Up | .Down, digits: n)` is total. Affine conversions reuse the D-QUANTITY-POINT1 names: a point applies scale and offset, a difference applies scale only. D-QUAL3 distinct types and E0127 stay unchanged.",
+          "code": "// Beginner: bring the leg into meters so it can join the sensor reading.\nleg_m :: Meter.from_kilometer(leg)?   // 2000meter, exact, cannot fail\ntotal :: leg_m + sensor_alt           // 3500meter\n\n// Mixing units directly is still rejected (D-QUAL3 / E0127 unchanged).\nleg + sensor_alt\n// error[E0127]: cannot add Kilometer and Meter\n// fix: convert one side first, e.g. Meter.from_kilometer(leg)?\n\n// Expert: an exact conversion that does not divide evenly fails instead of guessing.\nKilometer.from_meter(sensor_alt)?\n// error: 1500 meter is not an exact number of kilometer\n// fix: choose a rounding with from_meter_rounded\n\n// Expert: deliberate lossy conversion, explicit rounding policy, total (no ?).\nlabel :: Kilometer.from_meter_rounded(sensor_alt, .Nearest)          // 2kilometer\nprecise :: Kilometer.from_meter_rounded(1543meter, .Down, digits: 2) // 1.54kilometer"
+        },
+        {
+          "key": "B",
+          "name": "Same-dimension units convert implicitly",
+          "detail": "Because the compiler knows the dimension and the exact ratio, values of the same dimension interconvert on their own. Mixing in arithmetic and passing across a boundary both work; the result normalizes to one unit. This amends D-QUAL3 and E0127: cross-unit mixing becomes legal for commensurable units. Implicit conversion is performed only when it is exact; deliberate loss still needs an explicit rounded call.",
+          "technical": "Sema inserts an exact scale/offset coercion at any same-dimension boundary and at arithmetic. A same-dimension result normalizes to the left operand's unit or the declared canonical base. A coercion that would not be exact is a compile error, not a silent round. This supersedes E0127 for commensurable units and changes what an API snapshot promises about accepted argument units.",
+          "code": "// Same dimension auto-converts; mixing just works.\ntotal :: leg + sensor_alt     // 3500meter, leg converted to meters\n\n// Passing across a boundary auto-converts too.\nfn climb_to(target: Meter) -> Meter { target }\nclimb_to(leg)                 // Kilometer accepted, converted to Meter\n\n// Binding to another unit auto-converts when exact.\nround_trip :: Kilometer = 3000meter   // 3kilometer\n\n// A non-exact implicit conversion is still an error, not a silent round.\nalt_km :: Kilometer = sensor_alt\n// error: 1500 meter is not an exact number of kilometer\n// fix: Kilometer.from_meter_rounded(sensor_alt, .Nearest)"
+        },
+        {
+          "key": "C",
+          "name": "Read a quantity as a number in a unit; no typed unit-to-unit value",
+          "detail": "Follow the ratified Duration rule (D-SHAPE-DURATIONCONVERT1) for every quantity. You never turn a Meter value into a Kilometer value. You read a quantity as a plain checked number in a chosen unit under one fixed contract, and reconstruct a typed value if you need one. One conversion mechanism covers Duration and all units.",
+          "technical": "`value.in(unit)` returns a whole `Int`, truncates toward zero, and fails on overflow, exactly as Duration does today. A fractional read uses a separate ratio reader. Holding a converted typed value requires a `Destination.from_*` reconstruction from the read number. No same-dimension typed conversion and no implicit coercion exist; E0127 stays unchanged.",
+          "code": "// Read a quantity as a number in a chosen unit; the result is an Int, not a Meter.\nleg_m :: leg.in(.Meters)?             // 2000\nalt_km :: sensor_alt.in(.Kilometers)?\n// error: 1500 meter is not a whole number of kilometer\n// fixed contract: truncates toward zero, fails on overflow\n\n// Combining across units: read both into a common unit first.\ntotal :: Meter.from_int(leg.in(.Meters)? + sensor_alt.in(.Meters)?)?  // 3500meter\n\n// To hold a value as kilometers you round-trip through a number.\nlabel :: Kilometer.from_float(sensor_alt.in_ratio(.Kilometers))       // 1.5kilometer"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Measurement converts through a destination unit and returns a typed value; it does not auto-convert when you add two measurements of different units.",
+          "code": "let m = leg.converted(to: .meters)"
+        },
+        {
+          "lang": "F#",
+          "note": "Units of measure never auto-convert between scales; the programmer multiplies by an explicit conversion constant, so a scale change is always visible in the code.",
+          "code": "let m = km * 1000.0<m/km>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reuses the ratified destination-owned direction and settles the two open questions plainly: the compiler never converts on its own, and a conversion that cannot be exact fails instead of guessing. Beginners get km-to-m that always works and one clear error the time it cannot be exact; experts get a total, precision-controlled rounded form for intended loss.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Implicit conversion amends the ratified E0127 no-mixing law and hides a scale multiply and a precision decision at every boundary, which is the silent kind of mistake the defaults exist to prevent."
+          },
+          {
+            "key": "C",
+            "reason": "C cannot hold a converted value as a typed unit without a reconstruction round-trip and drops the destination-owned typed result that every other Jet conversion produces."
+          }
+        ],
+        "tradeoff": "A same-dimension change always requires a named call; there is no `+` across units. The compiler will not bridge commensurable units on its own even when it knows their exact ratio."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T01:03:24.986Z"
     }
   ],
   "questions": [
@@ -41123,6 +41297,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T01:03:24.986Z",
+      "by": "fable-clerk",
+      "action": "decision.add",
+      "ref": "D-QUANTITY-CONVERT1",
+      "note": "How does a value change from one unit to another?"
+    },
+    {
+      "at": "2026-07-16T01:02:39.181Z",
+      "by": "fable-clerk",
+      "action": "decision.add",
+      "ref": "D-PACKAGE-POLICY-SCOPE1",
+      "note": "Package-echelon spelling for scoped policy settings"
+    },
+    {
+      "at": "2026-07-16T01:02:25.655Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-QUANTITY-TYPE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-16T01:01:49.888Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-QUANTITY-POINT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-16T01:01:49.888Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t6owk6",
+      "note": "#9 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-16T01:01:49.888Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t6owk6",
+      "note": "#8 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-16T01:01:49.888Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t6owk6",
+      "note": "#7 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-16T01:01:49.888Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0t6owk6",
+      "note": "#6 Syntax.rs entry updated"
+    },
     {
       "at": "2026-07-16T00:57:29.438Z",
       "by": "sol-e3-planner",
@@ -44566,62 +44796,6 @@
       "action": "card.update",
       "ref": "c002osb3",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T13:56:59.033Z",
-      "by": "codex-root",
-      "action": "question.answer",
-      "ref": "q0ufxgxv",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T13:56:58.937Z",
-      "by": "codex-root",
-      "action": "decision.update",
-      "ref": "D-ECO-ROOTNAME1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-15T13:47:51.841Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T13:47:51.717Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0xe5g33",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T13:46:22.325Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ts6uv1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T13:45:11.941Z",
-      "by": "codex-event-builder",
-      "action": "card.update",
-      "ref": "c0ajdb8z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T13:45:11.819Z",
-      "by": "codex-event-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0ajdb8z",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-15T13:43:23.873Z",
-      "by": "root",
-      "action": "card.criteria-add",
-      "ref": "c0ajdb8z",
-      "note": "#6 Async event terminal phase is absorbing: a deadline catch ca"
     }
   ],
   "nextNum": 368,

@@ -362,11 +362,7 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
             _ => None,
         }
     }
-    let s: Vec<u8> = s
-        .trim()
-        .bytes()
-        .filter(|&c| c != b'\n' && c != b'\r')
-        .collect();
+    let s = s.as_bytes();
     if s.len() % 4 != 0 {
         return Err("base64 length not a multiple of 4".to_string());
     }
@@ -389,6 +385,9 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
         if pad < 1 {
             out.push(n as u8);
         }
+    }
+    if base64_encode(&out).as_bytes() != s {
+        return Err("non-canonical base64 encoding".to_string());
     }
     Ok(out)
 }
