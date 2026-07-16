@@ -357,14 +357,15 @@ indexes for read and write; `.ids()` walks every live entry. A stale `Id<T>`
 precedent (examples/features/memory/pool_stale_id.jet) — not a new
 diagnostic code.
 
-### `policy no_alloc`
+### Transitive memory facts
 
-A bare module-level `policy no_alloc` (D-NOALLOC-SEM1) flags four
-allocation-shaped expressions written directly in that module's own function
-bodies — string interpolation with a `{…}` hole, `.push`/`.insert`, a
-struct/enum literal for a heap-owning type, `~` of a heap-owning type —
-as **E0921**. The check is local only: a call into another function is that
-function's own module's problem, never followed.
+`no_alloc`, `zero_rc`, and `arena_bounded(N)` are explicit memory facts on the
+D-MARK-SCOPE1 package/module/function/block ladder (D-MEM-FACTS1). Sema checks
+every reachable call, including dependencies, against the effective inherited
+facts. **E0921** identifies the incompatible source operation, prints the full
+call path, and names the effective declaration plus its provenance. An
+open-world dispatch must have a sealed target set or a signed dependency
+summary; otherwise the strict fact is unprovable and rejected.
 
 ```jet
 #Policy(no_alloc)
@@ -373,6 +374,9 @@ fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 ```
 
 (examples/features/memory/no_alloc_policy.jet)
+
+Card #644 owns the implementation migration from the shipped module-local
+`no_alloc` denylist to this transitive contract.
 
 `const NAME = value` always looks the same; the transpiler emits Rust
 `const` or `static` when the address is taken or the type needs it.

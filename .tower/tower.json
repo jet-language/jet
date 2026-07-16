@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 667,
-    "rev": 8164,
+    "rev": 8173,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19903,10 +19903,17 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Implement D-MEM-FACTS1=B using package.jet's ratified `policy:` field at package scope and @Policy at narrower source scopes; D-POLICY-WORD1, D-MARK-SCOPE1, and D-ECO-FILEROOT1 already settle location. One explicit no_alloc/zero_rc/arena_bounded/high-water vocabulary checks the full reachable call graph. Compute facts before TIR; open-world dispatch needs sealed target sets or signed summaries. Carry scope/call-path provenance into diagnostics, contracts, inspect, semver, AOT/dev, and target profiles. Allocate fresh codes; E0922 belongs to Debug.",
-      "blockedBy": [],
+      "plan": "After #657 supplies the ratified package/module/function/block policy ladder, implement only D-MEM-FACTS1=B's three facts: `no_alloc`, `zero_rc`, and `arena_bounded`. Compute honest allocator and retain/release facts over the complete reachable call graph before TIR, including generics, dynamic dispatch, FFI, dependencies, and target profiles. Open-world calls satisfy a strict fact only when sealed targets or signed summaries close the graph. `no_alloc` rejects every reachable allocation event; `zero_rc` rejects every reachable reference-count retain/release event; `arena_bounded` requires a proven bound and reports the bound/provenance, never a sampled high-water estimate. Carry effective scope and shortest violating call path into diagnostics, inspect, API/semver facts, and AOT/dev parity. Use fresh diagnostic codes; E0922 remains Debug-owned.",
+      "blockedBy": [
+        "c0bfdd1e"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Removed unratified high-water vocabulary; narrowed to no_alloc/zero_rc/arena_bounded with honest facts and direct #657 dependency."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -19940,87 +19947,54 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-PACKAGE-POLICY-SCOPE1 is reviewed/ratified before package-echelon syntax is implemented.",
+          "text": "#657's common policy ladder is complete; #534's marker migration is inherited transitively through that dependency.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:17:43.577Z"
+          "at": "2026-07-16T02:44:34.178Z"
         },
         {
           "n": 2,
-          "text": "One explicit no_alloc/zero_rc/arena_bounded fact vocabulary works identically at block, function, module, and package scopes with provenance.",
+          "text": "Only no_alloc, zero_rc, and arena_bounded are registered and accepted at package, module, function, and block scopes; no high-water fact or spelling exists.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
+          "at": "2026-07-16T02:44:34.179Z"
         },
         {
           "n": 3,
-          "text": "Reachable-call analysis includes dependencies; open-world dispatch fails strict proof unless sealed targets or signed summaries close the graph.",
+          "text": "Reachability covers dependencies, generics, dynamic dispatch, FFI, and target profiles; strict proof fails unless sealed targets or signed summaries close open-world calls.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
+          "at": "2026-07-16T02:44:34.179Z"
         },
         {
           "n": 4,
-          "text": "Arena high-water/retention, RC erasure, dynamic dispatch, generic, FFI, and target-profile hostile cases are measured and inspectable.",
+          "text": "Allocator/RC facts come from compiler/runtime events: no_alloc rejects allocation, zero_rc rejects retain/release, and arena_bounded reports a proven bound with provenance rather than sampled evidence.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
+          "at": "2026-07-16T02:44:34.179Z"
         },
         {
           "n": 5,
-          "text": "New failures use fresh registered codes (not E0922), UI snapshots, docs/examples, AOT/dev parity, independent review, and full verification.",
+          "text": "Fresh coded diagnostics, UI snapshots, inspect/API/semver projections, examples, AOT/dev parity, independent review, and full verification pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
-        },
-        {
-          "n": 6,
-          "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
-        },
-        {
-          "n": 7,
-          "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
-        },
-        {
-          "n": 8,
-          "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
-        },
-        {
-          "n": 9,
-          "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:17:43.578Z"
+          "at": "2026-07-16T02:44:34.179Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:04.876Z",
       "updated": "2026-07-16",
@@ -20166,10 +20140,15 @@
       "milestoneId": null,
       "phase": "building",
       "priority": "P0",
-      "plan": "Implement D-OPTGC1=A as one automatic #Policy(gc) path across package, module, function, and block scopes via D-MARK-SCOPE1. Retire the public core.gc/Gc<T> surface; reuse the std-only collector internally. Wire traced identity and bare traced edges, &/^/~ behavior, ownership-only escape rejection, roots, cycles, safepoints, panic/unwind, thread/task behavior, resident JIT/dev parity, and jet gc report with source, reason, and concrete ownership fixes. Add hostile graph and parity tests. No external collector.",
+      "plan": "Implement only D-DEP-GC1=A's internal std collector substrate for later frontend use. Provide one std/mem-owned traced heap with stable object identity, traced edges, roots, cycle collection, safepoints, deterministic finalization policy, panic/unwind cleanup, and defined task/thread interaction. Expose a private compiler/runtime API consumed by #658 and prove equivalent TIR/AOT/dev behavior. Keep the collector dependency-free and bounded/fail-closed on malformed metadata or impossible invariants. This card does not add package/source GC scope, automatic promotion, public `Gc<T>` migration, or `jet gc report`; #658 and #659 own those surfaces.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Restricted ownership to the internal std collector substrate; moved scope/promotion/wrapper/report work to #658/#659."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -20204,42 +20183,53 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "One private std/mem collector implements traced identity, edges, roots, cycles, safepoints, and deterministic reclamation without an external dependency.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:14:29.872Z"
+          "at": "2026-07-16T02:44:34.316Z"
         },
         {
           "n": 2,
-          "text": "syntax-decisions.md log entry",
+          "text": "Panic/unwind, task/thread interaction, root changes, cyclic graphs, and malformed metadata are bounded, fail closed, and independently tested.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:14:29.872Z"
+          "at": "2026-07-16T02:44:34.317Z"
         },
         {
           "n": 3,
-          "text": "jet devtools grammars regenerated",
+          "text": "The private collector API is the sole backend consumed by #658; TIR, AOT, and jet dev execute equivalent collector behavior.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:14:29.872Z"
+          "at": "2026-07-16T02:44:34.317Z"
         },
         {
           "n": 4,
-          "text": "snapshots re-blessed",
+          "text": "No package/module/function/block policy, automatic frontend promotion, public wrapper retirement, trace command, or report surface lands on this card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:14:29.872Z"
+          "at": "2026-07-16T02:44:34.317Z"
+        },
+        {
+          "n": 5,
+          "text": "Targeted collector tests, hostile tests, docs of the private contract, independent review, and full repository verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:34.317Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:05.131Z",
       "updated": "2026-07-16",
@@ -20256,10 +20246,15 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Implement D-SHAPE-RESOURCE2=A as one cleanup mechanism layered on existing scope-end release: `defer statement` registers LIFO work across normal, return, ?, break, continue, and unwind-safe paths; `close(^resource)` is the sole explicit terminal release for File, Lock, Connection, Arena, Bump, Pool, Fixed, and other resources. Allocator `reset()` remains a non-terminal reuse operation; allocator `free()` retires to `close(^allocator)`. Sema consumes the resource at scheduling/close, rejects use-after-close/double scheduling/non-resource close, and prevents copy. Lower through TIR for AOT/dev parity; preserve unrelated fallible-value `.drop(reason)` discard semantics.",
+      "plan": "Implement only the ratified D-SHAPE-RESOURCE2=A cleanup form: `defer close(^resource)`. The fixed form transfers and consumes the resource when scheduled, then performs that one close at scope exit across normal return, `?`, break, continue, and panic/unwind paths. `close(^resource)` remains the immediate consuming form. Reject arbitrary statement or block defer, copied/captured cleanup work, non-resource close, use after scheduling/close, and double scheduling/close. File, Lock, Connection, Arena, Bump, Pool, Fixed, and FFI resources share the one close protocol; allocator `reset()` remains non-terminal reuse and allocator `free()` retires to close. Preserve automatic scope-end release and unrelated fallible-value `.drop(reason)` semantics.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Removed unratified arbitrary statement defer; plan and criteria now cover only consuming `defer close(^resource)`."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -20293,60 +20288,54 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs, parser, formatter, and syntax-decisions.md implement only `defer statement` and `close(^resource)` for the ratified cleanup job.",
+          "text": "Syntax.rs, parser, formatter, and syntax-decisions.md accept only `defer close(^resource)` plus immediate `close(^resource)`; arbitrary statement/block defer is rejected.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:03:37.469Z"
+          "at": "2026-07-16T02:44:34.443Z"
         },
         {
           "n": 2,
-          "text": "Sema enforces resource-only close, visible ^ transfer, no copy, no use-after-close, no double close/defer, and exact ownership across every exit path.",
+          "text": "Sema restricts close to resources, consumes the ^ transfer when scheduled or closed, and rejects copy, use-after-close, double close, and double defer.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:03:37.469Z"
+          "at": "2026-07-16T02:44:34.444Z"
         },
         {
           "n": 3,
-          "text": "TIR/AOT/dev execute deferred cleanup once in LIFO order on normal, return, ?, break, continue, and panic/unwind paths without changing automatic scope release.",
+          "text": "TIR/AOT/dev execute each scheduled close exactly once on normal, return, ?, break, continue, and panic/unwind exits without changing automatic scope release.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:03:37.469Z"
+          "at": "2026-07-16T02:44:34.444Z"
         },
         {
           "n": 4,
-          "text": "File, Lock, Connection, and FFI resources share close; unrelated fallible-value discard/drop semantics are not conflated.",
+          "text": "File, Lock, Connection, allocator, and FFI resources share close; reset remains non-terminal, free retires, and fallible-value drop remains unrelated.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:03:37.469Z"
+          "at": "2026-07-16T02:44:34.444Z"
         },
         {
           "n": 5,
-          "text": "Executable examples, coded diagnostics/UI snapshots, generated grammars, docs, independent review, and full repository verification pass.",
+          "text": "Coded diagnostics/UI snapshots, executable examples/goldens, generated grammars, docs, independent review, and full verification pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T00:03:37.469Z"
-        },
-        {
-          "n": 6,
-          "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:37.469Z"
+          "at": "2026-07-16T02:44:34.444Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:05.255Z",
       "updated": "2026-07-16",
@@ -21022,10 +21011,17 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Implement D-MARK-SCOPE1=A with one compiler-owned applicability matrix at block/function/module/package scopes. D-SHAPE2 gives @Rule attachment and visible brace extent for source scopes; D-POLICY-WORD1 plus D-ECO-FILEROOT1 place package-wide policy in package.jet's `policy:` field. Project both surfaces into one inheritance/override/merge/provenance model. Package/module settings may tighten but never authorize unsafe outside user-written gates; site-only authority/taint/wire markers never widen. Prove parser/sema/diagnostics/index/inspect/AOT/dev consistency.",
-      "blockedBy": [],
+      "plan": "After #534 completes D-SHAPE2's single `@Rule` marker migration, implement only D-MARK-SCOPE1=A's common scope/applicability/provenance ladder. Package settings enter through the ratified `package.jet` `policy:` field; source rules use the post-migration `@Rule` form at module, function, or block scope. One compiler-owned registry matrix defines each rule's legal echelons, inheritance, same-key override or merge, tightening law, conflicts, and effective-source provenance. Authority, unsafe, taint, sanitizer, and wire rules cannot widen beyond their sound sites. Parser, formatter, sema, semantic index, diagnostics, and `jet explain` consume the same matrix. This card does not implement memory facts, GC promotion, a collector, or GC reports.",
+      "blockedBy": [
+        "c083ne8x"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Restricted #657 to the common ladder and provenance engine; added direct #534 dependency and excluded consumer feature work."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -21060,93 +21056,48 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every registered marker has a checked applicability entry for block, function, module, and package, including inheritance, same-key override, merge, and prohibited-scope behavior.",
+          "text": "#534's D-SHAPE2 migration is complete; every source-scope rule uses the one post-migration @Rule attachment model.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:55:47.842Z"
+          "at": "2026-07-16T02:44:34.571Z"
         },
         {
           "n": 2,
-          "text": "Parser and sema implement ratified placements and preserve effective-value provenance; #Unsafe authorization, #Grant, #Tainted, #Sanitizer, and field wire attributes cannot widen past their sound sites.",
+          "text": "Every registered rule has one checked package/module/function/block applicability row covering inheritance, override or merge, tightening, conflict, and prohibited scope.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:55:47.842Z"
+          "at": "2026-07-16T02:44:34.571Z"
         },
         {
           "n": 3,
-          "text": "Every new or changed diagnostic is registered in docs/spec/diagnostics.md and pinned by tests/ui snapshots, including invalid wide scope and conflicting override cases, as required by I4.",
+          "text": "Package policy and source rules resolve through one effective-value/provenance engine; authority, unsafe, taint, sanitizer, and wire rules cannot widen unsafely.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:55:47.842Z"
+          "at": "2026-07-16T02:44:34.571Z"
         },
         {
           "n": 4,
-          "text": "jet fmt round-trips single and grouped markers at every legal echelon without moving declarations or changing attachment.",
+          "text": "Parser, formatter, sema, semantic index, diagnostics, and jet explain read the same registry and report the effective declaration site.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:55:47.842Z"
+          "at": "2026-07-16T02:44:34.571Z"
         },
         {
           "n": 5,
-          "text": "Executable examples and expected output cover inherited memory facts, sound effect scoping, #Unsafe policy interaction, and jet explain provenance at package, module, function, and block levels.",
+          "text": "Syntax registry/docs/grammars/snapshots, invalid-scope and conflict UI tests, executable provenance examples, AOT/dev parity, independent review, and full verification pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:55:47.842Z"
-        },
-        {
-          "n": 6,
-          "text": "Targeted parser, sema, formatter, UI, golden, and dev/AOT parity tests pass; scripts/agent/jet-env full scripts/agent/verify-full.sh passes before close.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T22:55:47.842Z"
-        },
-        {
-          "n": 7,
-          "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T23:12:32.257Z"
-        },
-        {
-          "n": 8,
-          "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T23:12:32.257Z"
-        },
-        {
-          "n": 9,
-          "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T23:12:32.257Z"
-        },
-        {
-          "n": 10,
-          "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T23:12:32.257Z"
+          "at": "2026-07-16T02:44:34.571Z"
         }
       ],
       "refs": [
@@ -21169,10 +21120,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "Implement D-OPTGC1=A through D-MARK-SCOPE1's common matrix using package.jet `policy:` at package scope and @Policy at module/function/block scopes. Automatic promotion inside effective GC scope is the sole source path; retire public core.gc/Gc<T>, keep the std-only collector internal, and migrate old examples/docs. Sema promotes eligible graphs only in scope while preserving bare-read/&-write/^-take/~copy, rejects escapes to ownership-only code, and records provenance. TIR/AOT/dev use #646's corrected collector; diagnostics/examples prove all echelons, cycles, ownership neighbors, and removal of wrapper API.",
-      "blockedBy": [],
+      "plan": "After #646 supplies the private collector and #657 supplies the common policy ladder, implement D-OPTGC1=A's frontend semantics only. Register package `policy: .{ gc: true }` and post-D-SHAPE2 narrower `@Policy(gc)` through the shared matrix. Within the effective scope, sema automatically promotes eligible heap graphs to traced identity while preserving bare read, `&` write, `^` take/root transfer, and `~` deep copy; reject unproven escape into ownership-only code with effective-scope provenance. Retire the public `core.gc`/`Gc<T>` wrapper surface and migrate examples/docs so scoped promotion is the sole source path. TIR/AOT/dev route promoted graphs through #646's private collector. This card does not implement tracing or `jet gc report`; #659 owns observability.",
+      "blockedBy": [
+        "c03lc2y3",
+        "c0bfdd1e"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Assigned frontend scope/promotion/wrapper retirement only; now blocked directly by #646 collector and #657 ladder."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -21202,63 +21161,62 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Register the ratified `gc` policy key in Syntax.rs, parser, formatter, generated grammars, package model, and D-MARK-SCOPE1's shared applicability matrix without a GC-only inheritance path.",
+          "text": "The gc package key and narrower @Policy(gc) use #657's common matrix with no GC-only inheritance or provenance path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:59:02.767Z"
+          "at": "2026-07-16T02:44:34.688Z"
         },
         {
           "n": 2,
-          "text": "Sema gives opted heap values traced identity: bare stores create same-identity edges, `&` gates mutation, `^` transfers roots, `~` deep-copies, and unproven escape to ownership-only code is rejected.",
+          "text": "Sema performs automatic traced promotion only inside effective scope and preserves bare read, & write, ^ root transfer, ~ deep copy, and ownership-only escape rejection.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:59:02.767Z"
+          "at": "2026-07-16T02:44:34.689Z"
         },
         {
           "n": 3,
-          "text": "TIR, Rust emission, and jet dev execute the same GC-scoped program behavior; the D-DEP-GC1=A std-only collector remains the only backend and adds no external dependency.",
+          "text": "TIR, Rust emission, and jet dev use #646's private std collector as the sole backend with equivalent behavior and no external dependency.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:59:02.767Z"
+          "at": "2026-07-16T02:44:34.689Z"
         },
         {
           "n": 4,
-          "text": "Every new rejection has a registered diagnostic with what, why, fix text and a tests/ui snapshot; package and nested-scope inheritance errors name the effective scope.",
+          "text": "Public core.gc/Gc<T> wrappers, aliases, adapters, examples, and docs retire; scoped automatic promotion is the only source mechanism.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:59:02.767Z"
+          "at": "2026-07-16T02:44:34.689Z"
         },
         {
           "n": 5,
-          "text": "Golden examples cover package, module, function, and block opt-ins plus an ownership-default neighbor, with exact expected output under examples/features per I5.",
+          "text": "Registered diagnostics/UI snapshots and golden examples cover all four echelons, cycles, nested ownership neighbors, provenance, and wrapper migration.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:59:02.767Z"
+          "at": "2026-07-16T02:44:34.689Z"
         },
         {
           "n": 6,
-          "text": "spec.md and syntax-decisions.md describe magic-in-scope behavior and D-MEM1 interaction; targeted tests and scripts/agent/jet-env full scripts/agent/verify-full.sh pass.",
+          "text": "No trace/report command lands here; targeted tests, docs, independent review, and full repository verification pass before handoff to #659.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T22:59:02.767Z"
+          "at": "2026-07-16T02:44:34.689Z"
         }
       ],
       "refs": [
         "docs/proposals/ecosystem-shape.md",
-        "D-OPTGC1",
-        "D-MARK-SCOPE1"
+        "docs/spec/syntax-decisions.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T22:58:13.874Z",
@@ -21276,12 +21234,17 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "After #658 supplies canonical GC scope semantics, add observability only; do not build a second collector. Trace every automatic GC-backed allocation the ownership checker could not erase, with stable span, effective scope/provenance, reason, count, retained count, and allocation identity. `jet gc report` consumes that trace into deterministic TTY/NO_COLOR and versioned JSON output, groups sites, and proposes ordinary ownership or Pool<T>/Id<T> rewrites. Tracing is explicit and zero-cost when off. Prove malformed/stale traces, AOT/dev equivalence, CI thresholds, cyclic example, migration rewrite, and empty-report removal gate.",
+      "plan": "After #658 establishes the sole scoped-GC frontend path, add observability only. Instrument that path without creating another collector or promotion mechanism: record stable source span, effective scope/provenance, promotion reason, allocation identity, allocation count, and retained count. `jet gc report` consumes the versioned trace into deterministic TTY/NO_COLOR text and `--json`, groups sites, and proposes ordinary ownership or `Pool<T>`/`Id<T>` rewrites. Tracing is explicit and zero-cost when off. Prove malformed/stale trace rejection, AOT/dev equivalence, cyclic examples, migration rewrites, and the empty-report removal gate. #646 remains collector owner and #658 remains scope/promotion owner.",
       "blockedBy": [
         "c02rqnrd"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Restricted #659 to trace and `jet gc report`; collector remains #646 and frontend promotion remains #658."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -21296,63 +21259,53 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Trace mode records every automatic GC-backed allocation with stable source span, effective package/module/function/block scope, proof-failure reason, allocation count, and retained count.",
+          "text": "Trace mode observes every #658 automatic promotion with stable span, effective scope/provenance, reason, identity, allocation count, and retained count without changing collector semantics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:00:15.151Z"
+          "at": "2026-07-16T02:44:34.814Z"
         },
         {
           "n": 2,
-          "text": "Tracing is off by default, adds no cost outside an explicit report/trace run, and preserves equivalent AOT and jet dev behavior when enabled.",
+          "text": "Tracing is explicit, zero-cost when off, versioned and bounded when on, and equivalent across AOT and jet dev.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:00:15.151Z"
+          "at": "2026-07-16T02:44:34.814Z"
         },
         {
           "n": 3,
-          "text": "`jet gc report` emits deterministic TTY-aware text and versioned `--json`; `jet clean` remains the sole Hangar garbage-collection and optimization command.",
+          "text": "`jet gc report` emits deterministic TTY/NO_COLOR text and --json; malformed, stale, oversized, or incompatible traces fail with coded diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:00:15.151Z"
+          "at": "2026-07-16T02:44:34.814Z"
         },
         {
           "n": 4,
-          "text": "Each report site gives an actionable ownership fix using ordinary owned values, D-MEM1 access, or Pool<T>/Id<T>; an empty report explicitly says `#Policy(gc)` can be removed.",
+          "text": "Each site proposes ordinary ownership or Pool<T>/Id<T>; an empty report says the gc policy can be removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:00:15.151Z"
+          "at": "2026-07-16T02:44:34.814Z"
         },
         {
           "n": 5,
-          "text": "Golden examples show a cyclic GC-backed program, its report, the Pool<T>/Id<T> rewrite, and the final empty report with exact expected output per I5.",
+          "text": "Golden cyclic/report/rewrite/empty examples, CLI transcripts, docs, independent review, and full verification pass; no collector or frontend scope work is duplicated.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T23:00:15.151Z"
-        },
-        {
-          "n": 6,
-          "text": "CLI transcripts, diagnostics snapshots, docs, and migration guidance cover text/JSON/NO_COLOR behavior and malformed trace data; scripts/agent/jet-env full scripts/agent/verify-full.sh passes.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-15T23:00:15.151Z"
+          "at": "2026-07-16T02:44:34.814Z"
         }
       ],
       "refs": [
         "docs/proposals/ecosystem-shape.md",
-        "D-OPTGC1",
-        "D-MARK-SCOPE1"
+        "docs/spec/syntax-decisions.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T22:59:26.789Z",
@@ -21711,15 +21664,72 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "D-SHAPE-CASE1 is the sole current gate. After ratification, encode the chosen law as one compiler-owned category table and migrate the complete surface without compatibility aliases: A makes every identifier PascalCase; B makes every identifier snake_case and amends conflicting prior casing laws; C enforces PascalCase type-like names and snake_case value-like names. For C, immediately raise the ballot's three named follow-up decisions for effect-keyword, generic-module-template, and constant spelling before touching those ambiguous categories; unambiguous categories proceed from the ratified table. Implement lexer/parser/sema name-category checks, formatter-preserving behavior, one coded diagnostic with precise category/fix, LSP/rename support, docs/examples/snapshots/grammars, package/API migration checks, and AOT/dev-neutral behavior.",
+      "blockedBy": [
+        "D-SHAPE-CASE1"
+      ],
       "workOrder": 30.5,
       "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Added a precise outcome-conditional plan and criteria; D-SHAPE-CASE1 is the sole current blocker."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-SHAPE-CASE1 is independently reviewed and ratified before any casing migration begins.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:34.940Z"
+        },
+        {
+          "n": 2,
+          "text": "One compiler-owned category table implements the selected option exactly across types, variants, functions, methods, fields, locals, modules, units, constants, markers, config names, and generated names.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:34.941Z"
+        },
+        {
+          "n": 3,
+          "text": "If C wins, the three explicitly identified ambiguous categories receive ballot-ready follow-up decisions before implementation; no unstated casing carve-out is invented.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:34.941Z"
+        },
+        {
+          "n": 4,
+          "text": "Coded diagnostics/UI snapshots, formatter/LSP/rename behavior, API/package migration, docs/examples/grammars, and golden outputs cover every category with no compatibility alias.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:34.941Z"
+        },
+        {
+          "n": 5,
+          "text": "Independent adversarial review and full repository verification pass after the chosen law and any required follow-up rulings are implemented.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:34.941Z"
+        }
+      ],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/Syntax.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T01:30:45.016Z",
       "updated": "2026-07-16"
@@ -21733,16 +21743,82 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "Follow `docs/plans/compiler-speed.md` with measured evidence, not illustrative timings. First establish the self-speed corpus and stage timings for parse/sema/TIR/Rust emission/rustc/link plus cold/warm cache identities. Land ungated reductions that preserve behavior: linker/flag cleanup, reusable stdlib objects, relevant-digest cache reuse, incremental batch sema, and bounded parallel frontend work. D-BUILD-DEFAULT1 then selects the exact everyday profile law: A fast-codegen default, B command-split defaults, or C current optimized default. D-AOT-CRANELIFT1 independently selects A default Cranelift debug AOT with named rustc fallback, B opt-in Cranelift requiring a ballot for its exact existing-profile-compatible spelling, or C rustc-only AOT. Every backend consumes executable TIR and must match rustc across outputs, exits, diagnostics, side effects, debug info, cache invalidation, and host/target matrices; release remains the ratified optimized path unless the selected outcome says otherwise.",
+      "blockedBy": [
+        "D-BUILD-DEFAULT1",
+        "D-AOT-CRANELIFT1"
+      ],
       "workOrder": 56.5,
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e3-planner",
+          "text": "[fresh-review] Added measured conditional plan and criteria; the two open build decisions are the only current owner blockers."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A checked self-speed corpus records cold/warm end-to-end and parse/sema/TIR/emission/rustc/link stages with stable source, toolchain, host, target, profile, and cache identities.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:35.064Z"
+        },
+        {
+          "n": 2,
+          "text": "Ungated linker/flag, stdlib-object, relevant-digest cache, incremental batch-sema, and bounded parallel-frontend work preserves diagnostics and observable semantics with measured before/after evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:35.064Z"
+        },
+        {
+          "n": 3,
+          "text": "D-BUILD-DEFAULT1 is ratified and its chosen A/B/C profile mapping is implemented exactly in CLI/help/config/docs without ambient overrides or a second default.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:35.064Z"
+        },
+        {
+          "n": 4,
+          "text": "D-AOT-CRANELIFT1 is ratified; A/B/C backend routing, named fallback, and any B spelling follow the ruling and an additional ballot when the selected option explicitly requires one.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:35.064Z"
+        },
+        {
+          "n": 5,
+          "text": "Rustc-reference differential tests cover output, exit, panic, side effects, diagnostics, debug info, cache invalidation, host/target support, and AOT/dev parity; unsupported paths never become false success.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:35.064Z"
+        },
+        {
+          "n": 6,
+          "text": "Benchmarks, docs, independent adversarial review, and full repository verification pass with no unmeasured speed claim.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T02:44:35.064Z"
+        }
+      ],
       "refs": [
-        "docs/plans/compiler-speed.md"
+        "docs/plans/compiler-speed.md",
+        "docs/spec/architecture.md",
+        "docs/spec/syntax-decisions.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T01:38:26.355Z",
@@ -40735,16 +40811,16 @@
         {
           "key": "B",
           "name": "Exact implicit conversion with canonical rational results",
-          "detail": "Same-dimension code omits a conversion only when it is total for the complete source type. Mixed arithmetic uses a canonical base-unit exact-rational intermediate. It is expression-only and cannot become a field, argument, return, public type, or wire value. One destination-owned checked call chooses storage at that boundary. The scoped `explicit_units` policy requires written calls.",
-          "technical": "The compiler-inserted step is exactly the destination-owned `Destination.from_source` semantic operation with syntax omitted. It uses the same normalized scale, offset, provenance, and diagnostics. Expected-type coercion is allowed only when sema proves that operation succeeds for every value of the source representation. It never inserts a value-dependent or fallible coercion. Mixed linear plus or minus linear uses a base linear exact-rational intermediate. Delta plus or minus Delta uses a base Delta intermediate. Point plus or minus Delta and Delta plus Point use a base Point intermediate. Point minus Point uses a base Delta intermediate. Point inputs use scale plus offset; every Delta uses scale only. Point plus Point and Delta minus Point remain errors. The intermediate uses an arbitrary-precision signed numerator and positive denominator, reduced by their greatest common divisor. It has no numeric overflow and no public or Codable form. Sema rejects binding, field, collection, argument, return, export, or serialization boundaries until a destination-owned checked or rounded call from A chooses a concrete representation. `policy: .{ explicit_units: true }` sets the package floor. Post-D-SHAPE2 `@Policy(explicit_units)` may strengthen a module, function, or block. Neither form may weaken the package floor.",
-          "code": "segment :: 1meter\ncalibration :: 1foot\nwire_mm :: Millimeter.from_meter(segment + calibration)?\n// exact 1631/1250 meter intermediate; checked Millimeter storage\n\nstart :: CelsiusPoint.from_float(20.0)?\nrise :: FahrenheitDelta.from_float(9.0)?\nwire_next :: CelsiusPoint.from_kelvin_point(start + rise)?\nwire_prior :: CelsiusPoint.from_kelvin_point(start - rise)?\n// the intermediate uses the Kelvin base; one call chooses Celsius storage\n\npub fn total_mm(a: Meter, b: Foot) -> Millimeter {\n    Millimeter.from_meter(a + b)?\n}\n// Public API and Codable see only Millimeter. The intermediate has no wire form.\n\n# package.jet\npolicy: .{ explicit_units: true }\n\n@Policy(explicit_units)\nmodule dosing\n\nsegment + calibration\n// error[E0127]: explicit_units requires a written conversion\n// fix: Meter.from_foot(calibration)?"
+          "detail": "Same-dimension code omits a conversion only when it is total for the complete source type. Mixed arithmetic uses a canonical base-unit exact-rational intermediate. It is expression-only and cannot become a field, ordinary argument, return, public type, or wire value. It may flow directly into one destination-owned checked or rounded conversion call, which chooses storage and ends the intermediate. The scoped `explicit_units` policy requires written calls.",
+          "technical": "The compiler-inserted step is exactly the destination-owned `Destination.from_source` semantic operation with syntax omitted. It uses the same normalized scale, offset, provenance, and diagnostics. Expected-type coercion is allowed only when sema proves that operation succeeds for every value of the source representation. It never inserts a value-dependent or fallible coercion. Mixed linear plus or minus linear uses a base linear exact-rational intermediate. Delta plus or minus Delta uses a base Delta intermediate. Point plus or minus Delta and Delta plus Point use a base Point intermediate. Point minus Point uses a base Delta intermediate. Point inputs use scale plus offset; every Delta uses scale only. Point plus Point and Delta minus Point remain errors. The intermediate uses an arbitrary-precision signed numerator and positive denominator, reduced by their greatest common divisor. It has no numeric overflow and no public or Codable form. Sema rejects binding, field, collection, ordinary argument, return, export, or serialization boundaries. The sole boundary exemption is the direct argument of a destination-owned checked or rounded conversion from A; that call consumes the intermediate and produces a concrete representation. `policy: .{ explicit_units: true }` sets the package floor. Post-D-SHAPE2 `@Policy(explicit_units)` may strengthen a module, function, or block. Neither form may weaken the package floor.",
+          "code": "segment :: 1meter\ncalibration :: 1foot\nwire_mm :: Millimeter.from_meter(segment + calibration)?\n// exact 1631/1250 meter intermediate; direct conversion argument is allowed\n\nstart :: CelsiusPoint.from_float(20.0)?\nrise :: FahrenheitDelta.from_float(9.0)?\nwire_next :: CelsiusPoint.from_kelvin_point(start + rise)?\nwire_prior :: CelsiusPoint.from_kelvin_point(start - rise)?\n// the intermediate uses the Kelvin base; one call chooses Celsius storage\n\npub fn total_mm(a: Meter, b: Foot) -> Millimeter ? {\n    Millimeter.from_meter(a + b)?\n}\n// Public API and Codable see only Millimeter. The intermediate has no wire form.\n\n# package.jet\npolicy: .{ explicit_units: true }\n\n@Policy(explicit_units)\nmodule dosing\n\nsegment + calibration\n// error[E0127]: explicit_units requires a written conversion\n// fix: Meter.from_foot(calibration)?"
         },
         {
           "key": "C",
           "name": "Implicit only when an existing operand type is total",
           "detail": "The compiler may omit a conversion only when one existing operand type can represent every value of the other type exactly and without overflow. Mixed arithmetic prefers the left unit when both directions are total, uses the sole total direction when only one exists, and otherwise reports E0127. This avoids a new rational result representation but rejects common rational pairs.",
           "technical": "Sema tests totality over the full numeric source domain, never the current runtime value. Linear and Delta arithmetic considers the left result unit before the right. Point plus or minus Delta uses the Point unit. Delta plus Point uses the Point unit. Point minus Point considers the left Point unit before the right and returns its paired Delta. If no candidate conversion is total, the expression is rejected. Ordinary destination-owned checked and rounded calls use A's overflow and rounding laws. The `explicit_units` policy disables every omitted conversion.",
-          "code": "small :: 3meter\nfine :: 42millimeter\n\nsmall + fine\n// accepted only if one complete backing type can hold both domains\n\n1meter + 1foot\n// error[E0127]: neither existing result type is total for this pair\n// fix: write a checked conversion; no implicit result exists here"
+          "code": "@UnitFamily(Length, base: meter) {\n    meter\n    centimeter(scale: 1/100)\n    survey_centimeter(scale: 1/100)\n}\n\nleft :: 3centimeter\nright :: 4survey_centimeter\nsum :: left + right\n// 7centimeter: equal scales and backing domains make both conversions total; left wins\n\n1meter + 1foot\n// error[E0127]: neither existing result type is total for this pair\n// fix: write a checked conversion; no implicit result exists here"
         }
       ],
       "comparisons": [
@@ -41825,6 +41901,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T02:44:35.164Z",
+      "by": "sol-e3-planner",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-CONVERT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-16T02:44:35.064Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c0zmoznd",
+      "note": "phase,plan,blockedBy,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T02:44:34.941Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c01wyk4u",
+      "note": "phase,plan,blockedBy,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T02:44:34.814Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c0kn6oul",
+      "note": "plan,blockedBy,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T02:44:34.689Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c02rqnrd",
+      "note": "plan,blockedBy,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T02:44:34.571Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c0bfdd1e",
+      "note": "plan,blockedBy,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T02:44:34.444Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c05n5x5o",
+      "note": "plan,blockedBy,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T02:44:34.317Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c03lc2y3",
+      "note": "plan,blockedBy,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T02:44:34.179Z",
+      "by": "sol-e3-planner",
+      "action": "card.update",
+      "ref": "c0zdv8vm",
+      "note": "plan,blockedBy,criteria,refs,logEntry"
+    },
     {
       "at": "2026-07-16T02:23:03.664Z",
       "by": "codex-663-verifier",
@@ -45261,69 +45400,6 @@
       "action": "card.add",
       "ref": "c0rxl8sx",
       "note": "Provider output parse breaks on nix store noise lines"
-    },
-    {
-      "at": "2026-07-15T18:57:09.810Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0dl51v1",
-      "note": "Full suite flake: perf probe report reuse fails under parallel gate load"
-    },
-    {
-      "at": "2026-07-15T18:17:31.569Z",
-      "by": "jet-impl-copy",
-      "action": "card.criteria-meet",
-      "ref": "c0we378g",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-15T18:07:27.279Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0we378g",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T16:50:04.445Z",
-      "by": "codex-630-verifier",
-      "action": "card.criteria-verify",
-      "ref": "c0ajdb8z",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-15T16:50:04.315Z",
-      "by": "codex-630-verifier",
-      "action": "card.criteria-verify",
-      "ref": "c0ajdb8z",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-15T16:42:02.035Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0zoq183",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T16:42:01.879Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0pj204u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T16:36:50.399Z",
-      "by": "jet-impl-copy",
-      "action": "card.update",
-      "ref": "c0we378g",
-      "note": "log"
-    },
-    {
-      "at": "2026-07-15T16:35:57.796Z",
-      "by": "jet-impl-copy",
-      "action": "card.criteria-meet",
-      "ref": "c0we378g",
-      "note": "#4"
     }
   ],
   "nextNum": 368,

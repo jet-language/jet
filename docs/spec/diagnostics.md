@@ -475,7 +475,7 @@ renumbered, and no new `W` code may be allocated.
 | E0918 | sema  | `@InlineAlways fn` had its address taken (stored, returned, or passed as a callback) instead of being called directly (D-METHODMACRO1) |
 | E0919 | sema  | `@InlineAlways fn` body exceeds the statement ceiling `@InlineAlways` enforces (D-METHODMACRO1) |
 | E0920 | parse | a function/method written with both `@Inline` and `@InlineAlways` (D-METHODMACRO1) |
-| E0921 | sema  | `#Policy(no_alloc)` floor violation — an allocation-shaped expression in the module's own function bodies (D-MEM1/S7, D-NOALLOC-SEM1) |
+| E0921 | sema  | a reachable call violates an effective `no_alloc`, `zero_rc`, or `arena_bounded(N)` memory fact; reports the source operation, full call path, effective declaration, and declaration provenance (D-MEM-FACTS1) |
 | E0922 | sema  | explicit `Debug` derive (`@Debug`, `@[.., Debug]`, body `derive Debug;`) — `Debug` auto-derives, the opt-in spelling is retired (D-MARK-DEBUG1=A) |
 | E0925 | parse | `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Task` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
@@ -1645,25 +1645,24 @@ literal's body (a separate closure, not inline text of the function).
 |------|-----|-----|
 | a function can't be both `@Inline` and `@InlineAlways`. | `@Inline` is a soft hint the compiler may ignore; `@InlineAlways` is a checked promise it must honor or reject — one declaration can't carry both meanings. | Keep one: `@Inline` to suggest inlining, `@InlineAlways` to require it. |
 
-### E0921 — `#Policy(no_alloc)` floor violation (D-MEM1/S7, D-NOALLOC-SEM1)
+### E0921 — transitive memory-fact violation (D-MEM-FACTS1)
 
-`#Policy(no_alloc)` is a module-level allocation floor (a directive at the top
-of a file). The check is **local only**: it flags an
-allocation-shaped expression written directly in the policy'd module's own
-function bodies, and never follows a call into another function — a helper
-that itself allocates is that helper's own module's problem, not this one's.
+`no_alloc`, `zero_rc`, and `arena_bounded(N)` are explicit memory facts on the
+D-MARK-SCOPE1 package/module/function/block ladder. Sema checks every reachable
+call, including dependency code, against the effective inherited facts. A
+violation points to the source allocation or other incompatible operation,
+prints the full call path, and names both the effective fact declaration and
+its provenance. Open-world dispatch must have a sealed target set or a signed
+dependency summary; otherwise the strict fact is unprovable and rejected.
 
 | What | Why | Fix |
 |------|-----|-----|
-| string interpolation allocates a new `String`. | any `"{…}"` hole builds a fresh `String` at runtime — a plain literal with no hole is one constant piece of text, not concatenation/interpolation, so it isn't flagged. | Avoid the allocation here, or move this code out of the `#Policy(no_alloc)` module. |
-| `` `.push`/`.insert` may allocate to grow this collection's heap allocation. `` | capacity headroom isn't provable at compile time in general, so every call of this shape is flagged, full stop. | Avoid the allocation here, or move this code out of the `#Policy(no_alloc)` module. |
-| constructing `{type}` here allocates — it owns heap data. | a struct/enum literal for a type with a `String`/`[T]`/`[K,V]`/`Shared<T>`/`Pool<T>` field (directly or transitively) allocates when built. | Avoid the allocation here, or move this code out of the `#Policy(no_alloc)` module. |
-| `` `copy` of `{type}` allocates — it owns heap data. `` | `copy` duplicates a value; duplicating a heap-owning type allocates a new one. | Avoid the allocation here, or move this code out of the `#Policy(no_alloc)` module. |
+| `{operation}` at `{source}` violates the effective `{fact}` declared at `{declaration}`. | `{source}` is reachable through `{call_path}` from code governed by `{fact}`; the diagnostic includes the declaration's package/module/function/block provenance. | Remove or replace the incompatible operation, call an implementation whose transitive facts satisfy the contract, or move the call outside the fact-bearing scope. |
+| `{fact}` cannot be proved through the open dispatch at `{source}`. | A strict transitive fact cannot assume that an unknown future target avoids allocation, reference counting, or excess arena use. | Seal the target set, consume a signed dependency summary that proves the fact, or move the dispatch outside the fact-bearing scope. |
 
-Coverage note: a bare list/map/string literal that isn't one of the four
-shapes above (e.g. `xs := [1, 2, 3]`) is not checked — only the ratified
-denylist is enforced; extending it is a future policy-list ballot, not a
-silent expansion here.
+Implementation note: card #644 owns migration from the shipped local
+`no_alloc` denylist to this controlling transitive E0921 contract. No E0922 is
+allocated for that migration.
 
 ### E0922 — explicit `Debug` derive is retired (D-MARK-DEBUG1=A)
 
