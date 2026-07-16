@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 665,
-    "rev": 8082,
+    "rev": 8089,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15189,9 +15189,14 @@
         "c03teoty",
         "D-EFFECT-OMIT1"
       ],
-      "workOrder": 93,
+      "workOrder": 36.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "fable-clerk",
+          "text": "Clerical: D-EFFECT-OMIT1 ratified A (2026-07-16) — card unblocked; slotted into the law wave beside #543 (effect arrow)."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -17059,6 +17064,11 @@
       "workOrder": 33,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "D-SHAPE-PLACE2 balloted (rec A). GATE 1 is largely pre-resolved: D-MEM-VIEWRET1=B (ratified 2026-07-15 #643) already reconciles — 'ordinary in-body place access remains D-SHAPE-PLACE1 bare/&/~; named view types appear only where the return/storage boundary states the contract.' So the handoff instruction to 'retire ViewMut' collides with an owner decision ratified the same day keeping View<T>/ViewMut<T> as first-class boundary carriers. Ballot confirms coexist (A) vs replace-with-Window (B) vs keep-everywhere (C), and folds the 5 open maximal-place-law edge cases (disjoint writes, liveness, call-result copy, receiver-write, calls-in-bounds) into a law-details table for a single owner pass. Blocked until ratified."
+        },
         {
           "at": "2026-07-16",
           "by": "claude-main",
@@ -19821,6 +19831,11 @@
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
+          "text": "Clerical: D-PACKAGE-POLICY-SCOPE1 ratified A (2026-07-16) — unblocked; package-echelon spelling is the ratified policy: field."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "fable-clerk",
           "text": "Clerical sweep: live gate D-PACKAGE-POLICY-SCOPE1 never minted — ballot being raised now. Note: D-NOALLOC-SEM1 cited in body is ratified in syntax-decisions.md but missing from Tower ledger (flagged on #661)."
         },
         {
@@ -19930,7 +19945,7 @@
       "needsAcceptance": false,
       "created": "2026-07-15T19:50:04.876Z",
       "updated": "2026-07-16",
-      "workOrder": 92
+      "workOrder": 54.5
     },
     {
       "id": "c01gqgxn",
@@ -20915,6 +20930,11 @@
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
+          "text": "Clerical: D-PACKAGE-POLICY-SCOPE1 ratified A (2026-07-16, typed policy: fields) — unblocked; slotted before #645 which consumes its applicability matrix."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "fable-clerk",
           "text": "Clerical sweep: blocker D-PACKAGE-POLICY-SCOPE1 was cited but never minted as a ballot — fable-clerk is raising it now. Block/function/module tiers could start ungated; package tier waits on the ballot."
         },
         {
@@ -21032,7 +21052,7 @@
       "needsAcceptance": false,
       "created": "2026-07-15T22:55:00.664Z",
       "updated": "2026-07-16",
-      "workOrder": 89
+      "workOrder": 53.5
     },
     {
       "id": "c02rqnrd",
@@ -40490,7 +40510,7 @@
       "group": "syntax",
       "title": "How does a value change from one unit to another?",
       "gist": "Choose how a value in one unit becomes a value in another unit of the same dimension, and what happens when that conversion cannot be exact.",
-      "lesson": "D-SHAPE-CONVERT1 already fixed the direction of every typed conversion: the destination owns it and names the source, as in `Kilometer.from_meter(x)`. That vote did not decide two things a unit system needs.\n\nFirst: may the compiler convert same-dimension units on its own? It knows Meter and Kilometer share a dimension and an exact ratio, so it could auto-convert when you mix or pass them. D-QUAL3 currently mints one distinct type per unit and rejects cross-unit mixing through E0127.\n\nSecond: what happens when a conversion loses information? On a value stored as a whole number, 1500 meter is not a whole kilometer. The conversion can fail, or the caller can pick a rounding.\n\nAffine units add one more rule from D-QUANTITY-POINT1: a point conversion applies scale and offset, a difference applies scale only. Whatever names POINT1 selects, this vote governs their exactness and direction.",
+      "lesson": "D-SHAPE-CONVERT1 already fixed the direction of every typed conversion: the destination owns it and names the source, as in `Kilometer.from_meter(x)`. That vote did not decide two things a unit system needs.\n\nFirst: may the compiler convert same-dimension units on its own? The ratified `@UnitFamily` rule (D-QUANTITY-DECL1) gives it every exact rational scale and offset in advance, so it can. D-QUAL3 currently rejects cross-unit mixing through E0127.\n\nSecond: what happens when a conversion loses information? On a value stored as a whole number, 1500 meter is not a whole kilometer. The conversion can fail, or the caller can pick a rounding.\n\nThe safety line that matters is exact versus lossy, not implicit versus explicit. A conversion by exact ratio changes spelling, never meaning; a lossy one changes the value and must stay visible. The ratified policy ladder (D-PACKAGE-POLICY-SCOPE1) gives teams that want ceremony a scoped opt-in to explicit-only.",
       "explainer": "",
       "story": "Priya writes a drone mapping tool. Her lidar reports altitude in meters; the flight-plan service returns each leg in kilometers. She adds a leg to a sensor reading, and later prints a rounded kilometer label for the map.",
       "inWild": "// Family declared per D-QUANTITY-DECL1; Meter and Kilometer are distinct types.\nleg :: 2kilometer           // from the flight-plan service\nsensor_alt :: 1500meter     // from the lidar\nreport(leg, sensor_alt)",
@@ -40498,24 +40518,24 @@
       "options": [
         {
           "key": "A",
-          "name": "Explicit conversion; exact or it fails; a named rounded form for deliberate loss",
-          "detail": "A cross-unit conversion is an ordinary destination-owned conversion from D-SHAPE-CONVERT1, no new direction. The compiler never converts units on its own, so mixing stays E0127. An exact conversion succeeds; one that cannot be represented exactly in the destination returns a fallible result you handle with `?`. Deliberate loss is a separate, total call that names a rounding policy.",
-          "technical": "Sema uses the exact rational scale/offset from D-QUANTITY-DECL1. `Destination.from_source(v)` is total when the destination can hold the value exactly, otherwise fallible with a not-exact error. `Destination.from_source_rounded(v, .Nearest | .Up | .Down, digits: n)` is total. Affine conversions reuse the D-QUANTITY-POINT1 names: a point applies scale and offset, a difference applies scale only. D-QUAL3 distinct types and E0127 stay unchanged.",
-          "code": "// Beginner: bring the leg into meters so it can join the sensor reading.\nleg_m :: Meter.from_kilometer(leg)?   // 2000meter, exact, cannot fail\ntotal :: leg_m + sensor_alt           // 3500meter\n\n// Mixing units directly is still rejected (D-QUAL3 / E0127 unchanged).\nleg + sensor_alt\n// error[E0127]: cannot add Kilometer and Meter\n// fix: convert one side first, e.g. Meter.from_kilometer(leg)?\n\n// Expert: an exact conversion that does not divide evenly fails instead of guessing.\nKilometer.from_meter(sensor_alt)?\n// error: 1500 meter is not an exact number of kilometer\n// fix: choose a rounding with from_meter_rounded\n\n// Expert: deliberate lossy conversion, explicit rounding policy, total (no ?).\nlabel :: Kilometer.from_meter_rounded(sensor_alt, .Nearest)          // 2kilometer\nprecise :: Kilometer.from_meter_rounded(1543meter, .Down, digits: 2) // 1.54kilometer"
+          "name": "Explicit conversion everywhere; exact or it fails; named rounded form for loss",
+          "detail": "A cross-unit conversion is always a written destination-owned call from D-SHAPE-CONVERT1. The compiler never converts units on its own, so mixing stays E0127 at every site. An exact conversion succeeds; one that cannot be represented exactly returns a fallible result handled with `?`. Deliberate loss is a separate, total call that names a rounding policy.",
+          "technical": "Sema uses the exact rational scale/offset from D-QUANTITY-DECL1. `Destination.from_source(v)` is total when exact, otherwise fallible. `Destination.from_source_rounded(v, .Nearest | .Up | .Down, digits: n)` is total. Affine conversions reuse D-QUANTITY-POINT1 names: a point applies scale and offset, a difference applies scale only. D-QUAL3 and E0127 stay unchanged.",
+          "code": "// Every mixed-unit site writes the conversion.\ninner_diameter :: 42millimeter\nlength :: 3meter\n\ntotal :: Millimeter.from_meter(length)? + inner_diameter   // 3042millimeter\n\nlength + inner_diameter\n// error[E0127]: cannot add Meter and Millimeter\n// fix: convert one side first, e.g. Millimeter.from_meter(length)?\n\n// Deliberate lossy conversion names its rounding and is total.\nlabel :: Kilometer.from_meter_rounded(1500meter, .Nearest)   // 2kilometer"
         },
         {
           "key": "B",
-          "name": "Same-dimension units convert implicitly",
-          "detail": "Because the compiler knows the dimension and the exact ratio, values of the same dimension interconvert on their own. Mixing in arithmetic and passing across a boundary both work; the result normalizes to one unit. This amends D-QUAL3 and E0127: cross-unit mixing becomes legal for commensurable units. Implicit conversion is performed only when it is exact; deliberate loss still needs an explicit rounded call.",
-          "technical": "Sema inserts an exact scale/offset coercion at any same-dimension boundary and at arithmetic. A same-dimension result normalizes to the left operand's unit or the declared canonical base. A coercion that would not be exact is a compile error, not a silent round. This supersedes E0127 for commensurable units and changes what an API snapshot promises about accepted argument units.",
-          "code": "// Same dimension auto-converts; mixing just works.\ntotal :: leg + sensor_alt     // 3500meter, leg converted to meters\n\n// Passing across a boundary auto-converts too.\nfn climb_to(target: Meter) -> Meter { target }\nclimb_to(leg)                 // Kilometer accepted, converted to Meter\n\n// Binding to another unit auto-converts when exact.\nround_trip :: Kilometer = 3000meter   // 3kilometer\n\n// A non-exact implicit conversion is still an error, not a silent round.\nalt_km :: Kilometer = sensor_alt\n// error: 1500 meter is not an exact number of kilometer\n// fix: Kilometer.from_meter_rounded(sensor_alt, .Nearest)"
+          "name": "Implicit exact conversion by default; policy opt-in to explicit-only",
+          "detail": "Same-dimension units interconvert on their own wherever the conversion is exact: mixed arithmetic, argument passing, and binding all just work. Mixed arithmetic lands on the finer operand's unit so whole-number values stay exact. A conversion that cannot be exact is a compile error naming the rounded fix — the compiler never rounds silently. The ratified policy ladder scopes an explicit-only opt-in for teams that want every conversion written.",
+          "technical": "Sema inserts exact scale/offset coercions from the family metadata; the finer-unit result rule keeps integer stores lossless. Affine kinds follow D-QUANTITY-POINT1: point plus delta converts with scale and offset, deltas with scale only; point plus point stays rejected. This amends E0127 for commensurable units. `policy: .{ explicit_units: true }` in package.jet, or `#Policy(explicit_units)` at module, function, or block, restores E0127 in that scope with the named-conversion fix. Lossy conversion is always the explicit rounded call.",
+          "code": "// Pragmatic default: the family already knows the exact ratios.\ninner_diameter :: 42millimeter\nlength :: 3meter\n\ntotal :: length + inner_diameter        // 3042millimeter — finer unit wins, exact\nclearance :: bore - shaft               // fine across any exact same-dimension pair\n\nfn fits(depth: Meter) -> Bool { ... }\nfits(150millimeter)                     // argument converts exactly on its own\n\n// Never a silent round: non-exact implicit conversion is rejected.\nalt_km :: Kilometer = 1500meter\n// error: 1500 meter is not an exact number of kilometer\n// fix: Kilometer.from_meter_rounded(1500meter, .Nearest)\n\n// Expert team opts a scope into explicit-only (ratified policy ladder):\n# package.jet\npolicy: .{ explicit_units: true }\n\n// or narrower:\n#Policy(explicit_units)\nmodule dosing\n\nlength + inner_diameter\n// error[E0127]: cannot add Meter and Millimeter (explicit_units in force)\n// declared at: package.jet:4 (package policy:)\n// fix: Millimeter.from_meter(length)?"
         },
         {
           "key": "C",
           "name": "Read a quantity as a number in a unit; no typed unit-to-unit value",
           "detail": "Follow the ratified Duration rule (D-SHAPE-DURATIONCONVERT1) for every quantity. You never turn a Meter value into a Kilometer value. You read a quantity as a plain checked number in a chosen unit under one fixed contract, and reconstruct a typed value if you need one. One conversion mechanism covers Duration and all units.",
           "technical": "`value.in(unit)` returns a whole `Int`, truncates toward zero, and fails on overflow, exactly as Duration does today. A fractional read uses a separate ratio reader. Holding a converted typed value requires a `Destination.from_*` reconstruction from the read number. No same-dimension typed conversion and no implicit coercion exist; E0127 stays unchanged.",
-          "code": "// Read a quantity as a number in a chosen unit; the result is an Int, not a Meter.\nleg_m :: leg.in(.Meters)?             // 2000\nalt_km :: sensor_alt.in(.Kilometers)?\n// error: 1500 meter is not a whole number of kilometer\n// fixed contract: truncates toward zero, fails on overflow\n\n// Combining across units: read both into a common unit first.\ntotal :: Meter.from_int(leg.in(.Meters)? + sensor_alt.in(.Meters)?)?  // 3500meter\n\n// To hold a value as kilometers you round-trip through a number.\nlabel :: Kilometer.from_float(sensor_alt.in_ratio(.Kilometers))       // 1.5kilometer"
+          "code": "// Read as a number in a chosen unit; the result is an Int, not a Meter.\nleg_m :: leg.in(.Meters)?             // 2000\n\n// Combining across units: read both into a common unit first.\ntotal :: Meter.from_int(leg.in(.Meters)? + alt.in(.Meters)?)?\n\n// Holding kilometers means a round-trip through a number.\nlabel :: Kilometer.from_float(alt.in_ratio(.Kilometers))"
         }
       ],
       "comparisons": [
@@ -40530,26 +40550,98 @@
           "code": "let m = km * 1000.0<m/km>"
         }
       ],
-      "rec": "A",
+      "rec": "B",
       "recommendation": {
-        "why": "A reuses the ratified destination-owned direction and settles the two open questions plainly: the compiler never converts on its own, and a conversion that cannot be exact fails instead of guessing. Beginners get km-to-m that always works and one clear error the time it cannot be exact; experts get a total, precision-controlled rounded form for intended loss.",
+        "why": "The family declaration already fixes every exact ratio in advance, so an exact conversion carries no information the reader lacks — the units are in the types. B lets pragmatic work read like the arithmetic it is, while the exact-only rule keeps the real hazard, silent precision loss, impossible. Teams that want written conversions get them scoped through the ratified policy ladder instead of a language-wide ceremony tax.",
         "whyNot": [
           {
-            "key": "B",
-            "reason": "Implicit conversion amends the ratified E0127 no-mixing law and hides a scale multiply and a precision decision at every boundary, which is the silent kind of mistake the defaults exist to prevent."
+            "key": "A",
+            "reason": "A taxes every mixed-unit site with a named call the compiler could prove exact itself, which punishes exactly the pragmatic measurement code units exist for. Its safety benefit over B is spelling, not meaning: B already refuses every non-exact conversion."
           },
           {
             "key": "C",
             "reason": "C cannot hold a converted value as a typed unit without a reconstruction round-trip and drops the destination-owned typed result that every other Jet conversion produces."
           }
         ],
-        "tradeoff": "A same-dimension change always requires a named call; there is no `+` across units. The compiler will not bridge commensurable units on its own even when it knows their exact ratio."
+        "tradeoff": "Under B an API accepts any commensurable unit, so a reviewer sees a scale multiply only through types, not spelling. The exact-only rule, the finer-unit result law, and `jet explain` provenance carry that visibility; `explicit_units` restores written conversions where a team wants them."
       },
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
       "status": "open",
       "created": "2026-07-16T01:03:24.986Z"
+    },
+    {
+      "id": "D-SHAPE-PLACE2",
+      "cardId": "c08wuixb",
+      "group": "syntax",
+      "title": "What carries a window across an API boundary?",
+      "gist": "Choose whether marks and `View` coexist, `View` is replaced, or `View` stays available everywhere.",
+      "lesson": "Glossary. An owner holds storage. A place is a name plus selected fields, indexes, or ranges. A window gives temporary access to that storage. A read window may only inspect it. A write window may change it. A copy owns separate storage. Provenance records which owner must outlive a window. Zero-copy means no duplicate storage is allocated.\n\nA second-class window can be bound locally or passed into a call. It cannot be returned or stored in a field. A first-class window can cross those boundaries because its type carries provenance that the compiler can prove and publish. This difference matters for zero-copy parsers and stored slices. A tensor is a multidimensional numeric value; its compute projection is a strided window into tensor storage.\n\nD-SHAPE-PLACE1 makes local access uniform: bare place for read, `&place` for write, and `~place` for an owned copy. Its selected option also says ordinary code should stop using `View` names. D-MEM-VIEWRET1 separately ratifies `View<T>` and `ViewMut<T>` for returns and fields. D-COMPUTE-TYPE1 makes `View<T>` the sole borrowed compute projection.\n\nThe primary choice is which first-class carrier survives. Option A reserves `View` names for application programming interface (API) and compute boundaries. Option B replaces them with `Window` names. Option C keeps `View` names available in local code too. Every option keeps marked local access and the same safety proofs.\n\nFive law details also need one exact meaning. They cover disjoint writes, last-use liveness, copy binding around calls, receiver position, and calls inside range bounds.",
+      "explainer": "This ruling reconciles three ratified decisions before card #613 changes parser and sema behavior. It also fixes five precedence and liveness rules that otherwise produce different accepted programs.",
+      "story": "Maya writes a zero-copy packet service. She reads and edits local ranges, returns a header range from a parser, stores that range in an index, and passes strided tensor data to compute. Marks handle local work, but those windows cannot cross a return or field boundary. She needs one first-class carrier whose provenance keeps the owner alive without lifetime syntax.",
+      "inWild": "struct Packet { bytes: [Int] }\nstruct IndexedHeader { bytes: View<Int> }\n\nfn header(packet: Packet) -> View<Int> {\n    return packet.bytes[0..3]\n}\n\nfn edit(chunk: &[Int]) {\n    chunk[0] += 10\n}\n\nfn inspect(packet: &Packet) {\n    local :: packet.bytes[4..7]       // marked-place law: local read window\n    edit(&packet.bytes[8..11])        // marked-place law: local write window\n}\n\n// D-MEM-VIEWRET1 requires the return and field types above.\n// D-COMPUTE-TYPE1 also requires View<T> for borrowed tensor projections.\n// D-SHAPE-PLACE1 selected marks for ordinary place access and said View names retire there.\n// D-SHAPE-PLACE2 decides which names remain legal, and where.",
+      "detail": "Law details adopted with every option:\n\n| Row | Recommended ruling | Ratified sentence clarified |\n|---|---|---|\n| a. Disjoint writes | Exclusivity is projection-relative. `&xs[0..2]` and `&xs[3..5]` may coexist only when sema proves they cannot overlap; uncertain overlap is rejected. | “Many read windows may overlap; a write window must be exclusive.” |\n| b. Liveness end | A window is live through its last use, not through the enclosing block. A later same-block owner mutation is legal after that use. | “Moving or resizing an owner is rejected while it could invalidate a live window.” |\n| c. Call-result copy | `~f(x).field` copies the whole call-result field. The first-call cutoff ends place recognition, not `~` on a general expression; `(~input).method()` still calls on a copy. | “`~x` is a prefix-verb expression producing an independent duplicate, legal in any position” and “Method calls are not part of a place.” |\n| d. Write receiver | Receiver position counts as a call argument. `&packet.payload.decrypt()` grants write access to `packet.payload`; the mark ends before `decrypt()`. | “Method calls are not part of a place.” |\n| e. Calls in bounds | Calls inside index or range bounds do not end the outer place. Bounds evaluate once, left to right, before the window starts; a call on the projection chain still ends it. | “A place is a name plus its maximal field, index, or range projection” and “Method calls are not part of a place.” |\n\nWorked edge behavior:\n\nleft :: &xs[0..2]\nright :: &xs[3..5]       // accepted: proved disjoint\nleft[0] = 1               // last use of left\nright[0] = 2              // last use of right\nxs.push(6)                // accepted: neither window remains live\n\nsaved :: ~load_packet().payload\n&packet.payload.decrypt()\npart :: &xs[offset()..limit]\n\noverlap :: &xs[2..4]\nerror: `overlap` may refer to storage already open for writing\n  Why: `xs[2..4]` can overlap `left` or `right`.\n  Fix: finish the earlier write window first, or select ranges sema can prove disjoint.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Marks locally, `View` at boundaries",
+          "detail": "Beginners use only bare, `&`, and `~` for local work. Experts use `View<T>` or `ViewMut<T>` in parameters, returns, fields, and compute projections. Local annotations and constructors cannot promote a marked place. A declared first-class boundary performs that promotion and publishes provenance.",
+          "technical": "D-SHAPE-PLACE1 governs every locally created window. `View<T>` and `ViewMut<T>` remain first-class provenance carriers only in parameter, return, field, and compute projection type positions. A return or field initializer may promote a marked place into its declared carrier. A local marked window remains second-class until it crosses such a boundary. A value received from a View-typed API is already first-class and may be bound normally. `.view()` and `.view_mut()` remain retired. D-MEM-VIEWRET1 and D-COMPUTE-TYPE1 keep their existing type names and contracts. All five shared law-detail rows apply.",
+          "code": "struct Packet { bytes: [Int] }\nstruct IndexedHeader { bytes: View<Int> }\n\nfn header(packet: Packet) -> View<Int> {\n    return packet.bytes[0..3]       // boundary promotes read window\n}\n\nfn edit(chunk: &[Int]) { chunk[0] += 10 }\n\nfn run() {\n    packet: Packet := Packet.{bytes: [0, 1, 2, 3, 4, 5, 6, 7]}\n    local :: packet.bytes[4..7]     // second-class; no View name\n    print(local[0])                 // last use\n    edit(&packet.bytes[4..7])\n    first_class :: header(packet)   // returned View<Int>\n    print(packet.bytes[4])\n    print(first_class[0])\n}\n\n$ jet run packet.jet\n4\n14\n0\n\nlocal: View<Int> :: packet.bytes[4..7]\n\nerror: `View<Int>` is only written at a parameter, return, field, or compute boundary\n  Why: Local place access uses bare, `&`, or `~`; a type annotation does not promote it.\n  Fix: Write `local :: packet.bytes[4..7]`."
+        },
+        {
+          "key": "B",
+          "name": "Replace `View` with `Window`",
+          "detail": "Beginners still use only bare, `&`, and `~` locally. Experts use new `Window<T>` and `WindowMut<T>` carriers for parameters, returns, fields, and compute. `View` is retired without an alias, so every first-class window contract uses the new vocabulary.",
+          "technical": "`Window<T>` and `WindowMut<T>` replace `View<T>` and `ViewMut<T>` everywhere. They carry the same public provenance and semver contract ratified by D-MEM-VIEWRET1. `Window<T>` becomes D-COMPUTE-TYPE1's sole borrowed strided projection. S14 forbids compatibility aliases. Local promotion, `.view()` retirement, and all five shared law-detail rows match Option A.",
+          "code": "struct Packet { bytes: [Int] }\nstruct IndexedHeader { bytes: Window<Int> }\n\nfn header(packet: Packet) -> Window<Int> {\n    return packet.bytes[0..3]\n}\n\nfn run() {\n    packet: Packet := Packet.{bytes: [0, 1, 2, 3, 4, 5, 6, 7]}\n    local :: packet.bytes[4..7]     // second-class; no carrier name\n    first_class :: header(packet)   // returned Window<Int>\n    print(local[0])\n    print(first_class[0])\n}\n\n$ jet run packet.jet\n4\n0\n\nfn old_header(packet: Packet) -> View<Int> {\n    return packet.bytes[0..3]\n}\n\n$ jet check packet.jet\nerror: `View<Int>` was retired\n  Why: First-class marked windows are named `Window<T>`. Jet has no compatibility aliases.\n  Fix: Write `Window<Int>`; use `WindowMut<Int>` for a write carrier."
+        },
+        {
+          "key": "C",
+          "name": "Keep `View` available everywhere",
+          "detail": "Beginners may use only marks and ignore named views. Experts keep `View<T>` and `ViewMut<T>` as ordinary local, parameter, return, field, and compute types. Only `.view()` and `.view_mut()` retire; a type annotation may promote a marked place locally.",
+          "technical": "This is additive except for retiring the old view methods. Bare, `&`, and `~` create local windows. An explicit local `View<T>` or `ViewMut<T>` annotation promotes the same marked place into a first-class value. Existing View-typed APIs and D-COMPUTE-TYPE1 remain unchanged. The result has both inferred second-class locals and explicitly named first-class locals. All five shared law-detail rows apply.",
+          "code": "struct Packet { bytes: [Int] }\nstruct IndexedHeader { bytes: View<Int> }\n\nfn header(packet: Packet) -> View<Int> {\n    return packet.bytes[0..3]\n}\n\nfn run() {\n    packet: Packet := Packet.{bytes: [0, 1, 2, 3, 4, 5, 6, 7]}\n    plain :: packet.bytes[4..7]              // second-class local\n    named: View<Int> :: packet.bytes[0..3]  // first-class local\n    print(plain[0])\n    print(named[0])\n}\n\n$ jet run packet.jet\n4\n0\n\nold :: packet.bytes.view(0..3)\n\nerror: `.view()` was retired\n  Why: A place already creates a read window.\n  Fix: Write `old :: packet.bytes[0..3]`, or add `: View<Int>` when a first-class local is required."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust uses one reference or slice type in locals, parameters, returns, and fields. Returned and stored forms often require written lifetime relationships that Jet infers as provenance.",
+          "code": "fn header<'a>(packet: &'a Packet) -> &'a [u8] {\n    &packet.bytes[0..4]\n}\n\nstruct IndexedHeader<'a> {\n    bytes: &'a [u8],\n}"
+        },
+        {
+          "lang": "C++",
+          "note": "C++ `std::span` is a first-class non-owning carrier across locals and APIs. It does not prove that its owner remains alive or prevent overlapping writes.",
+          "code": "std::span<const int> header(const Packet& packet) {\n    return std::span(packet.bytes).subspan(0, 4);\n}\n\nstd::span<int> local(packet.bytes);"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift `ArraySlice` is a first-class shared-storage value used locally or across APIs. It keeps its backing array alive instead of exposing a compile-time owner relationship.",
+          "code": "func header(_ packet: Packet) -> ArraySlice<Int> {\n    packet.bytes[0...3]\n}\n\nlet local = packet.bytes[4...7]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A preserves D-MEM-VIEWRET1's public provenance carrier and D-COMPUTE-TYPE1's projection type while keeping D-SHAPE-PLACE1 as the only local access rule. Beginners never need a View name. Experts retain first-class zero-copy contracts where storage or APIs require them.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B renames both ratified carrier types and the ratified compute projection without changing their ownership contract. S14 forbids aliases, so existing View-typed APIs lose their canonical spelling at once."
+          },
+          {
+            "key": "C",
+            "reason": "C gives local code two visible ways to classify the same selected storage: a marked second-class window or an annotated first-class View. That weakens the one-rule local model D-SHAPE-PLACE1 selected."
+          }
+        ],
+        "tradeoff": "A makes first-class promotion depend on a declared parameter, return, field, or compute boundary. Diagnostics and API snapshots must state when promotion occurs and which owner provenance it carries."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-16T01:24:41.786Z"
     }
   ],
   "questions": [
@@ -41114,9 +41206,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Remember one of the goals is not to baby experts. There can be value in having explicit conversions but in practice I would expect people doing pragmatic work to want implicit conversions which would be defined in advance anyway by the unit family. Maybe have some kind of marker/policy that can disable implicit conversions? For example, in my case if I was doing cad measurements, I would probably name something like inner_diameter_mm and length_m. It would be annoying to have to do mathematical operations with tons of dot methods just to manually convert everything. Implicit should be default with an explicit opt in",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-16T01:14:03.898Z"
+      "status": "answered",
+      "answer": "Agreed, and the ballot now recommends exactly that. Reworked option B: same-dimension units convert on their own wherever the family ratio makes the conversion exact — mixed arithmetic (lands on the finer unit so whole numbers stay exact), argument passing, and binding all just work, so length + inner_diameter is one plus sign, no dot-method chain. The guardrail kept: the compiler never rounds silently — a non-exact conversion (1500m into whole km) is a compile error naming the from_meter_rounded fix, so implicit never loses precision. The opt-in you asked for rides the policy ladder you just ratified: policy: .{ explicit_units: true } in package.jet, or #Policy(explicit_units) at module/function/block, restores explicit-only in that scope. Ballot updated and ready to ratify (rec B).",
+      "created": "2026-07-16T01:14:03.898Z",
+      "answeredAt": "2026-07-16",
+      "answeredBy": "fable-clerk"
     }
   ],
   "ideas": [
@@ -41382,6 +41476,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T01:24:53.002Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c08wuixb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T01:24:52.866Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0zdv8vm",
+      "note": "workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-16T01:24:52.724Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0bfdd1e",
+      "note": "workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-16T01:24:52.587Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0t32dtn",
+      "note": "workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-16T01:24:41.786Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-SHAPE-PLACE2",
+      "note": "What carries a window across an API boundary?"
+    },
+    {
+      "at": "2026-07-16T01:23:55.660Z",
+      "by": "fable-clerk",
+      "action": "question.answer",
+      "ref": "q359beh7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T01:23:55.536Z",
+      "by": "fable-clerk",
+      "action": "decision.update",
+      "ref": "D-QUANTITY-CONVERT1",
+      "note": ""
+    },
     {
       "at": "2026-07-16T01:18:17.496Z",
       "by": "owner",
@@ -44832,55 +44975,6 @@
       "action": "card.release",
       "ref": "c1jixkit",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:06:54.269Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c0x3pi8i",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T14:06:46.647Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0we378g",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:22.838Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-SHAPE-COPY1",
-      "note": "What is the one way to write a copy?"
-    },
-    {
-      "at": "2026-07-15T14:06:11.318Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0v1baa5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:11.191Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0ts6uv1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:11.063Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c021vh50",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T14:06:10.933Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0yt35t8",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
