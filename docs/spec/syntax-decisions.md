@@ -3872,6 +3872,18 @@ stays the sole GC+optimize intent. The `jet store` group is dissolved:
 <script.jet>`, and `jet store …` / bare `jet gc` are teaching errors naming
 the real spelling. Supersedes D-CLI-SURFACE1's `jet store` rows.
 
+**D-CLI-HANGAR1=B — one Hangar archive format, seven operational views**
+*(ratified 2026-07-13, card #517)*: `export` writes one canonical, signed,
+self-describing `.hangar` archive, including the closure by default and only
+the selected object with `--no-deps`; `import` verifies it in quarantine before
+registration. `dump` and `restore` stream those same archive bytes through
+stdout/stdin. `copy` fuses export, transport, and import over an endpoint.
+`repair` verifies, then re-realizes or re-fetches corrupt objects. `sign`
+(re)signs an object or archive. This refines D-JPK-STORECLI1=D and
+D-CLI-STORE2=A while explicitly superseding any interpretation of
+`dump`/`restore` as a second raw single-object serialization format: Hangar has
+one archive backbone, not separate dump and export formats.
+
 **D-CLI-DEVSERVE1=A — `serve` deleted** *(ratified 2026-07-11, card #497)*:
 `jet dev` is the only dev loop (auto-detects rerun vs resident hot-swap;
 `--restart`/`--swap` overrides, per D-DEV4). `jet serve` is a teaching error

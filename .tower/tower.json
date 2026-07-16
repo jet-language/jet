@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 667,
-    "rev": 8173,
+    "rev": 8351,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -171,11 +171,16 @@
       "epoch": "e4",
       "phase": "ready",
       "priority": "P2",
-      "plan": "Merged into #423 (E4-JP12 — live registry, resolver proof, and package delivery), which fully subsumes M12.2s publish/registry UX scope with atomic publish, namespace ownership, and signed yanks. Closed as duplicate planning scope only; no independent implementation claimed. Canonical #423 plan owns this work.",
+      "plan": "Compatibility-only duplicate of #423. Existing local `jet publish` dirty-tree/test/API checks, immutable local yank markers, and highest-compatible selection are evidence, not live registry delivery. #423 exclusively owns namespace authority, atomic upload/yank, live consumer resolution, signed metadata, offline/vendor behavior, hostile registry proof, and stable diagnostics. Do no independent implementation here. Close this card only after #423 is independently verified and its evidence explicitly covers D-PUBLISH1A, D-VERSION1, D-RESOLVE1, and D-LOCK1; otherwise remain ready and blocked.",
       "blockedBy": [
         "c09itznu"
       ],
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Duplicate scope made exact: no parallel build; closes only from independently verified #423 evidence."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-main",
@@ -225,10 +230,26 @@
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "#423 is done with independently verified live-registry evidence covering D-PUBLISH1A, D-VERSION1, D-RESOLVE1, D-LOCK1, publish/yank delivery, consumer resolution, offline/vendor behavior, hostile service cases, and stable diagnostics; no independent #6 implementation remains.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:35:30.494Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/syntax-decisions.md",
+        "Source/CmdSupply.rs",
+        "Source/Publish/Registry.rs",
+        "tests/pkg.rs"
+      ],
       "workOrder": 83
     },
     {
@@ -6545,13 +6566,27 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JPK-OVERLAY1=A: Hybrid: workspace policy plus reusable overlay modules and CLI drafting. workspace.jet owns reviewed policy and named overlay sets. Per-package overlay modules can package reusable override logic, but they must materialize as typed workspace policy facts. CLI commands are allowed only as drafting tools that write source patches/policy, not hidden state.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetpack: package overlays, per-package overrides, and source patches (nixpkgs overlay parity)\n\nCurrent law: Jetpack law: D-JPK provider/catalog/lock/replacement decisions are ratified, but overlay/override source syntax is not.\n\nBuild order: extend workspace/pkg parsing for typed override records; merge with provider authority graph; apply patches in sandboxed source realization; record explain facts for every override; add lock/provenance tests.\n\nAcceptance: Overlays/patches/channel overrides/unfree policy have tests, docs, examples, and `jet explain` output. No untyped fixpoint; no network outside ratified fetch phases.\n\nDependencies/collisions: Coordinates with #234 providers, #242 native replacements, #231 strict graph/catalogs, and #337 jetos fixture.",
+      "plan": "Current source already implements D-JPK-OVERLAY1=A workspace overlay policy, patch application, drafting, and package-overlay explain. Finish only D-JPK-PKGOVERRIDE1=B and gaps not owned by #428: parse one keyed overrides map whose package value is a typed dot-construction record; support exact version, flags, environment, and patch fields; reuse D-JOS-PRIORITY1 ordinary/Force/Priority tiers and deterministic declared overlay order; lower every winning and rejected contender into the canonical action digest, lock provenance, and explain facts; apply reviewable on-disk patches inside source realization with no network or host escape. #428 exclusively owns provider-wide conformance and lossless foreign migration; this card supplies the overlay facts it consumes and must not duplicate provider adapters. Prove stacked conflicts, same-tier ordering, source moves, patch tamper/failure, lock invalidation, offline realization, formatter/grammar, diagnostics, Canvas/semantic-index reconstruction, and live source builds.",
       "blockedBy": [
-        "c0c7d9qt",
         "c0mwowfx"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Removed stale pre-ratification wording. Current overlay substrate credited; keyed override record gaps separated from #428 provider conformance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Removed stale pre-ratification wording. Current overlay substrate credited; keyed override record gaps separated from #428 provider conformance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #424; #428 remains the sole live completion dependency."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -6603,7 +6638,7 @@
         }
       ],
       "created": "2026-07-07T17:37:59.565Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-16",
       "criteria": [
         {
           "n": 1,
@@ -6643,7 +6678,14 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-pkg-model/src/Overlay.rs",
+        "crates/jetpack/src/Overlay.rs",
+        "crates/jetpack/src/CLI/update_search_info.rs",
+        "tests/jetpack_engine.rs"
+      ],
       "workOrder": 88
     },
     {
@@ -8488,15 +8530,22 @@
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp5--native-binary-cache-and-nix-cache-interoperability",
       "blockedBy": [
-        "c0to4gms",
-        "c0zqnb18",
         "c01fj815",
-        "c041flkr",
-        "c0c7d9qt"
+        "D-JPK-EPOCHBOUNDARY1"
       ],
       "workOrder": 80,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP5 live cache/NAR acceptance and current refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP1/JP6A/JP13. #398 moved to E8 while the E4 plan still requires sandbox proof; D-JPK-EPOCHBOUNDARY1 now owns the contradictory exit law."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
@@ -8508,10 +8557,44 @@
         }
       ],
       "created": "2026-07-09T18:16:39.359Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Native ordered cache reads, resumable chunks, mirror-local negative TTLs, idempotent publication, separated read/write grants, and deterministic source fallback pass against live endpoints.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:27:35.744Z"
+        },
+        {
+          "n": 2,
+          "text": "NAR and narinfo import/export verify exact canonical bytes, hashes, sizes, references, deriver, CA field, store-dir law, and signed fingerprint without an installed Nix binary.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:27:35.745Z"
+        },
+        {
+          "n": 3,
+          "text": "Local-execution-disabled substitution, miss fallback, corruption/quarantine, credential secrecy, concurrent transfer, offline, Linux/macOS/Windows, stable JSON, diagnostics, docs, and independent verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:27:35.745Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src/Store.rs",
+        "crates/jet-pkg-model/src/Envelope.rs",
+        "tests/jetpack_engine.rs",
+        "tests/diagnostic_snapshots.rs"
+      ]
     },
     {
       "id": "c0xe5g33",
@@ -8529,6 +8612,11 @@
       "workOrder": 73,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP9 native evaluator Stage-A acceptance and current refs added."
+        },
         {
           "at": "2026-07-15",
           "by": "codex-root",
@@ -8550,10 +8638,44 @@
         }
       ],
       "created": "2026-07-09T18:16:39.431Z",
-      "updated": "2026-07-15",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The native Nix parser/evaluator lowers the ratified Stage-A language and derivation/path laws into the one Jet action graph without invoking an installed Nix executable.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:27:35.993Z"
+        },
+        {
+          "n": 2,
+          "text": "Differential fixtures compare values, derivations, paths, errors, cycles, purity, source positions, and resource ceilings against a pinned Nix oracle; unsupported input fails with a coded Jet diagnostic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:27:35.993Z"
+        },
+        {
+          "n": 3,
+          "text": "Flake pins, locks, store imports, platform facts, cache identity, stable JSON, docs, corpus replay, deterministic performance budgets, and independent verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:27:35.993Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src",
+        "crates/jet-pkg-model/src",
+        "tests/jetpack_engine.rs",
+        "tests/fixtures"
+      ]
     },
     {
       "id": "c0yl347q",
@@ -8574,16 +8696,59 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP10 breadth/bit-exactness/performance acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP10 breadth/bit-exactness/performance acceptance and refs added."
+        },
+        {
           "at": "2026-07-09",
           "by": "codex-main",
           "text": "Re-homed from JetOS: nixpkgs evaluator breadth belongs to Jetpack."
         }
       ],
       "created": "2026-07-09T18:16:39.503Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The pinned nixpkgs breadth corpus evaluates and lowers bit-exact derivations, dependencies, outputs, and errors without installed Nix or compatibility shell-outs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:19.234Z"
+        },
+        {
+          "n": 2,
+          "text": "Lazy evaluation, recursion, overlays, builtins, path context, fetchers, platform selection, and store projection are deterministic under bounded memory, time, and concurrency budgets.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:19.234Z"
+        },
+        {
+          "n": 3,
+          "text": "Differential cold/warm performance, unsupported diagnostics, cache/lock identity, hostile corpus, Linux/macOS/Windows coverage, docs, and independent verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:19.234Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src",
+        "crates/jet-pkg-model/src",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0zqnb18",
@@ -8637,17 +8802,35 @@
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp11--permanent-no-installed-nix-product-gate",
       "blockedBy": [
-        "c0zqnb18",
         "c01fj815",
         "c0w7297z",
-        "c0uxofls",
         "c0xe5g33",
         "c0yl347q",
-        "c0c7d9qt"
+        "D-JPK-EPOCHBOUNDARY1"
       ],
       "workOrder": 126,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP11 no-installed-Nix gate and conditional epoch-boundary acceptance added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP11 no-installed-Nix gate and conditional epoch-boundary acceptance added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP8/JP13. D-JPK-EPOCHBOUNDARY1 decides whether JP11 retains full sandbox-backed parity in E4 or narrows to functional behavior."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP8/JP13. D-JPK-EPOCHBOUNDARY1 decides whether JP11 retains full sandbox-backed parity in E4 or narrows to functional behavior."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
@@ -8659,10 +8842,43 @@
         }
       ],
       "created": "2026-07-09T18:16:39.644Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A clean machine with no Nix executable resolves, builds or substitutes, runs, audits, vendors, profiles, and explains the pinned Nix-package acceptance corpus through native Jetpack paths.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:19.480Z"
+        },
+        {
+          "n": 2,
+          "text": "Offline, cache miss, local build, registry, profile rollback, corruption/repair, cross target, and stable JSON paths contain no hidden Nix process, daemon, store, configuration, or environment dependency.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:19.480Z"
+        },
+        {
+          "n": 3,
+          "text": "D-JPK-EPOCHBOUNDARY1 is ratified and the chosen E4 claim is enforced exactly: either full hostile sandbox parity passes in E4 or isolation-dependent criteria and claims move to E8.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:19.480Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src",
+        "tests/jetpack_engine.rs",
+        "tests/jetpack_dispatch.rs"
+      ]
     },
     {
       "id": "c0233d1b",
@@ -9087,14 +9303,25 @@
       "phase": "building",
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp4--closure-db-roots-leases-gc-verify-repair",
-      "blockedBy": [
-        "c0to4gms",
-        "c0yxdqju",
-        "c0c7d9qt"
-      ],
+      "blockedBy": [],
       "workOrder": 78,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed/archived JP1, JP2, and JP13 blockers. JP4 has no live upstream blocker."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed/archived JP1, JP2, and JP13 blockers. JP4 has no live upstream blocker."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed/archived JP1, JP2, and JP13 blockers. JP4 has no live upstream blocker."
+        },
         {
           "at": "2026-07-15",
           "by": "claude-main",
@@ -9239,7 +9466,7 @@
         }
       ],
       "created": "2026-07-09T20:38:06.694Z",
-      "updated": "2026-07-15",
+      "updated": "2026-07-16",
       "criteria": [
         {
           "n": 1,
@@ -9447,28 +9674,86 @@
       "priority": "P1",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp7--remote-builders-and-execution",
       "blockedBy": [
-        "c0to4gms",
-        "c0yxdqju",
-        "c0zqnb18",
         "c01fj815",
         "c0w7297z",
         "c0v0y46r",
-        "c0c7d9qt",
-        "c0hgr4pk"
+        "D-JPK-EPOCHBOUNDARY1"
       ],
       "workOrder": 86,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP7 remote execution live/hostile acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP7 remote execution live/hostile acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP7 remote execution live/hostile acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP1/JP2/JP13/JP15. D-JPK-EPOCHBOUNDARY1 decides whether remote-worker sandbox proof remains an E4 exit gate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP1/JP2/JP13/JP15. D-JPK-EPOCHBOUNDARY1 decides whether remote-worker sandbox proof remains an E4 exit gate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP1/JP2/JP13/JP15. D-JPK-EPOCHBOUNDARY1 decides whether remote-worker sandbox proof remains an E4 exit gate."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:07.016Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Capability matching selects only authorized workers by build/host/target platform, resources, trust domain, cache grants, sandbox class, and concurrency policy.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:56.208Z"
+        },
+        {
+          "n": 2,
+          "text": "The client uploads missing CAS inputs, executes the exact action, verifies signed result/output/log/provenance facts, handles cancel/retry/failover/worker loss, and rejects malicious or disagreeing results.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:56.208Z"
+        },
+        {
+          "n": 3,
+          "text": "Local fallback, duplicate execution, offline control, heterogeneous live workers, stable JSON/metrics/docs, and the sandbox obligation selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:56.208Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c09itznu",
@@ -9483,25 +9768,85 @@
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp12--live-registry-solver-and-package-delivery",
       "blockedBy": [
-        "c0to4gms",
-        "c041flkr",
-        "c0c7d9qt",
-        "c0hgr4pk",
         "c0kalcyg"
       ],
       "workOrder": 82,
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP12 live registry/resolver/delivery acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP12 live registry/resolver/delivery acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP12 live registry/resolver/delivery acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP1/JP6A/JP13/JP15; live install/build authority #427 remains."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP1/JP6A/JP13/JP15; live install/build authority #427 remains."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP1/JP6A/JP13/JP15; live install/build authority #427 remains."
+        },
+        {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:07.183Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Live registry publish is atomic, namespace-authorized, immutable by version, signed, auditable, and supports signed yanks without exposing credentials or accepting stale/conflicting metadata.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:56.450Z"
+        },
+        {
+          "n": 2,
+          "text": "One resolver consumes live registry metadata with ratified version/feature/platform/provider rules, causal conflict proof, conservative targeted updates, exact lock identity, offline reuse, and vendor export.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:56.451Z"
+        },
+        {
+          "n": 3,
+          "text": "Concurrent publish/yank, rollback/freeze/mix-and-match/dependency-confusion attacks, first install, cache/store delivery, stable diagnostics/JSON/docs, and independent live-service verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:28:56.451Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "Source/Publish/Registry.rs",
+        "crates/jetpack/src",
+        "tests/pkg.rs",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0c7d9qt",
@@ -9560,22 +9905,99 @@
       "priority": "P1",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp14--source-backed-package-profiles-and-generations",
       "blockedBy": [
-        "c01fj815",
-        "c0c7d9qt"
+        "c01fj815"
       ],
       "workOrder": 79,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP14 source-backed profile/generation acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP14 source-backed profile/generation acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP14 source-backed profile/generation acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP14 source-backed profile/generation acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; JP4 roots/generations remains live."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; JP4 roots/generations remains live."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; JP4 roots/generations remains live."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; JP4 roots/generations remains live."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; JP4 roots/generations remains live."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:07.502Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Named per-user profiles are reviewable source, realize through the one Package graph, and atomically install immutable Hangar-backed generations with closure roots and verified receipts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.364Z"
+        },
+        {
+          "n": 2,
+          "text": "List, switch, rollback, diff, prune, and concurrent update preserve historical generations and never leave partial links, unrooted objects, or hidden mutable package truth.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.365Z"
+        },
+        {
+          "n": 3,
+          "text": "Cross-project and cross-platform use, crash recovery, corrupt generation, offline reinstall, stable JSON/docs/diagnostics, and independent live verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.365Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src/CLI/tool.rs",
+        "crates/jetpack/src/Store.rs",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0hgr4pk",
@@ -9660,23 +10082,109 @@
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp16--installbuild-authority-and-upstream-hooks",
       "blockedBy": [
-        "c0yxdqju",
-        "c0zqnb18",
-        "c041flkr"
+        "D-JPK-EPOCHBOUNDARY1"
       ],
       "workOrder": 81,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP16 hook authority/adapter acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP16 hook authority/adapter acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP16 hook authority/adapter acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP16 hook authority/adapter acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2/JP6A. D-JPK-EPOCHBOUNDARY1 decides whether hook sandbox proof remains an E4 exit gate or moves to E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2/JP6A. D-JPK-EPOCHBOUNDARY1 decides whether hook sandbox proof remains an E4 exit gate or moves to E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2/JP6A. D-JPK-EPOCHBOUNDARY1 decides whether hook sandbox proof remains an E4 exit gate or moves to E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2/JP6A. D-JPK-EPOCHBOUNDARY1 decides whether hook sandbox proof remains an E4 exit gate or moves to E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2/JP6A. D-JPK-EPOCHBOUNDARY1 decides whether hook sandbox proof remains an E4 exit gate or moves to E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2/JP6A. D-JPK-EPOCHBOUNDARY1 decides whether hook sandbox proof remains an E4 exit gate or moves to E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2/JP6A. D-JPK-EPOCHBOUNDARY1 decides whether hook sandbox proof remains an E4 exit gate or moves to E8."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:07.835Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every install/build hook lowers to the finite action graph with declared inputs, outputs, environment, authority, platform, toolchain, cache identity, and actual sandbox class; ambient execution is rejected.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.613Z"
+        },
+        {
+          "n": 2,
+          "text": "Upstream adapters cannot read host state, mutate source truth, smuggle credentials, weaken identity, or bypass policy; unsupported hooks produce actionable Jet diagnostics and a source-backed adapter path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.613Z"
+        },
+        {
+          "n": 3,
+          "text": "Hostile hooks, lifecycle ordering, cancellation, crash cleanup, offline, stable JSON/docs, and the sandbox obligation selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.613Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src",
+        "crates/jet-pkg-model/src",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0mwowfx",
@@ -9694,23 +10202,109 @@
         "c0w7297z",
         "c0v0y46r",
         "c09itznu",
-        "c0c7d9qt",
-        "c0hgr4pk",
         "c0kalcyg"
       ],
       "workOrder": 87,
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP17 provider conformance/lossless migration acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP17 provider conformance/lossless migration acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP17 provider conformance/lossless migration acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP17 provider conformance/lossless migration acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13/JP15; live cache, trust, registry, and build-authority dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13/JP15; live cache, trust, registry, and build-authority dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13/JP15; live cache, trust, registry, and build-authority dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13/JP15; live cache, trust, registry, and build-authority dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13/JP15; live cache, trust, registry, and build-authority dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13/JP15; live cache, trust, registry, and build-authority dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13/JP15; live cache, trust, registry, and build-authority dependencies remain."
+        },
+        {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:07.993Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every supported provider maps identities, versions, features, platforms, checksums, source authority, yanks, and build metadata into one canonical graph and lock without provider-specific hidden truth.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.865Z"
+        },
+        {
+          "n": 2,
+          "text": "Importers preserve source meaning losslessly or emit an explicit unsupported diagnostic; round-trip and explain output name every translation, policy choice, and non-canonical adapter.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.865Z"
+        },
+        {
+          "n": 3,
+          "text": "Live provider conformance, conflict/security corpus, lock/source-map determinism, offline/vendor behavior, migration fixtures, docs, and independent verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:29:36.865Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src/Providers",
+        "crates/jet-pkg-model/src",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0pn8z35",
@@ -9725,23 +10319,115 @@
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp18--reproducibility-certification",
       "blockedBy": [
-        "c0yxdqju",
-        "c0zqnb18",
-        "c06re5ow"
+        "c06re5ow",
+        "D-JPK-EPOCHBOUNDARY1"
       ],
       "workOrder": 89,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP18 independent reproducibility certification acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP18 independent reproducibility certification acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP18 independent reproducibility certification acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP18 independent reproducibility certification acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP18 independent reproducibility certification acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether cross-platform hostile sandbox proof remains part of the E4 reproducibility certificate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether cross-platform hostile sandbox proof remains part of the E4 reproducibility certificate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether cross-platform hostile sandbox proof remains part of the E4 reproducibility certificate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether cross-platform hostile sandbox proof remains part of the E4 reproducibility certificate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether cross-platform hostile sandbox proof remains part of the E4 reproducibility certificate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether cross-platform hostile sandbox proof remains part of the E4 reproducibility certificate."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether cross-platform hostile sandbox proof remains part of the E4 reproducibility certificate."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:08.158Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Two independent clean builders reproduce canonical output bytes and complete closure digests for the certified corpus from the same locked action facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:17.305Z"
+        },
+        {
+          "n": 2,
+          "text": "A signed certificate binds action, inputs, outputs, closure, platform, toolchain, worker, sandbox class, logs, provenance, and disagreement evidence; cache reuse cannot manufacture certification.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:17.305Z"
+        },
+        {
+          "n": 3,
+          "text": "Deliberate nondeterminism, malicious worker, clock/path/locale variation, cross-platform matrix, stable JSON/docs, and the boundary selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:17.305Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src",
+        "crates/jet-pkg-model/src",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0sa3d63",
@@ -9760,7 +10446,6 @@
         "c0w7297z",
         "c0v0y46r",
         "c06re5ow",
-        "c0c7d9qt",
         "c0esko6c",
         "c0mwowfx",
         "c0pn8z35",
@@ -9770,15 +10455,113 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP19 causal-query scope split cleanly from #517 physical operations; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP19 causal-query scope split cleanly from #517 physical operations; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP19 causal-query scope split cleanly from #517 physical operations; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP19 causal-query scope split cleanly from #517 physical operations; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP19 causal-query scope split cleanly from #517 physical operations; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; all remaining blockers own live explain/store evidence."
+        },
+        {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:08.317Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One causal fact engine answers why dependency, rebuild, cache, trust, root/liveness, profile, provider, policy, output, and receipt questions with complete source-to-object paths and rejected alternatives.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:17.541Z"
+        },
+        {
+          "n": 2,
+          "text": "Physical verify/repair/copy/import/export/dump/restore/sign operations delegate to #420/#517; JP19 adds no duplicate store algorithm, archive, signature, or repair path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:17.541Z"
+        },
+        {
+          "n": 3,
+          "text": "Human and stable JSON parity, large/cyclic graph bounds, missing/corrupt facts, cross-project history, docs, diagnostics, and independent live verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:17.541Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src/CLI/update_search_info.rs",
+        "crates/jetpack/src/Store.rs",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0ux5rmy",
@@ -9794,7 +10577,6 @@
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp20--advisory-license-sbom-provenance-policy",
       "blockedBy": [
         "c0v0y46r",
-        "c0c7d9qt",
         "c0mwowfx",
         "c0pn8z35"
       ],
@@ -9802,15 +10584,118 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP20 policy/live-feed acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP20 policy/live-feed acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP20 policy/live-feed acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP20 policy/live-feed acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP20 policy/live-feed acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP20 policy/live-feed acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP13; live trust/provider/reproducibility dependencies remain."
+        },
+        {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:08.477Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Advisory, license, SBOM, provenance, source freshness, maturity, and no-downgrade policy consumes the one locked graph and verified metadata with reviewable Package policy.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:57.913Z"
+        },
+        {
+          "n": 2,
+          "text": "Unknown, stale, revoked, conflicting, offline, private, and delegated metadata fails according to ratified policy without leaking package names, credentials, or trust evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:57.913Z"
+        },
+        {
+          "n": 3,
+          "text": "Live feeds, signed snapshots, targeted update, transitive/exotic sources, stable explain/JSON/docs/diagnostics, and independent hostile verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:30:57.913Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src",
+        "Source/Publish",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0xm7b14",
@@ -9825,24 +10710,137 @@
       "priority": "P1",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp21--explicit-finite-staged-planning",
       "blockedBy": [
-        "c0yxdqju",
-        "c0zqnb18",
         "c0v0y46r",
-        "c0kalcyg"
+        "c0kalcyg",
+        "D-JPK-EPOCHBOUNDARY1"
       ],
       "workOrder": 85,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP21 finite staged-planning acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP21 finite staged-planning acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP21 finite staged-planning acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP21 finite staged-planning acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP21 finite staged-planning acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP21 finite staged-planning acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP21 finite staged-planning acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed JP2. D-JPK-EPOCHBOUNDARY1 decides whether staged-action sandbox proof remains an E4 gate or becomes E8 acceptance."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:38:08.640Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every dynamic request expands into a finite typed staged action graph with explicit input/output digests, authority, dependency edges, platform roles, cache identity, and bounded stage count before execution.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:31:36.700Z"
+        },
+        {
+          "n": 2,
+          "text": "Stages cannot hide network, host reads, generated dependencies, mutable plan state, or evaluator/build cycles; generated source re-enters lexer, parser, and sema under R11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:31:36.700Z"
+        },
+        {
+          "n": 3,
+          "text": "Cache/replay, cancel/crash, malicious stage, stable explain/JSON/docs, and the sandbox obligation selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:31:36.700Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jet-pkg-model/src",
+        "crates/jet-env-model/src",
+        "crates/jetpack/src",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c00lqj9d",
@@ -9864,12 +10862,86 @@
       ],
       "workOrder": 131,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP22 binds all 21 master-plan lanes and conditional final claim; acceptance and refs added."
+        }
+      ],
       "created": "2026-07-09T20:38:08.821Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "All 21 binding Epoch 4 capability lanes named by the master plan are independently verified against their live, hostile, cross-platform acceptance and no card is closed by schema, fixture, or compatibility-only evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:32:15.290Z"
+        },
+        {
+          "n": 2,
+          "text": "Dogfood packages exercise registry, providers, source builds, Nix compatibility, caches, profiles, remote execution, policy, explain, offline, corruption, recovery, scale, and migration through one graph and store.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:32:15.290Z"
+        },
+        {
+          "n": 3,
+          "text": "Performance/resource budgets, clean-machine replay, stable CLI/JSON/docs, truth matrix, independent review, and the product claim selected by D-JPK-EPOCHBOUNDARY1 pass before Epoch 4 exit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:32:15.290Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/roadmap.md",
+        "tests/jetpack_engine.rs",
+        "tests/jetpack_dispatch.rs"
+      ]
     },
     {
       "id": "c0v0y46r",
@@ -9891,15 +10963,88 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-criteria] JP6B trust-integration/compromise acceptance and refs added."
+        },
+        {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         }
       ],
       "created": "2026-07-09T20:42:55.814Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-16",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Registry, cache, remote execution, locks, and offline bundles verify role-separated publisher, registry, builder, and executor identities through the ratified trust-root/delegation policy.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:32:15.538Z"
+        },
+        {
+          "n": 2,
+          "text": "Provenance binds action, closure, outputs, platform, actual sandbox class, toolchain, worker capabilities, and signer; key rotation/revocation and root recovery preserve monotonic trust.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:32:15.538Z"
+        },
+        {
+          "n": 3,
+          "text": "First-root replacement, rollback, freeze, fast-forward, mix-and-match, signature stripping, threshold-minus-one, compromised builder, privacy, offline, docs, and independent hostile verification pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:32:15.538Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src/TrustRoot.rs",
+        "crates/jetpack/src/Store.rs",
+        "tests/jetpack_engine.rs"
+      ]
     },
     {
       "id": "c0ddul2b",
@@ -12661,12 +13806,25 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "Implement D-CLI-HANGAR1=B through one versioned, signed, self-describing `.hangar` envelope over Hangar Store v2 canonical objects and closures. Reuse #420's verify/repair engine; this card must not create a second repair path. Build one encoder/decoder first, then project it as file `export`/`import`, byte-identical streaming `dump`/`restore`, and endpoint `copy`; closure is default and `--no-deps` selects one object. Every import/restore/copy target stages in quarantine, verifies canonical digests, references, platform/path law, signatures, provenance, and authority, then atomically registers or leaves the Hangar unchanged. `copy` negotiates missing objects and resumes idempotently without weakening verification. `repair` presents #420's exact plan-before-apply ordered-cache/rebuild result. `sign` uses the ratified trust-root/key policy without key bytes in source, argv, logs, archives, or JSON. Human and stable JSON plans precede every mutation. Prove identical archive bytes across file/stream paths, live cross-store transfer, hostile truncation/tamper/replay/wrong-key/wrong-platform inputs, crash recovery, concurrent import/copy, offline behavior, and Linux/macOS/Windows path cases.",
+      "blockedBy": [
+        "c01fj815",
+        "c0w7297z"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-ratifier",
+          "text": "[ratification durability] D-CLI-HANGAR1=B recorded canonically: export/import, dump/restore, and copy share one signed self-describing .hangar archive backbone; no second raw dump format."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] D-CLI-HANGAR1=B fully planned. Reuses JP4 repair and one archive backbone; waits on #420 closure/repair and #395 transfer/cache substrate. No new owner gate."
+        },
         {
           "at": "2026-07-13",
           "text": "All decisions ratified; advanced out of deciding."
@@ -12682,11 +13840,74 @@
           "text": "D-CLI-HANGAR1 ballot queued (semantics of the 7 ratified hangar verbs; rec B unified archive backbone). Implementation gated on ratification."
         }
       ],
-      "criteria": [],
-      "refs": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One versioned canonical `.hangar` envelope represents a leaf or closure, records references and trust metadata, and round-trips byte-identically through export/import and dump/restore.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:03:29.060Z"
+        },
+        {
+          "n": 2,
+          "text": "Import, restore, and copy stage in quarantine; verify bytes, graph, path/platform law, signatures, provenance, and authority; then register atomically or leave source and target stores unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:03:29.060Z"
+        },
+        {
+          "n": 3,
+          "text": "Copy negotiates missing objects, resumes idempotently, and proves live local/SSH endpoint transfer without treating endpoint location as trust.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:03:29.060Z"
+        },
+        {
+          "n": 4,
+          "text": "Repair reuses #420's verify, ordered-cache, and deterministic-rebuild engine with exact plan-before-apply human and versioned JSON output; ordinary reuse never repairs silently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:03:29.060Z"
+        },
+        {
+          "n": 5,
+          "text": "Sign and re-sign obey ratified key roles, rotation, and revocation while secret key material never enters source, argv, logs, archives, or JSON.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:03:29.060Z"
+        },
+        {
+          "n": 6,
+          "text": "Hostile, crash, concurrency, offline, and cross-platform acceptance plus diagnostics, examples, docs, and full verification prove all seven verbs end to end with no reserved teaching stub remaining.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T03:03:29.060Z"
+        }
+      ],
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/syntax-decisions.md",
+        "Source/CmdPkg.rs",
+        "crates/jet-cli/src/CLI.rs",
+        "crates/jetpack/src/Store.rs",
+        "crates/jet-pkg-model/src/Envelope.rs",
+        "tests/diagnostic_snapshots.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-12T13:59:10.137Z",
-      "updated": "2026-07-14"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0h1r3b8",
@@ -13099,10 +14320,21 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "Ratify one file-placement law, then make one-file packages and split workspaces follow it without translation.",
-      "blockedBy": [],
+      "plan": "Ratifications on this constitution card define one Package graph but do not constitute implementation. Ownership is split without overlap: #610 owns `package.jet`, Config discovery, and split/fold migration; #653 owns Config composition/provenance; #654 owns flat root-only membership; #587 owns typed Outputs and command selection; #609 owns only the System/Fleet Output projection onto Jetpack. This umbrella closes only when those five cards independently verify one graph identity across beginner single-file use and expert target/policy/cache/audit controls, and no retired `pkg.jet`/`env.jet`/`workspace.jet`/`config.jet`, wrapper Package, role module, or parallel OS graph remains authoritative.",
+      "blockedBy": [
+        "c0m1zysi",
+        "c0d06bh8",
+        "c0pro7ct",
+        "c0qj346l",
+        "c0kxss7s"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Constitution card converted to implementation umbrella with exact child ownership; no duplicate implementation lives here."
+        },
         {
           "at": "2026-07-15",
           "text": "All decisions ratified; advanced out of deciding."
@@ -13181,14 +14413,15 @@
         }
       ],
       "refs": [
-        "docs/proposals/language-shape-constitution.md",
-        "docs/proposals/package-ecosystem-frameworks.md",
+        "docs/proposals/ecosystem-shape.md",
         "docs/spec/syntax-decisions.md",
-        "docs/proposals/language-shape-research.md"
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jet-pkg-model",
+        "crates/jet-env-model"
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T11:56:28.357Z",
-      "updated": "2026-07-15",
+      "updated": "2026-07-16",
       "workOrder": 26
     },
     {
@@ -13966,12 +15199,65 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "Ratify one callable-link form, then use it for every runnable output while preserving zero-config `fn run`.",
-      "blockedBy": [
-        "c0xqkis5"
-      ],
+      "plan": "Implement D-SHAPE-OUTPUT-CALLABLE1 across parser, sema, TIR lowering, dev/JIT, formatter, package model, CLI selection, semantic index, Canvas, docs, and diagnostics. Runnable typed Outputs hold one checked Jet function reference; sema resolves it before codegen, enforces the Output kind's exact parameter/return/effect/authority contract, rejects ambiguity or mismatch with Jet-owned snapshots, and carries a resolved callable identity into dumb codegen. Preserve ceremony-free standalone `fn run`; inside a Package, D-ECO-OUTPUT-DEFAULT1's deterministic selection is the sole selection path. No string symbol lookup, generated Rust name, runtime reflection, second callable wrapper, or rustc diagnostic. Prove free functions, qualified functions, moved/renamed source, stale locks, each runnable Output kind, formatter/grammar stability, inspect/Canvas reconstruction, and AOT/dev parity.",
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Cleared completed #540 and expanded callable-link implementation through compiler, tooling, and AOT/dev consumers."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Removed completed #540 output-representation blocker; callable-link implementation is ungated."
+        },
         {
           "at": "2026-07-15",
           "text": "All decisions ratified; advanced out of deciding."
@@ -14025,14 +15311,19 @@
         }
       ],
       "refs": [
-        "docs/proposals/language-shape-constitution.md",
+        "docs/proposals/ecosystem-shape.md",
         "docs/spec/syntax-decisions.md",
         "crates/jet-foundation/src/Syntax.rs",
-        "docs/proposals/language-shape-research.md"
+        "crates/jet-parser/src",
+        "crates/jet-sema/src",
+        "crates/jet-codegen/src/Codegen/TIR",
+        "crates/jetpack/src/Output.rs",
+        "tests/jetpack_engine.rs",
+        "tests/dev.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T14:07:57.309Z",
-      "updated": "2026-07-15",
+      "updated": "2026-07-16",
       "workOrder": 32
     },
     {
@@ -15764,10 +17055,22 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "Ratify one typed output collection, then map run, build, test, publish, and dev commands to it.",
-      "blockedBy": [],
+      "plan": "Implement the ratified closed nine-kind Output set as thin typed projections over Package facts stored once: Executable, Library, Check, Benchmark, Service, Environment, Image, System, and Fleet. Parse and sema-check each payload and D-ECO-OUTPUT-CALLCONTRACT1 role contract; #544 supplies resolved callable links. Lower executable bodies through TIR and preserve R12 AOT/dev parity. D-ECO-OUTPUT-DEFAULT1 selects an explicitly named Output, then the ratified per-command default, then the sole compatible Output; ambiguity and kind mismatch stop before realization with all candidates and a fix. `jet run/build/test/bench/dev/env/os` and publish map to this same selection engine. `jet inspect output`, semantic index, Canvas, locks, cache keys, and receipts reconstruct identical facts and provenance without copying fields into command-specific models. Cover all nine kinds, valid and invalid call contracts, zero-config `fn run`, explicit/default/sole/ambiguous selection, formatter/grammar, diagnostics, examples, and AOT/dev behavior.",
+      "blockedBy": [
+        "c04x8do3"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Exact nine-kind Output, selection, diagnostic, tooling, and parity scope recorded; #544 is the sole callable-link dependency."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Exact nine-kind Output, selection, diagnostic, tooling, and parity scope recorded; #544 is the sole callable-link dependency."
+        },
         {
           "at": "2026-07-15",
           "text": "All decisions ratified; advanced out of deciding."
@@ -15840,13 +17143,20 @@
       ],
       "refs": [
         "docs/proposals/ecosystem-shape.md",
-        "docs/spec/philosophy.md",
         "docs/spec/syntax-decisions.md",
-        "docs/plans/epoch-4/world-class-package-manager.md"
+        "docs/spec/architecture.md",
+        "crates/jet-pkg-model",
+        "crates/jetpack/src/Output.rs",
+        "crates/jet-sema/src",
+        "crates/jet-codegen/src/Codegen/TIR",
+        "crates/jet-semindex/src",
+        "tests/jetpack_engine.rs",
+        "tests/dev.rs",
+        "tests/canvas.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T18:30:14.575Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0zoq183",
@@ -16837,11 +18147,24 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "Ratify one system contribution and activation model shared with packages and receipts.",
-      "blockedBy": [],
+      "plan": "Epoch 4 scope is only the typed System and Fleet Output projection onto the Package/Jetpack graph. Re-home machine, host-set, target, toolchain, package, policy, cache, closure, and receipt references so `jet build`, `jet inspect output`, semantic index, and Canvas see one locked identity; remove any parallel OS package resolver or copied dependency graph. Preserve the ratified preview/proof data shapes as inert typed facts and hand them to Epoch 7. Do not implement or claim activation, switch, rollback, installer, VM boot, readiness execution, or fleet rollout here; those remain Epoch 7 consumers. Prove System/Fleet parse and sema validation, graph/lock/cache identity with ordinary Outputs, host-reference and duplicate diagnostics, inspect/Canvas reconstruction, formatter/grammar, and AOT/dev read parity without touching a machine.",
+      "blockedBy": [
+        "c0qj346l",
+        "c0gvkibe"
+      ],
       "workOrder": 31,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Narrowed E4 to System/Fleet Output graph projection. Activation, rollback, installer, VM, and fleet execution stay E7."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Narrowed E4 to System/Fleet Output graph projection. Activation, rollback, installer, VM, and fleet execution stay E7."
+        },
         {
           "at": "2026-07-15",
           "text": "All decisions ratified; advanced out of deciding."
@@ -16914,13 +18237,18 @@
       ],
       "refs": [
         "docs/proposals/ecosystem-shape.md",
-        "docs/spec/philosophy.md",
         "docs/spec/syntax-decisions.md",
-        "docs/spec/architecture.md"
+        "docs/spec/architecture.md",
+        "crates/jet-pkg-model",
+        "crates/jet-env-model",
+        "crates/jetpack/src/Output.rs",
+        "crates/jet-semindex/src",
+        "tests/jetpack_engine.rs",
+        "tests/canvas.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T23:00:05.144Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0m1zysi",
@@ -16933,11 +18261,29 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "Ratify or preserve S52/U10 while keeping U3, U4, U7, U8, and path identity exact.",
-      "blockedBy": [],
+      "plan": "Implement D-ECO-FILEROOT1=A, D-ECO-ROOTNAME1, D-ECO-SLICENAME1=G, D-ECO-SOURCE1, D-ECO-SPLITPOLICY1=A, and D-ECO-TRANSITION1=A as one migration-safe source path. A single file remains a complete program. The nearest reserved `package.jet` supplies Package context through ratified inferred construction; discovered `.jet` files may export closed Config values, while leading underscore disables discovery and explicit imports remain exact. Reuse #653 composition and #654 membership; do not embed second merge/discovery engines. For one migration epoch, `jet init --check` previews folding `pkg.jet`, `env.jet`, `workspace.jet`, and JetOS `config.jet` into the one Package graph; apply is crash-safe and `--restore-role-files` returns byte-identical originals. `jet split` extracts inline facts into Config, flat member Package, or Fleet host files only after proving closure, collision freedom, stable identity, and unchanged graph fingerprint; its ledger records identity, spans, ordinal, tier, bytes, and fingerprint. `jet fold` consumes that ledger, restores exact bytes, leaves authored siblings untouched, and refuses stale/edited/open/shared boundaries before writes. Update CLI/help, diagnostics, formatter/grammars, semantic index, Canvas transactions, examples, and locks only after the current and migrated graph match.",
+      "blockedBy": [
+        "c0d06bh8",
+        "c0pro7ct"
+      ],
       "workOrder": 27,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Exact package.jet/Package/Config and reversible split/fold migration recorded; stale Epoch-4 README role files are migration inputs only."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Exact package.jet/Package/Config and reversible split/fold migration recorded; stale Epoch-4 README role files are migration inputs only."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Exact package.jet/Package/Config and reversible split/fold migration recorded; stale Epoch-4 README role files are migration inputs only."
+        },
         {
           "at": "2026-07-15",
           "text": "All decisions ratified; advanced out of deciding."
@@ -17010,14 +18356,19 @@
       ],
       "refs": [
         "docs/proposals/ecosystem-shape.md",
-        "docs/spec/philosophy.md",
         "docs/spec/syntax-decisions.md",
-        "docs/spec/architecture.md",
-        "docs/spec/diagnostics.md"
+        "docs/spec/diagnostics.md",
+        "crates/jet-foundation/src/Syntax.rs",
+        "crates/jet-env-model/src/WorkspaceFile.rs",
+        "crates/jet-pkg-model",
+        "crates/jetpack/src/CLI/workspace_sources.rs",
+        "crates/jet-devserver/src/Canvas/project_transactions.rs",
+        "tests/jetpack_engine.rs",
+        "tests/canvas.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T23:05:57.851Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0p5ugzr",
@@ -20728,12 +22079,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": null,
+      "plan": "Implement ratified D-ECO-SLICENAME1=G and D-ECO-COMPOSE2=A as one pure Config-composition path in `jet-pkg-model`, consumed unchanged by package evaluation, lock/explain, semantic index, Canvas, AOT, and dev. First model a closed Config's typed Package facts and source spans; reject `members:` because D-ECO-MEMBERS1 makes membership root-only. Merge order-independently by field law: equal scalars coalesce, named collections merge by key, sets union, ordered types use their declared order, and unequal ordinary scalars stop before realization with every contributor. Preserve all successful contributors and winning law in the semantic lock and explain facts. Expert conflict resolution remains an ordinary typed function producing one final value; do not add force syntax or file-order precedence. Replace stale role-module/wrapper composition only after equivalent graph fingerprints and reversible migration proof. Cover one-file and discovered-file Configs, cycles/open bindings, equal and conflicting facts, formatter round-trip, lock determinism, source moves, Canvas/semantic-index views, and AOT/dev parity.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Config merge grounded in D-ECO-SLICENAME1=G and D-ECO-COMPOSE2=A; no file-order or parallel force mechanism. Owner gates clear."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -20782,11 +22139,17 @@
         }
       ],
       "refs": [
-        "docs/proposals/ecosystem-shape.md"
+        "docs/proposals/ecosystem-shape.md",
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-pkg-model/src/WorkspacePlan.rs",
+        "crates/jet-env-model/src/WorkspaceFile.rs",
+        "crates/jet-semindex/src/Build.rs",
+        "tests/jetpack_engine.rs",
+        "tests/canvas.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T21:02:58.856Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0pro7ct",
@@ -20797,12 +22160,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": null,
+      "plan": "Implement D-ECO-MEMBERS1=A on the D-ECO-FILEROOT1=A `package.jet` root, replacing `workspace.jet` as permanent authority without retaining two membership paths. Reuse the current `members:` expression evaluator and E0995-E0997 discovery lineage, but bind its output to deterministic relative Package references under the nearest root. Canonicalize physical identity without following escapes; reject cycles, duplicate aliases, case/path collisions, ambiguous nearest roots, and member paths outside the root before resolution or build actions. A member Package containing `members:` fails at depth 2 with root/member paths, both spans, the depth-cap reason, and a lift-to-root fix. `find` stays deterministic and sparse-checkout-safe; absent members report exact missing paths. Migrate legacy workspace input through the ratified package-root transition, prove the same graph/lock identity, then retire workspace authority, diagnostics, Canvas edits, examples, and help. Cover single Package, flat monorepo, nested rejection, symlink/alias/cycle attacks, sparse checkouts, formatter/snapshots, lock/golden tests, and AOT/dev consumers.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] Flat Package membership grounded in D-ECO-MEMBERS1=A and package.jet law; current workspace evaluator is migration substrate, not a second authority. Owner gates clear."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -20851,11 +22220,19 @@
         }
       ],
       "refs": [
-        "docs/proposals/ecosystem-shape.md"
+        "docs/proposals/ecosystem-shape.md",
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-env-model/src/WorkspaceFile.rs",
+        "crates/jet-pkg-model/src/WorkspacePlan.rs",
+        "crates/jet-pkg-model/src/WorkspaceLock.rs",
+        "crates/jetpack/src/CLI/workspace_sources.rs",
+        "tests/jetpack_engine.rs",
+        "tests/canvas.rs",
+        "docs/spec/diagnostics.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T21:04:04.931Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0gvkibe",
@@ -20866,14 +22243,72 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": null,
+      "plan": "Implement D-ECO-RECEIPTSTORE1=A after #420's canonical object/closure/root engine is available. Define one versioned canonical receipt object shared by build and activation: locked input digest, finite action/plan digest, named output digests, parent generation, predicted delta, readiness results, activation observations, rollback evidence, platform/toolchain/sandbox/provenance/signature facts, and references to supporting logs or artifacts. Store immutable receipt bytes in Hangar; `.jet/lock` and generation records contain verified digest references only and remain the sole graph/merge-history authority. Register the receipt and all referenced objects atomically with its consuming lock/generation root. `jet inspect output`, `jet os proof`, Canvas, and stable JSON resolve the same object and fail closed on missing, corrupt, mismatched, stale, unauthorized, or incomplete evidence. Export/import/sign/dedup/retention/GC use the ordinary Hangar closure engine, never a receipt-specific store. Prove deterministic repeats, historical generations without recomputation, corruption, crash boundaries, export/import, signature revocation, clean retention, and concurrent writers.",
       "blockedBy": [
-        "D-ECO-RECEIPTSTORE1"
+        "c01fj815",
+        "c0qdr54o",
+        "c0sa3d63"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified receipt-location gate is clear. JP4 owns object roots, #517 owns physical archive/sign operations, and JP19 owns causal queries; this card owns only canonical connected receipt facts and references."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] D-ECO-RECEIPTSTORE1=A blocker cleared; implementation now correctly waits on #420 Hangar closure/root substrate. No new owner gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -20922,11 +22357,18 @@
         }
       ],
       "refs": [
-        "docs/proposals/ecosystem-shape.md"
+        "docs/proposals/ecosystem-shape.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src/Store.rs",
+        "crates/jet-pkg-model/src/WorkspaceLock.rs",
+        "crates/jet-devserver/src/Canvas/schema_api.rs",
+        "tests/canvas.rs",
+        "tests/jetpack_engine.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T21:05:11.873Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0e4nuy5",
@@ -20937,15 +22379,76 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Implement D-ECO-HANGARPATH1=A and D-ECO-BROKERBOUNDARY1=A over #420's store lifecycle. One pure path resolver chooses Linux `$XDG_DATA_HOME/jet/hangar` with `~/.local/share` fallback, macOS Application Support, or Windows LOCALAPPDATA; `jet hangar path`, Jetpack, JetOS, cleanup, locks, and tests consume that same result. First use is rootless. Detect supported legacy stores, preview and perform a locked crash-safe copy/verify/switch migration, and never silently adopt `/etc/jet/hangar`. Shared storage is explicit administrator installation of a socket-activated, request-bounded verifier. It never parses/evaluates Package source, never accepts arbitrary paths or commands, rebuilds only under ephemeral sandbox identities, exits idle, and promotes only after independently verifying canonical bytes, closure, signatures, provenance, writer role, platform, and policy. Promotion is atomic across user/shared stores; hostile or unavailable brokers leave both unchanged and honestly fall back to the user Hangar. Prove Linux/macOS/Windows paths, missing environment/home diagnostics, upgrades, hostile sockets/peers, multi-user isolation, concurrent promotion, crash recovery, idle exit, and fallback.",
       "blockedBy": [
-        "D-ECO-HANGARPATH1",
-        "D-ECO-BROKERBOUNDARY1"
+        "c01fj815",
+        "D-JPK-EPOCHBOUNDARY1"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[dependency-audit] Ratified Hangar-path/broker gates are clear. JP4 owns store lifecycle; D-JPK-EPOCHBOUNDARY1 decides whether hostile cross-platform broker isolation proof closes in E4 or E8."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "sol-e4-planner",
+          "text": "[fresh-plan] D-ECO-HANGARPATH1=A and D-ECO-BROKERBOUNDARY1=A blockers cleared; waits on #420 store lifecycle. No new owner gate."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -20994,11 +22497,18 @@
         }
       ],
       "refs": [
-        "docs/proposals/ecosystem-shape.md"
+        "docs/proposals/ecosystem-shape.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "crates/jetpack/src/Store.rs",
+        "crates/jetpack/src/CLI/parse.rs",
+        "Source/Doctor.rs",
+        "tests/jetpack_engine.rs",
+        "tests/diagnostic_snapshots.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T21:06:19.188Z",
-      "updated": "2026-07-15"
+      "updated": "2026-07-16"
     },
     {
       "id": "c0bfdd1e",
@@ -41067,6 +42577,57 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-16T01:44:57.715Z"
+    },
+    {
+      "id": "D-JPK-EPOCHBOUNDARY1",
+      "cardId": "c0zqnb18",
+      "group": "tooling",
+      "title": "Epoch boundary for package sandbox proof",
+      "gist": "Decide whether real Linux, macOS, and Windows package sandbox proof remains an Epoch 4 exit requirement or moves with JP3 to Epoch 8.",
+      "lesson": "A build sandbox is an operating-system boundary around package recipes. It limits files, processes, devices, and network access even when a recipe is hostile. A policy record saying ‘sandboxed’ is not proof; the child process must actually enter the boundary.\n\nEpoch 4’s package-manager plan currently requires that proof before Jetpack claims full Nix replacement parity. On July 12, JP3 moved to Epoch 8 so Epoch 4 could finish package behavior first. Several live Epoch 4 cards still depend on JP3, so the board now contains two incompatible exit laws.\n\nThis choice does not change safe defaults or permit false labels. It decides which epoch owns the proof and which product claim Epoch 4 may make. Beginners still run one command. Experts still see the exact sandbox class, denied authority, platform, worker, and audit evidence.",
+      "explainer": "",
+      "story": "Maya runs a third-party package recipe on a new laptop. Jetpack resolves, caches, and builds it correctly, but the platform sandbox has not passed hostile-system proof. Release notes must say whether Epoch 4 is incomplete or whether sandbox parity belongs to the later portability gate.",
+      "inWild": "$ jetpack build image-tools\nPlan: image-tools#4.1\n  source: locked sha256:20f1…\n  cache: verified miss\n  sandbox: linux namespace, passed\nBuilt sha256:91b8…\n\n$ jetpack inspect dossier image-tools\nPackage behavior: verified\nSandbox proof: Linux passed; macOS and Windows pending #398",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full parity stays in Epoch 4",
+          "detail": "Move JP3 back to Epoch 4 and keep real Linux, macOS, and Windows sandbox proof in the world-class exit. Cache, remote execution, reproducibility, staged builds, and no-installed-Nix acceptance remain blocked until the hostile sandbox matrix passes. Epoch 4 may then claim full package-manager and isolation parity together.",
+          "technical": "Set #398 epoch to E4. Restore direct JP3 dependencies for JP5, JP7, JP11, JP16, JP18, and JP21. The acceptance gate requires real child confinement, syscall-level offline proof, hostile recipes, crash cleanup, and accurate per-platform capability reporting. Model-only or detection-only status never closes a criterion.",
+          "code": "Epoch 4 exit:\n  package behavior: passed\n  Linux sandbox: passed\n  macOS sandbox: passed\n  Windows sandbox: passed\n  hostile recipe corpus: passed\n\nClaim: full Jetpack package-manager parity"
+        },
+        {
+          "key": "B",
+          "name": "Functional Epoch 4, sandbox proof in Epoch 8",
+          "detail": "Honor the July 12 move. Epoch 4 closes resolution, build, store, cache, registry, profile, and explain behavior with honest sandbox-class reporting. Cross-platform hostile sandbox proof and any criterion whose truth depends on it move to Epoch 8. Epoch 4 cannot claim full isolation or complete Nix replacement parity.",
+          "technical": "Remove JP3 as an Epoch 4 dependency. Rewrite the Epoch 4 exit label to functional package-manager parity. Move hostile cross-platform isolation criteria and dependent final-claim gates to #398 or new E8 child cards without duplicating implementation. E4 actions report `enforced`, `fallback`, or `unavailable`; fallback never prints `sandboxed`. E8 upgrades proof without changing package graph semantics.",
+          "code": "Epoch 4 exit:\n  package behavior: passed\n  sandbox class: reported honestly\n  isolation parity: pending Epoch 8\n\nClaim: functional Jetpack package management\nNot claimed: full hostile isolation or complete Nix replacement parity"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "Nix treats sandboxing as part of build trust, while platform support and policy vary. Jet must distinguish functional compatibility from proven isolation when the platform matrix is incomplete.",
+          "code": "build succeeds != hostile recipe is confined"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "B honors the latest owner direction and makes the boundary explicit. Epoch 4 can finish one coherent package graph while every command reports its real sandbox class. Epoch 8 then owns the complete cross-platform hostile proof without pretending it already exists.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A contradicts the July 12 move and restores cross-platform sandbox proof as an Epoch 4 gate without a newer owner ruling."
+          }
+        ],
+        "tradeoff": "Epoch 4 must narrow its exit and product language. It cannot claim full Nix replacement or complete isolation parity until Epoch 8 passes the hostile platform matrix."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-07-16T03:08:33.174Z"
     }
   ],
   "questions": [
@@ -41901,6 +43462,1252 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T03:35:30.494Z",
+      "by": "sol-e4-planner",
+      "action": "card.criteria-add",
+      "ref": "c96",
+      "note": "#1 #423 is done with independently verified live-registry evide"
+    },
+    {
+      "at": "2026-07-16T03:33:58.124Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:33:06.631Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:32:15.538Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:32:15.290Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:31:37.184Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:31:36.945Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:31:36.700Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:58.658Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:58.417Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:58.167Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:57.913Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:18.503Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:18.262Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:18.024Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:17.785Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:17.542Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:30:17.305Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:38.337Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:38.088Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:37.845Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:37.603Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:37.351Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:37.108Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:36.865Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:36.613Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:29:36.365Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:58.642Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:58.402Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:58.155Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:57.909Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:57.664Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:57.418Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:57.178Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:56.938Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:56.696Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:56.451Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:56.208Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:22.162Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:21.919Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:21.676Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:21.433Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:21.181Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:20.943Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:20.697Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:20.460Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:20.211Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:19.966Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:19.724Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:19.480Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:28:19.234Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0yl347q",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:39.168Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:38.909Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:38.667Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:38.428Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:38.190Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:37.938Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:37.695Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:37.454Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:37.213Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:36.972Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:36.723Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:36.480Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:36.237Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0yl347q",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:35.993Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xe5g33",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:27:35.745Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0w7297z",
+      "note": "criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:24:22.970Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0m1zysi",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:23:37.185Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0m1zysi",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:23:36.941Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kxss7s",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:23:36.695Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0qj346l",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:22:59.950Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0m1zysi",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:22:59.708Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kxss7s",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:22:59.455Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0qj346l",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:22:59.201Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:22:58.948Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c002osb3",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:22:58.695Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c96",
+      "note": "plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-16T03:19:49.116Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:19:12.063Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:19:11.824Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:19:11.585Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:18:31.972Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:18:31.729Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:18:31.480Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:18:31.230Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:51.333Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:51.090Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:50.845Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:50.601Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:50.354Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:50.097Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:11.109Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:10.866Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:10.625Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:10.383Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:10.143Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:09.899Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:17:09.655Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:26.066Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:25.821Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:25.589Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:25.349Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:25.107Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:24.866Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:24.626Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:24.384Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:16:24.141Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-16T03:15:22.133Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:21.889Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:21.641Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:21.395Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:21.156Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:20.905Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:20.669Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:20.429Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:15:20.187Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:14:42.395Z",
+      "by": "sol-ratifier",
+      "action": "card.update",
+      "ref": "c0qdr54o",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:31.450Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:31.217Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:30.980Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:30.718Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:30.480Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:30.242Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:30.004Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:29.765Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:29.526Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:13:29.283Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:12:27.941Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:12:27.698Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:12:27.448Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:37.745Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:37.502Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:37.260Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:37.018Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:36.780Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:36.536Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:36.294Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:36.050Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:35.811Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:35.565Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:35.322Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:35.071Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:11:34.821Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:37.870Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:37.629Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:37.381Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:37.128Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:36.891Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:36.652Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:36.407Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:36.158Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:35.914Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:35.673Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:35.428Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:35.185Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:34.940Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:10:34.694Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:51.740Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:51.479Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:51.235Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c04x8do3",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:50.994Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:50.754Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:50.508Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:50.267Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:50.020Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:49.778Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:49.537Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:49.292Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:49.052Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:48.807Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:48.558Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:48.316Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0w7297z",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:09:48.073Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:08:33.175Z",
+      "by": "sol-e4-planner",
+      "action": "decision.add",
+      "ref": "D-JPK-EPOCHBOUNDARY1",
+      "note": "Epoch boundary for package sandbox proof (draft)"
+    },
+    {
+      "at": "2026-07-16T03:03:30.047Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "phase,plan,blockedBy,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:03:29.802Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "phase,plan,blockedBy,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:03:29.552Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0pro7ct",
+      "note": "phase,plan,blockedBy,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:03:29.306Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0d06bh8",
+      "note": "phase,plan,blockedBy,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T03:03:29.060Z",
+      "by": "sol-e4-planner",
+      "action": "card.update",
+      "ref": "c0qdr54o",
+      "note": "phase,plan,blockedBy,refs,criteria,logEntry"
+    },
     {
       "at": "2026-07-16T02:44:35.164Z",
       "by": "sol-e3-planner",
@@ -44154,1252 +46961,6 @@
       "action": "card.update",
       "ref": "c06vgib7",
       "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:38.608Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c08wuixb",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:38.434Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c0bfdd1e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:38.260Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c05n5x5o",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:38.091Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c03lc2y3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:37.921Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c01gqgxn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:37.743Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c0zdv8vm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:37.567Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c0x9dh3l",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T00:05:37.389Z",
-      "by": "sol-ratifier",
-      "action": "card.update",
-      "ref": "c0vb511d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:37.929Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0kn6oul",
-      "note": "phase,blockedBy,plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:37.696Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c09minfo",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:37.469Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c05n5x5o",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:37.237Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c01gqgxn",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:37.006Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0x9dh3l",
-      "note": "phase,blockedBy,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:36.768Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0vb511d",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:36.532Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0d1a7ds",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:36.298Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c09re2dk",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:36.061Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c06h4p4q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:35.824Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c038fme7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:03:35.588Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c00lmm2k",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:56:21.480Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0n6vj96",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:56:21.244Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c11pkkov",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:56:21.004Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c2lizsmx",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:56:20.767Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c2fizfx3",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:56:20.530Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "csivxv0",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:56:20.294Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c164",
-      "note": "phase,plan,criteria,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:48:40.058Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0sucg7f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:47:53.236Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0wwekr6",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-15T23:47:40.474Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0wwekr6",
-      "note": "LSP semantic tokens: reserved 'view' skip + poisoned shared-server cascade"
-    },
-    {
-      "at": "2026-07-15T23:47:25.281Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0xmzy4p",
-      "note": "Truthfulness harness drift: truth-matrix 359/419 + epoch3 capability ledger"
-    },
-    {
-      "at": "2026-07-15T23:47:25.156Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0vkhjuk",
-      "note": "sema_soundness corpus stale against current stdlib signatures"
-    },
-    {
-      "at": "2026-07-15T23:16:22.520Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06qg7a2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T23:16:13.859Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-UNSAFE-OBLIG1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T23:16:13.859Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01gqgxn",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T23:16:13.859Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01gqgxn",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T23:16:13.859Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01gqgxn",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T23:16:13.859Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01gqgxn",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T23:14:29.872Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-OPTGC1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T23:14:29.872Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03lc2y3",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T23:14:29.872Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03lc2y3",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T23:14:29.872Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03lc2y3",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T23:14:29.872Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c03lc2y3",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T23:12:32.257Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MARK-SCOPE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T23:12:32.257Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bfdd1e",
-      "note": "#10 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T23:12:32.257Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bfdd1e",
-      "note": "#9 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T23:12:32.257Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bfdd1e",
-      "note": "#8 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T23:12:32.257Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0bfdd1e",
-      "note": "#7 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T23:02:41.901Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MEM-FACTS1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-15T23:02:41.901Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zdv8vm",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T23:02:41.901Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zdv8vm",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T23:02:41.901Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zdv8vm",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T23:02:41.900Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zdv8vm",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T23:00:39.159Z",
-      "by": "fable-orchestrator",
-      "action": "question.answer",
-      "ref": "q26ita4z",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T23:00:15.151Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0kn6oul",
-      "note": "title,body,kind,track,epoch,phase,priority,blockedBy,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T22:59:26.789Z",
-      "by": "fable-orchestrator",
-      "action": "card.add",
-      "ref": "c0kn6oul",
-      "note": "GC trace and report: migration back to ownership"
-    },
-    {
-      "at": "2026-07-15T22:59:02.767Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c02rqnrd",
-      "note": "title,body,kind,track,epoch,phase,priority,blockedBy,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T22:58:13.875Z",
-      "by": "fable-orchestrator",
-      "action": "card.add",
-      "ref": "c02rqnrd",
-      "note": "GC scope opt-in: package, module, function, block"
-    },
-    {
-      "at": "2026-07-15T22:57:50.759Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-OPTGC1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:56:58.603Z",
-      "by": "fable-orchestrator",
-      "action": "question.answer",
-      "ref": "q1migw8o",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:56:34.733Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-UNSAFE-OBLIG1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:56:10.739Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-MARK-SCOPE1",
-      "note": "Common scope ladder for eligible markers"
-    },
-    {
-      "at": "2026-07-15T22:55:47.842Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0bfdd1e",
-      "note": "title,body,kind,track,epoch,phase,priority,blockedBy,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T22:55:00.664Z",
-      "by": "fable-orchestrator",
-      "action": "card.add",
-      "ref": "c0bfdd1e",
-      "note": "Implement common marker scoping and provenance"
-    },
-    {
-      "at": "2026-07-15T22:54:37.911Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-MEM-FACTS1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:54:13.571Z",
-      "by": "fable-orchestrator",
-      "action": "question.answer",
-      "ref": "q0ehvoge",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:35:23.058Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0sucg7f",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T22:18:40.850Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:18:40.850Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zh74hs",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T22:18:40.850Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zh74hs",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T22:18:40.850Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zh74hs",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T22:18:40.850Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zh74hs",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T22:18:13.308Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-BROKERBOUNDARY1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:17:05.359Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-HANGARPATH1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:16:39.797Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-RECEIPTSTORE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:16:21.459Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-OUTPUT-KINDS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:15:43.895Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-FILEROOT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:15:21.144Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q26ita4z",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:14:51.091Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0sucg7f",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T22:10:58.721Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q1migw8o",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:07:18.381Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q0ehvoge",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T22:02:47.821Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MEM-VIEWRET1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-15T22:02:47.821Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0x9dh3l",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T22:02:47.821Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0x9dh3l",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T22:02:47.821Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0x9dh3l",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T22:02:47.821Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0x9dh3l",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T22:00:52.170Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MEM-PARAM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:00:52.170Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vb511d",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T22:00:52.170Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vb511d",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T22:00:52.170Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vb511d",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T22:00:52.170Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0vb511d",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T22:00:22.966Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-SPLITPOLICY1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T22:00:05.228Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-JETOS-PREVIEW1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T21:59:39.915Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-OUTPUT-PAYLOAD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T21:59:11.836Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-OUTPUT-DEFAULT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T21:58:36.509Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-OUTPUT-CALLCONTRACT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T21:57:08.318Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-OUTPUT-CALLABLE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T21:45:33.479Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0sucg7f",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T21:07:03.197Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0e4nuy5",
-      "note": "title,body,track,epoch,phase,priority,blockedBy,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:06:19.188Z",
-      "by": "fable-orchestrator",
-      "action": "card.add",
-      "ref": "c0e4nuy5",
-      "note": "Move Hangar to per-user paths and add optional transient broker"
-    },
-    {
-      "at": "2026-07-15T21:05:56.604Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0gvkibe",
-      "note": "title,body,track,epoch,phase,priority,blockedBy,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:05:11.874Z",
-      "by": "fable-orchestrator",
-      "action": "card.add",
-      "ref": "c0gvkibe",
-      "note": "Implement connected Hangar receipts and lock references"
-    },
-    {
-      "at": "2026-07-15T21:04:49.375Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0pro7ct",
-      "note": "title,body,track,epoch,phase,priority,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:04:04.931Z",
-      "by": "fable-orchestrator",
-      "action": "card.add",
-      "ref": "c0pro7ct",
-      "note": "Implement flat Package membership and depth diagnostics"
-    },
-    {
-      "at": "2026-07-15T21:03:42.511Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0d06bh8",
-      "note": "title,body,track,epoch,phase,priority,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:02:58.856Z",
-      "by": "fable-orchestrator",
-      "action": "card.add",
-      "ref": "c0d06bh8",
-      "note": "Implement Config merge law and explain provenance"
-    },
-    {
-      "at": "2026-07-15T21:02:36.191Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "body,refs"
-    },
-    {
-      "at": "2026-07-15T21:02:13.483Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0nlrm12",
-      "note": "title,body,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:01:50.991Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0kxss7s",
-      "note": "title,body,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:01:28.429Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0m1zysi",
-      "note": "title,body,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:01:05.924Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0qj346l",
-      "note": "title,body,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:00:43.472Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0q35155",
-      "note": "body,refs,criteria"
-    },
-    {
-      "at": "2026-07-15T21:00:20.897Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-BROKERBOUNDARY1",
-      "note": "Optional shared Hangar broker boundary"
-    },
-    {
-      "at": "2026-07-15T20:59:58.196Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-HANGARPATH1",
-      "note": "Default Hangar ownership and path"
-    },
-    {
-      "at": "2026-07-15T20:59:35.466Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-RECEIPTSTORE1",
-      "note": "Storage location for connected receipts"
-    },
-    {
-      "at": "2026-07-15T20:59:12.793Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-OUTPUT-KINDS1",
-      "note": "Closed v1 Output kind set"
-    },
-    {
-      "at": "2026-07-15T20:58:50.067Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-FILEROOT1",
-      "note": "Reserved Package source-file law"
-    },
-    {
-      "at": "2026-07-15T20:58:27.068Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-FLEETVERB1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T20:58:04.092Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-FLEETVERB1",
-      "note": "Fleet rollout command"
-    },
-    {
-      "at": "2026-07-15T20:57:41.244Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-TRANSITION1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T20:57:18.456Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-TRANSITION1",
-      "note": "Commands for Package growth and reversal"
-    },
-    {
-      "at": "2026-07-15T20:56:55.624Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-MEMBERS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T20:56:32.565Z",
-      "by": "fable-orchestrator",
-      "action": "decision.add",
-      "ref": "D-ECO-MEMBERS1",
-      "note": "How Packages relate in a monorepo"
-    },
-    {
-      "at": "2026-07-15T20:56:09.770Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-MANUALROOT1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-15T20:56:09.770Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01fj815",
-      "note": "#13 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T20:56:09.770Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01fj815",
-      "note": "#12 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T20:56:09.770Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01fj815",
-      "note": "#11 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T20:56:09.770Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c01fj815",
-      "note": "#10 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T20:55:46.792Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-SLICENAME1",
-      "note": "G"
-    },
-    {
-      "at": "2026-07-15T20:55:46.791Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0m1zysi",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T20:55:46.791Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0m1zysi",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T20:55:46.791Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0m1zysi",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T20:55:46.791Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0m1zysi",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T20:55:23.819Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ECO-ROOTNAME1",
-      "note": "I"
-    },
-    {
-      "at": "2026-07-15T20:55:01.151Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-ECO-SPLITPOLICY1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:54:38.398Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-ECO-JETOS-PREVIEW1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:54:15.647Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT-PAYLOAD1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:53:52.742Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT-DEFAULT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:53:29.956Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT-CALLCONTRACT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:53:06.996Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-SHAPE-OUTPUT-CALLABLE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:52:43.965Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:52:21.200Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-ECO-SLICENAME1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:51:59.250Z",
-      "by": "fable-orchestrator",
-      "action": "decision.update",
-      "ref": "D-ECO-ROOTNAME1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:51:54.114Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06vgib7",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-15T20:51:41.049Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06vgib7",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-15T20:49:58.252Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0sucg7f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-15T20:49:58.096Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0sucg7f",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:49:36.499Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06qg7a2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-15T20:49:36.339Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06qg7a2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T20:49:25.697Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0sucg7f",
-      "note": "Cache verifier rejects CAS-hardlinked hangar objects"
-    },
-    {
-      "at": "2026-07-15T20:14:45.914Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c06qg7a2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-15T20:11:06.685Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06qg7a2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T20:07:49.401Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06qg7a2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T20:07:49.249Z",
-      "by": "claude-main",
-      "action": "card.release",
-      "ref": "c0we378g",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-15T20:02:33.683Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T20:01:44.200Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c08wtn3k",
-      "note": "Store ingest silently no-ops on nonexistent output paths"
-    },
-    {
-      "at": "2026-07-15T20:01:44.068Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c06qg7a2",
-      "note": "Jetpack test fixtures: hangar-seeded outputs + staleness backdating"
-    },
-    {
-      "at": "2026-07-15T20:00:20.033Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHAPE-RESOURCE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-15T20:00:20.033Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05n5x5o",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-15T20:00:20.033Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05n5x5o",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-15T20:00:20.033Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05n5x5o",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-15T20:00:20.033Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05n5x5o",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-15T19:59:10.706Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-SHAPE-RESOURCE2",
-      "note": "A defer verb and one close word for resources"
-    },
-    {
-      "at": "2026-07-15T19:59:10.567Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-OPTGC1",
-      "note": "Expose the opt-in Gc<T> cycle collector — resolve the I6 gate"
-    },
-    {
-      "at": "2026-07-15T19:57:04.095Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-UNSAFE-OBLIG1",
-      "note": "Typed unsafe obligations — per-operation review inside audited regions"
-    },
-    {
-      "at": "2026-07-15T19:57:03.959Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-MEM-FACTS1",
-      "note": "Transitive fact vocabulary — allocation, RC, arena bounds"
-    },
-    {
-      "at": "2026-07-15T19:56:26.511Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-MEM-VIEWRET1",
-      "note": "Stored and returned safe views"
-    },
-    {
-      "at": "2026-07-15T19:56:26.369Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-MEM-PARAM1",
-      "note": "Unmarked parameter: read borrow or plain value?"
-    },
-    {
-      "at": "2026-07-15T19:50:05.496Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c09minfo",
-      "note": "Memory audit: unify view tracking + provenance/alias model spec + S9 gate"
-    },
-    {
-      "at": "2026-07-15T19:50:05.377Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c07nt4xr",
-      "note": "Memory audit: distinct allocator runtimes — Arena, Bump, Fixed, slab"
-    },
-    {
-      "at": "2026-07-15T19:50:05.255Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c05n5x5o",
-      "note": "Memory audit: cleanup surface — defer verb and one close word"
-    },
-    {
-      "at": "2026-07-15T19:50:05.131Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c03lc2y3",
-      "note": "Memory audit: Gc<T> exposure vs unratified I6 gate — status drift"
-    },
-    {
-      "at": "2026-07-15T19:50:05.002Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c01gqgxn",
-      "note": "Memory audit: typed unsafe obligations"
-    },
-    {
-      "at": "2026-07-15T19:50:04.877Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0zdv8vm",
-      "note": "Memory audit: transitive fact vocabulary — allocation, RC, targets"
-    },
-    {
-      "at": "2026-07-15T19:50:04.748Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0x9dh3l",
-      "note": "Memory audit: stored and returned safe views with public provenance"
-    },
-    {
-      "at": "2026-07-15T19:50:04.630Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0vb511d",
-      "note": "Memory audit: plain-parameter semantics — values vs read borrows"
-    },
-    {
-      "at": "2026-07-15T19:20:32.650Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T19:19:54.187Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0rxl8sx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T19:01:01.290Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0we378g",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-15T18:59:43.052Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0rxl8sx",
-      "note": "Provider output parse breaks on nix store noise lines"
     }
   ],
   "nextNum": 368,
