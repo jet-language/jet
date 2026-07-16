@@ -1220,22 +1220,20 @@ fn ensure_network_allowed(need: &str) -> Result<(), ProviderError> {
 /// Parse `nix build --json` output: an array of build results, each with an
 /// `outputs` object. `out` is canonical primary; `bin` remains a named output.
 fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderError> {
-    // parse_lenient (card #641): tolerates a `nix` store-optimise warning
-    // ("has maximum number of links") glued to the JSON on hosts whose store
-    // hit the hard-link ceiling — benign noise, not a real provider bug.
-    let json = JSON::parse_lenient(stdout).map_err(ProviderError::BadOutput)?;
-    let arr = json.as_array().map_err(ProviderError::BadOutput)?;
+    let parsed = JSON::parse_lenient(stdout).map_err(ProviderError::BadOutput)?;
+    let bad_output = |reason: String| ProviderError::BadOutput(parsed.diagnostic(reason));
+    let arr = parsed.value.as_array().map_err(&bad_output)?;
     let first = arr
         .first()
-        .ok_or_else(|| ProviderError::BadOutput("provider produced no build results".into()))?;
-    let outputs = first.get("outputs").map_err(ProviderError::BadOutput)?;
-    let outputs = outputs.as_object().map_err(ProviderError::BadOutput)?;
+        .ok_or_else(|| bad_output("provider produced no build results".into()))?;
+    let outputs = first.get("outputs").map_err(&bad_output)?;
+    let outputs = outputs.as_object().map_err(&bad_output)?;
     let drv_path = first
         .get("drvPath")
         .and_then(|value| value.as_str())
-        .map_err(ProviderError::BadOutput)?;
+        .map_err(&bad_output)?;
     if drv_path.trim().is_empty() {
-        return Err(ProviderError::BadOutput(
+        return Err(bad_output(
             "provider output had no exact `drvPath`".into(),
         ));
     }
@@ -1246,7 +1244,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
             value
                 .as_str()
                 .map(|path| (name.clone(), path.to_string()))
-                .map_err(ProviderError::BadOutput)
+                .map_err(&bad_output)
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
@@ -1254,9 +1252,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         .get("out")
         .or_else(|| outputs.get("bin"))
         .and_then(|j| j.as_str().ok())
-        .ok_or_else(|| {
-            ProviderError::BadOutput("provider output had no `out`/`bin` store path".into())
-        })?;
+        .ok_or_else(|| bad_output("provider output had no `out`/`bin` store path".into()))?;
 
     let bin_root = named_outputs.get("bin").map(String::as_str).unwrap_or(out);
     let bin = format!("{}/bin", bin_root.trim_end_matches('/'));
@@ -1477,6 +1473,40 @@ mod tests {
              \"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n";
         let r = parse_realization(&spec, stdout).unwrap();
         assert_eq!(r.out, "/nix/store/abc-fastfetch-2.0");
+    }
+
+    #[test]
+    fn tolerates_nix_warning_between_multiline_realization_lines() {
+        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let stdout = "[\n\
+             {\"drvPath\":\"/nix/store/abc-fastfetch.drv\",\n\
+             warning: ignoring untrusted substituter\n\
+             \"outputs\":{\"out\":\"/nix/store/abc-fastfetch-2.0\"}}\n\
+             ]\n";
+        let r = parse_realization(&spec, stdout).unwrap();
+        assert_eq!(r.out, "/nix/store/abc-fastfetch-2.0");
+    }
+
+    #[test]
+    fn rejects_duplicate_realization_payloads() {
+        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let payload = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
+        assert!(matches!(
+            parse_realization(&spec, &format!("{payload}\n{payload}\n")),
+            Err(ProviderError::BadOutput(_))
+        ));
+    }
+
+    #[test]
+    fn realization_schema_error_retains_filtered_provider_noise() {
+        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let noise = "warning: ignoring untrusted substituter";
+        let error = parse_realization(&spec, &format!("{noise}\n[{{}}]\n")).unwrap_err();
+        let ProviderError::BadOutput(reason) = error else {
+            panic!("expected BadOutput, got {error:?}");
+        };
+        assert!(reason.contains("missing key `outputs`"));
+        assert!(reason.contains(noise));
     }
 
     #[test]

@@ -88,28 +88,27 @@ fn run_nix_eval(flake_dir: &Path) -> Result<String, ProviderError> {
 }
 
 fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
-    // parse_lenient (card #641): tolerates the same nix store-optimise noise
-    // `Provider::parse_realization` guards against — see its comment.
-    let json = JSON::parse_lenient(text).map_err(ProviderError::BadOutput)?;
-    let obj = json.as_object().map_err(ProviderError::BadOutput)?;
+    let parsed = JSON::parse_lenient(text).map_err(ProviderError::BadOutput)?;
+    let bad_output = |reason: String| ProviderError::BadOutput(parsed.diagnostic(reason));
+    let obj = parsed.value.as_object().map_err(&bad_output)?;
 
     let mut packages: Vec<String> = obj
         .get("buildInputs")
-        .and_then(|v| v.as_array().ok())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().ok().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
+        .ok_or_else(|| bad_output("missing key `buildInputs`".into()))?
+        .as_array()
+        .map_err(&bad_output)?
+        .iter()
+        .map(|value| value.as_str().map(str::to_string).map_err(&bad_output))
+        .collect::<Result<_, _>>()?;
     packages.sort();
     packages.dedup();
 
     let mut unmapped = Vec::new();
     let shell_hook = obj
         .get("shellHook")
-        .and_then(|v| v.as_str().ok())
-        .unwrap_or_default();
+        .ok_or_else(|| bad_output("missing key `shellHook`".into()))?
+        .as_str()
+        .map_err(&bad_output)?;
     if !shell_hook.trim().is_empty() {
         unmapped.push("shellHook".to_string());
     }
@@ -224,6 +223,34 @@ mod tests {
             parse_facts_json(r#"{"buildInputs": ["fd", "ripgrep", "fd"], "shellHook": ""}"#)
                 .unwrap();
         assert_eq!(facts.packages, vec!["fd", "ripgrep"]);
+    }
+
+    #[test]
+    fn fact_schema_missing_or_wrong_typed_required_fields_fail_closed() {
+        for input in [
+            r#"{"shellHook":""}"#,
+            r#"{"buildInputs":{},"shellHook":""}"#,
+            r#"{"buildInputs":["fd",1],"shellHook":""}"#,
+            r#"{"buildInputs":[]}"#,
+            r#"{"buildInputs":[],"shellHook":false}"#,
+        ] {
+            assert!(
+                matches!(parse_facts_json(input), Err(ProviderError::BadOutput(_))),
+                "schema-wrong provider output passed: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn fact_schema_error_retains_filtered_provider_noise() {
+        let noise = "warning: ignoring untrusted substituter";
+        let error = parse_facts_json(&format!("{noise}\n{{\"shellHook\":\"\"}}\n"))
+            .unwrap_err();
+        let ProviderError::BadOutput(reason) = error else {
+            panic!("expected BadOutput, got {error:?}");
+        };
+        assert!(reason.contains("missing key `buildInputs`"));
+        assert!(reason.contains(noise));
     }
 
     #[test]
