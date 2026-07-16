@@ -1,17 +1,21 @@
-// D-DYNARRAY1: `[a..b]` (beginner law, unchanged) always COPIES; `.view(a..b)`
-// (expert tier) is a zero-copy WINDOW into the list's own backing storage,
-// tracked by sema so it can never outlive `incidents` (E2305).
+// D-SHAPE-PLACE1=A: a bare range place is a checked read window, `&place` is
+// an exclusive write window, and `~place` makes independent owned storage.
 struct Incident {
     severity: Int
 }
 
+struct Counters {
+    left: Int
+    right: Int
+}
+
 fn run() {
     incidents: [Incident] := [Incident.{severity: 1}, Incident.{severity: 2}, Incident.{severity: 3}, Incident.{severity: 4}, Incident.{severity: 5}]
-    // Copy-slice: `head` owns its own three `Incident`s.
-    head :: incidents[0..2]
+    // Explicit copy: `head` owns its own three `Incident`s.
+    head :: ~incidents[0..2]
     print("copy-slice len: {head.len()}")
-    // Zero-copy: `window` borrows straight into `incidents`' storage.
-    window :: incidents.view(0..2)
+    // Bare place: `window` reads straight from `incidents`' storage.
+    window :: incidents[0..2]
     print("view len: {window.len()}")
     print("indexed: {window[0].severity}")
     sum :: window.fold(0, (a, i) => a + i.severity)
@@ -21,4 +25,24 @@ fn run() {
     loop i in window {
         print("iter: {i.severity}")
     }
+
+    numbers := [1, 2, 3, 4]
+    edit :: &numbers[0..1]
+    read :: numbers[2..3]
+    edit[0] = 9
+    print("disjoint windows: {edit[0]},{read[0]}")
+
+    slots := [5, 6, 7]
+    first :: &slots[0]
+    last :: &slots[2]
+    first = 8
+    last = 9
+    print("disjoint indexes: {first},{last}")
+
+    counters := Counters.{ left: 1, right: 2 }
+    left :: &counters.left
+    right :: &counters.right
+    left = 3
+    right = 4
+    print("disjoint fields: {left},{right}")
 }

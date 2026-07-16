@@ -356,7 +356,7 @@ fn consume(xs: ^[Int]) {
 
 fn run() {
     xs := [1, 2, 3]
-    window :: xs.view(0..1)
+    window :: xs[0..1]
     consume(^xs)
     print(window.len())
 }
@@ -459,6 +459,89 @@ fn run() {
 }
 
 #[test]
+fn write_windows_edit_whole_field_and_index_places() {
+    let src = r#"
+struct Cell { value: Int }
+fn run() {
+    whole := 1
+    whole_edit :: &whole
+    whole_edit = 2
+
+    cell := Cell.{ value: 3 }
+    field_edit :: &cell.value
+    field_edit = 4
+
+    xs := [5, 6]
+    index_edit :: &xs[0]
+    index_edit = 7
+    print(whole + cell.value + xs[0])
+}
+"#;
+    let out = jet::compile(src).expect("write windows must write through to each owner place");
+    assert!(out.rust.contains("(*user_whole_edit) = 2i64"), "{}", out.rust);
+    assert!(out.rust.contains("(*user_field_edit) = 4i64"), "{}", out.rust);
+    assert!(out.rust.contains("(*user_index_edit) = 7i64"), "{}", out.rust);
+}
+
+#[test]
+fn write_window_requires_mutable_owner_or_write_parameter() {
+    let local = r#"
+fn run() {
+    xs :: [1, 2]
+    edit :: &xs[0]
+    print(edit)
+}
+"#;
+    let diags = jet::compile(local).expect_err("immutable local must reject write window");
+    assert!(diags.iter().any(|d| d.code == "E0202"), "{diags:?}");
+
+    let parameter = r#"
+fn edit(xs: [Int]) { window :: &xs[0]; print(window) }
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(parameter).expect_err("read parameter must reject write window");
+    assert!(diags.iter().any(|d| d.code == "E0205"), "{diags:?}");
+}
+
+#[test]
+fn indexed_window_conflict_ends_at_last_use() {
+    let src = r#"
+fn run() {
+    xs := [1, 2]
+    read :: xs[0..0]
+    print(read[0])
+    edit :: &xs[0..0]
+    edit[0] = 9
+    print(xs[0])
+}
+"#;
+    jet::compile(src).expect("last use must end the earlier window conflict");
+}
+
+#[test]
+fn write_mark_stops_at_maximal_place_before_method_chain() {
+    let src = r#"
+fn run() {
+    xs := [1, 2]
+    n :: &xs[0..1].len()
+    print(n)
+}
+"#;
+    let out = jet::compile(src).expect("method must receive the maximal write-window place");
+    assert!(out.rust.contains("jet_view_mut_new"), "{}", out.rust);
+}
+
+#[test]
+fn write_window_rejects_call_result_place() {
+    let src = r#"
+fn make() -> [Int] { return [1, 2] }
+fn run() { edit :: &make()[0]; print(edit) }
+"#;
+    let diags = jet::compile(src).expect_err("call result has no stable owner place");
+    assert!(diags.iter().any(|d| d.code == "E0213"), "{diags:?}");
+}
+
+#[test]
 fn disjoint_read_write_ranges_lower_to_safe_split() {
     let src = r#"
 fn run() {
@@ -471,7 +554,6 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("disjoint read/write windows must compile");
     assert!(out.rust.contains("split_at_mut"), "{}", out.rust);
-    assert!(!out.rust.contains("jet_view_mut_new(&mut user_xs"), "{}", out.rust);
 }
 
 #[test]
@@ -488,6 +570,102 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("disjoint write windows must compile");
     assert!(out.rust.matches("split_at_mut").count() >= 2, "{}", out.rust);
+}
+
+#[test]
+fn disjoint_write_indexes_lower_to_safe_split() {
+    let src = r#"
+fn run() {
+    xs := [1, 2, 3]
+    left :: &xs[0]
+    right :: &xs[2]
+    print(left + right)
+}
+"#;
+    let out = jet::compile(src).expect("disjoint constant indexes must compile");
+    assert!(out.rust.contains("&mut __jet_place_segment_0[0]"), "{}", out.rust);
+}
+
+#[test]
+fn disjoint_struct_fields_use_native_structural_borrows() {
+    let src = r#"
+struct Pair { left: Int, right: Int }
+fn run() {
+    pair := Pair.{ left: 1, right: 2 }
+    left :: &pair.left
+    right :: &pair.right
+    left = 3
+    right = 4
+    print(pair.left + pair.right)
+}
+"#;
+    let out = jet::compile(src).expect("different fields are structurally disjoint");
+    assert!(out.rust.contains("&mut ((user_pair).user_left)"), "{}", out.rust);
+    assert!(out.rust.contains("&mut ((user_pair).user_right)"), "{}", out.rust);
+}
+
+#[test]
+fn place_window_last_use_inside_branch_releases_owner() {
+    let src = r#"
+fn run() {
+    xs := [1, 2]
+    read :: xs[0..0]
+    if true {
+        print(read[0])
+    }
+    xs.push(3)
+}
+"#;
+    jet::compile(src).expect("branch-local last use must release the owner");
+}
+
+#[test]
+fn place_write_window_is_scoped_per_loop_iteration() {
+    let src = r#"
+fn run() {
+    xs := [1, 2]
+    loop i in 0..1 {
+        edit :: &xs[0]
+        edit = edit + 1
+    }
+    print(xs[0])
+}
+"#;
+    jet::compile(src).expect("loop-local write window must end each iteration");
+}
+
+#[test]
+fn generic_place_range_is_a_read_window() {
+    let src = r#"
+fn inspect<T>(xs: [T]) -> Int {
+    window :: xs[0..0]
+    return window.len()
+}
+fn run() { print(inspect([1, 2])) }
+"#;
+    let out = jet::compile(src).expect("generic range window must compile");
+    assert!(out.rust.contains("jet_view_new"), "{}", out.rust);
+}
+
+#[test]
+fn range_window_checks_bounds_before_borrowing() {
+    let src = r#"
+fn run() {
+    xs := [1, 2]
+    window :: xs[0..1]
+    print(window.len())
+}
+"#;
+    let out = jet::compile(src).expect("range window must compile");
+    let check = out
+        .rust
+        .find("let user_window = jet_view_new")
+        .expect("view helper call");
+    let helper = out.rust.find("fn jet_view_new").expect("view helper definition");
+    assert!(helper < check, "bounds-checking helper must exist before use");
+    assert!(out
+        .rust
+        .contains("a < 0 || b < 0 || a > b || b >= len"));
 }
 
 #[test]
@@ -568,7 +746,7 @@ fn resizing_list_owner_with_live_view_is_error() {
     let src = r#"
 fn run() {
     xs := [1, 2, 3]
-    window :: xs.view(0..1)
+    window :: xs[0..1]
     xs.push(4)
     print(window.len())
 }
@@ -584,7 +762,7 @@ fn replacing_list_owner_with_live_view_is_error() {
     let src = r#"
 fn run() {
     xs := [1, 2, 3]
-    window :: xs.view(0..1)
+    window :: xs[0..1]
     xs = [4, 5, 6]
     print(window.len())
 }
@@ -601,7 +779,7 @@ fn owner_can_resize_after_view_scope_ends() {
 fn run() {
     xs := [1, 2, 3]
     if true {
-        window :: xs.view(0..1)
+        window :: xs[0..1]
         print(window.len())
     }
     xs.push(4)
@@ -622,7 +800,7 @@ struct Bucket {
 
 fn run() {
     bucket := Bucket.{ values: [1, 2, 3] }
-    window :: bucket.values.view(0..1)
+    window :: bucket.values[0..1]
     bucket.values.push(4)
     print(window.len())
 }
@@ -640,7 +818,7 @@ struct Bucket {
 
 fn run() {
     bucket := Bucket.{ values: [1, 2, 3] }
-    window :: bucket.values.view(0..1)
+    window :: bucket.values[0..1]
     bucket.values = [4, 5]
     print(window.len())
 }
@@ -658,7 +836,7 @@ fn edit(xs: &[Int]) {
 
 fn run() {
     xs := [1, 2, 3]
-    window :: xs.view(0..1)
+    window :: xs[0..1]
     edit(&xs)
     print(window.len())
 }
@@ -681,7 +859,7 @@ impl Editor {
 fn run() {
     editor :: Editor.{ id: 0 }
     values := [1, 2, 3]
-    window :: values.view(0..2)
+    window :: values[0..2]
     editor.touch(&values)
     print(window[0])
 }
@@ -705,7 +883,7 @@ module edit {
 
 fn run() {
     values := [1, 2, 3]
-    window :: values.view(0..2)
+    window :: values[0..2]
     edit.touch(&values)
     print(window[0])
 }
@@ -733,7 +911,7 @@ fn run() {
     editor :: Editor.{ id: 0 }
     viewed := [1, 2, 3]
     changed := [4, 5, 6]
-    window :: viewed.view(0..2)
+    window :: viewed[0..2]
     editor.touch(&changed)
     print(window[0])
 }
@@ -745,7 +923,7 @@ fn run() {
 fn returned_parameter_view_is_rejected_until_public_provenance_lands() {
     let src = r#"
 fn first(xs: [Int]) -> View<Int> {
-    return xs.view(0..1)
+    return xs[0..1]
 }
 
 fn run() {
@@ -761,9 +939,9 @@ fn nested_returned_view_form_is_rejected() {
     let src = r#"
 fn choose(xs: [Int]) -> View<Int> {
     if true {
-        return xs.view(0..1)
+        return xs[0..1]
     }
-    return xs.view(1..2)
+    return xs[1..2]
 }
 
 fn run() {
@@ -940,11 +1118,6 @@ fn borrowed_parameter_subplaces_need_explicit_copy_in_owning_positions() {
     let cases = [
         r#"
 struct Parcel { label: String }
-fn alias_label(parcel: Parcel) { alias :: parcel.label }
-fn run() { print(0) }
-"#,
-        r#"
-struct Parcel { label: String }
 struct Holder { value: String }
 fn wrap(parcel: Parcel) -> Holder { return Holder.{ value: parcel.label } }
 fn run() { print(0) }
@@ -970,7 +1143,7 @@ fn run() { print(0) }
 }
 
 #[test]
-fn function_value_borrow_context_does_not_leak_between_arguments_or_calls() {
+fn function_value_borrow_context_preserves_parameter_place_window() {
     let src = r#"
 struct Parcel { label: String }
 fn inspect(text: String, n: Int) { print(text); print(n) }
@@ -980,12 +1153,8 @@ fn apply_to(parcel: Parcel, callback: fn(String, Int)) {
 }
 fn run() { apply_to(Parcel.{ label: "hello" }, inspect) }
 "#;
-    let diags = jet::compile(src).expect_err("owning context after callback call must be restored");
-    assert_eq!(
-        diags.iter().filter(|d| d.code == "E0120").count(),
-        1,
-        "only the owning alias must fail; callback read stays borrowed: {diags:?}"
-    );
+    let out = jet::compile(src).expect("bare parameter subplace is a read window");
+    assert!(out.rust.contains("let user_alias = &"), "{}", out.rust);
 }
 
 #[test]

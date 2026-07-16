@@ -507,7 +507,7 @@ fn card_511_census_matches_current_law() {
     );
     assert!(
         package.contains("pub const METHOD_VIEW"),
-        "D-DYNARRAY1 keeps `.view(a..b)` as an ordinary method"
+        "D-SHAPE-PLACE1 keeps retired `.view(a..b)` registered for E0214 teaching"
     );
     for retired in ["ATTR_WASM,", "ATTR_JS,", "ATTR_SUPPRESS,"] {
         assert!(

@@ -67,7 +67,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         }
         TStmt::SplitViews { owner, views } => {
             let owner = emit_tir_expr(owner, cx);
-            for (_, start, end, _, line) in views {
+            for (_, start, end, _, _, line) in views {
                 out.push_str(&format!(
                     "{}jet_check_view_bounds(({}).len() as i64, {}, {}, {:?}, {});\n",
                     pad, owner, start, end, cx.file, line
@@ -75,7 +75,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             }
             let mut previous_end = -1i64;
             let mut rest = owner.clone();
-            for (index, (name, start, end, write, _)) in views.iter().enumerate() {
+            for (index, (name, start, end, single, write, _)) in views.iter().enumerate() {
                 let after = format!("__jet_place_after_{}", index);
                 let segment = format!("__jet_place_segment_{}", index);
                 let next = format!("__jet_place_rest_{}", index);
@@ -92,7 +92,21 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     after,
                     end - start + 1
                 ));
-                if *write {
+                if *single && *write {
+                    out.push_str(&format!(
+                        "{}let {} = &mut {}[0];\n",
+                        pad,
+                        mangle(name),
+                        segment
+                    ));
+                } else if *single {
+                    out.push_str(&format!(
+                        "{}let {} = &{}[0];\n",
+                        pad,
+                        mangle(name),
+                        segment
+                    ));
+                } else if *write {
                     out.push_str(&format!("{}let {} = {};\n", pad, mangle(name), segment));
                 } else {
                     out.push_str(&format!("{}let {} = &*{};\n", pad, mangle(name), segment));

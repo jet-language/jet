@@ -1,10 +1,10 @@
 Error [E2305]: this view points into `xs`, which this function owns
-  --> tests/ui/task_detach_view_capture.jet:3:15
+  --> tests/ui/task_detach_view_capture.jet:3:14
     |
-  3 |     return xs.view(0..2)
-    |               ^^^^
- Why: `xs` is made here and freed when the function returns, so a view into it (`.view(...)`) would outlive what owns it — there'd be nothing left to look at
- Fix: return an owned copy (drop `.view(...)` for a copying slice `[a..b]`, or `.map(...)` it into an owned list), or accept the source as a parameter so the caller keeps owning it
+  3 |     return xs[0..2]
+    |              ^^^^^^
+ Why: `xs` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
+ Fix: return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it
 
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
   --> tests/ui/task_detach_view_capture.jet:8:22

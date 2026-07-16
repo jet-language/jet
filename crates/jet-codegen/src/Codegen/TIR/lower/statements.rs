@@ -41,11 +41,17 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
             group.sort_by_key(|view| view.start);
             let mut views = Vec::with_capacity(group.len());
             for view in &group {
-                env.bind(&view.name, mangle(&view.name), view.ty.clone());
+                let place = if view.single {
+                    format!("(*{})", mangle(&view.name))
+                } else {
+                    mangle(&view.name)
+                };
+                env.bind(&view.name, place, view.ty.clone());
                 views.push((
                     view.name.clone(),
                     view.start,
                     view.end,
+                    view.single,
                     view.write,
                     view.line,
                 ));
@@ -73,6 +79,7 @@ struct SplitViewCandidate {
     ty: Option<Type>,
     start: i64,
     end: i64,
+    single: bool,
     write: bool,
     line: usize,
 }
@@ -93,22 +100,27 @@ fn split_view_candidate(stmt: &Stmt, cx: &Cx) -> Option<SplitViewCandidate> {
     let Expr::Place(inner, access, _) = &binding.init else {
         return None;
     };
-    let Expr::Slice {
-        base, start, end, ..
-    } = inner.as_ref()
-    else {
-        return None;
+    let (base, start, end, single) = match inner.as_ref() {
+        Expr::Slice {
+            base, start, end, ..
+        } => (base.as_ref(), const_place_bound(start)?, const_place_bound(end)?, false),
+        Expr::Index { base, index, .. } => {
+            let index = const_place_bound(index)?;
+            (base.as_ref(), index, index, true)
+        }
+        _ => return None,
     };
-    let Expr::Ident(owner_name, _) = base.as_ref() else {
+    let Expr::Ident(owner_name, _) = base else {
         return None;
     };
     Some(SplitViewCandidate {
-        owner: (**base).clone(),
+        owner: base.clone(),
         owner_name: owner_name.clone(),
         name: binding.name.clone(),
         ty: binding.ty.clone(),
-        start: const_place_bound(start)?,
-        end: const_place_bound(end)?,
+        start,
+        end,
+        single,
         write: matches!(access, PlaceAccess::Write),
         line: crate::Diagnostics::span_line_col(&cx.src, binding.name_span.start).0,
     })

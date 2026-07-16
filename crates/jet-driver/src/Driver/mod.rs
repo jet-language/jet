@@ -390,6 +390,7 @@ fn collect_mmio_expr(
         }
         crate::AST::Expr::Unary(_, e, _)
         | crate::AST::Expr::Copy(e, _)
+        | crate::AST::Expr::Place(e, _, _)
         | crate::AST::Expr::Deref(e, _)
         | crate::AST::Expr::RawOf(e, _)
         | crate::AST::Expr::Field(e, _, _)

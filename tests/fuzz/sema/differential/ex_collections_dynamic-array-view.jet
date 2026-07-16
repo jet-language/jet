@@ -1,17 +1,15 @@
-// D-DYNARRAY1: `[a..b]` (beginner law, unchanged) always COPIES; `.view(a..b)`
-// (expert tier) is a zero-copy WINDOW into the list's own backing storage,
-// tracked by sema so it can never outlive `incidents` (E2305).
+// D-SHAPE-PLACE1=A: bare ranges read, `&` edits, `~` copies.
 struct Incident {
     severity: Int
 }
 
 fn run() {
     incidents: [Incident] := [Incident.{severity: 1}, Incident.{severity: 2}, Incident.{severity: 3}, Incident.{severity: 4}, Incident.{severity: 5}]
-    // Copy-slice: `head` owns its own three `Incident`s.
-    head :: incidents[0..2]
+    // Explicit copy: `head` owns its own three `Incident`s.
+    head :: ~incidents[0..2]
     print("copy-slice len: {head.len()}")
-    // Zero-copy: `window` borrows straight into `incidents`' storage.
-    window :: incidents.view(0..2)
+    // Bare range: `window` borrows straight into `incidents`' storage.
+    window :: incidents[0..2]
     print("view len: {window.len()}")
     print("indexed: {window[0].severity}")
     sum :: window.fold(0, (a, i) => a + i.severity)

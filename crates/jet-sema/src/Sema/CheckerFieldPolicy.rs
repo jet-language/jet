@@ -205,7 +205,8 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
-        | Expr::Copy(inner, _) => rewrite_field_refs(inner, names, receiver),
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _) => rewrite_field_refs(inner, names, receiver),
         Expr::Binary(_, l, r, _) => {
             rewrite_field_refs(l, names, receiver);
             rewrite_field_refs(r, names, receiver);

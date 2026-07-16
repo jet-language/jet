@@ -3,6 +3,32 @@ use super::super::{
     pat_span, retired_s14_teaching_enabled,
 };
 
+fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            method_span,
+            type_args,
+            args,
+            recv_type,
+            resolved_ret,
+        } => Expr::MethodCall {
+            receiver: Box::new(write_window_at_maximal_place(*receiver, start)),
+            method,
+            method_span,
+            type_args,
+            args,
+            recv_type,
+            resolved_ret,
+        },
+        place => {
+            let span = Span::new(start, place.span().end);
+            Expr::Place(Box::new(place), crate::AST::PlaceAccess::Write, span)
+        }
+    }
+}
+
 impl<'a> Parser<'a> {
         /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
         pub(super) fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -400,12 +426,7 @@ impl<'a> Parser<'a> {
                 TokKind::Amp => {
                     let span = self.bump().span;
                     let inner = self.expr_unary(allow_struct_lit)?;
-                    let full = Span::new(span.start, inner.span().end);
-                    Ok(Expr::Place(
-                        Box::new(inner),
-                        crate::AST::PlaceAccess::Write,
-                        full,
-                    ))
+                    Ok(write_window_at_maximal_place(inner, span.start))
                 }
                 // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
                 // expression form. Legal on any expression; most useful on a named

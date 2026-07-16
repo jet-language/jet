@@ -538,7 +538,7 @@ impl<'a> Checker<'a> {
                 // `Expr::Ident` node to get the name's value.
                 if self.is_string_view(name)
                     && !self.allow_string_view_read
-                    && !self.lambda_escapes
+                    && !(self.in_lambda_body && self.lambda_escapes)
                 {
                     self.report_string_view_unsupported_use(name, "be used directly here", *span);
                 }
@@ -806,6 +806,9 @@ impl<'a> Checker<'a> {
                         Some(*span),
                     ));
                     return None;
+                }
+                if *access == crate::AST::PlaceAccess::Write {
+                    self.validate_write_place(inner, *span);
                 }
                 self.borrow_ctx = true;
                 let ty = self.infer(inner)?;

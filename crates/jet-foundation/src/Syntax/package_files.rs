@@ -80,11 +80,9 @@ pub const KW_DISTINCT: &str = "distinct";
 /// `value.raw()` yields the base value. Named-cast family (S42).
 pub const METHOD_DISTINCT_RAW: &str = "raw";
 
-/// D-DYNARRAY1 (ratified 2026-07-01): zero-copy window constructor —
-/// `list.view(a..b)` — the sole legal spelling of the `View<T>` constructor
-/// (parsed specially: the `..` between the two ends is required, a
-/// comma-separated arg list is rejected so there is exactly one way to write
-/// it, I8). See `docs/spec/stdlib-api-laws.md` and `View<T>` in CoreLib.
+/// D-SHAPE-PLACE1=A (supersedes D-DYNARRAY1): retired `.view(a..b)` method
+/// name, retained only so parser recovery can emit E0214 and point at the bare
+/// range-place spelling. #567 removes the remaining collection plumbing.
 pub const METHOD_VIEW: &str = "view";
 
 /// D-SHIFT1 (ratified 2026-07-01, c7shift): `cursor.take_pattern("…")` reuses

@@ -279,10 +279,6 @@ impl<'a> Checker<'a> {
             if !b.mutable
                 && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
                 && self.place_from_expr(&b.init).is_some()
-                && crate::Sema::expr_root_ident(&b.init).is_none_or(|root| {
-                    self.lookup(root)
-                        .is_none_or(|info| info.param_conv.is_none())
-                })
             {
                 let span = b.init.span();
                 let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
@@ -475,7 +471,7 @@ impl<'a> Checker<'a> {
                     self.report_view_escape(src, "be stored in another binding", *src_span);
                 }
             }
-            // D-DYNARRAY1: `x :: list.view(a..b)` makes `x` a scope-bound window
+            // D-SHAPE-PLACE1: `x :: list[a..b]` makes `x` a scope-bound window
             // into `list`. E2305 fires the same way E0631 does for arena views —
             // rebinding a live view to a second name is itself an escape (views
             // are non-reassignable non-escaping locals, I8), not re-tracked.

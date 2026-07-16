@@ -271,6 +271,29 @@ fn describe(source: String, kind: String) {
 "many owners, one value," reach for `Shared<T>` or `Pool<T>`/`Id<T>` (below)
 instead of a raw stored reference.
 
+#### Place access (D-SHAPE-PLACE1=A)
+
+A place is a name followed by its maximal field, index, or range projection.
+Binding a bare place creates a checked read window; prefixing it with `&`
+creates the exclusive write window; prefixing it with `~` makes independent
+owned storage:
+
+```jet
+values := [10, 20, 30, 40]
+read :: values[0..1]
+edit :: &values[2..3]
+copy :: ~values[0..1]
+```
+
+The two windows above are disjoint. Constant disjoint ranges and indexes lower
+through a safe structural split, while different fields use Rust's native
+field disjointness. Dynamic projections stay conservatively overlapping. Jet
+never asks rustc to validate Jet semantics. A call or temporary is not a
+place: bind it first (**E0213**). The retired `values.view(0..1)` spelling is
+**E0214** and points at `values[0..1]`. Method calls never extend a place, so
+`&values[0..1].sort()` applies write access to the maximal range and then calls
+the method on that window.
+
 #### Unified provenance and alias model (D-MEM1/S9, #649)
 
 Sema keeps one fact graph for every borrowed window, independent of its runtime
@@ -295,13 +318,13 @@ doubt, sema treats places as overlapping.
 Moving or replacing an owner, writing an overlapping place, or calling an
 operation that may resize or relocate its storage is rejected while a view is
 live (**E0212**). Arena reset/free invalidates its views; a later read is
-**E0632**. Facts end at lexical scope. At control-flow joins, invalidation on
-any reachable branch survives; loops use the same conservative rule across
-iterations. Captures, fields, and task boundaries preserve the fact rather than
-rebuilding it from a type name. Tasks and channels reject a captured view once
-as **E1102**. Public calls, returns, stored fields, generic substitution, and
-trait dispatch remain rejected until #643 carries the same fact through those
-boundaries.
+**E0632**. A local fact ends after its last use or at lexical scope, whichever
+comes first. At control-flow joins, invalidation on any reachable branch
+survives; loops use the same conservative rule across iterations. Captures,
+fields, and task boundaries preserve the fact rather than rebuilding it from a
+type name. Tasks and channels reject a captured view once as **E1102**. Public
+calls, returns, stored fields, generic substitution, and trait dispatch remain
+rejected until #643 carries the same fact through those boundaries.
 
 TIR receives only sema-approved local lowering flags. It does not infer owners,
 overlap, lifetimes, or escape safety, and no returned-view signature is admitted

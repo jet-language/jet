@@ -37,6 +37,24 @@ impl<'a> Checker<'a> {
             recv_type_out: &mut Option<String>,
             resolved_ret_out: &mut Option<Type>,
         ) -> Option<Type> {
+            // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
+            // range-shaped recovery long enough to point at the old spelling,
+            // but never admit it to the type system.
+            if method == Syntax::METHOD_VIEW {
+                self.infer(receiver);
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0214",
+                    "`.view(a..b)` is now a bare range place".to_string(),
+                    "Jet uses one place-access rule: bare reads, `&` edits, and `~` copies"
+                        .to_string(),
+                    "replace `value.view(a..b)` with `value[a..b]`".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
             // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — the sole audited
             // escape from a runtime `String` into a typed-text position. `Sql`/
             // `Html` here name the type, not a value (checked via `lookup` so a

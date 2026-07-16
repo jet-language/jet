@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
                                 }
                                 return;
                             };
-                            if !info.mutable {
+                            if !info.mutable && !self.is_write_view(name) {
                                 let what = if info.param_conv.is_some() {
                                     format!("the parameter `{}` can't be changed here", name)
                                 } else {
@@ -260,6 +260,8 @@ impl<'a> Checker<'a> {
                                 matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "Pool");
                             let base_is_view_mut =
                                 matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "ViewMut");
+                            let base_has_write_view = expr_root_ident(base)
+                                .is_some_and(|name| self.is_write_view(name));
                             if base_is_pool
                                 || base_is_view_mut
                                 || matches!(
@@ -275,7 +277,10 @@ impl<'a> Checker<'a> {
                                         self.diags.push(collection_changed_in_loop(&root, *span));
                                     }
                                     if let Some(info) = self.lookup(&root) {
-                                        if !base_is_view_mut && !info.mutable {
+                                        if !base_is_view_mut
+                                            && !base_has_write_view
+                                            && !info.mutable
+                                        {
                                             let (code, why, fix) = if matches!(
                                                 info.param_conv,
                                                 Some(AccessConvention::Read)
@@ -456,7 +461,7 @@ impl<'a> Checker<'a> {
                                     if let Some(root) = expr_root_ident(base) {
                                         let root = root.to_string();
                                         if let Some(info) = self.lookup(&root) {
-                                            if !info.mutable {
+                                            if !info.mutable && !self.is_write_view(&root) {
                                                 self.diags.push(Diagnostic::error(
                                                     "E0202",
                                                     format!(
@@ -595,7 +600,7 @@ impl<'a> Checker<'a> {
                             if let Some(root) = expr_root_ident(base) {
                                 let root = root.to_string();
                                 if let Some(info) = self.lookup(&root) {
-                                    if !info.mutable {
+                                    if !info.mutable && !self.is_write_view(&root) {
                                         let is_self = root == Syntax::KW_SELF;
                                         let what = if is_self {
                                             format!(
@@ -774,6 +779,22 @@ impl<'a> Checker<'a> {
                     }
                     match (&mut *expr, resolved_ret) {
                         (Some(e), Some(rt)) => {
+                            // D-SHAPE-PLACE1=A: a bare maximal place is a read
+                            // window. At a named `View<T>` return boundary, make
+                            // that local acquisition explicit in the AST before
+                            // inference; E2305 then checks today's provenance gate.
+                            if matches!(&rt, Type::Apply { name, .. } if name == "View")
+                                && !matches!(e, Expr::Copy(..) | Expr::Place(..))
+                                && self.place_from_expr(e).is_some()
+                            {
+                                let span = e.span();
+                                let inner = std::mem::replace(e, Expr::Absent(span));
+                                *e = Expr::Place(
+                                    Box::new(inner),
+                                    crate::AST::PlaceAccess::Read,
+                                    span,
+                                );
+                            }
                             let saved_expected = self.expected_type.clone();
                             self.expected_type = Some(rt.clone());
                             // Spawned task returns are checked separately by E1102.
@@ -790,8 +811,8 @@ impl<'a> Checker<'a> {
                             // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
                             // list is local to this function would outlive it. Two
                             // shapes: an already-bound view name (`return window`),
-                            // and a fresh `.view(...)` call made right in the
-                            // `return` (`return incidents.view(0..2)`) — the latter
+                            // and a fresh range place made right in the
+                            // `return` (`return incidents[0..2]`) — the latter
                             // needs `view_call_source` directly.
                             if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                                 if let Expr::Ident(n, nspan) = &*e {

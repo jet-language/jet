@@ -237,6 +237,8 @@ renumbered, and no new `W` code may be allocated.
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
 | E0211 | sema  | `~x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-SHAPE-COPY1=A, supersedes D-CAP2/D-MEM1/S4) |
 | E0212 | sema  | an owner is moved, replaced, or resized while a live view still points into its storage (D-MEM1 S9, card #649) |
+| E0213 | sema  | `&` window operand is not a place — a name plus maximal field/index/range projections (D-SHAPE-PLACE1=A) |
+| E0214 | sema  | teaching: retired `.view(a..b)` → bare range place `[a..b]` (D-SHAPE-PLACE1=A) |
 | L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |
@@ -859,6 +861,8 @@ named cell.
 | E2305 | A `View<T>` leaves its local checked scope through a return, binding, field, or call boundary. | Public owner provenance is not carried through compiler APIs and TIR yet, so accepting the boundary could let the view outlive its owner. | Keep the view local, or cross the boundary with an owned copy (`~view`). |
 | E2307 | A string view leaves its local checked scope or reaches an operation that needs an owned `String`. | String view provenance is local-only today; other uses need an owned value. | Keep the view local, or materialize an owned `String` with `~view`. |
 | E0212 | An owner is moved, replaced, or resized while a live view still points into it. | The operation could move or destroy the storage that the view reads or edits; Jet rejects before lowering instead of relying on a backend borrow error. | Finish using the view before changing the owner, narrow the view's scope, or make an owned copy. |
+| E0213 | A read or write window starts from something that is not a place. | Only a name followed by fields, indexes, or one range has stable storage that can be accessed without copying. | Bind the call or temporary to a name first, then take the window from that name. |
+| E0214 | `.view(a..b)` uses the retired list-window spelling. | Place access has one rule: `value[a..b]` reads, `&value[a..b]` edits, and `~value[a..b]` copies. | Replace `value.view(a..b)` with `value[a..b]`. |
 
 ## Library authoring diagnostics (E2-M6)
 

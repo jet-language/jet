@@ -765,6 +765,71 @@ mod view_fact_graph_tests {
     }
 
     #[test]
+    fn distinct_constant_indexes_are_disjoint() {
+        let mut a = fact(1, 1, ViewKind::List).place;
+        let mut b = a.clone();
+        a.projections.push(ViewProjection::Index {
+            value: Some(0),
+            span: Span::new(20, 21),
+        });
+        b.projections.push(ViewProjection::Index {
+            value: Some(1),
+            span: Span::new(30, 31),
+        });
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn constant_index_outside_range_is_disjoint() {
+        let mut index = fact(1, 1, ViewKind::List).place;
+        let mut range = index.clone();
+        index.projections.push(ViewProjection::Index {
+            value: Some(0),
+            span: Span::new(20, 21),
+        });
+        range.projections.push(ViewProjection::Range {
+            start: Some(1),
+            end: Some(3),
+            span: Span::new(30, 34),
+        });
+        assert!(!index.overlaps(&range));
+    }
+
+    #[test]
+    fn separated_constant_ranges_are_disjoint() {
+        let mut a = fact(1, 1, ViewKind::List).place;
+        let mut b = a.clone();
+        a.projections.push(ViewProjection::Range {
+            start: Some(0),
+            end: Some(1),
+            span: Span::new(20, 24),
+        });
+        b.projections.push(ViewProjection::Range {
+            start: Some(2),
+            end: Some(3),
+            span: Span::new(30, 34),
+        });
+        assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn inclusive_ranges_sharing_boundary_overlap() {
+        let mut a = fact(1, 1, ViewKind::List).place;
+        let mut b = a.clone();
+        a.projections.push(ViewProjection::Range {
+            start: Some(0),
+            end: Some(1),
+            span: Span::new(20, 24),
+        });
+        b.projections.push(ViewProjection::Range {
+            start: Some(1),
+            end: Some(2),
+            span: Span::new(30, 34),
+        });
+        assert!(a.overlaps(&b));
+    }
+
+    #[test]
     fn fresh_arena_allocations_are_disjoint() {
         let mut a = fact(1, 1, ViewKind::Arena).place;
         let mut b = a.clone();
@@ -969,6 +1034,10 @@ pub(crate) struct Checker<'a> {
     /// D-MEM1 S9 / #649: sole provenance/alias state for arena, list, string,
     /// buffer, matrix, and future named mutable views.
     view_facts: ViewFactGraph,
+    /// View names read in the statement currently being checked. Together
+    /// with the existing statement-tail analysis, this makes local window
+    /// conflicts end at last use instead of lexical scope end.
+    views_used_in_stmt: HashSet<String>,
     /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: `:= uninit`
     /// bindings not yet definitely written — maps name → the decl span. A read
     /// while still in this map is E0420 (write-before-read proof); a write
@@ -989,6 +1058,9 @@ pub(crate) struct Checker<'a> {
     allow_string_view_read: bool,
     /// M8: when false, a lambda is consumed inline (collection methods / borrow).
     lambda_escapes: bool,
+    /// True only while checking a lambda body. Distinguishes an escaping lambda
+    /// from the checker's ordinary top-level default escape policy.
+    in_lambda_body: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
     /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s

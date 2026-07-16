@@ -68,6 +68,7 @@ impl<'a> Checker<'a> {
 
     /// E0632: reading a view whose arena was already `reset`/`free`d.
     pub(crate) fn check_view_use(&mut self, name: &str, span: Span) {
+        self.views_used_in_stmt.insert(name.to_string());
         if let Some(info) = self.view_fact(name) {
             if let Some((verb, _kill_span)) = &info.invalidated {
                 let arena = info.place.owner.name.clone();
@@ -176,10 +177,11 @@ impl<'a> Checker<'a> {
         access: ViewAccess,
         span: Span,
     ) {
-        if self.view_facts.bindings.iter().any(|(_, fact)| {
-            fact.invalidated.is_none()
-                && fact.place.overlaps(&place)
+        if self.view_facts.bindings.iter().any(|(name, fact)| {
+            self.view_is_live_now(name)
+                && fact.invalidated.is_none()
                 && (fact.access == ViewAccess::Write || access == ViewAccess::Write)
+                && fact.place.overlaps(&place)
         }) {
             let place_name = Self::place_name(&place);
             self.diags.push(Diagnostic::error(
@@ -204,6 +206,10 @@ impl<'a> Checker<'a> {
     fn view_fact(&self, name: &str) -> Option<&ViewFact> {
         let binding = self.lookup(name)?;
         self.view_facts.current_for_binding(name, binding.def_span)
+    }
+
+    fn view_is_live_now(&self, name: &str) -> bool {
+        self.views_used_in_stmt.contains(name) || self.is_name_live_after(name)
     }
 
     pub(crate) fn view_kind(&self, name: &str) -> Option<ViewKind> {
@@ -300,6 +306,75 @@ impl<'a> Checker<'a> {
         self.view_fact(name).is_some()
     }
 
+    pub(crate) fn is_write_view(&self, name: &str) -> bool {
+        self.view_fact(name)
+            .is_some_and(|fact| fact.access == ViewAccess::Write)
+    }
+
+    pub(crate) fn validate_write_place(&mut self, expr: &Expr, span: Span) {
+        let Some(root) = expr_root_ident(expr).map(str::to_string) else {
+            return;
+        };
+        if let Some(fact) = self.view_fact(&root) {
+            if fact.access == ViewAccess::Write {
+                return;
+            }
+            self.diags.push(Diagnostic::error(
+                "E0205",
+                format!("cannot edit through `{root}` — it has read access only"),
+                "a read window may inspect its place, but it cannot change the owner"
+                    .to_string(),
+                "take a write window from a mutable owner instead".to_string(),
+                Some(span),
+            ));
+            return;
+        }
+        if self.consts.contains_key(&root) {
+            self.diags.push(Diagnostic::error(
+                "E0111",
+                format!("`{root}` is a const and can never change"),
+                "a const is fixed for the whole program".to_string(),
+                format!(
+                    "use a `{}` binding if it needs to change",
+                    Syntax::SIGIL_BIND_MUT
+                ),
+                Some(span),
+            ));
+            return;
+        }
+        let Some(info) = self.lookup(&root) else {
+            return;
+        };
+        if info.mutable || info.param_conv == Some(AccessConvention::Write) {
+            return;
+        }
+        let (code, why, fix) = if info.param_conv.is_some() {
+            (
+                "E0205",
+                "an unmarked parameter gives read access only; a write window needs write access (`&`)".to_string(),
+                format!(
+                    "change the parameter to `{}: {}{}`",
+                    root,
+                    Syntax::SIGIL_WRITE,
+                    info.ty.name()
+                ),
+            )
+        } else {
+            (
+                "E0202",
+                "a write window can change its owner, so the owner must be mutable".to_string(),
+                format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
+            )
+        };
+        self.diags.push(Diagnostic::error(
+            code,
+            format!("cannot take a write window into `{root}`"),
+            why,
+            fix,
+            Some(span),
+        ));
+    }
+
     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
         if let Some(place) = self.place_from_expr(expr) {
             self.check_place_change(&place, action, span);
@@ -319,7 +394,7 @@ impl<'a> Checker<'a> {
                     .and_then(|name| self.view_fact(name))
                     .is_some_and(|fact| fact.access == ViewAccess::Write)
             }
-            LValue::Local { .. } => false,
+            LValue::Local { name, .. } => self.is_write_view(name),
         };
         if through_write_view {
             return;
@@ -362,8 +437,10 @@ impl<'a> Checker<'a> {
             .bindings
             .iter()
             .rev()
-            .find(|(_, fact)| {
-                fact.place.overlaps(changed) && fact.invalidated.is_none()
+            .find(|(name, fact)| {
+                self.view_is_live_now(name)
+                    && fact.place.overlaps(changed)
+                    && fact.invalidated.is_none()
             })
             .map(|(name, fact)| (name.clone(), fact.access, Self::place_name(&fact.place)))
         else {
@@ -464,7 +541,7 @@ impl<'a> Checker<'a> {
         self.view_kind(name).is_some_and(ViewKind::is_named_window)
     }
 
-    /// E2305: `return list.view(a..b)` made fresh right in the `return` — `owner`
+    /// E2305: `return list[a..b]` made fresh right in the `return` — `owner`
     /// (`list`) is made in this function and freed when it returns. Mirrors
     /// E2301's exact wording (`this view points into X, which this function
     /// owns`) for the "fresh call in return" shape; `report_list_view_escape`
@@ -478,10 +555,10 @@ impl<'a> Checker<'a> {
                 owner
             ),
             format!(
-                "`{}` is made here and freed when the function returns, so a view into it (`.view(...)`) would outlive what owns it — there'd be nothing left to look at",
+                "`{}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at",
                 owner
             ),
-            "return an owned copy (drop `.view(...)` for a copying slice `[a..b]`, or `.map(...)` it into an owned list), or accept the source as a parameter so the caller keeps owning it".to_string(),
+            "return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it".to_string(),
             Some(span),
         ));
     }

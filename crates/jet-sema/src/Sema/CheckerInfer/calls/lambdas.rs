@@ -329,6 +329,8 @@ impl<'a> Checker<'a> {
             self.txn_depth = 0;
             let saved_expected = self.expected_type.clone();
             self.expected_type = exp_ret.map(|ret| (**ret).clone());
+            let saved_in_lambda_body = self.in_lambda_body;
+            self.in_lambda_body = true;
             let body_ret = match &mut lam.body {
                 LambdaBody::Expr(e) => {
                     if self.is_task_spawn {
@@ -355,6 +357,7 @@ impl<'a> Checker<'a> {
                     last_ret
                 }
             };
+            self.in_lambda_body = saved_in_lambda_body;
             self.expected_type = saved_expected;
             self.txn_depth = saved_txn_depth;
     

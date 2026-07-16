@@ -222,6 +222,7 @@ fn expr_mut_arg(expr: &Expr, interpreted_functions: &HashSet<&str>) -> Option<Bo
             .or_else(|| args.iter().find_map(argument)),
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
         | Expr::Field(inner, _, _) => expr_mut_arg(inner, interpreted_functions),
         Expr::Binary(_, left, right, _) => expr_mut_arg(left, interpreted_functions)
             .or_else(|| expr_mut_arg(right, interpreted_functions)),
