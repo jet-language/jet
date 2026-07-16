@@ -528,11 +528,6 @@ fn ingest_tree_unlocked(
         let dir = hangar.join(&id);
         let now = now_secs();
         let realized_at = read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now);
-        if dir.exists() {
-            // Refresh record only.
-        } else {
-            fs::create_dir_all(&dir)?;
-        }
         let entry = StoreEntry {
             id: id.clone(),
             name: req.name.clone(),

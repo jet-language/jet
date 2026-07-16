@@ -9,6 +9,13 @@ Any owner-facing choice becomes a `decision` on its card. The owner decides
 from the ballot alone in focus mode; if he must ask what an option does, the
 ballot is not ready. A plan-writer proposes; the owner picks.
 
+## One decision per ballot
+
+Every independently decidable owner choice gets its own ballot, including a
+status-quo option when viable. An umbrella ballot may set a default direction,
+but it must not silently settle downstream choices the owner could resolve
+differently.
+
 ## Required fields
 
 - **`gist`** — one short plain-language sentence naming the choice.

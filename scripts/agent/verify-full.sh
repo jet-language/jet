@@ -43,13 +43,13 @@ done
 
 if ((${#canvas_missing[@]})); then
   missing_list="$(IFS=', '; echo "${canvas_missing[*]}")"
-  echo "error: Canvas interaction tests require Chromium and Node; missing: $missing_list. Run full verification inside 'nix develop'." >&2
+  echo "error: Canvas interaction tests require Chromium and Node; missing: $missing_list. Run scripts/agent/jet-env full scripts/agent/verify-full.sh." >&2
   exit 1
 fi
 
 # tests/cffi_native_matrix.rs::required_native_c_abi_matrix never skips (card
 # #436) — it needs a real C compiler/archiver/Rust toolchain to build and run
-# a native C ABI fixture. `nix develop` provides all three on the host
+# a native C ABI fixture. `scripts/agent/jet-env full` provides all three on the host
 # target, so full verification runs the matrix for real rather than treating
 # it as optional; same strict-missing-means-fail shape as the Canvas block.
 cffi_missing=()
@@ -74,7 +74,7 @@ done
 
 if ((${#cffi_missing[@]})); then
   missing_list="$(IFS=', '; echo "${cffi_missing[*]}")"
-  echo "error: the native C ABI matrix requires a C compiler, archiver, and rustc; missing: $missing_list. Run full verification inside 'nix develop'." >&2
+  echo "error: the native C ABI matrix requires a C compiler, archiver, and rustc; missing: $missing_list. Run scripts/agent/jet-env full scripts/agent/verify-full.sh." >&2
   exit 1
 fi
 

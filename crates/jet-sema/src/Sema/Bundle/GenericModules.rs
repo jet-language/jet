@@ -30,6 +30,32 @@ fn ct_value_expr(value: &crate::AST::CtValue, span: crate::Diagnostics::Span) ->
     }
 }
 
+fn substitute_meta(
+    meta: &mut Option<crate::AST::MetaAttr>,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) {
+    let Some(meta) = meta else {
+        return;
+    };
+    for field in &mut meta.fields {
+        match field {
+            crate::AST::MetaField::Category { value, .. }
+            | crate::AST::MetaField::Maturity { value, .. } => {
+                substitute_expr(value, types, values)
+            }
+            crate::AST::MetaField::Unknown {
+                value: Some(value),
+                ..
+            } => {
+                substitute_expr(value, types, values)
+            }
+            crate::AST::MetaField::Tunable { .. }
+            | crate::AST::MetaField::Unknown { value: None, .. } => {}
+        }
+    }
+}
+
 fn substitute_expr(
     expr: &mut Expr,
     types: &HashMap<String, Type>,
@@ -241,6 +267,7 @@ fn substitute_stmts(
         match stmt {
             Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, values),
             Stmt::Val(binding) => {
+                substitute_meta(&mut binding.meta, types, values);
                 if let Some(ty) = &mut binding.ty {
                     *ty = specialize_module_type(ty, types, values);
                 }
@@ -368,6 +395,7 @@ fn specialize_func(
             _ => {}
         }
     }
+    substitute_meta(&mut func.meta, &types, &values);
     for param in &mut func.params {
         param.ty = specialize_module_type(&param.ty, &types, &values);
         if let Some(default) = &mut param.default {
@@ -530,6 +558,7 @@ fn specialize_nested_code_module(
                 let mut result = def.clone();
                 result.value = value;
                 result.ty = def.ty.as_ref().map(|ty| specialize_module_type(ty, types, values));
+                substitute_meta(&mut result.meta, types, values);
                 Some(Item::Const(result))
             }
             Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(child, params, args, types, values))),
@@ -1459,12 +1488,14 @@ fn expand_alias(
         if let Ok(evaluated) = evaluated {
             definition_values.insert(source.name.clone(), evaluated);
         }
+        let mut meta = source.meta.clone();
+        substitute_meta(&mut meta, &definition_types, &definition_values);
         declarations.push(Item::Const(crate::AST::ConstDef {
             span: source.span,
             name: format!("{}__{}", alias.name, source.name),
             name_span: source.name_span,
             value,
-            meta: source.meta.clone(),
+            meta,
             attrs: source.attrs.clone(),
             rust_kind: source.rust_kind,
             is_comptime: source.is_comptime,

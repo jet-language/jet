@@ -9,14 +9,10 @@ Tower moved (2026-07-04): the app lives at repo-root `Tower/`, the DATA lives
 in `.tower/tower.json`. **Never edit the JSON by hand** — every operation
 goes through the CLI (or the HTTP API of the server on port 7878):
 
-```
-alias tower='node /home/nate/Projects/Github/jet/Tower/tower.mjs'
+```sh
+alias tower='scripts/agent/jet-env node Tower/tower.mjs'
 tower help
 ```
-
-The old `tools/Tower/` tree was deleted (2026-07-10); its board had been
-imported losslessly into `.tower/tower.json`, and its PM docs now live under
-`docs/{plans,proposals,sidequests,ballots}/`.
 
 ## The one rule that governs everything
 
@@ -142,7 +138,8 @@ and add via
 
 Ratifying a `group: "syntax"` decision auto-appends the standard
 post-ratification chores to the card's `criteria[]` (Syntax.rs entry,
-syntax-decisions.md log, `jet devtools grammars`, re-bless) — meet/verify
+syntax-decisions.md log,
+`scripts/agent/jet-env jet self devtools grammars`, re-bless) — meet/verify
 them like any other exit criterion.
 
 ## Guards — agent-hard, owner-soft

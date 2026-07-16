@@ -653,6 +653,15 @@ impl<'a> Parser<'a> {
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwFn => self.func().map(Item::Func),
+            TokKind::Hash if self.at_meta_attr() => {
+                if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
+                    self.const_def().map(Item::Const)
+                } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime)) {
+                    self.comptime_def().map(Item::Const)
+                } else {
+                    self.func().map(Item::Func)
+                }
+            }
             // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn` inside a module
             // body (old `@Pure fn` spelling is E0062, taught inside `func()`).
             TokKind::Hash | TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),

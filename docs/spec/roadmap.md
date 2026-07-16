@@ -1,10 +1,9 @@
 # Roadmap
 
-**Current epoch: Epoch 3.** (owner, 2026-06-19) Epoch 1 (v1.0) and Epoch 2 (GA)
-are complete — their development highlights are below under "Completed"; nothing
-in the Epoch 2 GA scope remained open. Active work is now Epoch 3
-([`docs/plans/epoch-3/`](../../docs/plans/epoch-3/)); its remaining-from-E2 loose ends are
-tracked as cards in the Tower dashboard board.
+This file records verified history and durable program ownership. Tower owns
+the current epoch, work order, decisions, and blockers; start it using
+[`AGENTS.md`](../../AGENTS.md). Epoch 1 (v1.0) and Epoch 2 (GA) are
+complete, with development highlights below.
 
 Each milestone is done when its exit criteria pass as tests. Examples are the
 executable spec: a milestone ships with new `examples/` programs and new
@@ -13,8 +12,8 @@ executable spec: a milestone ships with new `examples/` programs and new
 > **Competitive lens (owner, 2026-06-26, D-TSSWIFT1=B):** the "replace
 > TypeScript / Swift" gap analysis (typed client/server protocols, reactive UI,
 > interop, web/app backends) stays folded into these milestone descriptions —
-> no separate gap doc. When prioritizing Epoch 3 work, weigh each feature
-> against what a credible TS/Swift replacement needs.
+> no separate gap doc. When prioritizing language and client work, weigh each
+> feature against what a credible TS/Swift replacement needs.
 
 > **Naming canon (owner, 2026-06-15):** **jet** is the language + compiler;
 > **jetpack** is the package-manager engine/binary; **jetos** is the operating
@@ -27,7 +26,7 @@ executable spec: a milestone ships with new `examples/` programs and new
 |---|---|
 | Ratified syntax & owner decisions | [`syntax-decisions.md`](syntax-decisions.md) |
 | Language behavior today | [`spec.md`](spec.md) |
-| Open owner decisions | Tower (`node Tower/tower.mjs decision list --open`) |
+| Open owner decisions and current work | [AGENTS.md](../../AGENTS.md) → Tower |
 | Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
 | Epoch 5 metaprogramming plan | [`docs/plans/epoch-5/`](../../docs/plans/epoch-5/) → [`metaprogramming.md`](../../docs/plans/epoch-5/metaprogramming.md) |
@@ -151,7 +150,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 
 ---
 
-## Active / not yet verified — Epoch 3 and promoted tracks
+## Active / not yet verified
 
 ### Jetpack and jetos
 
@@ -248,7 +247,8 @@ duplicated here:
   [`docs/spec/formal-core.md`](formal-core.md); enforcement deferred until sema is frozen
 - Time-travel variable history (reversible execution / runtime value timeline)
   → **Epoch 6** (D-TIMETRAVEL1=C, c111); prerequisites: D-REPLAY1 runtime replay
-  harness shipped, `jet debug` (D-DBG3) mature. No compiler work in Epoch 3.
+  harness shipped, `jet debug` (D-DBG3) mature. Compiler work stays gated on
+  that Epoch 6 slot and those prerequisites.
   Manual workaround today: use `jet debug <file>` (source-level step debugger,
   D-DBG3) with breakpoints/watch, or add temporary `Log.debug(x)` calls at the
   points where history matters — the interpreter re-run is cheap enough for

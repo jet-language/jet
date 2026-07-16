@@ -528,9 +528,10 @@ pub fn host_platform() -> String {
 /// For a real local directory this is the full-tree content hash (every file's
 /// relative path, length, and bytes) — not the compiler's `.jet`-only
 /// `tree_hash`, since a realized output is `bin/`, `.rlib`, and arbitrary files.
-/// Existing files and symlinks are hashed from their bytes/target. Missing
-/// paths retain the legacy text identity only so old fixture records remain
-/// readable; cache verification rejects a missing output before trusting it.
+/// Existing files and symlinks are hashed from their bytes/target. Callers
+/// that can report failure should use [`try_output_hash_of`]; missing or
+/// unreadable outputs produce an empty compatibility digest here and Store
+/// registration rejects that digest.
 pub fn output_hash_of(out: &str) -> String {
     try_output_hash_of(out).unwrap_or_default()
 }
@@ -1057,6 +1058,57 @@ mod tests {
                     let replacement = dir.join("replacement");
                     fs::write(&replacement, "after!").unwrap();
                     fs::rename(&replacement, &keep).unwrap();
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("changed while hashing"), "{error}");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn canonical_archive_rejects_missing_output() {
+        let missing = scratch("missing-output");
+        fs::remove_dir_all(&missing).unwrap();
+        let error = try_output_hash_of(&missing.to_string_lossy()).unwrap_err();
+        assert!(error.contains("does not exist"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_unreadable_output() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = scratch("unreadable-output");
+        fs::write(dir.join("payload"), "bytes").unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read_dir(&dir).is_ok() {
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::remove_dir_all(dir).ok();
+            return;
+        }
+        let result = try_output_hash_of(&dir.to_string_lossy());
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let error = result.unwrap_err();
+        assert!(error.contains("Permission denied"), "{error}");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_output_disappearing_during_hash() {
+        let dir = scratch("disappearing-output");
+        let payload = dir.join("payload");
+        fs::write(&payload, "bytes").unwrap();
+        let mut removed = false;
+        let error = try_output_hash_of_with_hook(
+            &dir.to_string_lossy(),
+            false,
+            None,
+            &mut |path, stage| {
+                if !removed && path == payload && stage == "file-opened" {
+                    removed = true;
+                    fs::remove_file(&payload).unwrap();
                 }
             },
         )

@@ -377,8 +377,9 @@ pub(super) fn realize_adapter(
 fn report_realize_error(theme: &Theme, error: &Store::RealizeError) {
     match error {
         Store::RealizeError::Integrity(failure) => Store::report_integrity(theme, failure),
-        Store::RealizeError::Store(error) => theme.error(
-            "could not update the Jetpack store",
+        Store::RealizeError::Store(error) => theme.error_coded(
+            "E1315",
+            "hangar ingest failed",
             &format!("the verified realization transaction failed: {error}"),
             "check permissions on the store root, or set JETPACK_ROOT.",
         ),

@@ -46,7 +46,7 @@ Known traps:
   a weird failure; `rm -rf /tmp/nix-shell.*` clears it (a SessionStart
   hook does this for Claude Code).
 - The dev-shell `jet` is a wrapper that execs `target/debug/jet` — rebuild
-  (`cargo build`) before smoke-testing compiler changes.
+  (`scripts/agent/jet-env cargo build`) before smoke-testing compiler changes.
 
 ## Deeper guides — read the one that matches your task
 
@@ -56,9 +56,9 @@ as skills, every other agent reads them as files:
 - `.claude/skills/verify/SKILL.md` — verification checklist + this repo's
   traps (stale binaries, snapshot/golden/formatter gotchas). Read before
   claiming anything done.
-- `.claude/skills/tower/SKILL.md` — the board workflow (cards, lanes,
+- `.agents/skills/tower/SKILL.md` — the board workflow (cards, lanes,
   ballots, questions).
-- `.claude/skills/tower-ballot/SKILL.md` — ballot standard + how the owner
+- `.agents/skills/tower-ballot/SKILL.md` — ballot standard + how the owner
   decides. Read before raising any owner-facing choice.
 
 The two agent-config directories are intentional. `.agents/` is the
@@ -66,6 +66,10 @@ tool-neutral home for shared prompts and skills. `.claude/agents/` contains
 Claude Code's three harness-specific agent definitions (`jet-impl`,
 `jet-verify`, `jet-ballot`); they adapt this manual and do not duplicate the
 shared skill implementations.
+
+For this repo, launch Tower with
+`scripts/agent/jet-env node Tower/tower.mjs serve --open`. All other Tower
+commands use the same prefix; `.agents/skills/tower/SKILL.md` owns the workflow.
 
 ## Invariants (violating one = stop and fix)
 
@@ -89,8 +93,10 @@ shared skill implementations.
   runtime/tool siblings with separately ratified dependencies are not a way to
   smuggle dependencies into those seams. Stdlib sub-libraries and modules may
   use external crates to bootstrap until the end of Epoch 3; after that, all
-  external deps must be replaced with native Jet/Rust implementations. Any new
-  stdlib external dep requires owner approval.
+  external deps must be replaced with native Jet/Rust implementations.
+  Existing ratified bootstrap dependencies are recorded in the owning
+  architecture and syntax law. Any new stdlib external dependency requires
+  owner approval.
 - **I7** Every user-typeable keyword/sigil lives in
   `crates/jet-foundation/src/Syntax.rs` with a decision ID.
 - **I8** One way to mean it, many ways to write it. There is exactly one
@@ -113,7 +119,8 @@ JIT/dev parity through the same executable TIR (R12) → all tests green →
 update docs touched → done means: tests pass, docs match behavior, no
 invariant bent.
 
-While iterating, run targeted tests (`cargo test --test <name>`); run the
+While iterating, run targeted tests
+(`scripts/agent/jet-env cargo test --test <name>`); run the
 full suite once at the end of a card, before claiming done:
 `scripts/agent/jet-env full scripts/agent/verify-full.sh`. This keeps the suite parallel
 and uses a repo-local `TMPDIR`; do not add global `-- --test-threads=1`
@@ -131,8 +138,8 @@ CLI — never hand-edit the JSON). Then **stop work on the gated feature**
 until the owner decides; build something ungated meanwhile. When the owner
 ratifies: update `crates/jet-foundation/src/Syntax.rs` / parser, re-bless
 snapshots, log it in syntax-decisions.md. If the ratification adds or removes
-user-typeable syntax, run `jet devtools grammars` and commit the regenerated
-editor sections.
+user-typeable syntax, run `scripts/agent/jet-env jet self devtools grammars`
+and commit the regenerated editor sections.
 
 The owner is CEO/CTO; his decisions are the only allowed bottleneck — he
 never waits on you for a plan or a decision, and nothing reaches him that an
@@ -151,6 +158,26 @@ After both passes, rewrite each viable option so it is internally cohesive.
 Do not require a separate hybrid option or harvest field. When one canonical
 mechanism can serve both audiences, make that mechanism a normal worked option
 with ergonomic defaults and explicit expert control.
+
+## Owner decisions and frontend acceptance
+
+Owner choices live as Tower ballots and verdicts, never only in prose or logs.
+Honor the complete ruling, including attached questions and acceptance terms;
+the detailed authoring law lives in `.agents/skills/tower-ballot/SKILL.md`.
+Reject an option before ballot when it hollows out a useful default, forces a
+file or project shape, or weakens a safety invariant.
+
+Frontend acceptance requires the full mock and state matrix in the owner's real
+terminal or browser: relevant archetypes, viewports and states, keyboard/focus
+paths, and terminal ANSI/`NO_COLOR` behavior. A prose claim or selected
+screenshot is not acceptance evidence.
+
+## Canonical maintainer runbooks
+
+- Bless snapshots, add syntax, and triage ICEs:
+  `.claude/skills/verify/SKILL.md`.
+- Add a diagnostic: `docs/spec/diagnostics.md` → “Adding a diagnostic”.
+- Add an FFI bridge: `docs/spec/architecture.md` → “Adding an FFI bridge”.
 
 ## Communication — caveman default
 

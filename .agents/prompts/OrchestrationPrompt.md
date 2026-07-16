@@ -202,7 +202,7 @@ When work is Tower-driven:
    `done` only after Sol performs real end-to-end verification.
 8. On interruption risk, checkpoint the current state and exact next action.
 
-Respect computed lanes. Owner lanes are `decide` and `activate`; agent lanes are
+Respect computed lanes. The owner lane is `decide`; agent lanes are
 `plan`, `implement`, `building`, and `verify`. Never move `frozen` unless the
 owner activates it. Use Tower's supported CLI/API write path. Never hand-edit
 Tower JSON.

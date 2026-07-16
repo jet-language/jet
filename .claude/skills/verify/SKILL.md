@@ -47,8 +47,8 @@ tests disappear.
    Confirm every changed byte follows the ratified behavior and diagnostic voice.
 2. Build a fresh binary before using devtools: `scripts/agent/jet-env cargo build`.
 3. Preview supported snapshot targets with
-   `scripts/agent/jet-env jet devtools bless <target> --dry-run`. Then update only the
-   named target with `scripts/agent/jet-env jet devtools bless <target>`.
+   `scripts/agent/jet-env jet self devtools bless <target> --dry-run`. Then update only the
+   named target with `scripts/agent/jet-env jet self devtools bless <target>`.
    For generated error pages, use
    `scripts/agent/jet-env env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`.
 4. Inspect `git diff` immediately. Revert unrelated churn; never bulk-accept a
@@ -104,7 +104,7 @@ expected runtime failure. It never creates a new expectation channel.
    preserves every new token and formatting twice is byte-identical. Idempotence
    alone can bless a formatter that dropped the syntax on its first pass.
 5. Run `scripts/agent/jet-env cargo build`, then
-   `scripts/agent/jet-env jet devtools grammars`; inspect every generated editor section.
+   `scripts/agent/jet-env jet self devtools grammars`; inspect every generated editor section.
 6. Update `docs/spec/spec.md` and the implementation/log entry in
    `syntax-decisions.md`. Run focused parser, formatter, UI, golden, and grammar
    tests before final project verification.
@@ -112,15 +112,15 @@ expected runtime failure. It never creates a new expectation channel.
 ## ICE triage
 
 1. Check `/tmp`, build a fresh compiler, and reproduce through
-   `./target/debug/jet`. Record source, command, exit 101, generated Rust path,
+   `scripts/agent/jet-env ./target/debug/jet`. Record source, command, exit 101, generated Rust path,
    and complete banner. A missing rustc/linker/library is a tool or user
    diagnostic; only generated-code rejection or an impossible compiler state is
    an ICE.
 2. Minimize while preserving the same oracle:
-   `scripts/agent/jet-env jet devtools reduce <file.jet>` (or `--code EXXXX` for a
+   `scripts/agent/jet-env jet self devtools reduce <file.jet>` (or `--code EXXXX` for a
    diagnostic regression). Re-run the minimized file to confirm it still fails.
 3. Bundle durable evidence with
-   `scripts/agent/jet-env jet devtools ice-report <minimized.jet>`. Keep the original
+   `scripts/agent/jet-env jet self devtools ice-report <minimized.jet>`. Keep the original
    source when minimization removes context needed to understand the bug.
 4. Find the first broken invariant: front-end acceptance (sema), TIR lowering,
    Rust emission, or build/ICE classification. Fix the owning layer; never teach
@@ -153,21 +153,22 @@ expected runtime failure. It never creates a new expectation channel.
   regions — golden.rs greps the substring, including comments.
 - Docs match behavior: spec.md + syntax-decisions.md status.
 
-## Maintainer devtools (`jet devtools`, hidden namespace, D-DEVTOOLS1=A)
+## Maintainer devtools (`jet self devtools`, hidden namespace, D-DEVTOOLS1=A)
 
-- `jet devtools grammars` — regenerate editor grammar GENERATED sections from `Syntax.rs`.
-- `jet devtools reduce <file.jet> [--code EXXXX]` — delta-debugging minimizer; default oracle is an I2 repro (front end accepts, rustc rejects); writes `<file>.reduced.<ext>`.
-- `jet devtools ice-report <file.jet>` — bundles source + generated Rust + rustc stderr + jet/rustc versions under `.jet/ice-report/<stem>-<ts>/` for a bug report.
-- `jet devtools new-example <topic>/<name>` — scaffolds a passing `examples/features/<topic>/<name>.jet` + `expected/<topic>/<name>.out` pair (I5 golden layout).
-- `jet devtools new-ui <name>` — scaffolds a self-consistent `tests/ui/<name>.jet` + `<name>.stderr` pair (I4 snapshot layout), pre-blessed against a real (generic) diagnostic.
-- `jet devtools check-fixture-paths` — greps `tests/**/*.rs` for hardcoded example/doc/fixture path literals and reports any that don't exist on disk.
-- `jet devtools bless [target...] [--dry-run]` — wraps `UPDATE_EXPECT=1 cargo test --test <target>` for every `UPDATE_EXPECT`-blessable test file (cli, cross, diagnostic_snapshots, diagnostics_coverage, release_gates); `--dry-run` previews without running.
+- `scripts/agent/jet-env jet self devtools grammars` — regenerate editor grammar GENERATED sections from `Syntax.rs`.
+- `scripts/agent/jet-env jet self devtools reduce <file.jet> [--code EXXXX]` — minimize an I2 or named-diagnostic reproduction.
+- `scripts/agent/jet-env jet self devtools ice-report <file.jet>` — bundle source, generated Rust, stderr, and versions under `.jet/ice-report/`.
+- `scripts/agent/jet-env jet self devtools new-example <topic>/<name>` — scaffold a golden example pair.
+- `scripts/agent/jet-env jet self devtools new-ui <name>` — scaffold a UI fixture and snapshot pair.
+- `scripts/agent/jet-env jet self devtools check-fixture-paths` — reject missing embedded fixture paths.
+- `scripts/agent/jet-env jet self devtools bless [target...] [--dry-run]` — update a named supported snapshot target. `tests/devtools.rs` pins this command surface.
 
 ## Traps
 
 - Moving/renaming examples breaks path-embedding fixtures (panic-span
   .err.out, parallel_scan counts, hardcoded stem lists).
 - "New diagnostics" reminders after a build agent finishes are stale
-  mid-build snapshots — confirm with a real `cargo build` +
-  `cargo test --no-run`.
+  mid-build snapshots — confirm with
+  `scripts/agent/jet-env cargo build` and
+  `scripts/agent/jet-env cargo test --no-run`.
 - Unused-code warnings may be in-progress features — verify before removing.

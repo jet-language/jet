@@ -1,4 +1,6 @@
 // 131 — D-TASKSCOPE1=A / D-NURSERY1=A: structured `taskgroup` (c102).
+use core.time as time
+
 fn sum_range(first: Int, last: Int) -> Int {
     total := 0
     loop n in first..last {
@@ -22,11 +24,12 @@ fn run() {
         })
         results :: g.all([a, b])
         print((results[0] + results[1]))
-        slow :: g.task(() => {
-            sum_range(1, 500000)
-        })
         fast :: g.task(() => {
             fast_val()
+        })
+        slow :: g.task(() => {
+            time.sleep(200)
+            sum_range(1, 500000)
         })
         winner :: g.race([slow, fast])
         print(winner)

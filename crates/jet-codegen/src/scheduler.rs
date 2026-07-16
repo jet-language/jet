@@ -1054,6 +1054,14 @@ impl Scheduler {
 }
 
 static SCHEDULER: OnceLock<Arc<Scheduler>> = OnceLock::new();
+static NEXT_TASK_COMPLETION_ORDER: Mutex<u128> = Mutex::new(0);
+
+fn next_task_completion_order() -> u128 {
+    let mut next = NEXT_TASK_COMPLETION_ORDER.lock().unwrap();
+    let order = *next;
+    *next = order.checked_add(1).expect("task completion order exhausted");
+    order
+}
 
 fn worker_count() -> usize {
     if let Ok(raw) = std::env::var("JET_SCHEDULER_THREADS") {
@@ -1099,6 +1107,7 @@ enum JetSchedulerResult<T> {
 
 pub struct JetSchedulerJoin<T> {
     rx: std::sync::mpsc::Receiver<JetSchedulerResult<T>>,
+    completion_order: Arc<OnceLock<u128>>,
 }
 
 impl<T> JetSchedulerJoin<T> {
@@ -1126,6 +1135,10 @@ impl<T> JetSchedulerJoin<T> {
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(JetSchedulerResult::Panicked),
         }
+    }
+
+    fn completion_order(&self) -> Option<u128> {
+        self.completion_order.get().copied()
     }
 
     fn drain(self) {
@@ -1198,35 +1211,38 @@ pub fn jet_scheduler_race<T: Send + 'static>(
     let mut settled = vec![false; n];
     let mut settled_count = 0usize;
     loop {
-        for (i, (join, _)) in entries.iter().enumerate() {
-            if settled[i] {
-                continue;
-            }
-            let Some(res) = join.try_recv() else {
-                continue;
-            };
-            match res {
-                JetSchedulerResult::Value(v) => {
-                    for (j, (_, ctrl)) in entries.iter().enumerate() {
-                        if j != i {
-                            ctrl.cancel();
+        let next = entries
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !settled[*i])
+            .filter_map(|(i, (join, _))| join.completion_order().map(|order| (order, i)))
+            .min()
+            .map(|(_, i)| i);
+        if let Some(i) = next {
+            if let Some(res) = entries[i].0.try_recv() {
+                match res {
+                    JetSchedulerResult::Value(v) => {
+                        for (j, (_, ctrl)) in entries.iter().enumerate() {
+                            if j != i {
+                                ctrl.cancel();
+                            }
                         }
-                    }
-                    let mut losers = Vec::new();
-                    for (j, (join, _)) in entries.into_iter().enumerate() {
-                        if j != i {
-                            losers.push(join);
+                        let mut losers = Vec::new();
+                        for (j, (join, _)) in entries.into_iter().enumerate() {
+                            if j != i {
+                                losers.push(join);
+                            }
                         }
+                        for join in losers {
+                            join.drain();
+                        }
+                        jet_scheduler_drain();
+                        return v;
                     }
-                    for join in losers {
-                        join.drain();
+                    JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
+                        settled[i] = true;
+                        settled_count += 1;
                     }
-                    jet_scheduler_drain();
-                    return v;
-                }
-                JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
-                    settled[i] = true;
-                    settled_count += 1;
                 }
             }
         }
@@ -1243,8 +1259,15 @@ pub fn jet_scheduler_any<T: Send + 'static>(
 ) -> T {
     assert!(!entries.is_empty(), "any: empty task list");
     loop {
-        for (i, (join, _)) in entries.iter().enumerate() {
-            let Some(res) = join.try_recv() else {
+        let next = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (join, _))| join.completion_order().map(|order| (order, i)))
+            .min()
+            .map(|(_, i)| i);
+        if let Some(i) = next {
+            let Some(res) = entries[i].0.try_recv() else {
+                thread::yield_now();
                 continue;
             };
             for (j, (_, ctrl)) in entries.iter().enumerate() {
@@ -1308,6 +1331,8 @@ where
     T: Send + 'static,
 {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let completion_order = Arc::new(OnceLock::new());
+    let task_completion_order = completion_order.clone();
     scheduler().submit(Box::new(move || {
         jet_scheduler_set_task_control(Some(control.clone()));
         jet_scheduler_task_panic_enter();
@@ -1317,21 +1342,31 @@ where
         if control.paused.load(Ordering::Relaxed) && control.cancelled.load(Ordering::Relaxed) {
             jet_scheduler_task_panic_leave();
             jet_scheduler_set_task_control(None);
+            task_completion_order
+                .set(next_task_completion_order())
+                .expect("task completion recorded twice");
             let _ = tx.send(JetSchedulerResult::Cancelled);
             return;
         }
         let out = jet_scheduler_catch_task_unwind(f);
         jet_scheduler_task_panic_leave();
         jet_scheduler_set_task_control(None);
-        let _ = tx.send(match out {
+        let result = match out {
             Ok(v) => JetSchedulerResult::Value(v),
             // D-CANCELMODEL1=C: a `JetCancelUnwind` payload is a task that unwound at
             // a wait point because it was cancelled — report Cancelled, not Panicked.
             Err(e) if e.is::<JetCancelUnwind>() => JetSchedulerResult::Cancelled,
             Err(_) => JetSchedulerResult::Panicked,
-        });
+        };
+        task_completion_order
+            .set(next_task_completion_order())
+            .expect("task completion recorded twice");
+        let _ = tx.send(result);
     }));
-    JetSchedulerJoin { rx }
+    JetSchedulerJoin {
+        rx,
+        completion_order,
+    }
 }
 
 /// Block until the scheduler queue drains (for tests/shutdown hooks).
@@ -1358,6 +1393,52 @@ pub fn jet_scheduler_drain() {
 #[cfg(test)]
 mod interrupt_boundary_tests {
     use super::*;
+
+    fn ready_entries_in_reverse_completion_order(
+    ) -> Vec<(JetSchedulerJoin<i64>, Arc<JetTaskControl>)> {
+        let (slow_tx, slow_rx) = std::sync::mpsc::sync_channel(1);
+        let (fast_tx, fast_rx) = std::sync::mpsc::sync_channel(1);
+        fast_tx.send(JetSchedulerResult::Value(42)).unwrap();
+        slow_tx.send(JetSchedulerResult::Value(7)).unwrap();
+
+        let fast_order = Arc::new(OnceLock::new());
+        fast_order.set(0).unwrap();
+        let slow_order = Arc::new(OnceLock::new());
+        slow_order.set(1).unwrap();
+
+        vec![
+            (
+                JetSchedulerJoin {
+                    rx: slow_rx,
+                    completion_order: slow_order,
+                },
+                JetTaskControl::new(),
+            ),
+            (
+                JetSchedulerJoin {
+                    rx: fast_rx,
+                    completion_order: fast_order,
+                },
+                JetTaskControl::new(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn race_uses_completion_order_when_results_are_already_ready() {
+        assert_eq!(
+            jet_scheduler_race(ready_entries_in_reverse_completion_order()),
+            42
+        );
+    }
+
+    #[test]
+    fn any_uses_completion_order_when_results_are_already_ready() {
+        assert_eq!(
+            jet_scheduler_any(ready_entries_in_reverse_completion_order()),
+            42
+        );
+    }
 
     #[test]
     fn scheduler_module_stays_split_by_runtime_ownership() {

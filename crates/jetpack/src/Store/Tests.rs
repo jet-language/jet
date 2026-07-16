@@ -1257,6 +1257,35 @@ mod tests {
     }
 
     #[test]
+    fn ingest_missing_output_is_typed_atomic_and_retryable() {
+        let (roots, _g) = temp_roots();
+        let src = roots.root.join("late-ingest-output");
+        let request = |src: PathBuf| IngestRequest {
+            name: "late-ingest".into(),
+            version: "1".into(),
+            reference: "path:late-ingest".into(),
+            cache_identity: test_identity(),
+            references: Vec::new(),
+            outputs: BTreeMap::from([("out".into(), src)]),
+            signature: String::new(),
+            provenance: String::new(),
+            platform_artifact_kind: String::new(),
+        };
+
+        let error = ingest_tree(&roots, &request(src.clone())).unwrap_err();
+        assert!(matches!(&error, IngestError::Io(_)), "{error:?}");
+        assert_eq!(error.code(), "E1315");
+        assert!(list_checked(&roots).unwrap().is_empty());
+        assert!(closure_graph(&roots).unwrap().records.is_empty());
+        assert!(find_by_reference(&roots, "path:late-ingest").is_none());
+
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("payload"), "now-real").unwrap();
+        let ingested = ingest_tree(&roots, &request(src)).unwrap();
+        assert_eq!(find_by_reference(&roots, "path:late-ingest"), Some(ingested.entry));
+    }
+
+    #[test]
     fn ingest_retry_after_object_publish_seals_before_metadata() {
         let (roots, _g) = temp_roots();
         let first = ingest_fixture(&roots, "retry-crash", &[("out", "retry")], Vec::new());

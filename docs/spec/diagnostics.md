@@ -31,7 +31,9 @@ Every diagnostic has four parts:
    update mode.
 6. Add `jet explain` coverage and regenerate `docs/reference/errors/` when the
    code is part of that generated representative set. Update relevant spec/docs,
-   then run diagnostics coverage and the feature's focused test.
+   then run `scripts/agent/jet-env cargo test --test diagnostics_coverage` and
+   the feature's focused test. `tests/diagnostic_snapshots.rs` and
+   `tests/diagnostics_coverage.rs` are the executable proof.
 
 ## Exact render format (pinned by snapshots)
 
@@ -692,7 +694,8 @@ These enforce the compatibility contract in docs/spec/release-policy.md. An
 **edition** opts a project into a specific era of Jet syntax (D-REL3); the
 toolchain advertises the editions it supports in `jet --version`. **E2001** is
 fully reachable from a real `pkg.jet`. **E2002** and **L2001** read from the
-deprecation registry in `Source/Manifest.rs` (`DEPRECATIONS`); that registry is
+deprecation registry in `crates/jet-pkg-model/src/Manifest.rs`
+(`DEPRECATIONS`); that registry is
 empty pre-1.0 by design — Jet has deprecated nothing post-1.0 yet — so these two
 codes are registered and snapshotted but not yet user-triggerable. They become
 reachable the moment the first real deprecation is added, with no change to the
@@ -785,7 +788,8 @@ parse error.
 
 ## Module evaluation diagnostics (jetpack)
 
-These come from the jetpack module evaluator (`Source/Jetpack/ModuleEval.rs`,
+These come from the jetpack module evaluator
+(`crates/jet-env-model/src/ModuleEval/`,
 computed-modules arc), which gives `module name { … }` contributions meaning
 by reducing them via pure-eval (M9.5) and feeding them through the §6 merge
 table. Not (yet) reachable through `jet build`/`jet run` — `Item::Module` is a
@@ -1313,7 +1317,7 @@ These are produced by the `jet` driver itself, not by checking a `.jet`
 file, so they have no source span. They use the same what/why/fix voice
 and use the exit class stated below. E2101/E2102 carry a "did you mean" when a known
 command/flag is within edit distance 2. Their golden transcripts live in
-`tests/cli/` (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
+`tests/cli/` (blessed using `.claude/skills/verify/SKILL.md`).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -1501,7 +1505,8 @@ Passing `--json` to `jet check`, `jet build`, or `jet test` makes the
 driver emit diagnostics as **data** instead of prose, for scripts, CI,
 and editors. This is decision **D-DX1** (ratified 2026-06-16): a single,
 **stable, versioned** schema, shared by the `--json` CLI flag, the future
-`jet fix` engine, and the LSP. The serializer lives in `Source/DiagnosticsJSON.rs`
+`jet fix` engine, and the LSP. The serializer lives in
+`crates/jet-foundation/src/Diagnostics.rs`
 (`to_json` / `render_all_json`); this section is its single source of
 truth. Adding a field is allowed any time; **removing or repurposing one
 requires bumping `schema_version`.**
@@ -1555,7 +1560,7 @@ the real output is one line):
 ```
 
 The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
-(blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
+(blessed using `.claude/skills/verify/SKILL.md`).
 ### E0910 — Published schema breaking change
 
 `@PublishedSchema` pins a record's saved shape at release (D-MIGRATE1/2). A
@@ -1747,9 +1752,3 @@ is a collision, not a task.
 | What | Why | Fix |
 |------|-----|-----|
 | `` `{name}` is a built-in lifecycle verb, not a task name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Task fn build_assets()`, or drop `#Task` if this is the lifecycle entry. |
-
-## Process for a new diagnostic
-
-1. Claim the next code here. 2. Write what/why/fix per the voice rules.
-3. Add a tests/ui fixture + snapshot. 4. Ship. A diagnostic without a
-snapshot test does not exist (invariant I4).

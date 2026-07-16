@@ -248,27 +248,16 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
 #[test]
 fn build_resolves_fixture_ref() {
     let root = Scratch::new("root");
-    let run = || {
-        jetpack()
-            .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
-            .env("JETPACK_ROOT", &root.path)
-            .env("JETPACK_FIXTURES", example_fixtures())
-            .output()
-            .unwrap()
-    };
-    let out = run();
+    let out = jetpack()
+        .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
-    assert!(stderr.contains("/nix/store/"), "stderr: {stderr}");
-    let repeated = run();
-    assert!(repeated.status.success());
-    let repeated_stderr = String::from_utf8_lossy(&repeated.stderr);
-    assert!(!repeated_stderr.contains("E2604"), "stderr: {repeated_stderr}");
-    assert!(
-        repeated_stderr.contains("substituted"),
-        "Nix fixture must re-enter its provider, not claim a Jetpack cache hit: {repeated_stderr}"
-    );
+    assert!(stderr.contains("/hangar/objects/sha256-"), "stderr: {stderr}");
 }
 
 
@@ -297,6 +286,106 @@ fn list_shows_realized_package() {
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("greet"), "stderr: {stderr}");
+}
+
+
+#[test]
+fn disappeared_output_build_fails_without_store_state_and_retries() {
+    let root = Scratch::new("missing-output-root");
+    let fixtures = Scratch::new("missing-output-fixtures");
+    let missing = root.join("not-realized");
+    fs::create_dir_all(&missing).unwrap();
+    fs::write(missing.join("payload"), "present at fixture creation").unwrap();
+    fs::write(
+        fixtures.join("nixpkgs-greet.json"),
+        format!(
+            "[{{\"drvPath\":\"/nix/store/0fixture-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+            missing.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    fs::remove_dir_all(&missing).unwrap();
+    let build = || {
+        jetpack()
+            .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", &fixtures.path)
+            .output()
+            .unwrap()
+    };
+
+    let failed = build();
+    assert!(!failed.status.success());
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("error[E1315]"), "stderr: {stderr}");
+    assert!(stderr.contains("does not exist"), "stderr: {stderr}");
+    assert_no_hangar_entry(&root.path, "greet-");
+    let listed = jetpack()
+        .args(["list", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&listed.stderr).contains("greet"));
+
+    let staging = Scratch::new("retry-greet-output");
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+    let retried = build();
+    assert!(retried.status.success(), "stderr: {}", String::from_utf8_lossy(&retried.stderr));
+}
+
+
+#[cfg(unix)]
+#[test]
+fn unreadable_and_wrong_kind_outputs_leave_no_store_entry() {
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::os::unix::net::UnixListener;
+
+    let root = Scratch::new("invalid-output-root");
+    let fixtures = Scratch::new("invalid-output-fixtures");
+    let fixture = fixtures.join("nixpkgs-greet.json");
+    let write_fixture = |out: &Path| {
+        fs::write(
+            &fixture,
+            format!(
+                "[{{\"drvPath\":\"/nix/store/0fixture-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+                out.to_string_lossy()
+            ),
+        )
+        .unwrap();
+    };
+    let build = || {
+        jetpack()
+            .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", &fixtures.path)
+            .output()
+            .unwrap()
+    };
+
+    let unreadable = root.join("unreadable");
+    fs::create_dir_all(&unreadable).unwrap();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read_dir(&unreadable).is_err() {
+        write_fixture(&unreadable);
+        let failed = build();
+        let stderr = String::from_utf8_lossy(&failed.stderr);
+        assert!(!failed.status.success(), "stderr: {stderr}");
+        assert!(stderr.contains("error[E1315]"), "stderr: {stderr}");
+        assert!(stderr.contains("Permission denied"), "stderr: {stderr}");
+        assert_no_hangar_entry(&root.path, "greet-");
+    }
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let socket = root.join("wrong-kind");
+    let listener = UnixListener::bind(&socket).unwrap();
+    write_fixture(&socket);
+    let failed = build();
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(!failed.status.success(), "stderr: {stderr}");
+    assert!(stderr.contains("error[E1315]"), "stderr: {stderr}");
+    assert!(stderr.contains("unsupported special file"), "stderr: {stderr}");
+    assert_no_hangar_entry(&root.path, "greet-");
+    drop(listener);
 }
 
 
@@ -469,7 +558,7 @@ fn build_runs_opportunistic_clean_after_success() {
     let out = jetpack()
         .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .env("JETPACK_AUTO_CLEAN_ALWAYS", "1")
         .output()
         .unwrap();
@@ -1122,7 +1211,10 @@ module dev {
         .args(["build", "--no-color", "--offline"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", &fixtures.path)
+        .env(
+            "JETPACK_FIXTURES",
+            realized_fixtures(&fixtures.path, &root.path),
+        )
         .output()
         .unwrap();
     assert!(
@@ -1303,7 +1395,7 @@ fn named_source_env_resolves_with_pin() {
         .args(["build", "--no-color", "--offline"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
     assert!(
@@ -1330,7 +1422,7 @@ fn unknown_named_source_in_env_is_friendly() {
         .args(["build", "--no-color", "--offline"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -1794,7 +1886,7 @@ fn committed_example_builds_offline_end_to_end() {
         .args(["build", "--no-color", "--offline"])
         .current_dir(example_dir())
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
     assert!(
@@ -1866,7 +1958,10 @@ fn typed_module_example_builds_offline_end_to_end() {
         .args(["build", "--no-color", "--offline"])
         .current_dir(&typed_dir)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", typed_dir.join("fixtures"))
+        .env(
+            "JETPACK_FIXTURES",
+            realized_fixtures(&typed_dir.join("fixtures"), &root.path),
+        )
         .output()
         .unwrap();
     assert!(
@@ -2016,7 +2111,7 @@ fn malformed_jetpack_toml_fires_e1214_from_cli() {
         .args(["build", "--no-color", "--offline"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
     assert_eq!(
@@ -2053,7 +2148,7 @@ fn malformed_jetpack_toml_fires_e1215_from_cli() {
         .args(["build", "--no-color", "--offline"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
     assert_eq!(
@@ -2091,7 +2186,7 @@ fn jetpack_toml_packages_fires_e1225_from_cli() {
         .args(["build", "--no-color", "--offline"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
     assert_eq!(

@@ -162,7 +162,11 @@ become dependencies of the compiler workspace crates.
    layout conversions must be explicit.
 6. Add focused tests for front-end rejection, generated wrapper/link arguments,
    cache reuse, and a real end-to-end bridge call. Add the diagnostic snapshot
-   and docs for every new error, then run the project verification workflow.
+   and docs for every new error. Run
+   `scripts/agent/jet-env full cargo test --test cffi` for the bridge matrix and
+   `scripts/agent/jet-env full cargo test --test golden` for real generated calls,
+   then run the project verification workflow. `tests/cffi.rs` and
+   `tests/golden.rs` are the executable proof.
 
 ### Incremental Compiler Service
 

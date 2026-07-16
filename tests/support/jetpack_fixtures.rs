@@ -284,8 +284,43 @@ pub fn make_tree_writable(path: &Path) {
 }
 
 
-pub fn example_fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures")
+pub fn example_fixtures(root: &Path) -> PathBuf {
+    realized_fixtures(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures"),
+        root,
+    )
+}
+
+
+pub fn realized_fixtures(committed: &Path, root: &Path) -> PathBuf {
+    let fixtures = root.join("realized-fixtures");
+    if fixtures.is_dir() {
+        return fixtures;
+    }
+    fs::create_dir_all(&fixtures).unwrap();
+    for entry in fs::read_dir(committed).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        let source = entry.path();
+        let destination = fixtures.join(&name);
+        if source.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            fs::copy(source, destination).unwrap();
+            continue;
+        }
+        let stem = source.file_stem().unwrap().to_string_lossy();
+        let staging = root.join("example-fixture-outputs").join(stem.as_ref());
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("payload"), stem.as_bytes()).unwrap();
+        let output = seed_hangar_object(root, &staging);
+        let mut json = fs::read_to_string(source).unwrap();
+        let key = json.find("\"out\"").unwrap();
+        let colon = key + json[key..].find(':').unwrap() + 1;
+        let value_start = colon + json[colon..].find('"').unwrap();
+        let value_end = value_start + 1 + json[value_start + 1..].find('"').unwrap() + 1;
+        json.replace_range(value_start..value_end, &format!("{:?}", output.to_string_lossy()));
+        fs::write(destination, json).unwrap();
+    }
+    fixtures
 }
 
 
@@ -343,14 +378,46 @@ pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) 
 }
 
 
+pub fn assert_no_hangar_entry(root: &Path, name: &str) {
+    let hangar = root.join("hangar");
+    if let Ok(entries) = fs::read_dir(&hangar) {
+        assert!(entries.flatten().all(|entry| {
+            !entry.file_name().to_string_lossy().starts_with(name)
+        }));
+    }
+    let journal = hangar.join("closure-db/journal");
+    if let Ok(entries) = fs::read_dir(journal) {
+        assert_eq!(
+            entries
+                .flatten()
+                .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn"))
+                .count(),
+            0,
+            "failed registration left a closure journal transaction"
+        );
+    }
+    for empty in [hangar.join("objects"), root.join("leases")] {
+        if let Ok(mut entries) = fs::read_dir(&empty) {
+            assert!(entries.next().is_none(), "failed registration left state in {}", empty.display());
+        }
+    }
+    fn assert_no_root(path: &Path) {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            assert_ne!(entry.file_name(), "nix-gc-root", "failed registration left a Nix GC root");
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                assert_no_root(&entry.path());
+            }
+        }
+    }
+    assert_no_root(&hangar);
+}
+
+
 /// Write a `nixpkgs:fastfetch` fixture whose `out` points at a real directory
-/// we control (see `write_runnable_fixture`). The committed
-/// `tests/fixtures/jetpack-project/fixtures` set uses placeholder
-/// `/nix/store/...` paths that never exist on disk — fine for tests that only
-/// check `jetpack build`'s ledger output, but Store's fail-closed leasing
-/// (`snapshot_lease`) refuses to hand a consumer any path whose `out` doesn't
-/// exist, so a test that enters the composed env (`run`/`dev` with no
-/// explicit command consuming the package) needs a real backing tree.
+/// we control (see `write_runnable_fixture`).
 pub fn write_fastfetch_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
     fs::create_dir_all(fixtures).unwrap();
     let bin = staging_dir.join("bin");
@@ -701,4 +768,3 @@ pub fn harness_json_field(text: &str, key: &str) -> String {
 pub fn mono_example_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-mono")
 }
-

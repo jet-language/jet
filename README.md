@@ -19,7 +19,7 @@ no exceptions, no hidden control flow.
 <!-- CAPABILITY_CLAIM: claim.discard-control | Must-use discard is explicit and audited. -->
 <!-- CAPABILITY_CLAIM: claim.prelude-control | Prelude defaults and opt-out share one loader. -->
 <!-- CAPABILITY_CLAIM: claim.maturity-tags | Maturity is declared without runtime ambiguity. -->
-<!-- CAPABILITY_CLAIM: claim.generic-modules | Modules accept typed and value parameters. -->
+<!-- CAPABILITY_CLAIM: claim.generic-modules | Modules instantiate with types and closed Bool, Int, Char, String, or fieldless-enum values. -->
 <!-- CAPABILITY_CLAIM: claim.metaprogramming | Generated source re-enters Jet semantics. -->
 <!-- CAPABILITY_CLAIM: claim.embedded | Target profiles produce embedded artifacts. -->
 <!-- CAPABILITY_CLAIM: claim.adaptive-runtime | Runtime policy consumes measured environment facts. -->

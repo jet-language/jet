@@ -6,18 +6,15 @@ Tower owns live status, claims, decisions, and blockers.
 
 ## Where plans live
 
-- [`epoch-3/`](epoch-3/) — current compiler/language epoch.
+- [`epoch-3/`](epoch-3/) — compiler and language program plans.
 - [`epoch-4/`](epoch-4/) — jetpack package-manager and environment substrate.
 - [`epoch-5/`](epoch-5/) and [`epoch-6/`](epoch-6/) — later ratified arcs.
 - [`epoch-7/`](epoch-7/) — jetos and Studio plans, including frozen work.
 - [`../sidequests/`](../sidequests/) — reviewed cross-epoch work. Delete a
   sidequest plan after its behavior moves into the spec, examples, and tests.
 
-The live queue is not duplicated here. Run:
-
-```
-nix develop -c node Tower/tower.mjs serve --open
-```
+The live queue is not duplicated here. Start it using the canonical command in
+[`AGENTS.md`](../../AGENTS.md).
 
 ## Implementing-agent protocol
 

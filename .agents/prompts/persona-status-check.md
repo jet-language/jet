@@ -144,5 +144,6 @@ checked and what remains unknown.
 - Assert current state from memory.
 - Touch `docs/spec/` or example files.
 - Create any file other than the dated brief.
-- Run `nix develop` invocations in parallel.
+- Launch project commands outside `scripts/agent/jet-env` or run shell launches
+  in parallel.
 - Carry forward a Push entry without verifying it still applies.

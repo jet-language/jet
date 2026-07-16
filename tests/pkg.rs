@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-// Serialize all tests that mutate JET_STORE_DIR to prevent concurrent set_var races.
+// Serialize tests that mutate process-global package environment or helper selection.
 static STORE_LOCK: Mutex<()> = Mutex::new(());
 
 // ─────────────────────────────────────────────
@@ -3420,8 +3420,6 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
 // c146 (D-PKGSIGN1): package signing tier A — Ed25519
 // ─────────────────────────────────────────────
 
-static KEYS_LOCK: Mutex<()> = Mutex::new(());
-
 fn have_cargo() -> bool {
     Command::new("cargo").arg("--version").output().is_ok()
 }
@@ -3429,7 +3427,7 @@ fn have_cargo() -> bool {
 /// Run `f` with JET_KEYS_DIR pointed at `dir`, serialized against concurrent
 /// env mutation (same shape as `with_store`).
 fn with_keys<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
-    let _guard = KEYS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("JET_KEYS_DIR").ok();
     std::env::set_var("JET_KEYS_DIR", dir);
     let result = f();

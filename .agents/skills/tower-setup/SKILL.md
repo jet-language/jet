@@ -5,13 +5,13 @@ description: Set up or configure Tower in a project — init the .tower/ data di
 
 # Tower — set up in a project
 
-Tower's code lives where it's installed (plugin dir or vendored `Tower/`);
-its DATA lives in the host project at `.tower/`. Setup = create that dir,
-shape the config, start the server.
+Tower's code lives at repo-root `Tower/`; its data lives in `.tower/`. Setup =
+create that directory, shape the config, start the server.
 
-```
-node ${CLAUDE_PLUGIN_ROOT}/tower.mjs init --name "<Project>"
-node ${CLAUDE_PLUGIN_ROOT}/tower.mjs serve --open      # board at :7878
+```sh
+alias tower='scripts/agent/jet-env node Tower/tower.mjs'
+tower init --name "<Project>"
+tower serve --open
 ```
 
 `init` creates `.tower/tower.json` (all state), public `.tower/config.json`,

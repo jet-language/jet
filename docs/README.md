@@ -11,7 +11,7 @@ One home per kind of document. Start here.
 | Read the versioning / release policy | [reference/versioning.md](reference/versioning.md) |
 | Know the authoritative rules | [spec/](spec/) — see below |
 | See durable plans | [plans/](plans/) |
-| See live work, decisions, and blockers | Run Tower (below) |
+| See live work, decisions, and blockers | [AGENTS.md](../AGENTS.md) → Tower |
 | Review unexplored proposals | [proposals/](proposals/) |
 
 ## spec/ — the authoritative surface
@@ -33,8 +33,8 @@ These are binding. When they disagree with anything else, they win.
 
 ## plans/ — implementation plans
 
-Plans live in [`plans/`](plans/): current epoch law, long-running product
-master plans, and later-epoch architecture. Tower owns per-card plans and live
+Plans live in [`plans/`](plans/): durable program law, long-running product
+master plans, and later architecture. Tower owns per-card plans and live
 status. [`sidequests/`](sidequests/) retains only exceptional reviewed work not
 yet folded into an epoch master plan. Unexplored ideas live in
 [`proposals/`](proposals/); owner choices live only in Tower.
@@ -45,8 +45,5 @@ implementing-agent protocol.
 ## The dashboard — tasks, decisions, bugs, scratch
 
 The single management surface: tasks with live pipeline status, every open
-decision (grouped so nothing's hidden), bugs, and a scratch pad.
-
-```
-nix develop -c node Tower/tower.mjs serve --open
-```
+decision, bugs, and scratch. Start it using the canonical command in
+[`AGENTS.md`](../AGENTS.md).

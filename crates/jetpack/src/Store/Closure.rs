@@ -13,6 +13,160 @@ pub struct ClosureObject {
     pub external: bool,
 }
 
+#[cfg(test)]
+mod registration_tests {
+    use super::*;
+
+    struct Guard(PathBuf);
+
+    impl Guard {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "jpk-registration-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let _ = make_tree_writable_for_removal(&self.0);
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn roots() -> (Roots, Guard) {
+        let guard = Guard::new();
+        let roots = Roots {
+            root: guard.0.clone(),
+            dev_mode: true,
+        };
+        (roots, guard)
+    }
+
+    fn identity() -> CacheIdentity {
+        CacheIdentity {
+            source_fingerprint: "source-v1".into(),
+            recipe_fingerprint: "recipe-v1".into(),
+            policy_fingerprint: "policy-v1".into(),
+            platform: super::super::super::Envelope::host_platform(),
+        }
+    }
+
+    fn ingest(roots: &Roots, name: &str) -> IngestedObject {
+        let source = roots.root.join(format!("fixture-{name}"));
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("payload"), "bytes").unwrap();
+        ingest_tree(
+            roots,
+            &IngestRequest {
+                name: name.into(),
+                version: "1".into(),
+                reference: format!("path:{name}"),
+                cache_identity: identity(),
+                references: Vec::new(),
+                outputs: BTreeMap::from([("out".into(), source)]),
+                signature: String::new(),
+                provenance: "registration-test".into(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn failed_registration_removes_new_gc_root_from_existing_directory() {
+        let (roots, _guard) = roots();
+        let dir = roots.hangar_dir().join("existing-entry");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("keep"), "existing metadata").unwrap();
+        fs::write(dir.join(NIX_GC_ROOT), "new lease").unwrap();
+        rollback_registration_dir(&dir, false, false).unwrap();
+        assert!(dir.join("keep").is_file());
+        assert!(!dir.join(NIX_GC_ROOT).exists());
+    }
+
+    #[test]
+    fn external_output_is_rejected_before_registration() {
+        let (roots, _guard) = roots();
+        let out = roots.root.join("external-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "stable bytes").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "path:external",
+            "test",
+        );
+        let error = super::super::record_verified_mode(
+            &roots,
+            "external",
+            "1",
+            "path:external",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &identity(),
+            true,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("outside Hangar"), "{error}");
+        assert!(out.exists());
+        assert!(list_checked(&roots).unwrap().is_empty());
+        assert!(closure_graph(&roots).unwrap().records.is_empty());
+    }
+
+    #[test]
+    fn projection_failure_after_journal_commit_is_recoverable_success() {
+        let (roots, _guard) = roots();
+        let ingested = ingest(&roots, "projection-commit");
+        let dir = roots.hangar_dir().join(&ingested.entry.id);
+        make_tree_writable_for_removal(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(roots.hangar_dir().join(DB_DIR)).unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        let blocker = dir.join(format!("meta.json.{}.partial", std::process::id()));
+        fs::create_dir(&blocker).unwrap();
+        let changed = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &ingested.entry)
+        })
+        .unwrap();
+        assert!(changed);
+        assert!(!dir.join("meta.json").exists());
+        assert_eq!(transaction_paths(&journal_dir(&roots)).unwrap().len(), 1);
+        fs::remove_dir(blocker).unwrap();
+        assert_eq!(recover_closure_journal(&roots).unwrap(), 1);
+        assert!(dir.join("meta.json").is_file());
+    }
+
+    #[test]
+    fn disappearing_output_after_journal_append_rolls_back_transaction() {
+        let (roots, _guard) = roots();
+        let ingested = ingest(&roots, "post-append-race");
+        let object = PathBuf::from(&ingested.entry.out);
+        let dir = roots.hangar_dir().join(&ingested.entry.id);
+        make_tree_writable_for_removal(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(roots.hangar_dir().join(DB_DIR)).unwrap();
+        let mut disappear = || {
+            make_tree_writable_for_removal(&object).unwrap();
+            fs::remove_dir_all(&object).unwrap();
+        };
+        let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked_with_hook(&roots, &ingested.entry, &mut disappear)
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("does not exist"), "{error}");
+        assert!(transaction_paths(&journal_dir(&roots)).unwrap().is_empty());
+        assert!(list_checked(&roots).unwrap().is_empty());
+        assert!(closure_graph(&roots).unwrap().records.is_empty());
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosureRecord {
     pub id: String,
@@ -405,9 +559,24 @@ pub(crate) fn register_entry_unlocked(
     roots: &Roots,
     entry: &StoreEntry,
 ) -> std::io::Result<bool> {
-    if entry.envelope.output_hash.is_empty() {
-        return Ok(false);
-    }
+    register_entry_unlocked_mode(roots, entry, None)
+}
+
+#[cfg(test)]
+pub(crate) fn register_entry_unlocked_with_hook(
+    roots: &Roots,
+    entry: &StoreEntry,
+    after_append: &mut dyn FnMut(),
+) -> std::io::Result<bool> {
+    register_entry_unlocked_mode(roots, entry, Some(after_append))
+}
+
+fn register_entry_unlocked_mode(
+    roots: &Roots,
+    entry: &StoreEntry,
+    after_append: Option<&mut dyn FnMut()>,
+) -> std::io::Result<bool> {
+    verify_registration_output(roots, entry)?;
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     let (objects, record) = descriptor_for_entry(roots, entry)?;
     if graph.records.get(&record.id) == Some(&record)
@@ -428,10 +597,61 @@ pub(crate) fn register_entry_unlocked(
     validate_graph_structure_mode(roots, &candidate, false).map_err(std::io::Error::other)?;
     validate_record_store_proof(roots, &transaction.records[0], false)
         .map_err(std::io::Error::other)?;
-    append_entry(roots, &transaction)?;
-    materialize_package_record(roots, &transaction.records[0])?;
-    compact_if_needed(roots)?;
+    let committed = append_entry(roots, &transaction)?;
+    if let Some(after_append) = after_append {
+        after_append();
+    }
+    if let Err(error) = verify_registration_output(roots, entry) {
+        fs::remove_file(committed)?;
+        sync_dir(&journal_dir(roots))?;
+        return Err(error);
+    }
+    // The durable journal append plus post-commit content proof is the commit
+    // point. Projection and compaction are recoverable maintenance; they must
+    // not turn a committed registration into a reported failure.
+    let _ = materialize_package_record(roots, &transaction.records[0]);
+    let _ = compact_if_needed(roots);
     Ok(true)
+}
+
+fn verify_registration_output(roots: &Roots, entry: &StoreEntry) -> std::io::Result<()> {
+    let actual = Ingest::try_entry_output_hash(roots, entry).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("cannot register output `{}`: {error}", entry.out),
+        )
+    })?;
+    if entry.envelope.output_hash.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("cannot register output `{}` without a content digest", entry.out),
+        ));
+    }
+    if actual != entry.envelope.output_hash {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "cannot register output `{}`: expected `{}`, got `{actual}`",
+                entry.out, entry.envelope.output_hash
+            ),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn rollback_registration_dir(
+    dir: &Path,
+    created_dir: bool,
+    had_gc_root: bool,
+) -> std::io::Result<()> {
+    let gc_root = dir.join(NIX_GC_ROOT);
+    if !had_gc_root && fs::symlink_metadata(&gc_root).is_ok() {
+        fs::remove_file(gc_root)?;
+    }
+    if created_dir {
+        fs::remove_dir_all(dir)?;
+    }
+    Ok(())
 }
 
 /// Test-only seam (card #650): backdate a hangar entry's `last_used_at` in
@@ -1207,7 +1427,7 @@ fn store_entry_from_meta(id: &str, meta: &ParsedMeta) -> StoreEntry {
     }
 }
 
-fn append_entry(roots: &Roots, entry: &JournalEntry) -> std::io::Result<()> {
+fn append_entry(roots: &Roots, entry: &JournalEntry) -> std::io::Result<PathBuf> {
     let journal = journal_dir(roots);
     ensure_directory_durable(&journal)?;
     let sequence = next_sequence(&journal)?;
@@ -1236,7 +1456,7 @@ fn compact_if_needed(roots: &Roots) -> std::io::Result<()> {
     sync_dir(&journal)
 }
 
-fn write_entry(journal: &Path, sequence: u64, entry: &JournalEntry) -> std::io::Result<()> {
+fn write_entry(journal: &Path, sequence: u64, entry: &JournalEntry) -> std::io::Result<PathBuf> {
     let text = render_entry(entry);
     let checksum = SHA256::sha256_hex(text.as_bytes());
     let final_path = journal.join(format!("{sequence:020}-{}.txn", &checksum[..16]));
@@ -1244,7 +1464,8 @@ fn write_entry(journal: &Path, sequence: u64, entry: &JournalEntry) -> std::io::
     fs::write(&partial, format!("{text}checksum\t{checksum}\n"))?;
     fs::File::open(&partial)?.sync_all()?;
     fs::rename(&partial, &final_path)?;
-    sync_dir(journal)
+    sync_dir(journal)?;
+    Ok(final_path)
 }
 
 fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io::Result<bool> {

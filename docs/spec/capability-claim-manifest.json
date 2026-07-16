@@ -460,13 +460,13 @@
         "cardId": "c0vj7cg5",
         "num": 674
       },
-      "class": "partial",
-      "disposition": "open",
-      "reviewerRationale": "Type parameters, bodies, structs, enums, and Tier-0 value parameters now substitute, but value parameters are restricted to the Tier-0 scalar/fieldless-enum set (E0856) rather than general const generics, and full bound/recursive coverage is unproven.",
+      "class": "proven",
+      "disposition": "shipped",
+      "reviewerRationale": "Generic modules substitute type parameters and D-GENMOD-VALUE1=A's closed Tier-0 values (Bool, Int, Char, String, and fieldless enums, plus the Int `[T#capacity]` slot) through bounds and nested/recursive instantiation; complete-instantiation evidence also proves applicative full-key identity.",
       "acceptanceLanes": [
         {
           "id": "complete-instantiation",
-          "why": "Directly exercises every declared module item and parameter kind.",
+          "why": "Proves every ratified closed value kind, `[T#capacity]`, bounds, nesting/recursion, and applicative full-key identity.",
           "command": [
             "cargo",
             "test",
@@ -478,12 +478,20 @@
           ],
           "artifacts": [
             {
-              "role": "gap",
+              "role": "proof",
               "kind": "file",
               "path": "crates/jet-sema/src/Sema/Bundle/GenericModules.rs",
               "anchor": "value parameters admit only Bool, Int, Char, String, or a fieldless enum",
-              "why": "Decisive source limitation: generic-module value parameters are restricted to the Tier-0 scalar/fieldless-enum set, not general const-generic value types.",
-              "contentDigest": "4baff8da100161886a90a39144fb2f9d5f469482a886618b0ade9094fd9769dd"
+              "why": "Sema enforces the exact D-GENMOD-VALUE1=A closed value set.",
+              "contentDigest": "13c6a745f8c7b3b257495e10da8e88b86f0e0777c1a53dd60785cb211992c6a6"
+            },
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/generics.rs",
+              "anchor": "CAPABILITY_CLAIM: claim.generic-modules / complete-instantiation",
+              "why": "Dedicated native acceptance test covers the complete ratified generic-module instantiation surface.",
+              "contentDigest": "43f284c5f44aa33e39377726ab3b3ce6bc1bf1d1b296f2de456541311c024235"
             }
           ]
         }

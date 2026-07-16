@@ -424,9 +424,18 @@ fn record_verified_mode(
             realized_at,
             last_used_at: now,
         };
+        let created_dir = !dir.exists();
+        let gc_root = dir.join(NIX_GC_ROOT);
+        let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
         fs::create_dir_all(&dir)?;
-        pin_nix_gc_root(&dir, &out)?;
-        register_entry_unlocked(roots, &entry)?;
+        let registration = (|| {
+            pin_nix_gc_root(&dir, &out)?;
+            register_entry_unlocked(roots, &entry)
+        })();
+        if let Err(error) = registration {
+            Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
+            return Err(error);
+        }
         Ok(entry)
     })
 }
@@ -480,9 +489,18 @@ pub(crate) fn record_realized_mode(
             realized_at,
             last_used_at: now,
         };
+        let created_dir = !dir.exists();
+        let gc_root = dir.join(NIX_GC_ROOT);
+        let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
         fs::create_dir_all(&dir)?;
-        pin_nix_gc_root(&dir, &out)?;
-        register_entry_unlocked(roots, &entry)?;
+        let registration = (|| {
+            pin_nix_gc_root(&dir, &out)?;
+            register_entry_unlocked(roots, &entry)
+        })();
+        if let Err(error) = registration {
+            Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
+            return Err(error);
+        }
         Ok(entry)
     })
 }
@@ -495,10 +513,21 @@ fn canonicalize_local_output_unlocked(
     digest: &str,
 ) -> std::io::Result<(String, String, String)> {
     let source = Path::new(out);
-    let objects = roots.hangar_dir().join(OBJECTS_DIR);
-    if digest.is_empty() || !source.starts_with(roots.hangar_dir()) {
+    if digest.is_empty() || source.starts_with("/nix/store") {
         return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
     }
+    if !source.starts_with(roots.hangar_dir()) {
+        let actual = super::Envelope::try_output_hash_of(out).map_err(std::io::Error::other)?;
+        if actual != digest {
+            return Err(std::io::Error::other(format!(
+                "provider output `{out}` re-hashed as `{actual}`, expected `{digest}`"
+            )));
+        }
+        return Err(std::io::Error::other(format!(
+            "provider output `{out}` is outside Hangar and `/nix/store`"
+        )));
+    }
+    let objects = roots.hangar_dir().join(OBJECTS_DIR);
     let destination = objects.join(digest);
     fs::create_dir_all(&objects).map_err(|error| {
         std::io::Error::new(error.kind(), format!("creating canonical object directory: {error}"))

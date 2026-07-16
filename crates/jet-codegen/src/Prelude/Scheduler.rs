@@ -2064,6 +2064,14 @@ impl Scheduler {
 }
 
 static SCHEDULER: OnceLock<Arc<Scheduler>> = OnceLock::new();
+static NEXT_TASK_COMPLETION_ORDER: Mutex<u128> = Mutex::new(0);
+
+fn next_task_completion_order() -> u128 {
+    let mut next = NEXT_TASK_COMPLETION_ORDER.lock().unwrap();
+    let order = *next;
+    *next = order.checked_add(1).expect("task completion order exhausted");
+    order
+}
 
 fn worker_count() -> usize {
     if let Ok(raw) = std::env::var("JET_SCHEDULER_THREADS") {
@@ -2110,6 +2118,7 @@ enum JetSchedulerResult<T> {
 
 pub struct JetSchedulerJoin<T> {
     rx: std::sync::mpsc::Receiver<JetSchedulerResult<T>>,
+    completion_order: Arc<OnceLock<u128>>,
 }
 
 impl<T> JetSchedulerJoin<T> {
@@ -2137,6 +2146,10 @@ impl<T> JetSchedulerJoin<T> {
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(JetSchedulerResult::Panicked),
         }
+    }
+
+    fn completion_order(&self) -> Option<u128> {
+        self.completion_order.get().copied()
     }
 
     fn drain(self) {
@@ -2209,35 +2222,38 @@ pub fn jet_scheduler_race<T: Send + 'static>(
     let mut settled = vec![false; n];
     let mut settled_count = 0usize;
     loop {
-        for (i, (join, _)) in entries.iter().enumerate() {
-            if settled[i] {
-                continue;
-            }
-            let Some(res) = join.try_recv() else {
-                continue;
-            };
-            match res {
-                JetSchedulerResult::Value(v) => {
-                    for (j, (_, ctrl)) in entries.iter().enumerate() {
-                        if j != i {
-                            ctrl.cancel();
+        let next = entries
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !settled[*i])
+            .filter_map(|(i, (join, _))| join.completion_order().map(|order| (order, i)))
+            .min()
+            .map(|(_, i)| i);
+        if let Some(i) = next {
+            if let Some(res) = entries[i].0.try_recv() {
+                match res {
+                    JetSchedulerResult::Value(v) => {
+                        for (j, (_, ctrl)) in entries.iter().enumerate() {
+                            if j != i {
+                                ctrl.cancel();
+                            }
                         }
-                    }
-                    let mut losers = Vec::new();
-                    for (j, (join, _)) in entries.into_iter().enumerate() {
-                        if j != i {
-                            losers.push(join);
+                        let mut losers = Vec::new();
+                        for (j, (join, _)) in entries.into_iter().enumerate() {
+                            if j != i {
+                                losers.push(join);
+                            }
                         }
+                        for join in losers {
+                            join.drain();
+                        }
+                        jet_scheduler_drain();
+                        return v;
                     }
-                    for join in losers {
-                        join.drain();
+                    JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
+                        settled[i] = true;
+                        settled_count += 1;
                     }
-                    jet_scheduler_drain();
-                    return v;
-                }
-                JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
-                    settled[i] = true;
-                    settled_count += 1;
                 }
             }
         }
@@ -2254,8 +2270,15 @@ pub fn jet_scheduler_any<T: Send + 'static>(
 ) -> T {
     assert!(!entries.is_empty(), "any: empty task list");
     loop {
-        for (i, (join, _)) in entries.iter().enumerate() {
-            let Some(res) = join.try_recv() else {
+        let next = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (join, _))| join.completion_order().map(|order| (order, i)))
+            .min()
+            .map(|(_, i)| i);
+        if let Some(i) = next {
+            let Some(res) = entries[i].0.try_recv() else {
+                thread::yield_now();
                 continue;
             };
             for (j, (_, ctrl)) in entries.iter().enumerate() {
@@ -2337,6 +2360,8 @@ where
         .unwrap_or(0);
     control.observe_id.store(observe_id, Ordering::Relaxed);
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let completion_order = Arc::new(OnceLock::new());
+    let task_completion_order = completion_order.clone();
     scheduler().submit(Box::new(move || {
         if observe_id != 0 {
             JET_OBSERVE_TASK_ID.with(|current| current.set(observe_id));
@@ -2357,6 +2382,9 @@ where
             if let Some(registry) = jet_observe_registry() {
                 registry.tasks.lock().unwrap().remove(&observe_id);
             }
+            task_completion_order
+                .set(next_task_completion_order())
+                .expect("task completion recorded twice");
             let _ = tx.send(JetSchedulerResult::Cancelled);
             return;
         }
@@ -2373,9 +2401,15 @@ where
         if let Some(registry) = jet_observe_registry() {
             registry.tasks.lock().unwrap().remove(&observe_id);
         }
+        task_completion_order
+            .set(next_task_completion_order())
+            .expect("task completion recorded twice");
         let _ = tx.send(result);
     }));
-    JetSchedulerJoin { rx }
+    JetSchedulerJoin {
+        rx,
+        completion_order,
+    }
 }
 
 /// Block until the scheduler queue drains (for tests/shutdown hooks).
