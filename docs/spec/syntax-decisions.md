@@ -26,10 +26,16 @@ git history of this file. Canonical truth = `Syntax.rs` + this file
 
 **N2 — File extension**: `.jet`.
 
-**S54 — Naming convention**: PascalCase for types/traits/enums/constants;
-snake_case for functions, module path segments, locals. No naming lint in v1;
-`jet fmt` is layout-only. *(Open ballot D-SHAPE-CASE1 on card #665 proposes
-the single enforced casing law.)*
+**S54 / D-SHAPE-CASE1=C — One identifier-casing law, machine-enforced**
+*(ratified 2026-07-16, card #665; amends S54's PascalCase constants and its
+no-lint rule)*: one rule per grammatical category, zero exceptions. Type-like
+names are PascalCase: types, traits, enum variants, markers, unit-family names
+and their generated unit types, Config block types; effect and capability
+keywords stay PascalCase. Value-like names are snake_case: functions, methods,
+fields, locals, module paths, generic module templates, unit members, and
+constants. The compiler enforces the law; casing drift is a coded diagnostic,
+not a convention. Foreign names in FFI bindings are exempt inside binding
+modules per D-SHAPE-CASE2=A (FFI section).
 
 **S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1)*: `JSON`,
 `TOML`, `YAML`, `CSV`, `IOError`, `UTF8Error`, `U8`. No PascalCase aliases.
@@ -398,6 +404,13 @@ exact same-dimension conversion follows D-QUANTITY-CONVERT1. **D-UNITLIT1 —
 unit literals**: `500ms`, `12.50usd` resolve against in-scope family members
 (E0134 unknown suffix); `e`+digits reserved for float exponents.
 Dot-construction `px.{100}` also valid.
+
+**D-SHAPE-QUANTITY1=A — Jet understands physical dimensions** *(ratified
+2026-07-15)*: the compiler owns a small dimension table and scale rules —
+length divided by time is speed, length plus time is a clear Jet error. Unit
+information costs nothing at runtime and is shared across packages. This adds
+no general type-level programming; declaration and spelling are the
+D-QUANTITY-DECL1/TYPE1/POINT1/CONVERT1 family below.
 
 **D-QUANTITY-DECL1=A — scaled and affine units extend `@UnitFamily`**
 *(ratified 2026-07-16, card #603)*: the post-D-SHAPE2 `@UnitFamily` typed
@@ -1434,6 +1447,17 @@ hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
 Shipped by #350.
 
+**D-MODCOMPUTE1=A — Computed module fields: pure dependency graph** *(ratified
+2026-07-16, card #673)*: a module field may use any Tier-0 pure expression,
+top-level immutable `comptime` values, pure helper call graphs, and sibling
+fields of the same module. Fields evaluate once, in deterministic dependency
+order; source order breaks independent ties. A cycle fails before any plan
+exists and prints the complete chain. Tier-1 and Tier-2 reads are rejected
+inside fields: locked external input reaches a field only through a top-level
+`comptime` binding (D-CTIO1) or the `fn build` input surface. No field gains
+`BuildContext`, `#Impure`, filesystem, network, environment, clock, or
+randomness authority.
+
 **D-METADEPTH1/2 — Metaprogramming ceiling**: read-only reflection + derives.
 Rung B granted: whole-program read-only reflection + structured diagnostics
 from the build entry (post-sema snapshot; diagnostics must carry
@@ -1635,6 +1659,14 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 | Overlay | `#Extern module c.<lib> { … }` — merged bindgen ∪ overlay, overlay wins |
 | Script | `use "raylib.h" as rl` — compile-time bind on cache miss |
 | Project | `use c.raylib as rl` — one form per lib per file |
+
+**D-SHAPE-CASE2=A — FFI casing escape: binding modules are exempt zones**
+*(ratified 2026-07-16, card #665)*: casing diagnostics (S54/D-SHAPE-CASE1)
+skip declarations inside `#Bindgen` modules, `#Extern` modules, and
+`extern rust` blocks. Call sites use the foreign spelling verbatim, so a name
+in Jet code matches the C header and the library's documentation. Ordinary
+Jet modules stay fully enforced; the exemption boundary is a module kind sema
+already tracks, so no new syntax exists.
 
 Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `pkg.jet`
 `deps:` → pkg-config fallback → E3201. C deps are link deps, never packages.
@@ -2993,9 +3025,19 @@ default; D-BUILDPROFILE1's "never ambient env" rule is unchanged.
 card #666)*: “One compiler core, two lenses. JIT lens = rapid dev work people
 love in python/typescript; AOT lens = highly optimized ship binary at the cost
 of longer build time. Same compiler core prevents drift: there should NEVER be
-a difference in supported features/functionality between JIT and AOT.” The
-open D-AOT-CRANELIFT1 ballot decides the remaining AOT mechanism; it may not
-create a third product lens or a feature/functionality split.
+a difference in supported features/functionality between JIT and AOT.” D-AOT-CRANELIFT1
+(below) decided the remaining AOT mechanism; it does not create a third
+product lens or a feature/functionality split.
+
+**D-AOT-CRANELIFT1=B — Cranelift emits the fast AOT debug profile** *(ratified
+2026-07-16, card #666)*: on supported targets, `jet build --profile=debug`
+lowers the same sema-approved executable TIR through Cranelift to object code
+and links, with no generated Rust and no rustc. Unsupported targets fall back
+to rustc opt-level 0 and report that fallback in `jet explain build`; they
+never lose features or silently change optimization intent. Optimized AOT
+(`jet build`, `--release`) keeps the rustc backend. Both backends face R12
+differential tests; behavior and diagnostics are identical, only wait time
+differs.
 
 ```text
 $ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)
@@ -3056,6 +3098,17 @@ Offline is a tested guarantee: realize-class verbs never touch the network
 when the lock is satisfied. One canonical merge table (unified-ecosystem §6)
 across env/system/image. Monorepo addressing: `source.package` dot form +
 in-repo path-style + bare-name sugar when unambiguous.
+
+**D-JPK-SERVICEAUTH1=A — safe authority for dev-service trees** *(ratified
+2026-07-15, narrowly amends D-JPK-NODAEMON1)*: background dev services
+activate per proved platform. Linux uses a transient systemd user unit with a
+delegated control group; Windows uses a project-local guardian and Job Object
+alive only for the service's lifetime; macOS fails before spawn with E1332
+(`Safe service authority is unavailable for {name}.`). Root, a global Jetpack
+daemon, package background work, new syntax, new manifest fields, and new CLI
+remain forbidden. Structured output exposes backend, generation, phase,
+containment, and recovery facts; a post-Ready crash recovers the Ready
+generation.
 
 **D-JPK-EXECLEASE1=A — Protected native executable lease service**: Linux
 keeps its unprivileged private read-only mount. Official macOS and Windows
@@ -3815,6 +3868,17 @@ single package-profile declaration; `user.<name>` composes profiles by reference
 identity, atomic-switch, history, collision, and GC-root engine. Composed profiles
 have one history across both product views; non-jetos platforms retain parity.
 
+**D-JPK-PROFILECOLLISION1=A — exact-path provider map** *(ratified 2026-07-16,
+card #425)*: when composed packages provide different files at the same path,
+the plan fails and names every contender with its content digest; the
+profile's `collisions:` map selects one provider per exact path. A selection
+is recorded with all contender digests in the lock; if a contender's file
+changes, the pick is stale and refused (exit 2) until re-reviewed.
+Byte-identical files deduplicate, directories merge recursively, and
+file/directory or symlink-target mismatches always fail — a provider selection
+cannot change a path's type. The rule applies identically to `jet profile`,
+JetOS systems, tools, and `user.<name>`.
+
 **D-JPK-TRUSTROOT1=D — TUF root plus hybrid publisher identity**: registry
 authority uses a toolchain-pinned TUF root with offline threshold keys,
 delegations, snapshot/timestamp freshness, consistent snapshots, monotonic
@@ -4246,6 +4310,15 @@ field, its config type inferred from the field (`.{ }`, D-DOTCTOR2) — the
 type name never appears. Every app's config supports standard `package:`,
 `extraConfig:` (verbatim passthrough), and `files:` fields. Presence in the
 record means installed and configured; no `enable:` ceremony.
+
+**D-ECO1=A — one typed Jet project graph, source to machine** *(ratified
+2026-07-15)*: packages, development setups, checks, services, images, and
+machines are parts of one typed Jet value; a machine points directly at the
+package it runs, and every link is checked before building. The same graph
+powers run, test, build, explain, image, and OS commands (`jet explain
+systems.<host>` answers from machine back to source). The owner's
+ratification comment asked for a better root noun than "project" — honored by
+D-ECO-ROOTNAME1=I below: the root is `Package`.
 
 **D-ECO-ROOTNAME1=I — the ecosystem root is `Package`** *(ratified
 2026-07-15)*: `Package` is the one noun for the complete graph from a single
