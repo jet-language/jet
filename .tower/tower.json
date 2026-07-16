@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 668,
-    "rev": 8385,
+    "rev": 8392,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17821,9 +17821,14 @@
       "blockedBy": [
         "D-QUANTITY-CONVERT1"
       ],
-      "workOrder": 60.5,
+      "workOrder": 47.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "fable-clerk",
+          "text": "Clerical: ALL five gates now ratified (D-QUANTITY-CONVERT1=B implicit-exact conversions, 2026-07-16) — fully unblocked; slotted beside #576 quantity implementation."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -20857,6 +20862,11 @@
       "assignee": "claude-main",
       "log": [
         {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "C3 full gate deliberately deferred: verify-full is known-red on #660/#661 (sema_soundness + truthfulness). Fixing those first via sol workers, then one clean integrated gate closes #638/#635/#636/#637/#483 C-gate criteria together."
+        },
+        {
           "at": "2026-07-15",
           "by": "fable-burndown",
           "text": "[handoff] Retry helpers landed at 419d2a0f9 and are met plus verified on C1 and C2; C3 is the full-gate rerun. Root cause: a concurrent test fork inherits the freshly copied binary write descriptor before exec closes it, so exec sees ExecutableFileBusy; the bounded retry mirrors tests/engine_dispatch.rs. Also note: targeted runs need a repo-local TMPDIR because nix-shell temp dirs can vanish mid-run under concurrent launches."
@@ -20995,7 +21005,7 @@
       "priority": "P1",
       "plan": "Reproduce the three perf-budget probes concurrently and capture every compiler/report identity input. Find nondeterministic identity or publication race; make report creation/readback atomic and key only stable semantic/compiler/provider facts. Preserve forged, stale, source-drift, target-drift, and provider-drift rejection. Prove repeated parallel runs under load reuse only exact compatible reports, then run CLI target and full gate.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
         {
           "at": "2026-07-16",
@@ -21045,7 +21055,8 @@
       "needsAcceptance": false,
       "created": "2026-07-15T18:57:09.810Z",
       "updated": "2026-07-16",
-      "workOrder": 17
+      "workOrder": 17,
+      "claimedAt": "2026-07-16T04:37:45.320Z"
     },
     {
       "id": "c0rxl8sx",
@@ -22970,12 +22981,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Update only stale corpus programs to current ratified Core signatures; never weaken sema_soundness gates. For each failing fixture, verify canonical API from source/spec, patch source, and prove it remains a meaningful unsafe-provenance or differential case: sha256 byte input/Digest256 behavior, ^tcp reply ownership, and current DataGroup plotting input. Run exact three failing tests, mutation-check at least one rejected unsafe fixture, then full sema_soundness target and parent full gate.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "Sol worker dispatched: corpus-only repair per vetted plan (3 stale fixtures + any others the tests flag); harness untouched."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -23036,12 +23052,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Reconcile truth records to evidence, not current hashes blindly. Add audited matrix rows for done #359/#419 from their actual criteria/log/commits. For each capability digest mismatch, compare canonical ratified docs and implementation evidence, update digest only when claim text/owner/status still matches, otherwise move/reopen the claim/card honestly. Resolve tier-parity done-owner contradiction without bypass. Add focused regression for every corrected row and rerun both truth targets plus Tower lint.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "claude-main",
+          "text": "Sol worker dispatched: evidence-first matrix rows for #359/#419, digest reconciliation, tier-parity fix, syntax-decisions.md clerical items; Tower decisions[] drift (D-ALLOC1/D-NOALLOC-SEM1) to be reported for CLI add."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -23404,6 +23425,11 @@
       "workOrder": 56.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-666-1): One compiler core, two lenses. JIT lens = rapid dev work people love in python/typescript; AOT lens = highly optimized ship binary at the cost of longer build time. Same compiler core prevents drift: there should NEVER be a difference in supported features/functionality between JIT and AOT."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-planner",
@@ -42680,42 +42706,42 @@
       "id": "D-AOT-CRANELIFT1",
       "cardId": "c0zmoznd",
       "group": "tooling",
-      "title": "Cranelift AOT backend for debug/default builds",
-      "gist": "Whether `jet build` debug/default lowers TIR through Cranelift to object code, taking rustc off the debug path.",
-      "lesson": "Cranelift is already an I6-ratified dependency for the dev JIT (D-JITDEP1). This ballot extends that scope: the same backend would produce shippable-on-disk `jet build` debug artifacts, not just in-memory JIT code.\n\nR12 makes the AOT path a third consumer of the same executable TIR. It must prove stdout, stderr, exit code, panic, and side-effect parity through the golden suite, with rustc as the reference.\n\nI2 keeps rustc as the safety net: any construct Cranelift cannot lower falls through to rustc by a named internal reason, so no program ever fails to build for backend reasons.",
+      "title": "Whether a fast Cranelift AOT tier exists alongside the optimized AOT ship path",
+      "gist": "Given the JIT lens owns iteration and the AOT lens owns the optimized ship binary, whether Jet also ships a separate fast Cranelift AOT build tier.",
+      "lesson": "Cranelift is already an I6-ratified dependency for the dev JIT (D-JITDEP1). This ballot asks whether the same backend also produces a separate class of `jet build` artifact: a fast, on-disk, unoptimized binary, distinct from the optimized ship build.\n\nThe owner set the direction on 2026-07-16. Dev velocity comes from the JIT lens. In his words, \"AOT should produce a more performant, optimized version at the cost of longer build time\". So the AOT lens is the optimized ship path by definition.\n\nWhatever wins must preserve the two-lens law: one compiler core, one executable TIR feeding every lens (R12), and NEVER a difference in supported features or functionality between lenses. Any backend that cannot lower a construct falls through to rustc by a named internal reason (I2), so no program fails to build for backend reasons.\n\nThe question is narrow. Does a fast-but-unoptimized AOT binary earn its own tier when the JIT lens already gives instant iteration and the AOT lens already gives the optimized binary?\n\nD-BUILD-DEFAULT1 is now ratified B: jet run and jet dev are the fast commands; jet build stays optimized. The decree names the JIT lens as how rapid dev happens. This ballot fixes the mechanism behind those fast commands, and whether any fast-AOT artifact tier exists at all.",
       "explainer": "",
-      "story": "Priya iterates on a CLI tool, running `jet build` in her inner loop. The generated Rust is milliseconds, but shelling out to rustc dominates each build, even though sema already checked everything.",
-      "inWild": "// app.jet — sema resolves every type, ownership fact, and mangle into TIR\nfn run() {\n  let rows = load(\"data.csv\")\n  print(\"processed {rows.len()} rows\")\n}\n\n$ jet build app.jet           # debug build, run over and over\n$ jet build --release app.jet   # shipping build",
+      "story": "Priya iterates on a CLI tool. She gets instant reloads from `jet dev` through the JIT lens, and a fast optimized binary from `jet build` when she ships. The open question is whether she also needs a third thing: a quick, unoptimized real binary in between.",
+      "inWild": "// app.jet — sema resolves every type, ownership fact, and mangle into TIR\nfn run() {\n  let rows = load(\"data.csv\")\n  print(\"processed {rows.len()} rows\")\n}\n\n$ jet dev app.jet     # JIT lens: instant reloads while iterating\n$ jet build app.jet   # AOT lens: optimized binary to ship",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Cranelift AOT for debug/default, automatic rustc fallback",
-          "detail": "`jet build` (debug/default) lowers TIR to object code with Cranelift and links it. A construct Cranelift cannot lower falls back to rustc with a named reason (I2). `--release` stays on rustc/LLVM.",
-          "code": "# Option A: debug build goes TIR -> Cranelift -> object -> link, no rustc\n$ jet build app.jet\n$ ./app\nprocessed 1240 rows            # identical output to a rustc build\n\n# ~5x faster debug build (illustrative) — rustc is off the path\n\n# Unsupported construct: transparent fallback, named reason (verbose)\n$ jet build --verbose app.jet\nnote: backend fell back to rustc for `f128` math (cranelift: no f128 lowering)\n$ ./app\nprocessed 1240 rows            # same result on either backend\n\n# Shipping build is unchanged:\n$ jet build --release app.jet  # rustc/LLVM optimizing backend"
+          "name": "No separate fast-AOT tier — JIT owns iteration, AOT stays optimized",
+          "detail": "jet build always takes the optimized AOT lens (rustc/LLVM today). Cranelift keeps its ratified job: the engine behind the JIT lens. The ratified fast commands (jet run, jet dev per D-BUILD-DEFAULT1=B) are powered by the JIT lens, not an unoptimized AOT compile. There is no third artifact kind; you iterate through the JIT lens and ship through the optimized AOT lens.",
+          "code": "# Option A: two lenses, no third tier\n$ jet dev app.jet     # JIT lens: instant reloads, Cranelift, no rustc\n$ jet run app.jet     # JIT lens: run now, no build artifact\n$ jet build app.jet   # AOT lens: optimized on-disk binary (rustc/LLVM)\n$ ./app\nprocessed 1240 rows\n# Cranelift never emits a jet build artifact; it powers the JIT lens only."
         },
         {
           "key": "B",
-          "name": "Cranelift AOT opt-in only",
-          "detail": "`jet build` stays on rustc by default; Cranelift AOT is reached through an explicit opt-in (a profile or flag, spelling deferred to a follow-up). Debug builds are fast only when the developer asks.",
-          "code": "# Option B: rustc is the default AOT backend; Cranelift is opt-in\n$ jet build app.jet                    # rustc, same as today\n$ jet build <opt-in-cranelift> app.jet   # fast Cranelift object\n$ ./app\nprocessed 1240 rows                    # identical output"
+          "name": "Fast-AOT as an explicit opt-in profile",
+          "detail": "`jet build` stays optimized by default. An explicit profile lowers TIR through Cranelift to a fast on-disk binary, for cases the JIT lens cannot cover: CI smoke binaries, debugging a real deployable, a machine without the toolchain. Exact spelling deferred to a D-BUILDPROFILE follow-up.",
+          "code": "# Option B: optimized by default, fast on-disk binary on request\n$ jet build app.jet                 # optimized AOT (rustc/LLVM)\n$ jet build --profile=fast app.jet  # Cranelift object, quick real binary\n$ ./app\nprocessed 1240 rows                 # identical output to the optimized build"
         },
         {
           "key": "C",
-          "name": "No Cranelift AOT — rustc stays the only AOT path",
-          "detail": "`jet build` always emits generated Rust and shells rustc, debug and release alike. Cranelift stays JIT-only, powering `jet dev` reloads but never producing a `jet build` artifact.",
-          "code": "# Option C: today's behavior kept\n$ jet build app.jet          # app.jet -> generated .rs -> rustc -> link\n$ ./app\nprocessed 1240 rows\n# Cranelift never touches jet build; only jet dev uses it."
+          "name": "Fast-AOT as the debug default (old framing)",
+          "detail": "`jet build` debug/default lowers TIR through Cranelift to object code, taking rustc off the debug path; `--release` keeps rustc/LLVM. This makes the default `jet build` binary unoptimized.",
+          "code": "# Option C: default jet build goes TIR -> Cranelift -> object, no rustc\n$ jet build app.jet\n$ ./app\nprocessed 1240 rows            # ~5x faster build (illustrative), unoptimized binary\n$ jet build --release app.jet  # optimized rustc/LLVM"
         }
       ],
       "comparisons": [
         {
           "lang": "rustc cranelift backend",
-          "note": "rustc already ships a Cranelift codegen backend for faster debug builds, keeping LLVM for release. This is that split, owned by Jet instead of delegated to rustc.",
+          "note": "rustc ships a Cranelift codegen backend for faster debug builds, keeping LLVM for release. Under Jet's two-lens law the fast-debug job belongs to the JIT lens, so the split lands as JIT-vs-AOT rather than debug-vs-release codegen.",
           "code": "rustc -Zcodegen-backend=cranelift   # debug\nrustc                               # LLVM (release)"
         },
         {
           "lang": "Go",
-          "note": "Go's own compiler emits object code directly and never shells a second optimizer for debug builds. Fast builds come from owning the backend.",
+          "note": "Go's compiler emits object code directly and never shells a second optimizer for debug builds. Fast builds come from owning the backend.",
           "code": "go build ./..."
         },
         {
@@ -42726,18 +42752,18 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A takes the redundant rustc verify-and-optimize pass off the build developers run most, and the named fallback keeps every program buildable.",
+        "why": "A keeps one dev path (JIT lens) and one ship path (optimized AOT), matching the decree exactly. Cranelift stays in its ratified role as the JIT engine, so no new artifact kind and no new parity surface appear.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Opt-in means the default `jet build` keeps paying rustc; almost nobody flips a backend flag, so the common path stays as slow as today."
+            "reason": "B adds a third artifact, a fast unoptimized binary, that overlaps the JIT lens's job of quick iteration. Its genuine need is narrow (CI, no-toolchain hosts) and can be raised then as a profile."
           },
           {
             "key": "C",
-            "reason": "Keeps rustc on the debug path permanently, so the AOT Cranelift scope this ballot would grant goes entirely unused."
+            "reason": "C makes the default `jet build` binary unoptimized, so the AOT lens is no longer the optimized ship path. That directly contradicts the decree."
           }
         ],
-        "tradeoff": "Debug binaries use Cranelift codegen, roughly comparable to rustc opt-level 0 at runtime. The golden and differential suites carry the parity risk of a third TIR consumer (R12)."
+        "tradeoff": "Under A there is no fast on-disk binary short of the optimized build; iteration goes through the JIT lens. If a real need for quick binaries appears (CI smoke tests, cross-target, no-toolchain hosts), B stays available as an opt-in profile, decided then."
       },
       "hybrid": null,
       "checkInstructions": null,
@@ -42796,6 +42822,29 @@
       "status": "ratified",
       "created": "2026-07-16T03:08:33.174Z",
       "outcome": "B",
+      "ratifiedAt": "2026-07-16"
+    },
+    {
+      "id": "D-VERDICT-666-1",
+      "cardId": "c0zmoznd",
+      "group": "verdict",
+      "title": "One compiler, two lenses",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "One compiler core, two lenses. JIT lens = rapid dev work people love in python/typescript; AOT lens = highly optimized ship binary at the cost of longer build time. Same compiler core prevents drift: there should NEVER be a difference in supported features/functionality between JIT and AOT.",
+      "comment": "One compiler core, two lenses. JIT lens = rapid dev work people love in python/typescript; AOT lens = highly optimized ship binary at the cost of longer build time. Same compiler core prevents drift: there should NEVER be a difference in supported features/functionality between JIT and AOT.",
+      "created": "2026-07-16T04:44:24.638Z",
       "ratifiedAt": "2026-07-16"
     }
   ],
@@ -43631,6 +43680,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T04:44:24.791Z",
+      "by": "fable-clerk",
+      "action": "card.update",
+      "ref": "c0t6owk6",
+      "note": "workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-16T04:44:24.638Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-666-1",
+      "note": "One compiler core, two lenses. JIT lens = rapid dev work people love in python/typescript; AOT lens = highly optimized ship binary at the cost of longer build time. Same compiler core prevents drift: there should NEVER be a difference in supported features/functionality between JIT and AOT."
+    },
+    {
+      "at": "2026-07-16T04:44:24.511Z",
+      "by": "fable-clerk",
+      "action": "decision.update",
+      "ref": "D-AOT-CRANELIFT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T04:37:45.320Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0dl51v1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-16T04:37:24.662Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c067p6dz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-16T04:37:24.494Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0xmzy4p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T04:37:24.332Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0vkhjuk",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-16T04:34:51.427Z",
       "by": "claude-main",
@@ -47080,55 +47178,6 @@
       "by": "sol-e3-planner",
       "action": "card.update",
       "ref": "c0q52kwp",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:11:02.584Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0n183gm",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:11:02.338Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0qptf0n",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:11:02.092Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0njy69h",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:11:01.845Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0a689h5",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:11:01.601Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c06vgib7",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:11:01.352Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c03qvxt7",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-07-16T00:11:01.107Z",
-      "by": "sol-e3-planner",
-      "action": "card.update",
-      "ref": "c0qlg5mi",
       "note": "plan,logEntry"
     }
   ],
