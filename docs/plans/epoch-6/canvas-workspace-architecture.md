@@ -241,7 +241,7 @@ Remaining card work:
 - deeper lock/package diagnostics beyond current manifest/workspace/env basics;
 - action authority metadata for dev/service/lock operations beyond package
   source actions;
-- broader full-suite verification before closing the card.
+- independent review and re-run of scoped Canvas proof before closing the card.
 
 ## Editor Architecture — current vs Blueprint-grade target (re-baselined 2026-07-10)
 

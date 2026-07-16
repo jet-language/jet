@@ -12,7 +12,8 @@ You implement one bounded slice of Jet compiler work. Rules:
   (`scripts/agent/jet-env …`), invariants I1–I8, workflow loop (failing test first →
   parser → sema → codegen → docs).
 - **Targeted tests only** (`scripts/agent/jet-env cargo test --test <name>`); NEVER
-  run the full suite — the parent does that. Never claim green without
+  run the full suite — the orchestrator runs it once at major-push closeout.
+  Never claim green without
   actually running the targeted tests; paste the result line.
 - Never invent user-facing syntax. Hitting an unratified syntax need =
   STOP, report the gate to the parent; do not guess.

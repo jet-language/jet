@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Verify a Jet compiler/stdlib change end-to-end in THIS repo — the project-specific checklist (targeted vs full suite, fresh-binary smoke test, snapshot/golden/formatter checks, /tmp trap). Use before claiming any card or change done, or when asked to verify.
+description: Verify a Jet compiler/stdlib change in THIS repo — the project-specific checklist (scoped card proof, major-push closeout, fresh-binary smoke test, snapshot/golden/formatter checks, /tmp trap). Use before claiming any card or change done, or when asked to verify.
 ---
 
 # Verify a change in the Jet repo
@@ -14,11 +14,13 @@ description: Verify a Jet compiler/stdlib change end-to-end in THIS repo — the
 
 ## Test strategy
 
-- **Iterating:** targeted only — `scripts/agent/jet-env cargo test --test <name>`.
-- **Claiming done:** the FULL suite once —
-  `scripts/agent/jet-env full scripts/agent/verify-full.sh`. It runs `cargo test` with a
-  repo-local `TMPDIR` and normal test parallelism. Run it yourself; never accept
-  a sub-agent's "green".
+- **Per card:** scoped targeted tests only —
+  `scripts/agent/jet-env cargo test --test <name>`. A reviewer other than the
+  implementer inspects the diff and re-runs the relevant proof before close.
+- **Major-push closeout:** only the orchestrator runs
+  `scripts/agent/jet-env full scripts/agent/verify-full.sh`, once on the push's
+  closeout or blocking card. It uses a repo-local `TMPDIR` and normal test
+  parallelism. CI also runs the full suite.
 - Do not use global `-- --test-threads=1` for completion proof. Use it only for
   a targeted race reproduction after a parallel failure.
 
@@ -33,10 +35,11 @@ assume the patch is wrong and seek concrete bugs, missed paths, false-green
 tests, invariant breaks, and scope drift; it must not implement.
 
 Implementer fixes every material finding. Reviewer re-checks material fixes.
-Parent inspects the review and runs final verification; reviewer green is never
-completion evidence by itself. Record reviewer identity, reviewed commit/diff,
-findings, and resolution in the card/PR handoff. Exempt only a one-file exact
-mechanical transformation with local proof; record the exemption rationale.
+At per-card close, parent only inspects the review and evidence; reviewer green
+is never completion evidence by itself. Record reviewer identity, reviewed
+commit/diff, findings, and resolution in the card/PR handoff. Exempt only a
+one-file exact mechanical transformation with local proof; record the exemption
+rationale.
 
 ## Blessing snapshots and generated docs
 
@@ -107,7 +110,7 @@ expected runtime failure. It never creates a new expectation channel.
    `scripts/agent/jet-env jet self devtools grammars`; inspect every generated editor section.
 6. Update `docs/spec/spec.md` and the implementation/log entry in
    `syntax-decisions.md`. Run focused parser, formatter, UI, golden, and grammar
-   tests before final project verification.
+   tests before card review.
 
 ## ICE triage
 
@@ -128,7 +131,7 @@ expected runtime failure. It never creates a new expectation channel.
    a user diagnostic.
 5. Add the smallest regression fixture proving the former ICE is now either
    accepted end to end or rejected by a Jet diagnostic. Run its focused test plus
-   the relevant rustc-agreement/golden target, then final verification once.
+   the relevant rustc-agreement/golden target, then independent card review.
 
 ## Runtime smoke test (always, for compiler changes)
 

@@ -496,7 +496,9 @@ UL14 capstones                 after all above plus E4, E6, E7, E8
 
 Each implementation card follows test/reproducer first, parser/sema/TIR/runtime
 as applicable, diagnostics, example, docs, targeted tests, independent review,
-then `nix develop -c scripts/agent/verify-full.sh`. Sol reruns the final proof.
+then close. Only the Sol orchestrator runs
+`scripts/agent/jet-env full scripts/agent/verify-full.sh`, once after a major
+push on its closeout or blocking card; CI runs it again.
 
 ## Ratified owner decisions (2026-07-10)
 

@@ -75,14 +75,15 @@ surfaces, don't silence it.
    unfinished one with `--draft`, finish later with `decision update <id>
    --ready`.
 4. Do the work per AGENTS.md: failing test first → spec → parser → sema →
-   codegen → targeted tests while iterating → full suite green at the end →
-   docs. Invariants I1–I8 hold. Delegate with the project agents (`jet-impl`
-   implement, `jet-verify` verify, `jet-ballot` ballots) — caveman + rules are
-   baked into them.
+   codegen → scoped targeted tests → independent review → docs. Only the
+   orchestrator runs the full suite, once after a major push on its closeout or
+   blocking card; CI runs it again. Invariants I1–I8 hold. Delegate with the
+   project agents (`jet-impl` implement, `jet-verify` verify, `jet-ballot`
+   ballots) — caveman + rules are baked into them.
 5. Advance honestly, with attribution and a log entry:
    `tower card update '#N' --phase building --log "…" --by claude-main`.
-   `verify`→`done` only after real verification (verify skill; never trust a
-   sub-agent's green — re-run the suite yourself). Finish EVERY exit
+   `verify`→`done` only after real independent verification (verify skill;
+   never trust a builder's green). Finish EVERY exit
    criterion before touching the next card; "step N done" ≠ card done.
    Cards with a machine-checked `criteria[]` list: meet each item as you land
    it (`tower card criteria '#N' --meet n --evidence "…" --by claude-main`),
@@ -106,7 +107,9 @@ surfaces, don't silence it.
 parser→sema→codegen wired and reachable from real `.jet` source; every new
 diagnostic has a code in `docs/spec/diagnostics.md` **and** a `tests/ui`
 snapshot (I4); runnable example with golden output where user-visible (I5);
-`scripts/agent/jet-env full scripts/agent/verify-full.sh` fully green; docs match behavior. A ratified
+scoped targeted proof passes and a different agent reviews it; docs match
+behavior. Major-push closeout additionally requires the orchestrator's one full
+suite run. A ratified
 decision may sit unbuilt **only** while gated on an unratified upstream
 decision — the owner's answer on an unblocked decision IS the "go".
 

@@ -116,7 +116,7 @@ Every delegation brief must state:
 - applicable invariants and owner gates;
 - acceptance criteria and targeted verification command;
 - expected output or handoff format;
-- `targeted tests only — Sol runs final verification`;
+- `targeted tests only — orchestrator owns major-push closeout`;
 - `return compressed findings only`.
 
 Require workers to stop and report when the contract is wrong, a gate appears,
@@ -264,7 +264,8 @@ ballot-ready decision.
    behavior changes.
 9. Run targeted verification for each slice.
 10. Request independent Terra review for meaningful diffs; fix findings.
-11. Run broader and final verification proportional to the blast radius.
+11. Run scoped and integration checks proportional to blast radius; reserve the
+    full suite for the orchestrator's one major-push closeout or blocking run.
 12. Self-review the complete diff and repository state.
 13. Update Tower to the phase the evidence supports.
 14. Report result, verification, gates, and residual risk.
@@ -295,9 +296,9 @@ Before completion, inspect the integrated diff:
 ## Verification Contract
 
 Completion requires evidence. Follow the repository verification skill. Run
-targeted checks while iterating and the required full suite once at the end of a
-completed card or equivalent change. Sol runs final verification; delegated
-results are supporting evidence only.
+scoped targeted checks and independent review for each card. Only the Sol
+orchestrator runs the full suite, once after a major push on its closeout or
+blocking card; CI runs it again. Delegated results are supporting evidence.
 
 For Jet, use `scripts/agent/jet-env`; it reuses the nix-direnv cache when
 available. Avoid parallel shell launches. Typical commands:
@@ -305,7 +306,7 @@ available. Avoid parallel shell launches. Typical commands:
 - `scripts/agent/jet-env cargo build`
 - `scripts/agent/jet-env cargo test --test <name>`
 - `scripts/agent/jet-env jet run examples/features/basics/hello.jet`
-- `scripts/agent/jet-env full scripts/agent/verify-full.sh`
+- Major-push closeout only: `scripts/agent/jet-env full scripts/agent/verify-full.sh`
 
 For compiler changes, rebuild before smoke testing because the dev-shell `jet`
 wrapper executes `target/debug/jet`. If a check cannot run, report the exact

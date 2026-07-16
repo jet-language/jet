@@ -205,8 +205,8 @@ matrix preamble for the gesture-vs-protocol rule it added. Consequences:
   field-descriptor renderer (structural fix for #377's dead controls). Both
   are migration steps guarded by the M0 harness.
 - **M0 hardening**: the scenario suite silently skips when Chromium/node are
-  missing; the full-suite run must fail, not skip, so the interaction bar
-  cannot become a no-op on a bare box.
+  missing; CI and major-push closeout full-suite runs must fail, not skip, so
+  the interaction bar cannot become a no-op on a bare box.
 
 Prior ratified decisions stand: D-CANVAS-LAYOUT1 (layout/comment hints),
 D-CANVAS-CONVERT1, D-CANVAS-COLLAPSE1, D-CANVAS-EVENT1, D-CANVAS-DEBUGSTATE1,
@@ -215,8 +215,10 @@ D-CANVAS-SCM1, D-CANVAS-EXT1/2.
 ## Process rules for this epoch
 
 - Every card names its scenarios in exit criteria; a card is `verify`-ready
-  only with scenarios green locally, `done` only after the parent re-runs them
-  plus the full suite.
+  only with scenarios green locally, `done` only after a different agent
+  reviews the diff and re-runs scoped scenario proof. Only the orchestrator
+  runs `scripts/agent/jet-env full scripts/agent/verify-full.sh`, once after a
+  major push on its closeout or blocking card; CI runs it again.
 - No matrix row moves to `shipped` without an `interaction:` ratchet.
 - Owner acceptance scripts are part of milestone exit — a milestone is not
   done because tests pass; it is done when the owner ratifies that milestone's

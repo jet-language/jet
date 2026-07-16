@@ -70,7 +70,7 @@ Before implementation:
 2. Add measurable criteria if absent. Criteria must test behavior, not file existence or assertions.
 3. Claim the card with the builder identity.
 4. Create a clean checkpoint or isolated worktree.
-5. Give one self-contained brief: goal, exact paths, ratified decisions, criteria, invariants, collision limits, focused tests, and `no full suite; parent owns broader verification`.
+5. Give one self-contained brief: goal, exact paths, ratified decisions, criteria, invariants, collision limits, focused tests, and `no full suite; orchestrator owns major-push closeout`.
 
 Use one compressed investigator for a tranche when it avoids repeated discovery. Do not spawn an agent for a single command.
 
@@ -102,7 +102,10 @@ The orchestrator may authorize broader tests when risk demands them, including:
 - cross-card batch integration;
 - repository-required closeout gates.
 
-Only the orchestrator runs a full suite, and only at a meaningful batch/card boundary—not once per subagent. Distinguish unrelated pre-existing failures by exact reproduction; never relabel a caused failure as unrelated.
+Only the orchestrator runs a full suite, once after a major push on its closeout
+or blocking card—not once per card or subagent. CI runs it again. Distinguish
+unrelated pre-existing failures by exact reproduction; never relabel a caused
+failure as unrelated.
 
 ## Durable progress
 
@@ -133,6 +136,6 @@ Do not mark owner-gated criteria met. Merge safe local containment if useful, th
 
 ## Completion
 
-A card is complete only when implementation is merged, focused proof passes, all builder criteria are met, a different agent verifies them, Tower is updated, and its worktree/branch is deleted. A campaign is complete only when the requested scope is empty except frozen/owner-blocked cards, broader verification required by the repository has run at the chosen boundary, and no claims, dirty worktrees, or temporary artifacts are orphaned.
+A card is complete only when implementation is merged, focused proof passes, all builder criteria are met, a different agent verifies them, Tower is updated, and its worktree/branch is deleted. A campaign is complete only when the requested scope is empty except frozen/owner-blocked cards, the orchestrator's major-push closeout suite has passed, and no claims, dirty worktrees, or temporary artifacts are orphaned.
 
 End with a terse report: cards closed, cards advanced, owner gates, focused/broader test results, current active claims, and worktree cleanup proof.

@@ -115,17 +115,17 @@ commands use the same prefix; `.agents/skills/tower/SKILL.md` owns the workflow.
 
 Pick the next roadmap item → write the failing test first (ui fixture or
 example) → spec it in docs/spec/spec.md → implement parser → sema → codegen →
-JIT/dev parity through the same executable TIR (R12) → all tests green →
-update docs touched → done means: tests pass, docs match behavior, no
-invariant bent.
+JIT/dev parity through the same executable TIR (R12) → scoped tests green →
+independent review → update docs touched → done means: tests pass, docs match
+behavior, no invariant bent.
 
-While iterating, run targeted tests
-(`scripts/agent/jet-env cargo test --test <name>`); run the
-full suite once at the end of a card, before claiming done:
-`scripts/agent/jet-env full scripts/agent/verify-full.sh`. This keeps the suite parallel
-and uses a repo-local `TMPDIR`; do not add global `-- --test-threads=1`
-unless you are reproducing a specific race. Never trust a sub-agent's "green"
-— re-run yourself.
+Use scoped targeted tests (`scripts/agent/jet-env cargo test --test <name>`)
+plus independent review for each card. Never trust a builder's "green" — the
+reviewer re-runs the relevant proof. Only the orchestrator runs
+`scripts/agent/jet-env full scripts/agent/verify-full.sh`, once after a major
+push on its closeout or blocking card; CI also runs the full suite. Keep normal
+test parallelism; use global `-- --test-threads=1` only to reproduce a specific
+race.
 
 ## Syntax decision protocol
 
@@ -208,7 +208,7 @@ Rules:
   agents).
 - Every sub-agent brief starts with the caveman invocation (see
   Communication) and states: goal, relevant file paths, invariants that
-  apply, and "targeted tests only — parent runs the full suite".
+  apply, and "targeted tests only — orchestrator owns major-push closeout".
 - Prefer the baked project agents in `.claude/agents/`: `jet-impl` for builds,
   `jet-verify` for independent verification, and `jet-ballot` for decisions.
 - **Adversarial review gate.** Before a meaningful change is integrated or
@@ -218,7 +218,7 @@ Rules:
   job is to find concrete bugs, missing paths, invariant violations, false-green
   tests, and accidental scope changes; it does not implement. The implementer
   fixes findings, then the reviewer re-checks material fixes. Parent inspects
-  both reviews and runs final verification. Meaningful means any change to
+  both reviews and evidence. Meaningful means any change to
   compiler semantics, safety/ownership/FFI, runtime behavior, public contract,
   generated output, or more than one coherent implementation file. A one-file
   mechanical edit with an exact, locally verified transformation is exempt;
