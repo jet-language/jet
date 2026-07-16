@@ -245,12 +245,15 @@ saved :: ~name    // fresh, independent value; `name` still usable after
 
 (examples/features/memory/copy_verb.jet)
 
-### Second-class borrows
+### Named views, not raw references
 
-There is no first-class (storable, returnable) borrow in v1: `-> &T` return
-types and `&T` struct fields are not in the grammar (ordinary syntax errors,
-no special teaching text — the mechanism is gone, not disallowed). A struct
-field always owns its value:
+Raw reference syntax is not first-class: `-> &T` return types, `&T` struct
+fields, and `#Ref` provenance are not in the grammar. Named `View<T>` and
+`ViewMut<T>` values may cross a parameter, return, or field boundary when sema
+proves the owner outlives the view; `ViewMut<T>` additionally requires unique
+mutable access. Every public boundary exposes queryable, semver-pinned
+provenance naming the owner relationship (D-MEM-VIEWRET1). An ordinary field
+still owns its value:
 
 ```jet
 struct Span { text: String, meta: String }
@@ -263,14 +266,14 @@ fn describe(source: String, kind: String) {
 
 (examples/features/memory/ref_field.jet) When a program genuinely needs
 "many owners, one value," reach for `Shared<T>` or `Pool<T>`/`Id<T>` (below)
-instead of a stored reference.
+instead of a raw stored reference.
 
 ### Zero-copy string views
 
 `String.trim()`/`.after(sep)`/`.before(sep)` bound to a local return a
-zero-copy view into the receiver's own buffer — a real `&str` borrow,
-invisible in the type (`String` stays one Jet-level type end to end) —
-whenever sema can prove the binding can't outlive its owner:
+zero-copy view into the receiver's own buffer, invisible in the local type
+(`String` stays one Jet-level type end to end), whenever sema can prove the
+binding can't outlive its owner:
 
 ```jet
 padded := "  nate@jet.dev  "
@@ -279,13 +282,13 @@ domain :: email.after("@")
 print("padded still readable: {padded}")   // reading the owner still works
 ```
 
-(examples/features/memory/string_view.jet) A view's legal surface is
-narrow: chain another `.trim()/.after()/.before()`, interpolate it
-(`"{domain}"`), or `copy` it into an owned `String`. Any other use —
-return, rebind, struct field, call argument, list/tuple element, any other
-method — is **E2307**. `[T]` list slices (`list.view(a..b)`, D-DYNARRAY1,
-predates this migration) follow the same owner-outlives-view reasoning,
-reported as **E2305**. Either kind of view crossing a `tasks.spawn`/
+(examples/features/memory/string_view.jet) A local view may chain another
+`.trim()/.after()/.before()`, be interpolated (`"{domain}"`), or be copied into
+an owned `String` with `~`. It may also be rebound, passed, stored, or returned
+when the owner-outlives proof succeeds; a public boundary names the view and
+publishes its provenance. **E2307** reports only an escape that would outlive
+the owner or a public boundary missing that provenance. `[T]` slice views
+follow the same rule, reported as **E2305**. Either kind of view crossing a `tasks.spawn`/
 `Sender.send` boundary is reported once, as **E1102** (unsendable value) —
 a task or channel moves owned data between threads, and a view can't cross
 without ownership.

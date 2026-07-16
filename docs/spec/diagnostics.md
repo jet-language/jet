@@ -549,14 +549,14 @@ renumbered, and no new `W` code may be allocated.
 | E1110 | sema  | `.task { … }` outside a `taskgroup` scope, or on the wrong handle (D-TASKSCOPE1) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
-| E2301 | sema  | *retired by D-MEM1/S3* (was: returned `view` outlives the local that owns it; `-> &T` returns no longer exist) |
-| E2302 | sema  | *retired by D-MEM1/S3* (was: stored `ref` field would point at something that dies first; `&T` fields no longer exist) |
+| E2301 | sema  | *retired for raw references by D-MEM1/S3* (`-> &T` returns remain absent; invalid named-view returns use E2305/E2307) |
+| E2302 | sema  | *retired for raw references by D-MEM1/S3* (`&T`/`#Ref` fields remain absent; named view fields follow D-MEM-VIEWRET1) |
 | E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
-| E2304 | sema  | *retired by D-MEM1/S3* (was: an indexed/sliced piece can't be handed back as a `view`; `-> &T` returns no longer exist) |
-| E2305 | sema  | a `View<T>` (`.view(...)`) escapes the scope of the list it borrows from (D-DYNARRAY1) |
+| E2304 | sema  | *retired for raw references by D-MEM1/S3* (named slice-view returns follow D-MEM-VIEWRET1 and use E2305 when invalid) |
+| E2305 | sema  | a `View<T>` would outlive its owner, or crosses a public boundary without the required provenance (D-MEM-VIEWRET1) |
 | E2306 | sema  | *retired by D-MEM1/S3* (was: `#Ref(label)` on a `&T` field names no in-scope value of the referent type, D-REF-SHORTHAND2; stored-ref fields no longer exist) |
-| L2301 | sema  | *retired by D-MEM1/S3* (was: advisory naming a borrowed return's source; `-> &T` returns no longer exist) |
-| E2307 | sema  | a string view (`.trim()`/`.after()`/`.before()`) escapes the scope of the `String` it borrows from (D-MEM1 stage S5) |
+| L2301 | sema  | *retired for raw references by D-MEM1/S3* (public named-view provenance is queryable and semver-pinned under D-MEM-VIEWRET1) |
+| E2307 | sema  | a string view would outlive its owning `String`, or crosses a public boundary without the required provenance (D-MEM-VIEWRET1) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -833,17 +833,15 @@ CLI.
 
 ## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`, D-MEM1 S5 string views)
 
-D-MEM1/S3 deleted `-> &T` borrow returns and stored-reference (`&T`) fields
-outright — there is no first-class borrow to store or return in v1. What's
-left of this tier is the still-live `View<T>` zero-copy window
-(`list.view(a..b)`, D-DYNARRAY1) plus, since D-MEM1 stage S5, the same
-zero-copy treatment for `String` slicing (`s.trim()`/`s.after(sep)`/
-`s.before(sep)` bound to a local): both never mention lifetimes, speaking in
-Jet words instead — *what owns this* and *how long can this view live*. A
-string view carries no distinct Jet-level type the way `View<T>` does
-(`String` stays one type end to end, D-MEM1 gallery) — the check instead
-tracks which *bindings* are views, the same scope-liveness proof applied to
-a different owner kind. E2303 is the reference-specific name for the
+D-MEM1/S3 deleted raw `-> &T` borrow returns, stored-reference (`&T`) fields,
+and `#Ref`; those forms remain retired. D-MEM-VIEWRET1 permits named `View<T>`
+and `ViewMut<T>` values in parameters, returns, and fields when sema proves the
+owner outlives the view and mutable access remains unique. Public signatures
+expose queryable, semver-pinned provenance naming that owner relationship.
+Local string slicing (`s.trim()`/`s.after(sep)`/`s.before(sep)`) remains
+type-invisible; when it crosses a public boundary, the signature names the view
+and its provenance. Both forms speak in Jet words — *what owns this* and *how
+long can this view live* — rather than raw-reference syntax. E2303 is the view-specific name for the
 task/channel rule — that situation is **reported once, as E1102** (an
 unsendable value), for both `View<T>` and a captured string view; E2303
 exists so `jet explain E2303` points there and the soundness matrix has a
@@ -852,8 +850,8 @@ named cell.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`~x`) before crossing. |
-| E2305 | A `View<T>` (`list.view(a..b)`) escapes the scope of the list it borrows from — returned from a function that owns the list, rebound to another local, or stored in a struct field. | `.view(a..b)` is a zero-copy window into the list's own backing storage, not a copy; if the list is made and freed inside this function (or scope), a window into it would outlive what owns it — there'd be nothing left to look at. | Return/store an owned copy instead (`list[a..b]` for a copying slice, or `.map(...)` the window into an owned list), or accept the list as a parameter so the caller keeps owning it. |
-| E2307 | A string view (`s.trim()`/`s.after(sep)`/`s.before(sep)` bound to a local) escapes the scope of the `String` it borrows from — returned, rebound to another local, or stored in a struct field. | These calls return a zero-copy `&str` window into `s`'s own buffer when sema can prove it stays inside `s`'s scope (D-MEM1 S5); if `s` is made and freed inside this function (or scope), the window would outlive what owns it. | Keep the view inside the owner's scope, or materialize an owned `String` with `copy` before it leaves. |
+| E2305 | A `View<T>` would outlive its owner, or a public parameter/return/field omits the required owner provenance. | Named views may be rebound, passed, stored, and returned, but sema must prove the owner lives longer; public provenance is part of the API contract. | Keep the owner alive, publish the correct provenance, or cross the boundary with an owned copy (`~view`). |
+| E2307 | A string view would outlive its owning `String`, or a public parameter/return/field omits the required owner provenance. | String views may be rebound, passed, stored, and returned under the same owner-outlives-view proof; public provenance is part of the API contract. | Keep the owner alive, publish the correct provenance, or materialize an owned `String` with `~view`. |
 
 ## Library authoring diagnostics (E2-M6)
 

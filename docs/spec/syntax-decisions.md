@@ -824,12 +824,34 @@ grammar as ordinary syntax errors. The rule is now universal: an expert
 scoped region is a `#` block.
 
 **D-POLICY-WORD1=A — one meaning for `policy`** *(ratified by owner
-2026-07-12, card #512)*: the in-source module floor respells as
-`#Policy(no_alloc)` is a module-level directive; future floors arrive as
-arguments, never new keywords. The D-NOALLOC-SEM1 checker (local-only
-walk, E0921, ratified scope cut) is unchanged; only the trigger
-respells. The bare `policy` keyword leaves the grammar; the word means
-the manifest governance namespace alone.
+2026-07-12, card #512; amended by D-MARK-SCOPE1)*: source policy uses
+`#Policy(…)`; future floors arrive as arguments, never new keywords. Package-
+wide policy integrates with `package.jet`'s existing `policy:` namespace rather
+than copying source-marker placement into the Package record. The bare `policy`
+keyword leaves the grammar; the word means the Package governance namespace
+alone.
+
+**D-MARK-SCOPE1=A — common scope ladder for eligible settings** *(qualified
+owner ratification 2026-07-15, card #657: “A but at the package level syntax
+needs to be consistent and coherent within the package syntax”)*: eligible settings share block, function, module, and
+package scope. The nearest declaration of a key wins, unmentioned keys inherit,
+and `jet explain` reports the effective value plus every declaration it
+overrode. A compiler-owned applicability matrix decides which levels each
+setting may use and whether it may tighten, override, or merge. Site-specific
+proof and authority stay site-bound: `#Unsafe` authorization, `#Grant`,
+`#Tainted`, `#Sanitizer`, and field wire attributes do not widen through this
+ladder. At package scope, each setting uses the coherent Package `policy:`
+surface owned by its policy decision; the common ladder does not mint a second
+manifest spelling.
+
+**D-MEM-FACTS1=B — transitive memory facts** *(ratified 2026-07-15, card
+#644)*: `no_alloc`, `zero_rc`, and `arena_bounded(N)` are explicit memory facts
+on the D-MARK-SCOPE1 ladder. Each fact checks every reachable call, including
+dependencies, and a violation reports its source, full call path, effective
+declaration, and declaration provenance. Open-world dispatch cannot prove a
+strict fact: the program must seal the target set or consume a signed dependency
+summary, otherwise the compiler rejects the unprovable contract. This
+supersedes D-NOALLOC-SEM1=A's local-only denylist scope.
 
 **D-DROP-WORD1=A — one meaning for `drop`** *(ratified by owner
 2026-07-12, card #512)*: the linear finisher for `#SingleUse` values
@@ -936,18 +958,21 @@ D-MEM1 deleted elevation and the freeze tier outright: unmarked is always
 read, no inference, no `api:` manifest field (an ordinary unknown-key error,
 E1216) — see D-MEM1 below.
 
-**D-MEM1 — Memory model v5, "the borrow checker, humanized"** *(ratified
-2026-07-03; migration completed by card #187)*: supersedes the D-CAP7
+**D-MEM1 / D-MEM-PARAM1=A — Memory model v5, "the borrow checker,
+humanized"** *(ratified 2026-07-03; unmarked-read law reconfirmed 2026-07-15,
+card #642)*: supersedes the D-CAP7
 spelling assignments and D-CAP8 when the migration lands. Three sigils:
 unmarked = read (enforced — no elevation, no freeze; no `api:` manifest field),
 `&T` = exclusive write, `^T` = take; `&`/`^` mirrored at call sites;
-`&self`/`^self` receivers. `~` is not part of the v5 grammar (ordinary syntax
-error — no compat, ever, per the rule at the top of this file). Borrows are
-second-class — no `-> &T` returns, no `&T` fields (D-REF-SHORTHAND1/2 and
-E0207/E0427 deleted); string/list slices are counted view values. L0201
+`&self`/`^self` receivers. Passing an unmarked parameter is allocation-free and
+never elevates; a body write requires `&`, while consuming ownership requires
+`^`. `~` has only the copy meaning assigned by D-SHAPE-COPY1. Raw `&T`
+reference returns and fields remain deleted (D-REF-SHORTHAND1/2 and
+E0207/E0427); safe stored and returned views use D-MEM-VIEWRET1's named
+`View<T>`/`ViewMut<T>` boundary instead. L0201
 deleted — moves of named bindings are always written `^`; temporaries pass
-freely; `copy x` (D-CAP2) is the one copy spelling. Named escape hatches
-`Shared<T>`, `Pool<T>`/`Id<T>`; module `policy` floors (`no_alloc` first).
+freely; `~x` (D-SHAPE-COPY1) is the one copy spelling. Named escape hatches
+`Shared<T>`, `Pool<T>`/`Id<T>`; scoped memory-policy facts (`no_alloc` first).
 **S1 shipped (2026-07-04)**: `&` is the write sigil, `~` is gone from the
 grammar, call sites/receivers/formatter speak v5 spelling. **S2 shipped
 (2026-07-04)**: unmarked param is `Read`, decided at parse time — `Infer` and
@@ -967,11 +992,10 @@ E0211; on a scalar it's legal but redundant (already `Copy`). Every fix-it
 that used to suggest `.clone()` now suggests `copy name`. **S5 shipped
 (2026-07-04)**: `[T]` slice views were already live (`View<T>`, D-DYNARRAY1,
 predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
-`.before(sep)` bound to a local now return a zero-copy `&str` view instead of
-an owned `String` when sema proves it can't outlive its owner (no distinct
-Jet-level view type — `String` stays one type; view-ness lives on the binding,
-codegen-invisible to the user); escape (return/rebind/field/call-arg/any other
-method) is **E2307**. `split` stays eager (`Vec<String>`) — a view-of-views
+`.before(sep)` bound to a local return a zero-copy string view instead of an
+owned `String`. Local use remains codegen-invisible; crossing a return or field
+boundary uses D-MEM-VIEWRET1's named, provenance-carrying `View<str>` contract.
+`split` stays eager (`Vec<String>`) — a view-of-views
 list needs S6-scale representation work, named as a deferred gap, not built
 here. **S6 shipped (2026-07-04)**: `Shared<T>` (D-SHARED-API1=A) is a
 lock-guarded shared handle — `Shared.new(x)` constructs (bare type-name call,
@@ -990,21 +1014,11 @@ value round-trip); `.ids()` snapshots every live id; `.remove(id)` removes,
 bumping the slot's generation, returning `T?` (mirrors `Map.remove`'s
 `Option` convention). A stale `Id<T>` (removed/reused slot) panics at
 runtime, mirroring the array-out-of-bounds precedent — not a new diagnostic
-code. **S7 shipped (2026-07-04, D-NOALLOC-SEM1=A)**: `policy no_alloc` is a
-bare module-level item (parses like `use`, no manifest/`pkg.jet` field — it's
-ordinary module-file syntax, nothing else reads it). The check is **local
-only**: it walks only the policy'd module's own function bodies and never
-follows a call into another function (unlike `@Pure fn`'s whole-program
-call-graph fixpoint) — a denylist of four allocation-shaped expressions,
-each **E0921**: string interpolation with a `{…}` hole (a hole-less literal
-isn't flagged); any `.push`/`.insert` call (method-name match only, no
-receiver-type check — capacity headroom isn't provable statically); a
-struct/enum literal for a type that owns heap data directly or transitively
-(`String`/`[T]`/`[K,V]`/`Shared<T>`/`Pool<T>`, walked through struct fields
-and enum variant payloads — `Id<T>` is plain `Copy` data, never flagged);
-`~` of a heap-owning type. A bare list/map literal outside those four
-shapes (`xs := [1, 2, 3]`) is NOT checked — a deliberate, ratified-text-exact
-scope cut, not silently expanded. **S8 shipped (2026-07-04)**: docs sweep —
+code. **S7 shipped (2026-07-04, D-NOALLOC-SEM1=A; superseded by
+D-MEM-FACTS1=B)**: the original module-local allocation denylist shipped as
+E0921. Current law follows reachable calls at every eligible scope and checks
+the transitive `no_alloc`, `zero_rc`, and `arena_bounded(N)` facts above.
+**S8 shipped (2026-07-04)**: docs sweep —
 diagnostics.md retired-code stubs for every deleted S1-S7 mechanism,
 spec.md's memory chapter rewritten to v5 end to end, this file's
 D-CAP7/D-CAP8/D-CAP4-5-6/D-REF-SHORTHAND1/2 supersession notes, stale
@@ -1019,19 +1033,48 @@ non-cloneable type it is still E0211. The `copy` keyword is retired to a
 teaching error, E0991, pointing at `~`, mirroring how D-MEM1/S10 retired
 `mut`/`take` to E0056/E0057. This also reopens D-MEM1's "`~` is not part of
 the v5 grammar" decree for the copy sigil specifically — `~` still has no
-role as a parameter-position capability (that stays `&`/`^` only; a `~`
-parameter/place sigil is D-SHAPE-PLACE1, a separate, still-open ballot).
-D-SHAPE-LIFECYCLE's `^^` (never implemented — zero code hits, paused
-pending this ballot) is superseded and retired outright, never shipping.
+role as a parameter-position capability (that stays `&`/`^` only).
+D-SHAPE-LIFECYCLE's `^^` (never implemented — zero code hits) is superseded
+and retired outright, never shipping.
+
+**D-SHAPE-PLACE1=A — one rule for reading, editing, and copying a place**
+*(ratified 2026-07-15, card #613)*: a place is a name plus its maximal field,
+index, or range projection. Bare place access creates a checked read window,
+`&place` creates the exclusive write window, and `~place` creates independent
+owned storage. Many read windows may overlap; a write window must be exclusive;
+moving or resizing an owner is rejected while it could invalidate a live
+window. Method calls are not part of a place, so calling a method on a copy
+still needs `(~input).method()`. This supersedes D-SHAPE-VIEW1's `.view()`
+spelling and dissolves the separate D-SHAPE-VIEWMUT1 question.
+
+**D-MEM-VIEWRET1=B — stored and returned safe views** *(ratified 2026-07-15,
+card #643)*: `View<T>` and `ViewMut<T>` may cross a return or field boundary.
+This explicitly supersedes D-MEM1/S3's blanket ban on returned and stored
+borrows; it does not revive raw `&T` returns or fields.
+Each carries public, queryable source provenance in the API snapshot; changing
+that provenance is a breaking API change under E2601. Sema proves the owner
+outlives every view and keeps at most one mutable view live. Ordinary in-body
+place access remains D-SHAPE-PLACE1's bare/`&`/`~` rule; the named view types
+appear only where the return or storage boundary needs to state the contract.
+No lifetime syntax is added.
 
 **D-MUTSELF1 — Receiver mutation**: a `&self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a
 "write the receiver as `&self`" fix at the assignment.
 
-**S63 — Resource cleanup**: automatic scope-end cleanup (RAII) is the single
-story — backed by Rust `Drop`, every exit path. No `defer` keyword
-(D-DEFERKW1/D-SUGAR5); `core.scope.guard` is the scope-exit hook.
+**S63 / D-SHAPE-RESOURCE1=A / D-SHAPE-RESOURCE2=A — resource cleanup**
+*(amended 2026-07-15, cards #557/#647; supersedes D-DEFERKW1/D-SUGAR5's
+no-`defer` ruling)*: automatic scope-end cleanup remains
+the safety net on success, error, panic, and cancellation; a small block still
+ends ownership early. `close(^resource)` is the one consuming close operation
+for files, locks, connections, and other resources. `defer close(^resource)`
+schedules it beside acquisition and runs deferred closes in reverse order on
+every scope exit. An immediate close consumes at the call; a deferred close
+consumes when its scheduled action runs. `.drop("reason")` remains deliberate
+value discard, while protocol
+success such as `finish`, `commit`, `flush`, and `shutdown` remains an ordinary
+fallible method rather than pretending automatic cleanup succeeded.
 
 **S53 — Concurrency** *(deferred core; combinators live)*: tasks/channels
 deferred past v1.0 (planned: `tasks.spawn(closure) -> Task<T>`, `t.join()`,
@@ -1241,6 +1284,20 @@ Address-of is `mem.address_of(x)`. `mem.cast_ptr<T>(p)` is the cast primitive
 Generated `unsafe` appears only inside user-gated regions + vetted internals
 (I1). Onboarding never mentions any of it.
 
+**D-UNSAFE-OBLIG1=A — gate-only default with optional typed obligations and
+per-site control**
+*(qualified owner ratification 2026-07-15, card #645: A with ballot C's
+per-site flexibility)*: absent policy keeps the existing `#Unsafe` gate with no
+per-operation obligation records. Package or organization policy may require
+typed `valid_ptr`, `aligned`, and `no_alias` obligations; an undischarged
+required obligation is an error. `.Relaxed` suppresses only L3101 for a bare
+gate. `.PerSite` is also available: each gate selects
+`obligations: .Track` or `.Skip`, and organization policy may reject `.Skip`.
+Every mode still requires a lexical `#Unsafe` block or function for every
+low-level operation; none permits generated Rust `unsafe` outside I1's audited
+regions. `jet inspect unsafe` reports the effective mode, its policy source,
+each gate, and tracked operation state.
+
 **D-FLAGSHIP-MMIO1 — MMIO writes**: volatile writes use the Core helper
 `mem.volatile_write(ptr, value)`, paired with `mem.volatile_read(ptr)`. No
 pointer-assignment lvalue spelling is added.
@@ -1274,11 +1331,11 @@ separate marker; the owner was *inferred* at each construction site (one
 candidate → it, two or more → **E0207**), disambiguated with `#Ref(label)`
 when needed; the retired `#Ref(owner) name: T` form (plain type, no `&`) was
 a hard teaching error (**E0427**). D-MEM1/S3 deleted the whole mechanism
-outright — `&T` struct fields are not in the v5 grammar (ordinary syntax
-error), and E0207/E0427 are gone (retired stub rows in
-docs/spec/diagnostics.md). The "how do I store a reference?" answer is now
-an owned field, `Shared<T>`, or `Pool<T>`/`Id<T>` (see D-MEM1) — forward
-guidance only, this mechanism is not coming back.
+outright — raw `&T` struct fields remain outside the grammar and E0207/E0427
+remain retired. D-MEM-VIEWRET1=B later superseded only the blanket return/store
+ban: the selected safe boundary is a named, provenance-carrying `View<T>` or
+`ViewMut<T>`, while `#Ref` and raw `&T` storage remain retired. Owned fields,
+`Shared<T>`, and `Pool<T>`/`Id<T>` remain the non-view alternatives.
 
 **D-REF-SHORTHAND2 — `#Ref(label)` disambiguator (retired 2026-07-04 by
 D-MEM1/S3)**: originally the owner label stayed on the `#` directive plane,
@@ -2214,8 +2271,19 @@ and WebSocket belongs to `core.ws` per D-WS1=B (D-HTTPLIB1–3, D-ROUTE1).
 Compression
 `core.compress.{gzip,zstd}` (D-CODECS1). Measurement-with-uncertainty in
 `core.science.measurement` (D-HONESTNUM1 shipped/partial; #310 verifies module
-map truth). Opt-in `Gc<T>` module
-for cyclic data (D-OPTGC1, gated on its I6 ballot). Approximate/sketch algos
+map truth). **D-OPTGC1=A — scoped opt-in tracing GC** *(ratified 2026-07-15,
+card #646)*: GC is magic inside an opted scope, using D-MARK-SCOPE1 from
+package through module, function, and block. Heap-owning values gain traced
+identity without `Gc<T>` wrappers; a bare store creates a traced edge, `&`
+still gates mutation, `^` transfers a root, and `~` deep-copies. An unproved
+escape into ownership-only code is rejected. `jet gc report` lists each
+allocation ownership could not prove, with source, reason, and a concrete path
+back to owned values or `Pool<T>`/`Id<T>`; removing the opt-in is the supported
+end state. The collector is D-DEP-GC1=A's pure-Rust, std-only mark-sweep engine;
+it is an internal substrate, not a second source mechanism. Option C's explicit
+`core.gc` / `Gc<T>` handle surface is retired; scoped automatic promotion is
+the one GC path (I8). An external collector still needs a separate I6 ballot.
+Approximate/sketch algos
 are libraries (D-APPROX1); parallelism stays explicit `par_*`
 (D-AUTOPAR1); adaptive fidelity is a manual runtime-global knob:
 `core.perf.Perf.fidelity()`, `default_fidelity()`, `override_fidelity(v)?`,
@@ -3968,9 +4036,6 @@ implementation milestone is pending.
 | --- | -------- | --------- |
 | D-SHAPE-DUNDER2 | who owns the `__name` namespace | **Epoch 3** — Tower #601 |
 | D-SHAPE-MODULEINTERNAL1 | how `module _name` participates in discovery | **Epoch 3** — Tower #602 |
-| D-SHAPE-RESOURCE1 | how an owned resource releases before its surrounding scope | **Epoch 3** — Tower #557 |
-| D-SHAPE-VIEW1 | how source creates a read-only non-owning view | **Epoch 3** — Tower #567 |
-| D-SHAPE-VIEWMUT1 | how source creates an exclusive mutable view | **Epoch 3** — Tower #613 |
 | D-SHAPE-QUANTITY1 | who owns dimensional algebra | **Epoch 3** — Tower #576 |
 
 Blocked follow-ups stay on Tower planning cards and remain outside the owner
