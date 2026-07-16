@@ -70,3 +70,7 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 3. Add a line to the host repo's CLAUDE.md / AGENTS.md pointing agents at
    the **tower** skill (or `Tower/AGENTS.md` for non-Claude agents) so every
    session knows the board is the source of truth.
+4. Keep model routing, review count, Git ownership, and worktree lifecycle in
+   the host `AGENTS.md`, not copied into Tower data. For Jet, that means Sol by
+   default, one implementer, then Sol and Terra reviewers, with no orphaned
+   worktree or temporary branch.

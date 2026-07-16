@@ -49,8 +49,9 @@ Name and record worktrees/branches by card and owner. Integrate every successful
 ## Scope models
 
 Use GPT-5.6 Sol by default and state its effort in every brief. Use low effort
-for bounded mechanics, medium for normal implementation, and high/xhigh for
-architecture, compiler semantics, hard debugging, and first-pass review.
+for bounded mechanics, medium for normal implementation, high/xhigh for
+architecture, compiler semantics, hard debugging, and first-pass review, and
+max for the hardest cases.
 Prefer changing Sol effort over changing model families. Terra performs the
 mandatory second review; use it elsewhere only for a recorded task-specific
 advantage. Luna requires an owner request or measured stable advantage on

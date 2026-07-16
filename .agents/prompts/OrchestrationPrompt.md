@@ -14,7 +14,7 @@ status/briefs and normal prose for durable or user-facing copy.
    sections. Never require blanket repository reading.
 4. Use GPT-5.6 Sol by default. Tune Sol effort: low for bounded mechanics,
    medium for normal engineering, high/xhigh for semantics, architecture,
-   ambiguous debugging, integration, and first review.
+   ambiguous debugging, integration, and first review, and max for the hardest cases.
 5. Use Terra for the mandatory second review and only otherwise for a recorded
    task-specific advantage. Do not default to Luna; use it only by owner request
    or measured advantage on fully mechanical volume work.

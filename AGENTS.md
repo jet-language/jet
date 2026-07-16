@@ -1,16 +1,12 @@
 # AGENTS.md — Jet agent operating manual
 
-Canonical policy for every coding agent. `CLAUDE.md` is a symlink here; do not
-fork per-tool copies. Keep this file short, current, and limited to rules that
-apply across tasks. Put procedures in skills, design in specs, work state in
-Tower, and deterministic enforcement in tests or hooks.
+Canonical policy for every coding agent. `CLAUDE.md` is a symlink here; do not fork per-tool copies.
+Put procedures in skills, design in specs, work state in Tower, and deterministic enforcement in tests or hooks.
 
 ## Mission and authority
 
-Jet is a dual-facet, memory-safe compiled language: magic out of the box for
-beginners, full expert control behind explicit opt-in. The front end owns all
-semantics and user-facing errors; rustc is a hidden verifier and optimizer. The
-human owner has final say on user-facing syntax.
+Jet is a dual-facet, memory-safe compiled language: magic for beginners, full expert control behind explicit opt-in.
+The front end owns semantics and user-facing errors; rustc is hidden. The human owner decides user-facing syntax.
 
 Resolve guidance in this order:
 
@@ -20,27 +16,22 @@ Resolve guidance in this order:
 4. this file and the nearest nested `AGENTS.md`;
 5. task-specific skills and prompts.
 
-Code shows implementation state, not design authority. A newer ratified ruling
-beats stale code or prose. If sources conflict, follow the higher authority,
-record the conflict, and stop only the affected slice. Never silently average
-contradictory rules.
+Code shows implementation state, not design authority. A newer ratified ruling beats stale code or prose. On conflict,
+follow the higher authority, record it, and stop only the affected slice. Never average contradictory rules.
 
 ## Load context by trigger
 
-Read this file, then inspect the relevant code, tests, and current diff. Load
-only the references the task requires:
+Read this file, then relevant code, tests, and the current diff. Load only task-triggered references:
 
-- language semantics or syntax: relevant sections of
-  `docs/spec/philosophy.md`, `docs/spec/syntax-decisions.md`, and
-  `docs/spec/architecture.md`;
+- language semantics or syntax: relevant sections of `docs/spec/philosophy.md`,
+  `docs/spec/syntax-decisions.md`, and `docs/spec/architecture.md`;
 - diagnostics: `docs/spec/diagnostics.md` and the matching UI snapshots;
 - Tower work or owner decisions: `.agents/skills/tower/SKILL.md`, plus
   `.agents/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
 - completion claims: `.claude/skills/verify/SKILL.md`;
 - a specialized task: the matching skill named in the request or skill catalog.
 
-Do not front-load every spec, plan, prompt, or board record. Search first and
-read the smallest authoritative slice that can settle the question.
+Do not front-load every spec, plan, prompt, or board record. Search first; read the smallest authoritative slice.
 
 ## Command environment
 
@@ -53,15 +44,11 @@ scripts/agent/jet-env jet run examples/features/basics/hello.jet
 scripts/agent/jet-env rg "pattern" docs Source crates tests
 ```
 
-Use `scripts/agent/jet-env full <command>` only for FFI, Canvas/browser,
-graphics, VM/image, or full verification. Do not rely on host tools unless
-testing host-shell independence. Group dependent checks in one shell launch
-when practical.
+Use `scripts/agent/jet-env full <command>` only for FFI, browser/graphics, VM/image, or full verification. Do not rely
+on host tools unless testing host-shell independence. Group dependent checks when practical.
 
-Rebuild before smoke-testing compiler changes: the dev-shell `jet` wrapper runs
-`target/debug/jet`. A full `/tmp` can produce false ENOSPC failures; check it
-before trusting one. The verification skill owns deeper snapshot, golden,
-formatter, grammar, and full-suite traps.
+Rebuild before compiler smoke tests: the `jet` wrapper runs `target/debug/jet`. Check `/tmp` before trusting ENOSPC.
+The verification skill owns snapshot, golden, formatter, grammar, and full-suite traps.
 
 ## Invariants
 
@@ -92,19 +79,15 @@ Violating an invariant means stop and fix it.
 
 ## GPT-5.6 model policy
 
-Use GPT-5.6 Sol by default. Adjust Sol reasoning effort to task uncertainty and
-risk: low for bounded mechanical work, medium for normal implementation, high
-or xhigh for architecture, compiler semantics, hard debugging, and first-pass
-review. Prefer raising or lowering Sol effort over switching model families.
+Use GPT-5.6 Sol by default; the `gpt-5.6` alias is Sol. Tune effort to risk: low for bounded mechanics, medium for
+normal implementation, high/xhigh for semantics and hard debugging, and max for the hardest architecture or review.
+Prefer changing Sol effort over changing model families.
 
-Use Terra for the mandatory second review and only otherwise when a concrete,
-task-specific reason makes it better than Sol. Record that reason. Do not route
-work to Terra from habit. Use Luna only when the owner asks or measurements show
-a stable advantage on high-volume, fully mechanical work.
+Use Terra for the mandatory second review and otherwise only for a recorded task-specific advantage. Do not route
+to Terra from habit. Use Luna only when the owner asks or measurements show a stable high-volume mechanical advantage.
 
-Give agents a clear goal, relevant context, hard constraints, owned paths, and
-observable done conditions. Avoid step-by-step micromanagement when tests and
-acceptance criteria can express the result.
+Give agents a clear goal, relevant context, hard constraints, owned paths, and observable done conditions. Prefer
+tests and acceptance criteria over step-by-step micromanagement.
 
 ## Working method
 
@@ -117,17 +100,13 @@ Before editing:
 4. claim one coherent work package and name owned paths;
 5. choose targeted proof before implementation.
 
-Use the `ponytail:ponytail` skill for coding, refactoring, fixes, review, and
-technical design. Choose the smallest complete solution: standard library and
-existing project mechanisms before new dependencies or abstractions. Ponytail
-never permits cutting ratified scope, safety, necessary tests, or end-to-end
-behavior. No stubs, facades, speculative extension points, or parallel
-mechanisms.
+Use `ponytail:ponytail` for coding, refactoring, fixes, review, and technical design. Choose the smallest complete
+solution: standard library and existing mechanisms before dependencies or abstractions. Never cut ratified scope,
+safety, necessary tests, or end-to-end behavior. No stubs, facades, speculative extension points, or parallel mechanisms.
 
-Write a failing behavioral test or executable example first when feasible, then
-implement the smallest complete vertical slice. For language features, preserve
-parser → sema → TIR/codegen → JIT/dev parity and update touched docs. Difficulty
-and duration do not lower the required outcome.
+Write a failing behavioral test or executable example first when feasible, then the smallest complete vertical slice.
+Language features preserve parser → sema → TIR/codegen → JIT/dev parity and update touched docs. Difficulty and
+duration do not lower the outcome.
 
 Before plans, ballots, or public frontend acceptance, run both passes:
 
@@ -135,9 +114,8 @@ Before plans, ballots, or public frontend acceptance, run both passes:
 - **Expert:** explicit control over targets, effects, generated code, toolchains,
   scheduling, caching, and audit output.
 
-A frontend is accepted only from the real terminal/browser state matrix:
-archetypes, viewports, states, keyboard/focus paths, and ANSI/`NO_COLOR` where
-relevant—not prose or a selected screenshot.
+A frontend requires the real terminal/browser state matrix: archetypes, viewports, states, keyboard/focus paths, and
+ANSI/`NO_COLOR` where relevant—not prose or a selected screenshot.
 
 ## Owner gates
 
@@ -146,10 +124,7 @@ invariant carve-out, and any other owner-only call. For Jet project work, make
 each choice ballot-ready in Tower, then pause only the gated slice. Work on
 independent ungated slices meanwhile. Never hand-edit `.tower/` data.
 
-After ratification, implement the complete ruling and acceptance terms. Syntax
-changes update `Syntax.rs`, parser behavior, snapshots, and
-`docs/spec/syntax-decisions.md`; additions or removals also run
-`scripts/agent/jet-env jet self devtools grammars`.
+After ratification, implement the complete ruling and acceptance terms; the verification skill owns syntax chores.
 
 When the owner explicitly says a task is outside the Jet decision system, raise
 choices directly in chat rather than creating Tower ballots.
@@ -160,10 +135,8 @@ One implementer owns each coherent change. Never have multiple agents edit the
 same patch. Delegate only bounded, independently useful work; one layer deep;
 never delegate a single shell command.
 
-Before delegation, give the agent: goal, owned paths, relevant authority,
-invariants, done conditions, and targeted tests. Start sub-agent chatter with
-the `caveman:caveman` skill where available. Product copy, specs, diagnostics,
-ballots, and commit messages remain normal prose.
+Before delegation give goal, owned paths, authority, invariants, done conditions, and targeted tests. Start chatter
+with `caveman:caveman` where available. Product copy, specs, diagnostics, ballots, and commits use normal prose.
 
 Shared-tree safety is absolute:
 
@@ -182,10 +155,8 @@ lifecycle is part of done:
 5. remove the worktree and its temporary branch immediately;
 6. confirm `git worktree list` contains no orphan from the task.
 
-Do not leave “finished” work parked on an unmerged branch or worktree. If work
-must stop, make a coherent checkpoint, record exact resume state and owner in
-Tower/task handoff, remove the worktree, and retain only the named branch until
-resumed or explicitly abandoned.
+Never park “finished” work unmerged. If work stops, checkpoint owned coherent work, record resume state and owner,
+remove the worktree, and retain only the named handoff branch until resumed or abandoned.
 
 ## Review and verification
 
@@ -203,10 +174,9 @@ Reviewers do not implement. They check missing paths, semantic and safety bugs,
 false-green tests, stale decisions, accidental scope, duplicate mechanisms, and
 orphaned work. A green build never waives review.
 
-Use targeted tests during implementation and both reviews. Only the orchestrator
-runs `scripts/agent/jet-env full scripts/agent/verify-full.sh`, once after a
-major integrated push or on a blocking closeout card; CI also runs the full
-suite. Keep normal test parallelism unless reproducing a specific race.
+Use targeted tests during implementation and review. Only the orchestrator runs
+`scripts/agent/jet-env full scripts/agent/verify-full.sh`, once per major integrated push or blocking closeout; CI
+runs it again. Keep normal parallelism unless reproducing a race.
 
 Done means: integrated code matches current authority; targeted tests pass;
 docs/examples/snapshots match behavior; both reviews close; Tower/task state is
