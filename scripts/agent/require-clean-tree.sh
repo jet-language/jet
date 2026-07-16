@@ -3,8 +3,19 @@
 # dirty. Read-only agents pass. Write agents use a clean recorded worktree or
 # wait until owned paths are committed; never sweep unrelated paths into one.
 input=$(cat)
-case "$input" in
-  *cavecrew-investigator*|*cavecrew-reviewer*|*jet-verify*|*jet-ballot*|*read-only*|*claude-code-guide*|*'"Explore"'*|*'"Plan"'*|*statusline-setup*)
+subagent_type=$(printf '%s' "$input" | node -e '
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const value = JSON.parse(input)?.tool_input?.subagent_type;
+    if (typeof value === "string") process.stdout.write(value);
+  } catch {}
+});
+' 2>/dev/null)
+case "$subagent_type" in
+  cavecrew-investigator|cavecrew-reviewer|jet-verify|jet-ballot|read-only|claude-code-guide|Explore|Plan|statusline-setup)
     exit 0 ;;
 esac
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0

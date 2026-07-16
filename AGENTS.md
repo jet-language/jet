@@ -2,6 +2,7 @@
 
 Canonical policy for every coding agent. `CLAUDE.md` is a symlink here; do not fork per-tool copies.
 Put procedures in skills, design in specs, work state in Tower, and deterministic enforcement in tests or hooks.
+Codeflow owns systematic and larger-scope orchestration; this file does not duplicate its workflow.
 
 ## Mission and authority
 
@@ -29,6 +30,7 @@ Read this file, then relevant code, tests, and the current diff. Load only task-
 - Tower work or owner decisions: `.agents/skills/tower/SKILL.md`, plus
   `.agents/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
 - completion claims: `.claude/skills/verify/SKILL.md`;
+- systematic, multi-part, ambiguous, or larger-scope work: `codeflow`;
 - a specialized task: the matching skill named in the request or skill catalog.
 
 Do not front-load every spec, plan, prompt, or board record. Search first; read the smallest authoritative slice.
@@ -88,16 +90,16 @@ of the standard review path. Use Luna only when the owner asks or measurements s
 Give agents a clear goal, relevant context, hard constraints, owned paths, and observable done conditions. Prefer
 tests and acceptance criteria over step-by-step micromanagement.
 
-## Working method
+## Workflow ownership
 
-Before editing:
+Use Codeflow for systematic, multi-part, ambiguous, long-running, or larger-scope work. Codeflow owns planning,
+delegation, checkpoints, resumability, and phase mechanics. This manual supplies Jet's authority, invariants,
+environment, ownership guards, review requirement, and done conditions. Do not restate or extend Codeflow's
+orchestration algorithm in this file or repo prompts. Domain skills still own their mechanics; Codeflow coordinates
+them rather than replacing them.
 
-1. state the goal and done condition;
-2. inspect `git status`, relevant diffs, active Tower claims/tasks, and
-   worktrees;
-3. identify authoritative decisions and owner gates;
-4. claim one coherent work package and name owned paths;
-5. choose targeted proof before implementation.
+Keep bounded work inline. Before writing, inspect relevant Git/Tower ownership and the authoritative decision. Search
+before broad reading; choose targeted proof before implementation.
 
 Use `ponytail:ponytail` for coding, refactoring, fixes, review, and technical design. Choose the smallest complete
 solution: standard library and existing mechanisms before dependencies or abstractions. Never cut ratified scope,
@@ -128,14 +130,11 @@ After ratification, implement the complete ruling and acceptance terms; the veri
 When the owner explicitly says a task is outside the Jet decision system, raise
 choices directly in chat rather than creating Tower ballots.
 
-## Concurrency, delegation, and worktrees
+## Ownership and worktrees
 
-One implementer owns each coherent change. Never have multiple agents edit the
-same patch. Delegate only bounded, independently useful work; one layer deep;
-never delegate a single shell command.
-
-Before delegation give goal, owned paths, authority, invariants, done conditions, and targeted tests. Start chatter
-with `caveman:caveman` where available. Product copy, specs, diagnostics, ballots, and commits use normal prose.
+One implementer owns each coherent patch. Concurrent writers need disjoint paths. Codeflow or the active specialized
+skill decides delegation mechanics. Start agent chatter with `caveman:caveman` where available; product copy, specs,
+diagnostics, ballots, and commits use normal prose.
 
 Shared-tree safety is absolute:
 
@@ -144,20 +143,11 @@ Shared-tree safety is absolute:
 - stage and commit only explicitly owned paths after inspecting the diff;
 - if ownership or collision is unclear, stop and resolve it before writing.
 
-Worktrees are allowed and preferred for concurrent write-capable work. Their
-lifecycle is part of done:
+Worktrees are allowed for isolated or concurrent writes. Record ownership before use. Integrate successful work into
+the intended branch promptly, verify it there, then remove the worktree and temporary branch immediately. Never park
+finished work unmerged. Paused work keeps a named coherent handoff branch and resume note, not an orphaned worktree.
 
-1. record task/card, owner, branch, and path before work starts;
-2. keep one coherent change per worktree and commit only owned paths;
-3. test there, then integrate successful work into the intended branch promptly;
-4. verify the integrated diff and tests;
-5. remove the worktree and its temporary branch immediately;
-6. confirm `git worktree list` contains no orphan from the task.
-
-Never park “finished” work unmerged. If work stops, checkpoint owned coherent work, record resume state and owner,
-remove the worktree, and retain only the named handoff branch until resumed or abandoned.
-
-## Review and verification
+## Review and verification constraints
 
 Every completed change has one implementer and one fresh-context Sol reviewer:
 
@@ -169,9 +159,9 @@ The reviewer does not implement. They check missing paths, semantic and safety b
 false-green tests, stale decisions, accidental scope, duplicate mechanisms, and
 orphaned work. A green build never waives review.
 
-Use targeted tests during implementation and review. Only the orchestrator runs
-`scripts/agent/jet-env full scripts/agent/verify-full.sh`, once per major integrated push or blocking closeout; CI
-runs it again. Keep normal parallelism unless reproducing a race.
+Use targeted tests during implementation and review. The verification skill owns when to run
+`scripts/agent/jet-env full scripts/agent/verify-full.sh`; CI runs it again. Keep normal parallelism unless reproducing
+a race.
 
 Done means: integrated code matches current authority; targeted tests pass;
 docs/examples/snapshots match behavior; the Sol review closes; Tower/task state is
