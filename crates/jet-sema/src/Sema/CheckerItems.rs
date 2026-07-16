@@ -371,6 +371,7 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+                self.check_write_arg_change(arg);
                 arg_idx += 1;
             }
         }

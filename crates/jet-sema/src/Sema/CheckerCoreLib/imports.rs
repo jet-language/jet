@@ -89,6 +89,7 @@ impl<'a> Checker<'a> {
                     let arg_span = arg.expr.span();
                     self.check_type_assignable(pty, &aty, arg_span);
                 }
+                self.check_write_arg_change(arg);
             }
             sig.return_type
         }
@@ -256,6 +257,7 @@ impl<'a> Checker<'a> {
                             _ => {}
                         }
                     }
+                    self.check_write_arg_change(arg);
                 }
                 return sig.return_type.as_ref().map(|ty| self.resolve_type(
                     self.trait_reg.instantiate_type(ty, &subst)

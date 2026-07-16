@@ -1307,8 +1307,8 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
     
+                self.check_write_arg_change(arg);
                 if arg.convention == AccessConvention::Write {
-                    self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
                     if let Expr::Ident(name, _) = &arg.expr {
                         mut_borrowed.insert(name.clone());
                     }

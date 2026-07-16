@@ -406,6 +406,80 @@ fn run() {
 }
 
 #[test]
+fn method_write_argument_conflicts_with_live_view_once() {
+    let src = r#"
+struct Editor { id: Int }
+
+impl Editor {
+    fn touch(self, values: &[Int]) {
+        values.push(9)
+    }
+}
+
+fn run() {
+    editor :: Editor.{ id: 0 }
+    values := [1, 2, 3]
+    window :: values.view(0..2)
+    editor.touch(&values)
+    print(window[0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("live view must block method write argument");
+    assert_eq!(
+        diags.iter().filter(|diag| diag.code == "E0212").count(),
+        1,
+        "method write argument must report E0212 once: {diags:?}"
+    );
+}
+
+#[test]
+fn inline_module_write_argument_conflicts_with_live_view_once() {
+    let src = r#"
+module edit {
+    pub fn touch(values: &[Int]) {
+        values.push(9)
+    }
+}
+
+fn run() {
+    values := [1, 2, 3]
+    window :: values.view(0..2)
+    edit.touch(&values)
+    print(window[0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("live view must block inline-module write argument");
+    assert_eq!(
+        diags.iter().filter(|diag| diag.code == "E0212").count(),
+        1,
+        "inline-module write argument must report E0212 once: {diags:?}"
+    );
+}
+
+#[test]
+fn method_write_argument_allows_nonoverlapping_owner() {
+    let src = r#"
+struct Editor { id: Int }
+
+impl Editor {
+    fn touch(self, values: &[Int]) {
+        values.push(9)
+    }
+}
+
+fn run() {
+    editor :: Editor.{ id: 0 }
+    viewed := [1, 2, 3]
+    changed := [4, 5, 6]
+    window :: viewed.view(0..2)
+    editor.touch(&changed)
+    print(window[0])
+}
+"#;
+    jet::compile(src).expect("write to nonoverlapping owner must stay valid");
+}
+
+#[test]
 fn returned_parameter_view_is_rejected_until_public_provenance_lands() {
     let src = r#"
 fn first(xs: [Int]) -> View<Int> {

@@ -289,6 +289,12 @@ impl<'a> Checker<'a> {
         }
     }
 
+    pub(crate) fn check_write_arg_change(&mut self, arg: &crate::AST::CallArg) {
+        if arg.convention == AccessConvention::Write {
+            self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
+        }
+    }
+
     pub(crate) fn check_lvalue_change(&mut self, target: &LValue, action: &str) {
         let place = match target {
             LValue::Local { name, .. } => Some(ViewPlace {
