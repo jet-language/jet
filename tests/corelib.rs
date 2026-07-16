@@ -7934,13 +7934,49 @@ fn core_auth_verify_jwt_bad_signature_is_error() {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let exp = now + 3600;
     let payload = format!(r#"{{"sub":"eve","exp":{}}}"#, exp);
-    let mut token = auth_prelude::make_jwt(&payload, key);
-    let last = token.pop().unwrap();
-    token.push(if last == 'A' { 'B' } else { 'A' });
-    let result = auth_prelude::verify(&token, key);
+    let token = auth_prelude::make_jwt(&payload, key);
+    let sig_start = token.rfind('.').unwrap() + 1;
+
+    let mut material_tamper = token.clone();
+    let middle = sig_start + (token.len() - sig_start) / 2;
+    let middle_char = material_tamper.as_bytes()[middle] as char;
+    material_tamper.replace_range(
+        middle..middle + 1,
+        if middle_char == 'A' { "B" } else { "A" },
+    );
+    let result = auth_prelude::verify(&material_tamper, key);
     assert!(
         matches!(result, Err(auth_prelude::JetAuthError::InvalidSignature)),
         "expected InvalidSignature, got {:?}",
+        result
+    );
+
+    let invalid_length = format!("{}A", &token[..sig_start]);
+    let result = auth_prelude::verify(&invalid_length, key);
+    assert!(
+        matches!(result, Err(auth_prelude::JetAuthError::InvalidSignature)),
+        "expected InvalidSignature for invalid signature length, got {:?}",
+        result
+    );
+
+    let mut padding_tamper = token.clone();
+    let last = padding_tamper.pop().unwrap();
+    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let last_value = alphabet.iter().position(|&c| c == last as u8).unwrap();
+    assert_eq!(last_value % 4, 0, "final signature character must be canonical");
+    padding_tamper.push(alphabet[last_value + 1] as char);
+    let result = auth_prelude::verify(&padding_tamper, key);
+    assert!(
+        matches!(result, Err(auth_prelude::JetAuthError::InvalidSignature)),
+        "expected InvalidSignature for non-canonical signature, got {:?}",
+        result
+    );
+
+    let padded_tamper = format!("{token}=");
+    let result = auth_prelude::verify(&padded_tamper, key);
+    assert!(
+        matches!(result, Err(auth_prelude::JetAuthError::InvalidSignature)),
+        "expected InvalidSignature for padded signature, got {:?}",
         result
     );
 }

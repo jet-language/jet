@@ -285,9 +285,11 @@ print("padded still readable: {padded}")   // reading the owner still works
 (examples/features/memory/string_view.jet) A local view may chain another
 `.trim()/.after()/.before()`, be interpolated (`"{domain}"`), or be copied into
 an owned `String` with `~`. It may also be rebound, passed, stored, or returned
-when the owner-outlives proof succeeds; a public boundary names the view and
-publishes its provenance. **E2307** reports only an escape that would outlive
-the owner or a public boundary missing that provenance. `[T]` slice views
+when the owner-outlives proof succeeds; at a public boundary, the compiler
+infers the owner relationship and exposes it as queryable, semver-pinned
+provenance. **E2307** reports only an escape that would outlive the owner or a
+boundary where the compiler cannot infer, prove, and stabilize that
+provenance. `[T]` slice views
 follow the same rule, reported as **E2305**. Either kind of view crossing a `tasks.spawn`/
 `Sender.send` boundary is reported once, as **E1102** (unsendable value) —
 a task or channel moves owned data between threads, and a view can't cross
@@ -295,9 +297,9 @@ without ownership.
 
 ### Escape hatches — `Shared<T>` and `Pool<T>`/`Id<T>`
 
-Two named mechanisms cover what a first-class borrow used to promise —
-share-across-scopes and many-owners-one-value — without reviving stored
-references.
+`Shared<T>` and `Pool<T>`/`Id<T>` solve cross-scope and many-owner ownership.
+They are distinct from provenance-carrying `View<T>`/`ViewMut<T>`, which model
+owner-tied borrowed access.
 
 **`Shared<T>`** (D-SHARED-API1) is a lock-guarded shared handle — "a
 copyable door":

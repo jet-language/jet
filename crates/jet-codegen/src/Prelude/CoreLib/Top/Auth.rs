@@ -39,7 +39,7 @@ pub enum JetAuthError {
 // Auth.rs is self-contained when tested in isolation.
 
 const JET_AUTH_B64_CHARS: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 fn jet_auth_b64_decode_inner(s: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(s.len() * 3 / 4);
@@ -63,11 +63,25 @@ fn jet_auth_b64_decode_inner(s: &str) -> Result<Vec<u8>, String> {
             out.push((buf >> bits) as u8);
         }
     }
+    if bits != 0 && buf & ((1u32 << bits) - 1) != 0 {
+        return Err("non-canonical base64 trailing bits".to_string());
+    }
     Ok(out)
 }
 
 fn jet_auth_b64url_decode(text: &str) -> Result<Vec<u8>, String> {
-    let mut s = text.trim().replace('-', "+").replace('_', "/");
+    if text.bytes().any(|b| {
+        !matches!(
+            b,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'
+        )
+    }) {
+        return Err("invalid base64url character".to_string());
+    }
+    let mut s = text.replace('-', "+").replace('_', "/");
+    if s.len() % 4 == 1 {
+        return Err("invalid base64url length".to_string());
+    }
     while s.len() % 4 != 0 {
         s.push('=');
     }
@@ -189,7 +203,7 @@ fn jet_auth_verify_jwt_impl(
     let signed_input = format!("{}.{}", header_b64, payload_b64);
     let expected_sig = jet_hmac_sha256(key, signed_input.as_bytes());
     let actual_sig_bytes = jet_auth_b64url_decode(sig_b64)
-        .map_err(|e| JetAuthError::DecodeError(e))?;
+        .map_err(|_| JetAuthError::InvalidSignature)?;
     if actual_sig_bytes.len() != 32 {
         return Err(JetAuthError::InvalidSignature);
     }

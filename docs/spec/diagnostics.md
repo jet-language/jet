@@ -553,10 +553,10 @@ renumbered, and no new `W` code may be allocated.
 | E2302 | sema  | *retired for raw references by D-MEM1/S3* (`&T`/`#Ref` fields remain absent; named view fields follow D-MEM-VIEWRET1) |
 | E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
 | E2304 | sema  | *retired for raw references by D-MEM1/S3* (named slice-view returns follow D-MEM-VIEWRET1 and use E2305 when invalid) |
-| E2305 | sema  | a `View<T>` would outlive its owner, or crosses a public boundary without the required provenance (D-MEM-VIEWRET1) |
+| E2305 | sema  | a `View<T>` would outlive its owner, or the compiler cannot infer, prove, and stabilize its public owner provenance (D-MEM-VIEWRET1) |
 | E2306 | sema  | *retired by D-MEM1/S3* (was: `#Ref(label)` on a `&T` field names no in-scope value of the referent type, D-REF-SHORTHAND2; stored-ref fields no longer exist) |
 | L2301 | sema  | *retired for raw references by D-MEM1/S3* (public named-view provenance is queryable and semver-pinned under D-MEM-VIEWRET1) |
-| E2307 | sema  | a string view would outlive its owning `String`, or crosses a public boundary without the required provenance (D-MEM-VIEWRET1) |
+| E2307 | sema  | a string view would outlive its owning `String`, or the compiler cannot infer, prove, and stabilize its public owner provenance (D-MEM-VIEWRET1) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -836,11 +836,12 @@ CLI.
 D-MEM1/S3 deleted raw `-> &T` borrow returns, stored-reference (`&T`) fields,
 and `#Ref`; those forms remain retired. D-MEM-VIEWRET1 permits named `View<T>`
 and `ViewMut<T>` values in parameters, returns, and fields when sema proves the
-owner outlives the view and mutable access remains unique. Public signatures
-expose queryable, semver-pinned provenance naming that owner relationship.
+owner outlives the view and mutable access remains unique. The compiler infers
+that owner relationship; public signatures expose it as queryable,
+semver-pinned provenance without a user-written annotation.
 Local string slicing (`s.trim()`/`s.after(sep)`/`s.before(sep)`) remains
-type-invisible; when it crosses a public boundary, the signature names the view
-and its provenance. Both forms speak in Jet words — *what owns this* and *how
+type-invisible; when it crosses a public boundary, the compiler exposes the
+inferred provenance. Both forms speak in Jet words — *what owns this* and *how
 long can this view live* — rather than raw-reference syntax. E2303 is the view-specific name for the
 task/channel rule — that situation is **reported once, as E1102** (an
 unsendable value), for both `View<T>` and a captured string view; E2303
@@ -850,8 +851,8 @@ named cell.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`~x`) before crossing. |
-| E2305 | A `View<T>` would outlive its owner, or a public parameter/return/field omits the required owner provenance. | Named views may be rebound, passed, stored, and returned, but sema must prove the owner lives longer; public provenance is part of the API contract. | Keep the owner alive, publish the correct provenance, or cross the boundary with an owned copy (`~view`). |
-| E2307 | A string view would outlive its owning `String`, or a public parameter/return/field omits the required owner provenance. | String views may be rebound, passed, stored, and returned under the same owner-outlives-view proof; public provenance is part of the API contract. | Keep the owner alive, publish the correct provenance, or materialize an owned `String` with `~view`. |
+| E2305 | A `View<T>` would outlive its owner, or the compiler cannot infer, prove, and stabilize its owner provenance at a public parameter/return/field. | Named views may be rebound, passed, stored, and returned, but sema must prove the owner lives longer; compiler-inferred public provenance is part of the API contract. | Tie the view unambiguously to a caller-owned value, or cross the boundary with an owned copy (`~view`). |
+| E2307 | A string view would outlive its owning `String`, or the compiler cannot infer, prove, and stabilize its owner provenance at a public parameter/return/field. | String views may be rebound, passed, stored, and returned under the same owner-outlives-view proof; compiler-inferred public provenance is part of the API contract. | Tie the view unambiguously to a caller-owned `String`, or materialize an owned `String` with `~view`. |
 
 ## Library authoring diagnostics (E2-M6)
 
