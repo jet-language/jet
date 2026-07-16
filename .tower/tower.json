@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 675,
-    "rev": 8975,
+    "rev": 8998,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3190,19 +3190,24 @@
       "id": "c0p12web",
       "num": 218,
       "title": "Full port: self-host the Jet compiler in Jet",
-      "body": "Tracks the entire bootstrap arc. Gated by the readiness card (blockedBy) — do not start before it is done and owner-signed.\n\nOwner gates to mint as ballots when e8 opens:\n- **D-SELFHOST1 charter** — port scope: (A) rewrite in Jet, keep emitting Rust + hidden rustc backend; (B) native backend first, rustc leaves the bootstrap chain; (C) piecewise, one crate at a time via C-ABI linking into the Rust driver.\n- **I6 restatement** — zero-external-deps invariant re-expressed for Jet compiler source + what stage0 may be (pinned Rust-built release binary).\n- **I2 fate** — if the Jet compiler still emits Rust, bootstrap forever needs a Rust toolchain; owner accepts or demands the native backend first.\n\nMechanics:\n- Stage discipline: stage0 = pinned Rust-built jet; stage1 = jet compiled by stage0; stage2 = jet compiled by stage1; exit test = stage1 ≡ stage2 byte-identical. Requires deterministic codegen (no hash-order leaks, no timestamps).\n- Feature-freeze line: self-hosted compiler uses only the Jet subset stage0 supports; lint against drift.\n- Test-harness parity: golden tests, tests/ui snapshots, tests/decisions.rs run unchanged against the Jet-built binary.\n- Subsystem inventory to scope per-ballot: lexer, parser, sema (incl. memory model v5 checker), codegen, comptime tier-0 interpreter, JIT tier (see #10/#11 — Cranelift cannot port; own VM/JIT cards own that), jet fmt, LSP, jet debug, jetpack driver. Some may stay Rust indefinitely — charter decides.\n- Cheapest credible first step once unblocked: port the lexer, link into the Rust driver via C ABI, run the full suite — generates the real gap list.",
+      "body": "Tracks the full self-hosting arc. Card #217 is owner-frozen; its log removed D-BOOTSTRAP-GATE1 and D-SELFHOST1 and forbids re-raising or planning bootstrap until the owner explicitly reopens it. Question q0dvdl9a is the live reopen request. This card stays blocked by #217. After a reopen, re-audit current law before raising any distinct owner gate; do not recreate removed ballots from this historical text. The implementation target remains one compiler core, one executable TIR, two parity-locked JIT/AOT lenses, stage0 -> stage1 -> stage2 discipline, and unchanged Jet-owned diagnostics.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
-      "plan": "Charter ballots (D-SELFHOST1 port scope, I6 restatement for Jet compiler source, I2 fate) mint and ratify first — no port code before that. Subsystem inventory and stage discipline as in the card body. Architecture bets from docs/plans/compiler-speed.md's self-hosted-era section are non-negotiable design inputs for every ported subsystem, not retrofits: no redundant verification (sema stays sole gatekeeper, backend just emits), query-based incrementality (function/module-granular memoization) as the spine from day one, parallel-by-construction per-module front end with one serial cross-module resolve point, controlled monomorphization (share/outline/cap), and tiered backends (JIT/AOT) as two consumers of one executable TIR enforced by R12 differential gates. Cheapest credible first step once charter ratifies: port the lexer, link into the Rust driver via C ABI, run the full suite — generates the real gap list feeding the next subsystem card.",
+      "plan": "Blocked planning record only; no bootstrap work or ballot is authorized while #217 is frozen and q0dvdl9a is unanswered. After explicit reopen: (1) inventory the current compiler seams (foundation, lexer, parser, sema, codegen, comptime, driver, CLI/tooling) and map each to its existing Rust source/tests; (2) audit current ratified law and raise only genuinely distinct owner gates, never the removed D-BOOTSTRAP-GATE1/D-SELFHOST1 records; (3) sequence complete vertical ports behind #668-#670, preserving I1-I8, R2/R7/R12, Jet-owned diagnostics, the existing single-file UX, and expert audit output; (4) pin stage0, build stage1 with it, build stage2 with stage1, then compare deterministic compiler outputs byte-for-byte; (5) run the unchanged repository verification suites against the Jet-built compiler. No placeholder compiler, facade, or alternate semantics counts.",
       "blockedBy": [
         "c0949cz5"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: removed stale instructions to recreate deleted bootstrap ballots; recorded #217/q0dvdl9a freeze as the sole current gate and vetted the post-reopen full-port plan against current R12/two-lens law."
+        },
         {
           "at": "2026-07-07",
           "by": "canvas-agent",
@@ -3214,61 +3219,73 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-SELFHOST1 charter, the I6 restatement for Jet compiler source, and the I2-fate decision are ratified before any port code lands.",
+          "text": "Owner explicitly reopens frozen #217 through q0dvdl9a before this card raises a bootstrap ballot or begins implementation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:14.683Z"
+          "at": "2026-07-16T08:34:34.503Z"
         },
         {
           "n": 2,
-          "text": "Stage discipline proven: stage0 (pinned Rust-built jet) compiles stage1 (Jet source); stage1 compiles stage2; stage1 and stage2 outputs are byte-identical (deterministic codegen, no hash-order or timestamp leaks).",
+          "text": "A post-reopen source inventory accounts for every compiler/tooling seam in scope and records any intentionally retained host component without contradicting I1-I8 or R7/R12.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:14.817Z"
+          "at": "2026-07-16T08:34:34.504Z"
         },
         {
           "n": 3,
-          "text": "Each ported subsystem carries query-based incremental memoization (function/module granularity) and a parallel per-module front-end fan-out per docs/plans/compiler-speed.md, not a naive rewrite.",
+          "text": "Every distinct owner gate found after reopen is ballot-ready and ratified before gated code; removed D-BOOTSTRAP-GATE1 and D-SELFHOST1 are not silently recreated.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:14.943Z"
+          "at": "2026-07-16T08:34:34.504Z"
         },
         {
           "n": 4,
-          "text": "Sema remains the sole gatekeeper for the self-hosted backend (no re-verification at emit, I3 preserved); the R12 differential gate shows zero parity diffs between the JIT and AOT lenses on the golden suite for every ported subsystem.",
+          "text": "Pinned stage0 builds stage1, stage1 builds stage2, and deterministic stage1/stage2 compiler outputs are byte-identical with no timestamp or hash-order drift.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:15.069Z"
+          "at": "2026-07-16T08:34:34.504Z"
         },
         {
           "n": 5,
-          "text": "The full existing test harness (golden tests, tests/ui snapshots, tests/decisions.rs) passes unchanged against the stage1-built binary.",
+          "text": "Sema remains the sole semantic gatekeeper and both JIT/AOT lenses consume the same executable TIR with zero R12 parity differences.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:15.193Z"
+          "at": "2026-07-16T08:34:34.504Z"
         },
         {
           "n": 6,
-          "text": "The bootstrap validation harness (#new card below) runs a differential comparison of stage0-built vs stage1-built compiler output over the golden/example corpus on every change to a ported subsystem, wired into CI.",
+          "text": "The Jet-built compiler passes the unchanged golden, UI diagnostic, decisions, architecture, and full verification suites; rustc never speaks to users.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:15.317Z"
+          "at": "2026-07-16T08:34:34.504Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
+      "refs": [
+        "docs/spec/philosophy.md",
+        "docs/spec/architecture.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/plans/compiler-speed.md",
+        "Source/lib.rs",
+        "crates/jet-driver/src/Driver/mod.rs",
+        "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+        "tests/golden.rs",
+        "tests/diagnostic_snapshots.rs",
+        "tests/decisions.rs",
+        "scripts/agent/verify-full.sh"
+      ],
       "workOrder": 601
     },
     {
@@ -10157,14 +10174,18 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp5--native-binary-cache-and-nix-cache-interoperability",
+      "plan": "Execute E4-JP5 in docs/plans/epoch-4/world-class-package-manager.md: native ordered caches, resumable transfer, NAR/narinfo interoperability, verified publication, and deterministic source fallback without an installed Nix binary. E4 tests functional fallback on Linux, macOS, and Windows and reports the actual execution class. Hostile fallback confinement and full sandbox parity are excluded here and owned only by E8 #398 under D-JPK-EPOCHBOUNDARY1=B.",
       "blockedBy": [
-        "c01fj815",
-        "D-JPK-EPOCHBOUNDARY1"
+        "c01fj815"
       ],
       "workOrder": 108,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: E4 keeps functional cache/NAR and fallback work; hostile fallback confinement moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -10200,7 +10221,7 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:27:35.744Z"
+          "at": "2026-07-16T08:28:38.073Z"
         },
         {
           "n": 2,
@@ -10209,16 +10230,16 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:27:35.745Z"
+          "at": "2026-07-16T08:28:38.074Z"
         },
         {
           "n": 3,
-          "text": "Local-execution-disabled substitution, miss fallback, corruption/quarantine, credential secrecy, concurrent transfer, offline, Linux/macOS/Windows, stable JSON, diagnostics, docs, and independent verification pass.",
+          "text": "Local-execution-disabled substitution, cache miss fallback, corruption/quarantine, credential secrecy, concurrent transfer, offline, Linux/macOS/Windows, stable JSON, diagnostics, and docs pass while reporting the actual execution class; hostile fallback isolation remains E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:27:35.745Z"
+          "at": "2026-07-16T08:28:38.074Z"
         }
       ],
       "needsAcceptance": false,
@@ -10494,17 +10515,21 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp11--permanent-no-installed-nix-product-gate",
+      "plan": "Execute E4-JP11 as the permanent functional no-installed-Nix gate: resolve, build or substitute, run, audit, vendor, profile, and explain the pinned acceptance corpus through native Jetpack paths on clean machines. Assert no hidden Nix executable, daemon, store, configuration, or environment dependency and report the actual execution class. This closes the E4 functional package claim; hostile cross-platform isolation and the full Nix-replacement claim remain E8 #398.",
       "blockedBy": [
         "c01fj815",
         "c0w7297z",
         "c0xe5g33",
-        "c0yl347q",
-        "D-JPK-EPOCHBOUNDARY1"
+        "c0yl347q"
       ],
       "workOrder": 117,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: JP11 now closes functional no-installed-Nix behavior only; hostile/full-replacement proof moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -10550,25 +10575,25 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:28:19.480Z"
+          "at": "2026-07-16T08:28:38.318Z"
         },
         {
           "n": 2,
-          "text": "Offline, cache miss, local build, registry, profile rollback, corruption/repair, cross target, and stable JSON paths contain no hidden Nix process, daemon, store, configuration, or environment dependency.",
+          "text": "Offline, cache miss, local build, registry, profile rollback, corruption/repair, cross target, and stable JSON paths contain no hidden Nix process, daemon, store, configuration, or environment dependency and report their actual execution class.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:28:19.480Z"
+          "at": "2026-07-16T08:28:38.319Z"
         },
         {
           "n": 3,
-          "text": "D-JPK-EPOCHBOUNDARY1 is ratified and the chosen E4 claim is enforced exactly: either full hostile sandbox parity passes in E4 or isolation-dependent criteria and claims move to E8.",
+          "text": "Epoch 4 proves the 20 functional package lanes and makes only the functional package-manager claim; hostile Linux/macOS/Windows isolation and full Nix-replacement parity remain E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:28:19.480Z"
+          "at": "2026-07-16T08:28:38.319Z"
         }
       ],
       "needsAcceptance": false,
@@ -12428,16 +12453,20 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P1",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp7--remote-builders-and-execution",
+      "plan": "Execute E4-JP7 remote building: capability-match authorized workers, transfer missing CAS inputs, run the exact action, verify signed result/output/log/provenance facts, and handle cancel, retry, failover, loss, lies, replay, and disagreement. Worker selection, result facts, explain, and audit always record the actual sandbox class. Hostile cross-platform worker confinement is excluded from E4 and owned by E8 #398.",
       "blockedBy": [
         "c01fj815",
         "c0w7297z",
-        "c0v0y46r",
-        "D-JPK-EPOCHBOUNDARY1"
+        "c0v0y46r"
       ],
       "workOrder": 120,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: remote execution stays E4 with truthful worker-class facts; hostile cross-platform confinement moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e4-planner",
@@ -12478,12 +12507,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Capability matching selects only authorized workers by build/host/target platform, resources, trust domain, cache grants, sandbox class, and concurrency policy.",
+          "text": "Capability matching selects only authorized workers by build/host/target platform, resources, trust domain, cache grants, actual sandbox class, and concurrency policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:28:56.208Z"
+          "at": "2026-07-16T08:28:38.561Z"
         },
         {
           "n": 2,
@@ -12492,16 +12521,16 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:28:56.208Z"
+          "at": "2026-07-16T08:28:38.561Z"
         },
         {
           "n": 3,
-          "text": "Local fallback, duplicate execution, offline control, heterogeneous live workers, stable JSON/metrics/docs, and the sandbox obligation selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "text": "Local fallback, duplicate execution, offline control, heterogeneous live workers, stable JSON/metrics/docs, and truthful actual-sandbox reporting pass independently; hostile cross-platform worker confinement remains E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:28:56.208Z"
+          "at": "2026-07-16T08:28:38.561Z"
         }
       ],
       "needsAcceptance": false,
@@ -12836,13 +12865,16 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp16--installbuild-authority-and-upstream-hooks",
-      "blockedBy": [
-        "D-JPK-EPOCHBOUNDARY1"
-      ],
+      "plan": "Execute E4-JP16 at the authority and action-graph layer: every install/build hook declares inputs, outputs, environment, authority, platform, toolchain, cache identity, and actual sandbox class before execution; ambient or unsupported behavior is rejected with a source-backed adapter path. Prove approval invalidation, lifecycle ordering, cancellation, crash cleanup, offline behavior, stable JSON, and docs. OS-boundary confinement of a hostile hook remains E8 #398.",
+      "blockedBy": [],
       "workOrder": 101,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: hook authority stays E4; hostile OS-boundary hook confinement moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -12918,25 +12950,25 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:29:36.613Z"
+          "at": "2026-07-16T08:28:38.816Z"
         },
         {
           "n": 2,
-          "text": "Upstream adapters cannot read host state, mutate source truth, smuggle credentials, weaken identity, or bypass policy; unsupported hooks produce actionable Jet diagnostics and a source-backed adapter path.",
+          "text": "Upstream adapters declare all requested host, network, credential, and executable authority; policy rejects undeclared or unsupported requests, identity weakening, source-truth mutation, and credential grants without exact approval.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:29:36.613Z"
+          "at": "2026-07-16T08:28:38.816Z"
         },
         {
           "n": 3,
-          "text": "Hostile hooks, lifecycle ordering, cancellation, crash cleanup, offline, stable JSON/docs, and the sandbox obligation selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "text": "Approval invalidation, lifecycle ordering, cancellation, crash cleanup, offline behavior, stable JSON, diagnostics, and docs pass independently; hostile hook confinement at the OS boundary remains E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:29:36.613Z"
+          "at": "2026-07-16T08:28:38.816Z"
         }
       ],
       "needsAcceptance": false,
@@ -13086,14 +13118,18 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp18--reproducibility-certification",
+      "plan": "Execute E4-JP18 by reproducing the same locked action on independent builders and binding action, inputs, outputs, closure, platform, toolchain, worker, actual sandbox class, logs, provenance, and disagreement evidence into the certificate. Reject manufactured cache certification and prove nondeterminism/malicious-worker handling. The certificate is truthful for its recorded execution class; cross-platform hostile-confinement certification waits for E8 #398.",
       "blockedBy": [
-        "c06re5ow",
-        "D-JPK-EPOCHBOUNDARY1"
+        "c06re5ow"
       ],
       "workOrder": 122,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: E4 certification binds the actual sandbox class; hostile cross-platform confinement proof moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -13174,25 +13210,25 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:30:17.305Z"
+          "at": "2026-07-16T08:28:39.066Z"
         },
         {
           "n": 2,
-          "text": "A signed certificate binds action, inputs, outputs, closure, platform, toolchain, worker, sandbox class, logs, provenance, and disagreement evidence; cache reuse cannot manufacture certification.",
+          "text": "A signed certificate binds action, inputs, outputs, closure, platform, toolchain, worker, actual sandbox class, logs, provenance, and disagreement evidence; cache reuse cannot manufacture certification.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:30:17.305Z"
+          "at": "2026-07-16T08:28:39.066Z"
         },
         {
           "n": 3,
-          "text": "Deliberate nondeterminism, malicious worker, clock/path/locale variation, cross-platform matrix, stable JSON/docs, and the boundary selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "text": "Deliberate nondeterminism, malicious worker, clock/path/locale variation, the functional cross-platform matrix, stable JSON, and docs pass independently; hostile cross-platform confinement certification remains E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:30:17.305Z"
+          "at": "2026-07-16T08:28:39.066Z"
         }
       ],
       "needsAcceptance": false,
@@ -13482,15 +13518,19 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P1",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp21--explicit-finite-staged-planning",
+      "plan": "Execute E4-JP21 as finite typed staged planning: each dynamic request produces a bounded action graph with explicit digests, authority, dependencies, platform roles, cache identity, and actual sandbox class before execution. Reject hidden network/host reads, generated dependencies, mutable plan state, and evaluator/build cycles; generated source re-enters the normal R11 pipeline. Hostile stage confinement is E8 #398.",
       "blockedBy": [
         "c0v0y46r",
-        "c0kalcyg",
-        "D-JPK-EPOCHBOUNDARY1"
+        "c0kalcyg"
       ],
       "workOrder": 119,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: finite staging stays E4 with actual-class reporting; hostile stage confinement moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -13586,12 +13626,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every dynamic request expands into a finite typed staged action graph with explicit input/output digests, authority, dependency edges, platform roles, cache identity, and bounded stage count before execution.",
+          "text": "Every dynamic request expands into a finite typed staged action graph with explicit input/output digests, authority, dependency edges, platform roles, cache identity, actual sandbox class, and bounded stage count before execution.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:31:36.700Z"
+          "at": "2026-07-16T08:28:39.319Z"
         },
         {
           "n": 2,
@@ -13600,16 +13640,16 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:31:36.700Z"
+          "at": "2026-07-16T08:28:39.319Z"
         },
         {
           "n": 3,
-          "text": "Cache/replay, cancel/crash, malicious stage, stable explain/JSON/docs, and the sandbox obligation selected by D-JPK-EPOCHBOUNDARY1 pass independently.",
+          "text": "Cache/replay, cancel/crash, undeclared stage requests, stable explain/JSON/docs, and truthful actual-sandbox reporting pass independently; hostile stage confinement remains E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:31:36.700Z"
+          "at": "2026-07-16T08:28:39.319Z"
         }
       ],
       "needsAcceptance": false,
@@ -13624,7 +13664,7 @@
     {
       "id": "c00lqj9d",
       "num": 433,
-      "title": "E4-JP22 World-class live, hostile, scale, and dogfood gate",
+      "title": "E4-JP22 World-class live, scale, and dogfood gate",
       "body": "Run every binding acceptance lane across tier-1 platforms; attach live protocol/remote/adversarial/power-loss evidence; enforce million-object and 100k-action budgets; dogfood representative real projects. Closes milestone only after independent verification.",
       "kind": "task",
       "track": "epoch",
@@ -13632,7 +13672,7 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
-      "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp22--world-class-acceptance-and-scale-gate",
+      "plan": "Execute the E4-JP22 final gate against all 20 functional acceptance lanes in docs/plans/epoch-4/world-class-package-manager.md using live stores, registries, caches, builders, packages, and independent machines. Attach native cross-platform, scale, dogfood, recovery, stable CLI/JSON/docs, truth-matrix, and independent-review evidence. Exit Epoch 4 with only the functional package-manager claim and truthful actual-sandbox reporting; full hostile isolation and Nix-replacement parity remain E8 #398.",
       "blockedBy": [
         "c00wjjmo",
         "c0sa3d63",
@@ -13642,6 +13682,11 @@
       "workOrder": 125,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: JP22 binds 20 functional E4 lanes and the functional package claim; hostile/full-parity exit moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e4-planner",
@@ -13688,12 +13733,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "All 21 binding Epoch 4 capability lanes named by the master plan are independently verified against their live, hostile, cross-platform acceptance and no card is closed by schema, fixture, or compatibility-only evidence.",
+          "text": "All 20 binding Epoch 4 functional capability lanes named by the master plan are independently verified against live cross-platform acceptance, and no card is closed by schema, fixture, or compatibility-only evidence.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:32:15.290Z"
+          "at": "2026-07-16T08:28:39.565Z"
         },
         {
           "n": 2,
@@ -13702,16 +13747,16 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:32:15.290Z"
+          "at": "2026-07-16T08:28:39.565Z"
         },
         {
           "n": 3,
-          "text": "Performance/resource budgets, clean-machine replay, stable CLI/JSON/docs, truth matrix, independent review, and the product claim selected by D-JPK-EPOCHBOUNDARY1 pass before Epoch 4 exit.",
+          "text": "Performance/resource budgets, clean-machine replay, stable CLI/JSON/docs, truth matrix, actual-sandbox reporting, and independent review pass before Epoch 4 exits with the functional package-manager claim; full hostile parity remains E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T03:32:15.290Z"
+          "at": "2026-07-16T08:28:39.565Z"
         }
       ],
       "needsAcceptance": false,
@@ -26226,13 +26271,17 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "Implement D-ECO-HANGARPATH1=A and D-ECO-BROKERBOUNDARY1=A over #420's store lifecycle. One pure path resolver chooses Linux `$XDG_DATA_HOME/jet/hangar` with `~/.local/share` fallback, macOS Application Support, or Windows LOCALAPPDATA; `jet hangar path`, Jetpack, JetOS, cleanup, locks, and tests consume that same result. First use is rootless. Detect supported legacy stores, preview and perform a locked crash-safe copy/verify/switch migration, and never silently adopt `/etc/jet/hangar`. Shared storage is explicit administrator installation of a socket-activated, request-bounded verifier. It never parses/evaluates Package source, never accepts arbitrary paths or commands, rebuilds only under ephemeral sandbox identities, exits idle, and promotes only after independently verifying canonical bytes, closure, signatures, provenance, writer role, platform, and policy. Promotion is atomic across user/shared stores; hostile or unavailable brokers leave both unchanged and honestly fall back to the user Hangar. Prove Linux/macOS/Windows paths, missing environment/home diagnostics, upgrades, hostile sockets/peers, multi-user isolation, concurrent promotion, crash recovery, idle exit, and fallback.",
+      "plan": "Implement D-ECO-HANGARPATH1=A and D-ECO-BROKERBOUNDARY1=A over #420's store lifecycle. One pure resolver owns XDG, macOS Application Support, and LOCALAPPDATA paths; first use is rootless; legacy migration is locked, crash-safe, verified, and never silently adopts `/etc/jet/hangar`. Shared storage is an explicit administrator-installed, socket-activated, request-bounded verifier that never evaluates Package source or accepts arbitrary paths/commands, exits idle, and promotes only verified canonical objects atomically. E4 proves functional paths, broker protocol, identity requests, actual sandbox-class reporting, hostile peers, concurrency, crash recovery, and fallback. Hostile cross-platform confinement of ephemeral builder identities remains E8 #398.",
       "blockedBy": [
-        "c01fj815",
-        "D-JPK-EPOCHBOUNDARY1"
+        "c01fj815"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[ratified-boundary] D-JPK-EPOCHBOUNDARY1=B: per-user paths and broker protocol stay E4; hostile ephemeral-builder confinement moved to E8 #398."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -26307,7 +26356,7 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T21:07:03.197Z"
+          "at": "2026-07-16T08:28:39.813Z"
         },
         {
           "n": 2,
@@ -26316,16 +26365,16 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T21:07:03.197Z"
+          "at": "2026-07-16T08:28:39.814Z"
         },
         {
           "n": 3,
-          "text": "Shared-store install is administrator-only and creates a socket-activated process that exits idle, never evaluates source, and rebuilds only under ephemeral sandbox identities.",
+          "text": "Shared-store install is administrator-only and creates a socket-activated process that exits idle, never evaluates source, requests an ephemeral build identity, and records the actual sandbox class; hostile identity confinement remains E8 #398.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T21:07:03.197Z"
+          "at": "2026-07-16T08:28:39.814Z"
         },
         {
           "n": 4,
@@ -26334,16 +26383,16 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T21:07:03.197Z"
+          "at": "2026-07-16T08:28:39.814Z"
         },
         {
           "n": 5,
-          "text": "Missing or failed broker falls back honestly to the user Hangar; cross-platform, multi-user, hostile-socket, concurrent-promotion, and upgrade tests pass.",
+          "text": "Missing or failed broker falls back honestly to the user Hangar; cross-platform, multi-user, hostile-socket, concurrent-promotion, crash-recovery, and upgrade tests pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-15T21:07:03.197Z"
+          "at": "2026-07-16T08:28:39.814Z"
         }
       ],
       "refs": [
@@ -27230,13 +27279,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P0",
-      "plan": null,
+      "plan": "Maintain a live all-epoch inventory until this campaign closes. For every open non-frozen card, require a current implementation plan grounded in ratified-but-not-yet-implemented law, measurable criteria, exact source/spec/test refs, stable-ID blockers, and a work-order slot. Re-audit newly created cards and newly answered ballots before final readback. Raise only genuine owner gates after the two-facet pass; never resurrect deferred decisions. Run independent per-wave and final adversarial reviews, repair every concrete finding, then close only after Tower lint, decisions tests, diff check, and a machine audit show zero plan/criteria/ref gaps except owner-frozen cards or explicit blockers.",
       "blockedBy": [],
       "workOrder": 2.5,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[campaign-plan] Converted the readiness tracker itself into an evidence-gated plan; final closure waits on live global inventory, fresh review, and verification."
+        },
         {
           "at": "2026-07-16",
           "by": "fable-clerk",
@@ -27263,8 +27317,54 @@
           "text": "e5 wave applied as AUDIT-FIRST: drafted 15-card set found to duplicate shipped work (verified in code: Comptime/Build/context.rs, runtime_bridge, fn build entry, generated materialization); minted 2 cards instead — gap audit + gated computed-modules. e8/e9 wave applied (e8 wo 500-509 + criteria; e9 #218 fleshed + 4 staging cards; #217 left FROZEN per 2026-07-07 owner order, refreshed plan staged, owner question pending)."
         }
       ],
-      "criteria": [],
-      "refs": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every open non-frozen card across sidequests and Epochs 3-9 has a current implementation plan, measurable criteria, exact refs, stable blockers, and work order; a final machine inventory reports zero gaps.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.360Z"
+        },
+        {
+          "n": 2,
+          "text": "Every newly answered ballot is canonicalized and propagated to affected plans without marking unimplemented behavior shipped; every remaining owner gate is ballot-ready and linked to its cards.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.360Z"
+        },
+        {
+          "n": 3,
+          "text": "Independent fresh-context reviews cover each epoch wave and the final global board; every concrete stale claim, dependency error, false-ready phase, or missing gate is repaired and rechecked.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.360Z"
+        },
+        {
+          "n": 4,
+          "text": "Tower lint with docs, decisions tests, and git diff check pass; any excluded frozen card or external blocker is named exactly in the final handoff.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.360Z"
+        }
+      ],
+      "refs": [
+        "AGENTS.md",
+        ".agents/skills/tower/SKILL.md",
+        ".agents/skills/tower-ballot/SKILL.md",
+        ".agents/skills/tower-burndown/SKILL.md",
+        "docs/spec/philosophy.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/architecture.md",
+        "docs/spec/roadmap.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:34:34.504Z",
       "updated": "2026-07-16"
@@ -27273,57 +27373,94 @@
       "id": "c0xty2bs",
       "num": 668,
       "title": "TIR spec freeze — the lens contract for self-hosting",
-      "body": "Both the JIT lens and the AOT lens consume the identical executable TIR today (R12); the self-hosted compiler's backend will be a third consumer. Before any subsystem ports, TIR needs to be a frozen, versioned, documented contract so ported subsystems have a fixed target instead of chasing a moving one.",
+      "body": "R12 and D-VERDICT-666-1 require exactly two feature-identical lenses: JIT and optimized AOT, both consuming one executable TIR. Self-hosting changes the front end that produces TIR; it does not add a third consumer or lens. This card records and machine-enforces that internal contract from canonical source before port work begins, without a serialized schema or speculative version framework.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "planning",
       "priority": "P0",
-      "plan": "(1) Extract the current TIR shape (crates/jet-codegen and friends) into docs/spec/tir.md: every node/instruction shipped today, cross-referenced from architecture.md's R12 section. (2) Write a TIR versioning policy (TIR v1; additive-only changes within a stage; a breaking change bumps the version and ships a migration note) and emit a version tag alongside generated artifacts. (3) Document the R12 differential-gate mechanics (same program, same output, every tier) as the enforcement contract ported subsystems must satisfy. (4) Freeze sign-off ballot.",
-      "blockedBy": [],
+      "plan": "Blocked by frozen #217. After explicit reopen, document the existing executable TIR contract without creating a second source of truth: crates/jet-codegen/src/Codegen/TIR/mod.rs and its exhaustive consumers remain canonical; docs/spec/tir.md explains total typed facts, lowering ownership, two-lens consumer/fallback law, and links exact source/test seams instead of duplicating every variant. Extend R12 only to require the self-hosted front end to produce this same TIR for the existing JIT and AOT lenses. Strengthen compile-time exhaustive-match/parity tests so a new executable node cannot land without both lenses handling it or a named transparent JIT fallback. Do not add serialization, version tags, or migration machinery. No owner ballot is raised while #217 is frozen; this internal tested contract needs no syntax ballot.",
+      "blockedBy": [
+        "c0949cz5"
+      ],
       "workOrder": 602,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: replaced speculative TIR artifact versioning/owner ballot with the minimal source-canonical, machine-enforced R12 contract; added frozen #217 blocker."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: replaced speculative TIR artifact versioning/owner ballot with the minimal source-canonical, machine-enforced R12 contract; added frozen #217 blocker."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: replaced speculative TIR artifact versioning/owner ballot with the minimal source-canonical, machine-enforced R12 contract; added frozen #217 blocker."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "docs/spec/tir.md exists, documents every TIR node/instruction shipped today, and is cross-referenced from architecture.md's R12 section.",
+          "text": "Owner explicitly reopens #217 before TIR freeze work begins; no bootstrap/freeze ballot is raised while frozen.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:15.580Z"
+          "at": "2026-07-16T08:41:54.154Z"
         },
         {
           "n": 2,
-          "text": "A TIR versioning policy is written (TIR v1, additive-only within a stage, breaking change = version bump + migration note) and a version tag is emitted alongside generated artifacts.",
+          "text": "docs/spec/tir.md states totality, sema ownership, lowering, AOT/JIT consumer, and named-fallback laws while linking canonical source instead of copying the variant list.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:15.714Z"
+          "at": "2026-07-16T08:41:54.154Z"
         },
         {
           "n": 3,
-          "text": "The R12 differential-gate test explicitly asserts JIT-lens and AOT-lens output identity against the frozen TIR contract across the full golden suite.",
+          "text": "architecture.md R12 requires the self-hosted front end to produce the same executable TIR for exactly the existing JIT and AOT lenses.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:15.850Z"
+          "at": "2026-07-16T08:41:54.154Z"
         },
         {
           "n": 4,
-          "text": "The freeze is ratified via owner ballot; any future TIR change requires a version bump plus this card's documented process.",
+          "text": "Exhaustive compile-time coverage and differential tests fail when an executable TIR node lacks AOT/JIT handling or a named transparent fallback.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:15.979Z"
+          "at": "2026-07-16T08:41:54.154Z"
+        },
+        {
+          "n": 5,
+          "text": "No serialization, version tag, migration layer, third lens, or duplicate TIR schema is added.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:41:54.154Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/architecture.md",
+        "docs/plans/compiler-speed.md",
+        "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+        "crates/jet-codegen/src/Codegen/TIR/lower.rs",
+        "crates/jet-codegen/src/Codegen/TIR/emit.rs",
+        "crates/jet-codegen/src/Codegen/TIR/subset.rs",
+        "tests/tir_exhaustive_match.rs",
+        "tests/dev.rs",
+        "tests/golden.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:15.449Z",
       "updated": "2026-07-16"
@@ -27332,57 +27469,96 @@
       "id": "c08olnwg",
       "num": 669,
       "title": "Compile-speed architecture bets baked into the self-host design",
-      "body": "docs/plans/compiler-speed.md names 6 architecture bets the self-hosted compiler must bake in from day one (no redundant verification, query-based incrementality, parallel-by-construction, controlled monomorphization, tiered backends off one TIR, optimization budget spent where perf.<role> says). This card turns those into a concrete design doc plus a measurable Stage-0 benchmark corpus BEFORE subsystem ports start, so every port is reviewed against a written target instead of ad hoc choices made mid-port.",
+      "body": "docs/plans/compiler-speed.md is the self-host architecture law. Card #666 owns the checked compiler-speed corpus, phase timing, and final performance evidence. This card extends those existing artifacts with self-host source mappings, stage identity, and representative size tiers; it does not create a second architecture document, benchmark runner, or performance gate.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "planning",
       "priority": "P0",
-      "plan": "(1) Write docs/plans/epoch-9/self-hosted-architecture.md: one section per compiler-speed.md bet, each naming the concrete module/mechanism that implements it for the ported lexer/parser/sema (query cache keys, parallel fan-out points, monomorphization policy hooks). (2) Stand up the Stage-0 corpus (representative Jet programs at varied sizes) plus a benchmark script producing clean-build and incremental-build medians vs equivalent cargo builds. (3) Require every later subsystem-port card's plan to cite the relevant section of this doc.",
-      "blockedBy": [],
+      "plan": "Blocked by frozen #217, #668, and #666's compiler-speed foundation. After reopen, keep docs/plans/compiler-speed.md as the one architecture plan: add a current-source evidence table for its six self-hosting bets (sema-only verification, jet-queries invalidation, per-module fan-out, monomorphization control, one-TIR two-lens parity, perf-role optimization budget). Extend #666's checked self-speed corpus and PhaseTiming harness with self-host-sized cases and stage identity; do not create another corpus, runner, epoch-9 architecture doc, or competing performance gate. The existing harness records warmups, samples, tool/machine/cache identities, clean/incremental JIT and optimized AOT medians, Cargo baselines, variance, and parity.",
+      "blockedBy": [
+        "c0949cz5",
+        "c0xty2bs",
+        "c0zmoznd"
+      ],
       "workOrder": 603,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: collapsed duplicate self-host architecture doc into compiler-speed.md, reused existing corpora/timing seams, and added #217/#668 blockers."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: collapsed duplicate self-host architecture doc into compiler-speed.md, reused existing corpora/timing seams, and added #217/#668 blockers."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: collapsed duplicate self-host architecture doc into compiler-speed.md, reused existing corpora/timing seams, and added #217/#668 blockers."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "docs/plans/epoch-9/self-hosted-architecture.md exists with one section per compiler-speed.md bet, each naming the concrete module/mechanism implementing it.",
+          "text": "Owner explicitly reopens #217 and cards #668/#666 are complete before self-host architecture/benchmark work begins.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:16.235Z"
+          "at": "2026-07-16T08:41:54.338Z"
         },
         {
           "n": 2,
-          "text": "The Stage-0 corpus is checked in (or referenced) with a benchmark script producing clean-build and incremental-build medians vs equivalent cargo builds.",
+          "text": "compiler-speed.md maps all six self-hosting bets to current source mechanisms, owners, enforcement tests, and remaining gaps without a duplicate architecture doc.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:16.366Z"
+          "at": "2026-07-16T08:41:54.338Z"
         },
         {
           "n": 3,
-          "text": "Every subsystem-port card created after this one cites the relevant section of this doc in its plan (reviewer-checked at card review, not automatable).",
+          "text": "#666's checked corpus gains only missing self-host size tiers and pinned stage/tool/cache identities; no second corpus or runner exists.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:16.494Z"
+          "at": "2026-07-16T08:41:54.338Z"
         },
         {
           "n": 4,
-          "text": "compiler-speed.md's exit criteria (clean/incremental medians beat cargo at every corpus size for the dev/JIT path; AOT within a stated factor of cargo release; zero R12 parity diffs) are restated verbatim here as this card's own measurable target.",
+          "text": "The existing #666 timing harness reports clean/incremental JIT and optimized AOT medians, Cargo baselines, variance, and output parity for those cases.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:16.617Z"
+          "at": "2026-07-16T08:41:54.338Z"
+        },
+        {
+          "n": 5,
+          "text": "Evidence feeds compiler-speed.md's existing targets without creating a second final performance gate or fast unoptimized AOT lens.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:41:54.338Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/plans/compiler-speed.md",
+        "docs/spec/architecture.md",
+        "crates/jet-queries/src/lib.rs",
+        "crates/jet-driver/src/PhaseTiming.rs",
+        "crates/jet-driver/src/Driver/mod.rs",
+        "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+        "tests/fuzz/sema/differential",
+        "tests/golden.rs",
+        "tests/dev.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:16.105Z",
       "updated": "2026-07-16"
@@ -27391,57 +27567,95 @@
       "id": "c0j678mt",
       "num": 670,
       "title": "Bootstrap validation harness — differential proof vs the Rust-hosted compiler",
-      "body": "The stage discipline's exit test (stage1 output byte-identical to stage2) needs a reusable harness, and that same harness is the ongoing safety net: for as long as stage0 (Rust-hosted) and a self-hosted stage coexist, every change touching a ported subsystem should be differentially checked against the Rust-hosted ground truth, not just against its own prior output.",
+      "body": "Self-hosting needs one reusable behavioral comparator for any reference and candidate compiler binary. It runs the same public cases through both and reports the first observable semantic divergence. Card #218 separately owns byte-identical stage1/stage2 compiler artifacts; this card does not conflate behavior with binary identity.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "planning",
       "priority": "P0",
-      "plan": "Build a harness that runs the same input corpus (golden + tests/ui + examples) through stage0 (Rust-hosted) and the current self-hosted stage, diffing generated TIR/output/exit-codes/diagnostics byte-for-byte and reporting the first divergence. Wire it into CI as a required gate on any PR touching a ported subsystem. Keep stage0 pinned and buildable indefinitely as ground truth until the D-SELFHOST1 charter says otherwise.",
-      "blockedBy": [],
+      "plan": "Blocked directly by frozen #217 and #669. After reopen, build one generic two-binary behavioral comparator over the existing golden examples, tests/ui snapshots, and sema differential corpus. Given reference and candidate compiler paths, run identical public commands in deterministic roots and compare diagnostics, stdout, stderr, exit codes, panics, and observable side effects appropriate to each case. This proves behavior only; #218 separately owns byte-identical stage1/stage2 compiler artifacts. Add a permanent controlled canary fixture that proves first-divergence reporting, then wire the comparator into the existing full verification entrypoint once a real candidate exists.",
+      "blockedBy": [
+        "c0949cz5",
+        "c08olnwg"
+      ],
       "workOrder": 604,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: added direct frozen #217 blocker, reused existing corpora/full-verify entrypoint, and removed placeholder/manual-canary design."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: added direct frozen #217 blocker, reused existing corpora/full-verify entrypoint, and removed placeholder/manual-canary design."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: added direct frozen #217 blocker, reused existing corpora/full-verify entrypoint, and removed placeholder/manual-canary design."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "The harness runs the full golden + tests/ui + examples corpus through both stage0 and the current self-hosted stage, reporting the first byte-level divergence.",
+          "text": "Owner explicitly reopens #217 before comparator work begins and #669 is complete.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:16.861Z"
+          "at": "2026-07-16T08:41:54.592Z"
         },
         {
           "n": 2,
-          "text": "CI gate wired: any PR touching a ported subsystem must run the harness green before merge.",
+          "text": "One runner accepts pinned stage0 and candidate binaries and exercises existing golden, UI, and differential corpora under deterministic paths and environment.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:16.988Z"
+          "at": "2026-07-16T08:41:54.592Z"
         },
         {
           "n": 3,
-          "text": "The harness catches a deliberately injected divergence in a canary test (prove the tester, then revert) before being trusted in CI.",
+          "text": "The comparator checks diagnostics, status, stdout, stderr, panics, and observable side effects and reports the first exact behavioral divergence.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:17.110Z"
+          "at": "2026-07-16T08:41:54.592Z"
         },
         {
           "n": 4,
-          "text": "Harness output directly feeds #217/#218 exit-criteria evidence (the stage1-equiv-stage2 proof reuses this same harness).",
+          "text": "A checked controlled canary proves mismatch detection and first-divergence output without manual source mutation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:17.242Z"
+          "at": "2026-07-16T08:41:54.592Z"
+        },
+        {
+          "n": 5,
+          "text": "The same comparator proves reference-versus-candidate behavior and is required by full verification once a candidate exists; it does not claim stage artifact identity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:41:54.592Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/architecture.md",
+        "docs/plans/compiler-speed.md",
+        "tests/golden.rs",
+        "tests/diagnostic_snapshots.rs",
+        "tests/fuzz_sema.rs",
+        "tests/fuzz/sema/differential",
+        "tests/dev.rs",
+        "scripts/agent/verify-full.sh",
+        "crates/jet-driver/src/Driver/mod.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:16.739Z",
       "updated": "2026-07-16"
@@ -27450,59 +27664,110 @@
       "id": "c0tpn16q",
       "num": 671,
       "title": "Jet-in-Jet front-end milestone 1: lexer port + C-ABI link-in",
-      "body": "Per #218's mechanics: the cheapest credible first step is porting the lexer to Jet, linking it into the existing Rust driver via C ABI, and running the full suite to generate the real subsystem gap list. This is the first concrete self-hosting milestone and the template every later subsystem-port card follows.",
+      "body": "First concrete port milestone after owner-frozen #217 reopens and the architecture/behavioral prerequisites land. Port the current lexer contract to Jet, connect it through the existing internal C ABI seam, prove exact token/span/diagnostic parity, then replace the Rust path. Driver orchestration owns query caching and module fan-out; the lexer stays one sequential implementation.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
-      "plan": "Port the lexer module to Jet per docs/plans/epoch-9/self-hosted-architecture.md's query/parallel-fan-out design (card #603 above). Expose it via a C-ABI boundary consumed by the existing Rust driver. Prove token-stream equivalence (including error tokens/spans) against the Rust lexer over the full tests/ui + examples corpus, both as a golden diff and as a fuzzed differential test. Feed the resulting gap list (Jet-language/stdlib needs the port surfaced) back into #218 to scope the next subsystem.",
+      "plan": "Blocked directly by frozen #217 plus #669 and #670; #218 remains the umbrella but is not a dependency cycle. After those gates clear: port the current public lexer contract exactly—lex, lex_raw, TokKind/Token/StrTokPart, byte spans, interpolation, nested comments, terminator insertion, recovery, and Jet-owned diagnostics—using existing Syntax constants rather than a second keyword table. Connect the Jet lexer to the Rust driver through the already-ratified internal C ABI boundary; keep one selectable comparison seam until parity is proven, then make the Jet path authoritative with no facade. Driver/module orchestration owns jet-queries and fan-out; do not invent lexer-local parallelism. Run corpus and seeded fuzz differential comparisons against the Rust lexer, then file only concrete next-port gaps.",
       "blockedBy": [
-        "c0p12web"
+        "c0949cz5",
+        "c08olnwg",
+        "c0j678mt"
       ],
       "workOrder": 605,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: fixed stale #603 reference, added direct #217 plus stable prerequisite blockers, and grounded the lexer port in current public APIs/tests."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: fixed stale #603 reference, added direct #217 plus stable prerequisite blockers, and grounded the lexer port in current public APIs/tests."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "e9-plan-builder",
+          "text": "2026-07-16 e9-plan-builder: fixed stale #603 reference, added direct #217 plus stable prerequisite blockers, and grounded the lexer port in current public APIs/tests."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "The Jet-hosted lexer emits token streams (including error tokens/spans) identical to the Rust lexer across the full tests/ui + examples corpus.",
+          "text": "Frozen #217 and prerequisite cards #669/#670 are complete before lexer-port implementation begins.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:17.504Z"
+          "at": "2026-07-16T08:41:54.830Z"
         },
         {
           "n": 2,
-          "text": "The C-ABI boundary linking the Jet lexer into the Rust driver passes the full existing lexer/parser test suite unchanged.",
+          "text": "Jet lex and lex_raw produce byte-identical token kinds, payloads, byte spans, terminators, and ordered diagnostics to the Rust lexer across existing valid/invalid corpora.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:17.647Z"
+          "at": "2026-07-16T08:41:54.830Z"
         },
         {
           "n": 3,
-          "text": "A fuzzed differential test (Jet lexer vs Rust lexer) finds zero divergences over a defined iteration budget.",
+          "text": "The port reads the canonical Syntax vocabulary, preserves recovery/interpolation/comment behavior, and introduces no second keyword table or user-facing syntax.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:17.771Z"
+          "at": "2026-07-16T08:41:54.830Z"
         },
         {
           "n": 4,
-          "text": "The resulting gap list (features/stdlib the port needed but lacked) is filed as cards or ballots feeding the next subsystem (parser) port's scoping.",
+          "text": "The internal C ABI seam exercises the Jet lexer through the real Rust driver and all existing lexer/parser/formatter/diagnostic tests pass unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-16T04:46:17.894Z"
+          "at": "2026-07-16T08:41:54.830Z"
+        },
+        {
+          "n": 5,
+          "text": "A fixed-seed, recorded-budget differential fuzz test covers Unicode, malformed literals/comments/interpolation, numeric suffixes, and terminator boundaries with zero divergence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:41:54.830Z"
+        },
+        {
+          "n": 6,
+          "text": "Only observed language/Core gaps become follow-up cards or ballots; the milestone leaves no placeholder lexer path or duplicate semantics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:41:54.830Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md",
+        "docs/spec/architecture.md",
+        "docs/plans/compiler-speed.md",
+        "crates/jet-foundation/src/Syntax.rs",
+        "crates/jet-lexer/src/Lexer/mod.rs",
+        "crates/jet-lexer/src/Lexer/Scan.rs",
+        "crates/jet-lexer/src/Lexer/Strings.rs",
+        "crates/jet-lexer/src/Lexer/Terminators.rs",
+        "crates/jet-lexer/src/Lexer/Tokens.rs",
+        "crates/jet-queries/src/lib.rs",
+        "tests/grammar.rs",
+        "tests/diagnostic_snapshots.rs",
+        "tests/fuzz_sema.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:17.376Z",
       "updated": "2026-07-16"
@@ -27607,14 +27872,73 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Complete the already ratified generic-module surface without widening it. Preserve D-GENMOD-VALUE1=A exactly: closed Bool, Int, Char, String, and fieldless-enum value parameters plus the approved `[T#capacity]` layout slot; unsupported general const-generic types continue to fail with E0856 and non-closed arguments with E0857. Audit substitution across every permitted D-GENMOD-BODY1 item and expression/type position, then prove type/value bounds, nested and recursive instantiation, direct/indirect E0855 cycle rejection, applicative full-key identity, fingerprint collision defense, deterministic diagnostics, formatter/semindex facts, and R11 re-entry. Repoint `claim.generic-modules` only to the ratified closed-value promise and attach complete native test evidence; do not invent a general-const claim or new syntax.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[fresh-plan] Corrected stale general-const expansion against D-GENMOD-VALUE1=A. Card now completes the ratified closed-value, bound, recursion, identity, and capability-evidence surface; no new gate."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Generic modules accept and substitute every D-GENMOD-VALUE1=A closed value kind and approved `[T#capacity]` use across all D-GENMOD-BODY1 item, type, and expression positions; UI/golden tests cover each path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.607Z"
+        },
+        {
+          "n": 2,
+          "text": "Type and value bounds, nested templates, recursive instantiation, direct/indirect E0855 cycles, wrong arity/type E0851-E0853, unsupported value types E0856, and non-closed values E0857 have deterministic what/why/fix snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.608Z"
+        },
+        {
+          "n": 3,
+          "text": "Applicative instances reuse the complete full key while distinct type/value/module-path keys stay distinct; E0859 collision defense, semindex facts, formatter idempotence, and generated-code parity pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.608Z"
+        },
+        {
+          "n": 4,
+          "text": "The generic-modules capability manifest/reference claim says closed ratified value parameters rather than general const generics, cites complete-instantiation evidence, and all targeted generic-module plus capability-claim tests pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T08:35:22.608Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-sema/src/Sema/Bundle/GenericModules.rs",
+        "crates/jet-foundation/src/AST.rs",
+        "crates/jet-foundation/src/Generics.rs",
+        "docs/spec/spec.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md",
+        "docs/spec/capability-claim-manifest.json",
+        "docs/reference/capability-claims.md",
+        "tests/ui/genmod_disallowed_value_type.jet",
+        "tests/ui/genmod_value_not_comptime.jet",
+        "tests/ui/genmod_cycle_direct.jet",
+        "tests/ui/genmod_cycle_indirect.jet",
+        "tests/fuzz/sema/differential/ex_modules_generic_modules.jet",
+        "tests/semindex.rs",
+        "tests/fmt.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-16T06:31:30.155Z",
       "updated": "2026-07-16"
@@ -48368,6 +48692,167 @@
   ],
   "events": [
     {
+      "at": "2026-07-16T08:41:54.830Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0tpn16q",
+      "note": "body,phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:41:54.592Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0j678mt",
+      "note": "body,phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:41:54.338Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c08olnwg",
+      "note": "body,phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:41:54.154Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0xty2bs",
+      "note": "body,phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:37:43.921Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0tpn16q",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:37:43.745Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0j678mt",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:37:43.560Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c08olnwg",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:37:43.384Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0xty2bs",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:35:22.608Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0vj7cg5",
+      "note": "phase,plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:35:22.360Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0xhhjch",
+      "note": "phase,plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:34:35.242Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0tpn16q",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:34:35.055Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0j678mt",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:34:34.874Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c08olnwg",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:34:34.689Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0xty2bs",
+      "note": "phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:34:34.504Z",
+      "by": "e9-plan-builder",
+      "action": "card.update",
+      "ref": "c0p12web",
+      "note": "body,phase,plan,blockedBy,workOrder,refs,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:39.814Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0e4nuy5",
+      "note": "plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:39.565Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "title,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:39.319Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:39.066Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:38.816Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:38.562Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:38.319Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-16T08:28:38.074Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0w7297z",
+      "note": "plan,blockedBy,criteria,logEntry"
+    },
+    {
       "at": "2026-07-16T08:15:02.551Z",
       "by": "sol-e8-planner",
       "action": "card.update",
@@ -51705,167 +52190,6 @@
       "action": "card.criteria-add",
       "ref": "c0v5rsny",
       "note": "#2 Gesture scenario asserts each shown diff hunk highlights the"
-    },
-    {
-      "at": "2026-07-16T04:52:24.568Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0v5rsny",
-      "note": "#1 Gesture scenario edits a function via the graph, opens the r"
-    },
-    {
-      "at": "2026-07-16T04:52:24.443Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0v5rsny",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:24.295Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0u0y3s6",
-      "note": "#4 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md Find re"
-    },
-    {
-      "at": "2026-07-16T04:52:24.174Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0u0y3s6",
-      "note": "#3 Gesture scenario runs rename on a function used in 3 files, "
-    },
-    {
-      "at": "2026-07-16T04:52:24.053Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0u0y3s6",
-      "note": "#2 Gesture scenario runs find-references from a selected node o"
-    },
-    {
-      "at": "2026-07-16T04:52:23.930Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0u0y3s6",
-      "note": "#1 Gesture scenario opens project-wide search, types a function"
-    },
-    {
-      "at": "2026-07-16T04:52:23.803Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0u0y3s6",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:23.656Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0stzzp4",
-      "note": "#5 A scenario confirms the PROOF/REVISION panel and raw COMMAND"
-    },
-    {
-      "at": "2026-07-16T04:52:23.527Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0stzzp4",
-      "note": "#4 Gesture scenario toggles Meta category and tunable through D"
-    },
-    {
-      "at": "2026-07-16T04:52:23.397Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0stzzp4",
-      "note": "#3 Gesture scenario edits function signature, purity marker, an"
-    },
-    {
-      "at": "2026-07-16T04:52:23.275Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0stzzp4",
-      "note": "#2 Gesture scenario edits variable name, type, default, and doc"
-    },
-    {
-      "at": "2026-07-16T04:52:23.149Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0stzzp4",
-      "note": "#1 Details panel for a variable, a function, and a node each re"
-    },
-    {
-      "at": "2026-07-16T04:52:23.030Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0stzzp4",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T04:52:22.886Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0h41rrl",
-      "note": "#5 docs/plans/epoch-6/canvas-blueprint-parity-matrix.md rows fo"
-    },
-    {
-      "at": "2026-07-16T04:52:22.766Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0h41rrl",
-      "note": "#4 keyboard-only authoring scenario drives search, palette inse"
-    },
-    {
-      "at": "2026-07-16T04:52:22.637Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0h41rrl",
-      "note": "#3 node docs hover scenario asserts a doc-comment-derived toolt"
-    },
-    {
-      "at": "2026-07-16T04:52:22.513Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0h41rrl",
-      "note": "#2 collapse/expand and math-expression inline-edit gesture scen"
-    },
-    {
-      "at": "2026-07-16T04:52:22.390Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0h41rrl",
-      "note": "#1 scripts/canvas-test/scenario.mjs gains promote-pin-to-variab"
-    },
-    {
-      "at": "2026-07-16T04:52:22.259Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0h41rrl",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:52:22.112Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0fzoku6",
-      "note": "plan,workOrder"
-    },
-    {
-      "at": "2026-07-16T04:49:47.567Z",
-      "by": "fable-clerk",
-      "action": "question.add",
-      "ref": "q0dvdl9a",
-      "note": ""
-    },
-    {
-      "at": "2026-07-16T04:49:16.773Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0rxl8sx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-16T04:49:16.609Z",
-      "by": "sol-w3-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0rxl8sx",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

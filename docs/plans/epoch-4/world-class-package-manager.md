@@ -1,6 +1,6 @@
 # Epoch 4 — world-class Jetpack package manager
 
-**Status:** executable master plan. **Audit date:** 2026-07-09.
+**Status:** executable master plan. **Audit date:** 2026-07-16.
 **Scope:** Jetpack only. JetOS consumes this substrate in Epoch 7; OS activation,
 desktop modules, installers, and system services remain Epoch 7.
 
@@ -10,16 +10,18 @@ ratified decisions remain law unless a ballot below explicitly amends one.
 
 ## Exit claim
 
-Epoch 4 exits only when Jetpack has full Nix package-manager capability, native
-Nix-package interoperability without an installed `nix` binary, and the best
-compatible features from leading language and build package managers. “Full
-parity” covers package management and build/store behavior, not NixOS module
-breadth.
+Epoch 4 exits when Jetpack has functional Nix package-manager capability,
+native Nix-package interoperability without an installed `nix` binary, and the
+best compatible features from leading language and build package managers.
+Per `D-JPK-EPOCHBOUNDARY1=B`, Epoch 4 proves the 20 functional lanes below and
+reports the actual sandbox class. Epoch 8 card #398 alone owns hostile
+Linux/macOS/Windows confinement and the full Nix-replacement claim.
 
-The product may claim parity only when all acceptance lanes in this document
-pass against live stores, registries, caches, builders, hostile packages, and
-independent machines. Fixture-only tests support development; they never close
-a capability card.
+The product may claim functional package-manager capability only when all Epoch
+4 acceptance lanes below pass against live stores, registries, caches,
+builders, packages, and independent machines. Fixture-only tests support
+development; they never close a capability card. Full parity remains reserved
+until #398 also passes its hostile cross-platform lane.
 
 ## Current truth
 
@@ -491,24 +493,24 @@ JP0
 ├─ JP2 action IR
 ├─ JP6A trust primitives       after JP1 + JP2
 ├─ JP15 variants/domains       after JP2
-├─ JP3 sandbox                 after JP2
+├─ JP3 hostile sandbox         E8 #398, after JP2
 ├─ JP8 Nix derivations         after JP1 + JP2
 ├─ JP13 semantic lock          after JP1 + JP2 + JP15
 ├─ JP4 closure/roots           after JP1 + JP2 + JP13
-├─ JP5 cache/NAR               after JP1 + JP3 + JP4 + JP6A + JP13
-├─ JP16 hook authority         after JP2 + JP3 + JP6A
+├─ JP5 cache/NAR               after JP1 + JP4 + JP6A + JP13
+├─ JP16 hook authority         after JP2 + JP6A
 ├─ JP12 registry/solver        after JP1 + JP6A + JP13 + JP15 + JP16
 ├─ JP6B trust integration      after JP5 + JP12
 ├─ JP7 remote execution        after JP1–JP6B + JP13 + JP15
 ├─ JP14 profiles               after JP4 + JP13
 ├─ JP17 providers              after JP5 + JP6B + JP12 + JP13 + JP15 + JP16
-├─ JP18 reproducibility        after JP2 + JP3 + JP7
+├─ JP18 reproducibility        after JP2 + JP7
 ├─ JP20 policy                 after JP6B + JP13 + JP17 + JP18
 ├─ JP19 explain/store ops      after JP4 + JP5 + JP6B + JP7 + JP13 + JP14 + JP17 + JP18 + JP20
-├─ JP21 staging               after JP2 + JP3 + JP6B + JP16 + ballot
+├─ JP21 staging               after JP2 + JP6B + JP16 + ballot
 └─ JP22                        after every card
 
-JP9 follows JP8; JP10 follows JP9; JP11 follows JP3–JP5 + JP8–JP10 + JP13.
+JP9 follows JP8; JP10 follows JP9; JP11 follows JP4–JP5 + JP8–JP10 + JP13.
 ```
 
 ## Binding acceptance lanes
@@ -517,47 +519,49 @@ JP9 follows JP8; JP10 follows JP9; JP11 follows JP3–JP5 + JP8–JP10 + JP13.
    cached/sandboxed/reproducible labels remain impossible without proof.
 2. **No-installed-Nix lane:** PATH and filesystem expose no `nix` binary;
    representative nixpkgs packages/flakes/devShells resolve and realize.
-3. **Hostile sandbox lane:** host read/write, symlink escape, network, process,
-   ptrace, device, daemon, and undeclared executable attacks fail at OS boundary.
-4. **Canonical-store lane:** modes, symlinks, empty dirs, Unicode, hardlinks,
+3. **Canonical-store lane:** modes, symlinks, empty dirs, Unicode, hardlinks,
    xattrs, deep trees, corruption, partial ingest, and concurrent registration.
-5. **Cache adversary lane:** wrong hashes/platform/refs, stale/forged metadata,
+4. **Cache adversary lane:** wrong hashes/platform/refs, stale/forged metadata,
    truncated chunks, decompression bombs, mirror split-brain, concurrent push.
-6. **Trust compromise lane:** stolen publisher/builder/timestamp/snapshot key,
+5. **Trust compromise lane:** stolen publisher/builder/timestamp/snapshot key,
    rollback/freeze/mix-and-match, rotation/revocation/recovery.
-7. **Remote adversary lane:** worker lies, disappears, replays, returns wrong
+6. **Remote adversary lane:** worker lies, disappears, replays, returns wrong
    platform, loses logs, or disagrees with another builder.
-8. **GC/power-loss lane:** kill during ingest, root/profile switch, repair, GC,
+7. **GC/power-loss lane:** kill during ingest, root/profile switch, repair, GC,
    cache publish, and lock write; restart proves atomic invariants.
-9. **Independent reproducibility lane:** distinct builders, roots, UIDs, paths,
+8. **Independent reproducibility lane:** distinct builders, roots, UIDs, paths,
    locales, clocks, and schedules produce identical canonical objects.
-10. **Resolver lane:** targeted/lowest/latest/multi-platform graphs; minimal
+9. **Resolver lane:** targeted/lowest/latest/multi-platform graphs; minimal
     conflict explanations; unrelated lock records remain byte-stable.
-11. **Provider lane:** live provider projects import, lock, build, run, audit,
+10. **Provider lane:** live provider projects import, lock, build, run, audit,
     update, vendor, migrate, and work offline.
-12. **Cross lane:** build/host/target permutations, remote target, emulator,
+11. **Cross lane:** build/host/target permutations, remote target, emulator,
     and platform-specific cache identities.
-13. **Profile lane:** repeated kill injection shows old/new only; rollback and
+12. **Profile lane:** repeated kill injection shows old/new only; rollback and
     retained-generation GC proof work offline.
-14. **Scale lane:** million objects, 100k actions, large workspace/provider
+13. **Scale lane:** million objects, 100k actions, large workspace/provider
     metadata, bounded memory, stable latency budgets.
-15. **Authority lane:** metadata probes execute nothing; unapproved hooks and
+14. **Authority lane:** metadata probes execute nothing; unapproved hooks and
     transitive exotic sources fail; approvals invalidate on digest/cap changes;
     credential exfiltration attempts fail.
-16. **Registry lane:** concurrent same-version publish yields one immutable
+15. **Registry lane:** concurrent same-version publish yields one immutable
     success; signed yank never frees version; namespace transfer preserves
     history; quarantine blocks resolution; stale metadata cannot hide snapshot.
-17. **Universal-lock lane:** one platform's lock realizes declared other
+16. **Universal-lock lane:** one platform's lock realizes declared other
     domains offline; unsupported domains fail before fetch; build/target and
     duplicate-version domains never cross accidentally.
-18. **Policy lane:** maturity applies direct/transitive, audited exception is
+17. **Policy lane:** maturity applies direct/transitive, audited exception is
     exact, trust evidence cannot downgrade, advisory freshness/expiry works.
-19. **Diagnostic lane:** builder/linker/evaluator/worker/registry/sandbox failures
+18. **Diagnostic lane:** builder/linker/evaluator/worker/registry/sandbox failures
     have Jet codes with what/why/fix; raw tool output is optional log detail.
-20. **Protocol lane:** engine dispatch preserves exit codes, deterministic plain
+19. **Protocol lane:** engine dispatch preserves exit codes, deterministic plain
     output, and versioned JSON schemas for every new surface.
-21. **R9 lane:** `jet run file.jet` remains rootless and manifest/profile/
+20. **R9 lane:** `jet run file.jet` remains rootless and manifest/profile/
     registry/daemon-free; inline dependencies are the only package opt-in.
+
+Epoch 8 #398 adds the hostile sandbox lane: host read/write, symlink escape,
+network, process, ptrace, device, daemon, and undeclared executable attacks fail
+at the OS boundary on Linux, macOS, and Windows.
 
 ## Ratified owner decisions (2026-07-10)
 

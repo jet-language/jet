@@ -3056,6 +3056,25 @@ when the lock is satisfied. One canonical merge table (unified-ecosystem §6)
 across env/system/image. Monorepo addressing: `source.package` dot form +
 in-repo path-style + bare-name sugar when unambiguous.
 
+**D-JPK-EXECLEASE1=A — Protected native executable lease service**: Linux
+keeps its unprivileged private read-only mount. Official macOS and Windows
+installers, after one explicit administrator approval, register a narrowly
+scoped root-owned LaunchDaemon or LocalSystem service. The service accepts only
+authenticated local lease requests, independently re-verifies the locked
+digest, copies executable bytes into a caller-unwritable protected directory,
+and launches under the caller UID/session/token with no root/SYSTEM privileges,
+service handles, privilege-sensitive environment, or network access. Protected
+lease bins precede only the caller's approved inherited/system PATH. The
+service never resolves packages, evaluates source, builds arbitrary requests,
+or accesses the network; mismatch, stopped service, unverifiable bytes, or
+failed isolation rejects before any child starts. `jet env` keeps the lease
+through the shell and every descendant and deletes it after the process tree
+exits. Doctor/audit output names service/toolchain version, caller and child
+identity, stripped authority, PATH, network denial, verified handoff, and
+same-user redirect protection. This is the ratified narrow amendment to the
+otherwise no-root/no-daemon product law; ordinary run/env remains offline and
+ceremony-free after installation.
+
 **D-FE-PROMPT1 (=D) + D-FE-PROMPT-STRIP1 (=B, ratified 2026-07-08, #359)**:
 `jet env` uses one hybrid prompt engine. Default prompt shows the env label and
 compact path; `Ctrl-G` pulls the same status words the optional always-on strip
@@ -3456,6 +3475,22 @@ Because this decision adds no user-typeable token or form, it adds no
 `Syntax.rs` entry, parser or runtime behavior, grammar rule, diagnostic,
 snapshot, or executable example.
 
+**D-CI1=A — Full change gate, slow science nightly**: every proposed change
+runs the complete test suite on the exact candidate revision, sharded only to
+reduce wall time, plus grammar-drift and documentation-build checks. No test
+family is demoted to nightly. Nightly adds the supported Linux/macOS matrix,
+the performance-regression harness and ratchets, a bounded fuzzing cadence, and
+coverage reporting. CI uses the live Tower path. A green change therefore means
+the whole executable spec passed; nightly evidence covers slower platform and
+measurement work rather than repairing a knowingly partial merge gate.
+
+**D-CI2=A — Warning-free compiler gate with expiring exceptions**: CI denies
+Rust warnings, checks rustfmt, and runs the curated correctness/suspicious
+clippy set without imposing style lints that conflict with house conventions.
+Intentional lint exceptions use `#[expect(..., reason = "#card: ...")]`; the
+card reference explains unfinished work and the expectation fails when its lint
+stops firing. Unexplained dead code is not protected by convention or guesswork.
+
 **S15 — Binary profile**: default build unwinds; `jet build --small` =
 `opt-level="z"` + LTO + `panic=abort`.
 
@@ -3469,6 +3504,38 @@ swap in place, layout changes trigger a clean announced restart.
 (`--raw-frames` expert opt-in); `(jet)` prompt, `step/next/continue/finish`
 (+`s/n/c/f`), `<- here` caret, `locals:` dump (E2203/E2204). **D-OBS2**: the
 Jet→Rust line table is a sidecar `<file>.jetmap` JSON (versioned, std-only).
+
+**D-DBG-DAP1=A — Full local daily-driver DAP profile**: editors start
+`jet debug --dap <file.jet>` over stdio. DAP framing uses strict byte-counted
+`Content-Length` messages, positive correlated sequence IDs, bounded JSON
+objects, one response per accepted request, structured Jet-owned errors, and no
+TCP, reverse-request, telemetry, or remote transport. The adapter implements the
+Start → Initialized → Configuring → Stopped/Running → Terminated state machine;
+`initialized` follows a successful single launch or attach, and user code never
+runs before `configurationDone`. Advertised capabilities must equal implemented
+behavior.
+
+The full profile includes launch with explicit args/cwd/env, verified true local
+same-user attach, replacement source breakpoints with conditions, hit counts,
+and logpoints, all-stop Jet-task threads, Jet-only stacks/scopes/nested variables,
+read-only bounded Jet expression evaluation, panic/error/signal filters, pause,
+launch restart, cancellation, progress, timeouts, ordered output, and exact exit
+or signal status. Attach verifies process identity, executable build ID, source
+hashes, architecture, process image, and matching `.jetmap` before changing the
+target; disconnect defaults to terminating launched targets and continuing
+attached targets. Restart rebuilds through the same pipeline and preserves
+source breakpoints while invalidating every object reference.
+
+The default projection never exposes generated Rust names, paths, helper
+threads, backend values, addresses, secrets, or raw backend text. Explicit
+`showRawFrames` appends clearly marked raw frames/scopes without changing
+stepping or evaluation semantics. Mutation, memory read/write, reverse
+execution, disassembly, and other unimplemented advanced requests are
+truthfully unsupported. Conformance vendors a pinned Microsoft DAP schema,
+model-tests every legal and illegal transition/reference lifetime, and drives
+current VS Code and Zed clients plus native backend tests without skip on
+supported hosts. Terminal and editor debugging remain projections of one
+breakpoint, task, evaluator, exception, mapping, diagnostic, and process model.
 
 **D-SEMINDEX1**: versioned semantic-index query API (symbols/refs/types/
 call-graph/effects/member facts; `jet inspect semindex --json`, schema v3) —

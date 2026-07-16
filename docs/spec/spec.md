@@ -1773,8 +1773,10 @@ one arm wins, deregisters losers, and returns the received value. Example:
 
 The M:N scheduler (D-ASYNCRT1=A) parks tasks at channel/timer/IO waits instead
 of blocking OS threads. Native I/O pollers: Linux `epoll`, macOS/BSD `kqueue`,
-Windows IOCP path falls back to portable poll with an honest metric until IOCP
-lands. Task-local Jet traps unwind into the scheduler so sibling combinators can
+and Windows IOCP. The Windows backend registers sockets with a completion port,
+handles completion, cancellation, deadlines, stale packets, scale, cleanup, and
+terminal poller failure without a portable-poll fallback. Task-local Jet traps
+unwind into the scheduler so sibling combinators can
 report `panic: a task panicked` instead of exiting the whole process early.
 
 Scale tests: `scheduler_spawn_10000_tasks` in CI; `scheduler_spawn_100000_tasks_bench`
