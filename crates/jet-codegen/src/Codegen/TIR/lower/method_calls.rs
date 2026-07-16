@@ -1,4 +1,4 @@
-use crate::AST::{Expr, Type};
+use crate::AST::{AccessConvention, Expr, Type};
 use crate::Codegen::alloc_handle_rust_type;
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
@@ -43,6 +43,7 @@ use crate::Codegen::TIR::lower_expr_as_mut_place;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_lambda_expecting;
+use crate::Codegen::TIR::lower_lambda_expecting_host_borrow;
 use crate::Codegen::TIR::lower::lower_cursor_take_pattern;
 use crate::Codegen::TIR::lower::lower_reader_take_pattern;
 use crate::Codegen::TIR::lower_method_args;
@@ -517,15 +518,15 @@ pub(crate) fn lower_method_call(
     // with PLAIN args. Resolve the field's Rust name + the call's result type (the Fn's
     // return) here; emit just splices. (Tried before the JSON/core/user shapes, mirroring
     // the AST dispatch order — a fn-field check fires before user-method dispatch.)
-    if let Some(Type::Fn { ret, .. }) = fn_field_call_ty(method, recv_type, cx) {
+    if let Some(Type::Fn { params, ret, .. }) = fn_field_call_ty(method, recv_type, cx) {
         let ret_ty = ret.as_deref().cloned().unwrap_or_else(unit_type);
         let recv = lower_expr(receiver, cx, env);
-        // Args emit PLAINLY (AST `emit_call_args(.., None, ..)` — no convention), but the
-        // arg's own `implicit_clone`/`shared_auto_clone` flags still apply: pass `conv:
-        // None` to `lower_one_call_arg`, the single `emit_call_args` reproduction.
         let targs: Vec<TCallArg> = args
             .iter()
-            .map(|a| lower_one_call_arg(a, None, env, cx))
+            .zip(params.iter())
+            .map(|(a, ty)| {
+                lower_one_call_arg(a, Some((AccessConvention::Read, ty.clone())), env, cx)
+            })
             .collect();
         return TExpr {
             ty: ret_ty,
@@ -1649,20 +1650,16 @@ pub(crate) fn lower_method_call(
                 unreachable!("sema's finish_shared_read/finish_shared_edit require a lambda arg");
             };
             let expected = std::slice::from_ref(&inner);
-            // `JetShared::read`/`edit` take `f: F where F: FnOnce(&T) -> R` — the
-            // closure param is `&T`, not `T`. `render_lambda_str_expecting` has
-            // no notion of a Rust reference type (Jet's own `Type` doesn't model
-            // one), so patch the rendered `": user_App"` annotation to `": &user_App"`
-            // by hand; the ENV binding (used for the body's field/method
-            // resolution) stays the bare `T` — a read-only view of `T` behaves
-            // exactly like owning one for field reads.
-            let mut tl = lower_lambda_expecting(lam, cx, env, Some(expected));
-            let ref_prefix = if method == "edit" { "&mut " } else { "&" };
-            if let Some(p) = tl.params.get_mut(0) {
-                if let Some(pos) = p.find(": ") {
-                    p.insert_str(pos + 2, ref_prefix);
-                }
-            }
+            // `JetShared::read`/`edit` lend `&T`/`&mut T` directly. This host
+            // borrow is not an unmarked function-value parameter and must not
+            // receive another D-MEM-PARAM1 Read borrow.
+            let tl = lower_lambda_expecting_host_borrow(
+                lam,
+                cx,
+                env,
+                expected,
+                method == "edit",
+            );
             // D-STM1=A (card #506): a `Shared<T>.edit(f)` inside a `#Transact` block
             // routes to the deferred `edit_txn` — the write is buffered and applied
             // atomically at the block's commit, so the call yields nothing (Unit; E0750
@@ -1703,9 +1700,48 @@ pub(crate) fn lower_method_call(
         let recv_t = lower_expr(receiver, cx, env);
         let recv_ast_ty = tir_recv_jet_ty(receiver, env);
         let result_ty = builtin_result_ty(method, args.len(), recv_ast_ty.as_ref());
-        // Args lowered PLAINLY (the lambda + any seed) — `emit_builtin_method`'s
-        // `arg(i)` is a raw `emit_expr`, no clone/borrow wrappers.
-        let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        // Collection helpers lend callback inputs (`&T`, or `&U, &T` for
+        // folds). Lower that host borrow exactly once, including scalar
+        // payloads. `Option.map` emits through `.as_ref()` for the same law.
+        let mut callback_params = recv_ast_ty
+            .as_ref()
+            .and_then(|ty| crate::Collections::builtin_method_arg_types(ty, method))
+            .and_then(|types| {
+                types.into_iter().find_map(|ty| match ty {
+                    Type::Fn { params, .. } => Some(params),
+                    _ => None,
+                })
+            });
+        if matches!(method, "reduce" | "fold" | "scan" | "par_fold") {
+            if let Some(seed_ty) = args
+                .first()
+                .and_then(|arg| tir_recv_jet_ty(&arg.expr, env))
+            {
+                if let Some(first) = callback_params
+                    .as_mut()
+                    .and_then(|params| params.first_mut())
+                {
+                    *first = seed_ty;
+                }
+            }
+        }
+        let targs = args
+            .iter()
+            .map(|a| {
+                if let (Expr::Lambda(lam), Some(params)) = (&a.expr, callback_params.as_ref()) {
+                    let tl = lower_lambda_expecting_host_borrow(lam, cx, env, params, false);
+                    return TExpr {
+                        ty: Type::Fn {
+                            params: params.clone(),
+                            ret: None,
+                            effect_bound: None,
+                        },
+                        kind: TExprKind::Lambda(Box::new(tl)),
+                    };
+                }
+                lower_expr(&a.expr, cx, env)
+            })
+            .collect();
         return TExpr {
             ty: result_ty,
             kind: TExprKind::ClosureMethod {
@@ -2388,23 +2424,23 @@ pub(crate) fn lower_method_call(
     // `s: Box<dyn user_Shape>`). The gate proved `recv_type == Some(<trait>)` with the
     // trait in `cx.trait_names`. The AST `emit_method_call` (Expression.rs ~L1657) emits
     // `({recv}).{method}({args})` — the BARE (unmangled) method name (vtable dispatch),
-    // args lowered PLAINLY (`emit_call_args(.., None, ..)` — no sig). Reuse the `MethodCall`
-    // node (`({recv}).{method_rust}({args})`) with the bare method name. The result type is
-    // NOT load-bearing here (the AST carries no sig/return for a trait-object call, and a
-    // trait-method return isn't registered in `cx.method_rets` by trait name) — it is read
-    // only where the call result feeds a type-driven decision, which the sole reachable
-    // program (`print("{s.name()}: {s.area()}")` — string interpolation calls `.jet_show()`,
-    // type-agnostic) never does. Carry `unit_type`, exactly as the AST has no return fact.
+    // node (`({recv}).{method_rust}({args})`) with the bare method name. Trait declarations
+    // retain their full parameter/return facts in `Cx`, so dynamic calls use the same
+    // convention-aware argument lowering as static calls.
     if let Some(ty) = recv_type {
         if cx.trait_names.contains(ty) {
+            let key = (ty.clone(), method.to_string());
+            let sig = cx.method_sigs.get(&key).cloned().unwrap_or_default();
+            let ret_ty = cx
+                .method_rets
+                .get(&key)
+                .cloned()
+                .flatten()
+                .unwrap_or_else(unit_type);
             let recv = lower_expr(receiver, cx, env);
-            // Plain args (conv None), reproducing `emit_call_args(cx, None, args, env)`.
-            let targs: Vec<TCallArg> = args
-                .iter()
-                .map(|a| lower_one_call_arg(a, None, env, cx))
-                .collect();
+            let targs = lower_method_args(args, &sig, env, cx);
             return TExpr {
-                ty: unit_type(),
+                ty: ret_ty,
                 kind: TExprKind::MethodCall {
                     recv: Box::new(recv),
                     method_rust: method.to_string(),

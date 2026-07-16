@@ -3,6 +3,8 @@ use crate::Codegen::mangle;
 use crate::Syntax;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Per-function lowering environment: a local name -> (Rust place string, type).
 /// Built from params, extended by `let` bindings. The "place" already accounts
@@ -39,6 +41,9 @@ pub(crate) struct LowerEnv {
     /// another `&str` — the wrong Rust type for a `copy` result that needs to
     /// escape the view's scope).
     pub(super) string_view_locals: HashSet<String>,
+    /// Operand types that lowering materializes with Rust `.clone()`. Generic
+    /// function emission uses this to add `Clone` only where the body needs it.
+    pub(super) cloned_types: Rc<RefCell<Vec<Type>>>,
 }
 
 impl LowerEnv {
@@ -49,6 +54,7 @@ impl LowerEnv {
             fn_name,
             self_owner: None,
             string_view_locals: HashSet::new(),
+            cloned_types: Rc::new(RefCell::new(Vec::new())),
         }
     }
     /// D-MEM1 stage S5: mark `name` as a string-view local (see `string_view_locals`).
@@ -58,6 +64,9 @@ impl LowerEnv {
     /// D-MEM1 stage S5: true if `name` is a live string-view local.
     pub(super) fn is_string_view_local(&self, name: &str) -> bool {
         self.string_view_locals.contains(name)
+    }
+    pub(super) fn note_clone(&mut self, ty: &Type) {
+        self.cloned_types.borrow_mut().push(ty.clone());
     }
     /// Bind `name` to its resolved Rust place + type. The same lexical map drives
     /// expression resolution and rich-panic locals, so an out-of-scope branch binding

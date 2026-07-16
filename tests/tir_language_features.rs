@@ -623,18 +623,28 @@ fn double(x: Int) -> Int {
 struct Worker {
     step: fn(Int) -> Int
 }
+struct TextWorker {
+    step: fn(String) -> Int
+}
+fn text_len(text: String) -> Int {
+    return text.len()
+}
 fn run() {
     double_fn :: double
     print(apply_twice(double_fn, 3))
     print(apply_twice((x: Int) => (x + 1), 5))
     w :: Worker.{step: (n: Int) => (n * n)}
     print(w.step(4))
+    text_worker :: TextWorker.{step: text_len}
+    text :: \"read\"
+    print(text_worker.step(text))
+    print(text)
 }
 ";
     let (code, stdout) = build_and_run("tir_fn_value_struct_field", src);
     assert_eq!(code, 0);
     // double(double(3)) = 12; apply_twice(x+1, 5) = ((5+1)+1) = 7; w.step(4) = 4*4 = 16.
-    assert_eq!(stdout, "12\n7\n16\n");
+    assert_eq!(stdout, "12\n7\n16\n4\nread\n");
 }
 
 /// c109 Phase 28: the full sized-integer surface (82_sized_integers, D-SG9/S42/D-NUMOPS1).

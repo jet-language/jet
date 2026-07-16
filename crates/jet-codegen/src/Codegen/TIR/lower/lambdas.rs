@@ -1,6 +1,7 @@
-use crate::AST::{Expr, Lambda, LambdaBody, Stmt, Type};
+use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
+use crate::Codegen::rust_param_type;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_lambda_block;
 use crate::Codegen::TIR::emit_tir_stmts;
@@ -35,14 +36,36 @@ pub(crate) fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
 /// this lambda flows into (a user fn-typed parameter). A bare lambda param
 /// (`(x) => …`, no annotation) takes its Rust type from there so codegen emits
 /// `move |user_x: i64| …` instead of an un-annotated `move |user_x| …` that
-/// rustc can't infer (c142). Builtin closure methods (`.each`/`.map`/…) keep
-/// passing `None`: their helper signatures drive the closure-param type (often
-/// by-ref), so annotating it would mismatch.
+/// rustc can't infer (c142). Builtin closure methods use the host-borrow helper
+/// below because their runtime helpers lend callback inputs directly.
 pub(crate) fn lower_lambda_expecting(
     lam: &Lambda,
     cx: &Cx,
     env: &LowerEnv,
     expected_params: Option<&[Type]>,
+) -> TLambda {
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None)
+}
+
+/// Runtime helpers such as `Shared.read` and collection adapters already lend
+/// their payload to the callback. Render that host borrow exactly once instead
+/// of applying function-value Read rules on top of it (`&&T` / `&mut &T`).
+pub(crate) fn lower_lambda_expecting_host_borrow(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: &[Type],
+    write: bool,
+) -> TLambda {
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, Some(expected_params), Some(write))
+}
+
+fn lower_lambda_expecting_with_host_borrow(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: Option<&[Type]>,
+    host_borrow: Option<bool>,
 ) -> TLambda {
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
@@ -73,7 +96,12 @@ pub(crate) fn lower_lambda_expecting(
         let ty =
             p.ty.clone()
                 .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
-        lam_env.bind(&p.name, mangle(&p.name), ty);
+        let place = if host_borrow.is_some() || ty.as_ref().is_some_and(|t| !t.is_scalar()) {
+            format!("(*{})", mangle(&p.name))
+        } else {
+            mangle(&p.name)
+        };
+        lam_env.bind(&p.name, place, ty);
     }
     // The rendered param list: `name[: ty]`, exactly as `emit_lambda`. A bare
     // param (no annotation) falls back to the expected fn-type's param at the
@@ -87,7 +115,17 @@ pub(crate) fn lower_lambda_expecting(
             let ty =
                 p.ty.clone()
                     .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned())
-                    .map(|t| format!(": {}", cx.rust_type(&t)))
+                    .map(|t| match host_borrow {
+                        Some(write) => format!(
+                            ": {}{}",
+                            if write { "&mut " } else { "&" },
+                            cx.rust_type(&t)
+                        ),
+                        None => format!(
+                            ": {}",
+                            rust_param_type(cx, AccessConvention::Read, &t)
+                        ),
+                    })
                     .unwrap_or_default();
             format!("{}{}", mangle(&p.name), ty)
         })

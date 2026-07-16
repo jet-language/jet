@@ -25,6 +25,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         self_owner: env.self_owner.clone(),
         string_view_locals: env.string_view_locals.clone(),
+        cloned_types: env.cloned_types.clone(),
     }
 }
 
@@ -36,6 +37,7 @@ pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         self_owner: env.self_owner.clone(),
         string_view_locals: env.string_view_locals.clone(),
+        cloned_types: env.cloned_types.clone(),
     }
 }
 

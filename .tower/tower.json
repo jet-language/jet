@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 676,
-    "rev": 9260,
+    "nextNum": 678,
+    "rev": 9300,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20,7 +20,7 @@
         "radar-frozen"
       ]
     },
-    "digestCursor": "2026-07-16T11:33:01.888Z"
+    "digestCursor": "2026-07-16T18:12:52.109Z"
   },
   "epochs": [
     {
@@ -25723,12 +25723,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "D-MEM-PARAM1=A preserves current D-MEM1 law: an unmarked parameter is a read borrow, lowers without clone/RC/allocation, and cannot write, consume, escape, or outlive the caller. This is reconciliation work, not a new ownership implementation. Update ratified law/docs and public contract snapshots, then add focused regressions for String/list/struct reads, E0205 write fixes using &, E0209 take rejection, nested calls, generics, closures, AOT/dev parity, and generated Rust borrow shape. Remove stale copy-on-write audit text.",
       "blockedBy": [],
       "assignee": "codex-memory-642",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root-review",
+          "text": "[review] Implementation and exact targeted proofs green. Criterion 4 broad closeout intentionally deferred to memory-model major stopping point per owner."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e3-refs",
@@ -25758,29 +25763,29 @@
         {
           "n": 1,
           "text": "D-MEM-PARAM1=A and D-MEM1 agree everywhere: unmarked parameters are read borrows; & writes and ^ takes remain explicit.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-root-review",
+          "evidence": "Independent diff review and exact parameter-mode proof.",
+          "at": "2026-07-16T18:41:01.168Z"
         },
         {
           "n": 2,
           "text": "String, list, struct, generic, method, closure, and nested-call regressions prove no clone, reference count, hidden allocation, write, take, or escape on the unmarked path.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-root-review",
+          "evidence": "Independent ownership, TIR, and exact AOT regressions green.",
+          "at": "2026-07-16T18:41:01.386Z"
         },
         {
           "n": 3,
           "text": "E0205/E0209 diagnostics and fix text point to & or ^ correctly, with registered UI snapshots and no rustc leakage.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-root-review",
+          "evidence": "Independent snapshot/diff review; no rustc leakage in exact proofs.",
+          "at": "2026-07-16T18:41:01.598Z"
         },
         {
           "n": 4,
@@ -25794,38 +25799,38 @@
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-root-review",
+          "evidence": "Syntax entry reviewed.",
+          "at": "2026-07-16T18:41:01.810Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-root-review",
+          "evidence": "Ratified log reviewed.",
+          "at": "2026-07-16T18:41:02.023Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-root-review",
+          "evidence": "No grammar artifact change required.",
+          "at": "2026-07-16T18:41:02.267Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:03:36.768Z"
+          "status": "verified",
+          "metBy": "codex-memory-642",
+          "verifiedBy": "codex-root-review",
+          "evidence": "Targeted snapshots reviewed.",
+          "at": "2026-07-16T18:41:02.476Z"
         }
       ],
       "refs": [
@@ -26243,6 +26248,26 @@
       "blockedBy": [],
       "assignee": "codex-gc-646",
       "log": [
+        {
+          "at": "2026-07-16",
+          "by": "codex-root-review",
+          "text": "[done] Private collector substrate integrated; broad suite remains reserved for memory-model major stopping point per owner."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "codex-root-review",
+          "text": "[recheck] Corrected AOT emits exact collector plus adapter once in one private jet_gc module; exact collector/AOT proof green."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "codex-root",
+          "text": "[review-reopen] Independent memory golden found emitted AOT module defect after premature closure; corrected one-module fix remains uncommitted and requires closeout proof."
+        },
+        {
+          "at": "2026-07-16",
+          "by": "git",
+          "text": "commit 8b74dcaa: chore: close Tower #646"
+        },
         {
           "at": "2026-07-16",
           "by": "codex-root",
@@ -29217,6 +29242,212 @@
       "created": "2026-07-16T11:48:22.220Z",
       "updated": "2026-07-16",
       "workOrder": 12
+    },
+    {
+      "id": "c0171611",
+      "num": 676,
+      "title": "Video mine: compiler-latency lessons cross-check and gap closure",
+      "body": "Source mine: https://www.youtube.com/watch?v=M9UWgw_aW28, its full transcript, linked article, and 513 comments. Cross-check the evidence against Jet without creating a second compiler-speed plan, profiler, budget engine, or concurrency model. Canonical owners remain #666 (end-to-end compiler speed), #669 (self-host architecture), #441 (bounded profiler/trace), #241 (typed budgets), and #126 (colorless task runtime). This card owns the adversarial audit across those seams and closes only uncovered gaps.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "frozen",
+      "priority": "P1",
+      "plan": "When the owner unfreezes this card, use docs/plans/compiler-speed.md and #666's checked corpus as the only compiler-speed architecture and benchmark runner. Add a traceable evidence crosswalk, hostile cache-invalidation cases, construct-scale cliffs, environment isolation, and bounded cause reporting. Feed fixes to each canonical owner; do not duplicate its mechanism. Measure first, preserve one executable TIR and feature parity, and reject any speedup that silently boxes, deoptimizes, weakens diagnostics, changes observable semantics, or hides unsupported paths.",
+      "blockedBy": [
+        "c0zmoznd",
+        "c08olnwg",
+        "c0md55xu",
+        "ccq07pav"
+      ],
+      "workOrder": 950,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "owner",
+          "text": "Owner instruction on 2026-07-16: add the mined recommendations, but freeze them for now."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A source ledger separates transcript claims, linked-author corrections, repeated comment corroboration, disputed anecdotes, and Jet-specific inference; every recommendation names its canonical owner or uncovered gap.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:23.957Z"
+        },
+        {
+          "n": 2,
+          "text": "The #666 corpus covers clean, unchanged, and representative-edit runs across parse, sema, TIR, emission, backend, and link, with source, cache, toolchain, host, target, profile, and variance identity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.062Z"
+        },
+        {
+          "n": 3,
+          "text": "Hostile cache tests prove that compiler, schema, target, profile, backend, flags, Core artifact, source, dependency, generated-code, and linker inputs invalidate exactly the affected work.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.163Z"
+        },
+        {
+          "n": 4,
+          "text": "A construct-scale matrix isolates generic instantiations, bounded variadics, derives and reflection, large matches, closures, taskgroups and select, and Drop cleanup; reports expose instantiation, glue, artifact-size, and superlinear growth.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.275Z"
+        },
+        {
+          "n": 5,
+          "text": "No passing speed result depends on silent boxing, dynamic dispatch, feature loss, lower optimization than the named profile, weaker diagnostics, changed effects, or divergence between JIT, dev, and AOT.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.381Z"
+        },
+        {
+          "n": 6,
+          "text": "Builder evidence isolates linker, libc, allocator, backend, toolchain, hardware, and cache state; official environment claims publish exact provenance and never compare unmatched workloads.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.488Z"
+        },
+        {
+          "n": 7,
+          "text": "Compiler explanation stays bounded and actionable: Jet source names, top causes, phase totals, cache hits and misses, environment identity, stable JSON, and an explicit full artifact for deeper inspection.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.598Z"
+        },
+        {
+          "n": 8,
+          "text": "Each uncovered gap lands in its canonical owner with targeted tests, docs, examples where user-visible, independent adversarial review, and measured before and after evidence; no duplicate subsystem remains.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.700Z"
+        }
+      ],
+      "refs": [
+        "docs/plans/compiler-speed.md",
+        "docs/spec/philosophy.md",
+        "docs/spec/architecture.md",
+        "docs/spec/performance-budget-decisions.md",
+        "crates/jet-driver/src/PhaseTiming.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-16T18:00:25.417Z",
+      "updated": "2026-07-16"
+    },
+    {
+      "id": "c0be4wgi",
+      "num": 677,
+      "title": "Typed project compile-latency budgets",
+      "body": "The compiler-speed corpus in #666 protects Jet's own latency. Decide whether application teams may also make cold, no-change, and representative-edit compile latency enforceable product facts through #241's existing typed budget system. Any chosen surface must stay opt-in, preserve zero-ceremony defaults, record exact cache and environment identity, and use the shared evaluator/report/baseline path.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "frozen",
+      "priority": "P2",
+      "plan": "Blocked until #666 establishes truthful phase timing and #241 closes its canonical evaluator integration. D-PERFBUDGET-COMPILE1 is the only owner gate. If ratified, implement its exact surface through ordinary typed Budget values, the existing provider protocol, reports, baselines, diagnostics, and commands. Do not add a second benchmark runner, policy file, cache model, or compiler mode.",
+      "blockedBy": [
+        "c0zmoznd",
+        "ccq07pav",
+        "D-PERFBUDGET-COMPILE1"
+      ],
+      "workOrder": 951,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-16",
+          "by": "owner",
+          "text": "Owner instruction on 2026-07-16: add the mined recommendations and ballot, but freeze them for now."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-PERFBUDGET-COMPILE1 is ratified before any public metric, provider, workload value, manifest field, command spelling, or diagnostic is implemented.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.806Z"
+        },
+        {
+          "n": 2,
+          "text": "The chosen option is implemented exactly through #241 shared BudgetSpec evaluation, provider protocol, baseline storage, reports, diagnostics, JSON, CI, and proof integration; no second engine exists.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:24.911Z"
+        },
+        {
+          "n": 3,
+          "text": "Every compile sample records source tree, workload or edit bytes, cache state, compiler and Core digests, target, profile, backend, linker, host, warmups, samples, variance, and phase totals.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:25.019Z"
+        },
+        {
+          "n": 4,
+          "text": "Ordinary projects perform no extra measurement and need no policy. Declared expert budgets can reproduce cold, unchanged, and every ratified representative-edit scenario without ambient timestamp behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:25.122Z"
+        },
+        {
+          "n": 5,
+          "text": "Hostile tests reject stale or forged cache identity, missing edit inputs, incompatible baselines, unsupported targets, provider crashes, timeouts, and partial artifacts without accepting a false pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:25.224Z"
+        },
+        {
+          "n": 6,
+          "text": "Syntax registry, syntax decision log, formatter, grammars, diagnostics, examples, docs, AOT and dev parity, targeted tests, independent review, and full verification follow the selected ruling.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-16T18:02:25.325Z"
+        }
+      ],
+      "refs": [
+        "docs/plans/compiler-speed.md",
+        "docs/spec/performance-budget-decisions.md",
+        "crates/jet-foundation/src/Syntax/jetpack_config.rs",
+        "crates/jet-foundation/src/PerformanceBudget.rs",
+        "Source/CmdBudget.rs",
+        "Source/BudgetProviders.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-16T18:00:54.332Z",
+      "updated": "2026-07-16"
     }
   ],
   "decisions": [
@@ -49289,6 +49520,72 @@
       "comment": "Cards close on appropriately scoped, targeted test evidence; the full verify-full.sh suite runs once as closeout after a major push, clocked on the closeout/blocking card — not as a per-card exit criterion. Owner: 'I have REPEATEDLY instructed only to do appropriately scoped, targeted tests, not the entire suite. The entire suite should be done as part of closeout after a major push.' (2026-07-16). Existing per-card full-gate criteria are re-scoped to this standard.",
       "created": "2026-07-16T11:52:59.373Z",
       "ratifiedAt": "2026-07-16"
+    },
+    {
+      "id": "D-PERFBUDGET-COMPILE1",
+      "cardId": "c0be4wgi",
+      "group": "performance",
+      "title": "Should typed project budgets cover compile latency?",
+      "gist": "Decide whether Jet projects may enforce cold, unchanged, and representative-edit compile latency, and how each measured workload gets an exact identity.",
+      "lesson": "Compile latency is workload-relative. A cold build, an unchanged rebuild, and a one-file edit exercise different cache paths. A number without source, cache, compiler, target, profile, linker, and host identity cannot be compared safely.\n\nJet already measures its product compiler in #666. #241 enforces project performance facts, but its closed metric and provider set has no compile workload. Extending that public typed vocabulary requires this decision.",
+      "explainer": "All options preserve zero-ceremony defaults. No project receives a compile budget unless its author declares one. Any measurement uses #241's canonical evaluator, pinned baselines, reports, diagnostics, and CI behavior. The choice is whether project-level compile regressions are enforceable and whether representative edits are first-class.",
+      "story": "Mina maintains a large Jet service. A harmless generic helper change doubles every developer rebuild, while runtime benchmarks remain green. Mina wants CI to catch that regression with enough provenance to reproduce it.",
+      "inWild": "// Proposed typed surface under options B/C; ordinary projects declare nothing.\nmodule perf.ci {\n    budgets: [\n        Budget.{\n            name: \"cli-edit-compile\",\n            scope: .Target(\"cli\"),\n            metric: .CompileTime(.P95),\n            provider: .CompilerProbe(.Edit(\"rename-route\")),\n            comparison: .RelativeTo(\"ci/linux-x64\"),\n            limit: .RegressionAtMost(5pct),\n        },\n    ]\n}",
+      "detail": "Beginner pass: no new ceremony or measurement occurs by default. Expert pass: declared probes pin the source tree, edit, cache state, toolchain, target, profile, backend, linker, host, warmups, samples, and phase breakdown.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Internal Jet SLOs only",
+          "detail": "Keep compile latency entirely in #666's compiler corpus. Projects cannot declare or enforce their own compile-time regressions through performance budgets.",
+          "code": "$ jet budget check\n# Runtime, size, and existing compiler-fact budgets only.\n# Compile latency remains a Jet compiler product gate in #666."
+        },
+        {
+          "key": "B",
+          "name": "Fixed compile scenarios",
+          "detail": "Add typed Clean and NoChange compiler probes. They are reproducible, but they cannot model the representative edit loop that developers feel most often.",
+          "code": "Budget.{\n    name: \"clean-compile\",\n    scope: .Target(\"cli\"),\n    metric: .CompileTime(.P95),\n    provider: .CompilerProbe(.Clean),\n    comparison: .RelativeTo(\"ci/linux-x64\"),\n    limit: .RegressionAtMost(5pct),\n}\n\nBudget.{\n    name: \"no-change-compile\",\n    scope: .Target(\"cli\"),\n    metric: .CompileTime(.P95),\n    provider: .CompilerProbe(.NoChange),\n    comparison: .RelativeTo(\"ci/linux-x64\"),\n    limit: .RegressionAtMost(5pct),\n}"
+        },
+        {
+          "key": "C",
+          "name": "Typed compile workloads",
+          "detail": "Add one CompilerProbe provider with Clean, NoChange, and named Edit workload values. The edit value records a deterministic source patch instead of guessing from timestamps.",
+          "code": "module perf.ci {\n    compile_workloads: {\n        rename_route: CompilerWorkload.Edit.{\n            target: \"cli\",\n            patch: \"tests/perf/rename-route.patch\",\n        },\n    }\n    budgets: [\n        Budget.{\n            name: \"edit-compile\",\n            scope: .Target(\"cli\"),\n            metric: .CompileTime(.P95),\n            provider: .CompilerProbe(.Edit(\"rename_route\")),\n            comparison: .RelativeTo(\"ci/linux-x64\"),\n            limit: .RegressionAtMost(5pct),\n        },\n    ]\n}\n\n$ jet budget check\n# Measures the pinned clean tree, applies the named patch, and reports phase causes."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jet #666",
+          "note": "The checked compiler corpus protects Jet's compiler as a product. It does not let one application preserve its own representative edit latency.",
+          "code": "cold / warm / incremental JIT and AOT corpus\nparse / sema / TIR / backend / link timings"
+        },
+        {
+          "lang": "Rust case study",
+          "note": "The mined video shows why one total is insufficient. Generics, state machines, linker choice, libc, allocator, profile, and cache state can each dominate.",
+          "code": "same source + different profile/cache/environment\n=> different cause, different useful fix"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "C serves both facets with one existing budget mechanism. Beginners pay nothing; experts can prevent the real edit-loop regression, not only clean or unchanged build regressions.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A protects Jet's compiler average but gives application teams no enforceable guard for project-specific generic, derive, or module-graph cliffs."
+          },
+          {
+            "key": "B",
+            "reason": "B measures two useful endpoints yet omits the representative edit path where incremental invalidation failures appear."
+          }
+        ],
+        "tradeoff": "C adds public metric, provider, workload, and edit identity types. Their closed typed form keeps cache state and source changes auditable instead of relying on ambient files or timestamps."
+      },
+      "hybrid": null,
+      "checkInstructions": "Before deciding, compare the beginner default, expert workload identity, cache-key completeness, and whether each option can catch a one-file incremental regression without flaky ambient state.",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-16T18:02:25.430Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-16"
     }
   ],
   "questions": [
@@ -50206,6 +50503,279 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-16T18:41:02.862Z",
+      "by": "codex-root-review",
+      "action": "card.update",
+      "ref": "c03lc2y3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T18:41:02.736Z",
+      "by": "codex-root-review",
+      "action": "card.update",
+      "ref": "c03lc2y3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T18:41:02.606Z",
+      "by": "codex-root-review",
+      "action": "card.update",
+      "ref": "c0vb511d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T18:41:02.476Z",
+      "by": "codex-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-16T18:41:02.372Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-16T18:41:02.267Z",
+      "by": "codex-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-16T18:41:02.131Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-16T18:41:02.023Z",
+      "by": "codex-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-16T18:41:01.916Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-16T18:41:01.810Z",
+      "by": "codex-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-16T18:41:01.704Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-16T18:41:01.598Z",
+      "by": "codex-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T18:41:01.490Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-16T18:41:01.386Z",
+      "by": "codex-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T18:41:01.278Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-16T18:41:01.168Z",
+      "by": "codex-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0vb511d",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T18:41:01.069Z",
+      "by": "codex-memory-642",
+      "action": "card.criteria-meet",
+      "ref": "c0vb511d",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-16T18:14:56.348Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c03lc2y3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T18:12:49.952Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PERFBUDGET-COMPILE1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-16T18:02:25.694Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0be4wgi",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T18:02:25.564Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0171611",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-16T18:02:25.430Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-COMPILE1",
+      "note": "Should typed project budgets cover compile latency?"
+    },
+    {
+      "at": "2026-07-16T18:02:25.325Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0be4wgi",
+      "note": "#6 Syntax registry, syntax decision log, formatter, grammars, d"
+    },
+    {
+      "at": "2026-07-16T18:02:25.225Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0be4wgi",
+      "note": "#5 Hostile tests reject stale or forged cache identity, missing"
+    },
+    {
+      "at": "2026-07-16T18:02:25.123Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0be4wgi",
+      "note": "#4 Ordinary projects perform no extra measurement and need no p"
+    },
+    {
+      "at": "2026-07-16T18:02:25.019Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0be4wgi",
+      "note": "#3 Every compile sample records source tree, workload or edit b"
+    },
+    {
+      "at": "2026-07-16T18:02:24.911Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0be4wgi",
+      "note": "#2 The chosen option is implemented exactly through #241 shared"
+    },
+    {
+      "at": "2026-07-16T18:02:24.807Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0be4wgi",
+      "note": "#1 D-PERFBUDGET-COMPILE1 is ratified before any public metric, "
+    },
+    {
+      "at": "2026-07-16T18:02:24.701Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#8 Each uncovered gap lands in its canonical owner with targete"
+    },
+    {
+      "at": "2026-07-16T18:02:24.598Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#7 Compiler explanation stays bounded and actionable: Jet sourc"
+    },
+    {
+      "at": "2026-07-16T18:02:24.488Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#6 Builder evidence isolates linker, libc, allocator, backend, "
+    },
+    {
+      "at": "2026-07-16T18:02:24.381Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#5 No passing speed result depends on silent boxing, dynamic di"
+    },
+    {
+      "at": "2026-07-16T18:02:24.275Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#4 A construct-scale matrix isolates generic instantiations, bo"
+    },
+    {
+      "at": "2026-07-16T18:02:24.164Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#3 Hostile cache tests prove that compiler, schema, target, pro"
+    },
+    {
+      "at": "2026-07-16T18:02:24.062Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#2 The #666 corpus covers clean, unchanged, and representative-"
+    },
+    {
+      "at": "2026-07-16T18:02:23.958Z",
+      "by": "codex-root",
+      "action": "card.criteria-add",
+      "ref": "c0171611",
+      "note": "#1 A source ledger separates transcript claims, linked-author c"
+    },
+    {
+      "at": "2026-07-16T18:00:54.332Z",
+      "by": "codex-root",
+      "action": "card.add",
+      "ref": "c0be4wgi",
+      "note": "Typed project compile-latency budgets"
+    },
+    {
+      "at": "2026-07-16T18:00:25.418Z",
+      "by": "codex-root",
+      "action": "card.add",
+      "ref": "c0171611",
+      "note": "Video mine: compiler-latency lessons cross-check and gap closure"
+    },
+    {
+      "at": "2026-07-16T17:44:50.351Z",
+      "by": "git",
+      "action": "card.update",
+      "ref": "c03lc2y3",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-16T17:44:18.231Z",
       "by": "codex-memory-review",
@@ -53432,279 +54002,6 @@
       "action": "card.criteria-add",
       "ref": "c0qqwe62",
       "note": "#1 The Apps view lives inside the one Studio shell -- verified "
-    },
-    {
-      "at": "2026-07-16T05:01:59.930Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0qqwe62",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:59.780Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0m3ug2h",
-      "note": "#4 GATE: the welcome-flow GUI ships only after a D-WD7 ballot d"
-    },
-    {
-      "at": "2026-07-16T05:01:59.652Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0m3ug2h",
-      "note": "#3 The apply path reuses the existing declarative-apply machine"
-    },
-    {
-      "at": "2026-07-16T05:01:59.529Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0m3ug2h",
-      "note": "#2 Accepting an offer writes a source diff into the host config"
-    },
-    {
-      "at": "2026-07-16T05:01:59.407Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0m3ug2h",
-      "note": "#1 First-boot detection reads the #326 hardware.<host> facts an"
-    },
-    {
-      "at": "2026-07-16T05:01:59.279Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0m3ug2h",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:59.123Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c6q02qhw",
-      "note": "#4 No GUI-owned semantic state file is written in this slice --"
-    },
-    {
-      "at": "2026-07-16T05:01:58.990Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c6q02qhw",
-      "note": "#3 Studio and the browser/headless fallback consume the same lo"
-    },
-    {
-      "at": "2026-07-16T05:01:58.870Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c6q02qhw",
-      "note": "#2 An empty or missing proof state renders as an explicit no-pr"
-    },
-    {
-      "at": "2026-07-16T05:01:58.744Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c6q02qhw",
-      "note": "#1 jetos studio on a fixture repo opens the installed Studio ap"
-    },
-    {
-      "at": "2026-07-16T05:01:58.615Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c6q02qhw",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:58.467Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0kbaab0",
-      "note": "#5 The per-user HM-class environment (via the #469 user.<name> "
-    },
-    {
-      "at": "2026-07-16T05:01:58.346Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0kbaab0",
-      "note": "#4 Unfree packages and custom flake inputs both resolve in the "
-    },
-    {
-      "at": "2026-07-16T05:01:58.214Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0kbaab0",
-      "note": "#3 An import-audit diff lists every omission (each unexpressed "
-    },
-    {
-      "at": "2026-07-16T05:01:58.096Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0kbaab0",
-      "note": "#2 Real-guest proof boots the imported config with the owner de"
-    },
-    {
-      "at": "2026-07-16T05:01:57.977Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0kbaab0",
-      "note": "#1 The owner real ~/nixos config imports cleanly and builds und"
-    },
-    {
-      "at": "2026-07-16T05:01:57.820Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0kbaab0",
-      "note": "workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:57.667Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0nlrm12",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:57.496Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0txfavt",
-      "note": "#4 vmtest: an ephemeral-root guest reboots and only the declare"
-    },
-    {
-      "at": "2026-07-16T05:01:57.312Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0txfavt",
-      "note": "#3 An opt-in ephemeral root with an explicit persist list shows"
-    },
-    {
-      "at": "2026-07-16T05:01:57.121Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0txfavt",
-      "note": "#2 vmtest: install from a LUKS-on-ext4 storage-tree fixture suc"
-    },
-    {
-      "at": "2026-07-16T05:01:56.980Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0txfavt",
-      "note": "#1 One typed storage tree (partitions, filesystems, LUKS, LVM, "
-    },
-    {
-      "at": "2026-07-16T05:01:56.857Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0txfavt",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:56.708Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0svh6c4",
-      "note": "#5 Auto-upgrade runs with no resident daemon and no root-owned "
-    },
-    {
-      "at": "2026-07-16T05:01:56.586Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0svh6c4",
-      "note": "#4 A forced failed health check after auto-upgrade triggers aut"
-    },
-    {
-      "at": "2026-07-16T05:01:56.467Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0svh6c4",
-      "note": "#3 Unattended auto-upgrade fetch, build, proof-gate, and switch"
-    },
-    {
-      "at": "2026-07-16T05:01:56.346Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0svh6c4",
-      "note": "#2 jet clean-class GC never collects a generation excluded by t"
-    },
-    {
-      "at": "2026-07-16T05:01:56.221Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0svh6c4",
-      "note": "#1 A retention policy (keep-last-N / keep-younger-than) GC run "
-    },
-    {
-      "at": "2026-07-16T05:01:56.098Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0svh6c4",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:55.956Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0rvu7rz",
-      "note": "#4 jet os doctor hardware reports drift between scanned and dec"
-    },
-    {
-      "at": "2026-07-16T05:01:55.820Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0rvu7rz",
-      "note": "#3 jet os options explain shows what a specialisation changed r"
-    },
-    {
-      "at": "2026-07-16T05:01:55.702Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0rvu7rz",
-      "note": "#2 A specialisation (named boot variant) shares its base genera"
-    },
-    {
-      "at": "2026-07-16T05:01:55.583Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0rvu7rz",
-      "note": "#1 A hardware scan emits a typed hardware.<host> declaration (d"
-    },
-    {
-      "at": "2026-07-16T05:01:55.462Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0rvu7rz",
-      "note": "plan,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-16T05:01:55.317Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qs8j6u",
-      "note": "#4 A cross-architecture (aarch64) SD-card build succeeds for at"
-    },
-    {
-      "at": "2026-07-16T05:01:55.197Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qs8j6u",
-      "note": "#3 A docs matrix lists every candidate format (cloud/SD/netboot"
-    },
-    {
-      "at": "2026-07-16T05:01:55.068Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qs8j6u",
-      "note": "#2 Each of the three shipped formats boots successfully via the"
-    },
-    {
-      "at": "2026-07-16T05:01:54.946Z",
-      "by": "fable-clerk",
-      "action": "card.criteria-add",
-      "ref": "c0qs8j6u",
-      "note": "#1 jet os image <host> --format qcow2|sd|netboot each produce a"
-    },
-    {
-      "at": "2026-07-16T05:01:54.820Z",
-      "by": "fable-clerk",
-      "action": "card.update",
-      "ref": "c0qs8j6u",
-      "note": "plan,workOrder,blockedBy"
     }
   ],
   "nextNum": 368,

@@ -119,6 +119,23 @@ fn run() {
     );
 }
 
+#[test]
+fn option_map_callback_receives_read_borrow() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    value: String? :: Val(\"borrowed\")
+    size :: value.map((text: String) => text.len())
+    print(size)
+}
+";
+    let (code, stdout) = build_and_run("tir_option_map_read_borrow", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "8\n");
+}
+
 /// A FnMut closure (mutates a captured mutable local) routes through the
 /// FnMut branch (`jet_list_each_mut`, no `move` keyword) — the Fn-vs-FnMut
 /// decision read off the lambda's `needs_fn_mut` meta.
@@ -357,6 +374,43 @@ shapes: [Shape] :: [Circle.{radius: 2.0}, Square.{side: 3.0}]
     let (code, stdout) = build_and_run("tir_trait_methods", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "circle: 12.0\nsquare: 9.0\n");
+}
+
+#[test]
+fn trait_object_call_keeps_non_scalar_arg_and_return_type() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Measure {
+    fn measure(self, text: String) -> Int
+}
+struct Counter {
+    bonus: Int
+    impl Measure {
+        fn measure(self, text: String) -> Int {
+            return text.len() + self.bonus
+        }
+    }
+}
+fn apply_measure(counter: Measure, text: String) -> Int {
+    return inspect(counter) + counter.measure(text)
+}
+fn inspect<T>(value: T) -> Int {
+    return 1
+}
+fn run() {
+    counters: [Measure] :: [Counter.{bonus: 2}]
+    counters.each((counter) => {
+        text :: \"read\"
+        print(apply_measure(counter, text))
+        print(text)
+    })
+}
+";
+    let (code, stdout) = build_and_run("tir_trait_object_non_scalar_arg", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "7\nread\n");
 }
 
 /// c109 Phase 12: an explicit `else { if … }` block must stay `} else { if … }`,

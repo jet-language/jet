@@ -1032,9 +1032,43 @@ pub(crate) fn emit_type_impl(
     if methods.is_empty() {
         return;
     }
+    let previous_type_params = cx.current_type_params.replace(
+        type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+    );
+    let mut lowered = Vec::with_capacity(methods.len());
+    for method in methods {
+        if !TIR::tir_covers_method(method, type_name, cx) {
+            jet_foundation::ice!(
+                None,
+                "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+                method.name
+            );
+        }
+        lowered.push(TIR::lower_method(method, type_name, cx));
+    }
+    let param_names: std::collections::HashSet<&str> =
+        type_params.iter().map(|param| param.name.as_str()).collect();
+    for method in &mut lowered {
+        let mut clone_params = std::collections::HashSet::new();
+        for ty in &method.clone_types {
+            Generics::collect_type_param_mentions(ty, &param_names, &mut clone_params);
+        }
+        let bounds: Vec<String> = type_params
+            .iter()
+            .filter(|param| clone_params.contains(&param.name))
+            .map(|param| format!("{}: Clone", param.name))
+            .collect();
+        method.generics = if bounds.is_empty() {
+            String::new()
+        } else {
+            format!(" where {}", bounds.join(", "))
+        };
+    }
     let tp_use = Generics::type_param_rust_list(type_params);
-    let clone_bounds: std::collections::HashMap<String, Vec<String>> =
-        Generics::rust_extra_clone_bounds(type_params).into_iter().collect();
+    let clone_bounds = std::collections::HashMap::new();
     let tp_impl = Generics::rust_type_param_list(type_params, &clone_bounds);
     out.push_str(&format!(
         "impl{} {}{} {{\n",
@@ -1042,14 +1076,8 @@ pub(crate) fn emit_type_impl(
         user_type_rust(type_name),
         tp_use
     ));
-    let previous_type_params = cx.current_type_params.replace(
-        type_params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect(),
-    );
-    for m in methods {
-        emit_method(cx, type_name, m, out, 1);
+    for method in &lowered {
+        TIR::emit_tir_func(method, cx, out);
     }
     cx.current_type_params.replace(previous_type_params);
     out.push_str("}\n\n");
@@ -1277,27 +1305,6 @@ fn emit_trait_method(
     );
     if TIR::tir_covers_trait_method(f, type_name, cx, trait_name) {
         let tir = TIR::lower_trait_method(f, type_name, cx, trait_name);
-        TIR::emit_tir_func(&tir, cx, out);
-        return;
-    }
-    jet_foundation::ice!(
-        None,
-        "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
-        f.name
-    );
-}
-
-fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
-    // c109 Phase N: the typed IR is the only codegen seam (R7). An inherent
-    // method always emits at indent 1 inside the `impl` block the caller opened;
-    // it lowers + emits through the TIR. A gate-miss is an internal compiler
-    // error (I2-class), never an AST fallback.
-    debug_assert_eq!(
-        indent, 1,
-        "inherent methods always emit at impl-block indent 1"
-    );
-    if TIR::tir_covers_method(f, type_name, cx) {
-        let tir = TIR::lower_method(f, type_name, cx);
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }

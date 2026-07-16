@@ -1,6 +1,6 @@
 use super::*;
 use crate::Syntax;
-use crate::AST::{Pattern, Type, VariantPayload};
+use crate::AST::{AccessConvention, Pattern, Type, VariantPayload};
 
 pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
     use crate::AST::PatSlot;
@@ -299,24 +299,18 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
     let arg_decls: Vec<String> = params
         .iter()
         .enumerate()
-        .map(|(i, p)| format!("__jet_a{}: {}", i, cx.rust_type(p)))
+        .map(|(i, p)| {
+            format!(
+                "__jet_a{}: {}",
+                i,
+                rust_param_type(cx, AccessConvention::Read, p)
+            )
+        })
         .collect();
-    // Non-scalar Named types are passed by reference in Jet Rust functions.
     let arg_calls: Vec<String> = params
         .iter()
         .enumerate()
-        .map(|(i, p)| {
-            if matches!(p, Type::Named(name) if name == "HttpHandler") {
-                format!("__jet_a{i}")
-            } else if matches!(
-                p,
-                Type::Named(_) | Type::String | Type::List(_) | Type::Map { .. }
-            ) {
-                format!("&__jet_a{i}")
-            } else {
-                format!("__jet_a{i}")
-            }
-        })
+        .map(|(i, _)| format!("__jet_a{i}"))
         .collect();
     let _ = ret;
     format!(

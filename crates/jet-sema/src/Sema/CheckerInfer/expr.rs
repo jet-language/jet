@@ -11,6 +11,14 @@ use crate::AST::{
 };
 use std::collections::HashSet;
 
+fn field_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, field, _) => Some(format!("{}.{}", field_path(base)?, field)),
+        _ => None,
+    }
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn infer_name_or(&mut self, e: &mut Expr, fallback: &str) -> String {
         self.infer(e)
@@ -82,7 +90,39 @@ impl<'a> Checker<'a> {
         let ty = self.infer_inner(e);
         if !borrowed {
             if let Some(t) = &ty {
-                if !type_is_copy(t) && field_read_to_clone(e, self.registry, self.imports) {
+                let borrowed_param_place = !type_is_copy(t)
+                    && matches!(e, Expr::Field(..) | Expr::Index { .. })
+                    && expr_root_ident(e).is_some_and(|root| {
+                        self.lookup(root).is_some_and(|info| {
+                            matches!(
+                                info.param_conv,
+                                Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                            )
+                        })
+                    });
+                if !borrowed_param_place
+                    && !type_is_copy(t)
+                    && field_read_to_clone(e, self.registry, self.imports)
+                {
+                    if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(e) {
+                        let borrowed_param = self.lookup(root).is_some_and(|info| {
+                            matches!(
+                                info.param_conv,
+                                Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                            )
+                        });
+                        if borrowed_param {
+                            let path = field_path(e).unwrap_or_else(|| root.to_string());
+                            self.diags.push(Diagnostic::error(
+                                "E0120",
+                                format!("`{path}` is borrowed, so it cannot escape as an owned value"),
+                                format!("`{root}` is a parameter with read access; its fields are borrowed with it"),
+                                format!("copy it explicitly with `{}{path}`, or take `{root}` with `^`", Syntax::SIGIL_COPY),
+                                Some(e.span()),
+                            ));
+                            return ty;
+                        }
+                    }
                     // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
                     // explicitly — one mechanism for "duplicate this value",
                     // whether the compiler inserts it or the user spells it.
@@ -518,6 +558,29 @@ impl<'a> Checker<'a> {
                     // exactly "this function's address was taken" for E0918.
                     self.record_current_function_reference(name, *span);
                     self.inline_addr_taken.insert(name.clone());
+                    if let Some((idx, (convention, _))) = sig
+                        .params
+                        .iter()
+                        .enumerate()
+                        .find(|(_, (convention, _))| *convention != AccessConvention::Read)
+                    {
+                        let capability = match convention {
+                            AccessConvention::Write => "write access (`&`)",
+                            AccessConvention::Move => "ownership (`^`)",
+                            AccessConvention::Read => unreachable!(),
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{name}` cannot be used as a function value"),
+                            format!(
+                                "parameter {} requires {capability}, but `fn(T)` function values take every parameter with plain read access",
+                                idx + 1
+                            ),
+                            "call this function directly; function values cannot erase write or ownership requirements"
+                                .to_string(),
+                            Some(*span),
+                        ));
+                    }
                     return Some(func_sig_to_fn_type(&sig));
                 }
                 self.unknown_name(name, *span);

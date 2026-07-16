@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
+use crate::AST::{AccessConvention, CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
 
 use super::super::Builtins::{
     apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp,
@@ -485,17 +485,14 @@ impl<'a> Interp<'a> {
                         span,
                     ));
                 }
-                let mut frame = HashMap::new();
-                for (p, a) in fixed.iter().zip(args) {
-                    let v = self.eval(&a.expr, scope)?;
-                    frame.insert(p.name.clone(), v);
-                }
+                let (mut frame, writebacks) =
+                    self.bind_fixed_call_args(fixed, &args[..fixed.len()], scope)?;
                 let mut rest = Vec::with_capacity(args.len() - fixed.len());
                 for a in &args[fixed.len()..] {
                     rest.push(self.eval(&a.expr, scope)?);
                 }
                 frame.insert(last.name.clone(), CtValue::List(rest));
-                return self.call_func(name, func, frame);
+                return self.call_func_with_writebacks(name, func, frame, writebacks, scope);
             }
         }
         if func.params.len() != args.len() {
@@ -504,12 +501,44 @@ impl<'a> Interp<'a> {
                 span,
             ));
         }
+        let (frame, writebacks) = self.bind_fixed_call_args(&func.params, args, scope)?;
+        self.call_func_with_writebacks(name, func, frame, writebacks, scope)
+    }
+
+    fn bind_fixed_call_args(
+        &mut self,
+        params: &[crate::AST::Param],
+        args: &[CallArg],
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(HashMap<String, CtValue>, Vec<(String, String)>), Diagnostic> {
         let mut frame = HashMap::new();
-        for (p, a) in func.params.iter().zip(args) {
-            let v = self.eval(&a.expr, scope)?;
-            frame.insert(p.name.clone(), v);
+        let mut writebacks = Vec::new();
+        for (p, a) in params.iter().zip(args) {
+            frame.insert(p.name.clone(), self.eval(&a.expr, scope)?);
+            if p.convention == AccessConvention::Write {
+                if let Expr::Ident(caller_name, _) = &a.expr {
+                    writebacks.push((p.name.clone(), caller_name.clone()));
+                }
+            }
         }
-        self.call_func(name, func, frame)
+        Ok((frame, writebacks))
+    }
+
+    fn call_func_with_writebacks(
+        &mut self,
+        name: &str,
+        func: &Func,
+        frame: HashMap<String, CtValue>,
+        writebacks: Vec<(String, String)>,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let (result, frame) = self.call_func_with_frame(name, func, frame)?;
+        for (param_name, caller_name) in writebacks {
+            if let Some(value) = frame.get(&param_name) {
+                scope.insert(caller_name, value.clone());
+            }
+        }
+        Ok(result)
     }
 
     /// c139: run a resolved `Func`'s body in `frame` (already bound: params,
@@ -521,8 +550,18 @@ impl<'a> Interp<'a> {
         &mut self,
         name: &str,
         func: &Func,
-        mut frame: HashMap<String, CtValue>,
+        frame: HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        self.call_func_with_frame(name, func, frame)
+            .map(|(value, _)| value)
+    }
+
+    fn call_func_with_frame(
+        &mut self,
+        name: &str,
+        func: &Func,
+        mut frame: HashMap<String, CtValue>,
+    ) -> Result<(CtValue, HashMap<String, CtValue>), Diagnostic> {
         // D-DBG3: enter a user-function frame — bump the debugger's call depth
         // and current-function name so `next`/`finish` and the `in fn()` banner
         // track correctly, then restore both on the way out (every path).
@@ -532,7 +571,7 @@ impl<'a> Interp<'a> {
         let result = self.exec_block(&func.body, &mut frame);
         self.depth = prev_depth;
         self.cur_func = prev_func;
-        match result {
+        let value = match result {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(CtValue::Unit),
             Err(ref d) if d.code == ERR_PROPAGATE_CODE => {
@@ -552,7 +591,8 @@ impl<'a> Interp<'a> {
                 Ok(CtValue::Unit)
             }
             Err(e) => Err(e),
-        }
+        }?;
+        Ok((value, frame))
     }
 
     /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`

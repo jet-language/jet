@@ -1,6 +1,6 @@
 // Ownership (M2 / D-MEM1): unmarked is read by default, `&` to write/change,
-// `^` to move, `~x` to copy (D-SHAPE-COPY1=A). Every function below takes and returns
-// owned values or plain write-borrows — v5 has no borrow-return form
+// `^` to move, `~x` to copy (D-SHAPE-COPY1=A). Functions below use read borrows by
+// default, explicit write borrows, or explicit takes; returned values are owned. v5 has no borrow-return form
 // (`-> &T` is not in the grammar; see docs/spec/syntax-decisions.md D-MEM1).
 fn show(msg: String) {
     print(msg)
@@ -18,6 +18,14 @@ fn headline(text: String) -> String {
     return "== {text} =="
 }
 
+fn length(text: String) -> Int {
+    return text.len()
+}
+
+fn apply(reader: fn(String) -> Int, text: String) -> Int {
+    return reader(text)
+}
+
 fn run() {
     score: Int := 41
     bump(&score)
@@ -25,6 +33,8 @@ fn run() {
     greeting: String :: "hello"
     show(greeting)
     print(greeting)
+    print(apply(length, greeting))
+    print(apply((text: String) => text.len(), greeting))
     saved: String :: archive(^"vault")
     print(saved)
     print(headline("Jet"))

@@ -176,7 +176,7 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
     TYPE_F64,
 ];
 
-/// D-MEM1 (ratified, supersedes D-CAP7): memory model v5 sigils. Three
+/// D-MEM1 / D-MEM-PARAM1=A (ratified, supersedes D-CAP7): memory model v5 sigils. Three
 /// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
 /// write, `^T` = move (consume), `~T` = copy (D-SHAPE-COPY1=A, supersedes
 /// D-CAP2/S4's `copy` verb).

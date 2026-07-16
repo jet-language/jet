@@ -667,7 +667,10 @@ pub fn collect_type_param_mentions(
                 out.insert(n.clone());
             }
         }
-        Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. } => {
             collect_type_param_mentions(inner, param_names, out)
         }
         Type::FixedList { elem, .. } => collect_type_param_mentions(elem, param_names, out),

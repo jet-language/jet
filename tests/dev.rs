@@ -2421,6 +2421,68 @@ fn cranelift_covers_function_calls() {
     );
 }
 
+#[test]
+fn cranelift_matches_plain_parameter_read_write_and_take_modes() {
+    assert_cranelift_matches_interpreter(
+        "fn read(text: String) { print(text) }\nfn edit(values: &[Int]) { values[0] = 9 }\nfn consume(text: ^String) { print(text) }\nfn run() {\n    text :: \"hello\"\n    values := [1, 2]\n    read(text)\n    edit(&values)\n    print(values[0])\n    consume(^text)\n}\n",
+        "plain_parameter_modes",
+    );
+}
+
+#[test]
+fn interpreter_writeback_boundary_only_opens_for_resolved_user_functions() {
+    let user = bundle_of(
+        "fn edit(value: &Int) { value = 2 }\nfn run() { value := 1; edit(&value); print(value) }\n",
+        "user_writeback_boundary",
+    );
+    assert!(
+        jet_driver::InterpreterBoundary::dev_boundary_scan(&user).is_none(),
+        "resolved user calls have interpreter writeback support"
+    );
+
+    let unresolved = bundle_of(
+        "fn run() { value := 1; unsupported(&value) }\n",
+        "unsupported_writeback_boundary",
+    );
+    let boundary = jet_driver::InterpreterBoundary::dev_boundary_scan(&unresolved)
+        .expect("an unresolved/core/import-style direct call must keep the honest boundary");
+    assert_eq!(boundary.code, "E2201");
+    assert!(boundary.what.contains("writeback"), "{boundary:?}");
+
+    let mut foreign = bundle_of(
+        "fn edit(value: &Int) {}\nfn run() { value := 1; edit(&value) }\n",
+        "foreign_writeback_boundary",
+    );
+    let edit = foreign.modules[0]
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            jet::AST::Item::Func(function) if function.name == "edit" => Some(function),
+            _ => None,
+        })
+        .expect("fixture has edit");
+    let span = edit.name_span;
+    edit.inline_foreign = Some(jet::AST::InlineForeign {
+        lang: "c".to_string(),
+        lang_span: span,
+        marker_span: span,
+        source: String::new(),
+        source_span: span,
+    });
+    let boundary = jet_driver::InterpreterBoundary::dev_boundary_scan(&foreign)
+        .expect("inline foreign functions are not interpreter writeback targets");
+    assert_eq!(boundary.code, "E2201");
+    assert!(boundary.what.contains("writeback"), "{boundary:?}");
+}
+
+#[test]
+fn cranelift_matches_variadic_fixed_writeback() {
+    assert_cranelift_matches_interpreter(
+        "fn edit(values: &[Int], extras: ...Int) { values[0] = extras.len() }\nfn run() {\n    values := [0]\n    edit(&values, 7, 8)\n    print(values[0])\n}\n",
+        "variadic_fixed_writeback",
+    );
+}
+
 /// c139 M3+: counted `loop init; cond; step` with compound assign.
 #[test]
 fn cranelift_covers_counted_loop() {

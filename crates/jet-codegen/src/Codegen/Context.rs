@@ -1222,7 +1222,7 @@ impl Cx {
     ) -> String {
         let ps = params
             .iter()
-            .map(|p| self.rust_type(p))
+            .map(|p| rust_param_type(self, AccessConvention::Read, p))
             .collect::<Vec<_>>()
             .join(", ");
         let r = ret
@@ -1659,6 +1659,18 @@ pub(crate) fn build_cx_items(
             }
             Item::Trait(t) => {
                 cx.trait_names.insert(t.name.clone());
+                for m in &t.methods {
+                    cx.method_sigs.insert(
+                        (t.name.clone(), m.name.clone()),
+                        m.params
+                            .iter()
+                            .filter(|p| p.name != Syntax::KW_SELF)
+                            .map(|p| (p.convention, p.ty.clone()))
+                            .collect(),
+                    );
+                    cx.method_rets
+                        .insert((t.name.clone(), m.name.clone()), m.return_type.clone());
+                }
             }
             // D-QUAL2: a tag erases — it contributes no codegen names.
             Item::Tag(_) => {}

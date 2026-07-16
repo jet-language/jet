@@ -1,7 +1,9 @@
 use crate::AST::{AccessConvention, Expr, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::type_fix_hint;
+use crate::Sema::Diagnostics::{aliasing_mut_after_read, aliasing_while_mut, type_fix_hint};
+use crate::Syntax;
+use std::collections::HashSet;
 impl<'a> Checker<'a> {
         pub(super) fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
             crate::AST::CallArg {
@@ -73,12 +75,26 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
             }
+            let mut mut_borrowed = HashSet::new();
+            let mut read_borrowed = HashSet::new();
             for (i, arg) in args.iter_mut().enumerate() {
+                if let Expr::Ident(name, arg_span) = &arg.expr {
+                    if mut_borrowed.contains(name) {
+                        self.diags.push(aliasing_while_mut(name, *arg_span));
+                    } else if arg.convention == AccessConvention::Write
+                        && read_borrowed.contains(name)
+                    {
+                        self.diags.push(aliasing_mut_after_read(name, *arg_span));
+                    }
+                }
                 if let Some(param_ty) = params.get(i) {
                     let saved = self.expected_type.clone();
+                    let saved_borrow = self.borrow_ctx;
                     self.expected_type = Some(param_ty.clone());
+                    self.borrow_ctx = !param_ty.is_scalar();
                     let got = self.infer(&mut arg.expr);
                     self.expected_type = saved;
+                    self.borrow_ctx = saved_borrow;
                     if let Some(got) = got {
                         if got != *param_ty {
                             self.diags.push(Diagnostic::error(
@@ -93,6 +109,49 @@ impl<'a> Checker<'a> {
                                 type_fix_hint(param_ty, &got),
                                 Some(arg.expr.span()),
                             ));
+                        }
+                    }
+                    if arg.convention == AccessConvention::Move {
+                        self.diags.push(Diagnostic::error(
+                            "E0203",
+                            format!(
+                                "`{}` passed to a parameter that does not consume",
+                                Syntax::SIGIL_MOVE
+                            ),
+                            "function-value parameters have plain read access; they do not take ownership"
+                                .to_string(),
+                            format!("remove `{}`", Syntax::SIGIL_MOVE),
+                            Some(arg.span),
+                        ));
+                    }
+                    if arg.convention == AccessConvention::Write
+                        && !matches!(arg.expr, Expr::Ident(_, _))
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0202",
+                            format!("`{}` needs a plain named binding after it", Syntax::SIGIL_WRITE),
+                            "write access (`&`) can only be granted to a named binding, not an expression"
+                                .to_string(),
+                            "bind the value first, then pass the binding".to_string(),
+                            Some(arg.span),
+                        ));
+                    }
+                    if let Expr::Ident(name, _) = &arg.expr {
+                        if arg.convention == AccessConvention::Write {
+                            if let Some(info) = self.lookup(name) {
+                                if !info.mutable {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0111",
+                                        format!("`{name}` cannot be changed"),
+                                        "write access requires a mutable binding".to_string(),
+                                        format!("declare `{name}` with `:=`"),
+                                        Some(arg.span),
+                                    ));
+                                }
+                            }
+                            mut_borrowed.insert(name.clone());
+                        } else if !param_ty.is_scalar() {
+                            read_borrowed.insert(name.clone());
                         }
                     }
                 } else {

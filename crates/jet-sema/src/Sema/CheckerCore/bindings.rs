@@ -280,6 +280,11 @@ impl<'a> Checker<'a> {
             self.lambda_escapes = saved_esc;
             self.lambda_binding = saved_bind;
             self.expected_type = saved_expected;
+            self.reject_borrowed_param_subplace(
+                &b.init,
+                it.as_ref(),
+                "be stored in a binding",
+            );
     
             // E2502 (E2-M7): a line stream — `FileReader.lines()` / `StdinHandle
             // .lines()` — is a loop-source-only value. It may only be consumed

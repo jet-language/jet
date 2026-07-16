@@ -23,6 +23,41 @@ pub(crate) fn bin_bits_type(width: u8) -> Type {
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn reject_borrowed_param_subplace(
+        &mut self,
+        expr: &Expr,
+        ty: Option<&Type>,
+        destination: &str,
+    ) -> bool {
+        if ty.is_none_or(type_is_copy) || !matches!(expr, Expr::Field(..) | Expr::Index { .. }) {
+            return false;
+        }
+        let Some(root) = crate::Sema::Diagnostics::expr_root_ident(expr) else {
+            return false;
+        };
+        let borrowed = self.lookup(root).is_some_and(|info| {
+            matches!(
+                info.param_conv,
+                Some(AccessConvention::Read) | Some(AccessConvention::Write)
+            )
+        });
+        if !borrowed {
+            return false;
+        }
+        self.diags.push(Diagnostic::error(
+            "E0120",
+            format!("`{root}` was not moved here, so this part cannot {destination}"),
+            "the function can access this parameter, but it does not own any part of it"
+                .to_string(),
+            format!(
+                "copy the selected value explicitly by prefixing it with `{}`",
+                Syntax::SIGIL_COPY
+            ),
+            Some(expr.span()),
+        ));
+        true
+    }
+
     pub(crate) fn check_static_method(
         &mut self,
         type_name: &str,
@@ -760,7 +795,7 @@ impl<'a> Checker<'a> {
             // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
             // non-`Copy` ident (a `read`/`mut` param → `&T`/`&mut T`) can't be moved
             // into the field — codegen would emit `(*user_n)` → rustc E0507.
-            self.clone_borrowed_struct_field_value(expr);
+            self.clone_borrowed_struct_field_value(expr, et.as_ref());
             // D-ALLOC2: E0631 — storing an arena `view` in a struct field would
             // let the struct (which can outlive the region) keep a dangling
             // borrow into the arena.
@@ -874,9 +909,8 @@ impl<'a> Checker<'a> {
     /// is still read later — both would otherwise reach rustc as a raw,
     /// unreported E0507/E0382 (I2). Two cases:
     ///   - a `read`/`mut` param is `&T`/`&mut T`, so using it directly as the
-    ///     (owning) field value would emit `(*user_n)` → rustc E0507. Always
-    ///     cloned (this mirrors `field_read_to_clone`'s owning-field-read
-    ///     rewrite for the bare-ident case).
+    ///     (owning) field value would emit `(*user_n)` → rustc E0507. Reject it
+    ///     before codegen and require an explicit copy.
     ///   - an OWNED local (no param convention) moves for real in the
     ///     generated Rust; if a later statement in the same/enclosing block
     ///     still reads it, that would be rustc E0382 ("use after move") with
@@ -886,19 +920,34 @@ impl<'a> Checker<'a> {
     ///     that is NOT read again keeps moving (no wasted clone; unchanged
     ///     from prior behavior).
     /// `take` params, `Copy` types, and non-ident values are left untouched (no clone).
-    /// A type-VAR param (`a: T`) is emitted BY VALUE in codegen (`is_type_param` →
-    /// `Move`/no deref, Items.rs), not by reference, so it must NOT be cloned even though
-    /// its convention reads as `Read` — cloning would diverge from the AST path.
-    fn clone_borrowed_struct_field_value(&mut self, expr: &mut Expr) {
+    fn clone_borrowed_struct_field_value(&mut self, expr: &mut Expr, ty: Option<&Type>) {
+        if self.reject_borrowed_param_subplace(expr, ty, "fill an owned field") {
+            return;
+        }
+        if let Expr::Ident(name, span) = expr {
+            let borrowed = self.lookup(name).is_some_and(|info| {
+                !type_is_copy(&info.ty)
+                    && matches!(
+                        info.param_conv,
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                    )
+            });
+            if borrowed {
+                self.diags.push(Diagnostic::error(
+                    "E0120",
+                    format!("`{name}` was not moved here, so it cannot fill an owned field"),
+                    "this function has read access only and does not own the value".to_string(),
+                    format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                    Some(*span),
+                ));
+                return;
+            }
+        }
         let should_clone = match expr {
             Expr::Ident(name, _) => {
                 let name = name.clone();
                 self.lookup(&name).is_some_and(|info| {
-                    // A type-var-typed param is by-value (codegen's `is_type_param`), never
-                    // borrowed — exclude it (matches the AST path's owned move).
-                    let is_type_var = matches!(&info.ty,
-                        Type::Named(n) if self.type_param_scope.iter().any(|p| &p.name == n));
-                    if type_is_copy(&info.ty) || is_type_var {
+                    if type_is_copy(&info.ty) {
                         return false;
                     }
                     match info.param_conv {
@@ -1015,7 +1064,8 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if let Some(EnumLitArg::Positional(e)) = args.first_mut() {
-                    if let Some(et) = self.infer(e) {
+                    let et = self.infer(e);
+                    if let Some(et) = &et {
                         self.check_type_assignable(expected, &et, e.span());
                     }
                     // D-EPPAYLOAD1 (I2 fix): same owning-position clone-insertion
@@ -1023,7 +1073,7 @@ impl<'a> Checker<'a> {
                     // An enum payload is an owning slot exactly like a struct field;
                     // without this, an owned local moved here and read afterward
                     // reached rustc as a raw, unreported E0382.
-                    self.clone_borrowed_struct_field_value(e);
+                    self.clone_borrowed_struct_field_value(e, et.as_ref());
                 } else if let Some(EnumLitArg::Named { label, .. }) = args.first() {
                     self.diags.push(Diagnostic::error(
                         "E0303",
@@ -1064,7 +1114,7 @@ impl<'a> Checker<'a> {
                             }
                             let et = self.infer(expr);
                             // D-EPPAYLOAD1 (I2 fix): see the positional-payload call above.
-                            self.clone_borrowed_struct_field_value(expr);
+                            self.clone_borrowed_struct_field_value(expr, et.as_ref());
                             if let Some(f) = fields.iter().find(|f| f.name == *label) {
                                 if let Some(et) = et {
                                     self.check_type_assignable(&f.ty, &et, expr.span());

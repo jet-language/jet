@@ -73,10 +73,11 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 
 D-DEP-GC1=A has one dependency-free collector implementation in
 `crates/jet-rt/src/__gc.rs`. `jet-rt` exposes that module directly to dev/JIT;
-codegen embeds the same source inside private `jet_traced_heap` for AOT and
-strips it until #658 emits scoped-GC operations. The pre-#658 `core.gc`/`Gc<T>`
-adapter remains isolated and unchanged; it is not this substrate and carries
-no scoped-GC correctness claim. #658 owns its retirement.
+codegen embeds the exact same source inside private `jet_gc` for AOT and strips
+it when no generated operation references that module. The pre-#658
+`core.gc`/`Gc<T>` compatibility adapter lives in that module too and delegates
+to this collector; it adds no second heap or scoped-GC policy. #658 owns the
+adapter's retirement.
 
 Object identities are monotonic and never reused. RAII root handles keep an
 object live; traced edges are sorted, deduplicated, bounded, and accepted only

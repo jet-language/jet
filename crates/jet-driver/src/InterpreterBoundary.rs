@@ -6,6 +6,7 @@
 
 use crate::AST::{AccessConvention, CallArg, ElseBranch, Expr, IfStmt, ImportKind, Item, ProgramBundle, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
+use std::collections::HashSet;
 
 struct Boundary {
     feature: String,
@@ -40,6 +41,16 @@ pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
 
 fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
     for module in &bundle.modules {
+        let interpreted_functions: HashSet<&str> = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Func(function) if function.inline_foreign.is_none() => {
+                    Some(function.name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
         for import in &module.imports {
             if let ImportKind::Module(name, span) = &import.kind {
                 if let Some(feature) = native_module_feature(name) {
@@ -79,7 +90,9 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                     if let Some(boundary) = scan_stmts_for_unsafe(&function.body) {
                         return Some(boundary);
                     }
-                    if let Some(boundary) = scan_stmts_for_mut_arg(&function.body) {
+                    if let Some(boundary) =
+                        scan_stmts_for_mut_arg(&function.body, &interpreted_functions)
+                    {
                         return Some(boundary);
                     }
                 }
@@ -131,39 +144,59 @@ fn scan_if_for_unsafe(statement: &IfStmt) -> Option<Boundary> {
     })
 }
 
-fn scan_stmts_for_mut_arg(stmts: &[Stmt]) -> Option<Boundary> {
-    stmts.iter().find_map(scan_stmt_for_mut_arg)
+fn scan_stmts_for_mut_arg(
+    stmts: &[Stmt],
+    interpreted_functions: &HashSet<&str>,
+) -> Option<Boundary> {
+    stmts
+        .iter()
+        .find_map(|stmt| scan_stmt_for_mut_arg(stmt, interpreted_functions))
 }
 
-fn scan_stmt_for_mut_arg(stmt: &Stmt) -> Option<Boundary> {
+fn scan_stmt_for_mut_arg(
+    stmt: &Stmt,
+    interpreted_functions: &HashSet<&str>,
+) -> Option<Boundary> {
     match stmt {
-        Stmt::Expr(expr) => expr_mut_arg(expr),
-        Stmt::Val(binding) => expr_mut_arg(&binding.init),
-        Stmt::Assign { value, .. } => expr_mut_arg(value),
-        Stmt::Return(Some(expr), _) => expr_mut_arg(expr),
-        Stmt::If(statement) => scan_if_for_mut_arg(statement),
+        Stmt::Expr(expr) => expr_mut_arg(expr, interpreted_functions),
+        Stmt::Val(binding) => expr_mut_arg(&binding.init, interpreted_functions),
+        Stmt::Assign { value, .. } => expr_mut_arg(value, interpreted_functions),
+        Stmt::Return(Some(expr), _) => expr_mut_arg(expr, interpreted_functions),
+        Stmt::If(statement) => scan_if_for_mut_arg(statement, interpreted_functions),
         Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. } => {
-            expr_mut_arg(cond).or_else(|| scan_stmts_for_mut_arg(body))
+            expr_mut_arg(cond, interpreted_functions)
+                .or_else(|| scan_stmts_for_mut_arg(body, interpreted_functions))
         }
-        Stmt::Loop { body, .. } | Stmt::For { body, .. } => scan_stmts_for_mut_arg(body),
+        Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            scan_stmts_for_mut_arg(body, interpreted_functions)
+        }
         Stmt::Switch { arms, else_body, .. } => arms.iter()
-            .find_map(|arm| scan_stmts_for_mut_arg(&arm.body))
-            .or_else(|| else_body.as_ref().and_then(|body| scan_stmts_for_mut_arg(body))),
+            .find_map(|arm| scan_stmts_for_mut_arg(&arm.body, interpreted_functions))
+            .or_else(|| else_body.as_ref().and_then(|body| {
+                scan_stmts_for_mut_arg(body, interpreted_functions)
+            })),
         _ => None,
     }
 }
 
-fn scan_if_for_mut_arg(statement: &IfStmt) -> Option<Boundary> {
-    expr_mut_arg(&statement.cond)
-        .or_else(|| scan_stmts_for_mut_arg(&statement.then_body))
+fn scan_if_for_mut_arg(
+    statement: &IfStmt,
+    interpreted_functions: &HashSet<&str>,
+) -> Option<Boundary> {
+    expr_mut_arg(&statement.cond, interpreted_functions)
+        .or_else(|| scan_stmts_for_mut_arg(&statement.then_body, interpreted_functions))
         .or_else(|| match &statement.else_branch {
-            Some(ElseBranch::ElseIf(inner)) => scan_if_for_mut_arg(inner),
-            Some(ElseBranch::Else(body)) => scan_stmts_for_mut_arg(body),
+            Some(ElseBranch::ElseIf(inner)) => {
+                scan_if_for_mut_arg(inner, interpreted_functions)
+            }
+            Some(ElseBranch::Else(body)) => {
+                scan_stmts_for_mut_arg(body, interpreted_functions)
+            }
             None => None,
         })
 }
 
-fn expr_mut_arg(expr: &Expr) -> Option<Boundary> {
+fn expr_mut_arg(expr: &Expr, interpreted_functions: &HashSet<&str>) -> Option<Boundary> {
     let argument = |arg: &CallArg| {
         if matches!(arg.convention, AccessConvention::Write) && matches!(arg.expr, Expr::Ident(..)) {
             Some(Boundary {
@@ -171,20 +204,29 @@ fn expr_mut_arg(expr: &Expr) -> Option<Boundary> {
                 span: Some(arg.span),
             })
         } else {
-            expr_mut_arg(&arg.expr)
+            expr_mut_arg(&arg.expr, interpreted_functions)
         }
     };
     match expr {
+        // Direct user calls write back `&ident` arguments after the callee
+        // frame returns. Method and call-value writeback remain outside the
+        // interpreter subset.
+        Expr::Call(call) if interpreted_functions.contains(call.name.as_str()) => call
+            .args
+            .iter()
+            .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions)),
         Expr::Call(call) => call.args.iter().find_map(argument),
-        Expr::MethodCall { receiver, args, .. } => expr_mut_arg(receiver)
+        Expr::MethodCall { receiver, args, .. } => expr_mut_arg(receiver, interpreted_functions)
             .or_else(|| args.iter().find_map(argument)),
-        Expr::CallValue { callee, args, .. } => expr_mut_arg(callee)
+        Expr::CallValue { callee, args, .. } => expr_mut_arg(callee, interpreted_functions)
             .or_else(|| args.iter().find_map(argument)),
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _)
-        | Expr::Field(inner, _, _) => expr_mut_arg(inner),
-        Expr::Binary(_, left, right, _) => expr_mut_arg(left).or_else(|| expr_mut_arg(right)),
-        Expr::Index { base, index, .. } => expr_mut_arg(base).or_else(|| expr_mut_arg(index)),
+        | Expr::Field(inner, _, _) => expr_mut_arg(inner, interpreted_functions),
+        Expr::Binary(_, left, right, _) => expr_mut_arg(left, interpreted_functions)
+            .or_else(|| expr_mut_arg(right, interpreted_functions)),
+        Expr::Index { base, index, .. } => expr_mut_arg(base, interpreted_functions)
+            .or_else(|| expr_mut_arg(index, interpreted_functions)),
         _ => None,
     }
 }

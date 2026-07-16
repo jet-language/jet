@@ -151,11 +151,11 @@ fn largest<T: Comparable>(xs: [T]) -> (T?) {
     if xs.len() == 0 {
         return None
     }
-    best := xs[0]
+    best := ~xs[0]
     i := 1
     loop i < xs.len() {
         if xs[i] > best {
-            best = xs[i]
+            best = ~xs[i]
         }
         i+= 1
     }
@@ -186,15 +186,10 @@ shapes: [Shape] :: [Circle.{radius: 1.0}, Square.{side: 2.0}]
     assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
 }
 
-/// c150: assigning a Read-convention (borrowed) non-Copy parameter into a struct
-/// field previously emitted `((*self)).user_rows = (*user_s)` — a move out of a
-/// shared reference (E0507, I2 violation). The fix clones the value when the RHS is
-/// a borrowed non-scalar ident, mirroring the `lower_enum_arg` predicate.
+/// D-MEM-PARAM1=A: assigning a read parameter into an owned field must never
+/// insert a hidden clone or reach rustc as a move out of a shared reference.
 #[test]
-fn borrow_field_clone() {
-    if !have_rustc() {
-        return;
-    }
+fn borrowed_parameter_field_assignment_needs_explicit_copy() {
     let src = "\
 struct Ledger {
     rows: [Int]
@@ -211,9 +206,9 @@ fn run() {
     print(ledger.rows[2])
 }
 ";
-    let (code, stdout) = build_and_run("tir_borrow_field_clone", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "1\n2\n3\n");
+    let diags = jet::compile(src).expect_err("borrowed parameter cannot fill owned field");
+    let diag = diags.iter().find(|d| d.code == "E0120").expect("E0120");
+    assert!(diag.fix.contains("~s"), "{diag:?}");
 }
 
 /// D-MUTSELF1: a `mut self` method that assigns a field in place — `self.field = v`
@@ -366,4 +361,92 @@ pub struct Note {
     );
     assert_eq!(code, 0);
     assert_eq!(stdout, "hi\n");
+}
+
+#[test]
+fn plain_parameter_modes_match_tir_and_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Parcel { label: String }
+struct Leaf { text: String }
+struct Branch { leaf: Leaf }
+
+impl Parcel {
+    fn show(self) { print(self.label) }
+}
+
+fn read_text(text: String) { print(text) }
+fn read_list(values: [Int]) { print(values.len()) }
+fn read_generic<T>(value: T) { print(7) }
+fn read_nested(branch: Branch) { print(branch.leaf.text) }
+fn apply(f: fn(Int) -> Int, value: Int) -> Int { return f(value) }
+fn increment(value: Int) -> Int { return value + 1 }
+fn edit(values: &[Int]) { values[0] = 9 }
+fn consume(text: ^String) { print(text) }
+
+fn run() {
+    text :: "hello"
+    values := [1, 2]
+    parcel :: Parcel.{ label: "parcel" }
+    branch :: Branch.{ leaf: Leaf.{ text: "nested" } }
+    callback :: increment
+    read_text(text)
+    read_list(values)
+    read_generic(text)
+    read_generic(callback)
+    read_nested(branch)
+    parcel.show()
+    print(apply((n: Int) => (n + 1), 41))
+    edit(&values)
+    print(values[0])
+    consume(^text)
+}
+"#;
+    let (code, stdout) = build_and_run("tir_plain_parameter_modes", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "hello\n2\n7\n7\nnested\nparcel\n42\n9\nhello\n");
+}
+
+#[test]
+fn generic_inherent_methods_use_per_method_clone_bounds() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+trait Measure {
+    fn measure(self) -> Int
+}
+
+struct Holder<T> {
+    reader: fn(T) -> Int
+
+    fn inspect(self) -> Int {
+        return 1
+    }
+
+    fn copy_tagged(self, value: #Tainted T) -> #Tainted T {
+        return ~value
+    }
+}
+
+fn increment(value: Int) -> Int { return value + 1 }
+fn read_callback(value: fn(Int) -> Int) -> Int { return 1 }
+fn read_measure(value: Measure) -> Int { return 2 }
+fn read_string(value: String) -> Int { return value.len() }
+
+fn run() {
+    callbacks: Holder<fn(Int) -> Int> :: Holder<fn(Int) -> Int>.{reader: read_callback}
+    measures: Holder<Measure> :: Holder<Measure>.{reader: read_measure}
+    strings: Holder<String> :: Holder<String>.{reader: read_string}
+    print(callbacks.inspect())
+    print(measures.inspect())
+    copied :: strings.copy_tagged(#Tainted "copy")
+    print(3)
+}
+"#;
+    let (code, stdout) = build_and_run("tir_generic_method_clone_bounds", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n1\n3\n");
 }

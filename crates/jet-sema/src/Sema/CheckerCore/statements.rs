@@ -9,7 +9,7 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
 use crate::Sema::Registration::already_defined;
-use crate::Sema::{Checker, LocalInfo};
+use crate::Sema::{type_is_copy, Checker, LocalInfo};
 use crate::Syntax;
 use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
@@ -40,6 +40,35 @@ impl<'a> Checker<'a> {
                     }
                     self.check_lvalue_change(target, "be assigned");
                     let vt = self.infer(value);
+                    if !is_compound {
+                        self.reject_borrowed_param_subplace(
+                            value,
+                            vt.as_ref(),
+                            "replace an owned value",
+                        );
+                        if let Expr::Ident(name, span) = value {
+                            let borrowed = self.lookup(name).is_some_and(|info| {
+                                !type_is_copy(&info.ty)
+                                    && matches!(
+                                        info.param_conv,
+                                        Some(AccessConvention::Read)
+                                            | Some(AccessConvention::Write)
+                                    )
+                            });
+                            if borrowed {
+                                self.diags.push(Diagnostic::error(
+                                    "E0120",
+                                    format!(
+                                        "`{name}` was not moved here, so it cannot replace an owned value"
+                                    ),
+                                    "this function has read access only and does not own the value"
+                                        .to_string(),
+                                    format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                                    Some(*span),
+                                ));
+                            }
+                        }
+                    }
                     self.note_move_if_direct_ident(value);
                     // D-UNINIT-SENTINEL1: a plain `name = …` initializes a `:= uninit`
                     // binding; a compound `name += …` reads it first, so it's a
@@ -241,14 +270,39 @@ impl<'a> Checker<'a> {
                                     }
                                     if let Some(info) = self.lookup(&root) {
                                         if !info.mutable {
+                                            let (code, why, fix) = if matches!(
+                                                info.param_conv,
+                                                Some(AccessConvention::Read)
+                                            ) {
+                                                (
+                                                    "E0205",
+                                                    "an unmarked parameter gives read access only; assigning into it needs write access (`&`)".to_string(),
+                                                    format!(
+                                                        "change the parameter to `{}: {}{}`",
+                                                        root,
+                                                        Syntax::SIGIL_WRITE,
+                                                        info.ty.name()
+                                                    ),
+                                                )
+                                            } else {
+                                                (
+                                                    "E0202",
+                                                    "assigning into a collection edits it; the binding must be declared mutable".to_string(),
+                                                    format!(
+                                                        "declare `{} {} ...`",
+                                                        root,
+                                                        Syntax::SIGIL_BIND_MUT
+                                                    ),
+                                                )
+                                            };
                                             self.diags.push(Diagnostic::error(
-                                                "E0202",
+                                                code,
                                                 format!(
                                                     "cannot write to `{}` — it does not have edit access (`&`)",
                                                     root
                                                 ),
-                                                "assigning into a collection edits it; the binding must be declared mutable".to_string(),
-                                                format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
+                                                why,
+                                                fix,
                                                 Some(*span),
                                             ));
                                         }
@@ -738,6 +792,11 @@ impl<'a> Checker<'a> {
                             // string view's bare-`&str` read is never silent).
                             // Returning a borrowed parameter would move out of a
                             // borrow in the generated Rust (I2) — require a copy.
+                            self.reject_borrowed_param_subplace(
+                                e,
+                                et.as_ref(),
+                                "be returned as an owned value",
+                            );
                             if let Expr::Ident(n, nspan) = &*e {
                                 if let Some(info) = self.lookup(n) {
                                     if !info.ty.is_scalar()

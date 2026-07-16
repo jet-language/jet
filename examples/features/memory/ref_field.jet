@@ -1,7 +1,7 @@
 // v5 (D-MEM1): there is no stored-reference field — `&T` fields and
 // `#Ref(label)` are gone from the grammar. A struct field just owns its
-// value: fill it from a `~x`/move at construction time (auto-copied
-// here since `source`/`kind` are read-only params). `Shared<T>`/`Id<T>`
+// value: fill it from an explicit `~x` copy or move at construction time.
+// `Shared<T>`/`Id<T>`
 // (coming in a later migration stage) will cover "many owners, one value"
 // when a real program needs it.
 struct Span {
@@ -10,7 +10,7 @@ struct Span {
 }
 
 fn describe(source: String, kind: String) {
-    s: Span :: Span.{text: source, meta: kind}
+    s: Span :: Span.{text: ~source, meta: ~kind}
     print(s.text)
     print(s.meta)
 }

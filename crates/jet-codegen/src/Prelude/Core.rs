@@ -1145,40 +1145,41 @@ fn jet_time_format_pattern(
 // D-AUTOPAR1=A: explicit parallel list adapters using std::thread::scope (I6-safe).
 fn jet_list_par_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
 where
-    T: Send + Clone,
+    T: Sync,
     U: Send,
-    F: Fn(T) -> U + Sync,
+    F: Fn(&T) -> U + Sync,
 {
     std::thread::scope(|s| {
-        let handles: Vec<_> = xs.into_iter().map(|x| s.spawn(|| f(x))).collect();
+        let handles: Vec<_> = xs.iter().map(|x| s.spawn(|| f(x))).collect();
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     })
 }
 fn jet_list_par_filter<T, F>(xs: Vec<T>, f: F) -> Vec<T>
 where
-    T: Send + Clone,
-    F: Fn(T) -> bool + Sync,
+    T: Sync,
+    F: Fn(&T) -> bool + Sync,
 {
-    // Clone each element for the predicate thread; keep original for result.
-    let pairs: Vec<(T, T)> = xs.into_iter().map(|x| (x.clone(), x)).collect();
-    std::thread::scope(|s| {
-        let (originals, clones): (Vec<T>, Vec<T>) = pairs.into_iter().unzip();
-        let handles: Vec<_> = clones.into_iter().map(|x| s.spawn(|| f(x))).collect();
-        originals
+    let keep = std::thread::scope(|s| {
+        xs.iter()
+            .map(|x| s.spawn(|| f(x)))
+            .collect::<Vec<_>>()
             .into_iter()
-            .zip(handles)
-            .filter_map(|(x, h)| if h.join().unwrap() { Some(x) } else { None })
-            .collect()
-    })
+            .map(|h| h.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    xs.into_iter()
+        .zip(keep)
+        .filter_map(|(x, keep)| keep.then_some(x))
+        .collect()
 }
 // par_fold(init, f) — sequential execution; parallelism requires an associative combiner
 // the caller cannot provide separately. Semantically correct; future parallel version
 // would accept a combine: Fn(U, U) -> U argument.
 fn jet_list_par_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
 where
-    F: Fn(U, T) -> U,
+    F: Fn(&U, &T) -> U,
 {
-    xs.into_iter().fold(init, f)
+    xs.iter().fold(init, |acc, x| f(&acc, x))
 }
 
 // D-FIDELITY-API1=A: runtime-global fidelity signal. App code decides policy.
@@ -1692,21 +1693,21 @@ fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'
 // D-DYNARRAY1: View<T> read-only closure surface. `xs` is already a borrow
 // (never `.clone()`d to an owned `Vec` first, unlike the `jet_list_*` family
 // above) — folding/mapping a view touches no allocation beyond the result.
-fn jet_view_fold<T: Clone, U, F>(xs: &[T], init: U, f: F) -> U
+fn jet_view_fold<T, U, F>(xs: &[T], init: U, f: F) -> U
 where
-    F: Fn(U, T) -> U,
+    F: Fn(&U, &T) -> U,
 {
     let mut acc = init;
     for x in xs {
-        acc = f(acc, x.clone());
+        acc = f(&acc, x);
     }
     acc
 }
-fn jet_view_map<T: Clone, U, F>(xs: &[T], f: F) -> Vec<U>
+fn jet_view_map<T, U, F>(xs: &[T], f: F) -> Vec<U>
 where
-    F: Fn(T) -> U,
+    F: Fn(&T) -> U,
 {
-    xs.iter().cloned().map(f).collect()
+    xs.iter().map(f).collect()
 }
 fn jet_index_map<K: Ord + Clone, V: Clone>(
     m: &std::collections::BTreeMap<K, V>,
@@ -1815,27 +1816,27 @@ fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String
 }
 fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
 where
-    F: Fn(T) -> U,
+    F: Fn(&T) -> U,
 {
-    xs.into_iter().map(f).collect()
+    xs.iter().map(f).collect()
 }
 fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U>
 where
-    F: FnMut(T) -> U,
+    F: FnMut(&T) -> U,
 {
-    xs.into_iter().map(|x| f(x)).collect()
+    xs.iter().map(|x| f(x)).collect()
 }
-fn jet_list_filter<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T>
+fn jet_list_filter<T, F>(xs: Vec<T>, f: F) -> Vec<T>
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
 {
-    xs.into_iter().filter(|x| f(x.clone())).collect()
+    xs.into_iter().filter(|x| f(x)).collect()
 }
 fn jet_list_each<T, F>(xs: Vec<T>, f: F)
 where
-    F: Fn(T),
+    F: Fn(&T),
 {
-    for x in xs {
+    for x in &xs {
         f(x);
     }
 }
@@ -1849,47 +1850,47 @@ where
 }
 fn jet_list_each_mut<T, F>(xs: Vec<T>, mut f: F)
 where
-    F: FnMut(T),
+    F: FnMut(&T),
 {
-    for x in xs {
+    for x in &xs {
         f(x);
     }
 }
-fn jet_list_find<T: Clone, F>(xs: Vec<T>, f: F) -> Option<T>
+fn jet_list_find<T, F>(xs: Vec<T>, f: F) -> Option<T>
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
 {
-    xs.into_iter().find(|x| f(x.clone()))
+    xs.into_iter().find(|x| f(x))
 }
-fn jet_list_any<T: Clone, F>(xs: Vec<T>, f: F) -> bool
+fn jet_list_any<T, F>(xs: Vec<T>, f: F) -> bool
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
 {
-    xs.iter().any(|x| f(x.clone()))
+    xs.iter().any(f)
 }
-fn jet_list_all<T: Clone, F>(xs: Vec<T>, f: F) -> bool
+fn jet_list_all<T, F>(xs: Vec<T>, f: F) -> bool
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
 {
-    xs.iter().all(|x| f(x.clone()))
+    xs.iter().all(f)
 }
-fn jet_list_sort_by<T: Clone, K: Ord, F>(xs: &mut Vec<T>, f: F)
+fn jet_list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
 where
-    F: Fn(T) -> K,
+    F: Fn(&T) -> K,
 {
-    xs.sort_by_key(|x| f(x.clone()));
+    xs.sort_by_key(f);
 }
 fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
 where
-    F: Fn(U, T) -> U,
+    F: Fn(&U, &T) -> U,
 {
-    xs.into_iter().fold(init, f)
+    xs.iter().fold(init, |acc, x| f(&acc, x))
 }
 fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F)
 where
-    F: Fn(K, V),
+    F: Fn(&K, &V),
 {
-    for (k, v) in m {
+    for (k, v) in &m {
         f(k, v);
     }
 }
@@ -2137,16 +2138,16 @@ fn jet_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> {
     }
     out
 }
-fn jet_list_count_by<T: Clone, K: Ord + Clone, F>(
+fn jet_list_count_by<T, K: Ord, F>(
     xs: Vec<T>,
     f: F,
 ) -> std::collections::BTreeMap<K, i64>
 where
-    F: Fn(T) -> K,
+    F: Fn(&T) -> K,
 {
     let mut m: std::collections::BTreeMap<K, i64> = std::collections::BTreeMap::new();
     for x in xs {
-        let k = f(x.clone());
+        let k = f(&x);
         *m.entry(k).or_insert(0) += 1;
     }
     m
@@ -2301,94 +2302,94 @@ fn jet_list_windows<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
     }
     xs.windows(n).map(|w| w.to_vec()).collect()
 }
-fn jet_list_take_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T>
+fn jet_list_take_while<T, F>(xs: Vec<T>, f: F) -> Vec<T>
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
 {
-    xs.into_iter().take_while(|x| f(x.clone())).collect()
+    xs.into_iter().take_while(|x| f(x)).collect()
 }
-fn jet_list_skip_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T>
+fn jet_list_skip_while<T, F>(xs: Vec<T>, f: F) -> Vec<T>
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
 {
-    xs.into_iter().skip_while(|x| f(x.clone())).collect()
+    xs.into_iter().skip_while(|x| f(x)).collect()
 }
 fn jet_list_flat_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
 where
-    F: Fn(T) -> Vec<U>,
+    F: Fn(&T) -> Vec<U>,
 {
-    xs.into_iter().flat_map(f).collect()
+    xs.iter().flat_map(f).collect()
 }
 fn jet_list_filter_map<T, U, E, F>(xs: Vec<T>, f: F) -> Vec<U>
 where
-    F: Fn(T) -> Result<U, E>,
+    F: Fn(&T) -> Result<U, E>,
 {
-    xs.into_iter().filter_map(|x| f(x).ok()).collect()
+    xs.iter().filter_map(|x| f(x).ok()).collect()
 }
 fn jet_list_try_collect<T: Clone, E: Clone>(xs: Vec<Result<T, E>>) -> Result<Vec<T>, E> {
     xs.into_iter().collect()
 }
 fn jet_list_scan<T, U: Clone, F>(xs: Vec<T>, init: U, f: F) -> Vec<U>
 where
-    F: Fn(U, T) -> U,
+    F: Fn(&U, &T) -> U,
 {
     let mut acc = init;
     let mut out = Vec::new();
-    for x in xs {
-        acc = f(acc, x);
+    for x in &xs {
+        acc = f(&acc, x);
         out.push(acc.clone());
     }
     out
 }
 fn jet_list_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
 where
-    F: Fn(U, T) -> U,
+    F: Fn(&U, &T) -> U,
 {
-    xs.into_iter().fold(init, f)
+    xs.iter().fold(init, |acc, x| f(&acc, x))
 }
-fn jet_list_position<T: Clone, F>(xs: Vec<T>, f: F) -> Option<i64>
+fn jet_list_position<T, F>(xs: Vec<T>, f: F) -> Option<i64>
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
 {
-    xs.into_iter().position(|x| f(x)).map(|i| i as i64)
+    xs.iter().position(f).map(|i| i as i64)
 }
-fn jet_list_min_by<T: Clone, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
+fn jet_list_min_by<T, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
 where
-    F: Fn(T) -> K,
+    F: Fn(&T) -> K,
 {
-    xs.into_iter().min_by_key(|x| f(x.clone()))
+    xs.into_iter().min_by_key(f)
 }
-fn jet_list_max_by<T: Clone, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
+fn jet_list_max_by<T, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
 where
-    F: Fn(T) -> K,
+    F: Fn(&T) -> K,
 {
-    xs.into_iter().max_by_key(|x| f(x.clone()))
+    xs.into_iter().max_by_key(f)
 }
-fn jet_list_group_by<T: Clone, K: Ord + Clone, F>(
+fn jet_list_group_by<T, K: Ord, F>(
     xs: Vec<T>,
     f: F,
 ) -> std::collections::BTreeMap<K, Vec<T>>
 where
-    F: Fn(T) -> K,
+    F: Fn(&T) -> K,
 {
     let mut m: std::collections::BTreeMap<K, Vec<T>> = std::collections::BTreeMap::new();
     for x in xs {
-        let k = f(x.clone());
+        let k = f(&x);
         m.entry(k).or_default().push(x);
     }
     m
 }
 /// `partition(f)` — splits into (true-list, false-list) as a named-tuple struct.
 /// `build` receives `(true_vec, false_vec)` and wraps them into the JetTup struct.
-fn jet_list_partition<T: Clone, F, S, B>(xs: Vec<T>, f: F, build: B) -> S
+fn jet_list_partition<T, F, S, B>(xs: Vec<T>, f: F, build: B) -> S
 where
-    F: Fn(T) -> bool,
+    F: Fn(&T) -> bool,
     B: FnOnce(Vec<T>, Vec<T>) -> S,
 {
     let mut yes: Vec<T> = Vec::new();
     let mut no: Vec<T> = Vec::new();
     for x in xs {
-        if f(x.clone()) {
+        if f(&x) {
             yes.push(x);
         } else {
             no.push(x);

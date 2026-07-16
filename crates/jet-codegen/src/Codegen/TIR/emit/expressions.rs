@@ -1096,8 +1096,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             match op {
                 TClosureOp::Map => format!("jet_list_map(({}).clone(), {})", recv, a(0)),
                 TClosureOp::MapMut => format!("jet_list_map_mut(({}).clone(), {})", recv, a(0)),
-                // D-HOLE1: `.map` on `T?` — Rust's native `Option::map`.
-                TClosureOp::OptionMap => format!("({}).clone().map({})", recv, a(0)),
+                // D-HOLE1/D-MEM-PARAM1: `.map` on `T?` lends the payload to
+                // its plain callback instead of cloning/moving it.
+                TClosureOp::OptionMap => format!("({}).as_ref().map({})", recv, a(0)),
                 TClosureOp::Filter => format!("jet_list_filter(({}).clone(), {})", recv, a(0)),
                 TClosureOp::Each => format!("jet_list_each(({}).clone(), {})", recv, a(0)),
                 TClosureOp::EachMut => format!("jet_list_each_mut(({}).clone(), {})", recv, a(0)),

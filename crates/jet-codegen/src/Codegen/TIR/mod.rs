@@ -463,9 +463,12 @@ pub struct TFunc {
     pub ret: Option<Type>,
     /// c109 Phase 17: the rendered Rust generic clause (`<T: Clone>` / `<T, U>` / empty),
     /// resolved at lowering via `Generics::rust_type_param_list(&f.type_params, …)` exactly
-    /// as `emit_func` does (with the `rust_extra_clone_bounds` every type param carries).
+    /// as `emit_func` does, including only bounds required by lowered operations.
     /// Emitted verbatim after the function name; empty for a non-generic function.
     pub generics: String,
+    /// Types of operands materialized with `.clone()` while lowering this body.
+    /// Generic inherent impl emission unions these facts to derive minimal bounds.
+    pub clone_types: Vec<Type>,
     pub is_main: bool,
     /// D-COV1: the 1-based Jet source line of this function's name, for the
     /// `jet_cov(line)` coverage probe. Only read in coverage mode.
@@ -1785,8 +1788,8 @@ pub enum TClosureOp {
     /// `par_fold(init, f)` — `jet_list_par_fold((recv).clone(), init, f)`.
     ParFold,
     // D-HOLE1: Option combinators.
-    /// `map` on `T?` — `(recv).clone().map(f)` (Rust's native `Option::map`, no
-    /// prelude helper needed).
+    /// `map` on `T?` — `(recv).as_ref().map(f)` (Rust's native `Option::map`, no
+    /// prelude helper needed; `.as_ref()` supplies plain callback read access).
     OptionMap,
     // D-DYNARRAY1: `View<T>` read-only closure methods. `recv` is already a
     // `&[T]` borrow (see `Context::rust_type`'s `View` arm) — NOT `.clone()`d

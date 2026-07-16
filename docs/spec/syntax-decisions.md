@@ -139,8 +139,11 @@ wherever the expected type fixes it (same E0801/one-directional rule); no
 parenthesized/typed forms stay available for anywhere the type can't be
 inferred.
 
-**S47 — Function types & captures**: fn type `fn(T1, T2) -> R`. Named `fn`s
-coerce to function values. Captures follow M2: shared read for read-only
+**S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
+parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
+values only when every parameter also has plain read access. A named function
+with a write (`&`) or move (`^`) parameter stays direct-call-only because S47
+has no function-type spelling that could preserve that requirement. Captures follow M2: shared read for read-only
 names, mutable borrow for written names. Escaping closures own captures:
 clonable auto-clone (L0801); non-clonable need `take(name)` prefix.
 
@@ -1156,7 +1159,11 @@ unmarked param is a hard error (fix-it: add `&`, or `^`/copy it); L0201 is
 gone (E0209 hard error, no silent clone ever); `CapabilityFreeze`/E0912 are
 gone and the `api:` manifest field no longer exists (ordinary unknown-field
 error) — `ApiFreeze`'s snapshot mechanism remains, now unconditional pub-fn
-semver diffing (E1218/E2601), not a capability-tier freeze. **S3 shipped
+semver diffing (E1218/E2601), not a capability-tier freeze. **Card #642
+reconciliation shipped (2026-07-16)**: concrete, generic, callback, and
+receiver parameters now share the same unmarked-read lowering; no sema or
+codegen path may upgrade them to move or insert a hidden copy. Direct `&`
+calls write back identically in dev, TIR, and native builds. **S3 shipped
 (2026-07-04)**: `-> &T` returns and `&T` fields are gone from the grammar
 (ordinary syntax errors); `#Ref`/E0207/E0427 deleted outright. **S4 shipped
 (2026-07-04)**: `copy x` (D-CAP2) is the one copy verb — a real prefix-verb

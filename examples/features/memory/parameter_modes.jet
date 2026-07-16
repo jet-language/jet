@@ -1,0 +1,34 @@
+struct Parcel { label: String }
+
+impl Parcel {
+    fn show(self) { print(self.label) }
+}
+
+fn read_text(text: String) { print(text) }
+fn read_list(values: [Int]) { print(values.len()) }
+fn read_generic<T>(value: T) { print(7) }
+fn apply(f: fn(Int) -> Int, value: Int) -> Int { return f(value) }
+fn edit(values: &[Int]) { values[0] = 9 }
+fn consume(text: ^String) { print(text) }
+fn duplicate_if<T>(value: ^T, yes: Bool) -> T {
+    if yes { return ~value }
+    return value
+}
+
+fn run() {
+    text :: "hello"
+    values := [1, 2]
+    parcel :: Parcel.{ label: "parcel" }
+
+    read_text(text)
+    read_list(values)
+    read_generic(text)
+    parcel.show()
+    print(apply((n: Int) => (n + 1), 41))
+
+    edit(&values)
+    print(values[0])
+    consume(^text)
+    branch :: "branch"
+    print(duplicate_if(^branch, true))
+}

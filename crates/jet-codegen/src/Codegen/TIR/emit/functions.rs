@@ -196,10 +196,11 @@ pub(crate) fn emit_tir_method(
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{inline_attr}{pad}pub {unsafe_kw}fn {name}({params}){ret} {{\n",
+        "{inline_attr}{pad}pub {unsafe_kw}fn {name}({params}){ret}{where_clause} {{\n",
         name = mangle(&tir.name),
         params = params.join(", "),
         ret = ret_clause,
+        where_clause = tir.generics,
     ));
     // D-COV1: probe at the method head.
     if cx.coverage {

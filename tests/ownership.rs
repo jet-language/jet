@@ -51,6 +51,72 @@ fn run() {
 }
 
 #[test]
+fn generic_clone_bound_is_usage_sensitive() {
+    let src = r#"
+fn inspect<T>(value: T) -> Int { return 1 }
+fn duplicate<T>(value: T) -> T { return ~value }
+fn increment(value: Int) -> Int { return value + 1 }
+
+fn run() {
+    callback :: increment
+    print(inspect(callback))
+    print(duplicate(4))
+}
+"#;
+    let out = jet::compile(src).expect("usage-sensitive generic bounds should compile");
+    assert!(
+        out.rust.contains("fn user_inspect<T>"),
+        "read-only generic must not require Clone: {}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("fn user_duplicate<T: Clone>"),
+        "explicit copy must require Clone: {}",
+        out.rust
+    );
+}
+
+#[test]
+fn nested_plain_parameter_read_does_not_clone() {
+    let src = r#"
+struct Leaf { text: String }
+struct Branch { leaf: Leaf }
+fn show(branch: Branch) { print(branch.leaf.text) }
+fn run() {
+    branch :: Branch.{leaf: Leaf.{text: "read"}}
+    show(branch)
+}
+"#;
+    let out = jet::compile(src).expect("nested read should compile");
+    assert!(
+        !out.rust.contains("user_branch.user_leaf.user_text).clone()"),
+        "nested read must stay borrowed: {}",
+        out.rust
+    );
+}
+
+#[test]
+fn shared_callbacks_receive_exactly_one_host_borrow() {
+    let src = r#"
+struct Config { hits: Int }
+fn run() {
+    config := Shared.new(Config.{ hits: 0 })
+    config.read((c) => c.hits)
+    config.edit((c) => { c.hits += 1 })
+}
+"#;
+    let out = jet::compile(src).expect("Shared callbacks must lower without double borrowing");
+    assert!(out.rust.contains("|user_c: &user_Config|"), "{}", out.rust);
+    assert!(
+        out.rust.contains("|user_c: &mut user_Config|"),
+        "{}",
+        out.rust
+    );
+    assert!(!out.rust.contains("&&user_Config"), "{}", out.rust);
+    assert!(!out.rust.contains("&mut &user_Config"), "{}", out.rust);
+}
+
+#[test]
 fn mutate_required_at_call_site() {
     let src = r#"
 fn touch(n: &Int) {
@@ -607,15 +673,138 @@ fn run() {
 }
 
 #[test]
+fn function_value_calls_preserve_plain_parameter_read_borrows() {
+    let src = r#"
+fn inspect(value: String) -> Int { return value.len() }
+
+fn apply(f: fn(String) -> Int, value: String) -> Int {
+    return f(value)
+}
+
+fn run() {
+    print(apply(inspect, "hello"))
+}
+"#;
+    let out = jet::compile(src).expect("function-value call must preserve read access");
+    assert!(out.rust.contains("user_f: &Box<dyn Fn(&String)"), "{}", out.rust);
+    assert!(out.rust.contains("user_value: &String"), "{}", out.rust);
+    assert!(out.rust.contains("((*user_f))(&((*user_value)))"), "{}", out.rust);
+    assert!(!out.rust.contains("((*user_value)).clone()"), "{}", out.rust);
+}
+
+#[test]
+fn named_write_and_move_functions_cannot_erase_access_as_function_values() {
+    for src in [
+        r#"
+fn edit(value: &String) { print(value) }
+fn run() { callback :: edit }
+"#,
+        r#"
+fn consume(value: ^String) { print(value) }
+fn run() { callback :: consume }
+"#,
+    ] {
+        let diags = jet::compile(src).expect_err("function-value coercion must preserve access");
+        let mismatch = diags.iter().find(|d| d.code == "E0112").expect("E0112");
+        assert!(mismatch.why.contains("plain read access"), "{mismatch:?}");
+    }
+}
+
+#[test]
+fn function_value_call_rejects_move_and_tracks_aliases_per_call() {
+    let moved = r#"
+fn inspect(value: String) { print(value) }
+fn run() {
+    callback :: inspect
+    value :: "hello"
+    callback(^value)
+}
+"#;
+    let diags = jet::compile(moved).expect_err("read callback must reject explicit move");
+    assert!(diags.iter().any(|d| d.code == "E0203"), "{diags:?}");
+
+    let aliased = r#"
+fn both(a: String, b: String) { print(a); print(b) }
+fn run() {
+    callback :: both
+    value := "hello"
+    callback(&value, value)
+}
+"#;
+    let diags = jet::compile(aliased).expect_err("callback arguments must preserve alias rules");
+    assert_eq!(
+        diags.iter().filter(|d| d.code == "E0204").count(),
+        1,
+        "alias state must stay within this call and flow across its arguments: {diags:?}"
+    );
+}
+
+#[test]
+fn borrowed_parameter_subplaces_need_explicit_copy_in_owning_positions() {
+    let cases = [
+        r#"
+struct Parcel { label: String }
+fn alias_label(parcel: Parcel) { alias :: parcel.label }
+fn run() { print(0) }
+"#,
+        r#"
+struct Parcel { label: String }
+struct Holder { value: String }
+fn wrap(parcel: Parcel) -> Holder { return Holder.{ value: parcel.label } }
+fn run() { print(0) }
+"#,
+        r#"
+enum Wrapped { Val(String) }
+fn wrap(values: [String]) -> Wrapped { return Wrapped.Val(values[0]) }
+fn run() { print(0) }
+"#,
+        r#"
+struct Parcel { label: String }
+fn replace(parcel: Parcel) {
+    owned := "old"
+    owned = parcel.label
+}
+fn run() { print(0) }
+"#,
+    ];
+    for src in cases {
+        let diags = jet::compile(src).expect_err("borrowed subplace must not copy implicitly");
+        assert!(diags.iter().any(|d| d.code == "E0120"), "{diags:?}");
+    }
+}
+
+#[test]
+fn function_value_borrow_context_does_not_leak_between_arguments_or_calls() {
+    let src = r#"
+struct Parcel { label: String }
+fn inspect(text: String, n: Int) { print(text); print(n) }
+fn apply_to(parcel: Parcel, callback: fn(String, Int)) {
+    callback(parcel.label, 1)
+    alias :: parcel.label
+}
+fn run() { apply_to(Parcel.{ label: "hello" }, inspect) }
+"#;
+    let diags = jet::compile(src).expect_err("owning context after callback call must be restored");
+    assert_eq!(
+        diags.iter().filter(|d| d.code == "E0120").count(),
+        1,
+        "only the owning alias must fail; callback read stays borrowed: {diags:?}"
+    );
+}
+
+#[test]
 fn plain_parameter_write_take_and_escape_diagnostics_name_explicit_access() {
     let write_src = r#"
 fn edit(values: [Int]) {
-    values.push(4)
+    values[0] = 4
 }
 fn run() { print(0) }
 "#;
     let write = jet::compile(write_src).expect_err("plain list parameter cannot be edited");
-    let write = write.iter().find(|d| d.code == "E0205").expect("E0205");
+    let write = write
+        .iter()
+        .find(|d| d.code == "E0205")
+        .unwrap_or_else(|| panic!("expected E0205: {write:?}"));
     assert!(write.fix.contains("&[Int]"), "{write:?}");
 
     let take_src = r#"
@@ -647,4 +836,31 @@ fn run() { print(0) }
     let diags = jet::compile(src).expect_err("borrowed field value must not clone silently");
     let escape = diags.iter().find(|d| d.code == "E0120").expect("E0120");
     assert!(escape.fix.contains("~value"), "{escape:?}");
+}
+
+#[test]
+fn borrowed_parameter_can_feed_stored_lambda_after_explicit_copy() {
+    let src = r#"
+fn store(text: String) {
+    owned :: ~text
+    callback :: () => owned.len()
+    print(callback())
+}
+fn run() { store("read") }
+"#;
+    jet::compile(src).expect("explicitly copied capture should compile");
+}
+
+#[test]
+fn borrowed_parameter_can_feed_task_after_explicit_copy() {
+    let src = r#"
+use core.tasks
+fn launch(text: String) {
+    owned :: ~text
+    task :: tasks.spawn(() => owned.len())
+    print(task.join())
+}
+fn run() { launch("read") }
+"#;
+    jet::compile(src).expect("explicitly copied task capture should compile");
 }

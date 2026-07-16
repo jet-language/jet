@@ -115,12 +115,15 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         params.push((rust_name, param_ty, p.convention));
     }
     let body = lower_stmts(&f.body, cx, &mut env);
+    let clone_types = env.cloned_types.borrow().clone();
+    let generics = render_generics(&f.type_params, &clone_types);
     TFunc {
         name: f.name.clone(),
         params,
         web_param_reconstructions,
         ret: f.return_type.clone(),
-        generics: render_generics(&f.type_params),
+        generics,
+        clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
@@ -215,14 +218,26 @@ pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, ou
     emit_tir_stmts(&tbody, cx, out, 1);
 }
 
-/// c109 Phase 17: render the Rust generic clause exactly as `emit_func` does — every type
-/// param carries an extra `Clone` bound (`rust_extra_clone_bounds`), so `<T>` → `<T: Clone>`
-/// and `<T: Comparable>` → `<T: PartialOrd + Clone>`. Empty for a non-generic function.
-pub(crate) fn render_generics(type_params: &[crate::AST::TypeParam]) -> String {
+/// Render a Rust generic clause with `Clone` only for type parameters reached by
+/// an actual lowered clone. Read-only generic functions remain usable with
+/// non-Clone values such as callbacks and trait objects.
+pub(crate) fn render_generics(
+    type_params: &[crate::AST::TypeParam],
+    cloned_types: &[Type],
+) -> String {
     if type_params.is_empty() {
         return String::new();
     }
-    let extra = crate::Generics::rust_extra_clone_bounds(type_params);
+    let names: std::collections::HashSet<&str> =
+        type_params.iter().map(|p| p.name.as_str()).collect();
+    let mut cloned = std::collections::HashSet::new();
+    for ty in cloned_types {
+        crate::Generics::collect_type_param_mentions(ty, &names, &mut cloned);
+    }
+    let extra = cloned
+        .into_iter()
+        .map(|name| (name, vec!["Clone".to_string()]))
+        .collect();
     crate::Generics::rust_type_param_list(type_params, &extra)
 }
 
@@ -277,6 +292,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         params.push((rust_name, pty, p.convention));
     }
     let body = lower_stmts(&f.body, cx, &mut env);
+    let clone_types = env.cloned_types.borrow().clone();
     // An instance method carries `Some(conv)`; a static method carries `None`.
     let kind = TFuncKind::Method {
         self_conv: if is_static { None } else { self_conv },
@@ -289,9 +305,10 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             .return_type
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
-        // A method's generic params live on the enclosing `impl<T> user_<T>` block (the
-        // caller opened it); `emit_method` renders no per-method clause.
+        // The enclosing type params live on `impl<T>`. `emit_type_impl` fills a
+        // per-method `where T: Clone` suffix only for lowered clone operations.
         generics: String::new(),
+        clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
@@ -365,6 +382,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         params.push((rust_name, pty, p.convention));
     }
     let body = lower_stmts(&f.body, cx, &mut env);
+    let clone_types = env.cloned_types.borrow().clone();
     TFunc {
         name: f.name.clone(),
         params,
@@ -374,6 +392,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
         generics: String::new(),
+        clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         // The trait-method `unsafe` prefix rides on `TFuncKind::TraitMethod.is_unsafe`
@@ -462,6 +481,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         ret: f.return_type.clone(),
         // The signature is fully pre-rendered (`sig`); `is_view`/`generics` are unused for delegation.
         generics: String::new(),
+        clone_types: Vec::new(),
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).

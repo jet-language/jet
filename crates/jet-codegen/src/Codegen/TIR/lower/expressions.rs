@@ -190,19 +190,27 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             kind: TExprKind::ConstInline("Default::default()".to_string()),
         },
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
-        // AST path (`emit_expr`'s `Expr::CallValue`) emits `({callee})({args})` with the
-        // args lowered PLAINLY (it passes `None` to `emit_call_args` → no convention/
-        // clone/borrow wrappers). Reproduce exactly: lower the callee, lower each arg
-        // with `conv = None`. The result type is the callee fn-type's return (total).
+        // Function-type parameters are unmarked, therefore Read under D-MEM-PARAM1.
         Expr::CallValue { callee, args, .. } => {
             let callee_t = lower_expr(callee, cx, env);
             let ret_ty = match &callee_t.ty {
                 Type::Fn { ret: Some(r), .. } => (**r).clone(),
                 _ => unit_type(),
             };
+            let params = match &callee_t.ty {
+                Type::Fn { params, .. } => Some(params.as_slice()),
+                _ => None,
+            };
             let targs = args
                 .iter()
-                .map(|a| lower_one_call_arg(a, None, env, cx))
+                .enumerate()
+                .map(|(i, a)| {
+                    let conv = params
+                        .and_then(|ps| ps.get(i))
+                        .cloned()
+                        .map(|ty| (AccessConvention::Read, ty));
+                    lower_one_call_arg(a, conv, env, cx)
+                })
                 .collect();
             TExpr {
                 ty: ret_ty,
@@ -280,6 +288,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let kind = if is_view_copy {
                 TExprKind::MaterializeView(Box::new(operand))
             } else {
+                env.note_clone(&ty);
                 TExprKind::Clone(Box::new(operand))
             };
             TExpr { ty, kind }
@@ -446,9 +455,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         Expr::Call(call) => {
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
-            // parses as `Expr::Call`. The AST path (`emit_call`, env-contains-name
-            // branch) emits `(place)(args)` with args PLAIN (`emit_call_args(.., None)`).
-            // Reproduce as a `FnValue::Call` whose callee is the local's place.
+            // parses as `Expr::Call`. Function-type params are unmarked Read params.
             if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
                 let callee_ty = env.ty_of(&call.name).unwrap_or_else(unit_type);
                 let ret_ty = match &callee_ty {
@@ -459,10 +466,21 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ty: callee_ty,
                     kind: TExprKind::Local(env.place_of(&call.name)),
                 };
+                let params = match &callee_t.ty {
+                    Type::Fn { params, .. } => Some(params.as_slice()),
+                    _ => None,
+                };
                 let targs = call
                     .args
                     .iter()
-                    .map(|a| lower_one_call_arg(a, None, env, cx))
+                    .enumerate()
+                    .map(|(i, a)| {
+                        let conv = params
+                            .and_then(|ps| ps.get(i))
+                            .cloned()
+                            .map(|ty| (AccessConvention::Read, ty));
+                        lower_one_call_arg(a, conv, env, cx)
+                    })
                     .collect();
                 return TExpr {
                     ty: ret_ty,
@@ -2030,12 +2048,13 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 /// Lower an expression whose result is stored or returned as an owned value.
 /// A `Read`/`Write` non-scalar parameter is represented by a dereferenced Rust
 /// borrow; moving that place would leak E0507 from rustc. Jet generic functions
-/// already carry the required `Clone` bound, so materialize the owned value at
-/// this semantic boundary just as assignment and enum-payload lowering do.
+/// record the clone's type so generic emission adds the required bound, then
+/// materialize the owned value at this semantic boundary.
 pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let lowered = lower_expr(e, cx, env);
     if matches!(e, Expr::Ident(name, _) if env.is_borrowed(name)) && !lowered.ty.is_scalar() {
         let ty = lowered.ty.clone();
+        env.note_clone(&ty);
         TExpr {
             ty,
             kind: TExprKind::Clone(Box::new(lowered)),

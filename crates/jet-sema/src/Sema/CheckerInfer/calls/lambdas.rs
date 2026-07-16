@@ -132,12 +132,41 @@ impl<'a> Checker<'a> {
                     }
                     let cap = self
                         .lookup(name)
-                        .map(|i| (i.ty.clone(), i.sendable))
-                        .or_else(|| self.consts.get(name).map(|t| (t.clone(), true)));
-                    let Some((cap_ty, cap_sendable)) = cap else {
+                        .map(|i| (i.ty.clone(), i.sendable, i.param_conv))
+                        .or_else(|| self.consts.get(name).map(|t| (t.clone(), true, None)));
+                    let Some((cap_ty, cap_sendable, cap_conv)) = cap else {
                         continue;
                     };
                     let taken = take_set.contains(name);
+                    if !cap_ty.is_scalar()
+                        && matches!(
+                            cap_conv,
+                            Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                        )
+                    {
+                        let destination = if self.is_task_spawn {
+                            "a spawned task"
+                        } else {
+                            "a stored lambda"
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E0120",
+                            format!(
+                                "`{}` was not moved here, so it cannot be captured by {}",
+                                name, destination
+                            ),
+                            "this function can access the parameter, but it does not own the value"
+                                .to_string(),
+                            format!(
+                                "copy it into an owned local first: `owned {} {}{}`",
+                                Syntax::SIGIL_BIND_IMMUT,
+                                Syntax::SIGIL_COPY,
+                                name
+                            ),
+                            Some(lam.span),
+                        ));
+                        continue;
+                    }
                     if self.is_view(name) {
                         if self.is_task_spawn {
                             self.report_unsendable(

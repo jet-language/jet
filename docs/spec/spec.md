@@ -190,7 +190,12 @@ inference, no elevation):
 
 An unmarked parameter is **always** read — a body write to it, or handing it
 to a `&`/`^` position, is a hard error at the definition (fix-it: add `&` at
-the parameter and every call site). Call sites mirror the parameter's sigil:
+the parameter and every call site). This is allocation-free for every
+non-scalar shape, including strings, collections, structs, generic values, and
+callbacks: the compiler borrows the existing value and never inserts a copy,
+reference count, or allocation. Binding, returning, or storing an owned value
+from that borrow requires an explicit copy or a `^` parameter. Call sites
+mirror the parameter's sigil:
 
 ```jet
 fn bump(n: &Int) { n += 1 }
@@ -1622,8 +1627,11 @@ The lambda arrow is **`=>`**; **`->`** stays for return types and
 `if subject == { … }` dispatch arms.
 
 **Function types (S47):** `fn(T1, T2) -> R` (no parameter names; `-> R` may be
-omitted for no-return callbacks). Named `fn`s coerce to function values when
-referenced without a call.
+omitted for no-return callbacks). Their unmarked parameters always have plain
+read access (D-MEM-PARAM1). Named `fn`s coerce to function values when referenced
+without a call only if every parameter also has plain read access. Functions with
+write (`&`) or move (`^`) parameters remain direct-call-only; coercion cannot erase
+those requirements.
 
 **Capture rules (S47):** shared read for names only read; mutable borrow for
 names written (a `:=` binding required, else **E0111**). Escaping lambdas (stored in a
