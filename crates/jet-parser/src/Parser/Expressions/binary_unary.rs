@@ -462,6 +462,35 @@ impl<'a> Parser<'a> {
                     let dot_start = self.bump().span.start; // consume `.`
                     self.struct_lit_inferred(dot_start)
                 }
+                // D-SHAPE3a=A: `.new(...)` leaves only the static receiver implicit.
+                // Sema fills the empty, unspellable identifier from the ordinary
+                // expected type; downstream lowering then sees the same MethodCall as
+                // an explicit `Type.new(...)`.
+                TokKind::Dot if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MEM_ALLOC_NEW) => {
+                    let dot = self.bump().span;
+                    let (method, method_span) = self.expect_field_name()?;
+                    self.expect(TokKind::LParen, "after `.new`")?;
+                    let mut args = Vec::new();
+                    if !matches!(self.peek().kind, TokKind::RParen) {
+                        loop {
+                            args.push(self.call_arg()?);
+                            if matches!(self.peek().kind, TokKind::RParen) {
+                                break;
+                            }
+                            self.expect(TokKind::Comma, "between arguments")?;
+                        }
+                    }
+                    self.expect(TokKind::RParen, "to finish the call")?;
+                    Ok(Expr::MethodCall {
+                        receiver: Box::new(Expr::Ident(String::new(), dot)),
+                        method,
+                        method_span,
+                        type_args: Vec::new(),
+                        args,
+                        recv_type: None,
+                        resolved_ret: None,
+                    })
+                }
                 // D-ENUMDOT2=A: `.Variant`, `.Variant(arg)`, or `.Variant.{ field: val }` in
                 // value position. An uppercase ident after `.` with no receiver is a
                 // leading-dot enum literal. type_name="" is the unresolved sentinel;

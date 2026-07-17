@@ -7,6 +7,52 @@ use std::fs;
 
 use tir_support::{build_and_run, build_and_run_full, build_and_run_multi, have_rustc};
 
+/// D-SHAPE3a=A: inferred fresh construction rewrites to the ordinary static
+/// method call before TIR lowering. Expected types flow through bindings,
+/// returns, fields, and call arguments; explicit `Type.new` remains valid.
+#[test]
+fn inferred_new_expected_type_routes_through_tir() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Counter {
+    value: Int
+}
+
+struct Holder {
+    counter: Counter
+}
+
+impl Counter {
+    fn new(value: Int) -> Counter {
+        return Counter.{ value: value }
+    }
+}
+
+fn fresh(value: Int) -> Counter {
+    return .new(value)
+}
+
+fn read(counter: Counter) -> Int {
+    return counter.value
+}
+
+fn run() {
+    bound: Counter :: .new(1)
+    holder: Holder :: .{ counter: .new(2) }
+    pool: Pool<Holder> :: .new()
+    explicit :: Counter.new(4)
+    print(read(.new(5)))
+    print("{bound.value}{holder.counter.value}{explicit.value}")
+    print(fresh(6).value)
+}
+"#;
+    let (code, stdout) = build_and_run("tir_inferred_new", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "5\n124\n6\n");
+}
+
 // ===========================================================================
 // c109 Phase 23: @Pure / @Todo / default params / named args / distinct / tuples
 // ===========================================================================

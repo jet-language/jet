@@ -2491,6 +2491,12 @@ aliases or whole-buffer facades.
 
 **D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type.{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
 
+**D-SHAPE3a=A — inferred fresh construction** *(ratified by owner 2026-07-14,
+card #536)*: `.new(…)` may omit the receiver only when the surrounding expected
+type plus its arguments determine one receiver type. `Type.new(…)` always remains
+available. Elaboration reuses ordinary expected-type inference and the existing
+static-call path; there is no constructor registry or global search.
+
 **D-PRELUDE-LAW1=A — ambient-surface registry** *(ratified by owner 2026-07-12, card #514)*: the no-prefix surface is one closed list — always ambient: `print`, `input`, `panic`, `require`; comptime-gated ambient: `embed_file`, `embed_bytes`, `find`, `fetch`. User shadowing wins; libraries never inject (D-PRELUDEX1). Any addition or removal is a ballot.
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.

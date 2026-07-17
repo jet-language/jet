@@ -26,6 +26,8 @@
 // infers and publishes their owner provenance.
 // D-SHAPE-RESOURCE2=A adds contextual `defer` only at statement head in the
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
+// D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
+// and ordinary call punctuation, with the receiver resolved by sema.
 // D-UNSAFE-OBLIG1=A adds contextual `assert valid_ptr, aligned, no_alias`,
 // the `obligations: .Track/.Skip` @Unsafe field, and ENV_ORG_UNSAFE_POLICY.
 

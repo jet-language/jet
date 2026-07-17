@@ -1024,6 +1024,60 @@ impl<'a> Checker<'a> {
                 recv_type,
                 resolved_ret,
             } => {
+                // D-SHAPE3a=A: the parser's empty identifier is the unspellable
+                // receiver sentinel for `.new(...)`. Resolve it only from the same
+                // expected type already propagated for literals/calls; never search a
+                // constructor registry. Rewriting here gives TIR/AOT/dev the ordinary
+                // explicit static-call path.
+                if matches!(&**receiver, Expr::Ident(name, _) if name.is_empty()) {
+                    let resolved = match self.expected_type.as_ref() {
+                        Some(Type::Named(name)) => Some((name.clone(), Vec::new())),
+                        Some(Type::Apply { name, args }) => Some((name.clone(), args.clone())),
+                        Some(Type::Shared(inner)) => {
+                            Some(("Shared".to_string(), vec![(**inner).clone()]))
+                        }
+                        Some(Type::List(inner)) => {
+                            Some(("List".to_string(), vec![(**inner).clone()]))
+                        }
+                        Some(Type::Map { key, value, .. }) => Some((
+                            "Map".to_string(),
+                            vec![(**key).clone(), (**value).clone()],
+                        )),
+                        Some(Type::Int) => Some(("Int".to_string(), Vec::new())),
+                        Some(Type::Float) => Some(("Float".to_string(), Vec::new())),
+                        Some(Type::Bool) => Some(("Bool".to_string(), Vec::new())),
+                        Some(Type::String) => Some(("String".to_string(), Vec::new())),
+                        Some(Type::Char) => Some(("Char".to_string(), Vec::new())),
+                        Some(Type::IntN { signed, bits }) => Some((
+                            crate::AST::int_spelling(*signed, *bits),
+                            Vec::new(),
+                        )),
+                        Some(Type::Float32) => Some(("F32".to_string(), Vec::new())),
+                        Some(Type::Tagged { inner, .. }) => match inner.as_ref() {
+                            Type::Named(name) => Some((name.clone(), Vec::new())),
+                            Type::Apply { name, args } => Some((name.clone(), args.clone())),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    let Some((type_name, expected_args)) = resolved else {
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            "`.new(...)` needs one known receiver type here".to_string(),
+                            "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry".to_string(),
+                            "add a type annotation or write the full `Type.new(...)` form".to_string(),
+                            Some(*method_span),
+                        ));
+                        return None;
+                    };
+                    **receiver = Expr::Ident(type_name, receiver.span());
+                    if type_args.is_empty() {
+                        *type_args = expected_args;
+                    }
+                }
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): `.push`/`.insert` may grow a
                 // List/Map's backing heap allocation — capacity headroom isn't
                 // statically provable in general, so ANY call of this shape is

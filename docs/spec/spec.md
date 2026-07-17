@@ -526,6 +526,10 @@ surface (Group 2): struct literals **`Type.{f: v}`** (S29; flush, S29-FLUSH; dot
 **`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
 **`T?`** with **`Val(v)`** / **`None`** (S32); generic args
 **`Type<Args>`** (S33). `None` is only legal for `T?`, never plain `T`.
+Fresh hidden-state construction uses `Type.new(…)`. Under D-SHAPE3a, the
+receiver may be omitted as `.new(…)` when an expected type from a binding,
+return, field, or call argument determines exactly one receiver. This is
+ordinary expected-type elaboration, not a global constructor search.
 
 ```
 struct Circle {

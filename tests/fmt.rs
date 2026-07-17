@@ -1206,6 +1206,14 @@ fn fmt_dot_construction_d_dotctor1() {
 }
 
 #[test]
+fn fmt_inferred_new_stability() {
+    let src = "struct Box {\n    value: Int\n}\n\nimpl Box {\n    fn new(value: Int) -> Box {\n        return Box.{ value: value }\n    }\n}\n\nfn run() {\n    box: Box :: .new(1)\n}\n";
+    let out = jet::format_source(src).expect("fmt should accept `.new(...)`");
+    assert!(out.contains("box: Box :: .new(1)"), "{out}");
+    assert_eq!(out, jet::format_source(&out).expect("second fmt"));
+}
+
+#[test]
 fn fmt_enum_dot_pattern_stability() {
     // D-ENUMDOT1 (ratified 2026-06-26): a leading `.` before a variant name in pattern position
     // is accepted and canonical. The formatter always emits `.` before a Pattern::Variant name,
