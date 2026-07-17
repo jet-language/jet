@@ -802,7 +802,11 @@ pub(crate) fn check_bundle_opts(
                         }
                     }
                 }
-                Item::Trait(_) => {}
+                Item::Trait(t) => {
+                    st.type_pub
+                        .insert(t.name.clone(), t.is_pub && !t.is_package_pub);
+                    st.type_pkg_pub.insert(t.name.clone(), t.is_package_pub);
+                }
                 // D-QUAL2: a tag is a marker; it registers no callable items.
                 Item::Tag(_) => {}
                 Item::Module(_) => {}

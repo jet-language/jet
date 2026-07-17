@@ -88,6 +88,18 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
+        for param in &f.type_params {
+            self.warn_soft_public_declared_type(
+                &Type::TraitObject(param.bounds.clone()),
+                param.name_span,
+            );
+        }
+        if let Some(return_type) = &f.return_type {
+            self.warn_soft_public_declared_type(
+                return_type,
+                f.return_type_span.unwrap_or(f.name_span),
+            );
+        }
         for p in &f.params {
             // D-ANY-JAI1: the `...[TraitA, TraitB]` bound-list form parses `ty`
             // as an unused `Type::Named("")` placeholder (the real bound list is

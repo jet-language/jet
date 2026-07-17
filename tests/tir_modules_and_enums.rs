@@ -42,6 +42,79 @@ fn soft_public_imports_warn_once_per_outside_use() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn soft_public_reexports_warn_on_the_exported_spelling_once() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_soft_public_reexport_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("api")).unwrap();
+    fs::write(
+        dir.join("api/module.jet"),
+        "pub use implementation.{_raw as stable, supported as _preview}\nmodule implementation\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("api/implementation.jet"),
+        "pub fn _raw() -> Int { return 1 }\npub fn supported() -> Int { return 2 }\n",
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    fs::write(
+        &main,
+        "module api\nfn run() { print(api.stable()); print(api._preview()) }\n",
+    )
+    .unwrap();
+
+    let diagnostics = jet::check_with_path(main.to_str().unwrap());
+    let lints = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "L0601")
+        .collect::<Vec<_>>();
+    assert_eq!(lints.len(), 1, "{diagnostics:#?}");
+    assert_eq!(lints[0].what, "`_preview` is a soft-public API");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn imported_soft_public_declared_types_warn_once_per_occurrence() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_soft_public_types_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("models.jet"),
+        "pub struct _Cell<T> { pub value: T }\npub trait _Readable { fn read(self) -> Int }\n",
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    fs::write(
+        &main,
+        "use \"models\"\nfn adapt<T: _Readable>(value: ^models._Cell<Int>) -> models._Cell<Int> { return value }\nfn local(value: ^models._Cell<Int>) { cell: models._Cell<Int> := value }\nfn run() {}\n",
+    )
+    .unwrap();
+
+    let diagnostics = jet::check_with_path(main.to_str().unwrap());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "L0601")
+            .count(),
+        5,
+        "{diagnostics:#?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Imported public adapters may carry core.data containers across a module
 /// boundary. Their signatures are ordinary TIR types; codegen must not fall out
 /// of the typed-IR seam merely because the row is dynamic or generic.

@@ -3377,6 +3377,35 @@ fn ext_optional_check_resolves_dot_jet() {
 }
 
 #[test]
+fn check_reports_soft_public_lints_without_failing() {
+    let dir = isolated_cwd("check_soft_public");
+    fs::write(
+        dir.join("library.jet"),
+        "pub fn _legacy() -> Int { return 1 }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.jet"),
+        "use \"library\"\nfn run() { print(library._legacy()) }\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["check", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.matches("[L0601]").count(), 1, "{stderr}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("has no problems"),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn ext_optional_run_resolves_dot_jet() {
     // Same resolution for `jet run`.
     let stem = std::env::temp_dir().join("jet_cli_extopt_run");

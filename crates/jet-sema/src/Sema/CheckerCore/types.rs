@@ -67,12 +67,42 @@ impl<'a> Checker<'a> {
                 {
                     Type::Named("EnvError".to_string())
                 }
+                Type::Named(n)
+                    if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
+                        self.imports.get(alias).is_some_and(|&idx| {
+                            self.modules.is_some_and(|modules| {
+                                modules[idx].registry.contains(leaf)
+                                    || modules[idx].trait_reg.is_trait_name(leaf)
+                            })
+                        })
+                    }) => {
+                        let (_, leaf) = n.rsplit_once('.').unwrap();
+                        if self.modules.is_some_and(|modules| {
+                            self.imports
+                                .get(n.rsplit_once('.').unwrap().0)
+                                .is_some_and(|&idx| modules[idx].trait_reg.is_trait_name(leaf))
+                        }) {
+                            Type::TraitObject(vec![leaf.to_string()])
+                        } else {
+                            Type::Named(leaf.to_string())
+                        }
+                    }
                 Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
                     Type::TraitObject(vec![n])
                 }
                 Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
                 Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
                 Type::Apply { name, args } => {
+                    let name = name
+                        .rsplit_once('.')
+                        .and_then(|(alias, leaf)| {
+                            self.imports.get(alias).and_then(|&idx| {
+                                self.modules
+                                    .filter(|modules| modules[idx].registry.contains(leaf))
+                                    .map(|_| leaf.to_string())
+                            })
+                        })
+                        .unwrap_or(name);
                     if self.registry.is_type_alias(&name) {
                         if let Some((params, target)) = self.registry.type_alias(&name) {
                             let subst: std::collections::HashMap<String, Type> = params

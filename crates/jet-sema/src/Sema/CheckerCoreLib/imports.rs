@@ -107,6 +107,21 @@ impl<'a> Checker<'a> {
             type_args: &[Type],
             args: &mut [crate::AST::CallArg],
         ) -> Option<Type> {
+            self.infer_import_call_with_warning(
+                mod_idx, name, alias_span, span, type_args, args, true,
+            )
+        }
+
+        fn infer_import_call_with_warning(
+            &mut self,
+            mod_idx: usize,
+            name: &str,
+            alias_span: Span,
+            span: Span,
+            type_args: &[Type],
+            args: &mut [crate::AST::CallArg],
+            warn_soft_public: bool,
+        ) -> Option<Type> {
             let Some(mods) = self.modules else {
                 return None;
             };
@@ -114,8 +129,22 @@ impl<'a> Checker<'a> {
             // D-MOD4: `pub use` re-export — `thismod.Item` where Item is defined in a
             // submodule and re-exported. Redirect to the real definition.
             if let Some((real_name, real_idx)) = target.reexports.get(name) {
+                if warn_soft_public
+                    && mod_idx != self.module_idx
+                    && Syntax::classify_identifier(name) == Syntax::IdentifierClass::SoftPublic
+                {
+                    self.diags.push(soft_public_use(name, span));
+                }
                 let (real_name, real_idx) = (real_name.clone(), *real_idx);
-                return self.infer_import_call(real_idx, &real_name, alias_span, span, type_args, args);
+                return self.infer_import_call_with_warning(
+                    real_idx,
+                    &real_name,
+                    alias_span,
+                    span,
+                    type_args,
+                    args,
+                    false,
+                );
             }
             if target.funcs.contains_key(name) {
                 let is_pub = target.func_pub.get(name).copied().unwrap_or(false)
@@ -128,7 +157,8 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                if mod_idx != self.module_idx
+                if warn_soft_public
+                    && mod_idx != self.module_idx
                     && is_pub
                     && Syntax::classify_identifier(name) == Syntax::IdentifierClass::SoftPublic
                 {

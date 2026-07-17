@@ -5,12 +5,89 @@ use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COM
 use crate::Sema::CheckerCoreLib::{core_type_known, data_renamed_to_datatree};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{
-    option_used_where_plain_expected, result_used_where_plain_expected, type_fix_hint,
+    option_used_where_plain_expected, result_used_where_plain_expected, soft_public_use,
+    type_fix_hint,
 };
 use crate::Syntax;
 use super::helpers::no_any_type;
 impl<'a> Checker<'a> {
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
+            self.warn_soft_public_declared_type(ty, span);
+            self.check_declared_type_rules(ty, span);
+        }
+
+        pub(crate) fn warn_soft_public_declared_type(&mut self, ty: &Type, span: Span) {
+            self.warn_soft_public_type_tree(ty, span);
+        }
+
+        fn warn_soft_public_type_tree(&mut self, ty: &Type, span: Span) {
+            match ty {
+                Type::Named(name) => self.warn_soft_public_type_name(name, span),
+                Type::Apply { name, args } => {
+                    self.warn_soft_public_type_name(name, span);
+                    for arg in args {
+                        self.warn_soft_public_type_tree(arg, span);
+                    }
+                }
+                Type::TraitObject(names) => {
+                    for name in names {
+                        self.warn_soft_public_type_name(name, span);
+                    }
+                }
+                Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => {
+                    self.warn_soft_public_type_tree(inner, span);
+                }
+                Type::Map { key, value, .. } => {
+                    self.warn_soft_public_type_tree(key, span);
+                    self.warn_soft_public_type_tree(value, span);
+                }
+                Type::Result { ok, err } => {
+                    self.warn_soft_public_type_tree(ok, span);
+                    self.warn_soft_public_type_tree(err, span);
+                }
+                Type::Tuple(fields) => {
+                    for (_, field) in fields {
+                        self.warn_soft_public_type_tree(field, span);
+                    }
+                }
+                Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+                    self.warn_soft_public_type_tree(elem, span);
+                }
+                Type::Fn { params, ret, .. } => {
+                    for param in params {
+                        self.warn_soft_public_type_tree(param, span);
+                    }
+                    if let Some(ret) = ret {
+                        self.warn_soft_public_type_tree(ret, span);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn warn_soft_public_type_name(&mut self, name: &str, span: Span) {
+            let (owner, public_name) = if let Some((alias, leaf)) = name.rsplit_once('.') {
+                (self.imports.get(alias).copied(), leaf)
+            } else {
+                let owner = self.modules.and_then(|modules| {
+                    self.imports.values().copied().find(|&idx| {
+                        modules[idx].registry.contains(name)
+                            || modules[idx].trait_reg.is_trait_name(name)
+                    })
+                });
+                (owner, name)
+            };
+            if Syntax::classify_identifier(public_name) != Syntax::IdentifierClass::SoftPublic {
+                return;
+            }
+            let Some(owner) = owner else { return };
+            if owner == self.module_idx || !self.type_is_pub_in(owner, public_name) {
+                return;
+            }
+            self.diags.push(soft_public_use(public_name, span));
+        }
+
+        fn check_declared_type_rules(&mut self, ty: &Type, span: Span) {
             if let Some(chain) = generic_depth_exceeded(ty) {
                 self.diags.push(e0909(&chain, span));
             }
@@ -88,7 +165,7 @@ impl<'a> Checker<'a> {
                     if name == "Any" {
                         self.diags.push(no_any_type(span));
                         for arg in args {
-                            self.check_declared_type(arg, span);
+                            self.check_declared_type_rules(arg, span);
                         }
                         return;
                     }
@@ -117,14 +194,14 @@ impl<'a> Checker<'a> {
                             ));
                         }
                         for arg in args {
-                            self.check_declared_type(arg, span);
+                            self.check_declared_type_rules(arg, span);
                         }
                         let subst: std::collections::HashMap<String, Type> = params
                             .iter()
                             .zip(args.iter())
                             .map(|(p, a)| (p.name.clone(), a.clone()))
                             .collect();
-                        self.check_declared_type(&substitute_type(target, &subst), span);
+                        self.check_declared_type_rules(&substitute_type(target, &subst), span);
                         return;
                     }
                     let is_core_generic = matches!(
@@ -148,7 +225,15 @@ impl<'a> Checker<'a> {
                             // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
                             | "Pool" | "Id"
                     );
-                    if !is_core_generic && !self.registry.contains(name) {
+                    let imported_owner = self.modules.and_then(|modules| {
+                        self.imports.values().copied().find(|&idx| {
+                            modules[idx].registry.contains(name) && self.type_is_pub_in(idx, name)
+                        })
+                    });
+                    if !is_core_generic
+                        && !self.registry.contains(name)
+                        && imported_owner.is_none()
+                    {
                         self.diags.push(Diagnostic::error(
                             "E0119",
                             format!("there's no type called `{}`", name),
@@ -162,7 +247,20 @@ impl<'a> Checker<'a> {
                             .trait_reg
                             .struct_params
                             .get(name)
-                            .or_else(|| self.trait_reg.enum_params.get(name));
+                            .or_else(|| self.trait_reg.enum_params.get(name))
+                            .cloned()
+                            .or_else(|| {
+                                imported_owner.and_then(|idx| {
+                                    self.modules.and_then(|modules| {
+                                        modules[idx]
+                                            .trait_reg
+                                            .struct_params
+                                            .get(name)
+                                            .or_else(|| modules[idx].trait_reg.enum_params.get(name))
+                                            .cloned()
+                                    })
+                                })
+                            });
                         if let Some(params) = expected {
                             if params.len() != args.len() {
                                 self.diags.push(Diagnostic::error(
@@ -199,7 +297,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     for arg in args {
-                        self.check_declared_type(arg, span);
+                        self.check_declared_type_rules(arg, span);
                     }
                 }
                 Type::TraitObject(ts) => {
@@ -228,16 +326,18 @@ impl<'a> Checker<'a> {
                             Some(span),
                         ));
                     }
-                    self.check_declared_type(inner, span);
+                    self.check_declared_type_rules(inner, span);
                 }
-                Type::List(inner) | Type::Shared(inner) => self.check_declared_type(inner, span),
+                Type::List(inner) | Type::Shared(inner) => {
+                    self.check_declared_type_rules(inner, span)
+                }
                 Type::Map {
                     key,
                     key_span,
                     value,
                 } => {
-                    self.check_declared_type(key, span);
-                    self.check_declared_type(value, span);
+                    self.check_declared_type_rules(key, span);
+                    self.check_declared_type_rules(value, span);
                     if !is_map_key_type(key) {
                         self.diags.push(Diagnostic::error(
                             "E0502",
@@ -251,20 +351,20 @@ impl<'a> Checker<'a> {
                 }
                 Type::Char => {}
                 Type::Result { ok, err } => {
-                    self.check_declared_type(ok, span);
-                    self.check_declared_type(err, span);
+                    self.check_declared_type_rules(ok, span);
+                    self.check_declared_type_rules(err, span);
                 }
                 Type::Fn { params, ret, .. } => {
                     for p in params {
-                        self.check_declared_type(p, span);
+                        self.check_declared_type_rules(p, span);
                     }
                     if let Some(r) = ret {
-                        self.check_declared_type(r, span);
+                        self.check_declared_type_rules(r, span);
                     }
                 }
                 Type::Tuple(fields) => {
                     for (_, t) in fields {
-                        self.check_declared_type(t, span);
+                        self.check_declared_type_rules(t, span);
                     }
                 }
                 _ => {}

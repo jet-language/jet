@@ -180,17 +180,23 @@ pub(crate) fn run_compile_cmd(
     };
 
     if cmd == "check" {
-        let diags: Vec<_> = jet::check_with_path(file)
-            .into_iter()
+        let all_diags = jet::check_with_path(file);
+        let errors: Vec<_> = all_diags
+            .iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .cloned()
             .collect();
-        if !diags.is_empty() {
-            report_problems(mode, file, &src, &diags);
+        if !errors.is_empty() {
+            report_problems(mode, file, &src, &errors);
             exit(ExitCodes::USER_ERROR);
         }
-        if mode.json {
+        let lints = crate::CmdDevTools::visible_lints(&all_diags);
+        if !lints.is_empty() {
+            report_problems(mode, file, &src, &lints);
+        }
+        if mode.json && lints.is_empty() {
             println!("{}", jet::render_all_json(file, &src, &[]).trim_end());
-        } else {
+        } else if !mode.json {
             println!("ok: `{}` has no problems", file);
         }
         return;
