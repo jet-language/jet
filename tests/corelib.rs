@@ -2317,10 +2317,10 @@ fn comptime_find_glob_records_sorted_lock_inputs() {
     fs::write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap();
     fs::write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap();
     let src = r#"
-comptime PATHS = find("inputs/**/{{alpha,beta}}-[0-9].t?t")
+comptime paths = find("inputs/**/{{alpha,beta}}-[0-9].t?t")
 
 fn run() {
-    print(PATHS.join("|"))
+    print(paths.join("|"))
 }
 "#;
     let path = dir.join("main.jet");

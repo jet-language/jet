@@ -398,11 +398,11 @@ fn show(result: DataTree ? XMLError) -> String {
     return "unreachable"
 }
 
-comptime MISMATCH = show(xml.parse("<root>\n<a></root>"))
+comptime mismatch = show(xml.parse("<root>\n<a></root>"))
 
 fn run() {
     mismatch :: show(xml.parse("<root>\n<a></root>"))
-    print("{MISMATCH}")
+    print("{mismatch}")
     print("{mismatch}")
 }
 "#;
@@ -446,21 +446,21 @@ use core.encoding.hex as hex
 @[Codable]
 struct Packet { id: Int, payload: [U8] }
 
-comptime MAP = hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
-comptime FLOATS = hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
-comptime NAN = hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
-comptime TYPED = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+comptime map = hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+comptime floats = hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
+comptime nan = hex.encode(cbor.to_bytes_canonical(Float.nan) ?? panic("canonical"))
+comptime typed = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
 
 fn run() {
     map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
     floats := hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
-    nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+    nan := hex.encode(cbor.to_bytes_canonical(Float.nan) ?? panic("canonical"))
     typed := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
-    if MAP != "a261620262616101" { panic("canonical encoded-key order drift") }
-    if FLOATS != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
-    if NAN != "f97e00" { panic("canonical NaN drift") }
-    if TYPED != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
-    print("{MAP}|{FLOATS}|{NAN}|{TYPED}")
+    if map != "a261620262616101" { panic("canonical encoded-key order drift") }
+    if floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
+    if nan != "f97e00" { panic("canonical NaN drift") }
+    if typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
+    print("{map}|{floats}|{nan}|{typed}")
     print("{map}|{floats}|{nan}|{typed}")
 }
 "#;
@@ -531,15 +531,15 @@ fn show_ints(bytes: [U8]) -> String {
     return "unreachable"
 }
 
-comptime MALFORMED = show([255])
-comptime TRUNCATED = show([129])
-comptime NONCANONICAL = show_strict([24, 1])
-comptime UNSUPPORTED = show([192, 1])
-comptime MISMATCH = show_ints([129, 97, 120])
-comptime DEPTH = show_depth([129, 129, 1])
-comptime ITEMS = show_items([130, 1, 2])
-comptime BYTES = show_bytes([130, 1, 2])
-comptime ALLOC = show_alloc([130, 1, 2])
+comptime malformed = show([255])
+comptime truncated = show([129])
+comptime noncanonical = show_strict([24, 1])
+comptime unsupported = show([192, 1])
+comptime mismatch = show_ints([129, 97, 120])
+comptime depth = show_depth([129, 129, 1])
+comptime items = show_items([130, 1, 2])
+comptime bytes = show_bytes([130, 1, 2])
+comptime alloc = show_alloc([130, 1, 2])
 
 fn run() {
     malformed_wire: [U8] := [255]
@@ -558,7 +558,7 @@ fn run() {
     items := show_items(items_wire)
     bytes := show_bytes(items_wire)
     alloc := show_alloc(items_wire)
-    print("{MALFORMED}~{TRUNCATED}~{NONCANONICAL}~{UNSUPPORTED}~{MISMATCH}~{DEPTH}~{ITEMS}~{BYTES}~{ALLOC}")
+    print("{malformed}~{truncated}~{noncanonical}~{unsupported}~{mismatch}~{depth}~{items}~{bytes}~{alloc}")
     print("{malformed}~{truncated}~{noncanonical}~{unsupported}~{mismatch}~{depth}~{items}~{bytes}~{alloc}")
 }
 "#;

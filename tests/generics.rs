@@ -15,23 +15,23 @@ fn generic_modules_complete_instantiation() {
     );
 
     let nested = r#"
-module Outer<T, count: Int> {
-    module Inner<U, extra: Int> {
+module outer<T, count: Int> {
+    module inner<U, extra: Int> {
         pub fn total(first: T, second: U) -> Int { return count + extra }
     }
-    module Closed = Inner<T, count>
+    module closed = inner<T, count>
 }
-module Use = Outer<String, 3>
+module instance = outer<String, 3>
 fn run() {}
 "#;
     jet::compile(nested)
         .unwrap_or_else(|diags| panic!("nested generic-module instantiation failed: {diags:#?}"));
 
     let body_items = r#"
-module Complete<T, count: Int, label: String> {
+module complete<T, count: Int, label: String> {
     @Meta(category: label)
-    const VALUE = count
-    comptime COMPTIME_VALUE = count + 1
+    const value = count
+    comptime comptime_value = count + 1
     tag Marked;
     trait Reveal { fn reveal(self) -> T }
     struct Wrapped { value: T }
@@ -42,9 +42,9 @@ module Complete<T, count: Int, label: String> {
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
     @Target(Os.Linux)
     impl Wrapped { fn linux_value(self) -> T { return self.value } }
-    module Plain { pub fn value() -> Int { return count } }
-    module Nested<U> { pub fn keep(value: U) -> U { return ~value } }
-    module NestedUse = Nested<T>
+    module plain { pub fn value() -> Int { return count } }
+    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+    module nested_use = nested<T>
     @Meta(category: label)
     pub fn marked(value: @Marked T) -> @Marked T {
         @Meta(category: label)
@@ -54,7 +54,7 @@ module Complete<T, count: Int, label: String> {
     @Test fn identity(value: T) { expect(count == count) }
     @Bench("complete") { expect(label == label) }
 }
-module CompleteUse = Complete<Int, 3, "generic module">
+module complete_use = complete<Int, 3, "generic module">
 fn run() {}
 "#;
     jet::compile(body_items)
@@ -68,12 +68,12 @@ fn run() {}
     std::fs::create_dir_all(&root).expect("create generic-module acceptance directory");
     std::fs::write(
         root.join("left.jet"),
-        "pub module Boxed<T, n: Int> { pub fn value() -> Int { return n } }\n",
+        "pub module boxed<T, n: Int> { pub fn value() -> Int { return n } }\n",
     )
     .expect("write left template");
     std::fs::write(
         root.join("right.jet"),
-        "pub module Boxed<T, n: Int> { pub fn value() -> Int { return n } }\n",
+        "pub module boxed<T, n: Int> { pub fn value() -> Int { return n } }\n",
     )
     .expect("write right template");
     let main = root.join("main.jet");
@@ -82,13 +82,13 @@ fn run() {}
         r#"
 module left
 module right
-use left.{Boxed as LeftBoxed}
-use right.{Boxed as RightBoxed}
-module First = LeftBoxed<Int, 3>
-module Equivalent = LeftBoxed<Int, 3>
-module DifferentType = LeftBoxed<String, 3>
-module DifferentValue = LeftBoxed<Int, 4>
-module DifferentPath = RightBoxed<Int, 3>
+use left.{boxed as LeftBoxed}
+use right.{boxed as RightBoxed}
+module first = LeftBoxed<Int, 3>
+module equivalent = LeftBoxed<Int, 3>
+module different_type = LeftBoxed<String, 3>
+module different_value = LeftBoxed<Int, 4>
+module different_path = RightBoxed<Int, 3>
 fn run() {}
 "#,
     )
@@ -107,16 +107,16 @@ fn run() {}
             instance
                 .applications
                 .iter()
-                .any(|application| application.name == "First")
+                .any(|application| application.name == "first")
         })
-        .expect("canonical First instance");
+        .expect("canonical first instance");
     assert_eq!(
         shared
             .applications
             .iter()
             .map(|application| application.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["First", "Equivalent"]
+        vec!["first", "equivalent"]
     );
     let full_keys = index
         .instances()

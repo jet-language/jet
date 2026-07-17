@@ -16,11 +16,11 @@ type parameters use bounds (`K: Hash`), value parameters use value types
 (`capacity: Int`), and instantiation mirrors declaration.
 
 ```jet
-module Ring<T, capacity: Int> {
+module ring<T, capacity: Int> {
     pub struct Buffer { slots: [T#capacity] }
 }
 
-module PacketRing = Ring<Packet, 64>
+module packet_ring = ring<Packet, 64>
 ```
 
 D-GENMOD-VALUE1=A admits immutable Tier-0 comptime `Bool`, `Int`, `Char`,

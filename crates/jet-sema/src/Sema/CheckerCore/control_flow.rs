@@ -183,7 +183,7 @@ impl<'a> Checker<'a> {
                         ),
                         "the condition selects a branch at compile time — it must be true or false"
                             .to_string(),
-                        "write a Bool comptime expression, like `comptime if FLAG { … }`".to_string(),
+                        "write a Bool comptime expression, like `comptime if flag { … }`".to_string(),
                         Some(*cond_span),
                     ));
                     return;
@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
                         "E0989",
                         "this `comptime if` condition can't be known at compile time".to_string(),
                         "a `comptime if` condition must be a comptime expression — a `comptime` binding, a literal, or a pure function call with comptime arguments (D-WHEN1)".to_string(),
-                        "use a `comptime` binding: `comptime FLAG = …; comptime if FLAG { … }`"
+                        "use a `comptime` binding: `comptime flag = …; comptime if flag { … }`"
                             .to_string(),
                         Some(*cond_span),
                     ));

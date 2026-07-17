@@ -351,9 +351,9 @@ impl<'a> Parser<'a> {
         let next = &self.toks[scan.min(self.toks.len() - 1)];
         match &next.kind {
             TokKind::Semi => true, // `module name;` — always a code module
-            // D-GENMOD2=A: `module Name<params> { … }` — generic module template.
+            // D-GENMOD2=A: `module name<params> { … }` — generic module template.
             TokKind::Lt => true,
-            // D-GENMOD2=A: `module Alias = Module<args>` — module alias.
+            // D-GENMOD2=A: `module alias = module_name<args>` — module alias.
             TokKind::Eq => true,
             TokKind::LBrace => {
                 // Peek inside the `{` at scan+1
@@ -452,7 +452,7 @@ impl<'a> Parser<'a> {
         let start = self.bump().span; // consume `module`
         let (name, name_span) = self.expect_ident("for the code module name")?;
         match &self.peek().kind {
-            // D-GENMOD2=A: `module Name<params> { body }` — generic module template
+            // D-GENMOD2=A: `module name<params> { body }` — generic module template
             TokKind::Lt => {
                 self.finish_generic_module(name, name_span, is_pub, is_package_pub, start)
             }
@@ -515,7 +515,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-GENMOD2=A: finish parsing `module Name<params> { body }` after the name.
+    /// D-GENMOD2=A: finish parsing `module name<params> { body }` after the name.
     fn finish_generic_module(
         &mut self,
         name: String,

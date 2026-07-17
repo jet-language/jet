@@ -160,7 +160,7 @@ fn collect_funcs_and_info<'a>(
         }
     }
     // Top-level `const`/`comptime` bindings: sema already evaluated every
-    // `comptime NAME = …` into `ConstDef::ct` while checking the program (the
+    // `comptime name = …` into `ConstDef::ct` while checking the program (the
     // caller of `run_checked` guarantees the front end already ran) — reuse
     // that value rather than re-evaluating, so a `jet dev` run of the const
     // matches the real build bit-for-bit (I2).

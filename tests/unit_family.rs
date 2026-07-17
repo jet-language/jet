@@ -1,4 +1,4 @@
-//! D-QUAL3 (ratified 2026-06-24): unit families, `@UnitFamily(name) { m, … }`.
+//! D-QUAL3 (ratified 2026-06-24): unit families, `@UnitFamily(Name) { m, … }`.
 //!
 //! Each member mints one `@Numeric` distinct type erasing to `Float`
 //! (`usd` → `Usd`), so signatures read in plain English and the compiler keeps
@@ -10,7 +10,7 @@
 mod common;
 
 const FAMILY: &str = r#"
-@UnitFamily(currency) { usd, eur }
+@UnitFamily(Currency) { usd, eur }
 "#;
 
 fn codes_of(src: &str) -> Vec<String> {
@@ -66,7 +66,7 @@ fn bare_float_does_not_coerce_into_unit() {
 #[test]
 fn multi_word_member_pascal_cases() {
     let src = r#"
-@UnitFamily(speed) { m_per_s }
+@UnitFamily(Speed) { m_per_s }
 fn run() {
     v :: MPerS(3.0)
     print("{(v.raw())}")

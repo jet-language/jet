@@ -4,7 +4,7 @@ use super::*;
 // D-GENMOD2=A: generic module expansion (R11 pre-pass)
 // ---------------------------------------------------------------------------
 //
-// `module StringCache32 = Lru<String, 32>` expands into a synthetic
+// `module string_cache32 = lru<String, 32>` expands into a synthetic
 // `CodeModule` with the same body as the generic template, with every
 // TypeParam name substituted by the supplied type arg. The original
 // GenericModule/ModuleAlias items are then erased. This runs before
@@ -418,6 +418,10 @@ fn mapped_definition_name(name: &str, types: &HashMap<String, Type>) -> String {
     }
 }
 
+fn module_type_prefix(alias: &str) -> String {
+    crate::Syntax::canonical_name_case(alias, crate::Syntax::NameCase::Pascal)
+}
+
 fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
     let mut result = source.clone();
@@ -654,7 +658,7 @@ fn specialize_struct(
         .collect();
     let mut result = source.clone();
     if !alias.is_empty() {
-        result.name = format!("{alias}__{}", source.name);
+        result.name = format!("{}__{}", module_type_prefix(alias), source.name);
     }
     result.fields = fields;
     result.methods = methods;
@@ -768,7 +772,7 @@ fn specialize_enum(
         .collect();
     let mut result = source.clone();
     if !alias.is_empty() {
-        result.name = format!("{alias}__{}", source.name);
+        result.name = format!("{}__{}", module_type_prefix(alias), source.name);
     }
     result.variants = variants;
     result.methods = methods;
@@ -1414,7 +1418,7 @@ fn expand_alias(
             _ => None,
         };
         if let Some(name) = name {
-            definition_types.insert(name.clone(), Type::Named(format!("{}__{}", alias.name, name)));
+            definition_types.insert(name.clone(), Type::Named(format!("{}__{}", module_type_prefix(&alias.name), name)));
         }
     }
     for item in &template.body {
@@ -1428,7 +1432,7 @@ fn expand_alias(
         if let Some(name) = name {
             definition_types.insert(
                 name.clone(),
-                Type::Named(format!("{}__{}", alias.name, name)),
+                Type::Named(format!("{}__{}", module_type_prefix(&alias.name), name)),
             );
         }
     }

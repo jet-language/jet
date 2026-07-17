@@ -853,7 +853,7 @@ impl<'a> Parser<'a> {
                                     self.bump(); // consume `pub`
                                     self.must_use_type_def(true)
                                 }
-                                // D-QUAL3: `pub @UnitFamily(name) { m, … }`
+                                // D-QUAL3: `pub @UnitFamily(Name) { m, … }`
                                 TokKind::At
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
@@ -1043,7 +1043,7 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     TokKind::KwConst => self.const_def().map(Item::Const),
-                    // D-PERSIST1: `@Persist const NAME = expr;` — module-level
+                    // D-PERSIST1: `@Persist const name = expr;` — module-level
                     // binding that survives a `jet dev` hot reload.
                     TokKind::At if self.at_persist_const() => self.const_def().map(Item::Const),
                     TokKind::At

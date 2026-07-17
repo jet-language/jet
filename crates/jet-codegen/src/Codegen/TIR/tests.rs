@@ -1546,9 +1546,9 @@ fn mk(k: Kind) -> Query {
         // c109 Phase 24: a comptime const inlines its value at the use site
         // (`cx.consts`), so a fn interpolating a const routes.
         let src = "\
-comptime HEADER = \"<html>\"
+comptime header = \"<html>\"
 fn wrap(s: String) -> String {
-    return \"{HEADER}: {s}\"
+    return \"{header}: {s}\"
 }
 ";
         assert!(covers(src, "wrap"));
@@ -1556,7 +1556,7 @@ fn wrap(s: String) -> String {
 
     #[test]
     fn covers_comptime_local_binding() {
-        // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr` in a function body
+        // c109 (S57/M9.5): a comptime LOCAL `comptime name = expr` in a function body
         // routes once sema fills `b.ct`. The runtime `init` (`build()`) is NOT in-subset
         // on its own merits, but the comptime path never emits it — it emits the
         // sema-evaluated literal — so the gate admits it on `b.ct.is_some()`. Needs the
@@ -1622,7 +1622,7 @@ fn mk(p: String) -> PR {
     #[test]
     fn covers_numeric_bounds_const() {
         // c109 Phase 28: per-type bounds constants reach codegen as a `Field` whose
-        // receiver is a numeric type NAME (`U8.MAX`, `I32.MIN`, `Float.INFINITY`).
+        // receiver is a numeric type name (`U8.MAX`, `I32.MIN`, `Float.INFINITY`).
         // Gated structurally (numeric type name + a known const member), no sema fact.
         let src = "\
 fn bounds() {
@@ -1738,7 +1738,7 @@ fn takes_shapes(xs: [Shape]) {
 
     #[test]
     fn rejects_non_trait_object_named() {
-        // `is_covered_trait_object_ty` admits only a NAME in `cx.trait_names`. A param
+        // `is_covered_trait_object_ty` admits only a name in `cx.trait_names`. A param
         // typed as an unknown name (no such trait/struct) stays excluded — the gate
         // never wrongly treats a plain name as a trait object.
         let src = "\

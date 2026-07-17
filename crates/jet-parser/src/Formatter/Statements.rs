@@ -241,7 +241,7 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             // D-LAYOUT1: `layout form { … }`. The parser desugared every
-            // `box.anchor` read into a `NAME.h(box, anchor)`/`NAME.v(box,
+            // `box.anchor` read into a `name.h(box, anchor)`/`name.v(box,
             // anchor)` method call at parse time (D-LAYOUT1, `Parser/
             // Statements.rs`); re-sugar those calls back to `box.anchor`
             // before formatting so `layout` round-trips byte-for-byte
@@ -643,7 +643,7 @@ impl<'a> Fmt<'a> {
         if b.track {
             self.write(&format!("@{} ", Syntax::ATTR_TRACK));
         }
-        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND4: ordinary
+        // S57: comptime stays keyword-led (`comptime name = …`). D-BIND4: ordinary
         // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.
         if b.is_comptime {
             self.write(Syntax::KW_COMPTIME);
@@ -767,7 +767,7 @@ impl<'a> Fmt<'a> {
 }
 
 /// D-LAYOUT1: the inverse of `Parser::desugar_layout_anchors` — turns a
-/// `NAME.h(box, anchor)` / `NAME.v(box, anchor)` call back into the
+/// `name.h(box, anchor)` / `name.v(box, anchor)` call back into the
 /// `box.anchor` source spelling before formatting. Only fires on the EXACT
 /// shape the parser's desugar produces (receiver is a bare `Ident` equal to
 /// `layout_name`, method is `h`/`v`, exactly two single-literal `Str` args);

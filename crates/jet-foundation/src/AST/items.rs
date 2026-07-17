@@ -14,7 +14,7 @@ pub enum Item {
     /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — a transparent
     /// type alias for generic shortcuts. Erases at codegen (I3).
     TypeAlias(TypeAliasDef),
-    /// D-QUAL3 (ratified 2026-06-24): `@UnitFamily(currency) { usd, eur, gbp }` —
+    /// D-QUAL3 (ratified 2026-06-24): `@UnitFamily(Currency) { usd, eur, gbp }` —
     /// a unit family. Sugar: each member mints one `@Numeric` distinct type
     /// (`usd` → `Usd`) erasing to `Float`. Lowers to a `DistinctDef` per member
     /// in sema registration and codegen — it rides the D-DIST1/D-DIST3 machinery.
@@ -66,10 +66,10 @@ pub enum Item {
     ProtocolDecl(ProtocolDecl),
     /// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
     UserDerive(DeriveDef),
-    /// D-GENMOD2=A: `module Name<params> { … }` — a parameterized module template.
+    /// D-GENMOD2=A: `module name<params> { … }` — a parameterized module template.
     /// Stores the body as-is; sema expands `ModuleAlias` references before codegen.
     GenericModule(GenericModuleDef),
-    /// D-GENMOD2=A: `module Alias = Module<args>` — module instantiation alias.
+    /// D-GENMOD2=A: `module alias = module_name<args>` — module instantiation alias.
     /// Expanded to a `CodeModule` by sema before registration and body-checking.
     ModuleAlias(ModuleAliasDef),
 }
@@ -114,7 +114,7 @@ pub struct ModuleInstanceApplication {
     pub span: Span,
 }
 
-/// D-GENMOD2=A: one parameter of a generic module — `module Lru<K: Hash, capacity: Int>`.
+/// D-GENMOD2=A: one parameter of a generic module — `module lru<K: Hash, capacity: Int>`.
 /// Sema resolves annotated slot kind in the template definition scope. Casing
 /// never decides semantics (D-GENMOD-VALUE1).
 #[derive(Debug, Clone)]
@@ -158,7 +158,7 @@ pub enum ModuleArg {
     Value(Expr, Span),
 }
 
-/// D-GENMOD2=A: `module Name<params> { body }` — a parameterized module template.
+/// D-GENMOD2=A: `module name<params> { body }` — a parameterized module template.
 /// Stores the body as a template. Sema expands `ModuleAlias` referencing this into
 /// a `CodeModule` before the main checking pass. Never reaches codegen directly.
 #[derive(Debug, Clone)]
@@ -172,7 +172,7 @@ pub struct GenericModuleDef {
     pub span: Span,
 }
 
-/// D-GENMOD2=A: `module Alias = Module<args>` — module instantiation alias.
+/// D-GENMOD2=A: `module alias = module_name<args>` — module instantiation alias.
 /// Expanded to a `CodeModule` by sema before registration and codegen.
 #[derive(Debug, Clone)]
 pub struct ModuleAliasDef {
@@ -1245,7 +1245,7 @@ pub struct DistinctDef {
 }
 
 /// D-QUAL3 (ratified 2026-06-24): unit-family declaration —
-/// `@UnitFamily(currency) { usd, eur, gbp }`. Each member mints a distinct
+/// `@UnitFamily(Currency) { usd, eur, gbp }`. Each member mints a distinct
 /// `@Numeric` type erasing to `Float`. `members` carries each member's source
 /// spelling (lowercase, e.g. `usd`) and span; the minted type name is the
 /// PascalCase form (`Usd`).

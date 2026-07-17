@@ -7,7 +7,7 @@
 // This file is split into two partitions on purpose (D-WASM1's own model,
 // not a workaround): a native-only cluster (View tree + a plain reactive
 // counter, no `core.ui`) that `main()` runs and prints, and a browser-only
-// cluster (`initApp`/`initFuel` + everything they call) that paints the real
+// cluster (`init_app`/`init_fuel` + everything they call) that paints the real
 // dashboard. The two clusters never call into each other. That split isn't
 // a limitation dodged — the web JS backend (crates/jet-codegen/src/Codegen/Web.rs)
 // has no `Stmt::Switch`/pattern-matching support, so the `View` enum's
@@ -68,18 +68,18 @@ use core.reactive as reactive
 // Two independent entry points, each returning a `Signal` the host page
 // keeps and drives directly (`.get()`/`.set()`) — the same real
 // `jetDom.makeSignal` object 195_ui_web_reactive.jet's `reactive.signal`
-// compiles to, not a lookalike. `initApp` paints the two static stat cards
+// compiles to, not a lookalike. `init_app` paints the two static stat cards
 // once and wires a `Signal<Int>` boost counter through `reactive_render` (the
 // counter box repaints itself whenever the returned signal changes — real
 // reactivity, driven from outside Jet by the host's click handler).
-// `initFuel` wires a second `Signal<Int>` holding elapsed motion time: the
+// `init_fuel` wires a second `Signal<Int>` holding elapsed motion time: the
 // host's `requestAnimationFrame` loop calls `.set(elapsedMs)` every frame
 // once boosting starts, `reactive_render` recomputes `tween(...)` from that
 // elapsed reading and repaints the Fuel card — motion driven by real clock
 // time, never by a stored/mutated animated value (D-MOTIONTIME1).
 // ── native entry point: exercises the Phase 2/3 view-tree cluster + a plain
 // reactive counter (no `core.ui`, so this stays in the Wasm/native partition
-// — see the file-header note). `initApp`/`initFuel` are browser-only and are
+// — see the file-header note). `init_app`/`init_fuel` are browser-only and are
 // never reached from here; they're exercised by the fake-DOM harness test
 // (tests/web_build.rs) and by the real page (ui_showcase.html) instead.
 use core.web.devserver as devserver
@@ -223,7 +223,7 @@ fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
     return from + (to - from) * eased
 }
 
-fn initApp() -> Signal<Int> {
+fn init_app() -> Signal<Int> {
     boosts :: reactive.signal(0)
     paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), 0.0, 0.0))
     paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), 190.0, 0.0))
@@ -240,7 +240,7 @@ fn initApp() -> Signal<Int> {
     return boosts
 }
 
-fn initFuel() -> Signal<Int> {
+fn init_fuel() -> Signal<Int> {
     elapsed :: reactive.signal(0)
     backend :: ui.null_backend()
     hex := to_hex(fuel_color())

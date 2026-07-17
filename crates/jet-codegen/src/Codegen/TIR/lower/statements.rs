@@ -556,7 +556,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 gc_transferred: false,
                 };
             }
-            // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. The AST `emit_let`
+            // c109 (S57/M9.5): a comptime LOCAL `comptime name = expr`. The AST `emit_let`
             // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
             // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
             // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
@@ -1190,11 +1190,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` needs a REAL
+        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a REAL
         // runtime object (unlike Region/TaskGroup, which erase) — bind `name`
         // to a fresh `jet_layout::Handle` BEFORE lowering the body, so the
-        // desugared `NAME.h(box, anchor)` calls inside resolve to it, exactly
-        // like an ordinary `NAME :: jet_layout::Handle::new(…)` binding would.
+        // desugared `name.h(box, anchor)` calls inside resolve to it, exactly
+        // like an ordinary `name :: jet_layout::Handle::new(…)` binding would.
         Stmt::Layout { name, body, .. } => {
             let place = mangle(name);
             env.bind(

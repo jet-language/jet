@@ -98,7 +98,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     // (the placeholder `Expr::Int(0, …)` init is never evaluated or
                     // lowered).
                     //
-                    // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. Sema
+                    // c109 (S57/M9.5): a comptime LOCAL `comptime name = expr`. Sema
                     // evaluates the value into `b.ct` and the AST `emit_let` emits it as
                     // literal data (`let <name>[: <ty>] = <ct.serialize()>;`) — the runtime
                     // `init` expr is NEVER emitted, so it need not be in-subset. Covered
@@ -316,7 +316,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Region { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         Stmt::Policy { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         Stmt::TaskGroup { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. UNLIKE `Region`/
+        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }`. UNLIKE `Region`/
         // `TaskGroup`, `name` is a REAL runtime binding that must stay valid
         // for statements AFTER this one (`lower_stmt`/`TStmt::Layout` binds
         // it before lowering the body) — register it into `locals` here too,
@@ -505,7 +505,7 @@ pub(crate) fn if_cond_in_subset(
             // `if let user_E::user_V(_) = <subj>` (byte-for-byte the AST `emit_if`). A
             // single-payload covered-enum variant whose one slot is a wildcard is in
             // subset, introducing NO binding (empty bindings vec). (The recently-covered
-            // user-variant if-let bound a NAME; this binds `_`.)
+            // user-variant if-let bound a name; this binds `_`.)
             if !is_json_variant(variant)
                 && bindings.len() == 1
                 && matches!(bindings[0], PatSlot::Wildcard)

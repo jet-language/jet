@@ -458,7 +458,7 @@ fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 Card #644 owns the implementation migration from the shipped module-local
 `no_alloc` denylist to this transitive contract.
 
-`const NAME = value` always looks the same; the transpiler emits Rust
+`const name = value` always looks the same; the transpiler emits Rust
 `const` or `static` when the address is taken or the type needs it.
 
 Aliasing rule, stated for humans: *while something is being changed, nobody
@@ -1640,7 +1640,7 @@ values. Instantiating it produces a specialized ordinary module.
 **Template form (D-GENMOD2=A):**
 
 ```jet
-module Cache<K> {
+module cache<K> {
     pub fn key_of(k: K) -> String { … }
 }
 ```
@@ -1652,7 +1652,7 @@ Both live in one `<…>` list.
 **Instantiation alias:**
 
 ```jet
-module IntCache = Cache<Int>
+module int_cache = cache<Int>
 ```
 
 Value parameters are immutable Tier-0 comptime `Bool`, `Int`, `Char`, `String`,

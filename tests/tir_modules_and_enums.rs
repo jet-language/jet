@@ -358,16 +358,16 @@ fn decorate(s: String) -> String {
 
 /// c109 Phase 15: a resolved comptime-if (`comptime if … { } else { }`). Sema selects
 /// the branch; codegen emits ONLY that branch's statements inline (no `if`). Here
-/// `DEBUG` is `false`, so the `else` branch is emitted; the `then` branch is dropped.
+/// `debug` is `false`, so the `else` branch is emitted; the `then` branch is dropped.
 #[test]
 fn comptime_if_selected_branch() {
     if !have_rustc() {
         return;
     }
     let src = "\
-comptime DEBUG = false
+comptime debug = false
 fn pick(x: Int) -> Int {
-    comptime if DEBUG {
+    comptime if debug {
         return x + 100
     } else {
         return x + 1

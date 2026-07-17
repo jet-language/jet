@@ -143,7 +143,7 @@ module.exports = grammar({
       ),
 
     // A marker that introduces a top-level brace-list declaration:
-    // `@UnitFamily(currency) { usd, eur }` (D-QUAL3) mints one type per member.
+    // `@UnitFamily(Currency) { usd, eur }` (D-QUAL3) mints one type per member.
     marker_decl: ($) => seq($.attribute, "{", commaSep($.identifier), "}"),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────

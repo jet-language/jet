@@ -411,7 +411,7 @@ call of it. `@[Patchable]` (D-PATCH1) excludes a computed field from `T.Patch`
 and from `apply`/`diff`/`merge`. `@[Codable]` encode calls the getter (the
 field appears in the wire output); decode never reads into it.
 
-**D-QUAL3 — Unit families**: `@UnitFamily(currency) { usd, eur, gbp }` mints
+**D-QUAL3 — Unit families**: `@UnitFamily(Currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);
 inexact, noncommensurable, or explicit-only cross-unit mixing reuses E0127;
 exact same-dimension conversion follows D-QUANTITY-CONVERT1. **D-UNITLIT1 —
@@ -756,7 +756,7 @@ inside `module name { … }`, never file top-level.
 **D-GENMOD1 / D-GENMOD2 — Generic modules**: ML-functor style — a module
 parameterized by types and values; instantiation yields a specialized normal
 module. Type parameters (`K: Hash`) and value parameters (`capacity: Int`) share
-one `<…>` list, and application mirrors it: `module Cache64 = Cache<String,
+one `<…>` list, and application mirrors it: `module cache64 = cache<String,
 64>`.
 
 **D-GENMOD-VALUE1=A — Closed value specialization**: value parameters are
@@ -2712,11 +2712,11 @@ it so tests/CI terminate. Example:
 `tests/cross.rs` (`gtk_backend_*`). macOS/Windows native backends stay out of
 scope (their `comptime` arms degrade honestly).
 **D-STYLEUNIT1 (=A, ratified 2026-07-03, c2qj06uq)**: UI style lengths are
-unit-family literals — `core.ui.style` declares `@UnitFamily(length) { px }`
+unit-family literals — `core.ui.style` declares `@UnitFamily(Length) { px }`
 (D-QUAL3), so `width: 320px` is a compile-checked `Px` value via the one
 ratified unit mechanism (D-UNITLIT1); no second style-only unit system (I8).
 Supersedes Phase 3's interim `Length` struct pair. *Shipped* (Tower c134):
-`examples/features/ui/ui_typed_style.jet` declares `@UnitFamily(length) { px }`
+`examples/features/ui/ui_typed_style.jet` declares `@UnitFamily(Length) { px }`
 and its `Style` record carries `width: Px`/`height: Px`; the interim `Length`
 struct/enum pair is deleted. Landing this required closing a standing typed-IR
 gap — a distinct-typed struct/enum field (`width: Px`, `Length(Px)`) was not

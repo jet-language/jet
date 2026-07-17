@@ -1,11 +1,11 @@
 // D-GENMOD2=A: generic module templates and aliases (card #91).
 //
 // A generic module is a module template parameterised by types and values.
-// `module Cache<K>` defines the template; `module IntCache = Cache<Int>`
+// `module cache<K>` defines the template; `module int_cache = cache<Int>`
 // instantiates it, producing a concrete module with all type params resolved.
-module Cache<K, capacity: Int> {
-    comptime BASE = capacity
-    comptime SIZE = BASE + 1
+module cache<K, capacity: Int> {
+    comptime base = capacity
+    comptime computed_size = base + 1
 
     pub struct Entry {
         key: K
@@ -35,20 +35,20 @@ module Cache<K, capacity: Int> {
     }
 
     pub fn size() -> Int {
-        return SIZE
+        return computed_size
     }
 }
 
 // Forward alias chain: declaration order does not affect resolution.
-module ForwardCache = IntCache
-module IntCache = Cache<Int, 32>
+module forward_cache = int_cache
+module int_cache = cache<Int, 32>
 
 enum Mode {
     Fast
     Safe
 }
 
-module TierZero<flag: Bool, count: Int, letter: Char, label: String, mode: Mode> {
+module tier_zero<flag: Bool, count: Int, letter: Char, label: String, mode: Mode> {
     @Meta(category: label)
     pub fn show() {
         print(flag)
@@ -59,7 +59,7 @@ module TierZero<flag: Bool, count: Int, letter: Char, label: String, mode: Mode>
     }
 }
 
-module Values = TierZero<true, 7, 'J', "jet", Mode.Fast>
+module values = tier_zero<true, 7, 'J', "jet", Mode.Fast>
 
 trait Token {}
 
@@ -68,29 +68,29 @@ struct GoodToken {}
 impl GoodToken.Token {}
 
 // Parameter spelling never decides its kind: lowercase `item` is a type slot
-// because its annotation is a trait; uppercase `COUNT` is an Int value slot.
-module AnnotationKinds<item: Token, COUNT: Int> {
+// because its annotation is a trait; lowercase `count` is an Int value slot.
+module annotation_kinds<item: Token, count: Int> {
     pub fn count() -> Int {
-        return COUNT
+        return count
     }
 }
 
-module Kinds = AnnotationKinds<GoodToken, 8>
+module kinds = annotation_kinds<GoodToken, 8>
 
-module FixedBuffer<T, capacity: Int> {
+module fixed_buffer<T, capacity: Int> {
     pub struct Buffer {
         items: [T#capacity]
     }
 
     pub fn echo(values: [T#capacity]) -> [T#capacity] {
-        result: [T#capacity] := values
+        result: [T#capacity] := ~values
         return result
     }
 }
 
-module ThreeInts = FixedBuffer<Int, 3>
+module three_ints = fixed_buffer<Int, 3>
 
-module LocalLaws<T> {
+module local_laws<T> {
     pub trait Reveal {
         type Output
         fn reveal(self) -> T
@@ -110,31 +110,30 @@ module LocalLaws<T> {
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
 }
 
-module IntLaws = LocalLaws<Int>
+module int_laws = local_laws<Int>
 
 fn run() {
-    k :: IntCache__key_of(42)
-    d :: IntCache__describe()
-    n :: IntCache__size()
-    e :: IntCache__entry(42)
-    s :: IntCache__slot(7)
+    k :: int_cache.key_of(42)
+    d :: int_cache.describe()
+    n :: int_cache.size()
+    e :: int_cache.entry(42)
+    s :: int_cache.slot(7)
     print(k)
     print(d)
     print(n)
-    print(IntCache__SIZE)
     print(e.key)
     print(e.limit)
-    forwarded :: ForwardCache.entry(9)
-    print(ForwardCache.size())
+    forwarded :: forward_cache.entry(9)
+    print(forward_cache.size())
     print(forwarded.key)
     if s == {
         .Value(v) -> { print(v) }
         .Empty -> { print(0) }
     }
-    Values.show()
-    print(Kinds.count())
+    values.show()
+    print(kinds.count())
     input: [Int#3] := [1, 2, 3]
-    fixed: [Int#3] := ThreeInts.echo(input)
+    fixed: [Int#3] := three_ints.echo(input)
     buffer :: ThreeInts__Buffer.{ items: fixed }
     print(buffer.items[2])
     wrapped :: IntLaws__Wrapped.{ value: 91 }

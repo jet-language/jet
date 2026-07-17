@@ -339,7 +339,7 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
-/// c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr` in a function body. Sema
+/// c109 (S57/M9.5): a comptime LOCAL `comptime name = expr` in a function body. Sema
 /// evaluates `build()` at compile time and codegen emits the result as literal data
 /// (`let user_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
 /// serialized literal verbatim; the runtime `init` expr is never emitted. Mirrors

@@ -55,7 +55,7 @@ pub const KW_SANITIZER: &str = "Sanitizer";
 /// in any other state is E0150. The state is an ordinary `tag` (D-QUAL2); the
 /// current state of a value is a compile-time fact threaded by forward dataflow,
 /// erased in codegen (I3 — zero runtime cost). A paren-arg fn marker, parallel to
-/// `@Layout(c)` / `@UnitFamily(currency)`. The exact spelling is the implemented
+/// `@Layout(c)` / `@UnitFamily(Currency)`. The exact spelling is the implemented
 /// default queued for owner confirmation as D-STATE-REQ.
 pub const KW_STATE: &str = "State";
 

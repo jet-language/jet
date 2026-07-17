@@ -413,10 +413,10 @@ fn comptime_const_inline() {
         return;
     }
     let src = "\
-comptime VERSION = \"1.0\"
-comptime BANNER = \"logbook {VERSION}\"
+comptime version = \"1.0\"
+comptime banner = \"logbook {version}\"
 fn wrap(s: String) -> String {
-    return \"{BANNER}: {s}\"
+    return \"{banner}: {s}\"
 }
 fn run() {
     print(wrap(\"hi\"))

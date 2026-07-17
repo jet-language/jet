@@ -263,7 +263,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
+        /// S57 (M9.5): `comptime name = expr;` — a compile-time constant binding.
         pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {

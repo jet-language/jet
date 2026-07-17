@@ -370,7 +370,7 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek3().kind, TokKind::LParen)
         }
     
-        /// D-QUAL3: parse `@UnitFamily(family) { m1, m2, … }`. Each member mints a
+        /// D-QUAL3: parse `@UnitFamily(Family) { m1, m2, … }`. Each member mints a
         /// `@Numeric` distinct type erasing to `Float` (lowered in sema/codegen).
         pub(super) fn unit_family_def(
             &mut self,

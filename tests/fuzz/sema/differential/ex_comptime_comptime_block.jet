@@ -2,20 +2,20 @@
 // Runs at build time via the comptime interpreter; erases entirely — no runtime
 // Rust is emitted (I3). A block-local comptime binding can be spliced into
 // runtime code with `$name` after the block.
-comptime LIMIT = 1000
+comptime limit = 1000
 
-comptime BASE = 10
+comptime base = 10
 
 fn run() {
     // Build-time assertion: verify constants are valid before compiling.
     comptime {
-        comptime ratio = LIMIT / BASE
-        if ratio < 1 { panic("LIMIT must be >= BASE") }
+        comptime ratio = limit / base
+        if ratio < 1 { panic("limit must be >= base") }
     }
     // The block ran at build time and produced no runtime code. Its comptime
     // binding leaks into the surrounding comptime scope, so `$ratio` splices a
     // runtime literal.
-    print("limit: {LIMIT}")
-    print("base: {BASE}")
+    print("limit: {limit}")
+    print("base: {base}")
     print("ratio: {$ratio}")
 }

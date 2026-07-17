@@ -124,7 +124,7 @@ pub const BINPAT_ENDIAN_LITTLE: &str = "le";
 /// no longer exists as a separate constant; use this one.
 pub const ATTR_NUMERIC: &str = "Numeric";
 
-/// D-QUAL3 (ratified 2026-06-24): `@UnitFamily(currency) { usd, eur, gbp }` —
+/// D-QUAL3 (ratified 2026-06-24): `@UnitFamily(Currency) { usd, eur, gbp }` —
 /// declares a family of units. Each member mints one distinct `@Numeric` type
 /// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
 /// (`fn subtotal(price: Usd, qty: Int) -> Usd`). The family is the

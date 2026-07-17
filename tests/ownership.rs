@@ -179,14 +179,14 @@ fn run() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-const LIMIT = 10
+const limit = 10
 
 fn show(n: Int) {
     print(n)
 }
 
 fn run() {
-    show(LIMIT)
+    show(limit)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
