@@ -831,6 +831,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E0063", // retired by D-SHAPE2: former two-plane wrong-sigil diagnostic
         "E0010", // retired by D-S14-PAUSE: was `set` teaching
         "E0011", // retired
+        "E0020", // retired by D-SHAPE3b: foreign Optional/Result spellings use current errors
         "E0058", // retired (D-MEM1/S3): was `view` return keyword teaching; `-> &T` gone
         "E0206", // retired (D-MEM1/S3): was `view` return escape check; `-> &T` gone
         "E0207", // retired (D-MEM1/S3): was stored-ref `&T` field owner ambiguity, D-REF-SHORTHAND1
