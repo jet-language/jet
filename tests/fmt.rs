@@ -2362,30 +2362,30 @@ fn fmt_preserves_casing_errors_for_sema() {
 }
 #[test]
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
-    let src = r#"module Ring<T, capacity: Int, label: String> {
+    let src = r#"module ring<T, capacity: Int, label: String> {
 @Meta(category: label)
 const size = capacity
 pub struct Buffer { slots: [T#capacity] }
-module Nested<U> { pub fn keep(value: U) -> U { return ~value } }
-module Inner = Nested<T>
+module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+module inner = nested<T>
 @Meta(category: label)
 pub fn adjusted() -> Int { return capacity + 1 }
 }
-module A = Ring<Int, 2 + 2, "ring">
-module B = A
+module a = ring<Int, 2 + 2, "ring">
+module b = a
 fn run() {}
 "#;
     let once = jet::format_source(src).expect("generic module format");
     let twice = jet::format_source(&once).expect("formatted generic module reparses");
     assert_eq!(once, twice);
     for preserved in [
-        "module Ring<T, capacity: Int, label: String>",
+        "module ring<T, capacity: Int, label: String>",
         "@Meta(category: label)",
         "[T#capacity]",
-        "module Nested<U>",
+        "module nested<U>",
         "capacity + 1",
-        "Ring<Int, 2 + 2, \"ring\">",
-        "module B = A",
+        "ring<Int, 2 + 2, \"ring\">",
+        "module b = a",
     ] {
         assert!(once.contains(preserved), "formatter lost `{preserved}`:\n{once}");
     }

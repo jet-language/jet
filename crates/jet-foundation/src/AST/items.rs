@@ -149,7 +149,7 @@ impl GenericModuleParam {
     }
 }
 
-/// D-GENMOD2=A: one argument in `module Alias = Module<String, 32>`.
+/// D-GENMOD2=A: one argument in `module alias = module_name<String, 32>`.
 #[derive(Debug, Clone)]
 pub enum ModuleArg {
     /// A type argument: `String`, `Int`, `MyType`.

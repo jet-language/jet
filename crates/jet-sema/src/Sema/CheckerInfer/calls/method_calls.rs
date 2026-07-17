@@ -418,7 +418,7 @@ impl<'a> Checker<'a> {
                     || self.resolve_method_sig(type_name, method).is_some() {
                     return self.check_static_method(type_name, method, span, type_args, args);
                 }
-                // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as Perf`
+                // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as perf`
                 // remains accepted as the existing module-alias path.
                 if type_name == "Perf" && !self.registry.contains("Perf") {
                     return self.infer_core_call(

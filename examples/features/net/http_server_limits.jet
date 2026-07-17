@@ -1,17 +1,17 @@
 // D-HTTP-SERVER2=A: reject ambiguous framing and oversized bodies before handlers run.
-use core.http.server as Server
+use core.http.server as http_server
 use core.net as net
 use core.tasks as tasks
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
-    mux :: Server.mux()
-    mux.post("/", (req: HttpSrvReq) => Server.response(200, "handler ran"))
+    mux :: http_server.mux()
+    mux.post("/", (req: HttpSrvReq) => http_server.response(200, "handler ran"))
 
     server :: tasks.spawn(take(listener, mux) () => {
-        Server.serve_once_listener(listener, mux) ?? panic("serve smuggling")
-        Server.serve_once_listener(listener, mux) ?? panic("serve body limit")
+        http_server.serve_once_listener(listener, mux) ?? panic("serve smuggling")
+        http_server.serve_once_listener(listener, mux) ?? panic("serve body limit")
     })
 
     smuggling :: net.tcp_connect(addr) ?? panic("connect smuggling")

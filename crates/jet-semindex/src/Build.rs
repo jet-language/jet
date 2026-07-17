@@ -30,6 +30,9 @@ pub enum SymKind {
     Trait,
     /// D-QUAL2: a `tag` marker qualifier (no methods, erases at runtime).
     Tag,
+    /// Type-like declaration without struct/enum payload (alias, distinct,
+    /// unit family, state set, protocol).
+    Type,
     Const,
     EnumVariant {
         parent: String,
@@ -635,6 +638,7 @@ fn definition_kind(kind: &SymbolKind) -> &'static str {
         SymbolKind::Enum { .. } => "enum",
         SymbolKind::Trait => "trait",
         SymbolKind::Tag => "tag",
+        SymbolKind::Type => "type",
         SymbolKind::Const => "const",
         SymbolKind::EnumVariant { .. } => "variant",
         SymbolKind::Field { .. } => "field",
@@ -1323,29 +1327,108 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 ctx.scope_identity = prev;
             }
         }
-        // D-DIST1: distinct types aren't yet indexed for symbols/hover.
         Item::Distinct(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: format!("type:{}::{}", ctx.scope_identity, value.name),
+                name: value.name.clone(),
+                def_span: value.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Type,
+            });
             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| { record_node(ctx, "type", "type", mp, value.base_span); });
         }
-        // D-TYPEALIAS1: type aliases aren't yet indexed for symbols/hover.
         Item::TypeAlias(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: format!("type:{}::{}", ctx.scope_identity, value.name),
+                name: value.name.clone(),
+                def_span: value.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Type,
+            });
             structural_slot(ctx, "target", StructuralSlotKind::Scalar, |ctx| {
                 record_node(ctx, "type", "type", mp, value.target_span);
             });
         }
-        // D-QUAL3: unit families aren't yet indexed for symbols/hover.
-        Item::UnitFamily(_) => {}
+        Item::UnitFamily(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: format!("type:{}::{}", ctx.scope_identity, value.family),
+                name: value.family.clone(),
+                def_span: value.family_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Type,
+            });
+            for (name, span) in &value.members {
+                ctx.db.defs.push(SymDef {
+                    identity: format!("unit:{}::{}", ctx.scope_identity, name),
+                    name: name.clone(),
+                    def_span: *span,
+                    module_path: mp.to_string(),
+                    kind: SymKind::Const,
+                });
+            }
+        }
         // D-ERR-CONV: error conversions aren't yet indexed for symbols/hover.
         Item::ErrorConv(_) => {}
         // D-MIGRATE1: migration blocks aren't yet indexed for symbols/hover.
         Item::Migration(_) => {}
-        // D-STATE-DECL: state-set declarations aren't yet indexed for symbols/hover.
-        Item::StateDecl(_) => {}
-        Item::ProtocolDecl(_) => {}
-        // D-METADERIVE1=A: user-authored derive blocks aren't indexed (expanded in sema).
-        Item::UserDerive(_) => {}
-        // D-GENMOD2=A: templates/aliases aren't indexed (erased).
-        Item::GenericModule(_) | Item::ModuleAlias(_) => {}
+        Item::StateDecl(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: format!("type:{}::{}", ctx.scope_identity, value.type_name),
+                name: value.type_name.clone(),
+                def_span: value.type_name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Type,
+            });
+            for (name, span) in &value.states {
+                ctx.db.defs.push(SymDef {
+                    identity: format!("state:{}::{}", ctx.scope_identity, name),
+                    name: name.clone(),
+                    def_span: *span,
+                    module_path: mp.to_string(),
+                    kind: SymKind::EnumVariant { parent: value.type_name.clone() },
+                });
+            }
+        }
+        Item::ProtocolDecl(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: format!("type:{}::{}", ctx.scope_identity, value.name),
+                name: value.name.clone(),
+                def_span: value.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Type,
+            });
+            for message in &value.messages {
+                ctx.db.defs.push(SymDef {
+                    identity: format!("protocol:{}::{}", ctx.scope_identity, message.name),
+                    name: message.name.clone(),
+                    def_span: message.name_span,
+                    module_path: mp.to_string(),
+                    kind: SymKind::EnumVariant { parent: value.name.clone() },
+                });
+            }
+        }
+        Item::UserDerive(value) => {
+            ctx.db.refs.push(scoped_ref(value.trait_name.clone(), value.trait_span, mp, ctx));
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&value.body, mp, module, ctx));
+        }
+        Item::GenericModule(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: module_identity(&ctx.scope_identity, &value.name),
+                name: value.name.clone(),
+                def_span: value.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Module,
+            });
+        }
+        Item::ModuleAlias(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: module_identity(&ctx.scope_identity, &value.name),
+                name: value.name.clone(),
+                def_span: value.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Module,
+            });
+        }
     }
     if structural_id.is_some() { ctx.structural_parents.pop(); }
 }

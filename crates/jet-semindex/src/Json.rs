@@ -95,6 +95,7 @@ fn json_kind(kind: &SymbolKind) -> String {
         }
         SymbolKind::Trait => "{\"kind\":\"trait\"}".to_string(),
         SymbolKind::Tag => "{\"kind\":\"tag\"}".to_string(),
+        SymbolKind::Type => "{\"kind\":\"type\"}".to_string(),
         SymbolKind::Const => "{\"kind\":\"const\"}".to_string(),
         SymbolKind::EnumVariant { parent } => format!(
             "{{\"kind\":\"enum_variant\",\"parent\":{}}}",
@@ -412,6 +413,7 @@ fn convert_kind(kind: &SymKind) -> SymbolKind {
         },
         SymKind::Trait => SymbolKind::Trait,
         SymKind::Tag => SymbolKind::Tag,
+        SymKind::Type => SymbolKind::Type,
         SymKind::Const => SymbolKind::Const,
         SymKind::EnumVariant { parent } => SymbolKind::EnumVariant {
             parent: parent.clone(),

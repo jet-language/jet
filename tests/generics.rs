@@ -82,13 +82,13 @@ fn run() {}
         r#"
 module left
 module right
-use left.{boxed as LeftBoxed}
-use right.{boxed as RightBoxed}
-module first = LeftBoxed<Int, 3>
-module equivalent = LeftBoxed<Int, 3>
-module different_type = LeftBoxed<String, 3>
-module different_value = LeftBoxed<Int, 4>
-module different_path = RightBoxed<Int, 3>
+use left.{boxed as left_boxed}
+use right.{boxed as right_boxed}
+module first = left_boxed<Int, 3>
+module equivalent = left_boxed<Int, 3>
+module different_type = left_boxed<String, 3>
+module different_value = left_boxed<Int, 4>
+module different_path = right_boxed<Int, 3>
 fn run() {}
 "#,
     )

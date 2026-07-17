@@ -224,7 +224,7 @@ mod tests {
         let main = root.join("main.jet");
         std::fs::write(
             &main,
-            "module Boxed<T, n: Int> { pub fn value() -> Int { return n } }\nmodule A = Boxed<Int, 3>\nmodule B = Boxed<Int, 3>\nfn run() {}\n",
+            "module boxed<T, n: Int> { pub fn value() -> Int { return n } }\nmodule a = boxed<Int, 3>\nmodule b = boxed<Int, 3>\nfn run() {}\n",
         ).unwrap();
 
         let index = open(&main).expect("generic module should index");
@@ -232,7 +232,7 @@ mod tests {
         let instance = &index.instances()[0];
         assert_eq!(instance.fingerprint.len(), 64);
         assert!(!instance.full_key_hex.is_empty());
-        assert_eq!(instance.applications.iter().map(|application| application.name.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
+        assert_eq!(instance.applications.iter().map(|application| application.name.as_str()).collect::<Vec<_>>(), vec!["a", "b"]);
         assert!(instance.applications.iter().all(|application| {
             application.module_path == main.to_string_lossy()
                 && application.semantic_identity == format!("instance:{}", instance.fingerprint)
@@ -244,14 +244,14 @@ mod tests {
             .filter(|definition| definition.identity == format!("instance:{}", instance.fingerprint))
             .map(|definition| definition.name.as_str())
             .collect();
-        assert_eq!(alias_defs, vec!["A", "B"]);
+        assert_eq!(alias_defs, vec!["a", "b"]);
         assert!(index.definitions().iter().any(|definition| {
             definition.identity == format!("instance:{}", instance.fingerprint)
         }));
         let json = index.to_json();
         assert!(json.contains(&instance.fingerprint));
         assert!(json.contains(&instance.full_key_hex));
-        assert!(json.contains("\"applications\":[{\"name\":\"A\""));
+        assert!(json.contains("\"applications\":[{\"name\":\"a\""));
         let _ = std::fs::remove_dir_all(&root);
     }
 

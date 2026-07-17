@@ -128,6 +128,33 @@ mod tests {
     }
 
     #[test]
+    fn rename_preserves_case_for_all_declaration_families() {
+        let src = r#"UserId :: distinct Int
+alias Count = Int
+@UnitFamily(Length) { meter }
+state Door { Open }
+protocol Wire { client -> server: Send(value: Int) }
+module holder<T> { pub struct Box { value: T } }
+module cache = holder<Int>
+fn run() {}
+"#;
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (tokens, _) = crate::Lexer::lex(src);
+        for name in ["UserId", "Count", "Length", "Door", "Open", "Wire", "Send"] {
+            let err = compute_rename(&db, &tokens, "test.jet", src.find(name).unwrap(), "bad_name")
+                .unwrap_err();
+            assert!(err.contains("BadName"), "{name}: {err}");
+        }
+        for name in ["meter", "holder", "cache"] {
+            let err = compute_rename(&db, &tokens, "test.jet", src.find(name).unwrap(), "BadName")
+                .unwrap_err();
+            assert!(err.contains("bad_name"), "{name}: {err}");
+        }
+    }
+
+    #[test]
     fn semantic_tokens_non_empty() {
         let src = "fn run() { x: Int :: 1 }\n";
         let (toks, _) = crate::Lexer::lex(src);

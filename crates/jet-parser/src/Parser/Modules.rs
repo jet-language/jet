@@ -456,7 +456,7 @@ impl<'a> Parser<'a> {
             TokKind::Lt => {
                 self.finish_generic_module(name, name_span, is_pub, is_package_pub, start)
             }
-            // D-GENMOD2=A: `module Alias = Target<args>` — module alias
+            // D-GENMOD2=A: `module alias = target<args>` — module alias
             TokKind::Eq => self.finish_module_alias(name, name_span, is_pub, is_package_pub, start),
             TokKind::Semi => {
                 let end = self.bump().span.end; // consume `;`
@@ -569,7 +569,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// D-GENMOD2=A: finish parsing `module Alias = Target<args>` after the name.
+    /// D-GENMOD2=A: finish parsing `module alias = target<args>` after the name.
     fn finish_module_alias(
         &mut self,
         name: String,

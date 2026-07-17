@@ -110,6 +110,7 @@ pub enum SymbolKind {
     },
     Trait,
     Tag,
+    Type,
     Const,
     EnumVariant {
         parent: String,
@@ -572,6 +573,7 @@ fn structural_signature(def: &SymbolDef) -> String {
         SymbolKind::Enum { variants } => format!("enum{{{}}}", variants.join(",")),
         SymbolKind::Trait => "trait".to_string(),
         SymbolKind::Tag => "tag".to_string(),
+        SymbolKind::Type => "type".to_string(),
         SymbolKind::Const => "const".to_string(),
         SymbolKind::EnumVariant { parent } => format!("variant:{parent}"),
         SymbolKind::Field { ty, parent } => format!("field:{parent}:{ty}"),

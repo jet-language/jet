@@ -118,8 +118,8 @@ fn normalize_sem_path(path: &Path) -> PathBuf {
     out
 }
 
-/// D-MOD2: inside an inline `module M { … }`, a call to a sibling function
-/// `helper(x)` must lower to the mangled `M__helper`. This pre-pass rewrites
+/// D-MOD2: inside an inline `module math { … }`, a call to a sibling function
+/// `helper(x)` must lower to the mangled `math__helper`. This pre-pass rewrites
 /// such call names so registration, body-checking, and codegen all agree.
 /// Only callee names are rewritten (the unambiguous case); a sibling referenced
 /// as a value resolves through normal name lookup and yields a clean Jet error
@@ -518,7 +518,9 @@ pub(crate) fn check_bundle_opts(
     // declaration clone: generated Rust/TIR still sees the owner item once.
     let shared_instance_nominals: Vec<(usize, Item)> = bundle.modules.iter().enumerate().flat_map(|(owner, module)| {
         let prefixes: Vec<String> = module.items.iter().filter_map(|item| match item {
-            Item::CodeModule(cm) => Some(format!("{}__", cm.name)),
+            Item::CodeModule(cm) if cm.instance_identity.is_some() => Some(
+                crate::Syntax::canonical_name_case(&cm.name, crate::Syntax::NameCase::Pascal),
+            ),
             _ => None,
         }).collect();
         module.items.iter().filter_map(move |item| match item {

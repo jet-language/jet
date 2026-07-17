@@ -1571,6 +1571,8 @@ fn kind_matches(k: &SymbolKind, want: &str) -> bool {
             | (SymbolKind::Struct { .. }, "struct")
             | (SymbolKind::Enum { .. }, "enum")
             | (SymbolKind::Trait, "trait")
+            | (SymbolKind::Tag, "tag")
+            | (SymbolKind::Type, "type")
             | (SymbolKind::Const, "const")
             | (SymbolKind::Local { .. }, "local")
             | (SymbolKind::Param { .. }, "param")
@@ -1586,6 +1588,7 @@ fn definition_anchor(definition: &jet_semindex::SymbolDef) -> DefinitionAnchor {
         SymbolKind::Enum { .. } => "enum",
         SymbolKind::Trait => "trait",
         SymbolKind::Tag => "tag",
+        SymbolKind::Type => "type",
         SymbolKind::Const => "const",
         SymbolKind::EnumVariant { .. } => "enum_variant",
         SymbolKind::Field { .. } => "field",

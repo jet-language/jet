@@ -2214,7 +2214,7 @@ pub(crate) fn lower_method_call(
             };
         }
         // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
-        // lower to the same core call shape as `use core.perf as Perf`.
+        // lower to the same core call shape as `use core.perf as perf`.
         if type_name == "Perf" && !cx.type_names.contains("Perf") {
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
             return TExpr {

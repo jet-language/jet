@@ -48,52 +48,106 @@ pub enum NameCase {
 /// One compiler-owned category table. Parser/sema callers select the grammar
 /// category; spelling policy never gets reimplemented at individual sites.
 pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
-    ("type", NameCase::Pascal),
-    ("trait", NameCase::Pascal),
+    ("associated type", NameCase::Pascal),
+    ("distinct type", NameCase::Pascal),
+    ("enum", NameCase::Pascal),
     ("enum variant", NameCase::Pascal),
+    ("enum variant group", NameCase::Pascal),
     ("marker", NameCase::Pascal),
+    ("protocol", NameCase::Pascal),
+    ("protocol message", NameCase::Pascal),
+    ("state", NameCase::Pascal),
+    ("state type", NameCase::Pascal),
+    ("struct", NameCase::Pascal),
+    ("tag", NameCase::Pascal),
+    ("trait", NameCase::Pascal),
+    ("type", NameCase::Pascal),
+    ("type alias", NameCase::Pascal),
+    ("type parameter", NameCase::Pascal),
     ("unit family", NameCase::Pascal),
-    ("function", NameCase::Snake),
-    ("method", NameCase::Snake),
-    ("field", NameCase::Snake),
-    ("local", NameCase::Snake),
-    ("module", NameCase::Snake),
-    ("unit member", NameCase::Snake),
+    ("config name", NameCase::Snake),
     ("constant", NameCase::Snake),
+    ("field", NameCase::Snake),
+    ("function", NameCase::Snake),
+    ("generic module", NameCase::Snake),
+    ("lambda parameter", NameCase::Snake),
+    ("local", NameCase::Snake),
+    ("local constant", NameCase::Snake),
+    ("loop label", NameCase::Snake),
+    ("message field", NameCase::Snake),
+    ("method", NameCase::Snake),
+    ("module", NameCase::Snake),
+    ("module alias", NameCase::Snake),
+    ("parameter", NameCase::Snake),
+    ("pattern binding", NameCase::Snake),
+    ("unit member", NameCase::Snake),
+    ("value parameter", NameCase::Snake),
+    ("variant field", NameCase::Snake),
 ];
+
+pub fn name_case_for_category(category: &str) -> Option<NameCase> {
+    NAME_CASE_CATEGORIES.iter().find_map(|(name, case)| (*name == category).then_some(*case))
+}
 
 pub fn name_has_case(name: &str, case: NameCase) -> bool {
     if name == "_" { return true; }
-    let name = if case == NameCase::Snake { name.strip_prefix('_').unwrap_or(name) } else { name };
+    let name = name.strip_prefix('_').unwrap_or(name);
     if name.is_empty() || name.starts_with('_') || name.ends_with('_') || name.contains("__") { return false; }
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else { return false; };
     match case {
-        NameCase::Pascal => name.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
-            && name.bytes().all(|b| b.is_ascii_alphanumeric()),
-        NameCase::Snake => name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-            && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+        NameCase::Pascal => (first.is_uppercase() || first.is_alphabetic() && !first.is_lowercase())
+            && chars.all(char::is_alphanumeric),
+        NameCase::Snake => (first.is_lowercase() || first.is_alphabetic() && !first.is_uppercase())
+            && chars.all(|c| c == '_' || c.is_alphanumeric() && !c.is_uppercase()),
     }
 }
 
 pub fn canonical_name_case(name: &str, case: NameCase) -> String {
     match case {
-        NameCase::Pascal => name.split('_').filter(|s| !s.is_empty()).map(|s| {
+        NameCase::Pascal => {
+            let leading = name.starts_with('_');
+            let out: String = name.trim_start_matches('_').split('_').filter(|s| !s.is_empty()).map(|s| {
             let mut chars = s.chars();
-            chars.next().map(|c| c.to_ascii_uppercase().to_string() + chars.as_str()).unwrap_or_default()
-        }).collect(),
+            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+            }).collect();
+            if leading { format!("_{out}") } else { out }
+        }
         NameCase::Snake => {
             let leading = name.starts_with('_');
             let chars: Vec<char> = name.trim_start_matches('_').chars().collect();
             let mut out = String::new();
             for (i, c) in chars.iter().copied().enumerate() {
-                if c.is_ascii_uppercase() {
-                    let prev_lower = i > 0 && chars[i - 1].is_ascii_lowercase();
-                    let next_lower = chars.get(i + 1).is_some_and(char::is_ascii_lowercase);
+                if c.is_uppercase() {
+                    let prev_lower = i > 0 && chars[i - 1].is_lowercase();
+                    let next_lower = chars.get(i + 1).is_some_and(|c| c.is_lowercase());
                     if !out.is_empty() && (prev_lower || next_lower) && !out.ends_with('_') { out.push('_'); }
-                    out.push(c.to_ascii_lowercase());
+                    out.extend(c.to_lowercase());
                 } else { out.push(c); }
             }
             if leading { format!("_{out}") } else { out }
         }
+    }
+}
+
+#[cfg(test)]
+mod casing_tests {
+    use super::{canonical_name_case, name_has_case, NameCase};
+
+    #[test]
+    fn uncased_unicode_letters_obey_both_grammar_tiers() {
+        assert!(name_has_case("日本語", NameCase::Pascal));
+        assert!(name_has_case("日本語", NameCase::Snake));
+        assert_eq!(canonical_name_case("日本語", NameCase::Pascal), "日本語");
+        assert_eq!(canonical_name_case("日本語", NameCase::Snake), "日本語");
+    }
+
+    #[test]
+    fn cased_unicode_letters_follow_the_selected_tier() {
+        assert!(name_has_case("Éclair", NameCase::Pascal));
+        assert!(name_has_case("éclair", NameCase::Snake));
+        assert_eq!(canonical_name_case("Éclair", NameCase::Snake), "éclair");
+        assert_eq!(canonical_name_case("éclair", NameCase::Pascal), "Éclair");
     }
 }
 

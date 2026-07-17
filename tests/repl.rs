@@ -1586,7 +1586,7 @@ fn repl_tty_prompts_and_reuses_exact_session_tuple() {
 
 #[test]
 fn repl_http_client_import_hard_rejected() {
-    let out = run_transcript(&["use core.http.client as Client"], None);
+    let out = run_transcript(&["use core.http.client as client"], None);
     assert!(
         out.contains("E1802"),
         "HTTP client import should hard-reject, got: {:?}",

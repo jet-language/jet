@@ -661,21 +661,21 @@ fn web_inline_modules_keep_qualified_function_identity() {
         return;
     }
     let src = r#"@Target(Web)
-module Left {
+module left {
     @Target(Js)
     pub fn value() -> Int { return 1 }
 }
-module Right {
+module right {
     @Target(Js)
     pub fn value() -> Int { return 2 }
 }
 @Target(Js)
-fn run() { print(Left.value() + Right.value()) }
+fn run() { print(left.value() + right.value()) }
 "#;
     let dir = build_web_fixture("module_identity", src, "tests/fixtures/web_module_identity.jet");
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(js.contains("function Left__value()"), "left module identity was dropped:\n{js}");
-    assert!(js.contains("function Right__value()"), "right module identity was dropped:\n{js}");
+    assert!(js.contains("function left__value()"), "left module identity was dropped:\n{js}");
+    assert!(js.contains("function right__value()"), "right module identity was dropped:\n{js}");
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -687,19 +687,19 @@ fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
         return;
     }
     let src = r#"@Target(Web)
-module Left { pub fn value() -> Int { return 1 } }
-module Right { pub fn value() -> Int { return 2 } }
+module left { pub fn value() -> Int { return 1 } }
+module right { pub fn value() -> Int { return 2 } }
 @WasmExport
-fn total() -> Int { return Left.value() + Right.value() }
+fn total() -> Int { return left.value() + right.value() }
 @Target(Js)
 fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm_Left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_Right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm_Left__value()"), "left qualified call was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm_Right__value()"), "right qualified call was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm_left__value()"), "left qualified call was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm_right__value()"), "right qualified call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -856,7 +856,7 @@ fn module_local_run_cannot_hijack_web_entrypoint() {
         return;
     }
     let src = r#"@Target(Web)
-module Helper { pub fn run() -> Int { return 7 } }
+module helper { pub fn run() -> Int { return 7 } }
 @Target(Js)
 fn run() { print("top-level") }
 "#;
@@ -930,7 +930,7 @@ fn dev() {
     server.port(8080)
     server.serve()
 }
-module Tools {
+module tools {
     fn dev() -> Int { return 7 }
 }
 fn run() { print("hello, web") }
@@ -939,7 +939,7 @@ fn run() { print("hello, web") }
         .expect("host dev entry and web run body must compile through their own execution paths");
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
-    assert!(wasm.contains("fn jet_wasm_Tools__dev() -> i64"), "module Tools.dev was not emitted:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_tools__dev() -> i64"), "module tools.dev was not emitted:\n{wasm}");
     assert!(wasm.contains("println!(\"{}\", \"hello, web\")"), "literal TIR print was not emitted:\n{wasm}");
     let js = &web.js_app;
     assert!(!js.contains("function dev("), "top-level host dev leaked into JS runtime:\n{js}");
@@ -965,7 +965,7 @@ fn run() { print("hello") }
 #[test]
 fn module_local_dev_is_validated_as_web_runtime() {
     let src = r#"@Target(Web)
-module Tools {
+module tools {
     fn dev(name: String) { print("hello {name}") }
 }
 fn run() { print("hello") }

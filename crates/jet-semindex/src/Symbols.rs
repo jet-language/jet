@@ -617,6 +617,7 @@ fn semantic_shape(
         ),
         SymKind::Trait => (SemanticSymbolKind::Type, format!("trait {name}")),
         SymKind::Tag => (SemanticSymbolKind::Type, format!("tag {name}")),
+        SymKind::Type => (SemanticSymbolKind::Type, format!("type {name}")),
         SymKind::Const => (SemanticSymbolKind::Constant, format!("const {name}")),
         SymKind::EnumVariant { parent } => (
             SemanticSymbolKind::Member,

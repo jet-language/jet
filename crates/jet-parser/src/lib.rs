@@ -25,7 +25,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_value_slots_parse_closed_identifier_led_expressions() {
-        let src = "module Retry<count: Int> { fn ready() -> Bool { return true } }\nmodule A = Retry<limit + 1>\nmodule B = Retry<compute()>";
+        let src = "module retry<count: Int> { fn ready() -> Bool { return true } }\nmodule a = retry<limit + 1>\nmodule b = retry<compute()>";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();
@@ -37,7 +37,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_retains_symbolic_fixed_length_and_nested_modules() {
-        let src = "module Buffer<T, capacity: Int> { struct Data { items: [T#capacity] } module stats { fn size() -> Int { return capacity } } }";
+        let src = "module buffer<T, capacity: Int> { struct Data { items: [T#capacity] } module stats { fn size() -> Int { return capacity } } }";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();

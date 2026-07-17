@@ -1,6 +1,6 @@
 // core.http.client: request builder, response methods. HTTPS works by default;
 // this golden uses loopback plain HTTP to stay hermetic.
-use core.http.client as Client
+use core.http.client as http_client
 use core.net as net
 use core.tasks as tasks
 
@@ -15,7 +15,7 @@ fn run() {
         net.tcp_reply(^stream, "200 OK", "hello from core.http.client") ?? panic("tcp reply")
     })
     addr :: ch.receive() ?? panic("no addr")
-    resp :: Client.get("http://{addr}/") ?? panic("client get failed")
+    resp :: http_client.get("http://{addr}/") ?? panic("client get failed")
     print(resp.status())
     print(resp.body())
     t.join()

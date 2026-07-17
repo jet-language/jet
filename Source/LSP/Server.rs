@@ -1754,6 +1754,7 @@ fn document_symbol_kind(kind: &SymKind) -> Option<u8> {
         SymKind::Struct { .. } => Some(23),
         SymKind::Enum { .. } => Some(10),
         SymKind::Trait | SymKind::Tag => Some(11),
+        SymKind::Type => Some(5),
         SymKind::Const => Some(14),
         _ => None,
     }

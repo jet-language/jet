@@ -22,11 +22,11 @@ fn server_tls_option_validates_fixture_before_binding() {
     let key = jet_string(include_str!("../tests/fixtures/tls/localhost.key.pem"));
     let src = format!(
         r#"
-use core.http.server as Server
+use core.http.server as server
 
 fn run() {{
-    mux :: Server.mux()
-    result :: Server.serve("127.0.0.1:999999", mux, tls: Server.tls({cert}, {key}))
+    mux :: server.mux()
+    result :: server.serve("127.0.0.1:999999", mux, tls: server.tls({cert}, {key}))
     if result == {{
         Ok(_) -> {{ print("unexpected") }}
         Err(e) -> {{ print(e) }}
@@ -52,11 +52,11 @@ fn server_tls_bad_cert_is_jet_voiced() {
     }
     let _lock = FfiBridgeLock::acquire();
     let src = r#"
-use core.http.server as Server
+use core.http.server as server
 
 fn run() {
-    mux :: Server.mux()
-    result :: Server.serve("127.0.0.1:999999", mux, tls: Server.tls("not a cert", "not a key"))
+    mux :: server.mux()
+    result :: server.serve("127.0.0.1:999999", mux, tls: server.tls("not a cert", "not a key"))
     if result == {
         Ok(_) -> { print("unexpected") }
         Err(e) -> { print(e) }
@@ -75,11 +75,11 @@ fn run() {
 #[test]
 fn server_tls_requires_named_tls_option() {
     let src = r#"
-use core.http.server as Server
+use core.http.server as server
 
 fn run() {
-    mux :: Server.mux()
-    _ :: Server.serve("127.0.0.1:0", mux, Server.tls("cert", "key"))
+    mux :: server.mux()
+    _ :: server.serve("127.0.0.1:0", mux, server.tls("cert", "key"))
 }
 "#;
 

@@ -410,16 +410,16 @@ the hidden rustls bridge, and keeps the compiler itself dependency-free. The
 server is std-only HTTP/1.1 unless the named TLS option is supplied.
 
 ```jet
-use core.http.client as Client
-use core.http.server as Server
+use core.http.client as client
+use core.http.server as server
 
 fn run() {
-    mux :: Server.mux()
+    mux :: server.mux()
     mux.post("/api/:name/*", (req: HttpSrvReq) =>
-        Server.response(200, req.body())
+        server.response(200, req.body())
     )
 
-    req :: Client.request("POST", "http://127.0.0.1:8080/api/ada/profile")
+    req :: client.request("POST", "http://127.0.0.1:8080/api/ada/profile")
         .form("tool", "jet")
         .cookie("session", "abc")
         .connect_timeout(1000)
@@ -433,8 +433,8 @@ Client surface:
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
-| `Client.get(url)` / `Client.post(url, body)` | `HttpClientResp ? String` | One-shot request helpers |
-| `Client.request(method, url)` | `HttpClientReq` | Start a typed request builder |
+| `client.get(url)` / `client.post(url, body)` | `HttpClientResp ? String` | One-shot request helpers |
+| `client.request(method, url)` | `HttpClientReq` | Start a typed request builder |
 | `req.header(name, value)` / `.body(text)` | `HttpClientReq` | Add headers or a string body |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields |
 | `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or redirect limit |
@@ -447,15 +447,15 @@ Server surface:
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
-| `Server.mux()` | `HttpMux` | Create a function-first router |
+| `server.mux()` | `HttpMux` | Create a function-first router |
 | `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HttpSrvReq) -> HttpSrvResp` handlers |
-| `Server.serve(addr, mux)` | `() ? String` | Serve HTTP/1.1 forever |
-| `Server.serve(addr, mux, tls: Server.tls(cert, key))` | `() ? String` | Serve HTTPS with explicit TLS material |
-| `Server.serve_once(addr, mux)` / `Server.serve_once_listener(listener, mux)` | `() ? String` | Testable one-request serving |
-| `Server.response(status, body)` / `resp.header(name, value)` | `HttpSrvResp` | Build a response |
-| `Server.sse(data)` | `HttpSrvResp` | Server-sent event response |
-| `Server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HttpSrvResp ? String` | Static file response, with Range support |
-| `Server.access_log(req, status)` | `String` | Stable access-log line |
+| `server.serve(addr, mux)` | `() ? String` | Serve HTTP/1.1 forever |
+| `server.serve(addr, mux, tls: server.tls(cert, key))` | `() ? String` | Serve HTTPS with explicit TLS material |
+| `server.serve_once(addr, mux)` / `server.serve_once_listener(listener, mux)` | `() ? String` | Testable one-request serving |
+| `server.response(status, body)` / `resp.header(name, value)` | `HttpSrvResp` | Build a response |
+| `server.sse(data)` | `HttpSrvResp` | Server-sent event response |
+| `server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HttpSrvResp ? String` | Static file response, with Range support |
+| `server.access_log(req, status)` | `String` | Stable access-log line |
 | `req.method()` / `.path()` / `.param(name)` / `.header(name)` / `.body()` / `.body_len()` / `.under_limit(max)` | mixed | Inspect request data and enforce body limits |
 
 Card 301 audit state:
@@ -1107,10 +1107,10 @@ the order you add them. Failed constraints are counted; queries are
 deterministic.
 
 ```jet
-use core.solve as Solve
+use core.solve as solve
 
 fn run() {
-    solver := Solve.Solver.new(42)
+    solver := solve.Solver.new(42)
     solver.require(2 + 2 == 4)
     solver.require("red" != "blue")
 
@@ -1179,14 +1179,14 @@ not skip work, reschedule tasks, or change cleanup policy. App code reads the
 signal and chooses behavior.
 
 ```jet
-use core.perf as Perf
+use core.perf as perf
 
 fn run() -> Void ? {
-    if Perf.fidelity() < 0.5 {
+    if perf.fidelity() < 0.5 {
         print("low quality mode")
     }
-    Perf.override_fidelity(0.25)?   // tests or explicit app policy
-    Perf.reset_fidelity()
+    perf.override_fidelity(0.25)?   // tests or explicit app policy
+    perf.reset_fidelity()
 }
 ```
 

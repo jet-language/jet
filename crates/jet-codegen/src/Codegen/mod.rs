@@ -1142,7 +1142,7 @@ mod tests {
 
     #[test]
     fn generic_instance_provenance_reaches_tir_and_generated_rust() {
-        let source = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule A = Boxed<Int, 3>\nmodule B = Boxed<Int, 3>\nfn run() {}";
+        let source = "module boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule a = boxed<Int, 3>\nmodule b = boxed<Int, 3>\nfn run() {}";
         let bundle = checked_generic_bundle(source, "pkg-a");
         let fingerprint = bundle.modules[0].items.iter().find_map(|item| match item {
             crate::AST::Item::CodeModule(module) => module.instance_identity.as_ref().map(|identity| identity.fingerprint.clone()),
@@ -1160,13 +1160,13 @@ mod tests {
         assert!(rust.contains(&format!("module={} fingerprint={} full-key={}", expected[0].canonical_module, expected[0].fingerprint, expected[0].full_key_hex)));
 
         let semantic_edit = checked_generic_bundle(
-            "module Boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule A = Boxed<Int, 3>\nfn run() {}", "pkg-a");
+            "module boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule a = boxed<Int, 3>\nfn run() {}", "pkg-a");
         let edited_rust = emit_bundle(&semantic_edit, CompileMode::Run, None);
         assert!(edited_rust.contains(&format!("fingerprint={fingerprint}")), "body shape is a cache input, not nominal instance identity");
         assert_ne!(rust, edited_rust, "semantic body edits still change generated code/cache material");
 
         let distinct = checked_generic_bundle(
-            "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule A = Boxed<Int, 3>\nmodule B = Boxed<Int, 4>\nfn run() {}", "pkg-a");
+            "module boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule a = boxed<Int, 3>\nmodule b = boxed<Int, 4>\nfn run() {}", "pkg-a");
         let distinct_tir = crate::Codegen::TIR::lower_jit_program(&distinct).expect("distinct JIT TIR");
         assert_eq!(distinct_tir.instance_provenance, crate::Codegen::TIR::instance_provenance(&distinct));
         assert_eq!(distinct_tir.instance_provenance.len(), 2);

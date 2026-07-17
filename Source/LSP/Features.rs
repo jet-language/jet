@@ -179,7 +179,7 @@ mod generic_instance_tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("main.jet");
-        let source = "module Value<n: Int> { pub fn get() -> Int { return n } }\nmodule A = Value<3>\nmodule B = Value<3>\nfn run() { print(A.get()); print(B.get()) }\n";
+        let source = "module value<n: Int> { pub fn get() -> Int { return n } }\nmodule a = value<3>\nmodule b = value<3>\nfn run() { print(a.get()); print(b.get()) }\n";
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
@@ -188,10 +188,10 @@ mod generic_instance_tests {
         let db = jet_semindex::build_symbol_db(&bundle, &facts);
         let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
         assert!(lex_diagnostics.is_empty());
-        let references = compute_references(&db, &tokens, &shown, source.find("A.get").unwrap(), true);
+        let references = compute_references(&db, &tokens, &shown, source.find("a.get").unwrap(), true);
         let spellings: Vec<_> = references.iter().map(|(_, span)| &source[span.start..span.end]).collect();
-        assert!(spellings.iter().any(|spelling| *spelling == "A"), "{spellings:?}");
-        assert!(spellings.iter().any(|spelling| *spelling == "B"), "{spellings:?}");
+        assert!(spellings.iter().any(|spelling| *spelling == "a"), "{spellings:?}");
+        assert!(spellings.iter().any(|spelling| *spelling == "b"), "{spellings:?}");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -203,8 +203,8 @@ mod generic_instance_tests {
         let main = root.join("main.jet");
         let left = root.join("left.jet");
         let right = root.join("right.jet");
-        let left_source = "module Value<n: Int> { pub fn get() -> Int { return n } }\nmodule Same = Value<3>\nfn left_value() -> Int { return Same.get() }\n";
-        let right_source = "module Value<n: Int> { pub fn get() -> Int { return n } }\nmodule Same = Value<4>\nfn right_value() -> Int { return Same.get() }\n";
+        let left_source = "module value<n: Int> { pub fn get() -> Int { return n } }\nmodule same = value<3>\nfn left_value() -> Int { return same.get() }\n";
+        let right_source = "module value<n: Int> { pub fn get() -> Int { return n } }\nmodule same = value<4>\nfn right_value() -> Int { return same.get() }\n";
         std::fs::write(&main, "module left\nmodule right\nfn run() {}\n").unwrap();
         std::fs::write(&left, left_source).unwrap();
         std::fs::write(&right, right_source).unwrap();
@@ -217,10 +217,10 @@ mod generic_instance_tests {
         let db = jet_semindex::build_symbol_db(&bundle, &facts);
         let (tokens, lex_diagnostics) = crate::Lexer::lex(left_source);
         assert!(lex_diagnostics.is_empty());
-        let offset = left_source.find("Same =").unwrap();
+        let offset = left_source.find("same =").unwrap();
         let references = compute_references(&db, &tokens, &shown_left, offset, true);
-        assert!(references.iter().any(|(path, span)| path == &shown_left && &left_source[span.start..span.end] == "Same"), "refs={references:?} defs={:#?} instances={:#?}", db.defs, db.index.instances());
-        assert!(!references.iter().any(|(path, _)| path == &shown_right), "distinct Value<4> instance joined by alias spelling: {references:?}");
+        assert!(references.iter().any(|(path, span)| path == &shown_left && &left_source[span.start..span.end] == "same"), "refs={references:?} defs={:#?} instances={:#?}", db.defs, db.index.instances());
+        assert!(!references.iter().any(|(path, _)| path == &shown_right), "distinct value<4> instance joined by alias spelling: {references:?}");
         let _ = std::fs::remove_dir_all(root);
     }
 }
@@ -248,7 +248,7 @@ fn is_valid_ident(name: &str) -> bool {
 pub(crate) fn compute_rename(
     db: &SymbolDB,
     tokens: &[Token],
-    _path: &str,
+    path: &str,
     offset: usize,
     new_name: &str,
 ) -> Result<Vec<(String, Span)>, String> {
@@ -271,14 +271,26 @@ pub(crate) fn compute_rename(
     if is_keyword(name) {
         return Err(format!("`{}` is a keyword and cannot be renamed", name));
     }
-    if let Some(def) = db.defs.iter().find(|d| d.name == name) {
-        let (category, case) = match &def.kind {
-            SymKind::Struct { .. } | SymKind::Enum { .. } | SymKind::Trait | SymKind::Tag
+    let indexed_case = db.defs.iter().find(|d| d.name == name).map(|def| {
+        match &def.kind {
+            SymKind::Struct { .. } | SymKind::Enum { .. } | SymKind::Trait | SymKind::Tag | SymKind::Type
             | SymKind::EnumVariant { .. } => ("type-like name", Syntax::NameCase::Pascal),
             SymKind::Module | SymKind::Function { .. } | SymKind::Const | SymKind::Field { .. }
             | SymKind::Local { .. } | SymKind::Param { .. } =>
                 ("value-like name", Syntax::NameCase::Snake),
-        };
+        }
+    });
+    // Some declaration families are expanded before SemIndex sees the checked
+    // bundle (protocols, derives, state/unit sugar). Their already-validated
+    // source spelling still determines the strict two-tier category exactly.
+    let source_case = if Syntax::name_has_case(name, Syntax::NameCase::Pascal) {
+        Some(("type-like name", Syntax::NameCase::Pascal))
+    } else if Syntax::name_has_case(name, Syntax::NameCase::Snake) {
+        Some(("value-like name", Syntax::NameCase::Snake))
+    } else {
+        None
+    };
+    if let Some((category, case)) = source_case.or(indexed_case) {
         if !Syntax::name_has_case(new_name, case) {
             return Err(format!(
                 "`{new_name}` is not a valid {category}; use `{}`",
@@ -294,6 +306,12 @@ pub(crate) fn compute_rename(
     // Include all reference spans
     for r in db.refs.iter().filter(|r| r.name == name) {
         spans.push((r.module_path.clone(), r.span));
+    }
+    if spans.is_empty() {
+        spans.extend(tokens.iter().filter_map(|token| match &token.kind {
+            TokKind::Ident(candidate) if candidate == name => Some((path.to_string(), token.span)),
+            _ => None,
+        }));
     }
     if spans.is_empty() {
         return Err(format!("no occurrences of `{}` found", name));

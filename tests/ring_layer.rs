@@ -84,10 +84,10 @@ fn solve_import_infers_alloc_layer() {
     )
     .unwrap();
     let main = r#"
-use core.solve as Solve
+use core.solve as solve
 
 fn run() {
-    solver := Solve.Solver.new(1)
+    solver := solve.Solver.new(1)
     solver.require(true)
 }
 "#;

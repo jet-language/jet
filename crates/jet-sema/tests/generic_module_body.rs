@@ -23,6 +23,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
             source: src.into(),
+            block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
             pub_file: program.pub_file,
             no_prelude: program.no_prelude,
@@ -71,6 +72,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         modules.push(LoadedModule {
             path: PathBuf::from(path), display: (*path).into(), alias: path.trim_end_matches(".jet").into(),
             imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), source: (*src).into(),
+            block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
             html_path: program.html_path, no_alloc_policy: program.no_alloc_policy,
             policy_declarations: program.policy_declarations.clone(),
@@ -95,21 +97,20 @@ fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
 #[test]
 fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
     let src = r#"
-module Boxed<T, size: Int> {
+module boxed<T, size: Int> {
     struct Box { value: T }
     fn identity(value: Box) -> Box { return ~value }
 }
-
-module Other<T, size: Int> { struct Box { value: T } }
-module First = Boxed<Int, 3>
-module Equivalent = Boxed<Int, 3>
-module Forward = Equivalent
-module DifferentType = Boxed<String, 3>
-module DifferentValue = Boxed<Int, 4>
-module DifferentTemplate = Other<Int, 3>
-fn accepts_first(value: First__Box) -> First__Box { return ~value }
-fn accepts_projection(value: Equivalent__Box) -> First__Box { return ~value }
-fn accepts_chain(value: Forward__Box) -> First__Box { return ~value }
+module other<T, size: Int> { struct Box { value: T } }
+module first = boxed<Int, 3>
+module equivalent = boxed<Int, 3>
+module forward = equivalent
+module different_type = boxed<String, 3>
+module different_value = boxed<Int, 4>
+module different_template = other<Int, 3>
+fn accepts_first(value: FirstBox) -> FirstBox { return ~value }
+fn accepts_projection(value: EquivalentBox) -> FirstBox { return ~value }
+fn accepts_chain(value: ForwardBox) -> FirstBox { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -119,39 +120,56 @@ fn run() {}
         Item::CodeModule(module) => Some(module.name.as_str()),
         _ => None,
     }).collect();
-    assert_eq!(modules.iter().filter(|name| **name == "First").count(), 1);
-    assert!(!modules.contains(&"Equivalent"));
-    assert!(!modules.contains(&"Forward"));
-    assert!(modules.contains(&"DifferentType"));
-    assert!(modules.contains(&"DifferentValue"));
-    assert!(modules.contains(&"DifferentTemplate"));
-    assert_eq!(items.iter().filter(|item| matches!(item, Item::Struct(def) if def.name == "First__Box")).count(), 1);
+    assert_eq!(modules.iter().filter(|name| **name == "first").count(), 1);
+    assert!(!modules.contains(&"equivalent"));
+    assert!(!modules.contains(&"forward"));
+    assert!(modules.contains(&"different_type"));
+    assert!(modules.contains(&"different_value"));
+    assert!(modules.contains(&"different_template"));
+    assert_eq!(items.iter().filter(|item| matches!(item, Item::Struct(def) if def.name == "FirstBox")).count(), 1);
     for name in ["accepts_projection", "accepts_chain"] {
         let Item::Func(func) = items.iter().find(|item| matches!(item, Item::Func(func) if func.name == name)).unwrap() else { unreachable!() };
-        assert_eq!(func.params[0].ty, Type::Named("First__Box".into()));
-        assert_eq!(func.return_type, Some(Type::Named("First__Box".into())));
+        assert_eq!(func.params[0].ty, Type::Named("FirstBox".into()));
+        assert_eq!(func.return_type, Some(Type::Named("FirstBox".into())));
     }
+}
+
+#[test]
+fn soft_public_aliases_keep_distinct_casing_safe_type_names() {
+    let (bundle, diagnostics) = check(r#"
+module holder<T> { struct Item { value: T } }
+module cache = holder<Int>
+module _cache = holder<String>
+fn run() {}
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    let names: Vec<_> = bundle.modules[0].items.iter().filter_map(|item| match item {
+        Item::Struct(def) => Some(def.name.as_str()),
+        _ => None,
+    }).collect();
+    assert!(names.contains(&"CacheItem"), "{names:?}");
+    assert!(names.contains(&"_CacheItem"), "{names:?}");
 }
 
 #[test]
 fn imported_template_is_interned_once_across_consumers() {
     let template = r#"
-pub module Boxed<T, size: Int> { pub struct Box { value: T } }
-pub module Other<T, size: Int> { pub struct Box { value: T } }
+pub module boxed<T, size: Int> { pub struct Box { value: T } }
+pub module other<T, size: Int> { pub struct Box { value: T } }
 "#;
     let first = r#"
 use "./templates" as templates
-use templates.{Boxed}
-pub module First = Boxed<Int, 3>
+use templates.{boxed}
+pub module first = boxed<Int, 3>
 fn run() {}
 "#;
     let second = r#"
 use "./templates" as templates
-use templates.{Boxed, Other}
-module Second = Boxed<Int, 3>
-module DifferentArg = Boxed<Int, 4>
-module DifferentTemplate = Other<Int, 3>
-fn accepts_projection(value: Second__Box) -> First__Box { return ~value }
+use templates.{boxed, other}
+module second = boxed<Int, 3>
+module different_arg = boxed<Int, 4>
+module different_template = other<Int, 3>
+fn accepts_projection(value: SecondBox) -> FirstBox { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check_modules(&[
@@ -160,18 +178,18 @@ fn run() {}
         ("second.jet", second, &[("templates", 0)]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-    assert_eq!(bundle.modules.iter().flat_map(|module| &module.items).filter(|item| matches!(item, Item::Struct(def) if def.name == "First__Box")).count(), 1);
-    assert!(!bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "Second")));
-    assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "DifferentArg")));
-    assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "DifferentTemplate")));
+    assert_eq!(bundle.modules.iter().flat_map(|module| &module.items).filter(|item| matches!(item, Item::Struct(def) if def.name == "FirstBox")).count(), 1);
+    assert!(!bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "second")));
+    assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "different_arg")));
+    assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "different_template")));
 }
 
 #[test]
 fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
-    let base = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule Use = Boxed<Int, 3>\nfn run() {}";
-    let shifted = "\n\nmodule Boxed<T, n: Int> {   fn value() -> Int { return n } }\nmodule Renamed = Boxed<Int, 3>\nfn run() {}";
-    let body = "module Boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule Use = Boxed<Int, 3>\nfn run() {}";
-    let arg = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule Use = Boxed<Int, 4>\nfn run() {}";
+    let base = "module boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
+    let shifted = "\n\nmodule boxed<T, n: Int> {   fn value() -> Int { return n } }\nmodule renamed = boxed<Int, 3>\nfn run() {}";
+    let body = "module boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
+    let arg = "module boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule instance = boxed<Int, 4>\nfn run() {}";
     let fp = only_instance_fingerprint(base, "pkg-a");
     assert_eq!(fp, only_instance_fingerprint(shifted, "pkg-a"));
     assert_eq!(fp, only_instance_fingerprint(body, "pkg-a"));
@@ -204,7 +222,7 @@ fn instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspa
     std::fs::write(b.join("pkg.jet"), "payload: {\n name: \"demo\",\n version: \"2.0.0\"\n}").unwrap();
     std::fs::write(a.join(".jet/lock"), "source = a").unwrap();
     std::fs::write(b.join(".jet/lock"), "source = b").unwrap();
-    let src = "module Boxed<T> { fn value(v: T) -> T { return v } }\nmodule Use = Boxed<Int>\nfn run() {}";
+    let src = "module boxed<T> { fn value(v: T) -> T { return v } }\nmodule instance = boxed<Int>\nfn run() {}";
     assert_ne!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
     std::fs::write(b.join("pkg.jet"), "payload: { name: \"demo\", version: \"1.0.0\" }").unwrap();
     assert_eq!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
@@ -216,7 +234,7 @@ fn instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspa
 #[test]
 fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph() {
     let src = r#"
-module Laws<T> {
+module laws<T> {
     tag Audited;
     fn audited(value: @Audited T) -> @Audited T { return ~value }
     trait Reveal { type Output; fn reveal(self) -> T }
@@ -226,26 +244,26 @@ module Laws<T> {
     enum TargetErr { Wrapped(SourceErr) }
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
 }
-module IntLaws = Laws<Int>
+module int_laws = laws<Int>
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
     let items = &bundle.modules[0].items;
-    assert!(items.iter().any(|item| matches!(item, Item::Trait(t) if t.name == "IntLaws__Reveal" && t.methods[0].return_type == Some(Type::Int))));
-    assert!(items.iter().any(|item| matches!(item, Item::Tag(t) if t.name == "IntLaws__Audited")));
-    let Item::CodeModule(instance) = items.iter().find(|item| matches!(item, Item::CodeModule(m) if m.name == "IntLaws")).unwrap() else { unreachable!() };
+    assert!(items.iter().any(|item| matches!(item, Item::Trait(t) if t.name == "IntLawsReveal" && t.methods[0].return_type == Some(Type::Int))));
+    assert!(items.iter().any(|item| matches!(item, Item::Tag(t) if t.name == "IntLawsAudited")));
+    let Item::CodeModule(instance) = items.iter().find(|item| matches!(item, Item::CodeModule(m) if m.name == "int_laws")).unwrap() else { unreachable!() };
     let tagged = instance.body.as_ref().unwrap().iter().find_map(|item| match item { Item::Func(f) if f.name == "audited" => Some(&f.params[0].ty), _ => None }).unwrap();
-    assert!(matches!(tagged, Type::Tagged { marker, inner } if marker == "IntLaws__Audited" && **inner == Type::Int), "{tagged:?}");
-    assert!(items.iter().any(|item| matches!(item, Item::Impl(i) if i.type_name == "IntLaws__Wrapped" && i.trait_name.as_deref() == Some("IntLaws__Reveal") && i.assoc_type_impls[0].2 == Type::Int)));
-    assert!(items.iter().any(|item| matches!(item, Item::ErrorConv(ec) if ec.from_ty == "IntLaws__SourceErr" && ec.to_ty == "IntLaws__TargetErr")));
+    assert!(matches!(tagged, Type::Tagged { marker, inner } if marker == "IntLawsAudited" && **inner == Type::Int), "{tagged:?}");
+    assert!(items.iter().any(|item| matches!(item, Item::Impl(i) if i.type_name == "IntLawsWrapped" && i.trait_name.as_deref() == Some("IntLawsReveal") && i.assoc_type_impls[0].2 == Type::Int)));
+    assert!(items.iter().any(|item| matches!(item, Item::ErrorConv(ec) if ec.from_ty == "IntLawsSourceErr" && ec.to_ty == "IntLawsTargetErr")));
 }
 
 #[test]
 fn tag_method_inside_instance_keeps_e0732() {
     let (_, diagnostics) = check(r#"
-module Bad<T> { tag Marker { fn forbidden(self) -> T; } }
-module Use = Bad<Int>
+module bad<T> { tag Marker { fn forbidden(self) -> T; } }
+module instance = bad<Int>
 fn run() {}
 "#);
     assert_eq!(error_codes(&diagnostics), vec!["E0732"]);
@@ -254,11 +272,11 @@ fn run() {}
 #[test]
 fn deriving_instance_tag_keeps_e0731() {
     let (_, diagnostics) = check(r#"
-module Bad<T> {
+module bad<T> {
     tag Marker;
     struct Value { item: T; derive Marker }
 }
-module Use = Bad<Int>
+module instance = bad<Int>
 fn run() {}
 "#);
     assert_eq!(error_codes(&diagnostics), vec!["E0731"]);
@@ -267,13 +285,13 @@ fn run() {}
 #[test]
 fn duplicate_error_conversion_inside_instance_keeps_coherence_diagnostic() {
     let (_, diagnostics) = check(r#"
-module Bad<T> {
+module bad<T> {
     enum Source { Bad(T) }
     enum Target { Wrapped(Source) }
     impl Source -> Target { return Target.Wrapped(self) }
     impl Source -> Target { return Target.Wrapped(self) }
 }
-module Use = Bad<Int>
+module instance = bad<Int>
 fn run() {}
 "#);
     assert_eq!(error_codes(&diagnostics), vec!["E2405"]);
@@ -282,8 +300,8 @@ fn run() {}
 #[test]
 fn generic_module_does_not_launder_error_conversion_orphans() {
     let (_, diagnostics) = check(r#"
-module Bad<T> { impl Int -> String { return "number" } }
-module Use = Bad<Int>
+module bad<T> { impl Int -> String { return "number" } }
+module instance = bad<Int>
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).contains(&"E2406"), "{diagnostics:#?}");
@@ -292,46 +310,46 @@ fn run() {}
 #[test]
 fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
     let (bundle, diagnostics) = check(r#"
-module Outer<T, count: Int> {
-    module Inner<U> { pub fn keep(value: T, other: U) -> T { return value } }
-    module Fixed = Inner<Int>
-    module Forward = Fixed
+module outer<T, count: Int> {
+    module inner<U> { pub fn keep(value: T, other: U) -> T { return value } }
+    module fixed = inner<Int>
+    module forward = fixed
 }
-module TextOuter = Outer<String, 3>
+module text_outer = outer<String, 3>
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
     let Item::CodeModule(outer) = bundle.modules[0].items.iter()
-        .find(|item| matches!(item, Item::CodeModule(m) if m.name == "TextOuter")).unwrap() else { unreachable!() };
+        .find(|item| matches!(item, Item::CodeModule(m) if m.name == "text_outer")).unwrap() else { unreachable!() };
     let inner = outer.body.as_ref().unwrap().iter().find_map(|item| match item {
-        Item::CodeModule(module) if module.name == "TextOuter__Fixed" => Some(module), _ => None,
+        Item::CodeModule(module) if module.name == "text_outer_fixed" => Some(module), _ => None,
     }).expect("nested alias expanded");
     let Item::Func(keep) = &inner.body.as_ref().unwrap()[0] else { panic!("nested function") };
     assert_eq!(keep.params[0].ty, Type::String);
     assert_eq!(keep.params[1].ty, Type::Int);
     assert_eq!(keep.return_type, Some(Type::String));
     assert!(outer.body.as_ref().unwrap().iter().any(|item| matches!(item,
-        Item::CodeModule(module) if module.name == "TextOuter__Forward")));
+        Item::CodeModule(module) if module.name == "text_outer_forward")));
 }
 
 #[test]
 fn tests_and_benches_are_specialized_once_per_instance_with_unique_names() {
     let (bundle, diagnostics) = check(r#"
-module Checks<T, count: Int> {
+module checks<T, count: Int> {
     @Test fn identity(value: T) { expect(count == count) }
     @Bench("work") { expect(count == count) }
 }
-module IntChecks = Checks<Int, 2>
-module TextChecks = Checks<String, 4>
+module int_checks = checks<Int, 2>
+module text_checks = checks<String, 4>
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
     let items = &bundle.modules[0].items;
     let tests: Vec<_> = items.iter().filter_map(|item| match item { Item::Test(t) => Some(t), _ => None }).collect();
     let benches: Vec<_> = items.iter().filter_map(|item| match item { Item::Bench(b) => Some(b), _ => None }).collect();
-    assert_eq!(tests.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), vec!["IntChecks__identity", "TextChecks__identity"]);
+    assert_eq!(tests.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), vec!["int_checks_identity", "text_checks_identity"]);
     assert_eq!(tests[0].params[0].ty, Type::Int);
     assert_eq!(tests[1].params[0].ty, Type::String);
-    assert_eq!(benches.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), vec!["IntChecks__work", "TextChecks__work"]);
+    assert_eq!(benches.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), vec!["int_checks_work", "text_checks_work"]);
     assert!(!format!("{:?}{:?}", tests[0].body, benches[0].body).contains("count"));
 }

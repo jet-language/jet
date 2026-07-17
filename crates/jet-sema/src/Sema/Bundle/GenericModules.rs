@@ -422,6 +422,14 @@ fn module_type_prefix(alias: &str) -> String {
     crate::Syntax::canonical_name_case(alias, crate::Syntax::NameCase::Pascal)
 }
 
+fn module_type_name(alias: &str, name: &str) -> String {
+    format!("{}{}", module_type_prefix(alias), name.trim_start_matches('_'))
+}
+
+fn module_value_name(alias: &str, name: &str) -> String {
+    format!("{}_{}", alias.trim_end_matches('_'), name.trim_start_matches('_'))
+}
+
 fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
     let mut result = source.clone();
@@ -437,7 +445,7 @@ fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
 fn specialize_test(source: &crate::AST::TestDef, alias: &str,
     types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TestDef {
     let mut result = source.clone();
-    result.name = format!("{alias}__{}", source.name);
+    result.name = module_value_name(alias, &source.name);
     for param in &mut result.params {
         param.ty = specialize_module_type(&param.ty, types, values);
         if let Some(default) = &mut param.default { substitute_expr(default, types, values); }
@@ -449,7 +457,7 @@ fn specialize_test(source: &crate::AST::TestDef, alias: &str,
 fn specialize_bench(source: &crate::AST::BenchDef, alias: &str,
     types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::BenchDef {
     let mut result = source.clone();
-    result.name = format!("{alias}__{}", source.name);
+    result.name = module_value_name(alias, &source.name);
     substitute_stmts(&mut result.body, types, values);
     result
 }
@@ -658,7 +666,7 @@ fn specialize_struct(
         .collect();
     let mut result = source.clone();
     if !alias.is_empty() {
-        result.name = format!("{}__{}", module_type_prefix(alias), source.name);
+        result.name = module_type_name(alias, &source.name);
     }
     result.fields = fields;
     result.methods = methods;
@@ -772,7 +780,7 @@ fn specialize_enum(
         .collect();
     let mut result = source.clone();
     if !alias.is_empty() {
-        result.name = format!("{}__{}", module_type_prefix(alias), source.name);
+        result.name = module_type_name(alias, &source.name);
     }
     result.variants = variants;
     result.methods = methods;
@@ -1418,7 +1426,7 @@ fn expand_alias(
             _ => None,
         };
         if let Some(name) = name {
-            definition_types.insert(name.clone(), Type::Named(format!("{}__{}", module_type_prefix(&alias.name), name)));
+            definition_types.insert(name.clone(), Type::Named(module_type_name(&alias.name, name)));
         }
     }
     for item in &template.body {
@@ -1432,7 +1440,7 @@ fn expand_alias(
         if let Some(name) = name {
             definition_types.insert(
                 name.clone(),
-                Type::Named(format!("{}__{}", module_type_prefix(&alias.name), name)),
+                Type::Named(module_type_name(&alias.name, name)),
             );
         }
     }
@@ -1498,7 +1506,7 @@ fn expand_alias(
         substitute_meta(&mut meta, &definition_types, &definition_values);
         declarations.push(Item::Const(crate::AST::ConstDef {
             span: source.span,
-            name: format!("{}__{}", alias.name, source.name),
+            name: module_value_name(&alias.name, &source.name),
             name_span: source.name_span,
             value,
             meta,
@@ -1636,7 +1644,7 @@ fn expand_alias(
         ordered.sort_by_key(|def| local_alias_depth(def, &nested_aliases));
         for nested_alias in ordered {
             let Some(mut resolved_alias) = resolve_local_alias(nested_alias, &nested_aliases, &nested_templates, diags) else { continue };
-            resolved_alias.name = format!("{}__{}", alias.name, nested_alias.name);
+            resolved_alias.name = module_value_name(&alias.name, &nested_alias.name);
             if let Some(expansion) = expand_alias(&resolved_alias, consumer_module, &nested_templates,
                 diags, &nested_traits, &nested_funcs, &definition_values, &nested_enums, None) {
                 body.push(Item::CodeModule(expansion.module));
@@ -2138,10 +2146,10 @@ pub(crate) fn expand_generic_module_aliases(
         // Resolve projected nominal spellings before registration/codegen. No
         // duplicate declaration or zero-parameter surface alias leaks out.
         let projection_types: HashMap<String, Type> = projections.iter().flat_map(|(alias, canonical)| {
-            let prefix = format!("{canonical}__");
+            let prefix = module_type_prefix(canonical);
             bundle_instance_nominals.get(canonical).into_iter().flatten().filter_map(move |canonical_name| {
                 canonical_name.strip_prefix(&prefix).map(|suffix| {
-                    (format!("{alias}__{suffix}"), Type::Named(canonical_name.clone()))
+                    (module_type_name(alias, suffix), Type::Named(canonical_name.clone()))
                 })
             })
         }).collect();
@@ -2285,7 +2293,7 @@ mod instance_collision_tests {
     #[test]
     fn generic_template_snapshot_never_filters_parser_admitted_items() {
         let source = r#"
-module Everything<T> {
+module everything<T> {
     const answer = 42
     tag Marked;
     trait Show { fn show(self) -> T }
@@ -2293,9 +2301,9 @@ module Everything<T> {
     enum Maybe { Empty Value(T) }
     impl Boxed.Show { fn show(self) -> T { return self.value } }
     fn id(value: T) -> T { return ~value }
-    module Nested { fn nested() {} }
-    module Inner<U> { fn inner(value: U) -> U { return ~value } }
-    module IntInner = Inner<Int>
+    module nested { fn nested() {} }
+    module inner<U> { fn inner(value: U) -> U { return ~value } }
+    module int_inner = inner<Int>
     @Test("smoke") { expect(answer == 42) }
     @Bench("work") { expect(answer == 42) }
 }

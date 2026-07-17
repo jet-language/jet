@@ -2178,10 +2178,10 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"
-module Value<n: Int> { pub fn get() -> Int { return n } }
-module Three = Value<3>
-module Same = Value<3>
-fn run() { print(Three.get()); print(Same.get()) }
+module value<n: Int> { pub fn get() -> Int { return n } }
+module three = value<3>
+module same = value<3>
+fn run() { print(three.get()); print(same.get()) }
 "#;
     let jit = run_cranelift_without_fallback(src, "generic_module_instance");
     assert_eq!(jit.stdout, "3\n3\n");
@@ -2196,7 +2196,7 @@ fn run() { print(Three.get()); print(Same.get()) }
     let bundle = checked_bundle_from_path(file.to_str().unwrap());
     let tir = jet::Codegen::TIR::lower_jit_program(&bundle).expect("generic instance lowers to JIT TIR");
     assert_eq!(tir.instance_provenance.len(), 1, "equivalent aliases share one canonical instance");
-    assert_eq!(tir.funcs.iter().filter(|f| f.name == "Three__get").count(), 1);
+    assert_eq!(tir.funcs.iter().filter(|f| f.name == "three__get").count(), 1);
 }
 
 #[test]
@@ -2406,15 +2406,15 @@ fn resident_jit_fidelity_matches_runtime_contract() {
         return;
     }
     let valid = r#"
-use core.perf as Perf
+use core.perf as perf
 
 fn run() -> Void ? {
-    Perf.reset_fidelity()
-    print(Perf.default_fidelity())
-    Perf.override_fidelity(0.25)?
-    print(Perf.fidelity())
-    Perf.reset_fidelity()
-    print(Perf.fidelity())
+    perf.reset_fidelity()
+    print(perf.default_fidelity())
+    perf.override_fidelity(0.25)?
+    print(perf.fidelity())
+    perf.reset_fidelity()
+    print(perf.fidelity())
 }
 "#;
     let expected_valid = ProgramOutput::ran("1.0\n0.25\n1.0\n".into(), "".into(), 0);
@@ -2442,11 +2442,11 @@ fn run() -> Void ? {
         ("(0.0 / 0.0)", "nan"),
     ] {
         let src = format!(
-            r#"use core.perf as Perf
+            r#"use core.perf as perf
 fn run() -> Void ? {{
-    Perf.reset_fidelity()
-    Perf.override_fidelity(0.375)?
-    Perf.override_fidelity({value})?
+    perf.reset_fidelity()
+    perf.override_fidelity(0.375)?
+    perf.override_fidelity({value})?
 }}"#
         );
         let got = run_cranelift_outcome(&src, tag);
@@ -2457,8 +2457,8 @@ fn run() -> Void ? {{
             "{tag}: {:?}",
             got.stderr
         );
-        let read = r#"use core.perf as Perf
-fn run() { print(Perf.fidelity()) }"#;
+        let read = r#"use core.perf as perf
+fn run() { print(perf.fidelity()) }"#;
         assert_eq!(
             run_cranelift_outcome(read, &format!("{tag}_state")),
             ProgramOutput::ran("0.375\n".into(), "".into(), 0),

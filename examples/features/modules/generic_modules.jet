@@ -67,9 +67,9 @@ struct GoodToken {}
 
 impl GoodToken.Token {}
 
-// Parameter spelling never decides its kind: lowercase `item` is a type slot
-// because its annotation is a trait; lowercase `count` is an Int value slot.
-module annotation_kinds<item: Token, count: Int> {
+// The annotation decides the kind: `Item` is a type slot because `Token` is a
+// trait, while `count` is an `Int` value slot. Their spelling follows that kind.
+module annotation_kinds<Item: Token, count: Int> {
     pub fn count() -> Int {
         return count
     }
@@ -134,8 +134,8 @@ fn run() {
     print(kinds.count())
     input: [Int#3] := [1, 2, 3]
     fixed: [Int#3] := three_ints.echo(input)
-    buffer :: ThreeInts__Buffer.{ items: fixed }
+    buffer :: ThreeIntsBuffer.{ items: fixed }
     print(buffer.items[2])
-    wrapped :: IntLaws__Wrapped.{ value: 91 }
+    wrapped :: IntLawsWrapped.{ value: 91 }
     print(wrapped.reveal())
 }

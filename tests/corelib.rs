@@ -4274,11 +4274,11 @@ fn core_time_calendar_zone_and_dst_run() {
     fs::copy(&source_zone, tzdb.join("America/New_York")).unwrap();
     let src = r#"
 use core.time as time
-use core.time.date as Date
+use core.time.date as date
 
 fn run() {
     zone :: time.zone("America/New_York") ?? panic("missing zone")
-    local :: time.zoned_local(Date.new(2024, 3, 10), time.local_time(1, 30, 0), zone)
+    local :: time.zoned_local(date.new(2024, 3, 10), time.local_time(1, 30, 0), zone)
     print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     civil :: local.add_period(time.period_days(1))
     day :: Duration.hours(24) ?? panic("duration")
@@ -6993,10 +6993,10 @@ fn run() -> Void ? {
 #[test]
 fn perf_set_fidelity_alias_is_not_exported() {
     let src = r#"
-use core.perf as Perf
+use core.perf as perf
 
 fn run() -> Void ? {
-    Perf.set_fidelity(0.25)?
+    perf.set_fidelity(0.25)?
 }
 "#;
     let dir = std::env::temp_dir().join(format!("jet_corelib_perf_alias_{}", std::process::id()));
@@ -7032,15 +7032,15 @@ fn perf_override_is_range_checked_and_resettable() {
         &dir,
         "perf_runtime",
         r#"
-use core.perf as Perf
+use core.perf as perf
 
 fn run() -> Void ? {
-    print(Perf.default_fidelity())
-    Perf.override_fidelity(0.25)?
-    print(Perf.fidelity())
-    Perf.reset_fidelity()
-    print(Perf.fidelity())
-    Perf.override_fidelity(1.25)?
+    print(perf.default_fidelity())
+    perf.override_fidelity(0.25)?
+    print(perf.fidelity())
+    perf.reset_fidelity()
+    print(perf.fidelity())
+    perf.override_fidelity(1.25)?
 }
 "#,
         &[],
@@ -7645,10 +7645,10 @@ fn solve_solver_records_bool_constraints_in_order() {
         &dir,
         "solve_runtime",
         r#"
-use core.solve as Solve
+use core.solve as solve
 
 fn run() {
-    solver := Solve.Solver.new(42)
+    solver := solve.Solver.new(42)
     solver.require(1 + 1 == 2)
     solver.require(2 * 3 == 5)
     solver.require(true)
@@ -7668,10 +7668,10 @@ fn run() {
 #[test]
 fn solve_require_needs_mutable_solver() {
     let src = r#"
-use core.solve as Solve
+use core.solve as solve
 
 fn run() {
-    solver :: Solve.Solver.new(1)
+    solver :: solve.Solver.new(1)
     solver.require(true)
 }
 "#;
@@ -7703,10 +7703,10 @@ fn run() {}
 #[test]
 fn solve_constructor_is_static_only() {
     let src = r#"
-use core.solve as Solve
+use core.solve as solve
 
 fn run() {
-    solver := Solve.Solver.new(1)
+    solver := solve.Solver.new(1)
     solver.new(2)
 }
 "#;
