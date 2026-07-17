@@ -65,10 +65,8 @@ pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
             what
         ),
         "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
-        format!(
-            "remove this call, or do not mark the enclosing function `@{}`",
-            crate::Syntax::KW_PURE
-        ),
+        "remove this call, or remove the enclosing function's explicit `--[]->` bound"
+            .to_string(),
         span,
     )
 }

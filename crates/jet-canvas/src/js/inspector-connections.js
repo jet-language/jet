@@ -82,10 +82,13 @@
       const fallback = param.name === variable.name ? (next.defaultSource || "") : (param.default_source || "");
       return name + ": " + type + (String(fallback).trim() ? " = " + String(fallback).trim() : "");
     }).join(", ");
-    const ret = fnMeta.returns && fnMeta.returns !== "Void" ? " -> " + fnMeta.returns : "";
+    const originalSignature = String(fnMeta.signature || "");
+    const hasEffectArrow = originalSignature.includes("--[");
+    const effects = (fnMeta.effects || []).join(", ");
+    const arrow = hasEffectArrow ? " --[" + effects + "]->" : " ->";
+    const ret = fnMeta.returns && fnMeta.returns !== "Void" ? arrow + " " + fnMeta.returns : (hasEffectArrow ? arrow : "");
     const visibility = fnMeta.visibility === "public" ? "pub " : fnMeta.visibility === "package" ? "pub(package) " : "";
-    const pure = fnMeta.pure ? "@Pure " : "";
-    return pure + visibility + "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret;
+    return visibility + "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret;
   }
 
   function renderVariableDetails(graph, name) {

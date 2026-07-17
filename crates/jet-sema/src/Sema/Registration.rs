@@ -599,12 +599,17 @@ pub(crate) fn check_effect_boundaries(
         let mut declared: EffectSet = EffectSet::new();
         let mut prohibited: EffectSet = EffectSet::new();
         let mut bad_name = false;
+        let mut open_row = false;
         for (name, span) in declared_list {
             let (is_prohibited, base_name) = if name.starts_with('!') {
                 (true, &name[1..])
             } else {
                 (false, name.as_str())
             };
+            if effect_row_var(base_name).is_some() {
+                open_row = true;
+                continue;
+            }
             match parse_effect_name(base_name) {
                 Some(e) => {
                     if is_prohibited {
@@ -631,7 +636,7 @@ pub(crate) fn check_effect_boundaries(
         // D-EFFTREE1: `declared` may name ancestor roots — an ancestor entry
         // covers any effect at or below it, so this is a subsumption-aware
         // check, not a flat set difference.
-        if !declared.is_empty() {
+        if !open_row && !declared.is_empty() {
             let over: EffectSet = effects_uncovered(&inferred, &declared);
             if !over.is_empty() {
                 let span = declared_list
@@ -697,7 +702,12 @@ pub(crate) fn check_effect_boundaries(
                     (false, Some(list)) => {
                         let mut set = EffectSet::new();
                         let mut ok = true;
+                        let mut open = false;
                         for (name, span) in list {
+                            if effect_row_var(name).is_some() {
+                                open = true;
+                                continue;
+                            }
                             match parse_effect_name(name) {
                                 Some(e) => {
                                     set.insert(e);
@@ -708,7 +718,7 @@ pub(crate) fn check_effect_boundaries(
                                 }
                             }
                         }
-                        if ok {
+                        if ok && !open {
                             Some(set)
                         } else {
                             None

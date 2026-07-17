@@ -2804,6 +2804,9 @@ fn canvas_editor_shell_matches_round3_contract() {
 
     assert!(js.contains("function syncVariablesList"), "{js}");
     assert!(js.contains("function renderVariableDetails"), "{js}");
+    assert!(js.contains("originalSignature.includes(\"--[\")"), "{js}");
+    assert!(js.contains("\" --[\" + effects + \"]->\""), "{js}");
+    assert!(!js.contains("fnMeta.pure ? \"@Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");
     assert!(js.contains("toolbarSearch.addEventListener"), "{js}");

@@ -1166,7 +1166,7 @@ already-freed arena), these track the views themselves.
 
 Every function carries an inferred effect set (the ambient powers its body
 reaches — `Net`, `Fs`, `Io`, `Db`, `Time`, …). A `--[…]->` list on the signature
-declares an upper bound; `@Pure` declares the empty set. The inferred set must
+declares an upper bound; `--[]->` explicitly bounds the set empty. The inferred set must
 be a subset of the declared one. Effects are erased in codegen (I3), so these
 are compile-time-only diagnostics. An unknown effect name in a `--[…]->` list is
 reported as **E0119** (unknown name).

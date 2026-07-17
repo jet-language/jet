@@ -898,6 +898,21 @@ fn run() { invoke(5, show); }
     );
 }
 
+/// D-SHAPE8: open rows stay inside the arrow and remain generic proof terms;
+/// they are not effect roots and therefore must not produce E0119/E0740/E0747.
+#[test]
+fn open_effect_row_parses_checks_and_erases() {
+    let src = r#"
+fn invoke<E>(marker: E, act: fn() --[..E]-> Int) --[Log, ..E]-> Int {
+    return act();
+}
+fn value() --[]-> Int { return 1; }
+fn run() { print("{invoke(0, value)}"); }
+"#;
+    let rust = jet::compile(src).expect("generic open effect row compiles").rust;
+    assert!(!rust.contains("..E"), "effect rows erase before codegen");
+}
+
 /// Lever 2: `#(via f)` publishes the callback's effects — a `@Pure fn` calling a
 /// via-fn whose callback carries `Io` is rejected (E3401), proving the
 /// pass-through surfaced the effect even though the body only calls a fn-value.

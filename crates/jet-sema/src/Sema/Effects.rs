@@ -215,6 +215,14 @@ impl Effect {
 /// `"Fs.Read"`) rather than bare `Effect` roots — see the module doc.
 pub type EffectSet = BTreeSet<String>;
 
+/// D-SHAPE8 open-row entry (`..E`). The parser stores row variables beside
+/// concrete effects so every consumer can preserve the exact source spelling.
+/// #570 owns solving/substitution; until then an open row must never be
+/// mistaken for a closed effect root.
+pub fn effect_row_var(name: &str) -> Option<&str> {
+    name.strip_prefix("..").filter(|name| !name.is_empty())
+}
+
 /// The root segment of a dotted effect path (`"Fs.Read"` → `"Fs"`; a bare
 /// name is its own root). D-EFFTREE1.
 pub fn effect_root(name: &str) -> &str {
@@ -364,7 +372,12 @@ impl<'a> super::Checker<'a> {
         span: Span,
     ) {
         let mut bound: EffectSet = EffectSet::new();
+        let mut open = false;
         for (name, nspan) in bound_names {
+            if effect_row_var(name).is_some() {
+                open = true;
+                continue;
+            }
             match parse_effect_name(name) {
                 Some(e) => {
                     bound.insert(e);
@@ -374,6 +387,12 @@ impl<'a> super::Checker<'a> {
                     return; // a bad name leaves the bound incomplete; skip the check
                 }
             }
+        }
+        // `..E` may instantiate to the callback's remaining effects. #570 will
+        // substitute it precisely; treating this as a closed bound now would
+        // produce a false E0747.
+        if open {
+            return;
         }
         let direct: EffectSet = self.fx_direct.difference(before_direct).cloned().collect();
         let edges: BTreeSet<String> = self.fx_edges.difference(before_edges).cloned().collect();
@@ -745,6 +764,10 @@ pub fn apply_effect_via(
         match effect_bound {
             Some(names) => {
                 for (n, ns) in names {
+                    if effect_row_var(n).is_some() {
+                        maximal = true;
+                        continue;
+                    }
                     match parse_effect_name(n) {
                         Some(e) => {
                             via_set.insert(e);
