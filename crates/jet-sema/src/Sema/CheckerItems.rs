@@ -40,6 +40,33 @@ impl<'a> Checker<'a> {
         })
     }
 
+    pub(crate) fn instantiate_method_sig(
+        &self,
+        type_name: &str,
+        sig: &mut MethodSig,
+        args: &[Type],
+    ) {
+        let declared = self
+            .trait_reg
+            .struct_params
+            .get(type_name)
+            .or_else(|| self.trait_reg.enum_params.get(type_name));
+        let Some(params) = declared else {
+            return;
+        };
+        let subst: HashMap<String, Type> = params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+            .collect();
+        for (_, ty) in &mut sig.params {
+            *ty = crate::Generics::substitute_type(ty, &subst);
+        }
+        if let Some(ret) = &mut sig.return_type {
+            *ret = crate::Generics::substitute_type(ret, &subst);
+        }
+    }
+
     pub(crate) fn reject_borrowed_param_subplace(
         &mut self,
         expr: &Expr,
@@ -80,6 +107,7 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
         span: Span,
+        type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         if matches!(type_name, "Arena" | "Bump") && method == "new" {
@@ -124,7 +152,7 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named("Limits".to_string()));
         }
-        let Some((owner_mod, msig)) = self.resolve_method_sig(type_name, method) else {
+        let Some((owner_mod, mut msig)) = self.resolve_method_sig(type_name, method) else {
             self.diags.push(Diagnostic::error(
                 "E0102",
                 format!("`{}` has no method `{}`", type_name, method),
@@ -140,6 +168,7 @@ impl<'a> Checker<'a> {
         if owner_mod != self.module_idx && !msig.is_pub {
             self.diags.push(private_item(method, span));
         }
+        self.instantiate_method_sig(type_name, &mut msig, type_args);
         self.record_method_reference(type_name, method, span);
         self.record_edge(super::effect_key(Some(type_name), method), span);
         if !msig.is_static {
@@ -292,7 +321,10 @@ impl<'a> Checker<'a> {
                 if matches!(param_conv, AccessConvention::Read) && !param_ty.is_scalar() {
                     self.borrow_ctx = true;
                 }
+                let saved_expected = self.expected_type.clone();
+                self.expected_type = Some(param_ty.clone());
                 let arg_ty = self.infer(&mut arg.expr);
+                self.expected_type = saved_expected;
                 if let Some(arg_ty) = arg_ty {
                     let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
                     if !reported && arg_ty != *param_ty {

@@ -24,6 +24,14 @@ struct Holder {
     counter: Counter
 }
 
+struct GenericHolder<T> {
+    value: T
+
+    fn new(value: ^T) -> GenericHolder<T> {
+        return GenericHolder<T>.{ value: value }
+    }
+}
+
 impl Counter {
     fn new(value: Int) -> Counter {
         return Counter.{ value: value }
@@ -43,15 +51,18 @@ fn run() {
     holder: Holder :: .{ counter: .new(2) }
     pool: Pool<Holder> :: .new()
     nested_pool: Pool<Pool<Holder>> :: .new()
+    nested: GenericHolder<GenericHolder<Int>> :: .new(.new(7))
+    nested_explicit: GenericHolder<GenericHolder<Int>> :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
     explicit :: Counter.new(4)
     print(read(.new(5)))
     print("{bound.value}{holder.counter.value}{explicit.value}")
     print(fresh(6).value)
+    print("{nested.value.value}{nested_explicit.value.value}")
 }
 "#;
     let (code, stdout) = build_and_run("tir_inferred_new", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "5\n124\n6\n");
+    assert_eq!(stdout, "5\n124\n6\n78\n");
 }
 
 // ===========================================================================

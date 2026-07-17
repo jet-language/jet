@@ -1119,6 +1119,10 @@ pub(crate) fn check_module_bodies(
             }
             Item::Struct(s) => {
                 for m in &mut s.methods {
+                    let own_params = std::mem::take(&mut m.type_params);
+                    if own_params.is_empty() {
+                        m.type_params = s.type_params.clone();
+                    }
                     diags.extend(check_func_body_bundle(
                         m,
                         module_idx,
@@ -1134,9 +1138,10 @@ pub(crate) fn check_module_bodies(
                         embed_inputs_out,
                         global_addr_taken,
                         no_alloc,
-                    no_prelude,
-                    reference_anchors,
+                        no_prelude,
+                        reference_anchors,
                     ));
+                    m.type_params = own_params;
                 }
                 // Trait impls nested in a struct are real method bodies too.
                 // They inherit the struct's generic parameters, just as the
@@ -1190,6 +1195,10 @@ pub(crate) fn check_module_bodies(
             }
             Item::Enum(e) => {
                 for m in &mut e.methods {
+                    let own_params = std::mem::take(&mut m.type_params);
+                    if own_params.is_empty() {
+                        m.type_params = e.type_params.clone();
+                    }
                     diags.extend(check_func_body_bundle(
                         m,
                         module_idx,
@@ -1205,9 +1214,10 @@ pub(crate) fn check_module_bodies(
                         embed_inputs_out,
                         global_addr_taken,
                         no_alloc,
-                    no_prelude,
-                    reference_anchors,
+                        no_prelude,
+                        reference_anchors,
                     ));
+                    m.type_params = own_params;
                 }
                 for block in &mut e.trait_impls {
                     if matches!(

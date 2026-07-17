@@ -193,7 +193,7 @@ impl<'a> Checker<'a> {
                     {
                         let full = format!("{prefix}.{leaf}");
                         if self.registry.method(&full, method).is_some() {
-                            return self.check_static_method(&full, method, span, args);
+                            return self.check_static_method(&full, method, span, type_args, args);
                         }
                     }
                 }
@@ -220,19 +220,19 @@ impl<'a> Checker<'a> {
                                 *resolved_ret_out = ret.clone();
                                 return ret;
                             }
-                            return self.check_static_method(&type_name, method, span, args);
+                            return self.check_static_method(&type_name, method, span, type_args, args);
                         }
                         if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
-                            return self.check_static_method("EncodingLimits", method, span, args);
+                            return self.check_static_method("EncodingLimits", method, span, type_args, args);
                         }
                         if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
-                            return self.check_static_method("CBOROptions", method, span, args);
+                            return self.check_static_method("CBOROptions", method, span, type_args, args);
                         }
                         if ns == "core.encoding.xml" && (leaf == "XMLLimits" || leaf == "XMLParseOptions") && method == "safe" {
-                            return self.check_static_method(leaf, method, span, args);
+                            return self.check_static_method(leaf, method, span, type_args, args);
                         }
                         if ns == "core.email" && leaf == "Limits" && method == "safe" {
-                            return self.check_static_method("Limits", method, span, args);
+                            return self.check_static_method("Limits", method, span, type_args, args);
                         }
                         if ns == "core.encoding" && leaf == "DataEvent" {
                             let saved: Vec<Expr> = args
@@ -416,7 +416,7 @@ impl<'a> Checker<'a> {
                 }
                 if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "Limits") && method == "safe")
                     || self.resolve_method_sig(type_name, method).is_some() {
-                    return self.check_static_method(type_name, method, span, args);
+                    return self.check_static_method(type_name, method, span, type_args, args);
                 }
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as Perf`
                 // remains accepted as the existing module-alias path.
@@ -2594,24 +2594,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(args) = applied_args {
-                let declared = self
-                    .trait_reg
-                    .struct_params
-                    .get(&type_name)
-                    .or_else(|| self.trait_reg.enum_params.get(&type_name));
-                if let Some(params) = declared {
-                    let subst: std::collections::HashMap<String, Type> = params
-                        .iter()
-                        .zip(args)
-                        .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                        .collect();
-                    for (_, ty) in &mut msig.params {
-                        *ty = crate::Generics::substitute_type(ty, &subst);
-                    }
-                    if let Some(ret) = &mut msig.return_type {
-                        *ret = crate::Generics::substitute_type(ret, &subst);
-                    }
-                }
+                self.instantiate_method_sig(&type_name, &mut msig, args);
             }
             self.record_method_reference(&type_name, method, span);
             self.record_edge(crate::Sema::effect_key(Some(&type_name), method), span);
