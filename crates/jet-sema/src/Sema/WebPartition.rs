@@ -263,13 +263,13 @@ fn marker_show(marker: Option<WebPartitionMarker>) -> &'static str {
 
 fn reason_show(f: &FuncWebMeta, effects: &EffectSet) -> String {
     if let Some(m) = f.marker {
-        return format!("#{}", marker_show(Some(m)));
+        return format!("@{}", marker_show(Some(m)));
     }
     if effect_set_has_root(effects, Effect::Browser) {
         return "inferred: Browser effect".to_string();
     }
     if let Some(c) = f.ceiling {
-        return format!("#{}({})", Syntax::ATTR_TARGET, c.name());
+        return format!("@{}({})", Syntax::ATTR_TARGET, c.name());
     }
     if f.name == "run" {
         return "entry".to_string();
@@ -322,7 +322,7 @@ fn check_abi_export(f: &FuncWebMeta, idx: &AbiTypeIndex, diags: &mut Vec<Diagnos
         if !is_abi_safe_type_full(p, idx) {
             diags.push(Syntax::web_abi_type(
                 &type_show(p),
-                "on a `#WasmExport` parameter",
+                "on a `@WasmExport` parameter",
                 Some(f.name_span),
             ));
         }
@@ -331,7 +331,7 @@ fn check_abi_export(f: &FuncWebMeta, idx: &AbiTypeIndex, diags: &mut Vec<Diagnos
         if !is_abi_safe_type_full(ret, idx) {
             diags.push(Syntax::web_abi_type(
                 &type_show(ret),
-                "as a `#WasmExport` return type",
+                "as a `@WasmExport` return type",
                 Some(f.name_span),
             ));
         }

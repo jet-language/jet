@@ -42,7 +42,7 @@ impl Counter.Rollback {
 }
 enum Fail { Bad }
 fn bump(c: &Counter) -> Int ? Fail {
-    #Transact {
+    @Transact {
         c.value += 1
         c.ops += 1
         return err(Fail.Bad)
@@ -89,7 +89,7 @@ impl Counter.Rollback {
 }
 enum Fail { Bad }
 fn bump(c: &Counter) -> Int ? Fail {
-    #Transact {
+    @Transact {
         c.value += 1
         c.ops += 1
     }
@@ -128,7 +128,7 @@ impl Counter.Rollback {
 }
 enum Fail { Bad }
 fn bump(c: &Counter) -> Int ? Fail {
-    #Transact {
+    @Transact {
         c.value += 1
         return err(Fail.Bad)
     }

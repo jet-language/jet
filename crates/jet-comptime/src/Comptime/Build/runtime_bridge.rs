@@ -109,9 +109,9 @@ fn eval_session_method(
     if (method == "probe" || action_has_effects) && !in_impure_gate {
         return Err(Diagnostic::error(
             "E3502",
-            format!("`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`"),
+            format!("`b.{method}` touches the ambient world and must be inside `@Impure(\"reason\")`"),
             "build effects must be declared exactly where an auditor can see them".to_string(),
-            format!("wrap the `b.{method}` call in `#Impure(\"why it is needed\")`"),
+            format!("wrap the `b.{method}` call in `@Impure(\"why it is needed\")`"),
             Some(span),
         ));
     }

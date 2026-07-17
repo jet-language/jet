@@ -23,7 +23,7 @@
 
     #[test]
     fn shield_block_is_covered_by_tir() {
-        assert!(covers("fn guarded() { #Shield { value :: 1 } }", "guarded"));
+        assert!(covers("fn guarded() { @Shield { value :: 1 } }", "guarded"));
     }
 
     /// Like `covers`, but runs the FULL front end (sema) on `src` first, so
@@ -50,6 +50,7 @@
                 no_prelude: prog.no_prelude,
                 html_path: prog.html_path.clone(),
                 no_alloc_policy: prog.no_alloc_policy,
+                policy_declarations: prog.policy_declarations.clone(),
             }],
             parse_teaching: Vec::new(),
             used_core: std::collections::HashSet::new(),
@@ -260,17 +261,17 @@ fn mk() {
 
     #[test]
     fn covers_unsafe_fn_with_ptr_ops() {
-        // c109 Phase 18: a `#Unsafe fn` (S58) is covered — it lowers to `unsafe fn`, and
+        // c109 Phase 18: a `@Unsafe fn` (S58) is covered — it lowers to `unsafe fn`, and
         // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
-        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) -> Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+        let src = "use core.mem\n@Unsafe\nfn read_reg(addr: Int) -> Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
         assert!(covers_with_mem(src, "read_reg"));
     }
 
     #[test]
     fn covers_unsafe_block_and_address_of() {
-        // c109 Phase 18: a `#Unsafe("…") { … }` audited region + `mem.address_of` (the
+        // c109 Phase 18: a `@Unsafe("…") { … }` audited region + `mem.address_of` (the
         // inert address cast, legal outside unsafe) are covered.
-        let src = "use core.mem\nfn run() {\n cell: Int :: 7\n addr :: mem.address_of(cell)\n #Unsafe(\"live\") {\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
+        let src = "use core.mem\nfn run() {\n cell: Int :: 7\n addr :: mem.address_of(cell)\n @Unsafe(\"live\") {\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
         assert!(covers_with_mem(src, "run"));
     }
 
@@ -965,11 +966,11 @@ fn mk() {
         assert!(handle_method_op("TcpStream", "read", 0).is_some());
         assert!(handle_method_op("TcpStream", "close", 0).is_some());
         assert!(handle_method_op("TcpListener", "accept", 0).is_some());
-        // c109 Phase 19: the arena allocator methods (`alloc`/`reset`/`free`) are now
+        // c109 Phase 19: the reusable arena methods (`alloc`/`reset`) are now
         // covered (the producer `mem.Arena.new()` is covered too).
         assert!(handle_method_op("Arena", "alloc", 1).is_some());
         assert!(handle_method_op("Bump", "reset", 0).is_some());
-        assert!(handle_method_op("Pool", "free", 0).is_some());
+        assert!(handle_method_op("Pool", "free", 0).is_none());
         // c109 Phase 20: HttpRequest/HttpResponse accessors are now covered (the
         // `http.serve` lambda-param type is written back onto `p.ty`, so the slot
         // type is total and the AST `rty`-keyed handle arm fires identically).
@@ -1111,16 +1112,16 @@ fn greet() -> String { return input() }
 
     #[test]
     fn covers_caps_block() {
-        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region erases to a plain
+        // c109 Phase 26: a `@Caps(Io) { … }` effect-restriction region erases to a plain
         // block (byte-for-byte `Stmt::Region`); its body is checked on the SAME locals, so
         // an out-of-subset body keeps the whole fn off the TIR path.
-        assert!(covers("fn f() { #Caps(Io) { print(\"x\") } }", "f"));
+        assert!(covers("fn f() { @Caps(Io) { print(\"x\") } }", "f"));
         // c109: a single-uppercase-letter DECLARED struct name (`P`) is a concrete
         // type, not a type variable — the `is_type_var_name` heuristic is now guarded
         // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
         // `P{x} :: p` struct-destructure are both covered; the fn routes through TIR.
         assert!(covers(
-            "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#Caps(Io) { P.{x} :: p\nprint(x) } }",
+            "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n@Caps(Io) { P.{x} :: p\nprint(x) } }",
             "f"
         ));
     }
@@ -1362,15 +1363,15 @@ fn consume(ch: Receiver<Int>) -> Int {
 
     #[test]
     fn covers_todo_hole() {
-        // c109 Phase 23: a `#Todo` hole is covered (diverging `todo!`). The build_cx-only
+        // c109 Phase 23: a `@Todo` hole is covered (diverging `todo!`). The build_cx-only
         // helper leaves `expected_type` unset (sema fills it), but the gate admits a
         // None-typed hole too (it lowers to the `(unknown)` fallback — never reached here
         // since this is a structural gate test). Reproduce the sema fact: a hole with an
         // expected type. We can't run sema in this helper, so just assert the simpler
         // surrounding fn is covered — the end-to-end `todo_hole` test proves the emit.
-        // (A bare `#Todo` body with no sema annotation has `expected_type: None`, which the
+        // (A bare `@Todo` body with no sema annotation has `expected_type: None`, which the
         // gate EXCLUDES — so we assert exclusion here, matching the conservative rule.)
-        assert!(!covers("fn f(n: Int) -> Int {\n return #Todo\n}\n", "f"));
+        assert!(!covers("fn f(n: Int) -> Int {\n return @Todo\n}\n", "f"));
     }
 
     #[test]

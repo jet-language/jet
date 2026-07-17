@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
                     if mut_caps.contains(name) {
                         continue;
                     }
-                    if !is_cloneable(&cap_ty, self.registry) {
+                    if self.is_resource_type(&cap_ty) || !is_cloneable(&cap_ty, self.registry) {
                         if !taken {
                             if self.is_task_spawn {
                                 self.diags.push(Diagnostic::error(
@@ -321,7 +321,7 @@ impl<'a> Checker<'a> {
     
             // D-TXN2: a lambda body is a deferred execution context (it runs later —
             // e.g. an `on_commit` hook fires only post-commit). Effects inside it are
-            // NOT rejected by the enclosing `#Transact` block, so zero the depth here
+            // NOT rejected by the enclosing `@Transact` block, so zero the depth here
             // and restore it after the body. This is exactly why `name.on_commit(() =>
             // { fs.write(…) })` is the D-TXN2 fix-it: the irreversible work moves into
             // a lambda, off the block's direct path.

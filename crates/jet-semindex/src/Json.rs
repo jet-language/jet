@@ -335,8 +335,8 @@ impl TypeDossier {
 
 fn bypass_kind_text(kind: BypassKind) -> &'static str {
     match kind {
-        BypassKind::UnsafeRegion => "#Unsafe region",
-        BypassKind::UnsafeFn => "#Unsafe fn",
+        BypassKind::UnsafeRegion => "@Unsafe region",
+        BypassKind::UnsafeFn => "@Unsafe fn",
         BypassKind::ExplicitDrop => ".drop(reason)",
         BypassKind::LintAllow => "#[allow(lint)]",
     }

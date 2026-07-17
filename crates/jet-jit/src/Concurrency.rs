@@ -273,7 +273,7 @@ extern "C" fn jet_jit_shield_leave() -> i64 {
     if matches!(exit, JetShieldExit::Deadline) {
         with_runtime_mut(|rt| {
             rt.set_deadline(
-                "Error [E3003]: deadline exceeded while waiting at shield exit\nWhy: this wait point observed the task context deadline from `#Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
+                "Error [E3003]: deadline exceeded while waiting at shield exit\nWhy: this wait point observed the task context deadline from `@Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
             )
         });
     }

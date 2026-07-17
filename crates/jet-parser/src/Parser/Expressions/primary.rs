@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     return Ok(Expr::Absent(span));
                 }
-                TokKind::Hash
+                TokKind::At
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::Ident(n)) if n == Syntax::ATTR_META
@@ -97,7 +97,7 @@ impl<'a> Parser<'a> {
                         "binding, const, or function",
                     ));
                 }
-                TokKind::Hash
+                TokKind::At
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::Ident(n))
@@ -112,19 +112,19 @@ impl<'a> Parser<'a> {
                     };
                     return Err(Diagnostic::error(
                         "E0343",
-                        format!("`#{}` does not produce a value", name),
+                        format!("`@{}` does not produce a value", name),
                         "statement switch attributes control a whole statement; expressions must still produce values in every build".to_string(),
-                        format!("put it before the statement: `#{} <statement>`", name),
+                        format!("put it before the statement: `@{} <statement>`", name),
                         Some(Span::new(hash.start, name_tok.span.end)),
                     ));
                 }
-                TokKind::Hash
+                TokKind::At
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::Ident(n)) if n == Syntax::KW_TODO
                     ) =>
                 {
-                    // D-TOOL2 (D-CASING1 follow-on): `#Todo` typed hole — valid in any
+                    // D-TOOL2 (D-CASING1 follow-on): `@Todo` typed hole — valid in any
                     // expression position; sema fills `expected_type`; codegen emits a
                     // panic.
                     let start = self.bump().span.start; // `#`
@@ -134,15 +134,15 @@ impl<'a> Parser<'a> {
                         expected_type: None,
                     });
                 }
-                TokKind::Hash
+                TokKind::At
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::Ident(n)) if n == Syntax::KW_TAINTED
                     ) =>
                 {
-                    // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
-                    // The kind is optional; bare `#Tainted` defaults to the `.Input`
-                    // kind (backward compatible). D-TAINT2=A ratified `#Tainted(Kind)`
+                    // D-TAINT1/TAINT2: `@Tainted expr` or `@Tainted(Kind) expr`.
+                    // The kind is optional; bare `@Tainted` defaults to the `.Input`
+                    // kind (backward compatible). D-TAINT2=A ratified `@Tainted(Kind)`
                     // form with `Credential` (and the full D-TAINT1 closed set).
                     // Taint propagation + sink checks run in the sema taint pass;
                     // codegen erases the tag (I3), emitting the inner expr unchanged.
@@ -175,15 +175,15 @@ impl<'a> Parser<'a> {
                     let span = Span::new(start, inner.span().end);
                     return Ok(Expr::Tainted(Box::new(inner), kind, span));
                 }
-                TokKind::Hash
+                TokKind::At
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        // Any `#Ident` reaching here is past the `#Todo`/`#Tainted`
+                        // Any `@Ident` reaching here is past the `@Todo`/`@Tainted`
                         // expression markers handled above, so in expression position it
-                        // is a SIMD reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max`
+                        // is a SIMD reduce-op marker `@Add`/`@Mul`/`@Min`/`@Max`
                         // (D-SIMD2). Parse it generically; sema validates the closed set
                         // and the `.reduce(…)` position (E2510), giving a teaching error
-                        // for a typo like `#Avg` instead of a bare parse error.
+                        // for a typo like `@Avg` instead of a bare parse error.
                         Some(TokKind::Ident(n))
                             if n != Syntax::KW_TODO && n != Syntax::KW_TAINTED
                     ) =>
@@ -206,15 +206,15 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0054",
                         format!(
-                            "the typed hole is written `#{}`, not bare `{}`",
+                            "the typed hole is written `@{}`, not bare `{}`",
                             Syntax::KW_TODO,
                             Syntax::FOREIGN_TODO
                         ),
                         format!(
-                            "`#{}` is a marker, like every other `#`-tag, so an unfinished spot draws the eye",
+                            "`@{}` is a marker, like every other `#`-tag, so an unfinished spot draws the eye",
                             Syntax::KW_TODO
                         ),
-                        format!("write: #{}", Syntax::KW_TODO),
+                        format!("write: @{}", Syntax::KW_TODO),
                         Some(t.span),
                     ));
                     return Ok(Expr::Todo {
@@ -663,6 +663,7 @@ impl<'a> Parser<'a> {
                             pub_file_default: false,
                             in_layout_body: self.in_layout_body,
                             module_arg_expr_depth: None,
+                            policy_declarations: Vec::new(),
                         };
                         let e = sub.expr()?;
                         if !sub.diags.is_empty() {

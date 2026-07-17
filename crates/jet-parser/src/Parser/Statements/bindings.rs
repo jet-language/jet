@@ -26,6 +26,8 @@ impl<'a> Parser<'a> {
                 uninit: false,
                 arena_view: false,
                 string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
@@ -67,6 +69,8 @@ impl<'a> Parser<'a> {
                 uninit: false,
                 arena_view: false,
                 string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
             });
         }
         let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
@@ -99,6 +103,8 @@ impl<'a> Parser<'a> {
                         uninit: false,
                         arena_view: false,
                         string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
                     });
                 }
                 // D-BIND4: `name: Type := expr` — explicit mutable.
@@ -134,6 +140,8 @@ impl<'a> Parser<'a> {
                             uninit: true,
                             arena_view: false,
                             string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
                         });
                     }
                     let init = self.expr()?;
@@ -153,6 +161,8 @@ impl<'a> Parser<'a> {
                         uninit: false,
                         arena_view: false,
                         string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
                     });
                 }
                 // Retired: `name: Type : expr`.
@@ -192,6 +202,8 @@ impl<'a> Parser<'a> {
                         uninit: false,
                         arena_view: false,
                         string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
                     });
                 }
                 // Retired: `name: Type = expr`.
@@ -231,6 +243,8 @@ impl<'a> Parser<'a> {
                         uninit: false,
                         arena_view: false,
                         string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
                     });
                 }
                 _ => {}
@@ -272,6 +286,8 @@ impl<'a> Parser<'a> {
             uninit: false,
             arena_view: false,
             string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
         })
     }
 
@@ -670,6 +686,8 @@ impl<'a> Parser<'a> {
             uninit: false,
             arena_view: false,
             string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
         })
     }
 

@@ -58,7 +58,7 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// CLIF return type of the function being lowered (`None` = returns void).
     /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
     pub(crate) ret_clif: Option<types::Type>,
-    /// Lexical `#Shield` depth in emitted native code. Used to emit exact
+    /// Lexical `@Shield` depth in emitted native code. Used to emit exact
     /// cleanup calls before every non-local control-flow edge.
     pub(crate) shield_depth: u32,
 }
@@ -358,6 +358,13 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::ExprStmt(expr) => {
                 self.lower_expr(expr)?;
+            }
+            // D-SHAPE-RESOURCE2=A: the AOT emitter owns scope-exit cleanup
+            // until the resident JIT has an equivalent unwind-capable guard.
+            // Returning a named gap preserves dev-mode behavior via the
+            // existing JIT -> AOT fallback instead of silently weakening it.
+            TStmt::DeferClose { .. } => {
+                return Err("jit deferred resource close uses AOT fallback".to_string());
             }
             TStmt::If {
                 cond,
@@ -859,6 +866,9 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::IndexHookAssign { .. } => {
                 return Err("jit index-hook assign unsupported".to_string());
+            }
+            TStmt::GcEdit { .. } => {
+                return Err("jit automatic GC edit unsupported".to_string());
             }
             TStmt::MathSwizzleAssign { .. } => {
                 return Err("jit math swizzle assign unsupported".to_string());
@@ -1690,7 +1700,7 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::Drop(_) => Err("jit drop expression unsupported".to_string()),
             TExprKind::AmbientInput { .. } => Err("jit ambient input unsupported".to_string()),
-            TExprKind::RequireStop(_) => Err("jit require/panic stop unsupported".to_string()),
+            TExprKind::RequireStop { .. } => Err("jit require/panic stop unsupported".to_string()),
             TExprKind::LayoutCompare { .. } => Err("jit layout compare unsupported".to_string()),
             TExprKind::LayoutLit { .. } => Err("jit layout literal unsupported".to_string()),
             TExprKind::PtrFromAddr { .. } => Err("jit pointer from addr unsupported".to_string()),
@@ -1749,6 +1759,10 @@ impl LowerCtx<'_, '_> {
                 TModuleCallForm::Qualified { .. } => Err("jit file-module call unsupported".to_string()),
             },
             TExprKind::ExternCall { .. } => Err("jit extern call unsupported".to_string()),
+            TExprKind::Close(_) => Err("nominal resource close uses AOT fallback".to_string()),
+            TExprKind::ResourceNew(_) | TExprKind::ResourceTake(_) => {
+                Err("automatic resource cleanup uses AOT fallback".to_string())
+            }
         }
     }
 
@@ -2225,7 +2239,6 @@ impl LowerCtx<'_, '_> {
             | THandleOp::TcpStreamReady => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocAlloc => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocReset => Err("jit handle method unsupported".to_string()),
-            THandleOp::AllocFree => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqField(..) => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqHeader => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqParam => Err("jit handle method unsupported".to_string()),

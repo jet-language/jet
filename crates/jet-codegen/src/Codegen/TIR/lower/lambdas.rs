@@ -134,7 +134,7 @@ fn lower_lambda_expecting_with_host_borrow(
     // statements (on the lambda env) and emits a `{ … }` at indent 1 — byte-for-byte
     // `emit_lambda`'s `emit_stmts(…, 1, false)` then `format!("{{ {} }}", inner)`.
     // D-STM1=A (card #506): a lambda body is a deferred execution context (it may
-    // run after the `#Transact` block commits — an `on_commit` hook, a spawned
+    // run after the `@Transact` block commits — an `on_commit` hook, a spawned
     // task). So a `Shared.edit` inside a lambda must NOT route to the transaction's
     // deferred `edit_txn` (whose thread-local transaction is gone by then); it stays
     // an immediate edit. This mirrors sema zeroing `txn_depth` for lambda bodies
@@ -291,7 +291,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     }
 }
 
-/// Render a `#Reactive { … }` block as a `move || { … }` closure for
+/// Render a `@Reactive { … }` block as a `move || { … }` closure for
 /// `jet_reactive_effect`. Outer locals read inside the block are cloned into
 /// `_jet_cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
 pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> String {

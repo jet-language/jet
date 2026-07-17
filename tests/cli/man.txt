@@ -53,6 +53,9 @@ query the stable semantic index
 .B inspect expand
 print sema facts for one or every lens
 .TP
+.B inspect unsafe
+audit unsafe policy and typed obligations
+.TP
 .B inspect schema
 inspect or re-baseline published schema snapshots
 .TP
@@ -227,6 +230,12 @@ refresh moving dependency selectors (`update jet` moves the toolchain pin)
 .B init
 create a pkg.jet here, pinning the running jet's channel (add <script.jet> to lift its inline deps)
 .TP
+.B gc
+report automatic GC promotions (`gc report`)
+.TP
+.B gc report
+report automatic GC promotions and ownership rewrites
+.TP
 .B clean
 optimize and collect stale Jetpack hangar entries
 .TP
@@ -243,7 +252,7 @@ check performance budgets or explicitly update a baseline
 benchmark a Jet program with honest stats
 .TP
 .B fuzz
-fuzz a property `#Test fn` — corpus, minimization, seeded PRNG
+fuzz a property `@Test fn` — corpus, minimization, seeded PRNG
 .TP
 .B version
 print compiler version
@@ -260,6 +269,9 @@ with inspect live: print one snapshot and exit
 .TP
 .B --observe
 with run: expose bounded live runtime facts for attachment
+.TP
+.B --gc-trace
+with run/dev: record bounded automatic GC-promotion evidence
 .TP
 .B --structural
 with diff/merge: compare checked definitions by semantic identity
@@ -298,7 +310,7 @@ with fmt -: path label used in diagnostics when reading from stdin
 with build/run: smallest binary (S15)
 .TP
 .B --task
-with run: invoke a `#Task fn` by name (D-JPK-TASKRUN1)
+with run: invoke a `@Task fn` by name (D-JPK-TASKRUN1)
 .TP
 .B --locked
 with fetch: verify only, refuse network
@@ -370,7 +382,7 @@ with eval: require the program to be pure (S60 / D-PURE2)
 with build/run: no OS; rejects std-only APIs (E2-M15)
 .TP
 .B --allow-impure
-with build/run: allow Tier-2 ambient comptime effects inside #Impure gates (D-CTEFFECT1)
+with build/run: allow Tier-2 ambient comptime effects inside @Impure gates (D-CTEFFECT1)
 .TP
 .B --allow-exec
 with build: grant declared Exec actions for this run (D-BUILDFLAGS1)

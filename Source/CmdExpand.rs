@@ -27,11 +27,18 @@ struct Lens {
     render: fn(&ProgramBundle, &SemIndexEffectFacts) -> Vec<String>,
 }
 
-const LENSES: &[Lens] = &[Lens {
-    name: "inline",
-    summary: "@Inline / @InlineAlways contracts (D-METHODMACRO1)",
-    render: render_inline,
-}];
+const LENSES: &[Lens] = &[
+    Lens {
+        name: "inline",
+        summary: "@Inline / @InlineAlways contracts (D-METHODMACRO1)",
+        render: render_inline,
+    },
+    Lens {
+        name: "memory",
+        summary: "transitive no_alloc / zero_rc / arena_bounded facts (D-MEM-FACTS1)",
+        render: render_memory,
+    },
+];
 
 pub(crate) fn run_expand(args: &[String], _json: bool) {
     let mut lens_name: Option<String> = None;
@@ -129,6 +136,39 @@ fn print_available_lenses() {
     for l in LENSES {
         eprintln!("   {:<8} {}", l.name, l.summary);
     }
+}
+
+fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
+    let mut lines = facts
+        .memory_declarations
+        .iter()
+        .flat_map(|declaration| {
+            declaration.roots.iter().map(|root| {
+                let status = match facts
+                    .memory_projections
+                    .get(&(root.clone(), declaration.fact))
+                {
+                    Some(jet::Sema::MemoryProjection::Proven) => "proven".to_string(),
+                    Some(jet::Sema::MemoryProjection::Violated { call_path, operation }) => {
+                        format!("violated by {operation} through {}", call_path.join(" -> "))
+                    }
+                    Some(jet::Sema::MemoryProjection::OpenWorld { call_path, reason }) => {
+                        format!("open through {}: {reason}", call_path.join(" -> "))
+                    }
+                    None => "not projected".to_string(),
+                };
+                format!(
+                    "{}: {} — {} ({})",
+                    root,
+                    declaration.fact.display(),
+                    status,
+                    declaration.provenance
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    lines.sort();
+    lines
 }
 
 /// D-METHODMACRO1=A: every `@Inline`/`@InlineAlways` fn or method in the

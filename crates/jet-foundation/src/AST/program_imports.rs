@@ -8,11 +8,11 @@ pub struct Program {
     pub items: Vec<Item>,
     /// D-WASM1 (c123): optional file-level web bucket ceiling (`js target;` / `wasm target;`).
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
-    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
+    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `@PubFile` flips default top-level export visibility.
     pub pub_file: bool,
-    /// D-PRELUDEX1=A: `#NoPrelude` disables ambient `print`/`input` in this file.
+    /// D-PRELUDEX1=A: `@NoPrelude` disables ambient `print`/`input` in this file.
     pub no_prelude: bool,
-    /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — this file's default CLI
+    /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `@Target(Web)` — this file's default CLI
     /// backend is the web target, so `jet run`/`jet dev`/`jet build` don't
     /// need `--target=web` on every invocation. `None` means the native
     /// default applies unless `pkg.jet` or an explicit `--target=` flag says
@@ -20,17 +20,19 @@ pub struct Program {
     /// ceiling *within* a web build) — `Web` here means "build for the web
     /// backend at all," a different axis, same marker family (I8).
     pub default_target: Option<String>,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this program's
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `@Html("path.html")` — this program's
     /// companion host page for `--target=web` builds, explicit instead of
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
     pub html_path: Option<String>,
-    /// D-MEM1/S7 / D-POLICY-WORD1: `#Policy(no_alloc)` —
+    /// D-MEM1/S7 / D-POLICY-WORD1: `@Policy(no_alloc)` —
     /// this file's allocation floor. `Some(span)` = the policy line's span
     /// (for a "declared twice" check); `None` = no policy. Local-only: sema
     /// checks only expressions written directly in this file's own function
     /// bodies, never calls into other modules (E0921).
     pub no_alloc_policy: Option<Span>,
+    /// D-MARK-SCOPE1: source policy declarations with compiler-owned scope/target metadata.
+    pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
 }
 
 /// S16: `import "path" [as alias];` or `import name [as alias];`
@@ -280,7 +282,7 @@ pub struct ProgramBundle {
     pub used_core: std::collections::HashSet<String>,
     /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
     /// stable C callback symbol (`CallArgFlags::c_callback_symbol`) at some
-    /// `#Extern` call site anywhere in the bundle. Codegen emits exactly these
+    /// `@Extern` call site anywhere in the bundle. Codegen emits exactly these
     /// definitions as `extern "C" fn` — never every `@Pure fn` (that leaked the
     /// purity lever into codegen and broke I3 erasure; see 14dd68a5).
     pub ffi_callback_fns: std::collections::HashSet<String>,
@@ -334,15 +336,17 @@ pub struct LoadedModule {
     pub items: Vec<Item>,
     /// D-WASM1: optional file-level web bucket ceiling.
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
-    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
+    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `@PubFile` flips default top-level export visibility.
     pub pub_file: bool,
-    /// D-PRELUDEX1=A: `#NoPrelude` disables ambient `print`/`input` in this file.
+    /// D-PRELUDEX1=A: `@NoPrelude` disables ambient `print`/`input` in this file.
     pub no_prelude: bool,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this file's explicit
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `@Html("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,
     /// D-MEM1/S7 (D-NOALLOC-SEM1=A): mirrors `Program::no_alloc_policy`.
     pub no_alloc_policy: Option<Span>,
+    /// Mirrors `Program::policy_declarations` for sema/index/explain consumers.
+    pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
 }
 
 /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.

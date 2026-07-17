@@ -76,7 +76,7 @@ impl<'a> Parser<'a> {
             } else {
                 false
             };
-            // D-TAINT1: `#Sanitizer fn` is valid on methods too.
+            // D-TAINT1: `@Sanitizer fn` is valid on methods too.
             let is_sanitizer = if self.at_sanitizer_fn() {
                 self.bump(); // `#`
                 self.bump(); // `Sanitizer`
@@ -94,15 +94,15 @@ impl<'a> Parser<'a> {
             }
             // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` on methods too.
             let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
-            // D-STATE1: `#State(S)` / `#Transition(From -> To)` typestate markers on
+            // D-STATE1: `@State(S)` / `@Transition(From -> To)` typestate markers on
             // methods — the common case (typestate methods carry `self`).
             let mut state_requires = None;
             let mut state_transition = None;
             loop {
                 // D-SCHEDULE1 (card #505): a marker on its own line before `fn`
                 // gets a lexer-inserted `;` — skip it, matching `func()`'s own
-                // stacked-marker loop, so `#Task`/`#Every(…)` (wrong here, but
-                // still stacked with `#State`/`#Transition`) don't cascade into
+                // stacked-marker loop, so `@Task`/`@Every(…)` (wrong here, but
+                // still stacked with `@State`/`@Transition`) don't cascade into
                 // a spurious "expected `fn`" parse error after the E0925 push.
                 while matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
@@ -112,7 +112,7 @@ impl<'a> Parser<'a> {
                 } else if state_transition.is_none() && self.at_transition_fn() {
                     state_transition = Some(self.parse_transition_marker()?);
                 } else if self.at_task_fn() {
-                    // D-SCHEDULE1 (card #505): `#Task` only marks a top-level
+                    // D-SCHEDULE1 (card #505): `@Task` only marks a top-level
                     // function (D-JPK-TASKRUN1) — recoverable diagnostic, same
                     // shape as the E0062 plane-teaching pushes elsewhere, then
                     // keep parsing the method normally.
@@ -189,7 +189,7 @@ impl<'a> Parser<'a> {
         /// top level only — this predicate is never consulted by the statement
         /// parser, so a local binding's `@Persist` falls through to the E0145
         /// teaching diagnostic in `Statements.rs` instead).
-        pub(super) fn at_persist_const(&self) -> bool {
+        pub(in crate::Parser) fn at_persist_const(&self) -> bool {
             matches!(&self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
         }
@@ -205,35 +205,31 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            // D-PERSIST1: optional `@Persist` (retired `#Persist` teaches E0062).
-            let (is_persist, persist_span) = if matches!(&self.peek().kind, TokKind::At | TokKind::Hash)
+            // D-PERSIST1: optional `@Persist`.
+            let (is_persist, persist_span) = if matches!(&self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
             {
-                let sigil = self.bump(); // `#` or `@`
+                let sigil = self.bump(); // `@`
                 let name_tok = self.bump(); // `Persist`
                 let span = Span::new(sigil.span.start, name_tok.span.end);
-                if matches!(sigil.kind, TokKind::Hash) {
-                    self.diags
-                        .push(Self::e0062_contract_on_hash(Syntax::CONTRACT_PERSIST, span));
-                }
                 (true, Some(span))
             } else {
                 (false, None)
             };
             let mut attrs = Vec::new();
-            while matches!(self.peek().kind, TokKind::Hash) {
+            while matches!(self.peek().kind, TokKind::At) {
                 self.bump();
-                let (attr_name, _) = self.expect_ident("after `#`")?;
+                let (attr_name, _) = self.expect_ident("after `@`")?;
                 match attr_name.as_str() {
                     "static" => attrs.push(ConstAttr::ForceStatic),
                     "inline" => attrs.push(ConstAttr::ForceInline),
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",
-                            format!("`#{}` isn't a known attribute on a const", other),
-                            "only `#static` and `#inline` are supported on const declarations"
+                            format!("`@{}` isn't a known rule on a const", other),
+                            "only `@static` and `@inline` are supported on const declarations"
                                 .to_string(),
-                            "remove the attribute or use `#static` or `#inline`".to_string(),
+                            "remove the rule or use `@static` or `@inline`".to_string(),
                             Some(self.peek().span),
                         ));
                     }

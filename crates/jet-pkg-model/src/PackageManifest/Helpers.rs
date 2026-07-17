@@ -49,6 +49,7 @@ pub(super) fn block_body(text: &str, key: &str, open: char, close: char) -> Opti
         let after_trim = after.trim_start();
         if preceded_ok && after_trim.starts_with(':') {
             let rest = after_trim[1..].trim_start();
+            let rest = rest.strip_prefix('.').unwrap_or(rest).trim_start();
             if let Some(stripped) = rest.strip_prefix(open) {
                 return Some(balanced(stripped, open, close));
             }

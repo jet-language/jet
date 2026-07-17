@@ -15,7 +15,7 @@ use std::collections::HashSet;
 /// FileReader/StdinHandle (dead — E2502, loop-source-only); all HttpRouter `get`/
 /// `post`/`put`/`delete` (closure handler → `emit_router_handler`); HttpRequest/
 /// HttpResponse accessors (serve-lambda-param slot may be unresolved → AST handle arm
-/// wouldn't fire); Arena/Bump/Pool/Fixed (`alloc`/`reset`/`free` — the producer
+/// wouldn't fire); Arena/Bump/Pool/Fixed (`alloc`/`reset` — the producer
 /// `mem.*.new` isn't a covered call, so an allocator never binds in a covered fn);
 /// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
 /// `Match.group` (the `Option<Match>` unwrap chain isn't cleanly reachable).
@@ -30,9 +30,6 @@ pub(crate) fn alloc_new_type<'a>(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> Option<&'a str> {
-    if method != Syntax::MEM_ALLOC_NEW {
-        return None;
-    }
     let Expr::Field(inner, alloc_type, _) = receiver else {
         return None;
     };
@@ -46,7 +43,12 @@ pub(crate) fn alloc_new_type<'a>(
         return None;
     }
     match alloc_type.as_str() {
-        "Arena" | "Bump" | "Pool" | "Fixed" => Some(alloc_type.as_str()),
+        "Fixed" if method == "over" || method == Syntax::MEM_ALLOC_NEW => {
+            Some(alloc_type.as_str())
+        }
+        "Arena" | "Bump" | "Pool" if method == Syntax::MEM_ALLOC_NEW => {
+            Some(alloc_type.as_str())
+        }
         _ => None,
     }
 }
@@ -230,7 +232,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("TcpStream", "peer_addr", 0) => THandleOp::TcpStreamPeerAddr,
         ("TcpStream", "local_addr", 0) => THandleOp::TcpStreamLocalAddr,
         ("TcpStream", "close", 0) => THandleOp::TcpStreamClose,
-        // c109 Phase 19: the four arena allocators (`alloc`/`reset`/`free`). Sema sets
+        // c109 Phase 19: the four arena allocators (`alloc`/`reset`). Sema sets
         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`
         // share identical Rust method names (the engines differ; the surface doesn't).
@@ -268,7 +270,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ParsedArgs", "subcommand", 0) => THandleOp::ParsedArgsSubcommand,
         ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
         ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
-        ("Arena" | "Bump" | "Pool" | "Fixed", "free", 0) => THandleOp::AllocFree,
         // c109 Phase 20: HttpRequest/HttpResponse accessors (E2-M10, D-ROUTE1=A).
         // Now reachable because the `http.serve` lambda param type is written back
         // onto `p.ty` (sema), so the slot type is total. The AST `emit_builtin_method`
@@ -502,7 +503,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             _ => None,
         })
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — `take_pattern`
-        // is excluded (like `Gc.new<T>`/`Arena.alloc` above), resolved
+        // is excluded (like `Arena.alloc` above), resolved
         // directly at its call site since its return type depends on the
         // pattern literal's holes.
         .or_else(|| crate::Sema::binary_reader_method_return(handle, method, nargs))

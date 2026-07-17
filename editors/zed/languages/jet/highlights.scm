@@ -30,7 +30,7 @@
 (generic_type base: (type_identifier) @type)
 (capability_sigil) @operator
 
-; Markers / attributes (#Pure, #[Codable], #Caps(...), #grant, ...)
+; Applied rules (@Pure, @[Codable], @Caps(...), @Grant, ...)
 (attribute (marker_name) @attribute)
 (attribute_list (marker_name) @attribute)
 (lower_marker_name) @attribute
@@ -56,10 +56,11 @@
 (named_arg name: (identifier) @property)
 
 ; BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-; keyword.control: break continue else if in loop return step
+; keyword.control: break continue defer else if in loop return step
 [
   "break"
   "continue"
+  "defer"
   "else"
   "if"
   "in"
@@ -132,8 +133,7 @@
 ] @type.builtin
 
 ; builtin: check input print
-; marker.directive: Abi Bench Bindgen Caller Caps DebugOnly Default DenyUnknownFields Every Extern FFI Flatten Grant Html Impure Invariant Layout Live Meta Nondeterministic Off Policy Reactive Region Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow
-; marker.contract: Cli Codable CodableAsBase Comparable Decode Doc Encode Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize
+; marker.rule: Abi Add Bench Bindgen Caps Cli Codable CodableAsBase Comparable Context DebugOnly Decode Default DenyUnknownFields Doc Encode Every Extern FFI Flatten Grant Html Impure Inline InlineAlways Invariant Layout Live Max Meta Min Mul MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Pure Reactive Redact Region Rename RenameAll Replayable Sanitizer Shield SingleUse Skip Sql State Summarize Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow inline static
 ; sigil: # & ... :: := @ ^ ~
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS

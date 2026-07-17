@@ -79,6 +79,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::Off { body: inner, .. }
             | Stmt::DebugOnly { body: inner, .. }
             | Stmt::Region { body: inner, .. }
+            | Stmt::Policy { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Layout { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
@@ -481,6 +482,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Shield { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -873,6 +875,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::Shield { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }

@@ -7,11 +7,11 @@ use crate::AST::{
 impl<'a> Fmt<'a> {
     fn fmt_statement_switch_attr(&mut self, marker: &str, body: &[Stmt]) {
         if body.len() == 1 {
-            self.write(&format!("#{} ", marker));
+            self.write(&format!("@{} ", marker));
             self.fmt_stmt(&body[0]);
             return;
         }
-        self.write(&format!("#{} {{", marker));
+        self.write(&format!("@{} {{", marker));
         self.newline();
         self.with_indent(|f| f.fmt_block_stmts(body));
         self.end_block();
@@ -36,6 +36,19 @@ impl<'a> Fmt<'a> {
 
     fn fmt_stmt(&mut self, stmt: &Stmt) {
         match stmt {
+            Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_DEFER_CLOSE => {
+                self.write("defer ");
+                if let Some(arg) = call.args.first() {
+                    self.fmt_expr(&arg.expr, Prec::OrFallback);
+                }
+            }
+            Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_UNSAFE_ASSERT => {
+                self.write(Syntax::KW_ASSERT);
+                for (index, arg) in call.args.iter().enumerate() {
+                    self.write(if index == 0 { " " } else { ", " });
+                    if let Expr::Ident(name, _) = &arg.expr { self.write(name); }
+                }
+            }
             Stmt::Expr(e) => {
                 self.fmt_expr(e, Prec::OrFallback);
             }
@@ -161,26 +174,28 @@ impl<'a> Fmt<'a> {
                 self.write("loop {");
                 self.fmt_body(inner);
             }
-            Stmt::Unsafe { audit, body, .. } => {
-                // D-UNSAFE2: the reason is the argument of `#Unsafe` itself; the
-                // separate `#Audit` line is retired.
-                match audit {
-                    Some(reason) => self.write(&format!(
-                        "#{}(\"{}\") {{",
-                        Syntax::KW_UNSAFE,
-                        escape_str_lit(reason)
-                    )),
-                    None => self.write(&format!("#{} {{", Syntax::KW_UNSAFE)),
+            Stmt::Unsafe { audit, body, span } => {
+                // D-UNSAFE2: the reason is the argument of `@Unsafe` itself; the
+                // separate `@Audit` line is retired.
+                let site_mode = self.policy_declarations.iter().find(|declaration|
+                    declaration.key == crate::Policy::PolicyKey::Unsafe
+                        && declaration.target == Some(*span)
+                        && matches!(declaration.value, crate::Policy::PolicyValue::UnsafeTrack | crate::Policy::PolicyValue::UnsafeSkip)).map(|declaration| declaration.value);
+                match (audit, site_mode) {
+                    (Some(reason), Some(mode)) => self.write(&format!("@{}(\"{}\", obligations: {}) {{", Syntax::KW_UNSAFE, escape_str_lit(reason), mode.display())),
+                    (None, Some(mode)) => self.write(&format!("@{}(obligations: {}) {{", Syntax::KW_UNSAFE, mode.display())),
+                    (Some(reason), None) => self.write(&format!("@{}(\"{}\") {{", Syntax::KW_UNSAFE, escape_str_lit(reason))),
+                    (None, None) => self.write(&format!("@{} {{", Syntax::KW_UNSAFE)),
                 }
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-CTEFFECT1: `#Impure("reason") { … }` round-trips verbatim.
+            // D-CTEFFECT1: `@Impure("reason") { … }` round-trips verbatim.
             Stmt::Impure { reason, body, .. } => {
                 match reason {
-                    Some(r) => self.write(&format!("#{}(\"{}\") {{", Syntax::KW_IMPURE, r)),
-                    None => self.write(&format!("#{} {{", Syntax::KW_IMPURE)),
+                    Some(r) => self.write(&format!("@{}(\"{}\") {{", Syntax::KW_IMPURE, r)),
+                    None => self.write(&format!("@{} {{", Syntax::KW_IMPURE)),
                 }
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -190,23 +205,30 @@ impl<'a> Fmt<'a> {
             Stmt::DebugOnly { body, .. } => {
                 self.fmt_statement_switch_attr(Syntax::ATTR_DEBUG_ONLY, body)
             }
-            // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
+            // D-REACTCORE1: `@Reactive { … }` round-trips verbatim.
             Stmt::Reactive { body, .. } => {
-                self.write(&format!("#{} {{", Syntax::KW_REACTIVE));
+                self.write(&format!("@{} {{", Syntax::KW_REACTIVE));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-SHIELDNAME1=A: `#Shield { … }` round-trips verbatim.
+            // D-SHIELDNAME1=A: `@Shield { … }` round-trips verbatim.
             Stmt::Shield { body, .. } => {
-                self.write(&format!("#{} {{", Syntax::KW_SHIELD));
+                self.write(&format!("@{} {{", Syntax::KW_SHIELD));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-BLOCKPLANE1=A: `#Region(r) { … }`.
+            // D-BLOCKPLANE1=A: `@Region(r) { … }`.
             Stmt::Region { name, body, .. } => {
-                self.write(&format!("#{}({}) {{", Syntax::ATTR_REGION, name));
+                self.write(&format!("@{}({}) {{", Syntax::ATTR_REGION, name));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
+            Stmt::Policy { declarations, body, .. } => {
+                self.fmt_policy_declarations(declarations);
+                self.write(" {");
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
@@ -233,19 +255,19 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(&resugared));
                 self.end_block();
             }
-            // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
+            // D-EFF1 / D-QUAL1: `@Caps(Net, Db) { … }` effect-restriction region.
             Stmt::Caps { caps, body, .. } => {
                 let list = caps
                     .iter()
                     .map(|(n, _)| n.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                self.write(&format!("#{}({}) {{", Syntax::KW_CAPS, list));
+                self.write(&format!("@{}({}) {{", Syntax::KW_CAPS, list));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-SCAP1: `#Grant(Fs) { caps -> … }` scoped-capability grant region.
+            // D-SCAP1: `@Grant(Fs) { caps -> … }` scoped-capability grant region.
             Stmt::Grant {
                 caps,
                 binding,
@@ -258,7 +280,7 @@ impl<'a> Fmt<'a> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 self.write(&format!(
-                    "#{}({}) {{ {} {}",
+                    "@{}({}) {{ {} {}",
                     Syntax::KW_GRANT,
                     list,
                     binding,
@@ -307,9 +329,9 @@ impl<'a> Fmt<'a> {
                 self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));
                 self.fmt_dispatch(subject, arms, else_body.as_deref());
             }
-            // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
+            // D-CTX1 (ratified 2026-06-22, G2): `@Context(field: value, …) { … }`.
             Stmt::ContextBlock { fields, body, .. } => {
-                self.write(&format!("#{}", Syntax::CTX_BLOCK));
+                self.write(&format!("@{}", Syntax::CTX_BLOCK));
                 self.write("(");
                 for (i, (name, val, _)) in fields.iter().enumerate() {
                     if i > 0 {
@@ -323,26 +345,26 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-BLOCKPLANE1=A: `#Live { … }`.
+            // D-BLOCKPLANE1=A: `@Live { … }`.
             Stmt::Live { body, .. } => {
-                self.write(&format!("#{} {{", Syntax::ATTR_LIVE));
+                self.write(&format!("@{} {{", Syntax::ATTR_LIVE));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-BLOCKPLANE1=A: `#Nondeterministic("reason") { … }`.
+            // D-BLOCKPLANE1=A: `@Nondeterministic("reason") { … }`.
             Stmt::AssumeDet { reason, body, .. } => {
-                self.write(&format!("#{}(\"{}\") {{", Syntax::ATTR_NONDETERMINISTIC, reason));
+                self.write(&format!("@{}(\"{}\") {{", Syntax::ATTR_NONDETERMINISTIC, reason));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` (the handle
-            // is optional — a bare `#Transact { … }` with no hooks stays legal).
+            // D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` (the handle
+            // is optional — a bare `@Transact { … }` with no hooks stays legal).
             Stmt::Transact { name, body, .. } => {
                 match name {
-                    Some(name) => self.write(&format!("#{}({}) {{", Syntax::KW_TRANSACT, name)),
-                    None => self.write(&format!("#{} {{", Syntax::KW_TRANSACT)),
+                    Some(name) => self.write(&format!("@{}({}) {{", Syntax::KW_TRANSACT, name)),
+                    None => self.write(&format!("@{} {{", Syntax::KW_TRANSACT)),
                 }
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -619,7 +641,7 @@ impl<'a> Fmt<'a> {
             self.write(" ");
         }
         if b.track {
-            self.write(&format!("#{} ", Syntax::ATTR_TRACK));
+            self.write(&format!("@{} ", Syntax::ATTR_TRACK));
         }
         // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND4: ordinary
         // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.

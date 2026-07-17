@@ -41,6 +41,9 @@ pub(crate) struct LowerEnv {
     /// another `&str` — the wrong Rust type for a `copy` result that needs to
     /// escape the view's scope).
     pub(super) string_view_locals: HashSet<String>,
+    pub(super) resource_locals: HashSet<String>,
+    pub(super) gc_locals: HashSet<String>,
+    pub(super) gc_return: bool,
     /// Operand types that lowering materializes with Rust `.clone()`. Generic
     /// function emission uses this to add `Clone` only where the body needs it.
     pub(super) cloned_types: Rc<RefCell<Vec<Type>>>,
@@ -54,6 +57,9 @@ impl LowerEnv {
             fn_name,
             self_owner: None,
             string_view_locals: HashSet::new(),
+            resource_locals: HashSet::new(),
+            gc_locals: HashSet::new(),
+            gc_return: false,
             cloned_types: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -64,6 +70,28 @@ impl LowerEnv {
     /// D-MEM1 stage S5: true if `name` is a live string-view local.
     pub(super) fn is_string_view_local(&self, name: &str) -> bool {
         self.string_view_locals.contains(name)
+    }
+    pub(super) fn mark_resource(&mut self, name: &str) {
+        self.resource_locals.insert(name.to_string());
+    }
+    pub(super) fn is_resource(&self, name: &str) -> bool {
+        self.resource_locals.contains(name)
+    }
+    pub(super) fn mark_gc(&mut self, name: &str) {
+        self.gc_locals.insert(name.to_string());
+    }
+    pub(super) fn is_gc(&self, name: &str) -> bool {
+        self.gc_locals.contains(name)
+    }
+    pub(super) fn gc_edges_for_expr(&self, expr: &Expr, exclude: Option<&str>) -> Vec<String> {
+        let mut names = self.gc_locals.iter().collect::<Vec<_>>();
+        names.sort();
+        names
+            .into_iter()
+            .filter(|name| exclude != Some(name.as_str()))
+            .filter(|name| gc_expr_references_ident(expr, name))
+            .map(|name| format!("{}.id()", self.place_of(name)))
+            .collect()
     }
     pub(super) fn note_clone(&mut self, ty: &Type) {
         self.cloned_types.borrow_mut().push(ty.clone());
@@ -103,6 +131,82 @@ impl LowerEnv {
     }
 }
 
+fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Ident(candidate, _) => candidate == name,
+        Expr::Call(call) => call
+            .args
+            .iter()
+            .any(|arg| gc_expr_references_ident(&arg.expr, name)),
+        Expr::MethodCall { receiver, args, .. }
+        | Expr::CallValue {
+            callee: receiver,
+            args,
+            ..
+        } => {
+            gc_expr_references_ident(receiver, name)
+                || args
+                    .iter()
+                    .any(|arg| gc_expr_references_ident(&arg.expr, name))
+        }
+        Expr::FanOut { callee, items, .. } => {
+            gc_expr_references_ident(callee, name)
+                || items
+                    .iter()
+                    .any(|item| gc_expr_references_ident(item, name))
+        }
+        Expr::Binary(_, left, right, _) => {
+            gc_expr_references_ident(left, name) || gc_expr_references_ident(right, name)
+        }
+        Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
+        | Expr::Field(inner, _, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Tainted(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _) => gc_expr_references_ident(inner, name),
+        Expr::OptField { base, .. } => gc_expr_references_ident(base, name),
+        Expr::Index { base, index, .. } => {
+            gc_expr_references_ident(base, name) || gc_expr_references_ident(index, name)
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            gc_expr_references_ident(base, name)
+                || gc_expr_references_ident(start, name)
+                || gc_expr_references_ident(end, name)
+        }
+        Expr::ListLit(items, _) => items
+            .iter()
+            .any(|item| gc_expr_references_ident(item, name)),
+        Expr::MapLit(pairs, _) => pairs.iter().any(|(key, value)| {
+            gc_expr_references_ident(key, name) || gc_expr_references_ident(value, name)
+        }),
+        Expr::StructLit { fields, .. } => fields
+            .iter()
+            .any(|(_, _, value)| gc_expr_references_ident(value, name)),
+        Expr::TupleLit(fields, _, _) => fields
+            .iter()
+            .any(|(_, value)| gc_expr_references_ident(value, name)),
+        Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
+            crate::AST::EnumLitArg::Positional(value)
+            | crate::AST::EnumLitArg::Named { expr: value, .. } => {
+                gc_expr_references_ident(value, name)
+            }
+        }),
+        Expr::Str(parts, _) => parts.iter().any(|part| match part {
+            crate::AST::StrPart::Interp(value, _) => gc_expr_references_ident(value, name),
+            crate::AST::StrPart::Lit(_) => false,
+        }),
+        _ => false,
+    }
+}
+
 /// D-DOTSCOPE1: fold a `.timeout(<dur>)` argument (a bare unit literal, sema-
 /// validated) to a nanosecond budget. Falls back to 0 on the impossible shape.
 pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
@@ -125,10 +229,10 @@ pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
 }
 
 /// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere
-/// in a `#Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
+/// in a `@Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
 /// auto-snapshotted at block entry and restored on a `?`-failure. Recurses through
 /// nested control flow (if/while/for/switch/loop/region/etc.) but stops at:
-///   • nested `#Transact` blocks — they establish their own rollback scope; and
+///   • nested `@Transact` blocks — they establish their own rollback scope; and
 ///   • lambda bodies — a deferred execution context (the same reason `on_commit`
 ///     lambdas escape the enclosing transaction's effect check).
 /// Each root is recorded once, in first-seen order. v1 covers assignment targets,
@@ -174,6 +278,7 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Reactive { body, .. }
             | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
@@ -204,7 +309,7 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                     collect_txn_mut_roots(eb, out);
                 }
             }
-            // A nested `#Transact` owns its own rollback scope — don't pull its
+            // A nested `@Transact` owns its own rollback scope — don't pull its
             // mutations up into the enclosing block.
             Stmt::Transact { .. } => {}
             // Other statements (Expr/Val/Return/Break/…) introduce no assignment

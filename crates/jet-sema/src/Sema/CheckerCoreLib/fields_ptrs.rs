@@ -21,8 +21,6 @@ impl<'a> Checker<'a> {
                 ("core.mem", "Bump") => Some(Type::Named(Syntax::MEM_BUMP.to_string())),
                 ("core.mem", "Pool") => Some(Type::Named(Syntax::MEM_POOL.to_string())),
                 ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
-                // D-OPTGC1: `gc.Gc` sentinel — `.new<T>(value)` constructs a traced handle.
-                ("core.gc", "Gc") => Some(Type::Named(Syntax::GC_TYPE.to_string())),
                 // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
                 ("core.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
                 // D-GAME1/2/3 + D-WD10: static sentinels for `game.Scene.new`,
@@ -42,7 +40,7 @@ impl<'a> Checker<'a> {
         }
     
         /// S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`. Gated by `use core.mem`
-        /// (E3102) and an enclosing `#Unsafe` block (E3101). Returns `Ptr<T>`.
+        /// (E3102) and an enclosing `@Unsafe` block (E3101). Returns `Ptr<T>`.
         pub(crate) fn infer_ptr_from_addr(
             &mut self,
             alias: &str,

@@ -171,6 +171,8 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
             kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
         },
         track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
     }];
     let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
@@ -191,6 +193,8 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
                 kind: TExprKind::ConstInline(project),
             },
             track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
         });
     }
     out
@@ -235,6 +239,8 @@ pub(super) fn lower_bin_match_pattern_bindings(
             kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
         },
         track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
     }];
     let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
@@ -254,6 +260,8 @@ pub(super) fn lower_bin_match_pattern_bindings(
                 kind: TExprKind::ConstInline(project),
             },
             track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
         });
     }
     out

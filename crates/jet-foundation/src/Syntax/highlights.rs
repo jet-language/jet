@@ -13,8 +13,7 @@ pub enum HighlightClass {
     Literal,
     TypeBuiltin,
     Builtin,
-    MarkerDirective,
-    MarkerContract,
+    MarkerRule,
     Operator,
     Sigil,
 }
@@ -35,8 +34,7 @@ impl HighlightClass {
             HighlightClass::Literal => "constant.language.jet",
             HighlightClass::TypeBuiltin => "storage.type.builtin.jet",
             HighlightClass::Builtin => "support.function.builtin.jet",
-            HighlightClass::MarkerDirective => "entity.name.tag.directive.jet",
-            HighlightClass::MarkerContract => "entity.name.tag.contract.jet",
+            HighlightClass::MarkerRule => "entity.name.tag.rule.jet",
             HighlightClass::Operator => "keyword.operator.jet",
             HighlightClass::Sigil => "keyword.operator.sigil.jet",
         }
@@ -51,7 +49,7 @@ impl HighlightClass {
             HighlightClass::Literal => "@constant.builtin",
             HighlightClass::TypeBuiltin => "@type.builtin",
             HighlightClass::Builtin => "@function.builtin",
-            HighlightClass::MarkerDirective | HighlightClass::MarkerContract => "@attribute",
+            HighlightClass::MarkerRule => "@attribute",
             HighlightClass::Operator | HighlightClass::Sigil => "@operator",
         }
     }
@@ -65,8 +63,7 @@ impl HighlightClass {
             HighlightClass::Literal => "literal",
             HighlightClass::TypeBuiltin => "type.builtin",
             HighlightClass::Builtin => "builtin",
-            HighlightClass::MarkerDirective => "marker.directive",
-            HighlightClass::MarkerContract => "marker.contract",
+            HighlightClass::MarkerRule => "marker.rule",
             HighlightClass::Operator => "operator",
             HighlightClass::Sigil => "sigil",
         }
@@ -103,6 +100,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: KW_RETURN,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_DEFER,
         class: HighlightClass::KeywordControl,
     },
     HighlightToken {
@@ -755,23 +756,17 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::Sigil,
     },
     HighlightToken {
-        text: CONTRACT_PREFIX,
+        text: RULE_PREFIX,
         class: HighlightClass::Sigil,
     },
 ];
 
 pub fn highlighted_tokens_sorted() -> Vec<HighlightToken> {
     let mut tokens = JET_HIGHLIGHT_TOKENS.to_vec();
-    for &marker in DIRECTIVE_MARKERS {
+    for &marker in APPLIED_RULES {
         tokens.push(HighlightToken {
             text: marker,
-            class: HighlightClass::MarkerDirective,
-        });
-    }
-    for &marker in CONTRACT_MARKERS {
-        tokens.push(HighlightToken {
-            text: marker,
-            class: HighlightClass::MarkerContract,
+            class: HighlightClass::MarkerRule,
         });
     }
     tokens.sort_by(|a, b| a.class.cmp(&b.class).then(a.text.cmp(b.text)));
@@ -794,8 +789,7 @@ pub fn render_vscode_generated_highlights() -> String {
         HighlightClass::Literal,
         HighlightClass::TypeBuiltin,
         HighlightClass::Builtin,
-        HighlightClass::MarkerDirective,
-        HighlightClass::MarkerContract,
+        HighlightClass::MarkerRule,
         HighlightClass::Sigil,
         HighlightClass::Operator,
     ];
@@ -839,8 +833,7 @@ pub fn render_tree_sitter_generated_highlights() -> String {
         HighlightClass::Literal,
         HighlightClass::TypeBuiltin,
         HighlightClass::Builtin,
-        HighlightClass::MarkerDirective,
-        HighlightClass::MarkerContract,
+        HighlightClass::MarkerRule,
         HighlightClass::Sigil,
         HighlightClass::Operator,
     ] {
@@ -870,14 +863,13 @@ pub fn render_zed_generated_highlights() -> String {
         HighlightClass::Literal,
         HighlightClass::TypeBuiltin,
         HighlightClass::Builtin,
-        HighlightClass::MarkerDirective,
-        HighlightClass::MarkerContract,
+        HighlightClass::MarkerRule,
         HighlightClass::Sigil,
         HighlightClass::Operator,
     ] {
         let values = class_texts(class);
         out.push_str(&format!("; {}: {}\n", class.label(), values.join(" ")));
-        if class == HighlightClass::MarkerDirective || class == HighlightClass::MarkerContract {
+        if class == HighlightClass::MarkerRule {
             continue;
         }
         let query_words = values
@@ -979,6 +971,7 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
             | "const"
             | "continue"
             | "copy"
+            | "defer"
             | "derive"
             | "distinct"
             | "else"
@@ -1047,19 +1040,18 @@ fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
         HighlightClass::Literal => "JET_HIGHLIGHT_LITERAL",
         HighlightClass::TypeBuiltin => "JET_HIGHLIGHT_TYPE_BUILTIN",
         HighlightClass::Builtin => "JET_HIGHLIGHT_BUILTIN",
-        HighlightClass::MarkerDirective => "JET_HIGHLIGHT_MARKER_DIRECTIVE",
-        HighlightClass::MarkerContract => "JET_HIGHLIGHT_MARKER_CONTRACT",
+        HighlightClass::MarkerRule => "JET_HIGHLIGHT_MARKER_RULE",
         HighlightClass::Operator => "JET_HIGHLIGHT_OPERATOR",
         HighlightClass::Sigil => "JET_HIGHLIGHT_SIGIL",
     }
 }
 use super::{
-    ATTR_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, CONTRACT_MARKERS, CONTRACT_PREFIX, CTX_BLOCK,
-    DIRECTIVE_MARKERS, KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
+    APPLIED_RULES, ATTR_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
+    KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
     KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_DERIVE, KW_DISTINCT, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP,
     KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RANGE_STEP,
-    KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SANITIZER, KW_SELF,
+    KW_DEFER, KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SANITIZER, KW_SELF,
     KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASKGROUP, KW_TEST, KW_TODO,
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,
     KW_VIA, LIT_ERR, VALIDATE_CHECK_FN,

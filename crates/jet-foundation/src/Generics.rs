@@ -27,9 +27,10 @@ pub const DECODE: &str = "Decode";
 pub const RENDERABLE: &str = "Renderable";
 pub const IO_READER: &str = "Reader";
 pub const IO_WRITER: &str = "Writer";
+pub const CLOSE: &str = "Close";
 
 pub const BUILTIN_TRAITS: &[&str] = &[
-    PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE,
+    PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, CLOSE,
 ];
 
 pub fn is_builtin_trait(name: &str) -> bool {
@@ -50,6 +51,7 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         RENDERABLE => Some("JetDisplay"),
         IO_READER => Some("JetIoReader"),
         IO_WRITER => Some("JetIoWriter"),
+        CLOSE => Some("user_Close"),
         _ => None,
     }
 }

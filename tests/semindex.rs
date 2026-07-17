@@ -410,7 +410,7 @@ fn run() {
 #[test]
 fn semindex_dossier_bypass_facts() {
     // D-LINTPOLICY1=A (the override law, card #505): every spelled bypass
-    // — `#Unsafe(reason)` region, `#Unsafe(reason) fn`, `.drop(reason)`, and
+    // — `@Unsafe(reason)` region, `@Unsafe(reason) fn`, `.drop(reason)`, and
     // `#[allow(lint)]` — surfaces as a fact in the dossier, program-wide.
     let src = r#"
 struct Invoice {
@@ -418,15 +418,15 @@ struct Invoice {
     price: Float,
 }
 
-#Unsafe("caller must ensure the pointer is valid") fn risky_fn() {
+@Unsafe("caller must ensure the pointer is valid") fn risky_fn() {
     print("danger")
 }
 
 fn run() {
-    #Unsafe("index checked against len") {
+    @Unsafe("index checked against len") {
         print("audited")
     }
-    #Unsafe("risky_fn's contract is upheld here") {
+    @Unsafe("risky_fn's contract is upheld here") {
         risky_fn()
     }
     fetch_it().drop("telemetry only")

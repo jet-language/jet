@@ -3,7 +3,7 @@ use super::bindings::desugar_layout_anchors;
 
 impl<'a> Parser<'a> {
     pub(in super::super) fn at_meta_attr(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
+        matches!(self.peek().kind, TokKind::At)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_META)
             && matches!(self.peek3().kind, TokKind::LParen)
     }
@@ -42,13 +42,13 @@ impl<'a> Parser<'a> {
 
     pub(in super::super) fn parse_meta_attr(&mut self) -> Result<MetaAttr, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_META))?;
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::ATTR_META))?;
+        self.expect(TokKind::At, "expected `@`")?;
+        let (_, name_span) = self.expect_ident(&format!("`@{}`", Syntax::ATTR_META))?;
+        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::ATTR_META))?;
         let mut fields = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
-                let (name, field_span) = self.expect_ident("for a `#Meta` field")?;
+                let (name, field_span) = self.expect_ident("for a `@Meta` field")?;
                 if matches!(self.peek().kind, TokKind::Colon) {
                     self.bump();
                     let value = self.expr_no_struct_lit()?;
@@ -67,7 +67,7 @@ impl<'a> Parser<'a> {
                         if !valid {
                             self.diags.push(Diagnostic::error(
                                 "E0352",
-                                "`#Meta` maturity needs a known maturity value".to_string(),
+                                "`@Meta` maturity needs a known maturity value".to_string(),
                                 "maturity metadata is a closed documentation scale".to_string(),
                                 "write `maturity: .Experimental`, `.Tested`, or `.Hardened`".to_string(),
                                 Some(value.span()),
@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
             }
         }
         let end = self.peek().span.end;
-        self.expect(TokKind::RParen, &format!("to close `#{}`", Syntax::ATTR_META))?;
+        self.expect(TokKind::RParen, &format!("to close `@{}`", Syntax::ATTR_META))?;
         Ok(MetaAttr {
             fields,
             span: Span::new(start.start, end.max(name_span.end)),
@@ -111,21 +111,21 @@ impl<'a> Parser<'a> {
     pub(in super::super) fn meta_attr_wrong_place_diag(&self, span: Span, target: &str) -> Diagnostic {
         Diagnostic::error(
             "E0349",
-            "`#Meta` attaches to a binding, const, or function".to_string(),
-            "`#Meta` is a tooling fact about a named source item; expressions do not carry it"
+            "`@Meta` attaches to a binding, const, or function".to_string(),
+            "`@Meta` is a tooling fact about a named source item; expressions do not carry it"
                 .to_string(),
-            format!("move `#Meta(...)` before a {target}, or remove it"),
+            format!("move `@Meta(...)` before a {target}, or remove it"),
             Some(span),
         )
     }
 
     pub(super) fn at_statement_switch_stmt(&mut self, marker: &str) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
+        self.expect(TokKind::At, "expected `@`")?;
         let name_tok = self.bump();
         let attr_span = Span::new(start.start, name_tok.span.end);
 
-        if matches!(self.peek().kind, TokKind::Hash)
+        if matches!(self.peek().kind, TokKind::At)
             && matches!(
                 &self.peek2().kind,
                 TokKind::Ident(n) if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
@@ -141,11 +141,11 @@ impl<'a> Parser<'a> {
                 "E0344",
                 "only one switch-off attribute can be written on a statement".to_string(),
                 format!(
-                    "`#{}` and `#{}` both control whether the same statement emits code",
+                    "`@{}` and `@{}` both control whether the same statement emits code",
                     marker, second_name
                 ),
                 format!(
-                    "keep one marker: `#{} <statement>` or `#{} <statement>`",
+                    "keep one marker: `@{} <statement>` or `@{} <statement>`",
                     Syntax::ATTR_OFF,
                     Syntax::ATTR_DEBUG_ONLY
                 ),
@@ -171,14 +171,26 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") { … }`
-    /// in statement position. The reason string is the argument of `#Unsafe`
-    /// itself; the separate `#Audit` marker is retired (E0055 teaching error).
+    fn at_policy_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let mut declarations = self.policy_decl(crate::Policy::PolicyScope::Block)?;
+        self.expect(TokKind::LBrace, "after a block policy")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        let start = declarations.first().map(|d| d.span.start).unwrap_or(end);
+        let span = Span::new(start, end);
+        for declaration in &mut declarations { declaration.target = Some(span); }
+        self.policy_declarations.extend(declarations.clone());
+        Ok(Stmt::Policy { declarations, body, span })
+    }
+
+    /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `@Unsafe("reason") { … }`
+    /// in statement position. The reason string is the argument of `@Unsafe`
+    /// itself; the separate `@Audit` marker is retired (E0055 teaching error).
     /// A missing reason is allowed by the grammar and flagged in sema (L3101).
     pub(super) fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        // E0055: `#Audit("…")` is the retired spelling — teach the new form.
-        if matches!(self.peek().kind, TokKind::Hash)
+        // E0055: `@Audit("…")` is the retired spelling — teach the new form.
+        if matches!(self.peek().kind, TokKind::At)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_AUDIT)
         {
             let audit_start = self.peek().span;
@@ -190,12 +202,12 @@ impl<'a> Parser<'a> {
                              // skip the string argument
                 let _ = self.expect_plain_string(
                     "for the audit reason",
-                    "`#Audit` is retired; write `#Unsafe(\"reason\") { … }` instead",
-                    "write: #Unsafe(\"index checked against len\") { … }",
+                    "`@Audit` is retired; write `@Unsafe(\"reason\") { … }` instead",
+                    "write: @Unsafe(\"index checked against len\") { … }",
                 );
                 let _ = self.expect(TokKind::RParen, "after the audit reason");
             }
-            // Skip synthetic line terminator between `#Audit(…)` and `#Unsafe`.
+            // Skip synthetic line terminator between `@Audit(…)` and `@Unsafe`.
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
@@ -203,29 +215,29 @@ impl<'a> Parser<'a> {
             self.diags.push(Diagnostic::error(
                 "E0055",
                 format!(
-                    "`#{}` is retired — merge the reason into `#{}`",
+                    "`@{}` is retired — merge the reason into `@{}`",
                     Syntax::ATTR_AUDIT,
                     Syntax::KW_UNSAFE
                 ),
                 "D-UNSAFE2 merged the audit reason into the gate itself".to_string(),
                 format!(
-                    "write `#{}(\"why this is safe\") {{ … }}` (drop the separate `#{}` line)",
+                    "write `@{}(\"why this is safe\") {{ … }}` (drop the separate `@{}` line)",
                     Syntax::KW_UNSAFE,
                     Syntax::ATTR_AUDIT
                 ),
                 Some(audit_span),
             ));
         }
-        // Required `#Unsafe`.
-        if !(matches!(self.peek().kind, TokKind::Hash)
+        // Required `@Unsafe`.
+        if !(matches!(self.peek().kind, TokKind::At)
             && matches!(self.peek2().kind, TokKind::KwUnsafe))
         {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("expected `#{}` here", Syntax::KW_UNSAFE),
-                "an audited region opens with `#Unsafe(\"reason\") { … }`".to_string(),
+                format!("expected `@{}` here", Syntax::KW_UNSAFE),
+                "an audited region opens with `@Unsafe(\"reason\") { … }`".to_string(),
                 format!(
-                    "write `#{}(\"why this is safe\") {{ … }}`",
+                    "write `@{}(\"why this is safe\") {{ … }}`",
                     Syntax::KW_UNSAFE
                 ),
                 Some(self.peek().span),
@@ -233,29 +245,59 @@ impl<'a> Parser<'a> {
         }
         self.bump(); // `#`
         self.bump(); // `Unsafe`
-                     // Optional `("reason")` argument — absent means L3101 fires in sema.
+        // Optional reason plus D-UNSAFE-OBLIG1 per-site selection:
+        // `@Unsafe("reason", obligations: .Track) { … }`.
         let mut audit = None;
+        let mut obligation_mode = None;
         if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`
-            let (reason, _) = self.expect_plain_string(
-                "for the safety reason",
-                "`#Unsafe` takes one piece of quoted text explaining why the block is safe",
-                "write: #Unsafe(\"index checked against len\") { … }",
-            )?;
+            if matches!(self.peek().kind, TokKind::Str(_)) {
+                let (reason, _) = self.expect_plain_string(
+                    "for the safety reason",
+                    "`@Unsafe` takes quoted text explaining why the block is safe",
+                    "write: @Unsafe(\"index checked against len\") { … }",
+                )?;
+                audit = Some(reason);
+                if matches!(self.peek().kind, TokKind::Comma) { self.bump(); }
+            }
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                let (field, field_span) = self.expect_ident("for the `@Unsafe` option")?;
+                if field != "obligations" {
+                    return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(field_span)));
+                }
+                self.expect(TokKind::Colon, "after `obligations`")?;
+                self.expect(TokKind::Dot, "before the obligation mode")?;
+                let (mode, mode_span) = self.expect_ident("after `obligations: .`")?;
+                obligation_mode = Some(match mode.as_str() {
+                    "Track" => crate::Policy::PolicyValue::UnsafeTrack,
+                    "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
+                    _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(mode_span))),
+                });
+            }
             self.expect(TokKind::RParen, "after the safety reason")?;
-            audit = Some(reason);
         }
-        self.expect(TokKind::LBrace, "after `#Unsafe(…)`")?;
+        self.expect(TokKind::LBrace, "after `@Unsafe(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        let span = Span::new(start.start, end);
+        if let Some(value) = obligation_mode {
+            self.policy_declarations.push(crate::Policy::PolicyDeclaration {
+                key: crate::Policy::PolicyKey::Unsafe,
+                value,
+                scope: crate::Policy::PolicyScope::Block,
+                span: Span::new(start.start, self.toks[self.pos - 1].span.end),
+                target: Some(span),
+                source: "<source>".to_string(),
+            });
+        }
         Ok(Stmt::Unsafe {
             audit,
             body,
-            span: Span::new(start.start, end),
+            span,
         })
     }
 
-    /// D-CTEFFECT1 (ratified 2026-06-25): parse `#Impure("reason") { … }` in
+    /// D-CTEFFECT1 (ratified 2026-06-25): parse `@Impure("reason") { … }` in
     /// statement position. Mirrors `at_unsafe_stmt`. Missing reason → L3102 in sema.
     pub(super) fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
@@ -267,13 +309,13 @@ impl<'a> Parser<'a> {
             self.bump(); // `(`
             let (r, _) = self.expect_plain_string(
                 "for the impure reason",
-                "`#Impure` takes one piece of quoted text explaining why ambient I/O is needed here",
-                "write: #Impure(\"reading build config\") { … }",
+                "`@Impure` takes one piece of quoted text explaining why ambient I/O is needed here",
+                "write: @Impure(\"reading build config\") { … }",
             )?;
             self.expect(TokKind::RParen, "after the impure reason")?;
             reason = Some(r);
         }
-        self.expect(TokKind::LBrace, "after `#Impure(…)`")?;
+        self.expect(TokKind::LBrace, "after `@Impure(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Impure {
@@ -283,13 +325,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive { … }` in
+    /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `@Reactive { … }` in
     /// statement position. Lowers to a reactive effect scope at codegen.
     pub(super) fn at_reactive_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let _ = self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
-        self.expect(TokKind::LBrace, "after `#Reactive`")?;
+        self.expect(TokKind::At, "expected `@`")?;
+        let _ = self.expect_ident(&format!("`@{}`", Syntax::KW_REACTIVE))?;
+        self.expect(TokKind::LBrace, "after `@Reactive`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Reactive {
@@ -298,25 +340,25 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-SHIELDNAME1=A (ratified 2026-07-11): parse `#Shield { … }` in statement
-    /// position. Bare block only — no argument list. `#Shield(...)` is E0430.
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): parse `@Shield { … }` in statement
+    /// position. Bare block only — no argument list. `@Shield(...)` is E0430.
     /// Lowers to `jet_scheduler_shield_enter`/`_leave` around the body at codegen.
     pub(super) fn at_shield_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
+        self.expect(TokKind::At, "expected `@`")?;
         let name_tok = self.bump(); // `Shield`
         if matches!(self.peek().kind, TokKind::LParen) {
             let lparen = self.peek().span;
             return Err(Diagnostic::error(
                 "E0430",
-                "`#Shield` takes no arguments".to_string(),
+                "`@Shield` takes no arguments".to_string(),
                 "a shield region protects whatever runs inside it; there is nothing to configure"
                     .to_string(),
-                "write `#Shield { … }`".to_string(),
+                "write `@Shield { … }`".to_string(),
                 Some(Span::new(name_tok.span.start, lparen.end)),
             ));
         }
-        self.expect(TokKind::LBrace, "after `#Shield`")?;
+        self.expect(TokKind::LBrace, "after `@Shield`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Shield {
@@ -325,54 +367,54 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
+    /// D-BLOCKPLANE1=A: `@Region(name) { … }`.
     pub(super) fn at_region_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.bump().span; // `#`
         self.bump(); // `Region`
-        self.expect(TokKind::LParen, "after `#Region`")?;
+        self.expect(TokKind::LParen, "after `@Region`")?;
         let (name, name_span) = self.expect_ident("for the region name")?;
         self.expect(TokKind::RParen, "after the region name")?;
-        self.expect(TokKind::LBrace, "after `#Region(name)`")?;
+        self.expect(TokKind::LBrace, "after `@Region(name)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Region { name, name_span, body, span: Span::new(start.start, end) })
     }
 
-    /// D-BLOCKPLANE1=A: `#Live { … }`.
+    /// D-BLOCKPLANE1=A: `@Live { … }`.
     pub(super) fn at_live_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.bump().span; // `#`
         self.bump(); // `Live`
-        self.expect(TokKind::LBrace, "after `#Live`")?;
+        self.expect(TokKind::LBrace, "after `@Live`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Live { body, span: Span::new(start.start, end) })
     }
 
-    /// D-BLOCKPLANE1=A: audited `#Nondeterministic("reason") { … }`.
+    /// D-BLOCKPLANE1=A: audited `@Nondeterministic("reason") { … }`.
     pub(super) fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.bump().span; // `#`
         self.bump(); // `Nondeterministic`
-        self.expect(TokKind::LParen, "after `#Nondeterministic`")?;
+        self.expect(TokKind::LParen, "after `@Nondeterministic`")?;
         let (reason, _) = self.expect_plain_string(
             "for the nondeterminism reason",
-            "`#Nondeterministic` requires quoted audit text",
-            "write: #Nondeterministic(\"OS clock is an explicit input\") { … }",
+            "`@Nondeterministic` requires quoted audit text",
+            "write: @Nondeterministic(\"OS clock is an explicit input\") { … }",
         )?;
         self.expect(TokKind::RParen, "after the nondeterminism reason")?;
-        self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
+        self.expect(TokKind::LBrace, "after `@Nondeterministic(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::AssumeDet { reason, body, span: Span::new(start.start, end) })
     }
 
-    /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
+    /// D-CTX1 (ratified 2026-06-22, G2): parse `@Context(field: value, …) { … }`.
     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
     /// unknown fields.
     pub(super) fn at_context_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Context`
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::CTX_BLOCK))?;
+        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::CTX_BLOCK))?;
         let mut fields: Vec<(String, Expr, Span)> = Vec::new();
         // Parse comma-separated `ident : expr` pairs.
         while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
@@ -386,7 +428,7 @@ impl<'a> Parser<'a> {
                     "context fields are set with `:`, not `=`".to_string(),
                     "`=` is reassignment (S17); the `name: value` form sets a context field (D-CTX1)".to_string(),
                     format!(
-                        "write `#{}({}: …) {{ … }}`",
+                        "write `@{}({}: …) {{ … }}`",
                         Syntax::CTX_BLOCK,
                         field_name
                     ),
@@ -407,7 +449,7 @@ impl<'a> Parser<'a> {
                     format!("`{}` isn't a context field", field_name),
                     "the context bundle holds `allocator`, `logger`, and `deadline`".to_string(),
                     format!(
-                        "write `#{}(allocator: …)`, `#{}(logger: …)`, or `#{}(deadline: …)`",
+                        "write `@{}(allocator: …)`, `@{}(logger: …)`, or `@{}(deadline: …)`",
                         Syntax::CTX_BLOCK,
                         Syntax::CTX_BLOCK,
                         Syntax::CTX_BLOCK
@@ -424,11 +466,11 @@ impl<'a> Parser<'a> {
         }
         self.expect(
             TokKind::RParen,
-            &format!("after `#{}(…`", Syntax::CTX_BLOCK),
+            &format!("after `@{}(…`", Syntax::CTX_BLOCK),
         )?;
         self.expect(
             TokKind::LBrace,
-            &format!("after `#{}(…)`", Syntax::CTX_BLOCK),
+            &format!("after `@{}(…)`", Syntax::CTX_BLOCK),
         )?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -439,7 +481,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-EFF1 / D-QUAL1: parse a `#Caps(Net, Db) { … }` effect-restriction region
+    /// D-EFF1 / D-QUAL1: parse a `@Caps(Net, Db) { … }` effect-restriction region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -447,7 +489,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `#`
         self.bump(); // `Caps`
         let lparen = self.peek().span;
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_CAPS))?;
+        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::KW_CAPS))?;
         let mut caps = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
@@ -462,9 +504,9 @@ impl<'a> Parser<'a> {
         let rparen = self.peek().span;
         self.expect(
             TokKind::RParen,
-            &format!("to close the `#{}(…)` list", Syntax::KW_CAPS),
+            &format!("to close the `@{}(…)` list", Syntax::KW_CAPS),
         )?;
-        self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_CAPS))?;
+        self.expect(TokKind::LBrace, &format!("after `@{}(…)`", Syntax::KW_CAPS))?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Caps {
@@ -475,17 +517,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-SCAP1: parse a `#Grant(Fs) { caps -> … }` scoped-capability grant region
+    /// D-SCAP1: parse a `@Grant(Fs) { caps -> … }` scoped-capability grant region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents (sema validates them, E0119); `caps` binds the first-class
-    /// capability handle for the block. The dual of `#Caps`: `#Grant` authorizes
+    /// capability handle for the block. The dual of `@Caps`: `@Grant` authorizes
     /// the listed effects through the handle, RAII-revoked at scope end.
     pub(super) fn at_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Grant`
         let lparen = self.peek().span;
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_GRANT))?;
+        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::KW_GRANT))?;
         let mut caps = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
@@ -500,18 +542,18 @@ impl<'a> Parser<'a> {
         let rparen = self.peek().span;
         self.expect(
             TokKind::RParen,
-            &format!("to close the `#{}(…)` list", Syntax::KW_GRANT),
+            &format!("to close the `@{}(…)` list", Syntax::KW_GRANT),
         )?;
         self.expect(
             TokKind::LBrace,
-            &format!("after `#{}(…)`", Syntax::KW_GRANT),
+            &format!("after `@{}(…)`", Syntax::KW_GRANT),
         )?;
         // The capability handle binding: `{ caps -> … }`.
         let (binding, binding_span) = self.expect_ident("for the capability handle name")?;
         self.expect(
             TokKind::Arrow,
             &format!(
-                "after the `#{}` handle name (`#{}(…) {{ caps {} … }}`)",
+                "after the `@{}` handle name (`@{}(…) {{ caps {} … }}`)",
                 Syntax::KW_GRANT,
                 Syntax::KW_GRANT,
                 Syntax::GRANT_ARROW
@@ -529,21 +571,21 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement
+    /// D-TXN4: parse a `@Transact(name) { … }` transaction block in statement
     /// position. Cursor is on the `#` token. `name` binds a user-chosen
     /// transaction handle (any ident, mirroring `region r { … }`).
     pub(super) fn at_transact_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Transact`
-                     // D-TXN4: `#Transact(name) { … }` binds a handle; a bare `#Transact { … }`
+                     // D-TXN4: `@Transact(name) { … }` binds a handle; a bare `@Transact { … }`
                      // (no handle, hence no `on_commit` hooks) stays legal.
         let (name, name_span) = if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`
             let (n, ns) = self.expect_ident("for the transaction handle name")?;
             self.expect(
                 TokKind::RParen,
-                &format!("to close `#{}(name`", Syntax::KW_TRANSACT),
+                &format!("to close `@{}(name`", Syntax::KW_TRANSACT),
             )?;
             (Some(n), Some(ns))
         } else {
@@ -551,7 +593,7 @@ impl<'a> Parser<'a> {
         };
         self.expect(
             TokKind::LBrace,
-            &format!("after `#{}`", Syntax::KW_TRANSACT),
+            &format!("after `@{}`", Syntax::KW_TRANSACT),
         )?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -687,7 +729,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     break;
                 }
-                // S6-R: a block statement (`if`/`loop`/`#Unsafe`/nested `{}`)
+                // S6-R: a block statement (`if`/`loop`/`@Unsafe`/nested `{}`)
                 // ends with `}`, after which the lexer inserts a synthetic
                 // terminator. Those statements don't consume their own
                 // terminator, so skip a stray one here.
@@ -716,43 +758,11 @@ impl<'a> Parser<'a> {
         body
     }
 
-    /// D-UNINIT1 (ratified 2026-06-21, opt C): parse `#Uninit name: Type` — a binding
-    /// with no initializer, gated by `use core.mem` (E0424, checked in sema). The type
-    /// annotation is required (E0421); an initializer is rejected here (E0422). Codegen
-    /// lowers to `MaybeUninit::uninit().assume_init()` after sema proves write-before-read.
-    /// D-UNINIT-SENTINEL1 (ratified 2026-07-02): the old `#Uninit name: Type`
-    /// marker is retired — teaching error E0426 points at the replacement
-    /// spelling `name: Type := uninit`. Mirrors the `ref[label]` → `#Ref(label)`
-    /// retirement pattern (E0060, see `Items.rs`'s struct-field parser).
-    pub(super) fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
-        let hash_span = self.peek().span;
-        self.bump(); // `#`
-        let marker = self.bump(); // `Uninit`
-        let mut end = marker.span.end;
-        let mut name_hint = String::new();
-        if let TokKind::Ident(n) = &self.peek().kind {
-            name_hint = n.clone();
-            end = self.peek().span.end;
-        }
-        let fix = if name_hint.is_empty() {
-            "write `name: Type := uninit`".to_string()
-        } else {
-            format!("write `{name_hint}: <Type> := uninit`")
-        };
-        Err(Diagnostic::error(
-            "E0426",
-            format!("`#{}` is retired", Syntax::ATTR_UNINIT),
-            "uninitialized storage is a fact about the initializer, not the declaration — it now reads `name: Type := uninit`".to_string(),
-            fix,
-            Some(Span::new(hash_span.start, end)),
-        ))
-    }
-
     pub(super) fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
-            // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
+            // S43 (D-CASING1 follow-on): a `@Test "name" { … }` block in statement
             // position is misplaced — E0601 points at the top level.
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>
+            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>
             {
                 let span = self.peek().span;
                 self.bump(); // `#`
@@ -777,11 +787,11 @@ impl<'a> Parser<'a> {
                 }
                 Err(Diagnostic::error(
                     "E0601",
-                    format!("`#{}` blocks only belong at the top of a file", Syntax::KW_TEST),
+                    format!("`@{}` blocks only belong at the top of a file", Syntax::KW_TEST),
                     "test blocks group checks that `jet test` runs separately from `run`"
                         .to_string(),
                     format!(
-                        "move this block to the top level, after your functions: #{} (\"name\") {{ ... }}",
+                        "move this block to the top level, after your functions: @{} (\"name\") {{ ... }}",
                         Syntax::KW_TEST
                     ),
                     Some(span),
@@ -857,6 +867,66 @@ impl<'a> Parser<'a> {
                 };
                 self.finish_stmt()?;
                 Ok(Stmt::Return(expr, span))
+            }
+            TokKind::Ident(n) if n == Syntax::KW_DEFER => {
+                let defer_span = self.bump().span;
+                let close = self.expr()?;
+                let valid = matches!(
+                    &close,
+                    Expr::Call(call)
+                        if call.name == Syntax::RESOURCE_CLOSE
+                            && call.args.len() == 1
+                            && call.args[0].convention == AccessConvention::Move
+                            && matches!(call.args[0].expr, Expr::Ident(..))
+                );
+                if !valid {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "`defer` only schedules a consuming resource close".to_string(),
+                        "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked".to_string(),
+                        "write `defer close(^resource)`".to_string(),
+                        Some(Span::new(defer_span.start, close.span().end)),
+                    ));
+                }
+                let close_span = close.span();
+                self.finish_stmt()?;
+                Ok(Stmt::Expr(Expr::Call(Call {
+                    name: Syntax::INTERNAL_DEFER_CLOSE.to_string(),
+                    name_span: defer_span,
+                    args: vec![CallArg {
+                        convention: AccessConvention::Read,
+                        expr: close,
+                        span: close_span,
+                        flags: Default::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                    range_checked: false,
+                })))
+            }
+            TokKind::Ident(n) if n == Syntax::KW_ASSERT && matches!(self.peek2().kind, TokKind::Ident(_)) => {
+                let assert_span = self.bump().span;
+                let mut args = Vec::new();
+                loop {
+                    let (name, span) = self.expect_ident("after `assert`")?;
+                    args.push(CallArg {
+                        convention: AccessConvention::Read,
+                        expr: Expr::Ident(name, span),
+                        span,
+                        flags: Default::default(),
+                        label: None,
+                        spread: false,
+                    });
+                    if !matches!(self.peek().kind, TokKind::Comma) { break; }
+                    self.bump();
+                }
+                self.finish_stmt()?;
+                Ok(Stmt::Expr(Expr::Call(Call {
+                    name: Syntax::INTERNAL_UNSAFE_ASSERT.to_string(),
+                    name_span: assert_span,
+                    args,
+                    range_checked: false,
+                })))
             }
             TokKind::KwYield => {
                 let span = self.bump().span;
@@ -1052,7 +1122,7 @@ impl<'a> Parser<'a> {
                 self.bump(); // `@`
                 self.loop_stmt(Some((label, lspan)))
             }
-            TokKind::Hash if self.at_meta_attr() => {
+            TokKind::At if self.at_meta_attr() => {
                 let meta = self.parse_meta_attr()?;
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
@@ -1065,11 +1135,11 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TRACK) =>
+            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TRACK) =>
             {
                 let marker_span = self.peek().span;
                 self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_TRACK))?;
+                let (_, name_span) = self.expect_ident(&format!("`@{}`", Syntax::ATTR_TRACK))?;
                 let mut binding = self.sigil_binding()?;
                 binding.track = true;
                 binding.track_span = Some(Span::new(marker_span.start, name_span.end));
@@ -1084,20 +1154,20 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Val(binding))
             }
             // S58 (E2-M13): bare `unsafe { … }` is the rejected former
-            // spelling — point users at the `#Unsafe("…")` form.
+            // spelling — point users at the `@Unsafe("…")` form.
             TokKind::Ident(n) if n == Syntax::FOREIGN_UNSAFE => {
                 let span = self.bump().span;
                 Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "`{}` blocks are written with `#{}`",
+                        "`{}` blocks are written with `@{}`",
                         Syntax::FOREIGN_UNSAFE,
                         Syntax::KW_UNSAFE
                     ),
                     "the expert low-level gate is an attribute marker, never a bare keyword"
                         .to_string(),
                     format!(
-                        "write `#{}(\"why this is safe\") {{ … }}`",
+                        "write `@{}(\"why this is safe\") {{ … }}`",
                         Syntax::KW_UNSAFE
                     ),
                     Some(span),
@@ -1115,19 +1185,38 @@ impl<'a> Parser<'a> {
             {
                 return self.scope_member_stmt();
             }
-            TokKind::Hash => {
-                // D-UNINIT-SENTINEL1 (ratified 2026-07-02): `#Uninit name: Type` is
-                // retired — the spelling moved to `name: Type := uninit` (D-UNINIT1's
-                // sema/codegen engine is unchanged, only the surface syntax moved).
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNINIT) {
-                    return self.retired_uninit_marker();
+            TokKind::At
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
+                    Syntax::ATTR_AUDIT
+                    | Syntax::CTX_BLOCK
+                    | Syntax::ATTR_REGION
+                    | Syntax::ATTR_POLICY
+                    | Syntax::ATTR_LIVE
+                    | Syntax::ATTR_NONDETERMINISTIC
+                    | Syntax::KW_CAPS
+                    | Syntax::KW_GRANT
+                    | Syntax::KW_TRANSACT
+                    | Syntax::KW_IMPURE
+                    | Syntax::KW_SHIELD
+                    | Syntax::KW_REACTIVE
+                    | Syntax::ATTR_OFF
+                    | Syntax::ATTR_DEBUG_ONLY))
+                    || matches!(self.peek2().kind, TokKind::KwUnsafe) =>
+            {
+                if let TokKind::Ident(name) = &self.peek2().kind {
+                    if crate::Policy::applied_rule(name).is_some() && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Block) {
+                        return Err(Diagnostic::error("E0355", format!("`@{name}` cannot attach to a block"), "the compiler-owned rule registry gives every applied rule exact attachment sites".to_string(), "move the rule to one of its registered sites".to_string(), Some(self.peek2().span)));
+                    }
                 }
-                // D-CTX1 (ratified 2026-06-22): `#Context(field: value) { … }`.
+                // D-CTX1 (ratified 2026-06-22): `@Context(field: value) { … }`.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
                     return self.at_context_stmt();
                 }
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REGION) {
                     return self.at_region_stmt();
+                }
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) {
+                    return self.at_policy_stmt();
                 }
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LIVE) {
                     return self.at_live_stmt();
@@ -1135,7 +1224,7 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NONDETERMINISTIC) {
                     return self.at_nondeterministic_stmt();
                 }
-                // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
+                // D-EFF1 / D-QUAL1: `@Caps(Net, Db) { … }` effect-restriction region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
                 }
@@ -1143,21 +1232,21 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_GRANT) {
                     return self.at_grant_stmt();
                 }
-                // D-TXN1–D-TXN4: `#Transact(name) { … }` transaction block.
+                // D-TXN1–D-TXN4: `@Transact(name) { … }` transaction block.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSACT) {
                     return self.at_transact_stmt();
                 }
-                // D-CTEFFECT1: `#Impure("reason") { … }` comptime effect gate.
+                // D-CTEFFECT1: `@Impure("reason") { … }` comptime effect gate.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_IMPURE) {
                     return self.at_impure_stmt();
                 }
-                // D-SHIELDNAME1=A: `#Shield { … }` cancellation-shield region.
-                // Dispatch on the name alone so `#Shield(...)` still routes here
+                // D-SHIELDNAME1=A: `@Shield { … }` cancellation-shield region.
+                // Dispatch on the name alone so `@Shield(...)` still routes here
                 // to emit the E0430 teaching error.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SHIELD) {
                     return self.at_shield_stmt();
                 }
-                // D-REACTCORE1: `#Reactive { … }` reactive effect scope.
+                // D-REACTCORE1: `@Reactive { … }` reactive effect scope.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_REACTIVE)
                     && matches!(self.peek3().kind, TokKind::LBrace)
                 {
@@ -1170,7 +1259,7 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_DEBUG_ONLY) {
                     return self.at_statement_switch_stmt(Syntax::ATTR_DEBUG_ONLY);
                 }
-                // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
+                // D-UNSAFE2: `@Unsafe("reason") { … }` (or retired `@Audit("…") @Unsafe`).
                 self.at_unsafe_stmt()
             }
             // D-PERSIST1 (E0145): `@Persist` on a local binding — persistence
@@ -1187,28 +1276,6 @@ impl<'a> Parser<'a> {
                     "persistence is keyed by module + name; a local has no stable identity across a reload".to_string(),
                     "move it to module level, or drop `@Persist`".to_string(),
                     Some(Span::new(t.span.start, name_tok.span.end)),
-                ))
-            }
-            // D-MARKER-FAMILY1: `@Unsafe(...)` / `@Test(...)` etc mid-statement —
-            // a directive marker misspelled on the contract plane. Takes priority
-            // over the loop-label-typo interpretation below (a directive name is
-            // never a plausible loop label). `Unsafe` is a dedicated lexer
-            // keyword token (`KwUnsafe`), not a generic `Ident`, so it needs its
-            // own arm of this same guard.
-            TokKind::At
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if Syntax::is_directive_marker(n))
-                    || matches!(self.peek2().kind, TokKind::KwUnsafe) =>
-            {
-                let t = self.bump(); // `@`
-                let name_tok = self.bump(); // the directive name
-                let name = match &name_tok.kind {
-                    TokKind::Ident(n) => n.clone(),
-                    TokKind::KwUnsafe => Syntax::KW_UNSAFE.to_string(),
-                    _ => String::new(),
-                };
-                Err(Self::e0063_directive_on_at(
-                    &name,
-                    Span::new(t.span.start, name_tok.span.end),
                 ))
             }
             TokKind::At => {
@@ -1237,15 +1304,13 @@ impl<'a> Parser<'a> {
                         Some(Span::new(at_span.start, lspan.end)),
                     ));
                 }
-                // `@` not followed by an ident — teaching error for old attribute spelling.
+                // A bare `@` has no rule name and cannot start a loop label.
                 let t = self.bump();
                 Err(Diagnostic::error(
                     "E0990",
-                    format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
-                    "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)"
-                        .to_string(),
-                    "write `#Unsafe(\"…\")`, `#Test(\"…\")`, or `@Codable`/`@[Codable, MustUse]` instead of `@…`"
-                        .to_string(),
+                    "`@` needs an applied-rule name".to_string(),
+                    "D-SHAPE2 uses `@Rule` for declarations, expressions, and brace scopes; loop labels put `@` after the name".to_string(),
+                    "write `@Unsafe(\"…\")`, `@Test(\"…\")`, `@[Codable, MustUse]`, or `name@ loop { … }`".to_string(),
                     Some(t.span),
                 ))
             }

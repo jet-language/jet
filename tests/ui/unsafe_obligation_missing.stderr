@@ -1,0 +1,15 @@
+Error [E3107]: `raw_pointer` is missing unsafe obligations: no_alias
+  --> tests/ui/unsafe_obligation_missing.jet:6:25
+    |
+  6 |         pointer: *Int :: *value
+    |                         ^^^^^^
+ Why: the effective `.Obligations` policy requires a typed proof immediately after each low-level operation
+ Fix: add `assert no_alias` immediately after this operation
+
+Error [E3107]: `dereference` is missing unsafe obligations: valid_ptr, aligned
+  --> tests/ui/unsafe_obligation_missing.jet:7:15
+    |
+  7 |         print(pointer.*)
+    |               ^^^^^^^^^
+ Why: the effective `.Obligations` policy requires a typed proof immediately after each low-level operation
+ Fix: add `assert valid_ptr, aligned` immediately after this operation

@@ -41,7 +41,7 @@ existing drift found during review.
   caller-supplied buffer unless the API is explicitly a low-allocation path.
 - Mutation is visible: a function that mutates a value takes `&T`; ownership
   transfer takes `^T`.
-- `#SingleUse` types must be documented with the invariant they enforce.
+- `@SingleUse` types must be documented with the invariant they enforce.
 
 ## Law 4 — Effects
 

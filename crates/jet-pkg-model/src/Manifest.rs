@@ -417,6 +417,9 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadLintsPolicy { detail } => {
             e1206(&file, &format!("`policy.lints` is malformed: {detail}"))
         }
+        ManifestError::BadMemoryPolicy { detail } => {
+            e1206(&file, &format!("memory policy is malformed: {detail}"))
+        }
     }
 }
 

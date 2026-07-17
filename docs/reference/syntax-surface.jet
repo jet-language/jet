@@ -17,11 +17,11 @@
 //           syntax-decisions.md but has no shipped evidence (not in canon.jet,
 //           no golden example, no parser/sema support). Verify before relying.
 //
-// `#`/`@` in the actual code below (e.g. `@Pure`, `#Unsafe`, `@[Codable]`,
+// `#`/`@` in the actual code below (e.g. `@Pure`, `@Unsafe`, `@[Codable]`,
 // `[T#N]`) is REAL Jet syntax — two marker planes (D-MARKER-FAMILY1): `@`
 // states a checkable contract about the declaration below it (`@Pure`,
 // `@MustUse`, `@Codable`); `#` is a compiler directive and may appear in
-// type/expression position (`#Unsafe`, `[T#N]`). Neither is a comment.
+// type/expression position (`@Unsafe`, `[T#N]`). Neither is a comment.
 // Only a full line beginning `# RATIFIED…` is a not-yet-implemented marker.
 //
 // Implemented features are written as live code. Ratified-but-UNIMPLEMENTED
@@ -372,16 +372,15 @@ impl App.Logger using logger
 //>>> tracked: #33 D-IMPLDOT1
 
 // Built-in derives (S55): auto Printable/Equatable; opt-in Comparable/Codable.
-// D-MARKER-FAMILY1/D-MARKERMOVE1/D-MARKERMOVE3: built-in derives are contract
-// markers on the `@` plane.
-@[Comparable, Codable]                          // multi-marker list (D-ATTR2/D-SERDE-CANON1)
+// D-SHAPE2: built-in derives are applied rules in the one `@[…]` list.
+@[Comparable, Codable]
 struct Score {
     value: Int
 }
 
 // # RATIFIED, NOT YET IMPLEMENTED (S56)
 // User-defined derives against the serde data model (Epoch 3; S56/S26 Layer 3).
-// #[derive(MyTrait)]
+// @[MyTrait]
 // struct Custom { x: Int }
 
 
@@ -505,13 +504,13 @@ fn map_each(f: fn(Int) -> Int) #(via f) { }   // lever 2: `#(via f)` pass-throug
 //<<< Owner Scoped Capability: Update scoped capability syntax
 // HAVE:
 fn with_fs() {
-    #Grant(Fs) { caps ->
+    @Grant(Fs) { caps ->
         // Fs effect authorized only inside this block
     }
 }
 // WANT:
 fn with_fs() {
-    #Grant(Fs) { caps ->
+    @Grant(Fs) { caps ->
         // Fs effect authorized only inside this block
     }
 }
@@ -519,9 +518,9 @@ fn with_fs() {
 
 
 // ============================================================================
-// LOW-LEVEL / UNSAFE TIER  (#Unsafe, *T, p.*)
+// LOW-LEVEL / UNSAFE TIER  (@Unsafe, *T, p.*)
 // ============================================================================
-// `use core.mem` is the discovery gate (S58). `#Unsafe("reason")` is the audit
+// `use core.mem` is the discovery gate (S58). `@Unsafe("reason")` is the audit
 // gate; the reason IS the review artifact (D-UNSAFE2). Sigils per D-MEM1/D-CAP9.
 
 use core.mem
@@ -542,10 +541,10 @@ fn call_sites(player: Player, file: File) {
 }
 
 // Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.
-#Unsafe("reads through a raw pointer; addr must be live and valid")
+@Unsafe("reads through a raw pointer; addr must be live and valid")
 fn deref_cell(cell: Int) -> Int {
     addr :: mem.address_of(cell)               // address-of is a call, not a sigil
-    #Unsafe("addr is the address of a live Int on this frame") {
+    @Unsafe("addr is the address of a live Int on this frame") {
         p :: *addr                             // raw-pointer-of
         return p.*                             // dereference (composes as p.*.field)
     }
@@ -568,7 +567,7 @@ fn arena_use() {
 // Explicit expert region block (D-REGION1 opt B); the beginner tier infers the
 // region from the `arena` binding scope (opt A).
 fn explicit_region() {
-    #Region(scratch) {
+    @Region(scratch) {
         // allocations bounded to `scratch`, may flow out under a stated bound
     }
 }
@@ -622,18 +621,18 @@ tag Internal { }
 trait Greeter { fn greet(self) -> String }
 
 // Typestate via transitioning tags (D-STATE1): require a state, or transition states.
-#State(Open) fn write_line(self, s: String) { }       // valid only when Open
-#Transition(Closed -> Open) fn open(self) -> File { }  // consume Closed, yield Open
+@State(Open) fn write_line(self, s: String) { }       // valid only when Open
+@Transition(Closed -> Open) fn open(self) -> File { }  // consume Closed, yield Open
 
-// Taint tracking (D-TAINT1): `#Tainted` value-fact spreads; `#Sanitizer fn` strips it.
+// Taint tracking (D-TAINT1): `@Tainted` value-fact spreads; `@Sanitizer fn` strips it.
 fn taint(raw: String) {
-    user :: #Tainted raw                        // marks untrusted input
+    user :: @Tainted raw                        // marks untrusted input
     clean :: sanitize(user)                     // strip via sanitizer
 }
-#Sanitizer fn sanitize(s: String) -> String { return s }
+@Sanitizer fn sanitize(s: String) -> String { return s }
 
 // Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
-#SingleUse
+@SingleUse
 struct Ticket { id: Int }
 
 // Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare
@@ -655,14 +654,14 @@ fn price() -> Usd {
 // Layout control (D-SOA1/D-SOA2): whole-struct columnar (struct-of-arrays).
 //<<< Owner Layout Control: Update layout control syntax
 // HAVE:
-#Layout(columnar)
+@Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 // WANT:
-#Layout(columnar)
+@Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 //>>> tracked: #34 D-MARKERCASE1
 
-#Layout(C)                                      // C-compatible repr for FFI
+@Layout(C)                                      // C-compatible repr for FFI
 struct CView { a: Int, b: Int }
 
 // Portable SIMD lane types with safe ops + scalar fallback (D-SIMD1).
@@ -691,20 +690,20 @@ fn c_ffi() {
 // ============================================================================
 // TESTS, DOCS & MIGRATIONS
 // ============================================================================
-// `#Test` blocks/fns (S43/D-TEST1). A parameterized `#Test fn` is a property test.
+// `@Test` blocks/fns (S43/D-TEST1). A parameterized `@Test fn` is a property test.
 
 //<<< Owner Test Blocks: Update test block syntax
 // HAVE:
-#Test "reversing twice is identity" {
+@Test "reversing twice is identity" {
     require_eq(reverse(reverse([1, 2, 3])), [1, 2, 3])
 }
 //WANT:
-#Test("reversing twice is identity") {
+@Test("reversing twice is identity") {
     require_eq(reverse(reverse([1, 2, 3])), [1, 2, 3])
 }
 //>>> tracked: #35 D-TESTPAREN1
 
-#Test fn addition_commutes(a: Int, b: Int) {   // property test (inputs generated)
+@Test fn addition_commutes(a: Int, b: Int) {   // property test (inputs generated)
     require_eq(a + b, b + a)
 }
 
@@ -714,7 +713,7 @@ fn c_ffi() {
 /// ```
 fn double(n: Int) -> Int { return n * 2 }
 
-// Bug stops: panic / require (S36). Typed holes: #Todo (D-CASING1).
+// Bug stops: panic / require (S36). Typed holes: @Todo (D-CASING1).
 fn invariants(n: Int) {
     require(n > 0, "n must be positive")
     panic("unreachable")

@@ -2,8 +2,8 @@
 //! regions. Covers the soundness contract end to end:
 //!   * alloc-and-use compiles and runs;
 //!   * a view that escapes its region is E0631 (Jet rejects first, I2);
-//!   * a view used after the arena is `reset`/`free`d is E0632;
-//!   * an explicit `#Region(r) { … }` may span two allocators.
+//!   * a view used after the arena is reset is E0632;
+//!   * an explicit `@Region(r) { … }` may span two allocators.
 
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -139,8 +139,8 @@ fn run() {
 }
 "#;
     assert!(
-        error_codes(src).contains(&"E0631".to_string()),
-        "moving a view into another binding must be E0631, got {:?}",
+        error_codes(src).contains(&"E0212".to_string()),
+        "moving an owner-backed view while it remains live must be E0212, got {:?}",
         error_codes(src)
     );
 }
@@ -165,20 +165,20 @@ fn run() {
 }
 
 #[test]
-fn use_after_free_is_e0632() {
+fn close_while_a_view_is_live_is_e0212() {
     let src = r#"
 use core.mem
 
 fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
-    arena.free()
+    close(^arena)
     print(x)
 }
 "#;
     assert!(
-        error_codes(src).contains(&"E0632".to_string()),
-        "reading a view after free must be E0632, got {:?}",
+        error_codes(src).contains(&"E0212".to_string()),
+        "closing an allocator while its view is live must be E0212, got {:?}",
         error_codes(src)
     );
 }
@@ -230,7 +230,7 @@ fn explicit_region_spans_two_arenas() {
 use core.mem
 
 fn run() {
-    #Region(work) {
+    @Region(work) {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
         first :: a.alloc(1)
@@ -254,12 +254,12 @@ fn run() {
 #[test]
 fn region_confines_view_escape() {
     // A view made inside a `region` may not be carried out of it. v1 rejects the
-    // move into an outer binding (E0631).
+    // move while its owner-backed view remains live (E0212, D-MEM1 S9).
     let src = r#"
 use core.mem
 
 fn run() {
-    #Region(r) {
+    @Region(r) {
         a :: mem.Arena.new()
         v :: a.alloc(5)
         leak :: v
@@ -268,8 +268,8 @@ fn run() {
 }
 "#;
     assert!(
-        error_codes(src).contains(&"E0631".to_string()),
-        "a view escaping a region binding must be E0631, got {:?}",
+        error_codes(src).contains(&"E0212".to_string()),
+        "moving a region view while its owner remains live must be E0212, got {:?}",
         error_codes(src)
     );
 }

@@ -1,14 +1,7 @@
-/// D-MARKER-FAMILY1: is `name` a contract-plane (`@`) marker? The I7/R3
-/// dispatch chokepoint — parser/formatter/sema/LSP ask here, never hand-roll
-/// the move list.
-pub fn is_contract_marker(name: &str) -> bool {
-    CONTRACT_MARKERS.contains(&name)
-}
-
-/// D-MARKER-FAMILY1: is `name` a directive-plane (`#`) marker in the E0063
-/// confusable set? Used to detect `@` written before a directive name.
-pub fn is_directive_marker(name: &str) -> bool {
-    DIRECTIVE_MARKERS.contains(&name)
+/// D-SHAPE2=A: is `name` a built-in applied rule? The I7/R3 dispatch
+/// chokepoint — parser/formatter/sema/LSP ask here, never hand-roll the list.
+pub fn is_applied_rule(name: &str) -> bool {
+    APPLIED_RULES.contains(&name)
 }
 
 /// D-DSLBLOCK1=A: is `name` one of the stdlib-owned DSL block markers allowed
@@ -19,7 +12,7 @@ pub fn is_stdlib_dsl_block_marker(name: &str) -> bool {
 
 // D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
 // keyword — the lexer resolves a literal's identifier suffix against
-// #UnitFamily members in scope (ATTR_UNIT_FAMILY, D-QUAL3). One fixed rule:
+// @UnitFamily members in scope (ATTR_UNIT_FAMILY, D-QUAL3). One fixed rule:
 /// D-UNITLIT1: a literal suffix shaped `e` + digits is reserved for float
 /// exponent notation (`1e5`) and may never resolve as a unit name.
 pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
@@ -64,13 +57,11 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.random",
     "core.time",
     "core.tasks",
-    // D-TESTKIT1=A: helpers under existing #Test syntax.
+    // D-TESTKIT1=A: helpers under existing @Test syntax.
     "core.testing",
     "core.mem",
     // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
     "core.mem.alloc",
-    // D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` library.
-    "core.gc",
     // D-SOLVER-LIB1=A: explicit finite solver state, no language backtracking.
     "core.solve",
     // D-DATA-SURFACE1=A: one beginner facade for typed tables, series, stats, and plots.
@@ -396,6 +387,6 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 use super::{
-    CONTRACT_MARKERS, CORE_CANONICAL, CORE_EMAIL_MODULE, CORE_SHORT, DIRECTIVE_MARKERS,
+    APPLIED_RULES, CORE_CANONICAL, CORE_EMAIL_MODULE, CORE_SHORT,
     STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER,
 };

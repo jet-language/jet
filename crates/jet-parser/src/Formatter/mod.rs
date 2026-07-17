@@ -71,28 +71,29 @@ fn format_program_with_tokens(
         pending_blank: false,
         trailing_comment_limit: usize::MAX,
         pub_file: prog.pub_file,
+        policy_declarations: &prog.policy_declarations,
     };
     let mut first = true;
-    // D-VISDEFAULT2: `#PubFile` must precede any `priv`-qualified import in
+    // D-VISDEFAULT2: `@PubFile` must precede any `priv`-qualified import in
     // the rendered output — imports are formatted relative to `f.pub_file`
     // (emitting a `priv` prefix when the file is public-by-default), so the
-    // literal `#PubFile` marker has to appear *before* the imports loop, not
+    // literal `@PubFile` marker has to appear *before* the imports loop, not
     // after it. Emitting it post-imports produced output that failed to
-    // reparse (`priv use …` with no preceding `#PubFile`) — a real fmt
+    // reparse (`priv use …` with no preceding `@PubFile`) — a real fmt
     // idempotence bug, not just a reordering of independent items.
     if prog.pub_file {
         first = false;
-        f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
+        f.write(&format!("@{}", Syntax::MARKER_PUB_FILE));
         f.newline();
     }
-    // D-PRELUDEX1=A: `#NoPrelude` is a file-level directive; emit before imports
+    // D-PRELUDEX1=A: `@NoPrelude` is a file-level directive; emit before imports
     // so fmt round-trips the opt-out at the top of the file.
     if prog.no_prelude {
         if !first {
             f.newline();
         }
         first = false;
-        f.write(&format!("#{}", Syntax::MARKER_NO_PRELUDE));
+        f.write(&format!("@{}", Syntax::MARKER_NO_PRELUDE));
         f.newline();
     }
     for imp in &prog.imports {
@@ -104,12 +105,12 @@ fn format_program_with_tokens(
         f.fmt_import(imp);
         f.emit_trailing(imp.span.end);
     }
-    // D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — the file's
-    // default CLI backend. D-WASM1: `#Target(Wasm)`/`#Target(Js)` — the file's
+    // D-WEBDEFAULT1 (ratified 2026-07-01, c134): `@Target(Web)` — the file's
+    // default CLI backend. D-WASM1: `@Target(Wasm)`/`@Target(Js)` — the file's
     // web partition ceiling. Neither carries a span (single-instance file
-    // markers, same treatment as `#PubFile` above), so this fixed post-import
+    // markers, same treatment as `@PubFile` above), so this fixed post-import
     // position is canonical, not a preservation of wherever the author
-    // originally wrote it in the source. Unlike `#PubFile`, these markers
+    // originally wrote it in the source. Unlike `@PubFile`, these markers
     // don't gate any import's rendered qualifier, so they have no ordering
     // dependency on the imports loop and keep their original position.
     if prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB) {
@@ -118,7 +119,7 @@ fn format_program_with_tokens(
         }
         first = false;
         f.write(&format!(
-            "#{}({})",
+            "@{}({})",
             Syntax::ATTR_TARGET,
             Syntax::WEB_TARGET_DEFAULT_WEB
         ));
@@ -129,29 +130,30 @@ fn format_program_with_tokens(
             f.blank_line_between_items();
         }
         first = false;
-        f.write(&format!("#{}({})", Syntax::ATTR_TARGET, bucket.name()));
+        f.write(&format!("@{}({})", Syntax::ATTR_TARGET, bucket.name()));
         f.newline();
     }
-    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — the
+    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `@Html("path.html")` — the
     // file's explicit companion host page.
     if let Some(html_path) = &prog.html_path {
         if !first {
             f.blank_line_between_items();
         }
         first = false;
-        f.write(&format!("#{}(\"{}\")", Syntax::ATTR_HTML, html_path));
+        f.write(&format!("@{}(\"{}\")", Syntax::ATTR_HTML, html_path));
         f.newline();
     }
-    // D-POLICY-WORD1=A: `#Policy(no_alloc)` — fixed post-import
-    // position, same single-instance-marker treatment as `#PubFile`/
-    // `#Target(…)`/`#Html(…)` above (no span to preserve original placement).
-    if let Some(policy_span) = prog.no_alloc_policy {
+    // D-POLICY-WORD1=A: `@Policy(no_alloc)` — fixed post-import
+    // position, same single-instance-marker treatment as `@PubFile`/
+    // `@Target(…)`/`@Html(…)` above (no span to preserve original placement).
+    let module_policies = prog.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module).cloned().collect::<Vec<_>>();
+    if let Some(policy_span) = module_policies.first().map(|d| d.span) {
         if !first {
             f.blank_line_between_items();
         }
         first = false;
         f.emit_leading(policy_span.start);
-        f.write(&format!("#{}({})", Syntax::ATTR_POLICY, Syntax::POLICY_NO_ALLOC));
+        f.fmt_policy_declarations(&module_policies);
         f.newline();
         f.emit_trailing(policy_span.end);
     }
@@ -190,8 +192,9 @@ struct Fmt<'a> {
     /// nested construct. Prevents an inner statement from claiming a comment
     /// that trails its enclosing expression on the same line.
     trailing_comment_limit: usize,
-    /// D-VISDEFAULT2=A: file uses `#PubFile` public-by-default visibility.
+    /// D-VISDEFAULT2=A: file uses `@PubFile` public-by-default visibility.
     pub_file: bool,
+    policy_declarations: &'a [crate::Policy::PolicyDeclaration],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -273,7 +276,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Module(m) => src[..m.name_span.start]
             .rfind(Syntax::KW_MODULE)
             .unwrap_or(m.span.start),
-        // S59: the `#Extern`/`#Bindgen` marker precedes the span start.
+        // S59: the `@Extern`/`@Bindgen` marker precedes the span start.
         Item::CModule(cm) => cm.span.start,
         Item::CodeModule(cm) => src[..cm.name_span.start]
             .rfind(Syntax::KW_MODULE)
@@ -314,7 +317,7 @@ fn func_decl_start(f: &Func, src: &str) -> usize {
     // searched too, preferring whichever match sits closer to `pos`.
     if f.is_pure {
         let at_pos =
-            before[..pos].rfind(&format!("{}{}", Syntax::CONTRACT_PREFIX, Syntax::KW_PURE));
+            before[..pos].rfind(&format!("{}{}", Syntax::RULE_PREFIX, Syntax::KW_PURE));
         let hash_pos = before[..pos].rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_PURE));
         match (at_pos, hash_pos) {
             (Some(a), Some(h)) => a.max(h),
@@ -426,6 +429,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Off { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::DebugOnly { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Region { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::Policy { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::TaskGroup { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Layout { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Caps { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
@@ -450,7 +454,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::ScopeMember { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         // D-DET1: `assume_deterministic { … }` — use body/span end.
         Stmt::AssumeDet { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
-        // D-TXN1–D-TXN4: `#Transact(name) { … }` — use body/span end.
+        // D-TXN1–D-TXN4: `@Transact(name) { … }` — use body/span end.
         Stmt::Transact { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
     }
 }
@@ -832,6 +836,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Off { span, .. } => span.start,
         Stmt::DebugOnly { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,
+        Stmt::Policy { span, .. } => span.start,
         Stmt::TaskGroup { span, .. } => span.start,
         Stmt::Layout { span, .. } => span.start,
         Stmt::Caps { span, .. } => span.start,
@@ -846,7 +851,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::ScopeMember { span, .. } => span.start,
         // D-DET1: `assume_deterministic { … }` — use span start.
         Stmt::AssumeDet { span, .. } => span.start,
-        // D-TXN1–D-TXN4: `#Transact(name) { … }` — use span start.
+        // D-TXN1–D-TXN4: `@Transact(name) { … }` — use span start.
         Stmt::Transact { span, .. } => span.start,
     }
 }
@@ -1025,7 +1030,7 @@ mod tests {
     #[test]
     fn trailing_call_comment_stays_outside_lambda_block() {
         let source = r#"fn transfer(from: Shared<Account>, amount: Int) {
-    #Transact(tx) {
+    @Transact(tx) {
         from.edit(a => { a.balance -= amount })  // both land, or neither
     }
 }

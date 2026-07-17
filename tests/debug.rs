@@ -291,7 +291,7 @@ fn needs_native_is_false_for_an_interpreter_safe_program() {
     assert_eq!(jet::Debug::needs_native(&file), Some(false));
 }
 
-/// D-DBG3 step 2: an FFI/task/#Unsafe/native-std program is exactly the case
+/// D-DBG3 step 2: an FFI/task/@Unsafe/native-std program is exactly the case
 /// the interpreter declines (E2203) — `needs_native` must say so, so the CLI
 /// dispatch (`Source/main.rs`'s `debug` arm) routes it to the native backend
 /// instead of erroring.

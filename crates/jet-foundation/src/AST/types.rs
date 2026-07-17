@@ -97,7 +97,7 @@ pub enum Type {
     /// S73 (D-SG7): named tuple `(x: Int, y: Int)` — fields stored sorted by name.
     Tuple(Vec<(String, Box<Type>)>),
     /// S76 (2026-06-16): fixed-size list `[T#N]` — a compile-time refinement of
-    /// `[T]` with a statically-known length. Erases to `Vec<T>` at codegen (I3).
+    /// `[T]` with a statically-known length. Lowers to inline Rust `[T; N]`.
     FixedList {
         elem: Box<Type>,
         len: u64,

@@ -33,11 +33,11 @@ fn is_cli_scalar(ty: &Type) -> bool {
         || matches!(ty, Type::Named(n) if n == "Path")
 }
 
-/// D-CLIFLAG1: does `f` carry a `#[Default(expr)]` marker (D-SERDE5's
+/// D-CLIFLAG1: does `f` carry a `@[Default(expr)]` marker (D-SERDE5's
 /// existing field-default mechanism, reused here rather than inventing a
 /// second one — Jet's only *inline* `= expr` default lives on function
 /// parameters, S61, a different grammar slot; struct fields, Cli or not, use
-/// `#[Default(...)]`)?
+/// `@[Default(...)]`)?
 fn has_default_marker(f: &Field) -> bool {
     f.serde_markers
         .iter()
@@ -51,7 +51,7 @@ pub(crate) enum CliFieldKind {
     Flag,
     /// `T?` field (T a supported scalar) -> optional `.option(...)`, default `null`.
     OptionalOption,
-    /// A supported scalar field with `#[Default(expr)]` -> optional `.option(...)`,
+    /// A supported scalar field with `@[Default(expr)]` -> optional `.option(...)`,
     /// default = the marker's expression.
     DefaultedOption,
     /// A supported scalar field, no `Option`/`Default` -> required `.option(...)`;

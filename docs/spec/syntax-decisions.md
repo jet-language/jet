@@ -56,8 +56,8 @@ definition per name (E0105); no overloading — capability disambiguation is
 call-site sigils on a single definition.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
-every `#`-marker and every `@`-marker is PascalCase (`#Test`, `#Unsafe`,
-`#Grant`, `@Pure`, `@Pre`); traits are PascalCase. The standard library is
+every `#`-marker and every `@`-marker is PascalCase (`@Test`, `@Unsafe`,
+`@Grant`, `@Pure`, `@Pre`); traits are PascalCase. The standard library is
 **"Core"** — never "std"/"stdlib" — in docs, identifiers, and error copy.
 
 **D-CORENS1 — Single `core.*` namespace** *(D-CORENS-CANON1)*: every
@@ -508,7 +508,7 @@ inexact mixing remains rejected.
 
 Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and
-`#Policy(explicit_units)` does the same at module, function, or block scope.
+`@Policy(explicit_units)` does the same at module, function, or block scope.
 The normal D-MARK-SCOPE1 inheritance/provenance law applies.
 
 ```jet
@@ -528,7 +528,7 @@ alt_km: Kilometer = 1500meter
 # package.jet
 policy: .{ explicit_units: true }
 
-#Policy(explicit_units)
+@Policy(explicit_units)
 module dosing
 
 length + inner_diameter
@@ -549,15 +549,15 @@ implementations.
 **D-BIGINT1** *(home moved to `core.math` by D-CORE-NUMERIC1=A, 2026-07-12)*: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
 `Int` never auto-promotes (E0130–E0133). **D-DECIMAL1**: arbitrary-precision
 base-10 `Decimal` in `core.math`; default-on lint L0504 fires when a
-money-named field holds a float (`#[allow(float_money)]` suppresses).
+money-named field holds a float (`@[allow(float_money)]` suppresses).
 
 **D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in a
-`state TypeName { A, B, C }` block; `#State(S) fn m(self)` requires state S;
-`#Transition(From -> To) fn` advances it (`_` from-state = entry constructor).
+`state TypeName { A, B, C }` block; `@State(S) fn m(self)` requires state S;
+`@Transition(From -> To) fn` advances it (`_` from-state = entry constructor).
 Wrong-state call E0150; markers erase in codegen. Ordering falls out of the
 transition graph.
 
-**D-REFINE1 — Refinements**: `#Invariant("value >= lo && value < hi")` before
+**D-REFINE1 — Refinements**: `@Invariant("value >= lo && value < hi")` before
 a `distinct Int` declaration records a pure linear integer bound. The first
 shipped prover uses that bound to prove fixed-list indexes in-bounds; no new
 keyword.
@@ -729,7 +729,7 @@ Re-export is `pub use` (D-MOD4); a directory module's summary file is
 keyword.
 
 **S18 — Visibility** *(D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: private by
-default; `pub` exports. `#PubFile` flips a file to public-by-default with
+default; `pub` exports. `@PubFile` flips a file to public-by-default with
 `priv` marking exceptions (E0412–E0418). `pub(package)` exposes to the same
 package/workspace only (other `pub(...)` forms E0411). Cross-file private
 access E0605/E0609.
@@ -851,7 +851,7 @@ all applicative aliases. AOT, JIT, dev, and comptime consume the same checked
 instance law.
 
 **U17 — Library packages**: consumed with ordinary `use <pkg>`; executables
-go on PATH, never `use`. **D-PRELUDEX1**: `#NoPrelude` opts a file out of
+go on PATH, never `use`. **D-PRELUDEX1**: `@NoPrelude` opts a file out of
 ambient `print`/`input`; no library may inject into the no-prefix surface.
 **Declined**: `namespace { }` keyword (D-NAMESPACE1).
 
@@ -878,7 +878,7 @@ D-MARK-DEBUG1=A, 2026-07-11, card #498)*: silent auto-derive for
 `Printable`, `Equatable`, **and `Debug`** whenever every field qualifies; a
 hand-written impl overrides. `Debug` auto-derivation resolves the S55 ↔
 D-DISPLAYDBG1 contradiction in favor of auto (dev-facing tool, no ceremony;
-`#[Redact]` carries the secrets story); the standalone opt-in `@Debug`
+`@[Redact]` carries the secrets story); the standalone opt-in `@Debug`
 marker leaves the derive list. Explicit opt-in markers for the rest —
 `@Comparable`, `@Summarize`, and the codability family `@Codable`
 (≡ `@[Encode, Decode]`), `@Encode`, `@Decode` (D-SERDE4, D-MARKERMOVE3).
@@ -888,7 +888,7 @@ the `#` plane (see Serde under Core library).
 **D-DISPLAYDBG1 / D-DISPLAY-SHAPE — Display & Debug**: `Display` is
 user-facing — a single explicit method `fn display(self) -> String`, no
 default (E0915, L0520); interpolation `{}` calls it. `Debug` is dev-facing and
-auto-derived; `{value@Debug}` selects it; `#[Redact]` on a field renders
+auto-derived; `{value@Debug}` selects it; `@[Redact]` on a field renders
 `"[redacted]"` (D-DEBUG-REDACT).
 
 **D-ITER-HOOK / D-INDEX-HOOK — Extensibility hooks**: beginners use
@@ -912,69 +912,65 @@ declaration, expression, or brace scope. Braces show extent; the rule name
 states behavior; each rule declares its legal attachment targets. Authority-
 bearing rules require a visible brace scope, reason, and audit treatment, and
 `@Unsafe` remains the sole user-written unsafe gate. This decision frees `#`
-without assigning it another meaning. Card #534 still owns implementation;
-until that migration lands, the accepted source grammar remains the legacy
-D-MARKER-FAMILY1 plane below.
+without assigning it another meaning. The source grammar now implements this
+single applied-rule shape.
 
-**D-MARKER-FAMILY1 — Two-plane sigil law**: **`@` states a checkable
-contract** about the declaration it precedes (`@Pure`, `@MustUse`, `@Codable`,
-`@Pre`, `@Persist`); **`#` is a directive** — changes what compiles, when code
-runs, what's legal in a region, or supplies a compile-time value (`#Unsafe`,
-`#Test`, `#(Fs)`, `[T#N]`, `pkg#1.2.3`, `#Caller()`) and may appear inside
-types/expressions where `@` never does. `$` is splice-only. Loop-label suffix
-`@` is a different slot.
+**D-MARKER-FAMILY1 — superseded by D-SHAPE2**: every typed rule now uses `@`.
+Non-rule `#` constructs remain unchanged: effect sets `#(Fs)`, fixed lists
+`[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
+`$` is splice-only. Loop-label suffix `@` is a different slot.
 
 **D-MARKERMOVE1/2/3 — Plane assignments**: on `@`: `Pure`, `MustUse`,
 `Codable`, `Encode`, `Decode`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Summarize`, `Comparable`
-(user derives of the same names stay `#`). `@Pure` also valid as a
+(user derives of the same names also use `@`). `@Pure` is also valid as a
 function-type bound (`f: @Pure fn(Int) -> Int`). Field-level wire markers
-stay `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
+use `@`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 `DenyUnknownFields`, `Tag`, `Untagged`.
 
-**S82 — Marker grammar shapes** *(sigil per plane above; D-ATTR2)*:
-`@Marker` / `#Marker` single, line before the declaration;
-`#[A, B]` / `@[A, B]` comma lists (no Rust `#[derive(…)]` wrapper);
-`#Marker { … }` scoped region statement (`#Unsafe { }`, `#Transact { }`) or
+**S82 — Applied-rule grammar shapes** *(D-SHAPE2/D-ATTR2)*:
+`@Rule` single, line before the declaration;
+`@[A, B]` comma lists (no Rust `#[derive(…)]` wrapper);
+`@Rule { … }` scoped region statement (`@Unsafe { }`, `@Transact { }`) or
 in-body config as a type body's first statements. `comptime` stays a prefix
 keyword. LSP surfaces applicable markers per item.
 
-**D-CANVASSTATE1=D — Statement switch attributes**: `#Off <stmt>` parses and
-type-checks the statement, then emits no code in every build. `#DebugOnly <stmt>`
+**D-CANVASSTATE1=D — Statement switch attributes**: `@Off <stmt>` parses and
+type-checks the statement, then emits no code in every build. `@DebugOnly <stmt>`
 parses and type-checks the statement in every build, emits in debug/dev builds,
 and strips from release output. Both attach to statements only; item position is
 E0342, expression position is E0343, and doubled switch attributes are E0344.
 Names introduced inside the marker body do not escape. `build.profile` is not a
 user-typeable comptime value.
 
-**D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
+**D-CANVASMETA1=B — Canvas metadata attribute**: `@Meta(category: "Movement",
 tunable)` attaches to bindings and functions; at top level it may also attach to
 `const`/`comptime` bindings. `category` is a non-empty plain string literal and
 `tunable` is a bare flag. Unknown fields are E0345 with did-you-mean help,
 duplicate fields are E0346, wrong `category` value type is E0347, empty category
-is E0348, and expression-position use is E0349. `#Meta` has no runtime
+is E0348, and expression-position use is E0349. `@Meta` has no runtime
 semantics and emits no code; it is checked source data for Canvas/tooling only.
 New fields require a future ballot.
 
 **D-MARK-TARGET1=A — one target-marker family** *(ratified 2026-07-11, card
-#498)*: `#Target(…)` is the only target-partition spelling, for every axis —
-`#Target(Wasm)`, `#Target(Js)`, `#Target(Web)`, `#Target(Os.Linux)`. The
+#498)*: `@Target(…)` is the only target-partition spelling, for every axis —
+`@Target(Wasm)`, `@Target(Js)`, `@Target(Web)`, `@Target(Os.Linux)`. The
 bare `#Wasm` and `#Js` markers are removed from the grammar (ordinary
-unknown-marker errors, no teaching residue). `#WasmExport` is a different
+unknown-marker errors, no teaching residue). `@WasmExport` is a different
 job (export surface) and is untouched.
 
 **D-BLOCKPLANE1=A — expert regions are `#` blocks** *(ratified by owner
 2026-07-12, card #512)*: the three keyword regions join the marker
-family. `#Region(r) { }` has D-REGION1 semantics; `#Live { }` has D-TERM1
-semantics and no reason argument; `#Nondeterministic("reason") { }` has
+family. `@Region(r) { }` has D-REGION1 semantics; `@Live { }` has D-TERM1
+semantics and no reason argument; `@Nondeterministic("reason") { }` has
 D-DET1 semantics, now
-reason-gated like `#Unsafe`/`#Impure`). The three keywords leave the
+reason-gated like `@Unsafe`/`@Impure`). The three keywords leave the
 grammar as ordinary syntax errors. The rule is now universal: an expert
 scoped region is a `#` block.
 
 **D-POLICY-WORD1=A — one meaning for `policy`** *(ratified by owner
 2026-07-12, card #512; amended by D-MARK-SCOPE1)*: source policy uses
-`#Policy(…)`; future floors arrive as arguments, never new keywords. Package-
+`@Policy(…)`; future floors arrive as arguments, never new keywords. Package-
 wide policy integrates with `package.jet`'s existing `policy:` namespace rather
 than copying source-marker placement into the Package record. The bare `policy`
 keyword leaves the grammar; the word means the Package governance namespace
@@ -987,24 +983,33 @@ package scope. The nearest declaration of a key wins, unmentioned keys inherit,
 and `jet explain` reports the effective value plus every declaration it
 overrode. A compiler-owned applicability matrix decides which levels each
 setting may use and whether it may tighten, override, or merge. Site-specific
-proof and authority stay site-bound: `#Unsafe` authorization, `#Grant`,
-`#Tainted`, `#Sanitizer`, and field wire attributes do not widen through this
+proof and authority stay site-bound: `@Unsafe` authorization, `@Grant`,
+`@Tainted`, `@Sanitizer`, and field wire attributes do not widen through this
 ladder. At package scope, each setting uses the coherent Package `policy:`
 surface owned by its policy decision; the common ladder does not mint a second
 manifest spelling.
+
+The compiler registry is also the source of semantic-index/explain provenance:
+it returns one effective value and the complete outer-to-inner declaration
+chain. The shared memory fields are `no_alloc: true`, `zero_rc: true`,
+`arena_bounded: <positive bytes>`, and `gc: true`. Site-bound
+`@Unsafe`, `@Grant`, `@Tainted`, `@Sanitizer`, wire, and authority rows have
+explicit applicability but never inherit.
+The concrete terminal view uses the ratified existing route:
+`jet explain marker Source/sensor.jet:9 arena_bounded`.
 
 **D-PACKAGE-POLICY-SCOPE1=A — package `policy:` holds a typed field value**
 *(ratified 2026-07-16, card #657)*: the package-echelon `policy:` field
 settled by D-POLICY-WORD1 holds a typed `.{ ... }` value whose governance
 keys are ordinary fields, written like every other Package role field
-(`identity:`, `sources:`, D-SHAPE5a) — not the `#Policy(...)` marker
+(`identity:`, `sources:`, D-SHAPE5a) — not the `@Policy(...)` marker
 call. Each package-field key maps to the identical key the source-scope
-`#Policy(...)` marker uses, so `no_alloc: true` in `policy:` and
-`#Policy(no_alloc)` on a block/function/module are the same key in two
+`@Policy(...)` marker uses, so `no_alloc: true` in `policy:` and
+`@Policy(no_alloc)` on a block/function/module are the same key in two
 echelon-appropriate spellings, and `jet explain` unifies provenance across
 the whole D-MARK-SCOPE1 ladder. Package policy may only tighten safety — it
 can forbid unsafe code but can never authorize an unsafe operation; that
-still requires a written `#Unsafe("reason")` block or function. Reuse across
+still requires a written `@Unsafe("reason")` block or function. Reuse across
 a monorepo is reached through the ratified `jet split` (D-ECO-SPLITPOLICY1),
 which extracts a shared `policy:` value into a named `Config` when needed;
 `policy:` itself does not compose a `use:` list of named profiles.
@@ -1021,12 +1026,12 @@ policy:   .{
 }
 
 # Source/sensor.jet — a module tightens one key with the source marker
-#Policy(arena_bounded(2048))
+@Policy(arena_bounded(2048))
 module sensor
 
 # Package policy may only tighten safety, never authorize it:
 policy: .{ unsafe: .Allow }
-// error: package policy cannot authorize unsafe — write #Unsafe("reason")
+// error: package policy cannot authorize unsafe — write @Unsafe("reason")
 // at the exact block or function instead
 ```
 
@@ -1040,14 +1045,14 @@ summary, otherwise the compiler rejects the unprovable contract. This
 supersedes D-NOALLOC-SEM1=A's local-only denylist scope.
 
 **D-DROP-WORD1=A — one meaning for `drop`** *(ratified by owner
-2026-07-12, card #512)*: the linear finisher for `#SingleUse` values
-uses `consume(x)` (still `#Unsafe`-gated, D-LIN1 semantics unchanged).
+2026-07-12, card #512)*: the linear finisher for `@SingleUse` values
+uses `consume(x)` (still `@Unsafe`-gated, D-LIN1 semantics unchanged).
 `.drop("reason")` keeps sole ownership of the
 discard meaning.
 
 **D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against that
-marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
+marker's declared scope members (`@Test`: `.expect_fail`, `.setup`,
 `.timeout`, `.skip`); this is the ONLY spelling for scope vocabulary (I8 —
 no nested per-scope markers, no block-valued args for the same job). Unknown
 member is a teaching error listing the scope's vocabulary. Typing `.` in
@@ -1057,12 +1062,12 @@ the required trailing block separates it from leading-dot enum values
 construction and S74 destructuring. Other block markers may declare members
 under the same law — each addition is an API decision, not a syntax one.
 
-**D-PROVENANCE1=B — Binding-level provenance tracking**: `#Track` may prefix
+**D-PROVENANCE1=B — Binding-level provenance tracking**: `@Track` may prefix
 a sigil binding:
 
 ```jet
-#Track speed :: compute_speed()
-#Track correction: Float := 0.0
+@Track speed :: compute_speed()
+@Track correction: Float := 0.0
 ```
 
 The marker records provenance for that binding without changing its type.
@@ -1073,11 +1078,11 @@ No `Tracked<T>` wrapper exists and no general value-history type is introduced.
 **D-QUAL2 — Tag vs trait**: exactly two qualifier kinds — `trait` (has
 methods, dispatches) and `tag` (no methods, erases). Methods on a tag E0732;
 tag where dispatch expected E0731. **D-QUAL4**: type-position value tags are
-prefix — `#Tainted String`.
+prefix — `@Tainted String`.
 
 **D-MATURITY1 (superseded by D-MARK-META1=B, 2026-07-12)**: the maturity
 trio `@Experimental`/`@Tested`/`@Hardened` leaves the grammar — maturity
-is a `#Meta` field: `#Meta(maturity: .Experimental | .Tested |
+is a `@Meta` field: `@Meta(maturity: .Experimental | .Tested |
 .Hardened)`. Same semantics (doc-only, parsed onto `Func.maturity`,
 formatter-preserved, zero sema/codegen effect). Retired `@` spellings get
 ordinary unknown-marker errors (greenfield, no teaching residue; the old
@@ -1085,7 +1090,7 @@ E0062 row retires with them).
 
 **D-MARK-META1=B — doc-metadata growth law + trio fold** *(ratified by
 owner 2026-07-12, card #509)*: every tool-facing, behavior-free
-annotation is a `#Meta(…)` field — ballot-ed as a field, never a new
+annotation is a `@Meta(…)` field — ballot-ed as a field, never a new
 marker (extends D-CANVASMETA1's field-ballot hook). Applied immediately
 to the shipped maturity trio (above). `@Doc` stays: it is the CLI
 help-text carrier (D-CLIFLAG1), not free metadata.
@@ -1121,7 +1126,7 @@ Call sites mirror the type — `write(&file, data)`, `close(^file)`; receivers
 carry it on self (`fn write(&self)`, `fn destroy(^self)`, bare `self` =
 read). Capability sits on the type side (`name: &Type`, D-CAP3). `copy x`
 stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
-(composes: `p.*.field`); prefix `*x` is raw-pointer-of only, `#Unsafe`-gated
+(composes: `p.*.field`); prefix `*x` is raw-pointer-of only, `@Unsafe`-gated
 (D-CAP9), and is not a parameter capability. `mut`/`take`/`view` are not
 keywords (E0056/E0057 retired by D-S14-PAUSE; E0058 retired earlier by
 D-MEM1/S3).
@@ -1265,6 +1270,10 @@ consumes when its scheduled action runs. `.drop("reason")` remains deliberate
 value discard, while protocol
 success such as `finish`, `commit`, `flush`, and `shutdown` remains an ordinary
 fallible method rather than pretending automatic cleanup succeeded.
+There is no general deferred statement or block: `defer action()` and
+`defer { ... }` are E0003. The resource expression is one directly moved local;
+ordinary close-call resolution proves that `close(^resource)` is valid, and the
+normal move checker rejects any later use, immediate close, or second defer.
 
 **S53 — Concurrency** *(deferred core; combinators live)*: tasks/channels
 deferred past v1.0 (planned: `tasks.spawn(closure) -> Task<T>`, `t.join()`,
@@ -1281,7 +1290,7 @@ borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 `Receiver<T>` is what `g.select().recv(rx)` takes.
 
 **D-STM1=A — atomic memory transactions** *(ratified by owner
-2026-07-12, card #506)*: `#Transact` gains the `Shared<T>` plane — reads
+2026-07-12, card #506)*: `@Transact` gains the `Shared<T>` plane — reads
 and writes to Shared handles inside the block form one atomic commit,
 retried on conflict; either every handle's change lands or none does.
 No new marker (I8); E0746 keeps rejecting irreversible effects inside.
@@ -1296,16 +1305,16 @@ recv/send, sleep, join, select, I/O — running Drop-backed cleanup, exactly as
 a blown deadline (E3003) already does; a cancelled `g.all` member reports
 `Cancelled`, not a completed `Value`. A scoped shielded region defers (never
 discards) the unwind until a critical section finishes. **D-SHIELDNAME1 = A**
-*(ratified 2026-07-11)*: the shielded region is spelled `#Shield { … }`,
-joining the `#Unsafe` / `#Context` sigil family. A cancellation (or blown
-deadline) pending against a task inside `#Shield` lands the moment the block
+*(ratified 2026-07-11)*: the shielded region is spelled `@Shield { … }`,
+joining the `@Unsafe` / `@Context` sigil family. A cancellation (or blown
+deadline) pending against a task inside `@Shield` lands the moment the block
 exits — deadline first, then cancel.
 
 ### Effects & safety
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
 erased in codegen. Assert/restrict via `#(Net, Db)` on a signature and
-`#Caps(Net) { … }` regions.
+`@Caps(Net) { … }` regions.
 
 **S60 — Purity marking**: `@Pure fn` is a checked signature modifier — the
 empty effect set; violations name the impure call path. Also valid as a
@@ -1318,12 +1327,12 @@ and ancestor matching is subsumption. `effect <Name>` user declarations
 reserved, unminted.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the ten
-D-EFF4/5 names are tree roots; a signature/`#Caps`/`#Grant`/`#(!…)` entry may
+D-EFF4/5 names are tree roots; a signature/`@Caps`/`@Grant`/`#(!…)` entry may
 be a dotted path rooted at one (`Fs.Read`, `Net.Http.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
 learned once and reused: `#(Fs)` accepts any `Fs.*` callee; `#(Fs.Read)`
-rejects a sibling `Fs.Write` callee; `#Grant(Fs.Read)` doesn't authorize
+rejects a sibling `Fs.Write` callee; `@Grant(Fs.Read)` doesn't authorize
 `Fs.Write`; `#(!Fs)` prohibits the whole `Fs.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat root names
 stay valid (no migration break) — Core stdlib calls are still tagged with a
@@ -1363,41 +1372,41 @@ trait Renderer { fn render(self) --[Gpu]-> Image }
 **D-PROP1 / D-PROP2 — Prohibition**: `#(!Net)` — the fn and every reachable
 callee must not use the effect (E0749).
 
-**D-SCAP1 — Scoped capabilities**: `#Grant(Fs) { caps -> … }` authorizes
+**D-SCAP1 — Scoped capabilities**: `@Grant(Fs) { caps -> … }` authorizes
 effects into a lexical scope, binding an erased first-class handle; effect
 without backing grant E0712; handle escape E0711.
 
-**D-TAINT1 — Taint** *(D-TAINT-SAN, D-IFC1)*: `#Tainted expr` marks untrusted
+**D-TAINT1 — Taint** *(D-TAINT-SAN, D-IFC1)*: `@Tainted expr` marks untrusted
 values (closed kinds `.Input`/`.PII`/`.Secret`/`.Credential`; bare = `.Input`);
-taint spreads by dataflow; `#Sanitizer fn` strips by contract (bare
+taint spreads by dataflow; `@Sanitizer fn` strips by contract (bare
 `sanitizer` E0059); tainted value reaching a `Db`/`Exec`/`Net` sink is E0721.
 Full IFC deferred post-Epoch 3.
 
 **D-TAINT2=A — Credential taint** *(ratified 2026-07-13)*:
-`#Tainted(Credential) T` attaches the existing credential kind through the one
+`@Tainted(Credential) T` attaches the existing credential kind through the one
 taint lattice. Credential taint spreads by dataflow and may not reach
-`print`, `log`, or serialization sinks (E0722); `#Sanitizer fn` is the audited
+`print`, `log`, or serialization sinks (E0722); `@Sanitizer fn` is the audited
 strip point. Other taint kinds retain the D-TAINT1 injection-sink rules.
 
-**D-DET1 — Determinism** *(D-DET-CAPAPI)*: `#Pure` implies reproducible —
+**D-DET1 — Determinism** *(D-DET-CAPAPI)*: `@Pure` implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 (`now/tick/advance/wait`) and `Rng` (`int/float/bool/pick/shuffle`) are the
-pure-callable capabilities; `#Nondeterministic("reason") { }` expert escape (respelled by D-BLOCKPLANE1, 2026-07-12).
+pure-callable capabilities; `@Nondeterministic("reason") { }` expert escape (respelled by D-BLOCKPLANE1, 2026-07-12).
 
-**D-REPLAY1**: `#Replayable` rejects any reachable `Time`/`Rand`/`Net`/`Io`
+**D-REPLAY1**: `@Replayable` rejects any reachable `Time`/`Rand`/`Net`/`Io`
 not routed through a deterministic/mockable capability. Implemented by the
 effect fixpoint as E0725; deterministic `Clock`/`Rng` handles remain pure.
 
-**D-TXN1–4, D-TXN-ROLLBACK — Transactions**: `#Transact(name) { … }` — on a
+**D-TXN1–4, D-TXN-ROLLBACK — Transactions**: `@Transact(name) { … }` — on a
 `?`-failure, mutated locals restore LIFO from auto-snapshots (layer 1);
 `Rollback` trait for custom snapshots (layer 2); `name.on_rollback(() => …)`
 and `name.on_commit(() => …)` explicit hooks (layer 3, Drop-backed).
 Irreversible effects (`Net`/`Fs`/`Exec`) inside the block are E0746 — move
 after the block or register via `on_commit`.
 
-**D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `#SingleUse` (implies
+**D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `@SingleUse` (implies
 `#NoCopy`) must be consumed exactly once on every path — `^` param, return,
-or `consume(x)` inside `#Unsafe("reason")` (respelled by D-DROP-WORD1, 2026-07-12; else E0143). Unconsumed E0140;
+or `consume(x)` inside `@Unsafe("reason")` (respelled by D-DROP-WORD1, 2026-07-12; else E0143). Unconsumed E0140;
 one-branch-only E0141; lending instead E0142.
 
 **D-PREPOST1 — Contracts**: `@Pre(cond, "msg")` / `@Post(cond, "msg")` on a
@@ -1457,7 +1466,7 @@ pass through `Result`/`Option` for pure parse paths.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
-`fetch(url, sha256:)`); Tier 2 ambient requires `#Impure("reason")` **and**
+`fetch(url, sha256:)`); Tier 2 ambient requires `@Impure("reason")` **and**
 `--allow-impure`. **D-CTFIND1/2**: `find(glob) -> [String]` builtin, sorted,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
 Shipped by #350.
@@ -1470,7 +1479,7 @@ order; source order breaks independent ties. A cycle fails before any plan
 exists and prints the complete chain. Tier-1 and Tier-2 reads are rejected
 inside fields: locked external input reaches a field only through a top-level
 `comptime` binding (D-CTIO1) or the `fn build` input surface. No field gains
-`BuildContext`, `#Impure`, filesystem, network, environment, clock, or
+`BuildContext`, `@Impure`, filesystem, network, environment, clock, or
 randomness authority.
 
 **D-METADEPTH1/2 — Metaprogramming ceiling**: read-only reflection + derives.
@@ -1496,10 +1505,10 @@ decisions).
 ### Low-level tier
 
 **S58 — Two gates, one keyword**: `use core.mem` is the discovery gate
-(allocators, `*T`, layout/repr, volatile read/write). `#Unsafe("reason") { … }` /
-`#Unsafe("reason") fn` is the audit gate (**D-UNSAFE2** — the reason is the
-gate's argument; **D-UNSAFE-REASON1=B** — bare `#Unsafe { … }` / `#Unsafe fn`
-compile and emit L3101; whole-fn form requires an enclosing `#Unsafe` at call
+(allocators, `*T`, layout/repr, volatile read/write). `@Unsafe("reason") { … }` /
+`@Unsafe("reason") fn` is the audit gate (**D-UNSAFE2** — the reason is the
+gate's argument; **D-UNSAFE-REASON1=B** — bare `@Unsafe { … }` / `@Unsafe fn`
+compile and emit L3101; whole-fn form requires an enclosing `@Unsafe` at call
 sites). Gated ops: deref `p.*`, raw-pointer-of `*x`,
 volatile `mem.volatile_read(p)` / `mem.volatile_write(p, value)`, pointer math,
 transmute-class casts, FFI pointer crossings (outside the gate: E0208).
@@ -1511,13 +1520,16 @@ Generated `unsafe` appears only inside user-gated regions + vetted internals
 **D-UNSAFE-OBLIG1=A — gate-only default with optional typed obligations and
 per-site control**
 *(qualified owner ratification 2026-07-15, card #645: A with ballot C's
-per-site flexibility)*: absent policy keeps the existing `#Unsafe` gate with no
+per-site flexibility)*: absent policy keeps the existing `@Unsafe` gate with no
 per-operation obligation records. Package or organization policy may require
 typed `valid_ptr`, `aligned`, and `no_alias` obligations; an undischarged
-required obligation is an error. `.Relaxed` suppresses only L3101 for a bare
+required obligation is an error. A typed assertion is a postfix record on the
+immediately preceding operation statement (`mem.volatile_read(p)` followed by
+`assert valid_ptr, aligned`); it cannot discharge a later operation or cross a
+control-flow boundary. `.Relaxed` suppresses only L3101 for a bare
 gate. `.PerSite` is also available: each gate selects
 `obligations: .Track` or `.Skip`, and organization policy may reject `.Skip`.
-Every mode still requires a lexical `#Unsafe` block or function for every
+Every mode still requires a lexical `@Unsafe` block or function for every
 low-level operation; none permits generated Rust `unsafe` outside I1's audited
 regions. `jet inspect unsafe` reports the effective mode, its policy source,
 each gate, and tracked operation state.
@@ -1571,22 +1583,34 @@ D-MARKERMOVE1. Deleted along with D-REF-SHORTHAND1's `&T` fields; a
 
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
 and scope-inferred by default (the region is the arena binding's lexical
-scope); explicit `#Region(r) { … }` for the expert tier (respelled by D-BLOCKPLANE1, 2026-07-12). `arena ::
+scope); explicit `@Region(r) { … }` for the expert tier (respelled by D-BLOCKPLANE1, 2026-07-12). `arena ::
 mem.Arena.new(capacity: 4096)`; `arena.alloc(value)` returns a scope-bound
-view — escape E0631, use-after-`reset`/`free` E0632. Arenas live flat in
-`core.mem` (D-REF2); arena values are not `#Unsafe`.
+view — escape E0631, use-after-reset E0632. D-SHAPE-RESOURCE2 later supersedes
+terminal `free()` with universal `close(^allocator)`. Arenas live flat in
+`core.mem` (D-REF2); arena values are not `@Unsafe`.
 
-**D-SOA1 / D-SOA2A–D — Columnar layout**: `#Layout(columnar)` on a struct;
+**D-FIXED-BACKING1=A — Fixed allocator backing**: `fixed ::
+mem.Fixed.new(size: N)` requires a positive comptime `N` and synthesizes one
+inline `[Byte#N]` in that lexical frame; `mem.Fixed.over(&storage)` borrows one
+mutable fixed-size byte array instead. Both constructors must directly
+initialize a lexical binding. Payload plus alignment grows from the buffer
+start, reverse-drop metadata reserves from its end, and allocation fails
+atomically before the cursors collide; there is no heap fallback. The backing
+borrow is exclusive until consuming `close(^fixed)` or scope exit. Fixed
+handles and allocation views cannot escape, be stored/captured, or cross a
+task/join boundary, and `reset()` is rejected while any allocation view lives.
+
+**D-SOA1 / D-SOA2A–D — Columnar layout**: `@Layout(columnar)` on a struct;
 a `[S]` of it lowers to a struct-of-arrays with a logical-Vec API
 (index-read gathers, field-read hits the column). Whole-struct only (partial
 E1109); `columnar [T]` type-position reserved (E1107); deferred surface ops
-E1108; serialization-transparent. **D-REPRC1**: `#Layout(c)` = C repr in the
+E1108; serialization-transparent. **D-REPRC1**: `@Layout(c)` = C repr in the
 same family (growable field under it = compile error).
 
 **D-SIMD1 / D-SIMD2 — SIMD**: portable lane types `F32x4`/`F64x2` —
 `F32x4(…)`, `.splat(x)`, `v[i]`, element-wise ops, `v.sum()` /
-`v.reduce(#Add)`; `[F32#4]` bridges via `from_array`/`to_array`
-(E2510/E2511). Raw intrinsics behind `#Unsafe`. Operator overloading exists
+`v.reduce(@Add)`; `[F32#4]` bridges via `from_array`/`to_array`
+(E2510/E2511). Raw intrinsics behind `@Unsafe`. Operator overloading exists
 **only** on built-in lane/linalg types.
 
 **D-JIT1 / D-JIT2 / D-JITDEP1 — JIT tier**: production is AOT; the Cranelift
@@ -1609,15 +1633,15 @@ helper; other dynamic indexes keep the check.
 
 ### Testing & benchmarks
 
-**S43 — Tests** *(D-TESTPAREN1, D-TGT5)*: `#Test("name") { … }` blocks with
-`require`/`require_eq`; `jet test` auto-collects every `#Test` in the
+**S43 — Tests** *(D-TESTPAREN1, D-TGT5)*: `@Test("name") { … }` blocks with
+`require`/`require_eq`; `jet test` auto-collects every `@Test` in the
 package; optional `test { entry: … }` target adds an out-of-tree file.
-**D-TEST1**: a parameterized `#Test fn name(p: T)` is a property test —
+**D-TEST1**: a parameterized `@Test fn name(p: T)` is a property test —
 ~200 generated cases (`JET_PROP_SEED`), automatic shrinking; ungeneratable
 param type E0613. **D-TEST4**: fenced ```jet blocks in `///` docs run as
 doctests; `EXPR // => VALUE` compares JetShow output (E2901).
 
-**D-BENCH1 / D-BENCH-MARKER1=A**: `#Bench("name") { … }` region benchmarks, run by `jet bench`
+**D-BENCH1 / D-BENCH-MARKER1=A**: `@Bench("name") { … }` region benchmarks, run by `jet bench`
 (ops/sec + ns/iter); the `benchmark` manifest target points `jet bench` at a
 package entry.
 
@@ -1626,7 +1650,7 @@ in this mode, normal codegen byte-identical. **D-TOOL4**: snapshot testing
 with `-u`/`--update-snapshots`. **D-A11YGATE1**: accessibility issues are
 `jet lint --a11y` lints (E2930/E2931), opt-in CI gate.
 
-**D-TESTKIT1=A** *(ratified 2026-07-07, card #308)*: `#Test` remains the only
+**D-TESTKIT1=A** *(ratified 2026-07-07, card #308)*: `@Test` remains the only
 test syntax. `core.testing` adds snapshots, fixtures, corpora, temp dirs, fake
 clocks/random, HTTP servers, and golden files as library
 helpers. Helpers emit structured test metadata so reports and CI can render
@@ -1670,14 +1694,14 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 
 | Layer | Shape |
 |---|---|
-| Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
-| Overlay | `#Extern module c.<lib> { … }` — merged bindgen ∪ overlay, overlay wins |
+| Autogen | `@Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
+| Overlay | `@Extern module c.<lib> { … }` — merged bindgen ∪ overlay, overlay wins |
 | Script | `use "raylib.h" as rl` — compile-time bind on cache miss |
 | Project | `use c.raylib as rl` — one form per lib per file |
 
 **D-SHAPE-CASE2=A — FFI casing escape: binding modules are exempt zones**
 *(ratified 2026-07-16, card #665)*: casing diagnostics (S54/D-SHAPE-CASE1)
-skip declarations inside `#Bindgen` modules, `#Extern` modules, and
+skip declarations inside `@Bindgen` modules, `@Extern` modules, and
 `extern rust` blocks. Call sites use the foreign spelling verbatim, so a name
 in Jet code matches the C header and the library's documentation. Ordinary
 Jet modules stay fully enforced; the exemption boundary is a module kind sema
@@ -1687,7 +1711,7 @@ Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `pkg.jet`
 `deps:` → pkg-config fallback → E3201. C deps are link deps, never packages.
 `jet inspect bind` uses a native std-only C-prototype parser (`Source/CBind.rs`);
 binds scalars and `char*`↔String; `#define` constants only. Old
-`@extern`/`#extern` spellings E0060. `#Bindgen`/`#Extern` PascalCase.
+`@extern`/`#extern` spellings E0060. `@Bindgen`/`@Extern` PascalCase.
 
 **D-CABI-CALLBACK1=A / D-CABI-RESULT1=C / D-CABI-PLATFORM1=A** *(ratified
 2026-07-11, card #436)*: C callbacks accept only C-convention function values
@@ -1700,7 +1724,7 @@ nullable callback, or alternate callback ABI. Unsupported cases are E3203.
 Generic `Result<T, E>` remains illegal in C declarations: expose a raw C status
 plus out-pointer function and write an ordinary Jet wrapper that initializes
 the out value and maps the status. The compiler invents no error adapter.
-`#Abi(name)` is a per-function marker with no module inheritance. Omission means
+`@Abi(name)` is a per-function marker with no module inheritance. Omission means
 C. `system` selects the target-native convention; `cdecl`, `stdcall`, and
 `fastcall` exist only on Windows x86, `win64` only on Windows x86_64, and
 `sysv64` only on non-Windows x86_64. ARM/AArch64 accept only C/system.
@@ -1712,26 +1736,26 @@ taken as values. Bindgen records both portable declared `system` and the
 resolved target ABI.
 
 **D-FFI-INLINE1=A — inline foreign tier** *(ratified 2026-07-11, card
-#501; owner ratification comment renames the marker: **`#FFI(<lang>)`**,
+#501; owner ratification comment renames the marker: **`@FFI(<lang>)`**,
 not `#Foreign` — FFI fully capitalized per S66)*: the fourth D-FFI-UNIFY1
-tier. `#FFI(<lang>) fn` declares an
+tier. `@FFI(<lang>) fn` declares an
 ordinary Jet signature whose body is one multi-line string of foreign
 source. Sema checks every call site against the signature; the language's
 binder compiles the body on cache miss through the same machinery as the
 script tier; a body/signature mismatch is a Jet diagnostic naming both
 sides (I2). Effects declare like any extern; unsafe-language bodies
-(c, cpp, asm) additionally require the enclosing `#Unsafe("reason")` gate
+(c, cpp, asm) additionally require the enclosing `@Unsafe("reason")` gate
 (S58). One shape for every current and future language.
 
 **D-FFI-ASM1=A — inline assembly** *(ratified 2026-07-11, card #501; the
 `asm` instance of the D-FFI-INLINE1 tier, whose ratification cleared this
-entry's gate; owner comment: spelled **`#FFI(asm)`**)*: `#FFI(asm) fn`
+entry's gate; owner comment: spelled **`@FFI(asm)`**)*: `@FFI(asm) fn`
 bodies are per-target assembly with the Jet
 signature as the operand contract (parameters map to inputs, the return
 value to outputs, named `; -> return` anchors). Requires `use core.mem`
-plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
+plus an enclosing `@Unsafe("reason")` (S58); outside the gate is E0208-class.
 Target variants select via the existing `comptime if build.os ==` /
-`#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
+`@Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
 functions on top — beginners meet only the named functions.
@@ -1791,7 +1815,7 @@ the D-FFI-PY1 precedent):**
   **D-FFI-COM1=A** — `com.*` Windows COM/IDispatch automation root,
   Windows-gated (honest error elsewhere); typed stubs generated from
   type libraries via `jet inspect bind com` (committable); dynamic
-  IDispatch fallback behind `#Unsafe`; the Office/VBA estate becomes
+  IDispatch fallback behind `@Unsafe`; the Office/VBA estate becomes
   automatable and migratable. **D-FFI-PWSH1=A** — `pwsh.*` sidecar
   PowerShell 7+ worker; cmdlet objects cross as `DataTree`; pipelines
   callable. **D-FFI-DART1=A** — dual surface: `dart.*` library binder
@@ -1817,12 +1841,12 @@ the D-FFI-PY1 precedent):**
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
 tier (`use "xxhash.h" as xx` — bind on first compile), project tier
 (`use py.h5instrument as h5`, dep pinned in `pkg.jet` as
-`<lib>: <lang>@"ref"`), overlay tier (`#Extern module <lang>.<lib> { … }`,
+`<lib>: <lang>@"ref"`), overlay tier (`@Extern module <lang>.<lib> { … }`,
 overlay wins). `jet inspect bind <lang>` is a per-language binder emitting
 inspectable bindings in `.jet/bindings/<lang>/<lib>.jet`. Generated bindings
 are safe wrappers by construction (marshaling internals compiler-vetted like
 std internals — I1); calling a foreign symbol outside a binding requires
-`#Unsafe("reason")`. In-situ replacement: any `<lang>.<lib>` can be shadowed
+`@Unsafe("reason")`. In-situ replacement: any `<lang>.<lib>` can be shadowed
 by a Jet package exporting the same surface — call sites never change.
 Binder diagnostics are Jet diagnostics with codes and snapshots (I2/I4); no
 foreign toolchain error reaches the user unlaundered. One structure for all
@@ -1838,7 +1862,7 @@ moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` surface, host chosen by
 compile target — browser JS engine on the web target, QuickJS/componentize-js
 WASM component on wasmtime for native targets. `jet inspect bind js` generates
 committable typed stubs from a package's `.d.ts` — this AMENDS D-NPMTYPE1's
-hand-authored-only floor; no-`.d.ts` packages get a `#Unsafe`-gated dynamic
+hand-authored-only floor; no-`.d.ts` packages get a `@Unsafe`-gated dynamic
 surface; Node-subprocess broker is an opt-in tier. **D-FFI-SWIFT1 (=A)**:
 swift-bridge-style generated projection over the fixed C-ABI transport
 (D-JSWIFTFFI1) — `jet inspect bind swift` runs swiftc to emit `@_cdecl` shims +
@@ -1884,7 +1908,7 @@ npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 **D-REPLCOREEFFECT1=A (ratified 2026-07-11)**: `jet repl` uses the existing
-effect model for ambient Core calls. An enclosing `#Grant(root)` supplies
+effect model for ambient Core calls. An enclosing `@Grant(root)` supplies
 lexical authority. Interactive sessions then authorize the exact
 `(root, operation, resource)` tuple once or for the in-memory session;
 reusing session authority offers continue or revoke before execution.
@@ -1892,7 +1916,7 @@ reusing session authority offers continue or revoke before execution.
 Non-TTY and transcript sessions never prompt and deny effects without the
 matching allow flag. Filesystem operations stay within the REPL project root
 and reject absolute paths, parent traversal, and symlinks. `Exec.Exit` always
-gets its own consequence prompt interactively and needs both `#Grant(Exec)`
+gets its own consequence prompt interactively and needs both `@Grant(Exec)`
 and `--allow-exec` outside a TTY.
 
 **D-FE-REPL-HISTORY1=A (ratified 2026-07-11)**: `jet repl` persists the
@@ -2016,12 +2040,12 @@ binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 `encode`/`decode` verbs over `DataTree`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `DecodeError
 { path, reason }`; encode infallible. Field markers (`#` plane):
-`#[Rename("x")]`, `#[Skip]`, `#[Default]`/`#[Default(expr)]`, `#[Flatten]`,
-`#[RenameAll(camel|snake|pascal|kebab|screaming)]` (E2409). Enum wire:
-externally tagged default, single-value variants bare; `#[Tag("type")]`
-internal (single unnamed payload under `"value"`), `#[Untagged]`. Unknown wire
+`@[Rename("x")]`, `@[Skip]`, `@[Default]`/`@[Default(expr)]`, `@[Flatten]`,
+`@[RenameAll(camel|snake|pascal|kebab|screaming)]` (E2409). Enum wire:
+externally tagged default, single-value variants bare; `@[Tag("type")]`
+internal (single unnamed payload under `"value"`), `@[Untagged]`. Unknown wire
 keys ignored by default;
-`#[DenyUnknownFields]` errors (E2412). Generic `@Codable` auto-adds
+`@[DenyUnknownFields]` errors (E2412). Generic `@Codable` auto-adds
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.
@@ -2054,7 +2078,7 @@ hidden alias, alternate codec, or fallback exists.
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with
-`.lines()`/`.read_line()` (D-STDIN1). Scoped `#Live { … }` raw-terminal block (respelled by D-BLOCKPLANE1, 2026-07-12)
+`.lines()`/`.read_line()` (D-STDIN1). Scoped `@Live { … }` raw-terminal block (respelled by D-BLOCKPLANE1, 2026-07-12)
 with guaranteed restore (D-TERM1). `core.log` auto-detects TTY (text) vs
 piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
 
@@ -2132,7 +2156,7 @@ index, not a substitute for that law.
   remain unchanged, so Bcc stays envelope-only. `SmtpConfig` contains host,
   port, `.StartTls`/`.Tls` security, `.None`/`.Password` auth,
   `.RequireAll`/`.DeliverAccepted` recipient policy, verified system or
-  system-plus-CA trust, and bounded `Limits`. Ambient `#Context` alone owns
+  system-plus-CA trust, and bounded `Limits`. Ambient `@Context` alone owns
   deadline and cancellation. `SendReport` records server, accepted and rejected
   recipient reports, final response, and acceptance time; acceptance never
   claims inbox delivery. `EmailError` is the closed Configuration, Dns, Connect,
@@ -2307,7 +2331,7 @@ index, not a substitute for that law.
   unsupported operations, DNS, TLS, protocol errors, and other OS failures.
   Operation/address/name are stable data; an OS code is optional audit data.
 - **D-NETTASK1=A**: blocking-looking calls on the one socket-handle family
-  observe the current `#Context`, yield through the shared runtime where
+  observe the current `@Context`, yield through the shared runtime where
   available, and obey the earliest context, persistent socket, or explicit
   per-call deadline. The same handles expose readiness; cancellation and
   expiry are distinct `.Cancelled` and `.Timeout` values. **Implementation
@@ -2424,7 +2448,7 @@ xchacha20poly1305_open,aes256gcm_seal,aes256gcm_open,ed25519_sign,
 ed25519_verify_strict,x25519,hkdf_sha256,argon2id}` plus the explicit
 `secret_bytes`, `signing_key_bytes`, `x25519_secret_bytes`, and
 `shared_secret_bytes` exposure functions (D-CRYPTO-API1). Every call requires
-an audited `#Unsafe` region (D-CRYPTOENV1, E0510/E0511). Secret-bearing values
+an audited `@Unsafe` region (D-CRYPTOENV1, E0510/E0511). Secret-bearing values
 are move-only and cannot use ordinary equality, printing, interpolation,
 reflection, hashing, or serialization; use constant-time operations or an
 explicit expert exposure instead. Versioned `JETC` envelope headers give
@@ -2440,7 +2464,7 @@ sealing snapshots and revalidates the source before its four independent RNG
 requests, and neither operation overwrites or exposes partial output. Safe open
 accepts v2 only and collapses attacker-controlled parse, recipient, and auth
 failures to `FileCryptoError.OpenFailed`. Legacy v1 is confined to the ratified
-expert `open_v1`/`migrate_v1` path under `#Unsafe`; no v1 writer exists.
+expert `open_v1`/`migrate_v1` path under `@Unsafe`; no v1 writer exists.
 `crypto.file_inspect` is parse-only and never authenticates. Secret material
 and plaintext staging buffers are zeroized on every exit. The exact format,
 nonce/AAD domains, parser caps, atomic publication rules, cancellation points,
@@ -2490,7 +2514,7 @@ overlapping gzip rows of D-DEP-ARCHIVE1/D-CODECS1.
 `Matrix<M,N>` substrate (const-generic substrate tracked by #293) (D-MATHLIB1,
 D-LINALG1). `core.db`: backend-neutral `Driver` trait, parameterized-only
 API, SQLite first; explicit `.begin/.commit/.rollback` distinct from
-`#Transact` (D-DBDRIVER1). D-DBMIGRATE1 ships the hybrid database floor:
+`@Transact` (D-DBDRIVER1). D-DBMIGRATE1 ships the hybrid database floor:
 checked `Sql` literals feed `db.params(sql)`, rows stay inspectable maps with
 typed `db.row_*` reads, and `db.transaction`/`db.migrate` provide rollback and
 checksum-recorded migration helpers over the same parameterized path. `core.http`: client+server submodules; client
@@ -2514,7 +2538,9 @@ back to owned values or `Pool<T>`/`Id<T>`; removing the opt-in is the supported
 end state. The collector is D-DEP-GC1=A's pure-Rust, std-only mark-sweep engine;
 it is an internal substrate, not a second source mechanism. Option C's explicit
 `core.gc` / `Gc<T>` handle surface is retired; scoped automatic promotion is
-the one GC path (I8). An external collector still needs a separate I6 ballot.
+the one GC path (I8). Nested stores and later mutations update deterministic
+collector edges, including cycles, while source values remain bare. An external
+collector still needs a separate I6 ballot.
 Approximate/sketch algos
 are libraries (D-APPROX1); parallelism stays explicit `par_*`
 (D-AUTOPAR1); adaptive fidelity is a manual runtime-global knob:
@@ -2526,7 +2552,7 @@ D-ADAPT-PROVIDER1=A).
 **Reactive, events & UI stack** *(D-REACT1, D-REACTCORE1, D-SIGNAL1, D-EVENT1,
 D-RENDERTGT1/2, D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-LAYOUT1,
 D-OWNCOMP1, D-A11Y1, D-NATIVEUI1/2)*: reactivity is a library + explicit
-`#Reactive` scope marker (E2914) lowering onto `core.reactive` — `Signal<T>`
+`@Reactive` scope marker (E2914) lowering onto `core.reactive` — `Signal<T>`
 (`.get()/.set(v)`), `Computed<T>`, `Effect`; explicit-by-read subscription;
 pure std runtime (E2910–E2913). Events and hooks are compiler-known Core values
 in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,
@@ -2543,7 +2569,7 @@ widget FFI, all three desktop platforms against one trait seam *(gated)*.
 #505)*: `app.live(query, args)` accepts only a function whose effect row
 is inside `Db.Read` and whose body is `@Pure` modulo those reads;
 anything else is a compile error naming the offending effect. Sema
-records the query's read footprint; a committed `#Transact` whose write
+records the query's read footprint; a committed `@Transact` whose write
 set intersects a live footprint invalidates exactly those subscriptions,
 re-runs them, and pushes results over `core.ws` into a client
 `Signal<T>` (D-REACT1). No invalidation keys exist. Runs in `jet dev`
@@ -2579,17 +2605,17 @@ and `DbConnection`/`DbError` nameability, with a runnable example
 (`examples/features/io/db_read_footprint.jet`). The remaining `app.live`
 legs — the `app` namespace / app graph (D-WEBAPP1, card #438), the
 `core.ws` push transport (D-WS1; a native std-only WebSocket, I6 forbids a
-crate), the client `Signal<T>` binding, and the `#Transact` write-set
+crate), the client `Signal<T>` binding, and the `@Transact` write-set
 publication + invalidation scheduler — ride unbuilt infrastructure owned
 by cards #438 and #134 and are not yet implemented.
 
 **Web target** *(D-WEBKIND1, D-DOMGEN1, D-WEBBACKEND1, D-OSTARGET1,
 D-WEBDEFAULT1, D-HTMLPAIR1)*: browser target is `wasm32-unknown-unknown` +
 generated JS loader; DOM work goes through a tiny first-party `JetDom` shim
-(no vdom); hybrid: view emits JS, compute may compile to WASM. `#Target(…)`
+(no vdom); hybrid: view emits JS, compute may compile to WASM. `@Target(…)`
 takes `Web`/`Browser`/`Wasm`/`Js` and `Os.Linux`/`Os.Macos`/`Os.Windows`
 (mixing web+OS on one item rejected). Default target: CLI `--target` >
-`pkg.jet` `target:` > file marker. `#Html("path.html")` names a companion
+`pkg.jet` `target:` > file marker. `@Html("path.html")` names a companion
 page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `Os.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
@@ -2597,7 +2623,7 @@ error). `Os.*` gates a single `impl` block (item-scoped), not a file/module —
 the surviving OS-gated impl through a comptime dispatch on `build.os` — a
 compiler-known comptime value matched with `.Linux`/`.Macos`/`.Windows`
 arms; non-matching arms are discarded before OS-gating checks run.
-fn-level `#Target(Os.*)` gating (option A) rejected.
+fn-level `@Target(Os.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
 build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
 `if subject == { }` if-table) with the existing `comptime if` lead (D-WHEN1) —
@@ -2651,11 +2677,11 @@ it so tests/CI terminate. Example:
 `tests/cross.rs` (`gtk_backend_*`). macOS/Windows native backends stay out of
 scope (their `comptime` arms degrade honestly).
 **D-STYLEUNIT1 (=A, ratified 2026-07-03, c2qj06uq)**: UI style lengths are
-unit-family literals — `core.ui.style` declares `#UnitFamily(length) { px }`
+unit-family literals — `core.ui.style` declares `@UnitFamily(length) { px }`
 (D-QUAL3), so `width: 320px` is a compile-checked `Px` value via the one
 ratified unit mechanism (D-UNITLIT1); no second style-only unit system (I8).
 Supersedes Phase 3's interim `Length` struct pair. *Shipped* (Tower c134):
-`examples/features/ui/ui_typed_style.jet` declares `#UnitFamily(length) { px }`
+`examples/features/ui/ui_typed_style.jet` declares `@UnitFamily(length) { px }`
 and its `Style` record carries `width: Px`/`height: Px`; the interim `Length`
 struct/enum pair is deleted. Landing this required closing a standing typed-IR
 gap — a distinct-typed struct/enum field (`width: Px`, `Length(Px)`) was not
@@ -2985,7 +3011,7 @@ D-FRONTENDAPI1, D-DSLBLOCK1, D-METAMUTATE1)*: compile-time build entry is
 `fn build(b: BuildContext)`, living in the unit's own definition file (beside
 `fn run` / in `pkg.jet` / in `workspace.jet`); `jet build` runs it when
 defined, else the batteries pipeline. Build code is tiered: Tier 1
-pure+locked by default; Tier 2 needs `#Impure("reason")` + explicit
+pure+locked by default; Tier 2 needs `@Impure("reason")` + explicit
 permission + provenance; deps never get Tier 2 implicitly. Generated source
 lands under `.jet/generated/`, never committed; lock records source+output
 hashes. Profiles: `Build.{optimize, debug_info, small, panic, features,
@@ -3022,7 +3048,7 @@ component plugins under policy; both emit the same BuildPlan graph. D-FRONTENDAP
 `core.compiler` exposes stable read-only lexer/parser/check/semindex/source-map
 value APIs plus a CLI JSON mirror; internal compiler crates stay private and no
 AST mutation enters compilation. D-DSLBLOCK1=A: stdlib-only PascalCase
-directive DSL blocks such as `#Sql<Row> { ... }` and `#Html { ... }` are a
+directive DSL blocks such as `@Sql<Row> { ... }` and `@Html { ... }` are a
 fixed whitelist in `Syntax.rs`; third-party grammar mutation is rejected.
 D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
 the power surface is additive generated modules/overlays, registered
@@ -4057,7 +4083,7 @@ precision, effects, failure shape, or observable results.
 bounds, alias/race freedom, captures, barrier uniformity, and control flow before
 an ordinary Jet function becomes a kernel. Failure names the unmet obligation;
 there is no unproved fallback. Atomics/reorderable reductions require recorded
-policy. Raw device code is confined to `#Unsafe("reason")` with typed boundary
+policy. Raw device code is confined to `@Unsafe("reason")` with typed boundary
 contracts and differential-test requirements.
 
 **D-COMPUTE-AUTODIFF1=D — reverse default, composable transforms**:
@@ -4223,17 +4249,17 @@ Bare `jet self lsp` is E2101 before external-command discovery, preserves follow
 argv in its replacement, exits 2, and never starts a server. Help, palette,
 man pages, and completions advertise only canonical grouped spellings.
 
-**D-JPK-TASKRUN1=A — tasks are `#Task fn`**: a task is an ordinary Jet
-function marked `#Task`, living beside `fn run()`. Reuses typed-argument CLI
+**D-JPK-TASKRUN1=A — tasks are `@Task fn`**: a task is an ordinary Jet
+function marked `@Task`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-task dependency is a plain
 function call, no separate DAG syntax. Invoked `jetpack run <name>`. `run`,
 `dev`, `build`, `test` remain reserved lifecycle verb names a task cannot
 reuse.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
-#505)*: `#Every(…)` is a directive marker on a `#Task fn`
-(D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1);
-`#Every("03:00")` takes a daily wall-clock time; both are
+#505)*: `@Every(…)` is a directive marker on a `@Task fn`
+(D-JPK-TASKRUN1). `@Every(5min)` takes a duration literal (D-UNITLIT1);
+`@Every("03:00")` takes a daily wall-clock time; both are
 compile-checked. One declaration feeds every consumer: `jet dev` runs
 due tasks in the dev loop, the service runtime (D-SERVICE1) schedules
 them in production, a jetos generation projects them as timer units.
@@ -4241,18 +4267,18 @@ Complex calendars (cron expressions, timezones, jitter) stay with the
 runtime API or jetos timers; operator-side cadence overrides live at the
 jetos/service layer with explain provenance.
 
-*Shipped 2026-07-12 (card #505, slice 2)*: `#Task fn` (D-JPK-TASKRUN1) and
-`#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
+*Shipped 2026-07-12 (card #505, slice 2)*: `@Task fn` (D-JPK-TASKRUN1) and
+`@Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
 dev`'s watch loop runs due tasks on their own schedule (UTC for
-`#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
+`@Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
 job per this same law).
 
-*Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `#Task fn
-run|dev|build|test` (E0928); `jetpack run <name>` discovers `#Task fn`s in
+*Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `@Task fn
+run|dev|build|test` (E0928); `jetpack run <name>` discovers `@Task fn`s in
 the project entry and dispatches via `jet run --task <name> <entry>`
 (D-JPK-DISPATCH1); unknown names list declared tasks (E1294). Typed task
 args reuse D-CLIFLAG1 once the task is the entry. Entry dispatch injects a
-synthetic `fn run { task(…) }` wrapper so the selected `#Task fn` keeps its
+synthetic `fn run { task(…) }` wrapper so the selected `@Task fn` keeps its
 name — a sibling's plain-call dependency (ballot: dependency = plain
 function call) does not die with E0102. D-SERVICE1 still has no typed
 builder/worker/group to carry a schedule into a service runtime — that
@@ -4273,7 +4299,7 @@ emit E1298 (JPK-TOOL-PROVIDER) instead of silent skip. `tool install` writes
 real symlinks under `~/.jet/bin` plus generation metadata at
 `~/.jet/tools/generations/<n>/` (profile `"tools"`) — a minimal isolated
 install until the shared D-JPK-PROFILE1 `jet profile` front door is the
-caller. Bin/`#Task fn` collision is E1297 (JPK-TOOL-COLLIDE).
+caller. Bin/`@Task fn` collision is E1297 (JPK-TOOL-COLLIDE).
 
 **D-JPK-PKGOVERRIDE1=B — keyed override record inside `overlay`**: a
 package's version/flags/env/patch overrides live under one
@@ -4445,7 +4471,7 @@ Control flow).
 **S25 — comparison distribution**: retired by D-S25-RETIRE1; use `|`.
 **S29 — dotless struct literal**: superseded by D-DOTCTOR2 `T.{ }` (E0320).
 **S35 — `or` fallback**: superseded by `??` (S71).
-**S43 — `test` blocks**: superseded by `#Test("name")` (see Testing).
+**S43 — `test` blocks**: superseded by `@Test("name")` (see Testing).
 **S53 — concurrency**: deferred past v1.0 (see Capabilities & memory).
 **S81 — `?continue`**: superseded by `expr ?? continue` (D-ORRETURN-CANON1).
 **U1 / U10 filenames, D-JPK3/8/13, D-BIND1/2, D-ATTR1/3, D-CAP1/2-words,

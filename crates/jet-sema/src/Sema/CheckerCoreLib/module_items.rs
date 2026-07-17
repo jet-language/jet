@@ -207,7 +207,6 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
-        "core.gc" => &["Gc", "collect"],
         "core.solve" => &["Solver"],
         "core.game" => &["Scene", "Replay", "Backend", "run"],
         "core.data" => &[
@@ -444,7 +443,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "sha512",
             "constant_time_equal",
         ],
-        // D-CRYPTO-API1=A: exact expert surface — every call is #Unsafe-gated.
+        // D-CRYPTO-API1=A: exact expert surface — every call is @Unsafe-gated.
         "core.crypto.expert" => &[
             "xchacha20poly1305_seal",
             "xchacha20poly1305_open",

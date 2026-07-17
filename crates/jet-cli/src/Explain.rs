@@ -104,6 +104,44 @@ pub fn lookup(code: &str) -> Option<Explanation> {
     index()
         .into_iter()
         .find_map(|(k, v)| if normalize(&k) == want { Some(v) } else { None })
+        .or_else(|| {
+            let key = jet_foundation::Policy::PolicyKey::parse(code.trim())?;
+            Some(Explanation {
+                code: key.name().to_string(),
+                stage: "policy".to_string(),
+                meaning: format!("compiler-owned scoped policy `{}`", key.name()),
+                what: Some(format!("`{}` participates in the package → module → function → block policy ladder.", key.name())),
+                why: Some("one registry owns applicability, inheritance, conflicts, and provenance".to_string()),
+                fix: Some("inspect the semantic index at the target site for the effective value and full declaration chain".to_string()),
+                retired: false,
+            })
+        })
+        .or_else(|| {
+            let row = jet_foundation::Policy::applied_rule(code.trim())?;
+            Some(Explanation {
+                code: row.name.to_string(),
+                stage: "rule applicability".to_string(),
+                meaning: format!("`@{}` applicability", row.name),
+                what: Some(format!("`@{}` may attach at: {:?}.", row.name, row.sites)),
+                why: Some(format!("resolution is {:?}; site-bound authority never becomes ambient policy", row.resolution)),
+                fix: Some("move the rule to one of its registered sites".to_string()),
+                retired: false,
+            })
+        })
+}
+
+/// Existing `jet explain` rendering for one effective policy at a concrete site.
+pub fn lookup_policy(key: jet_foundation::Policy::PolicyKey, declarations: impl IntoIterator<Item = jet_foundation::Policy::PolicyDeclaration>) -> Option<Explanation> {
+    let effective = jet_foundation::Policy::resolve(key, declarations).ok()??;
+    Some(Explanation {
+        code: key.name().to_string(),
+        stage: "policy".to_string(),
+        meaning: format!("effective scoped policy `{}`", key.name()),
+        what: Some(jet_foundation::Policy::explain(&effective)),
+        why: Some("the nearest applicable declaration wins subject to the registry's tightening and conflict rules".to_string()),
+        fix: Some("change the nearest declaration, or remove it to inherit the next outer value".to_string()),
+        retired: false,
+    })
 }
 
 /// Render the offline essay for a code. Uses readable, beginner-friendly

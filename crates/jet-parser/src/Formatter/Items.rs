@@ -12,7 +12,7 @@ enum EnumFmtEntry<'b> {
 
 impl<'a> Fmt<'a> {
     pub(super) fn fmt_meta_attr(&mut self, meta: &MetaAttr) {
-        self.write(&format!("#{}(", Syntax::ATTR_META));
+        self.write(&format!("@{}(", Syntax::ATTR_META));
         for (idx, field) in meta.fields.iter().enumerate() {
             if idx > 0 {
                 self.write(", ");
@@ -259,7 +259,7 @@ impl<'a> Fmt<'a> {
 
     fn fmt_extern_fn(&mut self, ef: &ExternFn) {
         if let Some((abi, _)) = &ef.abi {
-            self.write(&format!("#{}({}) ", Syntax::ATTR_ABI, abi));
+            self.write(&format!("@{}({}) ", Syntax::ATTR_ABI, abi));
         }
         self.write("fn ");
         self.write(&ef.name);
@@ -283,9 +283,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_test(&mut self, t: &crate::AST::TestDef) {
-        self.write(&format!("#{}", Syntax::KW_TEST));
-        // D-TESTPAREN1=A: unit-test block form is `#Test("name") { … }` — no space before `(`.
-        // D-TEST1: property test form is `#Test fn name(params) { … }` — space before `fn`.
+        self.write(&format!("@{}", Syntax::KW_TEST));
+        // D-TESTPAREN1=A: unit-test block form is `@Test("name") { … }` — no space before `(`.
+        // D-TEST1: property test form is `@Test fn name(params) { … }` — space before `fn`.
         if t.params.is_empty() && t.fn_keyword_span.is_none() {
             self.write("(\"");
             self.write(&t.name.replace('\\', "\\\\").replace('"', "\\\""));
@@ -310,9 +310,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_bench(&mut self, b: &crate::AST::BenchDef) {
-        self.write(&format!("#{}", Syntax::KW_BENCH));
+        self.write(&format!("@{}", Syntax::KW_BENCH));
         // D-BENCH-MARKER1=A: benchmark blocks use the same parenthesized
-        // marker-argument shape as `#Test("name")`.
+        // marker-argument shape as `@Test("name")`.
         self.write("(\"");
         self.write(&b.name.replace('\\', "\\\\").replace('"', "\\\""));
         self.write("\")");
@@ -346,7 +346,7 @@ impl<'a> Fmt<'a> {
         self.write(trait_name);
     }
 
-    /// D-ATTR2 / D-SERDE2–8: render one `#[…]` marker (name + optional `(args)`).
+    /// D-SHAPE2 / D-SERDE2–8: render one applied rule.
     fn fmt_marker(&mut self, m: &Marker) {
         self.write(&m.name);
         if !m.args.is_empty() {
@@ -364,24 +364,14 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// D-MARKER-FAMILY1/G2: render leading type-marker prefixes, split into the
-    /// contract plane (`@`) and directive/serde plane (`#`) — one marker on a
-    /// plane is `@A`/`#A` when it sits immediately before `struct`/`enum`;
-    /// otherwise `@[A, B]`/`#[A, B]` (D-ATTR1/D-ATTR2). Both groups may stack
-    /// on one declaration (`@[Codable] #[RenameAll(camel)] struct …`).
+    /// D-SHAPE2: render the declaration's one applied-rule group. A lone rule
+    /// may use `@A`; multiple rules use `@[A, B]`.
     fn fmt_type_markers(&mut self, markers: &[Marker], lone_hash_ok: bool) {
         if markers.is_empty() {
             return;
         }
-        // D-MARK-DEBUG1 follow-up (card #498): re-emit under the sigil the
-        // marker was actually WRITTEN with, not `is_contract_marker`'s
-        // legality classification — a retired-but-still-typeable name (e.g.
-        // `Debug`) must round-trip byte-identically even after it leaves
-        // `CONTRACT_MARKERS`.
-        let contract: Vec<&Marker> = markers.iter().filter(|m| m.sigil == '@').collect();
-        let directive: Vec<&Marker> = markers.iter().filter(|m| m.sigil != '@').collect();
-        self.fmt_marker_group(&contract, Syntax::CONTRACT_PREFIX, lone_hash_ok);
-        self.fmt_marker_group(&directive, Syntax::ATTR_PREFIX, lone_hash_ok);
+        let rules: Vec<&Marker> = markers.iter().collect();
+        self.fmt_marker_group(&rules, Syntax::RULE_PREFIX, lone_hash_ok);
     }
 
     /// One marker-list group on a single plane. `sigil` is `"@"` or `"#"`.
@@ -407,20 +397,20 @@ impl<'a> Fmt<'a> {
         self.newline();
     }
 
-    /// D-REPRC1/D-SOA1: `#Layout(c)` / `#Layout(columnar)` on its own line.
+    /// D-REPRC1/D-SOA1: `@Layout(c)` / `@Layout(columnar)` on its own line.
     fn fmt_layout(&mut self, layout: &Option<StructLayout>) {
         if let Some(l) = layout {
             let variant = match l {
                 StructLayout::C => Syntax::LAYOUT_C,
                 StructLayout::Columnar => Syntax::LAYOUT_COLUMNAR,
             };
-            self.write(&format!("#{}({})", Syntax::ATTR_LAYOUT, variant));
+            self.write(&format!("@{}({})", Syntax::ATTR_LAYOUT, variant));
             self.newline();
         }
     }
 
     /// Body `derive Name` lines for a type, minus the derives that the leading
-    /// `#[…]` markers already account for. `Codable` expands to `Encode`+`Decode`;
+    /// `@[…]` rules already account for. `Codable` expands to `Encode`+`Decode`;
     /// `Encode`/`Decode` and any user-trait marker map to themselves. The remaining
     /// `derives` came from `derive Name` lines in the body and must re-emit there.
     fn body_derive_lines(derives: &[(String, Span)], type_markers: &[Marker]) -> Vec<String> {
@@ -473,65 +463,69 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
+        let policies = self.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Function && d.target == Some(f.span) && d.key != crate::Policy::PolicyKey::Unsafe).cloned().collect::<Vec<_>>();
+        if !policies.is_empty() {
+            self.fmt_policy_declarations(&policies);
+            self.write(" ");
+        }
         if let Some(meta) = &f.meta {
             self.fmt_meta_attr(meta);
             self.newline();
         }
-        // S58 (E2-M13): `#Unsafe` whole-function contract sits on its own line.
-        if f.is_unsafe {
-            match &f.unsafe_reason {
-                Some(reason) => self.write(&format!(
-                    "#{}(\"{}\")",
-                    Syntax::KW_UNSAFE,
-                    escape_str_lit(reason)
-                )),
-                None => self.write(&format!("#{}", Syntax::KW_UNSAFE)),
+        // S58 (E2-M13): `@Unsafe` whole-function contract sits on its own line.
+        if f.is_unsafe && crate::Policy::rule_allows(Syntax::KW_UNSAFE, crate::Policy::RuleSite::Function) {
+            let site_mode = self.policy_declarations.iter().find(|declaration| declaration.key == crate::Policy::PolicyKey::Unsafe && declaration.target == Some(f.span)).map(|declaration| declaration.value);
+            match (&f.unsafe_reason, site_mode) {
+                (Some(reason), Some(mode)) => self.write(&format!("@{}(\"{}\", obligations: {})", Syntax::KW_UNSAFE, escape_str_lit(reason), mode.display())),
+                (None, Some(mode)) => self.write(&format!("@{}(obligations: {})", Syntax::KW_UNSAFE, mode.display())),
+                (Some(reason), None) => self.write(&format!("@{}(\"{}\")", Syntax::KW_UNSAFE, escape_str_lit(reason))),
+                (None, None) => self.write(&format!("@{}", Syntax::KW_UNSAFE)),
             }
             self.newline();
         }
-        // D-FFI-INLINE1=A (card #501): the `#FFI(<lang>)` inline foreign tier
-        // marker sits on its own line before `fn`, directly after any `#Unsafe`
-        // gate (matching the ratified rdtsc example: `#Unsafe(…)` then
-        // `#FFI(asm)`).
+        // D-FFI-INLINE1=A (card #501): the `@FFI(<lang>)` inline foreign tier
+        // marker sits on its own line before `fn`, directly after any `@Unsafe`
+        // gate (matching the ratified rdtsc example: `@Unsafe(…)` then
+        // `@FFI(asm)`).
         if let Some(inl) = &f.inline_foreign {
-            self.write(&format!("#{}({})", Syntax::ATTR_FFI, inl.lang));
+            self.write(&format!("@{}({})", Syntax::ATTR_FFI, inl.lang));
             self.newline();
         }
-        // D-WASM1: `#Wasm` / `#Js` / `#WasmExport` per-function web partition
+        // D-WASM1: `@Wasm` / `@Js` / `@WasmExport` per-function web partition
         // override, on its own line before `fn`/`pub` (the convention every
         // web example uses; the parser skips the lexer-inserted `;` between
         // marker lines). fmt used to drop this marker entirely — every
         // browser-side function silently fell back to the Wasm bucket,
         // breaking the cross-partition checks in tests/web_build.rs.
         if let Some(marker) = f.web_marker {
-            self.write(&format!("#{}", marker.name()));
+            self.write(&format!("@{}", marker.name()));
             self.newline();
         }
-        // D-REACTCORE1: `#Reactive fn` marker precedes `pub`/`fn`.
+        // D-REACTCORE1: `@Reactive fn` marker precedes `pub`/`fn`.
         if f.is_reactive {
-            self.write(&format!("#{} ", Syntax::KW_REACTIVE));
+            self.write(&format!("@{} ", Syntax::KW_REACTIVE));
         }
         // S60 (D-CASING1 follow-on): `@Pure` marker precedes `pub`/`fn`.
-        if f.is_pure {
+        if f.is_pure && crate::Policy::rule_allows(Syntax::KW_PURE, crate::Policy::RuleSite::Function) {
             self.write(&format!("@{} ", Syntax::KW_PURE));
         }
-        // D-TAINT1: the `#Sanitizer` taint-strip modifier precedes `pub`/`fn`.
-        if f.is_sanitizer {
-            self.write(&format!("#{} ", Syntax::KW_SANITIZER));
+        // D-TAINT1: the `@Sanitizer` taint-strip modifier precedes `pub`/`fn`.
+        if f.is_sanitizer && crate::Policy::rule_allows(Syntax::KW_SANITIZER, crate::Policy::RuleSite::Function) {
+            self.write(&format!("@{} ", Syntax::KW_SANITIZER));
         }
-        // D-REPLAY1: `#Replayable` deterministic replay guard precedes `pub`/`fn`.
+        // D-REPLAY1: `@Replayable` deterministic replay guard precedes `pub`/`fn`.
         if f.is_replayable {
-            self.write(&format!("#{} ", Syntax::ATTR_REPLAYABLE));
+            self.write(&format!("@{} ", Syntax::ATTR_REPLAYABLE));
         }
-        // D-SCHEDULE1 (card #505): `#Task` / `#Every(…)` schedule-as-code
-        // markers precede `pub`/`fn`, `#Task` first (the parser accepts
+        // D-SCHEDULE1 (card #505): `@Task` / `@Every(…)` schedule-as-code
+        // markers precede `pub`/`fn`, `@Task` first (the parser accepts
         // either order; fmt canonicalizes on one so round-tripping is
         // idempotent).
         if f.is_task {
-            self.write(&format!("#{} ", Syntax::KW_TASK));
+            self.write(&format!("@{} ", Syntax::KW_TASK));
         }
         if let Some(every) = &f.every {
-            self.write(&format!("#{}(", Syntax::ATTR_EVERY));
+            self.write(&format!("@{}(", Syntax::ATTR_EVERY));
             match &every.arg {
                 crate::AST::EveryArg::Duration { int, float, suffix, .. } => {
                     if let Some(n) = int {
@@ -555,23 +549,23 @@ impl<'a> Fmt<'a> {
         }
         // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` precedes `pub`/`fn`, in
         // the same slot the parser checks (after `@MustUse`/`@Pure`/
-        // `#Sanitizer`, before the typestate markers).
+        // `@Sanitizer`, before the typestate markers).
         if f.is_inline_always {
             self.write(&format!("@{} ", Syntax::CONTRACT_INLINE_ALWAYS));
         } else if f.is_inline {
             self.write(&format!("@{} ", Syntax::CONTRACT_INLINE));
         }
-        // D-STATE1: typestate markers precede `pub`/`fn`. `#State(S)` is the
-        // require-state guard; `#Transition(From -> To)` is the transition (the
+        // D-STATE1: typestate markers precede `pub`/`fn`. `@State(S)` is the
+        // require-state guard; `@Transition(From -> To)` is the transition (the
         // from-state is `_` for an entry transition). Round-tripped verbatim so
         // `jet fmt` never drops a typestate contract.
         if let Some((state, _)) = &f.state_requires {
-            self.write(&format!("#{}({}) ", Syntax::KW_STATE, state));
+            self.write(&format!("@{}({}) ", Syntax::KW_STATE, state));
         }
         if let Some(tr) = &f.state_transition {
             let from = tr.from.as_deref().unwrap_or(Syntax::STATE_ENTRY);
             self.write(&format!(
-                "#{}({} -> {}) ",
+                "@{}({} -> {}) ",
                 Syntax::KW_TRANSITION,
                 from,
                 tr.to
@@ -658,6 +652,16 @@ impl<'a> Fmt<'a> {
         self.fmt_body(&f.body);
     }
 
+    pub(super) fn fmt_policy_declarations(&mut self, declarations: &[crate::Policy::PolicyDeclaration]) {
+        self.write(&format!("@{}(", Syntax::ATTR_POLICY));
+        for (i, declaration) in declarations.iter().enumerate() {
+            if i > 0 { self.write(", "); }
+            self.write(declaration.key.name());
+            if let crate::Policy::PolicyValue::Limit(limit) = declaration.value { self.write(&format!("({limit})")); }
+        }
+        self.write(")");
+    }
+
     fn fmt_param(&mut self, p: &Param) {
         // D-MEM1: capability is a sigil, never a word. The sigil rides the type
         // (`name: &Type`), or `self` for a receiver (`&self`). `Read` is
@@ -704,14 +708,13 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
-        // D-ATTR2/D-SERDE: the leading `#[…]` bracket-marker list (derives +
-        // container serde attrs), verbatim as the user wrote it.
+        // D-SHAPE2: the leading `@[…]` applied-rule list, verbatim.
         let lone_hash_ok =
             s.layout.is_none() && !s.is_published_schema && !s.is_single_use && !s.is_must_use;
         self.fmt_type_markers(&s.type_markers, lone_hash_ok);
-        // D-LIN1: `#SingleUse` precedes `pub`/`struct`, on the same line.
+        // D-LIN1: `@SingleUse` precedes `pub`/`struct`, on the same line.
         if s.is_single_use {
-            self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
+            self.write(&format!("@{} ", Syntax::ATTR_SINGLE_USE));
         }
         // D-MUSTUSE1 (c18iwxqx): `@MustUse` precedes `pub`/`struct`, on the same line.
         if s.is_must_use {
@@ -729,7 +732,7 @@ impl<'a> Fmt<'a> {
         {
             self.write(&format!("@{} ", Syntax::ATTR_PUBLISHED_SCHEMA));
         }
-        // D-REPRC1/D-SOA1: `#layout(…)` sits on its own line before the struct.
+        // D-REPRC1/D-SOA1: `@Layout(…)` sits on its own line before the struct.
         self.fmt_layout(&s.layout);
         if top_level {
             self.fmt_pub_qualifier(s.is_pub, s.is_package_pub);
@@ -740,7 +743,7 @@ impl<'a> Fmt<'a> {
         self.write(" {");
         self.newline();
         // Only `derive Name` lines the user wrote in the body re-emit here; derives
-        // lifted from the `#[…]` list are already rendered above.
+        // lifted from the `@[…]` list are already rendered above.
         let body_derives = Self::body_derive_lines(&s.derives, &s.type_markers);
         self.with_indent(|f| {
             for (i, field) in s.fields.iter().enumerate() {
@@ -795,12 +798,12 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_enum(&mut self, e: &EnumDef, top_level: bool) {
-        // D-ATTR2/D-SERDE: leading `#[…]` bracket-marker list, verbatim.
+        // D-SHAPE2: leading `@[…]` applied-rule list, verbatim.
         let lone_hash_ok = !e.is_single_use && !e.is_must_use;
         self.fmt_type_markers(&e.type_markers, lone_hash_ok);
-        // D-LIN1: `#SingleUse` precedes `pub`/`enum`, on the same line.
+        // D-LIN1: `@SingleUse` precedes `pub`/`enum`, on the same line.
         if e.is_single_use {
-            self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
+            self.write(&format!("@{} ", Syntax::ATTR_SINGLE_USE));
         }
         // D-MUSTUSE1 (c18iwxqx): `@MustUse` precedes `pub`/`enum`, on the same line.
         if e.is_must_use {
@@ -898,9 +901,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_variant_name_and_payload(&mut self, v: &Variant, name: &str) {
-        // D-SERDE5: per-variant `#[Rename("x")]` markers sit inline before the name.
+        // D-SERDE5: per-variant `@[Rename("x")]` markers sit inline before the name.
         if !v.serde_markers.is_empty() {
-            self.write("#[");
+            self.write("@[");
             for (i, m) in v.serde_markers.iter().enumerate() {
                 if i > 0 {
                     self.write(", ");
@@ -967,11 +970,11 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_impl(&mut self, i: &ImplDef) {
-        // D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os.Linux|Os.Macos|Os.Windows)`
+        // D-OSTARGET1=A (ratified 2026-07-01, c134): `@Target(Os.Linux|Os.Macos|Os.Windows)`
         // precedes the `impl` block it gates, on its own line.
         if let Some(os) = i.os_target {
             self.write(&format!(
-                "#{}({}.{})",
+                "@{}({}.{})",
                 Syntax::ATTR_TARGET,
                 Syntax::TARGET_OS_NAMESPACE,
                 os.name()
@@ -1035,8 +1038,8 @@ impl<'a> Fmt<'a> {
         }
         for attr in &c.attrs {
             match attr {
-                ConstAttr::ForceStatic => self.write("#static "),
-                ConstAttr::ForceInline => self.write("#inline "),
+                ConstAttr::ForceStatic => self.write("@static "),
+                ConstAttr::ForceInline => self.write("@inline "),
             }
         }
         self.write("const ");
@@ -1048,8 +1051,8 @@ impl<'a> Fmt<'a> {
     pub(super) fn fmt_import(&mut self, imp: &ImportDecl) {
         // Imports don't take `priv` — the parser only accepts `use …` (not
         // re-exported, the ambient default whether or not the file is
-        // `#PubFile`) or `pub use …` (re-exported). Unlike struct/fn/etc.,
-        // there's no `#PubFile`-relative "priv" spelling to fall back to, so
+        // `@PubFile`) or `pub use …` (re-exported). Unlike struct/fn/etc.,
+        // there's no `@PubFile`-relative "priv" spelling to fall back to, so
         // this can't route through `fmt_pub_qualifier` (that produced
         // unparseable `priv use …` output — a real fmt idempotence bug).
         if imp.is_package_pub {
@@ -1120,49 +1123,23 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// D-CLIFLAG1 / D-MARKER-FAMILY1: one field-marker group on a single
-    /// plane — always bracketed (`sigil[A, B]`), inline, no trailing
-    /// newline. Sibling of `fmt_marker_group` (struct/enum level), which
-    /// additionally unwraps a lone marker to bare `@A`/`#A` — field position
-    /// never does that (D-ATTR2's field grammar is bracket-only).
-    fn fmt_field_marker_group(&mut self, markers: &[&Marker], sigil: &str) {
-        if markers.is_empty() {
-            return;
-        }
-        self.write(sigil);
-        self.write("[");
-        for (i, m) in markers.iter().enumerate() {
-            if i > 0 {
-                self.write(", ");
-            }
-            self.fmt_marker(m);
-        }
-        self.write("] ");
-    }
-
     fn fmt_field(&mut self, field: &Field) {
-        // D-DEBUG-REDACT/D-MARKERMOVE1: `@[Redact]` (contract plane) sits
-        // inline before the field, ahead of any `#[…]` serde group (G2
-        // stacking). Field markers are bracket-only (no bare `@Redact`).
-        if field.redact {
-            self.write(Syntax::CONTRACT_PREFIX);
+        // D-SHAPE2: field rules share one inline `@[…]` group. Redact has a
+        // dedicated semantic bit, so fold it back into the same group here.
+        if field.redact || !field.serde_markers.is_empty() {
+            self.write(Syntax::RULE_PREFIX);
             self.write("[");
-            self.write(Syntax::ATTR_REDACT);
+            if field.redact {
+                self.write(Syntax::ATTR_REDACT);
+            }
+            for (i, marker) in field.serde_markers.iter().enumerate() {
+                if field.redact || i > 0 {
+                    self.write(", ");
+                }
+                self.fmt_marker(marker);
+            }
             self.write("] ");
         }
-        // D-SERDE5 / D-CLIFLAG1 (D-MARKER-FAMILY1/G2): field markers split by
-        // plane and sit inline before the field on the same line. A
-        // contract-plane marker (`@[Doc(...)]`) gets its own `@[...]` group;
-        // directive/serde markers (`#[Rename]`/`#[Skip]`/`#[Default]`/
-        // `#[Flatten]`) get their own `#[...]` group, contract first — same
-        // stacking order as struct-level `fmt_type_markers`. Both groups are
-        // always bracketed at field position (no bare `@Name` unwrap here —
-        // fields don't support it, unlike a lone struct/enum-level marker).
-        // D-MARK-DEBUG1 follow-up: sigil-based split, see `fmt_type_markers`.
-        let (contract_markers, directive_markers): (Vec<&Marker>, Vec<&Marker>) =
-            field.serde_markers.iter().partition(|m| m.sigil == '@');
-        self.fmt_field_marker_group(&contract_markers, Syntax::CONTRACT_PREFIX);
-        self.fmt_field_marker_group(&directive_markers, Syntax::ATTR_PREFIX);
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
         self.write(&field.name);
         self.write(": ");

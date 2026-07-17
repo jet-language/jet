@@ -29,7 +29,7 @@ fn run() {}
 
     let body_items = r#"
 module Complete<T, count: Int, label: String> {
-    #Meta(category: label)
+    @Meta(category: label)
     const VALUE = count
     comptime COMPTIME_VALUE = count + 1
     tag Marked;
@@ -40,19 +40,19 @@ module Complete<T, count: Int, label: String> {
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
-    #Target(Os.Linux)
+    @Target(Os.Linux)
     impl Wrapped { fn linux_value(self) -> T { return self.value } }
     module Plain { pub fn value() -> Int { return count } }
     module Nested<U> { pub fn keep(value: U) -> U { return ~value } }
     module NestedUse = Nested<T>
-    #Meta(category: label)
-    pub fn marked(value: #Marked T) -> #Marked T {
-        #Meta(category: label)
+    @Meta(category: label)
+    pub fn marked(value: @Marked T) -> @Marked T {
+        @Meta(category: label)
         local: T := value
         return ~local
     }
-    #Test fn identity(value: T) { expect(count == count) }
-    #Bench("complete") { expect(label == label) }
+    @Test fn identity(value: T) { expect(count == count) }
+    @Bench("complete") { expect(label == label) }
 }
 module CompleteUse = Complete<Int, 3, "generic module">
 fn run() {}

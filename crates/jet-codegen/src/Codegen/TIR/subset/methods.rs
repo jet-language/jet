@@ -116,13 +116,7 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_deref() == Some("Html") && method == "text" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
-    // D-OPTGC1: `handle.with` / `handle.with_mut` on a traced `Gc<T>` value.
-    if matches!(method, "with" | "with_mut") {
-        return args.len() == 1
-            && matches!(&args[0].expr, Expr::Lambda(l) if lambda_in_subset(l, cx, locals))
-            && expr_in_subset(receiver, cx, locals);
-    }
-    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
+    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `@Transact` handle.
     // Sema types the handle `Transaction` (`recv_type == Some("Transaction")`).
     // It lowers to a Drop-backed commit guard (a `scope.guard` cousin), so the
     // single arg must be an in-subset literal zero-param lambda.
@@ -191,7 +185,7 @@ pub(crate) fn method_call_in_subset(
     // arity guess. `recv_type == Some("Pool")` is ALSO how D-ALLOC1's `mem.Pool`
     // slab allocator (a completely different, pre-existing type — see
     // `Type::Named` vs this stage's `Type::Apply` in the type's own doc
-    // comment) marks its `.alloc`/`.reset`/`.free` methods, so only intercept
+    // comment) marks its `.alloc`/`.reset` methods, so only intercept
     // (and `return`) for the THREE names this stage actually owns — anything
     // else falls through to the allocator's existing `("Arena"|"Bump"|"Pool"|
     // "Fixed", …)` shape further down, unbroken.
@@ -314,8 +308,13 @@ pub(crate) fn method_call_in_subset(
     // arm — so we mirror that and try it FIRST, before the handle shape. The optional
     // `capacity:`/`slots:`/`size:` arg is admitted (a label is allowed HERE — the AST reads
     // `arg(0)` ignoring the label, choosing the ctor by allocator type, not label).
-    if alloc_new_type(receiver, method, cx, locals).is_some() {
-        return args.len() <= 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    if let Some(alloc_type) = alloc_new_type(receiver, method, cx, locals) {
+        let arity_ok = if alloc_type == "Fixed" {
+            args.len() == 1
+        } else {
+            args.len() <= 1
+        };
+        return arity_ok && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
     // receiver is a module-field sentinel, not a runtime value.
@@ -328,10 +327,6 @@ pub(crate) fn method_call_in_subset(
             _ => 1,
         };
         return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
-    // D-OPTGC1: `gc.Gc.new<T>(value)` traced-handle constructor.
-    if recv_type.as_deref() == Some(Syntax::GC_TYPE) && method == Syntax::GC_NEW {
-        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d) [c109 Phase 9]: a built-in collection/string method
     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
@@ -1124,7 +1119,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "to_u32" | "to_u64" | "to_f32" | "to_f64" | "to_float"
         // Stopwatch / file / stdin / net / http / regex / alloc handle methods.
         | "elapsed_millis" | "write_line" | "flush" | "read_line" | "lines"
-        | "alloc" | "reset" | "free" | "accept" | "local_addr" | "read" | "write"
+        | "alloc" | "reset" | "accept" | "local_addr" | "read" | "write"
         | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
         | "status" | "group"
         // D-COLLBREADTH1=A: Set<T> and Deque<T> methods.

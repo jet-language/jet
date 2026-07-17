@@ -1,6 +1,7 @@
 // D-ALLOC1 (ratified 2026-06-19): explicit arena allocators under `core.mem`.
-// Four allocators: Arena, Bump, Pool, Fixed — all under `core.mem.alloc`.
-// No `#Unsafe` needed; `use core.mem` is the opt-in gate (E3102 if absent).
+// Four allocator names live under `core.mem`; this executable demonstrates
+// the three #648 runtimes whose storage contracts are implementation-complete.
+// No `@Unsafe` needed; `use core.mem` is the opt-in gate (E3102 if absent).
 use core.mem
 
 fn run() {
@@ -16,21 +17,22 @@ fn run() {
     arena.reset()
     y :: arena.alloc(99)
     print(y)
-    // Bump: alias for Arena (append-only, O(1) alloc).
-    bump :: mem.Bump.new()
+    // Bump: one contiguous monotonic buffer until reset.
+    bump :: mem.Bump.new(capacity: 64)
     b :: bump.alloc(7)
     print(b)
-    // Pool: fixed-slot slab allocator.
+    // Pool: caller-bounded slots with retained size/alignment-class reuse.
     pool :: mem.Pool.new(slots: 8)
     p :: pool.alloc(3)
     print(p)
-    // Fixed: static backing buffer (stack-only, no heap).
+    // Fixed: compiler-synthesized inline backing, with payload and drop metadata
+    // sharing exactly this compile-time byte budget.
     fixed :: mem.Fixed.new(size: 256)
     f :: fixed.alloc(1)
     print(f)
-    // free returns the backing memory to the OS / releases the buffer.
-    arena.free()
-    bump.free()
-    pool.free()
-    fixed.free()
+    // close is the same terminal release used by every resource.
+    close(^arena)
+    close(^bump)
+    close(^pool)
+    close(^fixed)
 }

@@ -3,7 +3,7 @@
 //! ships (`jet-debug`, D-DBG3 — I8: one vocabulary regardless of
 //! backend) but steps the REAL compiled binary through [`super::Inferior`], so
 //! it covers the full feature set the interpreter declines (FFI, tasks,
-//! `#Unsafe`, native std — the E2203 boundary).
+//! `@Unsafe`, native std — the E2203 boundary).
 //!
 //! I2: every frame/line/value shown by default is translated back to Jet terms
 //! through [`super::LineMap`]; a frame with no Jet line (prelude/generated glue)
@@ -104,7 +104,7 @@ fn run_with_io(
 ) -> (i32, String) {
     if !Inferior::available() {
         let msg = format!(
-            "error: native `jet debug` needs `lldb` on PATH, which isn't installed\n fix: install lldb for the native backend (FFI/tasks/#Unsafe/native-std), or use `jet debug {}` on a program the step-1 interpreter covers",
+            "error: native `jet debug` needs `lldb` on PATH, which isn't installed\n fix: install lldb for the native backend (FFI/tasks/@Unsafe/native-std), or use `jet debug {}` on a program the step-1 interpreter covers",
             jet_file
         );
         if io.is_scripted() {
@@ -465,7 +465,7 @@ commands:
   backtrace, bt  show the Jet call stack
   help, h        show this list
   quit, q        end the debug session
-  (native backend — steps the full feature set, incl. FFI/tasks/#Unsafe)",
+  (native backend — steps the full feature set, incl. FFI/tasks/@Unsafe)",
         );
     }
 

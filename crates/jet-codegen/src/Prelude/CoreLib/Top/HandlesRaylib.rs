@@ -25,11 +25,11 @@ struct JetFileWriter {
 // ── core.db connection handle (D-DBDRIVER1) ──────────────────────────────────
 // The real SQLite connection lives in the FFI bridge crate's thread-local
 // handle map (`rusqlite::Connection` can't cross into this always-compiled
-// prelude — I6). `JetDbConnection` is a thin, `Copy` handle wrapper so
+// prelude — I6). `JetDbConnection` is a thin, move-only handle wrapper so
 // `.query`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` dispatch by
 // receiver TYPE (`DbConnection`), the same mechanism `FileReader`/`FileWriter`
 // use, instead of exposing the bare `u64` to Jet code.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct JetDbConnection {
     handle: u64,
 }
@@ -359,4 +359,3 @@ fn jet_raylib_set_target_fps(fps: i64) {
     }
 }
 // jet:raylib-end
-

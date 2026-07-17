@@ -20,7 +20,7 @@ const UTF8_RETURN_PANIC: &str =
 
 /// Card #436: `CModule` functions are always emitted in a synthetic per-lib
 /// Rust module (`CFFI::assemble` in the jetpack crate folds every
-/// `#Extern`/`#Bindgen module` into its own `<c.lib>` "file", separate from
+/// `@Extern`/`@Bindgen module` into its own `<c.lib>` "file", separate from
 /// wherever the struct/enum/distinct it references was actually declared) —
 /// so this module's `cx` never has a local type of its own; every `Named`
 /// type it sees belongs to the root program and needs `cx.root_prefix`
@@ -96,7 +96,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
                 // above; `c_wrapper_param_type` mirrors that with `&T` too.
                 // The real `extern "C"` declaration wants it by value, so
                 // clone through the reference here. Sound because every
-                // C-ABI-accepted struct (`#Layout(c)`, E1104-restricted to
+                // C-ABI-accepted struct (`@Layout(c)`, E1104-restricted to
                 // fixed-size fields) and distinct is `Clone` (codegen always
                 // derives it — `Context.rs::type_is_cloneable_struct` /
                 // `Items.rs::emit_distinct`).
@@ -151,7 +151,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
 /// reach here — every arm it accepts MUST have a matching arm below, or an
 /// accepted-but-unlowered shape becomes an I2/I3 bug (rustc ICE or silent
 /// `()`  placeholder). `IntN`/`Float32` (D-SG9, fixed-width) and a `Named`
-/// struct/distinct (D-REPRC1/D-DIST1 — sema already required `#Layout(c)` /
+/// struct/distinct (D-REPRC1/D-DIST1 — sema already required `@Layout(c)` /
 /// a C-abi base) all get their ordinary generated Rust type via `cx.rust_type`,
 /// which is ABI-identical to the C shape sema verified.
 fn c_abi_rust_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String {

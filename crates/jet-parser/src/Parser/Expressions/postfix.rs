@@ -19,7 +19,7 @@ impl<'a> Parser<'a> {
                         }
                         // D-CAP9: postfix `p.*` — dereference a raw pointer. The `.`
                         // followed by `*` reads as deref (it composes with a further
-                        // `.field`, giving `p.*.field`). Gated to `#Unsafe` in sema.
+                        // `.field`, giving `p.*.field`). Gated to `@Unsafe` in sema.
                         if matches!(self.peek().kind, TokKind::Star) {
                             let star = self.bump().span;
                             let full = Span::new(expr.span().start, star.end);

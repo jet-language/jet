@@ -827,16 +827,20 @@ fn registered_unimplemented_codes_are_expected() {
         "E0004", // retired
         "E0005", // retired
         "E0006", // retired
+        "E0062", // retired by D-SHAPE2: legacy applied-rule wrong-sigil diagnostic
+        "E0063", // retired by D-SHAPE2: former two-plane wrong-sigil diagnostic
         "E0010", // retired by D-S14-PAUSE: was `set` teaching
         "E0011", // retired
         "E0058", // retired (D-MEM1/S3): was `view` return keyword teaching; `-> &T` gone
         "E0206", // retired (D-MEM1/S3): was `view` return escape check; `-> &T` gone
         "E0207", // retired (D-MEM1/S3): was stored-ref `&T` field owner ambiguity, D-REF-SHORTHAND1
         "E0427", // retired (D-MEM1/S3): was `#Ref(owner) name: T` retired-form teaching
+        "E0426", // retired by D-UNINIT-SENTINEL1; teaching is synthesized from the retired spelling
         "E0912", // retired (D-MEM1/S2): was frozen capability signature drift, D-CAP8/c129
         "L0201", // retired (D-MEM1/S2): was implicit `.clone()` lint; superseded by hard error E0209
         "E2101", // CLI: emitted via eprintln! (not Diagnostic::error) in main.rs
         "E2102", // CLI: emitted via eprintln! (not Diagnostic::error) in main.rs
+        "E2110", // GC report: emitted in human/JSON form by CmdGc.rs
         "E2301", // retired (D-MEM1/S3): was returned `view` outlives its owner
         "E2302", // retired (D-MEM1/S3): was stored `ref` field outliving its source
         "E2303", // alias for E1102 (view crossing task boundary); registered for jet explain
@@ -845,7 +849,7 @@ fn registered_unimplemented_codes_are_expected() {
         "L2301", // retired (D-MEM1/S3): was advisory naming a borrowed return's source
         "E2403", // E2-M6 (library authoring) — staged
         "E2410", // D-SERDE: runtime decode error (missing required field) — emitted as a DecodeError string in generated code, not a compile Diagnostic
-        "E2412", // D-SERDE: runtime decode error (unknown field under #[DenyUnknownFields]) — emitted as a DecodeError string, not a compile Diagnostic
+        "E2412", // D-SERDE: runtime decode error (unknown field under @[DenyUnknownFields]) — emitted as a DecodeError string, not a compile Diagnostic
         "E2413", // retired (D-SERDE12): generic @[Codable] is first-class; no gate
         "E2701", // E2-M9 (ring library) — staged
         "E2702", // E2-M9 — staged
@@ -854,17 +858,18 @@ fn registered_unimplemented_codes_are_expected() {
         "E2802", // E2-M10 — staged
         "E2803", // E2-M10 — staged
         "E2804", // E2-M10 — staged, but appears in tests/ui snapshot
-        "E2902", // E2-M11 (#Todo typed holes) — staged
+        "E2902", // E2-M11 (@Todo typed holes) — staged
         "E2940", // D-PROVE-SEM1: emitted only when complete_required policy is wired
         "E3001", // E2-M12 runtime panic report — runtime, not compile-time
         "E3002", // E2-M12 error propagation trace — runtime
         "E3005", // D-PREPOST1 @Pre/@Post contract failure — runtime (jet_contract_fail in generated code), not a compile Diagnostic
+        "E3104", // retired by universal consuming close; use-after-close is E0121
         "E3208", // emitted via eprintln! in CmdDevTools.rs
         "L2501", // reserved (path-normalisation issue noted in spec)
         "L2701", // E2-M9 — staged
         "L2801", // E2-M10 — staged
         "L2901", // E2-M11 — staged
-        "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
+        "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without @Impure gate)
         "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed
         "E0954", // retired by D-S14-PAUSE: was two-keyword comptime binding teaching
         "E1229", // D-JPK-MODBODY1: retired role-module body form — parse recovery only, not stable

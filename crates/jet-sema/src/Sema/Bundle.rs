@@ -223,6 +223,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Off { body: inner, .. }
             | Stmt::DebugOnly { body: inner, .. }
             | Stmt::Region { body: inner, .. }
+            | Stmt::Policy { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Layout { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
@@ -471,6 +472,10 @@ pub(crate) fn check_bundle_opts(
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
+    // D-UNSAFE-OBLIG1=A: run after compile-time branch selection and generic
+    // module expansion, but before registration/TIR. Assertions are checked and
+    // erased here so no generated or untaken body bypasses the policy.
+    diags.extend(super::UnsafeObligations::check_and_strip(bundle));
     let mut states: Vec<ModuleState> = bundle
         .modules
         .iter()
@@ -576,7 +581,7 @@ pub(crate) fn check_bundle_opts(
         })
         .collect();
 
-    // D-MARK-VOCAB1 (card #518): the dynamic half of the `@` contract-plane
+    // D-MARK-VOCAB1 (card #518): the dynamic half of the `@Rule` vocabulary
     // vocabulary — every `derive T.Name { … }` provider in the bundle, not
     // just this module's own, per the same bundle-wide orphan-rule view as
     // `derive_providers` above.
@@ -597,7 +602,7 @@ pub(crate) fn check_bundle_opts(
         // D-PATCH1: synthetic `T.Patch` before struct registration.
         inject_patchable_types(&mut module.items, &mut diags);
         // Card #436: `CFFI::assemble` (jetpack crate) drains every
-        // `#Extern`/`#Bindgen module` out of its declaring file and re-homes
+        // `@Extern`/`@Bindgen module` out of its declaring file and re-homes
         // it in a synthetic per-lib module (`<c.lib>`) with an empty
         // registry of its own — so a struct/enum/distinct declared in an
         // ordinary file was NEVER visible to `is_c_abi_type`'s `Type::Named`
@@ -748,7 +753,7 @@ pub(crate) fn check_bundle_opts(
                         st.tests.insert(t.name.clone(), t.name_span);
                     }
                 }
-                // D-BENCH1: `#Bench` blocks define no referenceable name; codegen
+                // D-BENCH1: `@Bench` blocks define no referenceable name; codegen
                 // discovers them straight from the AST, so registration is a no-op.
                 Item::Bench(_) => {}
                 Item::ExternRust(block) => {
@@ -1051,6 +1056,7 @@ pub(crate) fn check_bundle_opts(
         // D-TXN-ROLLBACK layer 2: ensure Rollback is known before user impl blocks.
         st.trait_reg.register_synthetic_rollback();
         st.trait_reg.register_synthetic_display_debug();
+        st.trait_reg.register_synthetic_close();
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_items(&module.items, &mut diags);
@@ -1591,9 +1597,9 @@ pub(crate) fn check_bundle_opts(
         CompileMode::Test if entry.tests.is_empty() => {
             diags.push(Diagnostic::error(
                 "E0601",
-                format!("no `#{}` blocks found to run", Syntax::KW_TEST),
+                format!("no `@{}` blocks found to run", Syntax::KW_TEST),
                 format!(
-                    "add at least one top-level block: #{} \"describes what this checks\" {{ ... }}",
+                    "add at least one top-level block: @{} \"describes what this checks\" {{ ... }}",
                     Syntax::KW_TEST
                 ),
                 format!(
@@ -1604,7 +1610,7 @@ pub(crate) fn check_bundle_opts(
                 None,
             ));
         }
-        // `jet bench` checks the AST for `#Bench` blocks before entering Bench
+        // `jet bench` checks the AST for `@Bench` blocks before entering Bench
         // mode and falls back to whole-program timing otherwise, so an empty
         // bench set is never an error here.
         CompileMode::Bench
@@ -1685,6 +1691,31 @@ pub(crate) fn check_bundle_opts(
     // File modules need qualified facts here: the bundle-local maps above use
     // bare top-level names and therefore overwrite same-leaf functions.
     let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
+    // D-MEM-FACTS1: module `@Policy(no_alloc)` declarations are checked only
+    // after the same qualified, dependency-complete graph reaches its fixpoint.
+    // #657 feeds the other scope levels and the two remaining fact values into
+    // this declaration surface; reachability itself stays single-mechanism.
+    let (memory_summaries, memory_declarations) =
+        super::MemoryFacts::bundle_memory_inputs(bundle, &public_summaries);
+    let memory_projections = memory_declarations
+        .iter()
+        .flat_map(|declaration| {
+            declaration.roots.iter().map(|root| {
+                (
+                    (root.clone(), declaration.fact),
+                    super::MemoryFacts::project_memory_fact(
+                        declaration.fact,
+                        root,
+                        &memory_summaries,
+                    ),
+                )
+            })
+        })
+        .collect::<HashMap<_, _>>();
+    diags.extend(super::MemoryFacts::check_memory_facts(
+        &memory_declarations,
+        &memory_summaries,
+    ));
     diags.extend(check_web_partition(
         bundle,
         &public_summaries,
@@ -1695,7 +1726,7 @@ pub(crate) fn check_bundle_opts(
     // mixed-axis conflicts and unmatched cross-gate calls.
     diags.extend(check_os_target(bundle));
 
-    // D-TAINT1: taint tracking across every module. `#Sanitizer fn`s are
+    // D-TAINT1: taint tracking across every module. `@Sanitizer fn`s are
     // collected program-wide (a sanitizer in one module clears taint at a call in
     // another); each module's bodies are checked against its own Core aliases so
     // a sink call (Db/Exec/Net effect) resolves correctly. Erased in codegen (I3).
@@ -1777,12 +1808,15 @@ pub(crate) fn check_bundle_opts(
     }
     bundle.used_core = used_core;
     bundle.ffi_callback_fns = ffi_callback_fns;
+    diags.extend(super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     (
         diags,
         super::Effects::SemIndexEffectFacts {
             summaries: public_summaries,
             solved: public_solved,
+            memory_declarations,
+            memory_projections,
             reference_anchors,
         },
     )

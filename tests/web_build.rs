@@ -385,7 +385,7 @@ fn jet_cli_web_build_succeeds() {
     );
 }
 
-/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a file-level `#Target(Web)` marker makes
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a file-level `@Target(Web)` marker makes
 /// `jet build <file>` (no `--target=` flag at all) infer the web backend.
 #[test]
 fn jet_cli_infers_web_target_from_file_marker() {
@@ -398,7 +398,7 @@ fn jet_cli_infers_web_target_from_file_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\nuse core.ui as ui\nfn run() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
+        "@Target(Web)\nuse core.ui as ui\nfn run() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
     )
     .unwrap();
 
@@ -410,7 +410,7 @@ fn jet_cli_infers_web_target_from_file_marker() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet build (no --target flag) should infer web from #Target(Web):\nstdout: {}\nstderr: {}",
+        "jet build (no --target flag) should infer web from @Target(Web):\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -473,12 +473,12 @@ fn jet_cli_infers_web_target_from_manifest() {
 }
 
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `jet run` never infers the web backend from
-/// `#Target(Web)`, even with no `--target=` flag — "run" means "execute and
+/// `@Target(Web)`, even with no `--target=` flag — "run" means "execute and
 /// show console output," which a web build can't satisfy (there's no runtime
 /// to run a `.wasm`+`.js` bundle as a console program). This is a real
 /// regression that was caught while dogfooding the marker on 196/197: the
 /// first cut of D-WEBDEFAULT1 inferred web for every command including
-/// `run`, which made `jet run <file-with-#Target(Web)>` fail trying to exec
+/// `run`, which made `jet run <file-with-@Target(Web)>` fail trying to exec
 /// the wrong artifact as a native binary. `build`/`dev`/`check` still infer.
 #[test]
 fn jet_cli_run_never_infers_web_target_from_marker() {
@@ -490,7 +490,7 @@ fn jet_cli_run_never_infers_web_target_from_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         &dir.join("app.jet"),
-        "#Target(Web)\nfn run() {\n    print(\"native\")\n}\n",
+        "@Target(Web)\nfn run() {\n    print(\"native\")\n}\n",
     )
     .unwrap();
 
@@ -502,7 +502,7 @@ fn jet_cli_run_never_infers_web_target_from_marker() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet run should stay native for #Target(Web) (never infer for `run`):\nstdout: {}\nstderr: {}",
+        "jet run should stay native for @Target(Web) (never infer for `run`):\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -514,12 +514,12 @@ fn jet_cli_run_never_infers_web_target_from_marker() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-HTMLPAIR1 (ratified 2026-07-01, c134): an explicit `#Html("path.html")` marker wins
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): an explicit `@Html("path.html")` marker wins
 /// over the `<stem>.html` sibling-filename convention.
 #[test]
 fn jet_cli_uses_explicit_html_marker() {
     if !have_tool("rustc") {
-        eprintln!("note: skipping #Html marker test");
+        eprintln!("note: skipping @Html marker test");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_html_marker_{}", std::process::id()));
@@ -527,7 +527,7 @@ fn jet_cli_uses_explicit_html_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#Html(\"custom.html\")\nfn run() {}\n",
+        "@Target(Web)\n@Html(\"custom.html\")\nfn run() {}\n",
     )
     .unwrap();
     // A sibling `app.html` exists too — the explicit marker must win over it.
@@ -546,24 +546,24 @@ fn jet_cli_uses_explicit_html_marker() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet build with #Html marker failed:\nstdout: {}\nstderr: {}",
+        "jet build with @Html marker failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     let served = fs::read_to_string(dir.join("build/index.html")).unwrap();
     assert!(
         served.contains("custom marker page"),
-        "expected the #Html(\"custom.html\") content, got:\n{served}"
+        "expected the @Html(\"custom.html\") content, got:\n{served}"
     );
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-HTMLPAIR1 (ratified 2026-07-01, c134): a `#Html(...)` path that doesn't exist is a
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): a `@Html(...)` path that doesn't exist is a
 /// loud build error, never a silent fallback to the generic page.
 #[test]
 fn jet_cli_html_marker_missing_file_is_an_error() {
     if !have_tool("rustc") {
-        eprintln!("note: skipping #Html missing-file test");
+        eprintln!("note: skipping @Html missing-file test");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_html_marker_missing_{}", std::process::id()));
@@ -571,7 +571,7 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#Html(\"does_not_exist.html\")\nfn run() {}\n",
+        "@Target(Web)\n@Html(\"does_not_exist.html\")\nfn run() {}\n",
     )
     .unwrap();
 
@@ -583,7 +583,7 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
         .unwrap();
     assert!(
         !out.status.success(),
-        "jet build should fail loudly when #Html names a missing file"
+        "jet build should fail loudly when @Html names a missing file"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -636,12 +636,12 @@ fn web_executable_emission_is_structurally_tir_only() {
 
 #[test]
 fn wasm_void_body_and_internal_helper_are_emitted_from_tir() {
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 fn tick() {}
-#WasmExport
+@WasmExport
 fn ping() { tick() }
 fn twice(n: Int) -> Int { return n * 2 }
-#WasmExport
+@WasmExport
 fn compute(n: Int) -> Int { return twice(n) }
 fn run() {}
 "#;
@@ -660,16 +660,16 @@ fn web_inline_modules_keep_qualified_function_identity() {
         eprintln!("note: skipping web module identity test");
         return;
     }
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 module Left {
-    #Target(Js)
+    @Target(Js)
     pub fn value() -> Int { return 1 }
 }
 module Right {
-    #Target(Js)
+    @Target(Js)
     pub fn value() -> Int { return 2 }
 }
-#Target(Js)
+@Target(Js)
 fn run() { print(Left.value() + Right.value()) }
 "#;
     let dir = build_web_fixture("module_identity", src, "tests/fixtures/web_module_identity.jet");
@@ -686,12 +686,12 @@ fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
         eprintln!("note: skipping web Wasm module identity test");
         return;
     }
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 module Left { pub fn value() -> Int { return 1 } }
 module Right { pub fn value() -> Int { return 2 } }
-#WasmExport
+@WasmExport
 fn total() -> Int { return Left.value() + Right.value() }
-#Target(Js)
+@Target(Js)
 fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
@@ -715,15 +715,15 @@ fn web_file_modules_keep_qualified_js_function_identity() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(Js)\nfn run() { print(left.value() + right.value()) }\n",
+                "@Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n@Target(Js)\nfn run() { print(left.value() + right.value()) }\n",
             ),
             (
                 "left.jet",
-                "#Target(Js)\npub fn value() -> Int { return 1 }\n",
+                "@Target(Js)\npub fn value() -> Int { return 1 }\n",
             ),
             (
                 "right.jet",
-                "#Target(Js)\npub fn value() -> Int { return 2 }\n",
+                "@Target(Js)\npub fn value() -> Int { return 2 }\n",
             ),
         ],
     );
@@ -745,7 +745,7 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() -> Int { return left.value() + right.value() }\n#Target(Js)\nfn run() { print(total()) }\n",
+                "@Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n@WasmExport\nfn total() -> Int { return left.value() + right.value() }\n@Target(Js)\nfn run() { print(total()) }\n",
             ),
             ("left.jet", "pub fn value() -> Int { return 1 }\n"),
             ("right.jet", "pub fn value() -> Int { return 2 }\n"),
@@ -771,11 +771,11 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./math\" as math\n#Target(Js)\nfn run() { print(math.value()) }\n",
+                "@Target(Web)\nuse \"./math\" as math\n@Target(Js)\nfn run() { print(math.value()) }\n",
             ),
             (
                 "math.jet",
-                "#WasmExport\npub fn value() -> Int { return 7 }\n",
+                "@WasmExport\npub fn value() -> Int { return 7 }\n",
             ),
         ],
     );
@@ -810,7 +810,7 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
         ),
     ] {
         let main = format!(
-            "#Target(Web)\n{imports}\n#Target(Js)\nfn run() {{ print(left.value() + right.value()) }}\n"
+            "@Target(Web)\n{imports}\n@Target(Js)\nfn run() {{ print(left.value() + right.value()) }}\n"
         );
         let dir = build_web_project(
             stem,
@@ -818,11 +818,11 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
                 ("main.jet", &main),
                 (
                     "left.jet",
-                    "#Target(Js)\nfn helper() -> Int { return 1 }\n#Target(Js)\npub fn value() -> Int { return helper() }\n",
+                    "@Target(Js)\nfn helper() -> Int { return 1 }\n@Target(Js)\npub fn value() -> Int { return helper() }\n",
                 ),
                 (
                     "right.jet",
-                    "fn helper() -> Int { return 2 }\n#WasmExport\npub fn value() -> Int { return helper() }\n",
+                    "fn helper() -> Int { return 2 }\n@WasmExport\npub fn value() -> Int { return helper() }\n",
                 ),
             ],
         );
@@ -855,9 +855,9 @@ fn module_local_run_cannot_hijack_web_entrypoint() {
         eprintln!("note: skipping web entrypoint identity test");
         return;
     }
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 module Helper { pub fn run() -> Int { return 7 } }
-#Target(Js)
+@Target(Js)
 fn run() { print("top-level") }
 "#;
     let dir = build_web_fixture("entry_identity", src, "tests/fixtures/web_entry_identity.jet");
@@ -871,7 +871,7 @@ fn run() { print("top-level") }
 
 #[test]
 fn web_missing_return_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(Js)\nfn missing() -> Int { n :: 1 }\nfn run() {}\n";
+    let src = "@Target(Web)\n@Target(Js)\nfn missing() -> Int { n :: 1 }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
         .expect_err("non-void JS function without return must be rejected");
     assert!(diags.iter().any(|d| d.code == "E0114"), "{diags:?}");
@@ -879,7 +879,7 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n#WasmExport\nfn echo(s: ^String) -> String { return s }\nfn run() {}\n";
+    let src = "@Target(Web)\n@WasmExport\nfn echo(s: ^String) -> String { return s }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
     assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
@@ -887,7 +887,7 @@ fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\nfn helper(s: ^String) -> String { return s }\nfn run() {}\n";
+    let src = "@Target(Web)\nfn helper(s: ^String) -> String { return s }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
     assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
@@ -895,7 +895,7 @@ fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(Js)\nfn browser_value() -> Int { return 1 }\n#WasmExport\nfn compute() -> Int { return browser_value() }\nfn run() {}\n";
+    let src = "@Target(Web)\n@Target(Js)\nfn browser_value() -> Int { return 1 }\n@WasmExport\nfn compute() -> Int { return browser_value() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
         .expect_err("Wasm must not call a JS-bucket function directly");
     assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
@@ -903,7 +903,7 @@ fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
 
 #[test]
 fn canvas_style_wasm_tir_control_flow_and_print_compile() {
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 fn square(n: Int) -> Int { return n * n }
 fn summarize(limit: Int) -> Int {
     total := square(limit)
@@ -922,9 +922,9 @@ fn run() { print(summarize(4)) }
 
 #[test]
 fn host_dev_entry_is_not_web_runtime_and_run_prints_literal_from_tir() {
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 use core.web.devserver as devserver
-#Target(Js)
+@Target(Js)
 fn dev() {
     server :: devserver.app()
     server.port(8080)
@@ -947,7 +947,7 @@ fn run() { print("hello, web") }
 
 #[test]
 fn default_wasm_top_level_dev_is_not_web_runtime() {
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 use core.web.devserver as devserver
 fn dev() {
     server :: devserver.app()
@@ -964,7 +964,7 @@ fn run() { print("hello") }
 
 #[test]
 fn module_local_dev_is_validated_as_web_runtime() {
-    let src = r#"#Target(Web)
+    let src = r#"@Target(Web)
 module Tools {
     fn dev(name: String) { print("hello {name}") }
 }
@@ -1013,7 +1013,7 @@ fn web_reactive_dom_snapshot_roundtrip() {
 
 #[test]
 fn web_click_counter_dom_roundtrip() {
-    // 196_ui_web_click.jet: every top-level `#Target(Js) fn` is exported (not just
+    // 196_ui_web_click.jet: every top-level `@Target(Js) fn` is exported (not just
     // `main`), and `paint()` mounts a real, reused DOM element when a
     // `document` exists. This proves both, end to end: a fake `document` (no
     // browser, no new dependency) stands in for the click-driven host page
@@ -1037,10 +1037,10 @@ fn web_events_and_storage_roundtrip() {
         eprintln!("note: skipping web_build browser API (need rustc + node)");
         return;
     }
-    let src = r##"#Target(Web)
+    let src = r##"@Target(Web)
 use core.web as web
 
-#Target(Js)
+@Target(Js)
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)

@@ -1,0 +1,11 @@
+// E0121: reset keeps the allocator alive; close consumes it.
+use core.mem
+fn run() {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(1)
+    print(x)
+    arena.reset()
+    close(^arena)
+    y :: arena.alloc(2)
+    print(y)
+}

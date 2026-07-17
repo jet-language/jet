@@ -77,7 +77,7 @@ Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
 Jet keeps ownership and safety but drops most of Rust's surface syntax and
 jargon. Errors are values (`T ? E`), not exceptions. There is no macro
 system, no `async`/`await`, and the compiler never speaks rustc's language to
-you. Expert unsafe is opt-in via `#Unsafe("reason") { … }`, not the default.
+you. Expert unsafe is opt-in via `@Unsafe("reason") { … }`, not the default.
 
 **How is Jet different from Go?**  
 Jet is statically typed with generics and traits, and stricter error handling —

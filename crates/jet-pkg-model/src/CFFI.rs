@@ -4,9 +4,9 @@
 //! `extern "C"` shims (I2/I3). This module runs after the loader has read every
 //! `.jet` file and before sema:
 //!
-//! 1. Gather every `#Extern module c.<lib>` (overlay) and
-//!    `#Bindgen module c.<lib>.__bindgen__` (generated cache) item.
-//! 2. Enforce the location rule: `#Bindgen` only in a generated
+//! 1. Gather every `@Extern module c.<lib>` (overlay) and
+//!    `@Bindgen module c.<lib>.__bindgen__` (generated cache) item.
+//! 2. Enforce the location rule: `@Bindgen` only in a generated
 //!    `.jet/bindings/c/<lib>.jet` file (E3207).
 //! 3. Merge per library — **bindgen ∪ overlay, overlay wins** on a clash;
 //!    incompatible signatures are E3205 (D-CFFI2-SYN-4).
@@ -76,7 +76,7 @@ fn synthetic_alias(lib: &str) -> String {
     format!("__c_{lib}")
 }
 
-/// Identify compiler-owned binding cache locations. `#Bindgen` is legal only
+/// Identify compiler-owned binding cache locations. `@Bindgen` is legal only
 /// in one of these generated directories (E3207).
 fn generated_cache_language(display: &str) -> Option<ForeignLanguage> {
     let display = display.replace('\\', "/");
@@ -109,7 +109,7 @@ fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
         .all(|(x, y)| x.convention == y.convention && x.ty == y.ty)
 }
 
-/// E3207 — `#Bindgen` used outside a generated cache file.
+/// E3207 — `@Bindgen` used outside a generated cache file.
 fn e3207(lib: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3207",
@@ -373,6 +373,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             no_prelude: false,
             html_path: None,
             no_alloc_policy: None,
+            policy_declarations: Vec::new(),
         });
         lib_to_idx.insert(lib.clone(), synth_idx);
         cffi.libs.push(CLib {
@@ -436,6 +437,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                         no_prelude: false,
                         html_path: None,
                         no_alloc_policy: None,
+                        policy_declarations: Vec::new(),
                     });
                     lib_to_idx.insert(lib.clone(), synth_idx);
                     cffi.libs.push(CLib {
@@ -466,7 +468,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
 /// (`use "lib.h" as l`), the bind backend is invoked automatically (D-CBIND2
 /// auto half, E3 deferred piece). When the cache exists, its sidecar `.hash`
 /// file (Phase 3) is checked; a hash mismatch triggers re-bind before loading.
-/// Parsed `#Bindgen` modules are appended as ordinary loaded modules so the
+/// Parsed `@Bindgen` modules are appended as ordinary loaded modules so the
 /// main drain/merge pass (step 1) folds them like any other.
 fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
     // Collect libs and, for the header-path `use "x.h"` form, the header path.
@@ -647,6 +649,7 @@ fn load_cache_source(
         no_prelude: prog.no_prelude,
         html_path: prog.html_path.clone(),
         no_alloc_policy: prog.no_alloc_policy,
+        policy_declarations: prog.policy_declarations.clone(),
     });
 }
 

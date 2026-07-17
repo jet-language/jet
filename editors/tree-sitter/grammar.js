@@ -12,15 +12,14 @@
 // wasm via editors/zed/install.sh (FORCE=1).
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "continue", "else", "if", "in", "loop", "return", "step"];
+const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "continue", "defer", "else", "if", "in", "loop", "return", "step"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Pure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "const", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "err", "false", "ok", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "Char", "Computed", "Csv", "DataTree", "DbValue", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "JSON", "JSONError", "Json", "Key", "Lru", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "SortedSet", "Stream", "String", "Subscription", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "Yaml"];
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
-const JET_HIGHLIGHT_MARKER_DIRECTIVE = ["Abi", "Bench", "Bindgen", "Caller", "Caps", "DebugOnly", "Default", "DenyUnknownFields", "Every", "Extern", "FFI", "Flatten", "Grant", "Html", "Impure", "Invariant", "Layout", "Live", "Meta", "Nondeterministic", "Off", "Policy", "Reactive", "Region", "Rename", "RenameAll", "Replayable", "Sanitizer", "SingleUse", "Skip", "Sql", "State", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow"];
-const JET_HIGHLIGHT_MARKER_CONTRACT = ["Cli", "Codable", "CodableAsBase", "Comparable", "Decode", "Doc", "Encode", "Inline", "InlineAlways", "MustUse", "Numeric", "Patchable", "Persist", "Post", "Pre", "Printable", "PublishedSchema", "Pure", "Redact", "Summarize"];
+const JET_HIGHLIGHT_MARKER_RULE = ["Abi", "Add", "Bench", "Bindgen", "Caps", "Cli", "Codable", "CodableAsBase", "Comparable", "Context", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Doc", "Encode", "Every", "Extern", "FFI", "Flatten", "Grant", "Html", "Impure", "Inline", "InlineAlways", "Invariant", "Layout", "Live", "Max", "Meta", "Min", "Mul", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Pure", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Sanitizer", "Shield", "SingleUse", "Skip", "Sql", "State", "Summarize", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "inline", "static"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -55,19 +54,19 @@ module.exports = grammar({
   rules: {
     source_file: ($) => repeat($._item),
 
-    // ── Markers / attributes (D-ATTR1/2/3, D-CASING1) ──────────────────────
-    // `#Marker`, `#Marker(args)`, `#[Marker, Marker(args)]` bracket lists, and
+    // ── Applied rules (D-SHAPE2, D-ATTR1/2/3, D-CASING1) ──────────────────
+    // `@Rule`, `@Rule(args)`, `@[Rule, Rule(args)]` bracket lists, and
     // `#(Effect, …)` effect annotations. Loop labels keep `@` (D-ATTR3=B).
     _marker: ($) => choice($.attribute, $.attribute_list, $.effect_set),
 
     attribute: ($) =>
       prec.right(
-        seq("#", field("name", $.marker_name), optional($.marker_args)),
+        seq("@", field("name", $.marker_name), optional($.marker_args)),
       ),
 
     attribute_list: ($) =>
       seq(
-        "#",
+        "@",
         "[",
         commaSep1(seq(field("name", $.marker_name), optional($.marker_args))),
         "]",
@@ -84,14 +83,14 @@ module.exports = grammar({
 
     marker_name: (_) => /[A-Z][a-zA-Z0-9_]*/,
 
-    // Lowercase markers also exist: `#grant`, `#layout`, `#context`.
+    // Lowercase applied rules use the same `@` sigil.
     _lower_marker: ($) =>
       prec.right(
-        seq("#", field("name", $.lower_marker_name), optional($.marker_args)),
+        seq("@", field("name", $.lower_marker_name), optional($.marker_args)),
       ),
 
     lower_marker_name: (_) =>
-      choice("grant", "layout", "context", "bindgen", "extern"),
+      choice("allow", "static", "inline"),
 
     marker_args: ($) => seq("(", commaSep($._marker_arg), ")"),
 
@@ -142,7 +141,7 @@ module.exports = grammar({
       ),
 
     // A marker that introduces a top-level brace-list declaration:
-    // `#UnitFamily(currency) { usd, eur }` (D-QUAL3) mints one type per member.
+    // `@UnitFamily(currency) { usd, eur }` (D-QUAL3) mints one type per member.
     marker_decl: ($) => seq($.attribute, "{", commaSep($.identifier), "}"),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────
@@ -233,7 +232,7 @@ module.exports = grammar({
       ),
 
     // ── Function definition (S1) ───────────────────────────────────────────
-    // Leading markers (`#Pure fn`, `#Unsafe("…") fn`, `#Sanitizer fn`); trailing
+    // Leading markers (`@Pure fn`, `@Unsafe("…") fn`, `@Sanitizer fn`); trailing
     // `#(effects)` set on the signature.
     function_def: ($) =>
       seq(
@@ -372,7 +371,7 @@ module.exports = grammar({
       ),
 
     // A method signature with no body: `fn greet(self) -> String;`, optionally
-    // marked (`#Pure fn area(self) -> Int`).
+    // marked (`@Pure fn area(self) -> Int`).
     trait_method_sig: ($) =>
       seq(
         repeat($._marker),
@@ -394,7 +393,7 @@ module.exports = grammar({
         field("value", $._expr),
       ),
 
-    // ── Distinct type (D-DIST1): `UserId :: distinct Int`, `#Numeric M :: …` ──
+    // ── Distinct type (D-DIST1): `UserId :: distinct Int`, `@Numeric M :: …` ──
     distinct_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
@@ -405,8 +404,8 @@ module.exports = grammar({
       ),
 
     // ── Test / Bench blocks (S43, D-BENCH1, D-CASING1) ─────────────────────
-    test_block: ($) => seq("#", "Test", $.string_literal, $.block),
-    bench_block: ($) => seq("#", "Bench", $.string_literal, $.block),
+    test_block: ($) => seq("@", "Test", "(", $.string_literal, ")", $.block),
+    bench_block: ($) => seq("@", "Bench", "(", $.string_literal, ")", $.block),
 
     // ── Type params / generics ─────────────────────────────────────────────
     // `<T>`, `<T, U>`, with optional trait bounds `<T: Comparable>`.
@@ -512,7 +511,7 @@ module.exports = grammar({
     map_type: ($) =>
       seq("[", $._type, ":", $._type, "]"),
 
-    // `#Pure fn(T) -> U` or `#(Io) fn(T) -> U` callback type (D-EFF2).
+    // `@Pure fn(T) -> U` or `#(Io) fn(T) -> U` callback type (D-EFF2).
     fn_type: ($) =>
       seq(
         optional(choice($.attribute, $.effect_set)),
@@ -532,6 +531,7 @@ module.exports = grammar({
       choice(
         $.bind_stmt,
         $.assign_stmt,
+        $.defer_close_stmt,
         $.return_stmt,
         $.break_stmt,
         $.continue_stmt,
@@ -544,8 +544,8 @@ module.exports = grammar({
         $.expr_stmt,
       ),
 
-    // A marker-introduced block: `#Caps(Io) { … }` (D-EFF1), `#grant(Fs) { caps
-    // -> … }` (D-SCAP1), `#Transact(order) { … }` (D-TXN4), `#context(…) { … }`.
+    // A rule-introduced block: `@Caps(Io) { … }` (D-EFF1), `@Grant(Fs) { caps
+    // -> … }` (D-SCAP1), `@Transact(order) { … }` (D-TXN4), `#context(…) { … }`.
     marker_block_stmt: ($) =>
       seq(choice($.attribute, $._lower_marker), $.scoped_block),
 
@@ -597,6 +597,10 @@ module.exports = grammar({
         ),
         field("value", $._expr),
       ),
+
+    // D-SHAPE-RESOURCE2=A: no general defer; only a consuming resource close.
+    defer_close_stmt: ($) =>
+      seq("defer", "close", "(", "^", field("resource", $.identifier), ")"),
 
     return_stmt: ($) => prec.right(seq("return", optional($._expr))),
 
@@ -704,8 +708,8 @@ module.exports = grammar({
 
     ref_target: (_) => token.immediate(/[A-Za-z0-9_./:-]+/),
 
-    // A value-fact marker riding an expression: `#Tainted input` (D-TAINT1), or
-    // a bare marker value such as the typed hole `#Todo` (D-TOOL2).
+    // A value-fact rule riding an expression: `@Tainted input` (D-TAINT1), or
+    // a bare rule value such as the typed hole `@Todo` (D-TOOL2).
     marked_expr: ($) => prec.right(seq($.attribute, optional($._expr))),
 
     copy_expr: ($) => prec.right(6, seq("~", $._expr)),

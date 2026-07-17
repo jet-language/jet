@@ -159,7 +159,7 @@ fn section_has_token(section: &str, token: &str) -> bool {
 fn zed_generated_class(class: jet::Syntax::HighlightClass) -> bool {
     !matches!(
         class,
-        jet::Syntax::HighlightClass::MarkerDirective | jet::Syntax::HighlightClass::MarkerContract
+        jet::Syntax::HighlightClass::MarkerRule
     )
 }
 

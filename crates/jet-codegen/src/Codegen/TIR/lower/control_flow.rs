@@ -272,6 +272,8 @@ pub(crate) fn lower_if_cond(
                             )),
                         },
                         track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
                     };
                     return (
                         TIfCond::IfLet { pat_str, subj },
@@ -631,6 +633,8 @@ fn lower_struct_pattern_bindings(
                 )),
             },
             track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
         });
     }
     out

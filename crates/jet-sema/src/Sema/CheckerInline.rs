@@ -216,6 +216,7 @@ impl<'a> InlineAlwaysScan<'a> {
             | Stmt::Off { body, .. }
             | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::ComptimeBlock { body, .. }

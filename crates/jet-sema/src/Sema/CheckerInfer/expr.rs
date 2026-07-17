@@ -262,7 +262,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-UNITLIT1: `500ms` — resolve the suffix against an in-scope
-            // `#UnitFamily` member (PascalCased to its minted `@Numeric
+            // `@UnitFamily` member (PascalCased to its minted `@Numeric
             // distinct Float` type name) and rewrite this node in place to an
             // ordinary constructor call — sugar over the existing
             // distinct-type path, so every downstream check (cross-unit
@@ -284,7 +284,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0134",
                         format!("`{}` isn't a unit in scope", suffix),
-                        "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here".to_string(),
+                        "a unit suffix names a member of a `@UnitFamily` you've imported; this suffix isn't one here".to_string(),
                         format!("import the family that defines `{}`, or write the number without a suffix", suffix),
                         Some(*suffix_span),
                     ));
@@ -328,10 +328,11 @@ impl<'a> Checker<'a> {
                 // `{…}` hole builds a fresh `String` (unlike a plain literal
                 // with no holes, which is one constant piece of text — not
                 // "concatenation/interpolation that produces a new String").
-                if self.no_alloc && parts.iter().any(|p| matches!(p, StrPart::Interp(..))) {
-                    self.diags.push(no_alloc_violation(
-                        "string interpolation allocates a new `String`".to_string(),
+                if parts.iter().any(|p| matches!(p, StrPart::Interp(..))) {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
                         *str_span,
+                        "string interpolation allocates a new `String`",
                     ));
                 }
                 for p in parts.iter_mut() {
@@ -486,6 +487,22 @@ impl<'a> Checker<'a> {
                 if let Some(moved_at) = self.moved.get(name).copied() {
                     let (line_note, _) = (moved_at, ());
                     let _ = line_note;
+                    let moved_ty = self.lookup(name).map(|info| info.ty.clone());
+                    let fix = if moved_ty
+                        .as_ref()
+                        .is_some_and(|ty| self.is_resource_type(ty))
+                    {
+                        format!(
+                            "acquire a new `{}` resource; closed resources cannot be copied or reused",
+                            moved_ty.as_ref().map(Type::show).unwrap_or_default()
+                        )
+                    } else {
+                        format!(
+                            "give away a copy instead (`{}{}`) where it moved",
+                            Syntax::SIGIL_COPY,
+                            name
+                        )
+                    };
                     self.diags.push(Diagnostic::error(
                         "E0121",
                         format!(
@@ -494,11 +511,7 @@ impl<'a> Checker<'a> {
                         ),
                         "after a value moves somewhere else, the old name no longer holds it"
                             .to_string(),
-                        format!(
-                            "give away a copy instead (`{}{}`) where it moved",
-                            Syntax::SIGIL_COPY,
-                            name
-                        ),
+                        fix,
                         Some(*span),
                     ));
                     self.moved.remove(name); // report once
@@ -522,7 +535,7 @@ impl<'a> Checker<'a> {
                     self.uninit.remove(name); // report once, then resolve its type below
                 }
                 // D-ALLOC2: E0632 — reading an arena `view` whose backing arena
-                // was already `reset`/`free`d. (`alloc` and `reset`/`free` go
+                // was already reset. (`alloc` and `reset` go
                 // through the method-call path below, so reaching here means a
                 // plain read of the view's value.)
                 self.check_view_use(name, *span);
@@ -597,13 +610,33 @@ impl<'a> Checker<'a> {
                 ));
                 None
             }
-            Expr::ListLit(elems, span) => self.infer_list_lit(elems, *span),
+            Expr::ListLit(elems, span) => {
+                if !elems.is_empty()
+                    && !matches!(self.expected_type.as_ref(), Some(Type::FixedList { .. }))
+                {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
+                        *span,
+                        "list construction allocates backing storage",
+                    ));
+                }
+                self.infer_list_lit(elems, *span)
+            }
             Expr::TupleLit(fields, span, ty_slot) => {
                 let t = self.infer_tuple_lit(fields, *span);
                 *ty_slot = t.clone();
                 t
             }
-            Expr::MapLit(entries, span) => self.infer_map_lit(entries, *span),
+            Expr::MapLit(entries, span) => {
+                if !entries.is_empty() {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
+                        *span,
+                        "map construction allocates backing storage",
+                    ));
+                }
+                self.infer_map_lit(entries, *span)
+            }
             Expr::Index {
                 base,
                 index,
@@ -717,15 +750,15 @@ impl<'a> Checker<'a> {
             }
             Expr::Deref(inner, span) => {
                 // D-CAP9: postfix `p.*` dereferences a raw pointer — a raw
-                // memory access, gated to `#Unsafe`. The result type is the
+                // memory access, gated to `@Unsafe`. The result type is the
                 // pointer's element type.
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
                         "E0208",
-                        "reading through a raw pointer requires `#Unsafe`".to_string(),
-                        "`p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region"
+                        "reading through a raw pointer requires `@Unsafe`".to_string(),
+                        "`p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `@Unsafe { … }` region"
                             .to_string(),
-                        "wrap this in `#Unsafe(\"why this is safe\") { … }`".to_string(),
+                        "wrap this in `@Unsafe(\"why this is safe\") { … }`".to_string(),
                         Some(*span),
                     ));
                 }
@@ -737,14 +770,14 @@ impl<'a> Checker<'a> {
             }
             Expr::RawOf(inner, span) => {
                 // D-CAP9: prefix `*x` takes a raw pointer to `x` (raw-pointer-of),
-                // legal only inside `#Unsafe`. Result type is `*T` (`Ptr<T>`).
+                // legal only inside `@Unsafe`. Result type is `*T` (`Ptr<T>`).
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
                         "E0208",
-                        "taking a raw pointer requires `#Unsafe`".to_string(),
-                        "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region"
+                        "taking a raw pointer requires `@Unsafe`".to_string(),
+                        "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `@Unsafe { … }` region"
                             .to_string(),
-                        "wrap this in `#Unsafe(\"why this is safe\") { … }` — to dereference a pointer use postfix `p.*`"
+                        "wrap this in `@Unsafe(\"why this is safe\") { … }` — to dereference a pointer use postfix `p.*`"
                             .to_string(),
                         Some(*span),
                     ));
@@ -769,15 +802,29 @@ impl<'a> Checker<'a> {
                 let inner_t = self.infer(inner);
                 self.allow_string_view_read = was_view_read;
                 let inner_t = inner_t?;
-                if !type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry) {
+                let resource = self.is_resource_type(&inner_t);
+                if resource
+                    || (!type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry))
+                {
+                    let (why, fix) = if resource {
+                        (
+                            "a resource owns one cleanup duty; copying it would create two owners that could close the same handle".to_string(),
+                            format!("move it instead with `{}name`, or acquire a second resource", Syntax::SIGIL_MOVE),
+                        )
+                    } else {
+                        (
+                            "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet".to_string(),
+                            format!(
+                                "move it instead (`{}name` if this is its last use), or change the type so every part can be copied",
+                                Syntax::SIGIL_MOVE
+                            ),
+                        )
+                    };
                     self.diags.push(Diagnostic::error(
                         "E0211",
                         format!("`{}` can't be copied", inner_t.show()),
-                        "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet".to_string(),
-                        format!(
-                            "move it instead (`{}name` if this is its last use), or change the type so every part can be copied",
-                            Syntax::SIGIL_MOVE
-                        ),
+                        why,
+                        fix,
                         Some(*span),
                     ));
                     return None;
@@ -785,13 +832,17 @@ impl<'a> Checker<'a> {
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): `copy` of a heap-owning type
                 // is itself an allocation (the whole point of `.clone()`-style
                 // duplication) — flagged regardless of whether it's cloneable.
-                if self.no_alloc && type_owns_heap(&inner_t, self.registry) {
-                    self.diags.push(no_alloc_violation(
-                        format!(
-                            "`copy` of `{}` allocates — it owns heap data",
-                            inner_t.show()
-                        ),
+                if matches!(inner_t, Type::Shared(_)) {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::RetainRelease,
                         *span,
+                        format!("`copy` of `{}` retains a shared reference", inner_t.show()),
+                    ));
+                } else if type_owns_heap(&inner_t, self.registry) {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
+                        *span,
+                        format!("`copy` of `{}` allocates owned heap data", inner_t.show()),
                     ));
                 }
                 Some(inner_t)
@@ -907,13 +958,11 @@ impl<'a> Checker<'a> {
                 // List/Map's backing heap allocation — capacity headroom isn't
                 // statically provable in general, so ANY call of this shape is
                 // flagged, full stop (no receiver-type check needed).
-                if self.no_alloc && matches!(method.as_str(), "push" | "insert" | "add" | "add_new") {
-                    self.diags.push(no_alloc_violation(
-                        format!(
-                            "`.{}` may allocate to grow this collection's heap allocation",
-                            method
-                        ),
+                if matches!(method.as_str(), "push" | "insert" | "add" | "add_new") {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
                         *method_span,
+                        format!("`.{method}` may allocate to grow backing storage"),
                     ));
                 }
                 // D-TAG1: a payload leaf under a group — `Damage.Fire.Burn(5)`
@@ -949,9 +998,29 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
+                // Fixed.over borrows raw backing; unlike an ordinary `&` fill
+                // call it does not promise to initialize every byte. Let the
+                // constructor inspect the array type without consuming its
+                // write-before-read obligation.
+                let fixed_uninit = if method == "over"
+                    && matches!(&**receiver, Expr::Field(_, name, _) if name == "Fixed")
+                {
+                    args.iter()
+                        .filter_map(|arg| match &arg.expr {
+                            Expr::Ident(name, _) => self
+                                .uninit
+                                .get(name)
+                                .copied()
+                                .map(|span| (name.clone(), span)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
                 self.clear_uninit_mut_args(args);
-                self.infer_method_call(
+                let inferred = self.infer_method_call(
                     receiver,
                     method,
                     *method_span,
@@ -959,7 +1028,9 @@ impl<'a> Checker<'a> {
                     args,
                     recv_type,
                     resolved_ret,
-                )
+                );
+                self.uninit.extend(fixed_uninit);
+                inferred
             }
             Expr::StructLit {
                 type_name,
@@ -997,15 +1068,6 @@ impl<'a> Checker<'a> {
                 }
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): a struct literal for a type
                 // that owns heap data (directly or transitively) allocates.
-                if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
-                    self.diags.push(no_alloc_violation(
-                        format!(
-                            "constructing `{}` here allocates — it owns heap data",
-                            type_name
-                        ),
-                        *span,
-                    ));
-                }
                 Some(self.check_struct_lit(
                     type_name,
                     type_args,
@@ -1053,18 +1115,9 @@ impl<'a> Checker<'a> {
                 }
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): an enum literal for a type
                 // that owns heap data (directly or transitively) allocates.
-                if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
-                    self.diags.push(no_alloc_violation(
-                        format!(
-                            "constructing `{}` here allocates — it owns heap data",
-                            type_name
-                        ),
-                        *span,
-                    ));
-                }
                 Some(self.check_enum_lit(type_name, variant, args, *span))
             }
-            // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
+            // D-TAINT1: `@Tainted expr` — the value-fact tag is type-transparent.
             // Its type is exactly the inner's type; taint propagation + the E0721
             // sink check run in the dedicated taint pass (Sema/Taint.rs), erased
             // in codegen (I3).
@@ -1127,10 +1180,10 @@ impl<'a> Checker<'a> {
             Expr::ReduceMarker(name, span) => {
                 self.diags.push(Diagnostic::error(
                     "E2510",
-                    format!("`#{}` is only valid inside a lane `.reduce(…)`", name),
+                    format!("`@{}` is only valid inside a lane `.reduce(…)`", name),
                     "a reduce-op marker names the fold operation; it isn't a value on its own"
                         .to_string(),
-                    "write `v.reduce(#Add)` / `#Mul` / `#Min` / `#Max`".to_string(),
+                    "write `v.reduce(@Add)` / `@Mul` / `@Min` / `@Max`".to_string(),
                     Some(*span),
                 ));
                 None
@@ -1205,6 +1258,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
+        for elem in elems.iter() {
+            self.reject_fixed_storage(elem, "be stored in a list");
+        }
         if self.freestanding {
             self.diags.push(e3303(span));
         }
@@ -1247,7 +1303,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0963",
                     format!(
-                        "this list has {} element{}, but `[T#{}]` expects exactly {}",
+                        "this list has {} element{}, but `[T@{}]` expects exactly {}",
                         elems.len(),
                         if elems.len() == 1 { "" } else { "s" },
                         len,
@@ -1394,6 +1450,7 @@ impl<'a> Checker<'a> {
         let mut seen = HashSet::new();
         let mut typed = Vec::with_capacity(fields.len());
         for (name, expr) in fields.iter_mut() {
+            self.reject_fixed_storage(expr, "be stored in a tuple");
             if !seen.insert(name.clone()) {
                 self.diags.push(Diagnostic::error(
                     "E0003",
@@ -1425,7 +1482,7 @@ impl<'a> Checker<'a> {
         let callee_span = callee.span();
 
                 // `print` is a builtin that doesn't live in scope as an ident — special-case it so
-        // `print.[a, b, c]` works without triggering E0107. D-PRELUDEX1=A: skipped under `#NoPrelude`.
+        // `print.[a, b, c]` works without triggering E0107. D-PRELUDEX1=A: skipped under `@NoPrelude`.
         if let Expr::Ident(name, _) = callee.as_ref() {
             if name == Syntax::BUILTIN_PRINT && !self.no_prelude {
                 self.borrow_ctx = true;
@@ -1586,6 +1643,8 @@ impl<'a> Checker<'a> {
         let mut key_ty = None;
         let mut val_ty = None;
         for (k, v) in entries.iter_mut() {
+            self.reject_fixed_storage(k, "be stored in a map");
+            self.reject_fixed_storage(v, "be stored in a map");
             let Some(kt) = self.infer(k) else {
                 continue;
             };
@@ -1693,7 +1752,7 @@ impl<'a> Checker<'a> {
                                     name, lo, hi
                                 ),
                                 format!(
-                                    "this `[T#{}]` value only has proven indexes 0 through {}",
+                                    "this `[T@{}]` value only has proven indexes 0 through {}",
                                     len,
                                     len.saturating_sub(1)
                                 ),
@@ -1919,9 +1978,9 @@ impl<'a> Checker<'a> {
                                 "slicing isn't supported on a columnar list `{}` yet",
                                 Type::List(inner.clone()).show()
                             ),
-                            "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                            "`@Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
                             format!(
-                                "drop `#Layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
+                                "drop `@Layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
                                 elem
                             ),
                             Some(span),

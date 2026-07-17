@@ -981,7 +981,7 @@ pub fn core_fixed_sig(
         )),
         ("jet.crypto", "blake3") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
         ("jet.crypto", "sha512") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest512".into())))),
-        // D-CRYPTO-API1=A: exact #Unsafe expert API. Bounds remain runtime
+        // D-CRYPTO-API1=A: exact @Unsafe expert API. Bounds remain runtime
         // checked; lexical gating never waives memory safety or cleanup.
         ("core.crypto.expert", "xchacha20poly1305_seal" | "aes256gcm_seal") => Some((
             vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
@@ -1832,8 +1832,6 @@ pub fn core_fixed_sig(
             vec![(read, Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))],
             Some(Type::String),
         )),
-        // D-OPTGC1: run a mark-sweep collection over traced `Gc<T>` roots.
-        ("core.gc", "collect") => Some((vec![], Some(unit))),
         ("core.args", "spec") => Some((vec![], Some(Type::Named("ArgsSpec".to_string())))),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
         // `term.read_key()` → `Key` (the key-event enum). No arguments.

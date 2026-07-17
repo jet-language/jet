@@ -1,11 +1,34 @@
-// D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` handles + explicit collection.
-use core.gc
+// D-OPTGC1=A: scoped promotion traces nested ownership and cyclic mutations
+// while the source keeps ordinary bare-value syntax.
+@Policy(gc);
+
+enum Link {
+    End(Int)
+    Next(Link)
+}
+
+fn promoted_cycle() -> Link {
+    // The payloads remain finite value snapshots. Their promoted identities
+    // form the cycle: second -> first at construction, then first -> second.
+    first := Link.End(1)
+    second :: Link.Next(~first)
+    first = Link.Next(~second)
+    return first
+}
+
+fn promoted_replacement() -> Link {
+    stale :: Link.End(2)
+    current := Link.Next(~stale)
+    fresh :: Link.End(3)
+    // Whole-value replacement removes current -> stale before adding
+    // current -> fresh; the trace must not retain the stale identity.
+    current = Link.Next(~fresh)
+    return current
+}
 
 fn run() {
-    a :: gc.Gc.new<Int>(1)
-    b :: gc.Gc.new<Int>(2)
-    keep_a :: ~a
-    keep_b :: ~b
-    gc.collect()
-    print(1)
+    cycle :: promoted_cycle()
+    print(cycle)
+    replacement :: promoted_replacement()
+    print(replacement)
 }

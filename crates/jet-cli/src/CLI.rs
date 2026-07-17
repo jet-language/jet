@@ -70,9 +70,10 @@ pub struct NestedCommandSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HandlerKey {
     Publish, Yank, Keygen, Key, Vendor,
-    Graph, Query, ExplainBuild, Impact, Dossier, Semindex, Expand, Schema, Codemod, Audit, Sbom, Bind, Live,
+    Graph, Query, ExplainBuild, Impact, Dossier, Semindex, Expand, Unsafe, Schema, Codemod, Audit, Sbom, Bind, Live,
     Logs, Search, Info, Outdated,
     Hangar,
+    GcReport,
     Push, Bridge, Services, Config,
     Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
 }
@@ -83,11 +84,12 @@ impl HandlerKey {
             Self::Publish => "publish", Self::Yank => "yank", Self::Keygen => "keygen",
             Self::Key => "key", Self::Vendor => "vendor", Self::Graph => "graph",
             Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Impact => "impact",
-            Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand",
+            Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
             Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
             Self::Sbom => "sbom", Self::Bind => "bind", Self::Live => "live",
             Self::Logs => "logs", Self::Search => "search", Self::Info => "info", Self::Outdated => "outdated",
             Self::Hangar => "hangar",
+            Self::GcReport => "gc",
             Self::Push => "push", Self::Bridge => "bridge", Self::Services => "services", Self::Config => "config",
             Self::Toolchain => "toolchain",
             Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
@@ -96,7 +98,7 @@ impl HandlerKey {
     }
 
     pub const fn keeps_group(self) -> bool {
-        matches!(self, Self::Hangar)
+        matches!(self, Self::Hangar | Self::GcReport)
     }
 }
 
@@ -116,6 +118,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "dossier", summary: "explain a file or symbol through semantic facts", handler: HandlerKey::Dossier },
     NestedCommandSpec { name: "semindex", summary: "query the stable semantic index", handler: HandlerKey::Semindex },
     NestedCommandSpec { name: "expand", summary: "print sema facts for one or every lens", handler: HandlerKey::Expand },
+    NestedCommandSpec { name: "unsafe", summary: "audit unsafe policy and typed obligations", handler: HandlerKey::Unsafe },
     NestedCommandSpec { name: "schema", summary: "inspect or re-baseline published schema snapshots", handler: HandlerKey::Schema },
     NestedCommandSpec { name: "codemod", summary: "run replayable semantic codemods", handler: HandlerKey::Codemod },
     NestedCommandSpec { name: "audit", summary: "check dependencies against the advisory database", handler: HandlerKey::Audit },
@@ -147,6 +150,9 @@ const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "generations", summary: "list store generations", handler: HandlerKey::Hangar },
     NestedCommandSpec { name: "du", summary: "honest per-object hangar disk usage", handler: HandlerKey::Hangar },
 ];
+const GC_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "report", summary: "report automatic GC promotions and ownership rewrites", handler: HandlerKey::GcReport },
+];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "toolchain", summary: "show the project's pinned Jet toolchain", handler: HandlerKey::Toolchain },
     NestedCommandSpec { name: "upgrade", summary: "show how to download a newer release", handler: HandlerKey::Upgrade },
@@ -171,6 +177,7 @@ pub const COMMAND_GROUPS: &[CommandGroup] = &[
     CommandGroup { name: "registry", summary: "publishing, signing, yanking, and vendoring", actions: REGISTRY_ACTIONS, exhaustive: true },
     CommandGroup { name: "inspect", summary: "semantic, build, schema, supply, discovery, and binding inspection", actions: INSPECT_ACTIONS, exhaustive: true },
     CommandGroup { name: "hangar", summary: "physical package-store integrity and lifecycle", actions: HANGAR_ACTIONS, exhaustive: true },
+    CommandGroup { name: "gc", summary: "inspect explicit automatic-promotion traces", actions: GC_ACTIONS, exhaustive: false },
     CommandGroup { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", actions: SELF_ACTIONS, exhaustive: true },
     CommandGroup { name: "os", summary: "deploy, bridge, services, and config live under the jetos front door", actions: OS_ACTIONS, exhaustive: false },
 ];
@@ -371,7 +378,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "gc",
-        summary: "retired (D-CLI-SURFACE3=B) — teaches `jet clean`",
+        summary: "report automatic GC promotions (`gc report`)",
         headline: false,
     },
     CommandSpec {
@@ -436,7 +443,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fuzz",
-        summary: "fuzz a property `#Test fn` — corpus, minimization, seeded PRNG",
+        summary: "fuzz a property `@Test fn` — corpus, minimization, seeded PRNG",
         headline: false,
     },
     CommandSpec {
@@ -455,7 +462,7 @@ pub const COMMANDS: &[CommandSpec] = &[
 /// group-prepend replacement — each is a bespoke teaching error (not a
 /// `jet <group> <word>` rename), so `moved_command_group` can't find them.
 /// Never advertise them in help/man/completions.
-const RETIRED_BARE: &[&str] = &["store", "gc", "serve", "lock"];
+const RETIRED_BARE: &[&str] = &["store", "serve", "lock"];
 
 /// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B: canonical top-level
 /// frequency ring. Moved handler names remain in the internal registry only so
@@ -471,6 +478,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--attach", help: "with inspect live: process id to observe" },
     FlagSpec { long: "--once", help: "with inspect live: print one snapshot and exit" },
     FlagSpec { long: "--observe", help: "with run: expose bounded live runtime facts for attachment" },
+    FlagSpec { long: "--gc-trace", help: "with run/dev: record bounded automatic GC-promotion evidence" },
     FlagSpec { long: "--structural", help: "with diff/merge: compare checked definitions by semantic identity" },
     FlagSpec { long: "--out", help: "with structural merge: write the checked result to this path" },
     FlagSpec { long: "--report", help: "with structural diff/merge: text, json, or editor report" },
@@ -483,8 +491,8 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--changed", help: "with fmt: format only VCS-changed .jet files (requires git)" },
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: smallest binary (S15)" },
-    // D-JPK-TASKRUN1 (card #476): run a `#Task fn` instead of `fn run`.
-    FlagSpec { long: "--task", help: "with run: invoke a `#Task fn` by name (D-JPK-TASKRUN1)" },
+    // D-JPK-TASKRUN1 (card #476): run a `@Task fn` instead of `fn run`.
+    FlagSpec { long: "--task", help: "with run: invoke a `@Task fn` by name (D-JPK-TASKRUN1)" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },
@@ -513,7 +521,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--pure", help: "with eval: require the program to be pure (S60 / D-PURE2)" },
     FlagSpec { long: "--freestanding", help: "with build/run: no OS; rejects std-only APIs (E2-M15)" },
     // D-CTEFFECT1: comptime effect tier gate.
-    FlagSpec { long: "--allow-impure", help: "with build/run: allow Tier-2 ambient comptime effects inside #Impure gates (D-CTEFFECT1)" },
+    FlagSpec { long: "--allow-impure", help: "with build/run: allow Tier-2 ambient comptime effects inside @Impure gates (D-CTEFFECT1)" },
     // D-BUILDFLAGS1=A: per-effect grants for one programmable-build run.
     FlagSpec { long: "--allow-exec", help: "with build: grant declared Exec actions for this run (D-BUILDFLAGS1)" },
     FlagSpec { long: "--allow-fs", help: "with build: grant declared Fs actions for this run (D-BUILDFLAGS1)" },
@@ -1070,6 +1078,7 @@ mod tests {
             ("inspect", "query", Query, "query", false), ("inspect", "explain-build", ExplainBuild, "explain-build", false),
             ("inspect", "impact", Impact, "impact", false), ("inspect", "dossier", Dossier, "dossier", false),
             ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
+            ("inspect", "unsafe", Unsafe, "unsafe", false),
             ("inspect", "schema", Schema, "schema", false), ("inspect", "codemod", Codemod, "codemod", false),
             ("inspect", "audit", Audit, "audit", false), ("inspect", "sbom", Sbom, "sbom", false),
             ("inspect", "bind", Bind, "bind", false),
@@ -1082,6 +1091,7 @@ mod tests {
             ("hangar", "restore", Hangar, "hangar", true), ("hangar", "sign", Hangar, "hangar", true),
             ("hangar", "rollback", Hangar, "hangar", true), ("hangar", "generations", Hangar, "hangar", true),
             ("hangar", "du", Hangar, "hangar", true),
+            ("gc", "report", GcReport, "gc", true),
             ("self", "toolchain", Toolchain, "toolchain", false),
             ("self", "upgrade", Upgrade, "upgrade", false), ("self", "doctor", Doctor, "doctor", false),
             ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),

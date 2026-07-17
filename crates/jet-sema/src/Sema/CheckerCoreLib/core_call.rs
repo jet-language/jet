@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
                 self.record_effect(e.name());
                 // D-TXN2: an irreversible effect (Net/Fs/Exec — a network/file/
                 // subprocess effect) can't be rolled back, so it is rejected when it
-                // occurs directly inside a `#Transact { … }` block (E0746). The fix
+                // occurs directly inside a `@Transact { … }` block (E0746). The fix
                 // is to move it after the block, or register it via
                 // `name.on_commit(() => { … })` so it runs only on a clean commit.
                 if self.txn_depth > 0 && is_irreversible_effect(e) {
@@ -829,14 +829,14 @@ impl<'a> Checker<'a> {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                         return None;
                     }
-                    // Taking an address is inert (S58): legal outside `#Unsafe`.
+                    // Taking an address is inert (S58): legal outside `@Unsafe`.
                     let arg = args.get_mut(0)?;
                     self.infer(&mut arg.expr);
                     let _ = alias_span;
                     return Some(Type::Int);
                 }
                 ("core.io", "print") => {
-                    // D-PRELUDEX1=A: qualified twin of ambient `print` for `#NoPrelude` files.
+                    // D-PRELUDEX1=A: qualified twin of ambient `print` for `@NoPrelude` files.
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     }
@@ -2153,7 +2153,7 @@ impl<'a> Checker<'a> {
                         args: vec![val_ty],
                     });
                 }
-                // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
+                // D-CRYPTOENV1=A: expert-only raw crypto — requires import + @Unsafe gate.
                 ("core.crypto.expert", _) => {
                     let has_import = self
                         .core_imports
@@ -2164,15 +2164,15 @@ impl<'a> Checker<'a> {
                             "E0510",
                             format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
                             "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
-                            "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
+                            "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `@Unsafe(\"reason\")` region".to_string(),
                             Some(span),
                         ));
                     } else if !self.in_unsafe {
                         self.diags.push(Diagnostic::error(
                             "E0510",
-                            format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
+                            format!("`core.crypto.expert.{name}` requires an audited `@Unsafe` region"),
                             "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
-                            "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+                            "wrap the call in `@Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
                             Some(span),
                         ));
                     }

@@ -1,6 +1,6 @@
 //! C FFI (S59 / E2-M14) integration + unit tests.
 //!
-//! Phase 1 proves the whole pipeline end to end: a hand-written `#Bindgen`
+//! Phase 1 proves the whole pipeline end to end: a hand-written `@Bindgen`
 //! cache fixture + a `use c.<lib>` call site compile to `extern "C"` wrappers
 //! that link against a real C static library (built here with `cc`) and print
 //! deterministic output.
@@ -51,7 +51,7 @@ fn forged_fortran_library_prefix_cannot_admit_list_abi() {
     ));
     fs::create_dir_all(&root).unwrap();
     let main = root.join("main.jet");
-    let source = "use c.jet_fortran_forged as raw\n#Extern module c.jet_fortran_forged { fn probe(a: [Float]) -> Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
+    let source = "use c.jet_fortran_forged as raw\n@Extern module c.jet_fortran_forged { fn probe(a: [Float]) -> Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
     fs::write(&main, source).unwrap();
     let diagnostics = jet::compile_with_path(source, main.to_str().unwrap()).unwrap_err();
     assert!(
@@ -511,7 +511,7 @@ const char *jetc_greeting(void) { return "hi from C"; }
 }
 
 /// E2-M14: the native `jet inspect bind` backend turns a real C header into a working
-/// `#Bindgen` cache that compiles, links against the C library, and runs.
+/// `@Bindgen` cache that compiles, links against the C library, and runs.
 #[test]
 fn jet_bind_native_backend_end_to_end() {
     if !have_rustc() {
@@ -616,7 +616,7 @@ fn cffi_end_to_end_links_and_runs() {
     // Hand-written bindgen cache fixture (simulates `jet inspect bind` output).
     fs::write(
         cache.join("jetc.jet"),
-        r#"#Bindgen module c.jetc.__bindgen__ {
+        r#"@Bindgen module c.jetc.__bindgen__ {
     fn add_ints(a: Int, b: Int) -> Int = "jetc_add_ints";
     fn greeting() -> String = "jetc_greeting";
 }
@@ -680,7 +680,7 @@ fn run() {
 }
 
 /// Card #436: build a second C static library exercising the C-ABI shapes
-/// that sema newly accepts (fixed-width ints, a `#Layout(c)` struct passed
+/// that sema newly accepts (fixed-width ints, a `@Layout(c)` struct passed
 /// by value, a distinct-over-`Int`) so the round trip is proven against a
 /// REAL C compiler + linker, not just codegen string matching.
 fn build_c_lib_card436(dir: &Path) -> Option<(PathBuf, String)> {
@@ -698,7 +698,7 @@ uint8_t jetc436_add_u8(uint8_t a, uint8_t b) { return (uint8_t)(a + b); }
 int32_t jetc436_add_i32(int32_t a, int32_t b) { return a + b; }
 float jetc436_add_f32(float a, float b) { return a + b; }
 
-/* D-REPRC1: a `#Layout(c)` struct is `#[repr(C)]` — same field order/size as
+/* D-REPRC1: a `@Layout(c)` struct is `#[repr(C)]` — same field order/size as
  * this C struct, so it crosses by value with no bridging code needed. */
 typedef struct {
     long long x;
@@ -746,7 +746,7 @@ long long jetc436_scale_meters(long long m) { return m * 2; }
     Some((dir.to_path_buf(), "jetc436".to_string()))
 }
 
-/// Card #436: fixed-width ints (`U8`/`I32`), `F32`, a `#Layout(c)` struct
+/// Card #436: fixed-width ints (`U8`/`I32`), `F32`, a `@Layout(c)` struct
 /// passed/returned by value, and a distinct-over-`Int` all round-trip through
 /// generated wrappers, link against a real C library, and run — the shapes
 /// `Sema::FFI::is_c_abi_type` accepts now all have matching `CModule.rs`
@@ -775,7 +775,7 @@ fn cffi_card436_c_abi_shapes_round_trip() {
 // Deliberately NOT named `Point` — that's a reserved builtin UI-geometry
 // type name (D-RENDERTGT2, `Codegen/Context.rs`); this exercises the
 // ordinary user-struct fallback, not that special case.
-#Layout(c)
+@Layout(c)
 struct Coord {
     x: Int
     y: Int
@@ -783,7 +783,7 @@ struct Coord {
 
 Meters :: distinct Int;
 
-#Extern module c.jetc436 {
+@Extern module c.jetc436 {
     fn add_u8(a: U8, b: U8) -> U8 = "jetc436_add_u8";
     fn add_i32(a: I32, b: I32) -> I32 = "jetc436_add_i32";
     fn add_f32(a: F32, b: F32) -> F32 = "jetc436_add_f32";
@@ -870,11 +870,11 @@ int32_t repr_packet_payload_offset(void){return offsetof(Packet,payload);}"#).un
     assert!(Command::new("ar").arg("rcs").arg(root.join("libreprc2.a")).arg(root.join("reprc2.o")).status().unwrap().success());
     let main = root.join("main.jet");
     fs::write(&main, r#"use c.reprc2 as c
-#Layout(c)
+@Layout(c)
 enum Status { Ok = 0; Lost = 7 }
-#Layout(c, tag: U8)
+@Layout(c, tag: U8)
 enum Packet { Ping(Int) = 3; Data(x: Int, y: Int) = 7 }
-#Extern module c.reprc2 {
+@Extern module c.reprc2 {
  fn repr_status(s: Status) -> I32 = "repr_status"
  fn repr_packet(p: Packet) -> I32 = "repr_packet"
  fn repr_packet_size() -> I32 = "repr_packet_size"
@@ -901,7 +901,7 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap();
     assert!(Command::new(cc).args(["-c"]).arg(root.join("cb.c")).arg("-o").arg(root.join("cb.o")).status().unwrap().success());
     assert!(Command::new("ar").arg("rcs").arg(root.join("libcb.a")).arg(root.join("cb.o")).status().unwrap().success());
-    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\n@Pure fn increment(x: I32) -> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: @Pure fn(I32) -> I32, x: I32) -> I32 = \"call_twice\"; fn call_parallel(cb: @Pure fn(I32) -> I32) -> I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) => x + x, 10)) }\n").unwrap();
+    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\n@Pure fn increment(x: I32) -> I32 { return x + 1 }\n@Extern module c.cb { fn call_twice(cb: @Pure fn(I32) -> I32, x: I32) -> I32 = \"call_twice\"; fn call_parallel(cb: @Pure fn(I32) -> I32) -> I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) => x + x, 10)) }\n").unwrap();
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
     assert!(out.rust.contains("extern \"C\" fn user_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
     fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lcb").arg("-lpthread").output().unwrap();
@@ -918,13 +918,13 @@ fn cffi_raw_status_out_pointer_reads_only_on_success() {
     assert!(Command::new("ar").arg("rcs").arg(root.join("libstore.a")).arg(root.join("store.o")).status().unwrap().success());
     let main=root.join("main.jet"); let src=r#"use core.mem
 use c.store as store
-#Layout(c)
+@Layout(c)
 struct Record { id: U64; flags: U32 }
-#Extern module c.store { fn store_load(id: U64, out: *Record) -> I32 = "store_load"; }
+@Extern module c.store { fn store_load(id: U64, out: *Record) -> I32 = "store_load"; }
 fn load(id: U64) -> Record ? String {
     slot: Record := Record.{id: 0, flags: 0}
     status: I32 := 1
-    #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
+    @Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = store.store_load(id, p)
         if status.to_int() == 0 { slot = ~p.* }
@@ -954,7 +954,7 @@ fn cffi_sysv64_abi_executes_native_symbol() {
     let root=std::env::temp_dir().join(format!("jet_cffi_sysv_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
     fs::write(root.join("abi.c"),"#include <stdint.h>\nint32_t abi_add(int32_t a,int32_t b){return a+b;}\n").unwrap();
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("abi.c")).arg("-o").arg(root.join("abi.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libabi.a")).arg(root.join("abi.o")).status().unwrap().success());
-    let src="use c.abi as c\n#Extern module c.abi { #Abi(sysv64) fn add(a: I32, b: I32) -> I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
+    let src="use c.abi as c\n@Extern module c.abi { @Abi(sysv64) fn add(a: I32, b: I32) -> I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
     fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-labi").output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
 }
 
@@ -965,7 +965,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
     fs::write(root.join("strret.c"),"const char* good(void){return \"caf\\xC3\\xA9\";} const char* null_s(void){return 0;} const char* bad(void){static const char s[]={ (char)0xff,0 };return s;}\n").unwrap();
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("strret.c")).arg("-o").arg(root.join("strret.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libstrret.a")).arg(root.join("strret.o")).status().unwrap().success());
     for (name, expected, success) in [("good","café\n",true),("null_s","returned a null pointer",false),("bad","not valid UTF-8",false)] {
-        let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() -> String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d))); assert!(!out.rust.contains("to_string_lossy")); assert!(!out.rust.contains("/* unsupported:"));
+        let src=format!("use c.strret as c\n@Extern module c.strret {{ fn get() -> String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d))); assert!(!out.rust.contains("to_string_lossy")); assert!(!out.rust.contains("/* unsupported:"));
         let rs=root.join(format!("{name}.rs")); let bin=root.join(format!("{name}_bin")); fs::write(&rs,out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg(format!("native={}",root.display())).arg("-lstrret").output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(bin).output().unwrap(); assert_eq!(run.status.success(),success); let text=format!("{}{}",String::from_utf8_lossy(&run.stdout),String::from_utf8_lossy(&run.stderr)); assert!(text.contains(expected),"{name}: {text}");
     }
     let _=fs::remove_dir_all(root);
@@ -994,7 +994,7 @@ fn cffi_runtime_interior_nul_panics_instead_of_silently_truncating() {
         &main,
         r#"use c.jetc436 as c436
 
-#Extern module c.jetc436 {
+@Extern module c.jetc436 {
     fn takes_str(s: String) -> Int = "strlen";
 }
 
@@ -1066,7 +1066,7 @@ fn cffi_string_param_emits_cstring_conversion() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("strlib.jet"),
-        "#Bindgen module c.strlib.__bindgen__ { fn slen(s: String) -> Int = \"strlen\"; }\n",
+        "@Bindgen module c.strlib.__bindgen__ { fn slen(s: String) -> Int = \"strlen\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -1093,7 +1093,7 @@ fn cffi_string_param_emits_cstring_conversion() {
 
 #[test]
 fn cffi_empty_overlay_is_bindgen_only() {
-    // D-CFFI2-SYN-2: an empty `#Extern module` adds nothing; the full bindgen
+    // D-CFFI2-SYN-2: an empty `@Extern module` adds nothing; the full bindgen
     // surface stays visible.
     let root = std::env::temp_dir().join(format!("jet_cffi_empty_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -1101,14 +1101,14 @@ fn cffi_empty_overlay_is_bindgen_only() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("jetc.jet"),
-        "#Bindgen module c.jetc.__bindgen__ { fn ping() -> Int = \"jetc_ping\"; }\n",
+        "@Bindgen module c.jetc.__bindgen__ { fn ping() -> Int = \"jetc_ping\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
         r#"use c.jetc as jc;
-#Extern module c.jetc { }
+@Extern module c.jetc { }
 fn run() { print(jc.ping()); }
 "#,
     )
@@ -1132,14 +1132,14 @@ fn cffi_overlay_overrides_bindgen() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("jetc.jet"),
-        "#Bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) -> Int = \"gen_add\"; }\n",
+        "@Bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) -> Int = \"gen_add\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
         r#"use c.jetc as jc;
-#Extern module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add"; }
+@Extern module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add"; }
 fn run() { print(jc.add(1, 2)); }
 "#,
     )
@@ -1165,7 +1165,7 @@ fn cffi_header_use_form_lowers_to_lib() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("demo.jet"),
-        "#Bindgen module c.demo.__bindgen__ { fn ping() -> Int = \"demo_ping\"; }\n",
+        "@Bindgen module c.demo.__bindgen__ { fn ping() -> Int = \"demo_ping\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -1494,8 +1494,8 @@ Error [E3202]: Type `Ptr<Int>` cannot cross the C boundary here.
     |
   1 | fn f(p: Ptr<Int>) = \"f\";
     |         ^^^^^^^^
- Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58).
- Fix: Move the call inside `#Unsafe`, or change the type to a C-safe value type.
+ Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@Unsafe { … }` region (S58).
+ Fix: Move the call inside `@Unsafe`, or change the type to a C-safe value type.
 ";
     assert_eq!(rendered, expected);
 }

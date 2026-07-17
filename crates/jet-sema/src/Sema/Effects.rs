@@ -96,7 +96,7 @@ pub enum Effect {
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
     /// (`core.vault.get`). Denied by default even with no declared bound at
     /// all — see `check_secret_grants` — and always denied in a comptime
-    /// build-tier context (E1265), with no `#Impure` escape hatch.
+    /// build-tier context (E1265), with no `@Impure` escape hatch.
     Secret,
 }
 
@@ -275,7 +275,7 @@ pub fn effect_set_has_root(set: &EffectSet, root: Effect) -> bool {
 
 impl<'a> super::Checker<'a> {
     /// D-EFF1: record an effect this function reaches directly — into the
-    /// function's set and every open `#Caps(…)` region (which must account for
+    /// function's set and every open `@Caps(…)` region (which must account for
     /// effects reached inside it, E0741).
     pub(crate) fn record_effect(&mut self, e: &str) {
         self.fx_direct.insert(e.to_string());
@@ -285,21 +285,56 @@ impl<'a> super::Checker<'a> {
     }
 
     /// D-EFF1: record a call-graph edge to a user function `name` — into the
-    /// function's edges and every open `#Caps(…)` region.
-    pub(crate) fn record_edge(&mut self, name: String) {
+    /// function's edges and every open `@Caps(…)` region.
+    pub(crate) fn record_edge(&mut self, name: String, span: Span) {
+        self.record_edge_with_executions(name, span, self.memory_control_multiplier);
+    }
+
+    fn record_edge_with_executions(
+        &mut self,
+        name: String,
+        span: Span,
+        executions: Option<u64>,
+    ) {
         for r in &mut self.region_stack {
             r.edges.insert(name.clone());
         }
+        for r in &mut self.memory_policy_stack {
+            r.edges.insert(name.clone());
+        }
+        let call = super::MemoryFacts::MemoryCall {
+            callee: name.clone(),
+            span,
+            source: self.module_path.to_string(),
+            executions,
+        };
+        for r in &mut self.memory_policy_stack {
+            r.calls.push(call.clone());
+        }
+        self.fx_memory_calls.push(call);
         self.fx_edges.insert(name);
     }
 
     /// D-EFF1: record that a foreign (`extern`) call was reached — forcing the
-    /// maximal set on the function and every open `#Caps(…)` region.
-    pub(crate) fn record_maximal(&mut self) {
+    /// maximal set on the function and every open `@Caps(…)` region.
+    pub(crate) fn record_maximal(&mut self, span: Span) {
         self.fx_maximal = true;
+        self.record_open_memory_dispatch(span, "foreign or dynamically selected function body");
         for r in &mut self.region_stack {
             r.maximal = true;
         }
+    }
+
+    pub(crate) fn record_open_memory_dispatch(&mut self, span: Span, reason: &str) {
+        let dispatch = super::MemoryFacts::OpenMemoryDispatch {
+            span,
+            source: self.module_path.to_string(),
+            reason: reason.to_string(),
+        };
+        for region in &mut self.memory_policy_stack {
+            region.open_dispatches.push(dispatch.clone());
+        }
+        self.fx_memory_open.push(dispatch);
     }
 
     /// D-EFF2 (transparent flow-through): a function value passed as an argument
@@ -359,9 +394,47 @@ impl<'a> super::Checker<'a> {
             Expr::Ident(name, _)
                 if self.lookup(name).is_none() && self.funcs.contains_key(name) =>
             {
-                self.record_edge(name.clone());
+                // The callee is sealed, but the higher-order function may
+                // invoke this callback any number of times.
+                self.record_edge_with_executions(name.clone(), arg.span(), None);
             }
-            _ => self.record_maximal(),
+            _ => self.record_maximal(arg.span()),
+        }
+    }
+
+    pub(crate) fn record_memory_event(&mut self, mut event: super::MemoryFacts::MemoryEvent) {
+        event.executions = self.memory_control_multiplier;
+        for region in &mut self.memory_policy_stack {
+            region.events.push(event.clone());
+        }
+        self.fx_memory_events.push(event);
+    }
+
+    pub(crate) fn enter_memory_policy_region(
+        &mut self,
+        declarations: Vec<crate::Policy::PolicyDeclaration>,
+        span: Span,
+    ) {
+        let mut inherited = self
+            .memory_policy_stack
+            .last()
+            .map(|region| region.declarations.clone())
+            .unwrap_or_default();
+        inherited.extend(declarations);
+        self.memory_policy_stack.push(super::MemoryFacts::MemoryPolicyRegion {
+            declarations: inherited,
+            span,
+            events: Vec::new(),
+            edges: BTreeSet::new(),
+            open_dispatches: Vec::new(),
+            unbounded_control: Vec::new(),
+            calls: Vec::new(),
+        });
+    }
+
+    pub(crate) fn exit_memory_policy_region(&mut self) {
+        if let Some(region) = self.memory_policy_stack.pop() {
+            self.fx_memory_regions.push(region);
         }
     }
 }
@@ -449,7 +522,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
 
 /// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
 /// effect that, once performed, cannot be rolled back. These are rejected when
-/// reached directly inside a `#Transact { … }` block (E0746). The remaining
+/// reached directly inside a `@Transact { … }` block (E0746). The remaining
 /// effects (Io/Time/Rand/Env/Db/Log/Gpu) are reversible-or-benign for this
 /// purpose: reads, clock/RNG reads, and logging leave no committed external
 /// state a rollback must undo, and Db rollback is the transaction's own job.
@@ -458,17 +531,17 @@ pub fn is_irreversible_effect(e: Effect) -> bool {
 }
 
 /// E0746 (D-TXN2): an irreversible effect (Net/Fs/Exec) used directly inside a
-/// `#Transact { … }` block. Points at the offending call; the fix is to move it
+/// `@Transact { … }` block. Points at the offending call; the fix is to move it
 /// after the block or register it via `name.on_commit(() => { … })`.
 pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0746",
         format!(
-            "`{}` has the `{}` effect, which can't be rolled back inside a `#{}` block",
+            "`{}` has the `{}` effect, which can't be rolled back inside a `@{}` block",
             api, e.name(), crate::Syntax::KW_TRANSACT
         ),
         format!(
-            "a `#{}` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{}`) leaves committed external state a rollback can't take back",
+            "a `@{}` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{}`) leaves committed external state a rollback can't take back",
             crate::Syntax::KW_TRANSACT, e.name()
         ),
         format!(
@@ -498,7 +571,7 @@ pub struct EffectSummary {
     pub edges: BTreeSet<String>,
     /// A foreign (`extern`) call was reached: the body's effects are maximal.
     pub maximal: bool,
-    /// D-EFF1: `#Caps(…)` restriction regions found in this body (checked against
+    /// D-EFF1: `@Caps(…)` restriction regions found in this body (checked against
     /// their transitive inferred set in the post-pass — E0741).
     pub regions: Vec<RegionSummary>,
     /// D-EFF2 (callback param bound): obligations recorded at each call to a
@@ -506,6 +579,9 @@ pub struct EffectSummary {
     /// (`@Pure fn(…)` / `#(E) fn(…)`). Checked against the actual callback's
     /// resolved effects in the post-pass — E0747.
     pub callback_obligations: Vec<CallbackObligation>,
+    /// D-MEM-FACTS1 shares this already-complete call graph instead of growing
+    /// a parallel reachability mechanism.
+    pub memory: super::MemoryFacts::MemorySummary,
 }
 
 /// D-SEMINDEX1: per-function effect summaries and the solved transitive sets,
@@ -514,6 +590,11 @@ pub struct EffectSummary {
 pub struct SemIndexEffectFacts {
     pub summaries: HashMap<String, EffectSummary>,
     pub solved: HashMap<String, EffectSet>,
+    /// D-MEM-FACTS1 inspect/API/semver surface. These are the exact effective
+    /// declarations and checker projections from the same graph used for E0921.
+    pub memory_declarations: Vec<super::MemoryFacts::MemoryFactDeclaration>,
+    pub memory_projections:
+        HashMap<(String, super::MemoryFacts::MemoryFact), super::MemoryFacts::MemoryProjection>,
     /// Reference targets proven by sema/name resolution. Key is
     /// `(module path, reference start, reference end)`. Tooling may copy these
     /// facts but must never independently resolve by spelling or proximity.
@@ -551,7 +632,7 @@ pub struct CallbackObligation {
     pub span: Span,
 }
 
-/// D-EFF1: an open `#Caps(…)` region's running accumulator while the checker
+/// D-EFF1: an open `@Caps(…)` region's running accumulator while the checker
 /// walks its body. Sealed into a `RegionSummary` when the region closes.
 #[derive(Debug, Clone)]
 pub struct RegionAccum {
@@ -560,15 +641,15 @@ pub struct RegionAccum {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// D-SCAP1: true for a `#Grant(…)` region (authorizes the listed effects via
-    /// a handle), false for a `#Caps(…)` region (restricts to the listed set).
+    /// D-SCAP1: true for a `@Grant(…)` region (authorizes the listed effects via
+    /// a handle), false for a `@Caps(…)` region (restricts to the listed set).
     /// Both share the subset machinery; the flag selects the diagnostic — an
     /// out-of-set effect is E0712 (no capability) for a grant, E0741 (out of the
     /// restriction) for caps.
     pub grant: bool,
 }
 
-/// D-EFF1: a `#Caps(…) { … }` region's accumulated effects, checked (transitively)
+/// D-EFF1: a `@Caps(…) { … }` region's accumulated effects, checked (transitively)
 /// against the declared cap set in the post-pass.
 #[derive(Debug, Clone)]
 pub struct RegionSummary {
@@ -577,9 +658,9 @@ pub struct RegionSummary {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// Span of the `#Caps(…)` / `#Grant(…)` list, for the diagnostic.
+    /// Span of the `@Caps(…)` / `@Grant(…)` list, for the diagnostic.
     pub caps_span: Span,
-    /// D-SCAP1: a `#Grant(…)` region (E0712 on overflow) vs `#Caps(…)` (E0741).
+    /// D-SCAP1: a `@Grant(…)` region (E0712 on overflow) vs `@Caps(…)` (E0741).
     pub grant: bool,
 }
 
@@ -764,7 +845,7 @@ pub fn check_callback_bounds(
     }
 }
 
-/// D-REPLAY1: `#Replayable` functions may not reach ambient
+/// D-REPLAY1: `@Replayable` functions may not reach ambient
 /// Time/Rand/Net/Io. Deterministic handles (`time.clock(seed)`,
 /// `random.rng(seed)`, mockable capability objects) stay valid because they do
 /// not enter the ambient Core-call effect graph.
@@ -835,16 +916,16 @@ pub fn check_replayable_effects(
     }
 }
 
-/// E0725 (D-REPLAY1): a `#Replayable` function reaches ambient nondeterminism.
+/// E0725 (D-REPLAY1): a `@Replayable` function reaches ambient nondeterminism.
 pub fn e0725(fn_name: &str, effects: &EffectSet, span: Span) -> Diagnostic {
     let effect_list = show_set(effects);
     Diagnostic::error(
         "E0725",
         format!(
-            "`{}` is `#Replayable` but reaches `{}`",
+            "`{}` is `@Replayable` but reaches `{}`",
             fn_name, effect_list
         ),
-        "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge"
+        "`@Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge"
             .to_string(),
         "inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function"
             .to_string(),
@@ -945,7 +1026,7 @@ pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: S
     )
 }
 
-/// D-EFF1: check every `#Caps(…)` region across the program against its
+/// D-EFF1: check every `@Caps(…)` region across the program against its
 /// transitive inferred effect set (region.direct ∪ maximal ∪ ⋃ solved[edge]).
 /// An effect used inside a region that its cap list omits is E0741.
 pub fn check_region_caps(
@@ -976,7 +1057,7 @@ pub fn check_region_caps(
     }
 }
 
-/// E0741: an effect used inside a `#Caps(…)` region is not in its cap list.
+/// E0741: an effect used inside a `@Caps(…)` region is not in its cap list.
 pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
     let over_list = show_set(over);
     let caps_list = if caps.is_empty() {
@@ -986,17 +1067,17 @@ pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
     };
     Diagnostic::error(
         "E0741",
-        format!("this `#{}` region uses the effect `{}`, which it doesn't allow", crate::Syntax::KW_CAPS, over_list),
+        format!("this `@{}` region uses the effect `{}`, which it doesn't allow", crate::Syntax::KW_CAPS, over_list),
         format!(
-            "`#{}(…)` restricts the region to {}; an effect reached inside — even through a call — must be in that list",
+            "`@{}(…)` restricts the region to {}; an effect reached inside — even through a call — must be in that list",
             crate::Syntax::KW_CAPS, caps_list
         ),
-        format!("add `{}` to the `#{}(…)` list, or move that work outside the region", over_list, crate::Syntax::KW_CAPS),
+        format!("add `{}` to the `@{}(…)` list, or move that work outside the region", over_list, crate::Syntax::KW_CAPS),
         Some(span),
     )
 }
 
-/// D-SCAP1: detect whether the capability handle `handle` bound by a `#Grant(…)`
+/// D-SCAP1: detect whether the capability handle `handle` bound by a `@Grant(…)`
 /// region escapes its block — returned, stored, passed, captured, or otherwise
 /// used as a value that outlives the scope. Returns the span of the first escape,
 /// or `None` if the handle is only ever used in place (as the receiver of a
@@ -1067,6 +1148,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Shield { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -1240,9 +1322,9 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
     }
 }
 
-/// E0712 (D-SCAP1): an effect used inside a `#Grant(…)` region that the grant
+/// E0712 (D-SCAP1): an effect used inside a `@Grant(…)` region that the grant
 /// doesn't authorize — there is no capability in scope backing it. The dual of
-/// E0741: `#Grant(…)` *authorizes* exactly the listed effects through its handle,
+/// E0741: `@Grant(…)` *authorizes* exactly the listed effects through its handle,
 /// so an effect reached inside (even through a call) that the grant omits has no
 /// capability to perform it.
 pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
@@ -1255,39 +1337,39 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0712",
         format!(
-            "this `#{}` region uses the effect `{}`, which it has no capability for",
+            "this `@{}` region uses the effect `{}`, which it has no capability for",
             crate::Syntax::KW_GRANT, over_list
         ),
         format!(
-            "`#{}(…)` grants only {}; an effect reached inside — even through a call — needs a capability in scope to perform it",
+            "`@{}(…)` grants only {}; an effect reached inside — even through a call — needs a capability in scope to perform it",
             crate::Syntax::KW_GRANT, caps_list
         ),
         format!(
-            "add `{}` to the `#{}(…)` list, or move that work outside the grant",
+            "add `{}` to the `@{}(…)` list, or move that work outside the grant",
             over_list, crate::Syntax::KW_GRANT
         ),
         Some(span),
     )
 }
 
-/// E0711 (D-SCAP1): the capability handle bound by a `#Grant(…)` region escapes
+/// E0711 (D-SCAP1): the capability handle bound by a `@Grant(…)` region escapes
 /// its scope — returned, stored in an outer binding, or captured by an escaping
 /// value. The capability is revoked at scope end (RAII, S63), so a reference that
 /// outlives the block would name a revoked authority.
 pub fn e0711(handle: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0711",
-        format!("the capability `{}` can't escape its `#{}` block", handle, crate::Syntax::KW_GRANT),
+        format!("the capability `{}` can't escape its `@{}` block", handle, crate::Syntax::KW_GRANT),
         format!(
-            "`#{}(…)` revokes the capability at the end of its block (RAII); returning, storing, or sharing `{}` would let a revoked authority outlive the grant",
+            "`@{}(…)` revokes the capability at the end of its block (RAII); returning, storing, or sharing `{}` would let a revoked authority outlive the grant",
             crate::Syntax::KW_GRANT, handle
         ),
-        format!("use `{}` only inside the `#{}` block, or perform the work there", handle, crate::Syntax::KW_GRANT),
+        format!("use `{}` only inside the `@{}` block, or perform the work there", handle, crate::Syntax::KW_GRANT),
         Some(span),
     )
 }
 
-/// E0119: a `#(…)` or `#Caps(…)` list names something that isn't a known effect.
+/// E0119: a `#(…)` or `@Caps(…)` list names something that isn't a known effect.
 pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0119",

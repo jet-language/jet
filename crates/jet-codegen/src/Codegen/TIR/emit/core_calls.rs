@@ -50,7 +50,7 @@ pub(crate) fn emit_tir_core_call(
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
         // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
         // `volatile_read`/`volatile_write` access through a `Ptr<T>` — the volatile ops are
-        // valid because the call only reaches codegen inside an `#Unsafe` region/fn (sema
+        // valid because the call only reaches codegen inside an `@Unsafe` region/fn (sema
         // E3101), already lowered to a Rust `unsafe` context.
         ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
         ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
@@ -1004,7 +1004,6 @@ pub(crate) fn emit_tir_core_call(
         // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
         ("core.uuid", "v4") => format!("{}()", helper("jet_std_uuid_v4")),
         ("core.uuid", "v7") => format!("{}(&({}))", helper("jet_std_uuid_v7"), arg(0)),
-        ("core.gc", "collect") => format!("{}()", helper("jet_gc::gc_collect")),
         ("core.files", "open") => format!("{}(&({}))", helper("jet_std_files_open"), arg(0)),
         ("core.files", "create") => format!("{}(&({}))", helper("jet_std_files_create"), arg(0)),
         ("core.files", "append") => format!("{}(&({}))", helper("jet_std_files_append"), arg(0)),

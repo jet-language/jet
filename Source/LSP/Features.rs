@@ -366,8 +366,7 @@ mod sm {
     pub const MOVE: u32 = 1 << 2;
     pub const WRITE_BORROW: u32 = 1 << 3;
     pub const COPY: u32 = 1 << 4;
-    pub const DIRECTIVE: u32 = 1 << 5;
-    pub const CONTRACT: u32 = 1 << 6;
+    pub const RULE: u32 = 1 << 5;
 }
 
 fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u32, u32)> {
@@ -486,15 +485,13 @@ fn marker_modifier(tokens: &[Token], idx: usize) -> Option<u32> {
 
 #[derive(Clone, Copy)]
 enum MarkerKind {
-    Directive,
-    Contract,
+    Rule,
 }
 
 impl MarkerKind {
     fn modifier(self) -> u32 {
         match self {
-            MarkerKind::Directive => sm::DIRECTIVE,
-            MarkerKind::Contract => sm::CONTRACT,
+            MarkerKind::Rule => sm::RULE,
         }
     }
 }
@@ -507,11 +504,8 @@ fn marker_kind_after(tokens: &[Token], idx: usize) -> Option<MarkerKind> {
 fn marker_kind_for(prefix: &Token, tokens: &[Token], name_idx: usize) -> Option<MarkerKind> {
     let name = marker_name(tokens, name_idx)?;
     match prefix.kind {
-        TokKind::Hash if crate::Syntax::DIRECTIVE_MARKERS.contains(&name) => {
-            Some(MarkerKind::Directive)
-        }
-        TokKind::At if crate::Syntax::CONTRACT_MARKERS.contains(&name) => {
-            Some(MarkerKind::Contract)
+        TokKind::At if crate::Syntax::APPLIED_RULES.contains(&name) => {
+            Some(MarkerKind::Rule)
         }
         _ => None,
     }
@@ -553,7 +547,8 @@ fn token_text<'a>(src: &'a str, tok: &Token) -> &'a str {
 pub(crate) fn is_live_teaching_semantic_word(name: &str) -> bool {
     matches!(
         name,
-        crate::Syntax::FOREIGN_PRIVATE
+        crate::Syntax::METHOD_VIEW
+            | crate::Syntax::FOREIGN_PRIVATE
             | crate::Syntax::FOREIGN_UNSAFE
             | crate::Syntax::FOREIGN_NAMESPACE
             | crate::Syntax::FOREIGN_OWNED

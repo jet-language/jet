@@ -192,7 +192,9 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         ct: None,
         uninit: false,
         arena_view: false,
-        string_view: false,
+                string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
     });
 
     let mut body = vec![errors_binding];
@@ -282,6 +284,8 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         }),
         return_type_span: Some(span),
         return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,

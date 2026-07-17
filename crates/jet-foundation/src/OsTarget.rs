@@ -1,6 +1,6 @@
 //! D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating for
-//! `#Extern` backends. A second, mutually-exclusive axis of the same
-//! `#Target(...)` marker family that `WebPartition::WebBucket` already uses
+//! `@Extern` backends. A second, mutually-exclusive axis of the same
+//! `@Target(...)` marker family that `WebPartition::WebBucket` already uses
 //! for the web bucket ceiling (`Wasm`/`Js`) and the default-web-backend
 //! marker (`Web`) — `Os.Linux`/`Os.Macos`/`Os.Windows` picks which native
 //! platform an `impl` block compiles for (I8: one marker family, mutually
@@ -70,8 +70,8 @@ impl OsTarget {
     }
 }
 
-/// E-OSTARGET-MIXED-AXIS: a `#Target(Os.*)`-gated item also carries a
-/// web-axis marker (a per-method `#Wasm`/`#Js`/`#WasmExport` override, or an
+/// E-OSTARGET-MIXED-AXIS: a `@Target(Os.*)`-gated item also carries a
+/// web-axis marker (a per-method `#Wasm`/`#Js`/`@WasmExport` override, or an
 /// enclosing web bucket ceiling) — two different compilation axes, one item.
 pub fn os_target_mixed_axis(
     item: &str,
@@ -96,7 +96,7 @@ pub fn os_target_mixed_axis(
 }
 
 /// E-OSTARGET-UNMATCHED-CALL: a function/method not itself gated to match
-/// takes or returns a value of a type whose `impl` is `#Target(Os.*)`-gated
+/// takes or returns a value of a type whose `impl` is `@Target(Os.*)`-gated
 /// — reachable from any build, it would call a method that `impl` supplies.
 pub fn os_target_unmatched_call(
     caller: &str,

@@ -175,6 +175,15 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             let ty = env.ty_of(name).unwrap_or(Type::Int);
+            if env.is_gc(name) {
+                return TExpr {
+                    ty,
+                    kind: TExprKind::ConstInline(format!(
+                        "jet_gc::runtime_or_exit({}.read(|__jet_value| __jet_value.clone()))",
+                        env.place_of(name)
+                    )),
+                };
+            }
             TExpr {
                 ty,
                 kind: TExprKind::Local(env.place_of(name)),
@@ -528,6 +537,21 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            if call.name == Syntax::RESOURCE_CLOSE
+                && call.args.len() == 1
+            {
+                let resource = match &call.args[0].expr {
+                    Expr::Ident(name, _) if env.is_resource(name) => TExpr {
+                        ty: env.ty_of(name).unwrap_or_else(unit_type),
+                        kind: TExprKind::ResourceTake(env.rust_name_of(name)),
+                    },
+                    expr => lower_expr(expr, cx, env),
+                };
+                return TExpr {
+                    ty: unit_type(),
+                    kind: TExprKind::Close(Box::new(resource)),
+                };
+            }
             // D-TYPEDTEXT1=D: the synthetic `Sql`/`Html` call sema rewrote a typed
             // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
             // alternate literal-segment, hole, literal-segment, ..., always closing
@@ -616,7 +640,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
             }
             // D-LIN1-DROP: `drop(x)` — discard the value (move-to-nowhere). Sema
-            // proved the discard is audited when the value is `#SingleUse`. Lowers
+            // proved the discard is audited when the value is `@SingleUse`. Lowers
             // to a plain `drop(arg)`; no `unsafe` (I3). Disjoint from a user `drop`
             // fn or local of that name (`cx.sigs`/`env.locals` would be set then).
             if call.name == Syntax::BUILTIN_CONSUME
@@ -638,24 +662,33 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if call.name == Syntax::BUILTIN_REQUIRE {
                     return TExpr {
                         ty: unit_type(),
-                        kind: TExprKind::RequireStop(render_require(call, cx, env)),
+                        kind: TExprKind::RequireStop {
+                            rendered: render_require(call, cx, env),
+                            always_stops: false,
+                        },
                     };
                 }
                 if call.name == Syntax::BUILTIN_REQUIRE_EQ {
                     return TExpr {
                         ty: unit_type(),
-                        kind: TExprKind::RequireStop(render_require_eq(call, cx, env)),
+                        kind: TExprKind::RequireStop {
+                            rendered: render_require_eq(call, cx, env),
+                            always_stops: false,
+                        },
                     };
                 }
                 if call.name == Syntax::BUILTIN_PANIC {
                     return TExpr {
                         ty: unit_type(),
-                        kind: TExprKind::RequireStop(render_panic_stop(
-                            &call.name_span,
-                            &call.args,
-                            cx,
-                            env,
-                        )),
+                        kind: TExprKind::RequireStop {
+                            rendered: render_panic_stop(
+                                &call.name_span,
+                                &call.args,
+                                cx,
+                                env,
+                            ),
+                            always_stops: true,
+                        },
                     };
                 }
             }
@@ -1838,7 +1871,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // D-TAINT1: `#Tainted expr` — the value-fact tag is **erased in codegen**
+        // D-TAINT1: `@Tainted expr` — the value-fact tag is **erased in codegen**
         // (I3). Lower the inner expression unchanged; taint exists only as a
         // compile-time sema proof, never a runtime value.
         Expr::Tainted(inner, _, _) => lower_expr(inner, cx, env),
@@ -1858,7 +1891,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Option(Box::new(Type::Int)),
             kind: TExprKind::Absent,
         },
-        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. The expected-type
+        // c109 Phase 23: a `@Todo` typed hole → diverging `todo!(…)`. The expected-type
         // STRING is the total sema fact (gate guarantees `Some`); the source line is
         // resolved here. The result `ty` is never load-bearing (a `todo!()` diverges and
         // is never an arithmetic operand), so a placeholder suffices — the emitted Rust
@@ -2092,7 +2125,13 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 /// materialize the owned value at this semantic boundary.
 pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let lowered = lower_expr(e, cx, env);
-    if matches!(e, Expr::Ident(name, _) if env.is_borrowed(name)) && !lowered.ty.is_scalar() {
+    if matches!(e, Expr::Ident(name, _) if env.is_resource(name)) {
+        let Expr::Ident(name, _) = e else { unreachable!() };
+        TExpr {
+            ty: lowered.ty,
+            kind: TExprKind::ResourceTake(env.rust_name_of(name)),
+        }
+    } else if matches!(e, Expr::Ident(name, _) if env.is_borrowed(name)) && !lowered.ty.is_scalar() {
         let ty = lowered.ty.clone();
         env.note_clone(&ty);
         TExpr {

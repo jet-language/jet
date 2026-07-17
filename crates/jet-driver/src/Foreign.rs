@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinderSurface {
-    /// `use <lang>.<lib>` / `#Extern module <lang>.<lib>` / generated cache.
+    /// `use <lang>.<lib>` / `@Extern module <lang>.<lib>` / generated cache.
     Namespace,
 }
 
@@ -450,6 +450,7 @@ fn materialize_namespace(
                 no_prelude: program.no_prelude,
                 html_path: program.html_path.clone(),
                 no_alloc_policy: program.no_alloc_policy,
+                policy_declarations: program.policy_declarations.clone(),
             });
             return Ok(module_idx);
         }
@@ -467,6 +468,7 @@ fn materialize_namespace(
         no_prelude: false,
         html_path: None,
         no_alloc_policy: None,
+        policy_declarations: Vec::new(),
     });
     Ok(module_idx)
 }

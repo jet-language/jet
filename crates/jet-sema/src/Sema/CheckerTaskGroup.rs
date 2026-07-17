@@ -157,7 +157,9 @@ impl<'a> Checker<'a> {
             ct: None,
             uninit: false,
             arena_view: false,
-            string_view: false,
+                string_view: false,
+                gc_promotion: None,
+                gc_transferred: false,
         });
         true
     }

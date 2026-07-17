@@ -203,12 +203,13 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. } => body.iter().for_each(|s| walk_stmt_exprs(s, f)),
-        // D-CTEFFECT1: `#Impure` body is allowed to be impure — skip purity
+        // D-CTEFFECT1: `@Impure` body is allowed to be impure — skip purity
         // walk so its Tier-2 calls don't fire E0951.
         Stmt::Impure { .. } => {}
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
@@ -240,7 +241,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         Stmt::Live { body, .. } => {
             body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }
-        // D-DOTSCOPE1: walk a `#Test` scope-member region body for purity analysis.
+        // D-DOTSCOPE1: walk a `@Test` scope-member region body for purity analysis.
         Stmt::ScopeMember { body, .. } => {
             body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }

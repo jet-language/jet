@@ -76,17 +76,17 @@ Job: attach a fact/promise/instruction to a fn.
 
 ```jet
 @Pure                          // contract marker         S60
-#Sanitizer / #Replayable       // directive marker        D-TAINT-SAN / D-REPLAY1
+@Sanitizer / @Replayable       // directive marker        D-TAINT-SAN / D-REPLAY1
 pub / priv                     // keyword                 S18
 #(Net, !Fs)                    // effect parens           D-EFF1
 effects: { allow: […] }        // manifest field          D-EFFBUDGET1
 ```
 
 The two-plane law (D-MARKER-FAMILY1: `@` = checkable promise, `#` = compiler
-instruction) is a *good* rule that its own assignments break. `#Sanitizer` is a
-promise about return taint; `#Replayable` is a determinism promise — both are
+instruction) is a *good* rule that its own assignments break. `@Sanitizer` is a
+promise about return taint; `@Replayable` is a determinism promise — both are
 `@Pure` siblings, both stranded on `#`. **Wrong guess:** "promise → @" is right
-for `@Pure`/`@MustUse`, wrong for `#Sanitizer`/`#Replayable`. Cite core F1/F7.
+for `@Pure`/`@MustUse`, wrong for `@Sanitizer`/`@Replayable`. Cite core F1/F7.
 
 ### Class D — "external reference" has 4 punctuations [blast: medium-high]
 
@@ -121,13 +121,13 @@ comments quoting the namespaced spec form one line above the flat implementation
 ### Class F — "handle-binding block" has 3 slots [blast: medium]
 
 ```jet
-#Transact(order) { … }         // handle inside the parens   D-TXN4
-#Grant(Fs) { caps -> … }       // handle after {, via arrow  D-SCAP1
+@Transact(order) { … }         // handle inside the parens   D-TXN4
+@Grant(Fs) { caps -> … }       // handle after {, via arrow  D-SCAP1
 taskgroup g { … }              // handle after the keyword   D-TASKSCOPE1
 ```
 
 All three are "a scoped block binding one handle." D-TXN4's own doc says it
-"mirrors `region r { }`" — yet region is `#Region(r)`. Expert can't guess the
+"mirrors `region r { }`" — yet region is `@Region(r)`. Expert can't guess the
 slot. Cite core F2.
 
 ### Class G — "manage a value's lifecycle" has 3 shapes [blast: high]
@@ -167,7 +167,7 @@ it is *reopening S4*, which the owner explicitly asked for this session
 reopen with S4's rationale on the table, not a silent flip. The three lifecycle
 verbs also do **not** share a gating regime: `copy` is ungated on any cloneable
 type, `drop("reason")` is the `@MustUse` discard, but `consume(x)` is the
-**linear finisher** legal only inside `#Unsafe` for `#SingleUse`/`#NoCopy`
+**linear finisher** legal only inside `@Unsafe` for `@SingleUse`/`#NoCopy`
 (D-LIN1). That difference is load-bearing (I1: footguns stay structurally
 visible), so the family does not fully collapse to one shape — see §4.
 
@@ -180,18 +180,18 @@ name, opposite placement rule, no local cue. Cite manifest F2.
 
 ### Smaller classes (lower blast, same disease)
 
-- **I — duration spelled 3 ways:** `#Every(5min)`, `.timeout(2s)`,
+- **I — duration spelled 3 ways:** `@Every(5min)`, `.timeout(2s)`,
   `time.ms(n)` (core F13).
-- **J — derive spelled 3 ways:** `@[Codable]`, `#[Wire]`, in-body `derive`
-  line (core F9).
+- **J — derive spelling history:** D-SHAPE2 collapses prefix derives into the
+  one `@[…]` rule list; in-body `derive` remains the explicit body form.
 - **K — naming drift:** `constant_time_eq` vs `constant_time_equal` (arg-type
   suffix), `watcher.files` noun-first vs `fs.read` verb-first, RAII vs explicit
   `.close()` with no visible rule (stdlib 2/3/4).
-- **L — one-off grammars:** `.view(a..b)`, `.take_pattern("{h}")`, `#Test`'s
+- **L — one-off grammars:** `.view(a..b)`, `.take_pattern("{h}")`, `@Test`'s
   private `.setup`/`.timeout`/`.skip` scope-members, `wrapping(a+b)` as a
   free-fn wrap (core F15/F16/F17).
 - **M — invokable entry: name vs marker:** `fn run/dev/build` are magic by
-  name; `#Task fn deploy` is magic by marker (core F14).
+  name; `@Task fn deploy` is magic by marker (core F14).
 - **N — hygiene drift:** registry doc comments write `#layout`/`#grant`
   (lowercase) against PascalCase constants; informal planning-number citations
   are reused for unrelated features with no canonical header (core F12,
@@ -204,9 +204,8 @@ name, opposite placement rule, no local cue. Cite manifest F2.
 Already guessable. A paradigm that churns these to hit a clean count is
 **disqualified** — don't break working code for a tidier table.
 
-- **Two-plane `@`/`#` law**, *once the assignments are correct* — the intuition
-  "promise vs instruction" is sound (D-MARKER-FAMILY1). Fix the leaks, keep the
-  law.
+- **One `@Rule` application law** — D-SHAPE2 makes the rule name and its legal
+  attachment site carry meaning instead of asking readers to classify sigils.
 - **`.{` / `.[` dot-adjacency family** — `T.{}` ctor, `.Variant.{}`, `f.[a,b]`
   fan-out all read as "dot then bracket = structured operation" (D-DOTCTOR1,
   S75).
@@ -217,7 +216,7 @@ Already guessable. A paradigm that churns these to hit a clean count is
 - **Teaching-error discipline** — every retired spelling has an E-code that
   names the replacement (I4). Any overturn below must ship its teaching error.
 - **Casing convention** — snake_case fns/fields, PascalCase types, held
-  uniformly (D-API naming). The exceptions are `ok`/`err` and `#[allow]`.
+  uniformly (D-API naming). The exceptions are `ok`/`err` and `@[allow]`.
 - **Diagnostics render shape** — `Error [E….]:` / `Why:` / `Fix:`, fixed and
   disciplined; no drift found at render level.
 - **Naming laws that already hold** — `has` for membership (D-API-CONTAINS1),
@@ -256,7 +255,7 @@ The corpus, six fixtures, shown once per candidate:
 Baseline **(b)**–**(f)** as they read today:
 
 ```jet
-// (b)  @Pure @MustUse  #Replayable #Sanitizer
+// (b)  @Pure @MustUse  @Replayable @Sanitizer
 //      fn parse(input: Tainted<Str>) -> Record ? Error #(Net, !Fs) { … }
 // (c)  Deque.new()   Set.from([1,2,3])   time.clock(42)   Wrap.{…}   BigInt(100)   ok(v)/Val(x)
 // (d)  struct Point { x: Int, y: Int }   alias Pair<T> = (T,T)
@@ -383,7 +382,7 @@ dictate; a job that maps to two shapes means a plane boundary is wrong — fix t
 boundary, never add a special case.
 
 Deletions/re-rulings this forces (each closes a Class):
-- `#Sanitizer`/`#Replayable` → `@Sanitizer`/`@Replayable` (promises) — Class C.
+- `@Sanitizer`/`@Replayable` → `@Sanitizer`/`@Replayable` (promises) — Class C.
 - `overlay name { }` → `module overlay.name { }` (introduces a namespace) —
   Class A.
 - product type → `.{}`, sum variant → `.Variant(…)`, and the ctor-verb choice
@@ -459,13 +458,13 @@ plain operations on a value → the method plane, matching shipped `.drop()`:
 ```jet
 ops.transform(pool, input.copy(), 5000)   // was `copy input` prefix keyword (reopens S4)
 result.drop("reason")                     // already a method
-consume(handle)                           // UNCHANGED — linear finisher, #Unsafe-gated (D-LIN1)
+consume(handle)                           // UNCHANGED — linear finisher, @Unsafe-gated (D-LIN1)
 ```
 
 `input.copy()` reads left-to-right and carries its own call-site signal (the
 `.copy()` is visibly *on* `input`), which the bare prefix never did; no new
 sigil (respects D-CAP2). But `consume` is **not** collapsed: it is the linear
-finisher legal only inside `#Unsafe` (D-LIN1), and giving it a bare `.consume()`
+finisher legal only inside `@Unsafe` (D-LIN1), and giving it a bare `.consume()`
 would hide that gate — a footgun I1 requires to stay visible. So Class G lands
 as "copy and drop share the method shape; consume stays distinct and gated,"
 not "one shape for three." And `copy`'s move reopens the 10-day-old S4 (see §4),
@@ -492,11 +491,11 @@ carve-out? no — it *repairs* I8's "one way to mean it" and keeps I1's opt-in
 tiers. Clean.
 
 **Attacks:** ① "Total" is aspirational — the locally-justified I8 islands
-(`.view(a..b)`, `.take_pattern`, `#Test` scope-members) are still exceptions;
+(`.view(a..b)`, `.take_pattern`, `@Test` scope-members) are still exceptions;
 plane-total must either kill useful DSLs or admit a bounded exception list,
 softening "gap-free." ② The product-vs-sum ctor rule needs the type's kind to
 predict its ctor; for an opaque stdlib type the user can't see the definition —
-still a doc lookup. ③ Moving `#Sanitizer`/`#Replayable` to `@` is only honest if
+still a doc lookup. ③ Moving `@Sanitizer`/`@Replayable` to `@` is only honest if
 they are statically *checked* like `@Pure`; if enforcement differs, the plane
 line re-blurs. ④ Two marker glyphs survive (`@` and `#`) — a beginner still
 learns which is which before the law pays off. ⑤ Effects keep both `#(…)` and
@@ -684,13 +683,13 @@ mechanism I8 has always implied, now made total.
   ballot (options: keep `copy x`; method `x.copy()`; other), recommending the
   method form on guessability grounds while naming what it costs S4.
   **`consume` does not join the collapse:** it is the linear finisher gated to
-  `#Unsafe` (D-LIN1); giving it a bare `.consume()` would hide that gate and
+  `@Unsafe` (D-LIN1); giving it a bare `.consume()` would hide that gate and
   break I1's "footguns stay visible." So the family lands as: `copy` respelled
   (owner's ask), `drop` already a method, `consume` kept distinct and visibly
   gated. The three do *not* force to one shape — the gating difference is real
   and load-bearing.
 - **Tradeoff — "gap-free" has an asterisk.** Two marker glyphs survive, and a
-  small set of I8 DSL islands (`.view(a..b)`, `#Test` scope-members) are real
+  small set of I8 DSL islands (`.view(a..b)`, `@Test` scope-members) are real
   exceptions. §5's I9 does not wave these away; it gives a *hard qualifying
   test* for what may be an island, so the escape clause cannot be used to
   re-admit ordinary drift.
@@ -722,7 +721,7 @@ defect, not a carve-out. The **same** plane law applies in manifests and in
 code — there is no second manifest register.
 
 **The island test (so the exception clause can't be gamed).** A bounded
-exception ("DSL island" — e.g. `#Sql<Row> { }`, `#Test`'s `.setup`/`.timeout`
+exception ("DSL island" — e.g. `@Sql<Row> { }`, `@Test`'s `.setup`/`.timeout`
 members, `.view(a..b)`'s range grammar) is admissible *only* if it meets all of:
 (1) it is a **closed, stdlib-only, statically-checked** grammar — no user code
 may mint a new one; (2) it is **registered by name in the law itself**, so the
@@ -759,8 +758,8 @@ The principle guides; it does not prescribe.
 | Card | Scope (one line) | Depends on | Closes |
 |---|---|---|---|
 | **D-SHAPE1** | **Ratify the plane-total shape law + invariant I9** (§4/§5) — the job→plane function + the island test; commits wave directions per the note above | — | the disease framing; gates all below |
-| **D-SHAPE2** | Marker-plane repair: move `#Sanitizer`/`#Replayable` → `@` (**precondition: confirm both are statically checked like `@Pure`; if enforcement differs, they are not promises and stay `#`**), one handle-binding slot, one derive spelling | D-SHAPE1 | core F1, F2, F9 |
-| **D-SHAPE-LIFECYCLE** | **Reopen S4/D-CAP2** for `copy`: ballot keep-`copy x` / method-`x.copy()` / other, with S4's rationale on the card; `drop` already a method. **`consume` stays distinct and `#Unsafe`-gated (D-LIN1) — explicitly *not* collapsed** | D-SHAPE1 | core F6 |
+| **D-SHAPE2** | Marker-plane repair: move `@Sanitizer`/`@Replayable` → `@` (**precondition: confirm both are statically checked like `@Pure`; if enforcement differs, they are not promises and stay `#`**), one handle-binding slot, one derive spelling | D-SHAPE1 | core F1, F2, F9 |
+| **D-SHAPE-LIFECYCLE** | **Reopen S4/D-CAP2** for `copy`: ballot keep-`copy x` / method-`x.copy()` / other, with S4's rationale on the card; `drop` already a method. **`consume` stays distinct and `@Unsafe`-gated (D-LIN1) — explicitly *not* collapsed** | D-SHAPE1 | core F6 |
 | **D-SHAPE3a** | Construction *shape* law: product→`.{}`, sum→`.Variant()`, mechanical `new`/`from`/`over` verb choice, retire bare `T(…)` + lowercase module factories (`time.clock`→`Clock.new`, keeping the injectable *convention*) | D-SHAPE1 | core F4, F17; stdlib 1 |
 | **D-SHAPE3b** | Option/Result variant casing alone (`Val`/`None`/`ok`/`err` → uniform) — **split out because it touches nearly every program**; decide independently | D-SHAPE1 | core F5; stdlib 2 |
 | **D-SHAPE4** | Stdlib naming/resource law: `eq`/`equal` split, `watcher.*` verb-first, RAII-vs-`.close()` rule, duration unification (`5min`/`2s`/`time.ms`) | D-SHAPE1, D-SHAPE3a | stdlib 2, 3, 4; core F13 |
@@ -769,8 +768,8 @@ The principle guides; it does not prescribe.
 | **D-SHAPE6** | CLI grammar law + **fix the spec/impl drift** (`jet inspect …`/`jet registry …` vs shipped flat verbs): pick noun-verb or ratify-flat-and-amend-spec, unify `jetos`/`jetpack` depth, retire self-relabeling aliases | D-SHAPE1 | manifest F5, F6 |
 | **D-SHAPE7** | External-ref sigil unification across `provider@target`, version-pin, CLI `:` ref, and the three `D-MONOREF1` member forms. **Scope guard: must NOT disturb `[T#N]`, `#(E)`, or the `.{`/`.[` family (bright spots) — the chosen sigil is named and bounded** | D-SHAPE1 | manifest F4, F9; core F8 |
 | **D-SHAPE8** | Effects-plane consolidation: reconcile `@Pure` vs `#(…)` into one signature effect-annotation spelling | D-SHAPE1, D-SHAPE2 | core F7 |
-| **D-SHAPE9** | Invokable-entry law: reserved `fn run/dev/build` names vs `#Task fn` marker — pick one mechanism | D-SHAPE1, D-SHAPE2 | core F14 |
-| **SHAPE-HYGIENE1** *(card, no owner gate)* | Registry doc casing (`#layout`→`#Layout`), ambiguous planning-number citations → canonical headers, historical `W`-prefix diagnostics note — pure correction, can start now | — | core F12; manifest F10 |
+| **D-SHAPE9** | Invokable-entry law: reserved `fn run/dev/build` names vs `@Task fn` marker — pick one mechanism | D-SHAPE1, D-SHAPE2 | core F14 |
+| **SHAPE-HYGIENE1** *(card, no owner gate)* | Registry doc casing (`#layout`→`@Layout`), ambiguous planning-number citations → canonical headers, historical `W`-prefix diagnostics note — pure correction, can start now | — | core F12; manifest F10 |
 
 Order: **D-SHAPE1 ratifies first** (nothing else is a real decision until the
 law exists, and it commits the wave directions per the note). Then the

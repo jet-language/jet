@@ -52,7 +52,6 @@ use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::lower::static_call_type_name_lower;
 use crate::Codegen::TIR::pool_field_ty_hint;
-use crate::Codegen::TIR::render_lambda_str;
 use crate::Codegen::TIR::render_router_handler;
 use crate::Codegen::TIR::render_safe_locals;
 use crate::Codegen::TIR::render_spawn_lambda;
@@ -105,6 +104,127 @@ pub(crate) fn lower_method_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
+    if let Expr::Ident(name, _) = receiver {
+        if env.is_gc(name) {
+            let root = env.place_of(name);
+            let edge_args = match method {
+                "insert" if args.len() > 1 => &args[1..],
+                "remove" => &args[0..0],
+                _ => args,
+            };
+            let mut edges = edge_args
+                .iter()
+                .flat_map(|arg| env.gc_edges_for_expr(&arg.expr, Some(name)))
+                .collect::<Vec<_>>();
+            edges.sort();
+            edges.dedup();
+            let mut lowered_args = args.to_vec();
+            let index_temp = if matches!(method, "insert" | "remove") {
+                args.first().and_then(|arg| {
+                    let lowered = lower_expr(&arg.expr, cx, env);
+                    if !lowered.ty.is_integer() {
+                        return None;
+                    }
+                    let source_name = format!("__jet_gc_index_{}", method_span.start);
+                    let rust_name = source_name.clone();
+                    lowered_args[0].expr = Expr::Ident(source_name.clone(), arg.span);
+                    env.bind(&source_name, rust_name.clone(), Some(lowered.ty.clone()));
+                    Some((rust_name, lowered))
+                })
+            } else {
+                None
+            };
+            let saved = env.locals.get(name).cloned();
+            env.gc_locals.remove(name);
+            env.bind(name, "(*__jet_value)".to_string(), saved.as_ref().and_then(|(_, ty)| ty.clone()));
+            let inner = lower_method_call(
+                receiver,
+                method,
+                method_span,
+                &lowered_args,
+                recv_type,
+                resolved_ret,
+                cx,
+                env,
+            );
+            if let Some((place, ty)) = saved {
+                env.bind(name, place, ty);
+            }
+            env.mark_gc(name);
+            if let Some((temp, _)) = &index_temp {
+                env.locals.remove(temp);
+            }
+            let ty = inner.ty.clone();
+            let edit = emit_tir_expr(&inner, cx);
+            let emitted = if method == "clear" {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit_clearing_edges(|__jet_value| {}))",
+                    root, edit
+                )
+            } else if method == "pop" {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit_edge_slot_pop(\"collection\", |__jet_value| {}))",
+                    root, edit
+                )
+            } else if method == "remove" && index_temp.is_some() {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit_edge_slot_remove(\"collection\", {} as usize, |__jet_value| {}))",
+                    root,
+                    index_temp.as_ref().map(|(temp, _)| temp.as_str()).unwrap_or("0"),
+                    edit
+                )
+            } else if method == "insert" && index_temp.is_some() {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit_edge_slot_insert(\"collection\", {} as usize, &[{}], |__jet_value| {}))",
+                    root,
+                    index_temp.as_ref().map(|(temp, _)| temp.as_str()).unwrap_or("0"),
+                    edges.join(", "),
+                    edit
+                )
+            } else if method == "prepend" {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit_edge_slot_prepend(\"collection\", &[{}], |__jet_value| {}))",
+                    root,
+                    edges.join(", "),
+                    edit
+                )
+            } else if matches!(method, "push" | "append") {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit_edge_slot_additive(\"collection\", &[{}], |__jet_value| {}))",
+                    root,
+                    edges.join(", "),
+                    edit
+                )
+            } else if edges.is_empty() {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit(|__jet_value| {}))",
+                    root, edit
+                )
+            } else {
+                format!(
+                    "jet_gc::runtime_or_exit({}.edit_edge_slot(\"method:{}\", &[{}], |__jet_value| {}))",
+                    root,
+                    method_span.start,
+                    edges.join(", "),
+                    edit
+                )
+            };
+            let emitted = if let Some((temp, value)) = index_temp {
+                format!(
+                    "{{ let {} = {}; {} }}",
+                    temp,
+                    emit_tir_expr(&value, cx),
+                    emitted
+                )
+            } else {
+                emitted
+            };
+            return TExpr {
+                ty,
+                kind: TExprKind::ConstInline(emitted),
+            };
+        }
+    }
     if recv_type.as_ref().is_some_and(|name| {
         cx.current_type_params.borrow().contains(name.as_str())
     }) && matches!(method, "read" | "write" | "write_all") {
@@ -203,7 +323,10 @@ pub(crate) fn lower_method_call(
                 );
                 return TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::RequireStop(rendered),
+                    kind: TExprKind::RequireStop {
+                        rendered,
+                        always_stops: false,
+                    },
                 };
             }
         }
@@ -431,14 +554,14 @@ pub(crate) fn lower_method_call(
             _ => {}
         }
     }
-    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
+    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `@Transact` handle.
     // The gate proved `recv_type == Some("Transaction")` and a single literal
     // zero-param lambda arg. Lower to `<handle>.on_commit(Box::new(move || { … }))`;
     // the Drop-backed LIFO-on-commit semantics live in the `JetTransaction` prelude
     // type. The receiver is the bound handle ident → its mangled Rust place.
     if method == Syntax::TXN_ON_COMMIT && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE) {
         // The handle is always a bound ident (sema typed it `Transaction` from a
-        // `#Transact(name)` binding); its mangled place is `user_<name>`.
+        // `@Transact(name)` binding); its mangled place is `user_<name>`.
         let handle = match receiver {
             Expr::Ident(name, _) => mangle(name),
             // Defensive: a non-ident receiver can't be a transaction handle, but
@@ -465,7 +588,7 @@ pub(crate) fn lower_method_call(
             };
         }
     }
-    // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a `#Transact`
+    // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a `@Transact`
     // handle — the exact mirror of `on_commit`. Lower to
     // `<handle>.on_rollback(Box::new(move || { … }))`; the Drop-backed run-on-rollback
     // semantics live in the `JetTransaction` prelude type.
@@ -580,9 +703,9 @@ pub(crate) fn lower_method_call(
     }
     // c109 Phase 19: the arena allocator constructor `mem.Arena.new(…)` (D-ALLOC1). The
     // gate proved the receiver is `Field(Ident(mem-alias), <AllocType>)` + method `new`.
-    // Render the whole ctor call HERE (totality), reproducing `emit_method_call`'s arena
-    // branch (Expression.rs ~L1515): `jet_mem::Jet<Alloc>::new()` (no arg) or
-    // `::with_capacity|with_slots|with_size((arg) as usize)` (one optional arg). The
+    // Render the whole ctor call HERE. Ordinary families call their runtime
+    // constructors; Fixed.new carries an internal byte-count marker to the let
+    // emitter so it can synthesize frame storage, and Fixed.over borrows its array.
     // result type is the allocator handle `Named(<AllocType>)` (`alloc_method_return`'s
     // `new` arm). The allocator's only `unsafe` lives in the vetted `jet_mem` prelude (I1).
     {
@@ -590,12 +713,19 @@ pub(crate) fn lower_method_call(
         {
             if let Some(alloc_type) = alloc_new_type(receiver, method, cx, &locals) {
                 let rust_type = alloc_handle_rust_type(alloc_type).unwrap_or("jet_mem::JetArena");
-                let ctor = if args.is_empty() {
+                let ctor = if alloc_type == "Fixed" && method == "new" {
+                    let Expr::Int(size, _, _, _) = &args[0].expr else {
+                        unreachable!("sema rewrites Fixed.new's comptime size to a literal")
+                    };
+                    format!("__JET_FIXED_INLINE:{size}")
+                } else if alloc_type == "Fixed" && method == "over" {
+                    let backing = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
+                    format!("{rust_type}::over(&mut {backing})")
+                } else if args.is_empty() {
                     format!("{}::new()", rust_type)
                 } else {
                     let ctor_fn = match alloc_type {
                         "Pool" => "with_slots",
-                        "Fixed" => "with_size",
                         _ => "with_capacity",
                     };
                     let a0 = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
@@ -657,24 +787,6 @@ pub(crate) fn lower_method_call(
                     args: rest,
                 },
             };
-        }
-    }
-    // D-OPTGC1: `gc.Gc.new<T>(value)` traced handle constructor.
-    if method == Syntax::GC_NEW && recv_type.as_deref() == Some(Syntax::GC_TYPE) {
-        if let Some(Type::Apply { name, args: targs }) = resolved_ret {
-            if name == Syntax::GC_TYPE && targs.len() == 1 && args.len() == 1 {
-                let rust_t = cx.rust_type(&targs[0]);
-                let a0 = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
-                return TExpr {
-                    ty: Type::Apply {
-                        name: name.clone(),
-                        args: targs.clone(),
-                    },
-                    kind: TExprKind::AllocNew {
-                        ctor: format!("jet_gc::Gc::<{}>::new({})", rust_t, a0),
-                    },
-                };
-            }
         }
     }
     // c109 Phase 16: an enum-variant CONSTRUCTION `Enum.Variant(args)` reaching codegen
@@ -769,7 +881,8 @@ pub(crate) fn lower_method_call(
                 let caret = (method_span.end - method_span.start) as u32;
                 let locals = render_safe_locals(env);
                 let rendered = format!(
-                    "{{ let __jet_env_name = ({name}); let __jet_env_value = ({value}); if let Err(__jet_env_error) = {root}jet_std_env_set(&__jet_env_name, &__jet_env_value) {{ jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.env.set: {{}}\", __jet_env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                    "{{ let __jet_env_name = ({name}); let __jet_env_value = ({value}); if let Err(__jet_env_error) = {root}jet_std_env_set(&__jet_env_name, &__jet_env_value) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.env.set: {{}}\", __jet_env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                    cleanup = crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER,
                     root = cx.root_prefix,
                     file = escape_rust_str(&cx.file),
                     fn_name = escape_rust_str(&env.fn_name),
@@ -777,7 +890,10 @@ pub(crate) fn lower_method_call(
                 );
                 return TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::RequireStop(rendered),
+                    kind: TExprKind::RequireStop {
+                        rendered,
+                        always_stops: false,
+                    },
                 };
             }
         }
@@ -1660,7 +1776,7 @@ pub(crate) fn lower_method_call(
                 expected,
                 method == "edit",
             );
-            // D-STM1=A (card #506): a `Shared<T>.edit(f)` inside a `#Transact` block
+            // D-STM1=A (card #506): a `Shared<T>.edit(f)` inside a `@Transact` block
             // routes to the deferred `edit_txn` — the write is buffered and applied
             // atomically at the block's commit, so the call yields nothing (Unit; E0750
             // rejects a value-producing edit here). The closure is stored past the call,
@@ -1856,9 +1972,9 @@ pub(crate) fn lower_method_call(
         }
     }
     // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — argument-dependent
-    // (the return shape comes from the pattern's holes), same reason
-    // `Gc.new<T>` is resolved directly here instead of through a generic
-    // method-return table. The parser already committed to `Expr::StrMatchLit`
+    // (the return shape comes from the pattern's holes), so it is resolved
+    // directly instead of through a generic method-return table. The parser
+    // already committed to `Expr::StrMatchLit`
     // for this argument (sema rejects any other shape), so it's always
     // present when this method name/receiver-type pair is reached.
     if let Some(handle) = recv_type {
@@ -1943,7 +2059,7 @@ pub(crate) fn lower_method_call(
                     .first()
                     .map(|a| a.ty.clone())
                     .unwrap_or_else(unit_type),
-                THandleOp::AllocReset | THandleOp::AllocFree => unit_type(),
+                THandleOp::AllocReset => unit_type(),
                 _ => handle_method_return_ty(handle, method, args.len()),
             };
             return TExpr {
@@ -2452,28 +2568,22 @@ pub(crate) fn lower_method_call(
     // A user instance method on a covered type. `recv_type` is total (gate proved
     // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
     // name (trait-impl methods keep their bare name; others get the `user_` mangle).
-    if matches!(method, "with" | "with_mut") {
-        let recv = lower_expr(receiver, cx, env);
-        if matches!(&recv.ty, Type::Apply { name, .. } if name == Syntax::GC_TYPE) {
-            if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
-                let closure = render_lambda_str(lam, cx, env);
-                let recv_rust = emit_tir_expr(&recv, cx);
-                return TExpr {
-                    ty: unit_type(),
-                    kind: TExprKind::AllocNew {
-                        ctor: format!("jet_gc::Gc::{method}(&({recv_rust}), {closure})"),
-                    },
-                };
-            }
-        }
-    }
     let ty_name = recv_type.clone().expect("gate proved recv_type is Some");
     let sig = cx
         .method_sigs
         .get(&(ty_name.clone(), method.to_string()))
         .cloned()
         .unwrap_or_default();
-    let recv = lower_expr(receiver, cx, env);
+    let recv = if matches!(
+        cx.method_self_convs.get(&(ty_name.clone(), method.to_string())),
+        Some(AccessConvention::Move)
+    )
+        && matches!(receiver, Expr::Ident(name, _) if env.is_resource(name))
+    {
+        lower_owned_expr(receiver, cx, env)
+    } else {
+        lower_expr(receiver, cx, env)
+    };
     let targs = lower_method_args(args, &sig, env, cx);
     // S62: a trait-impl method is called by its bare name (the trait impl owns it);
     // a plain user method is `user_<method>`. This mirrors `emit_method_call`'s

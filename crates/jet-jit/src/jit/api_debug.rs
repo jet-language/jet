@@ -152,8 +152,19 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
             | TStmt::TupleDestructure { init, .. }
             | TStmt::StructDestructure { init, .. }
             | TStmt::ListDestructure { init, .. } => collect_expr_ops(init, out),
-            TStmt::Assign { value, .. } | TStmt::Return(Some(value)) | TStmt::ExprStmt(value) => {
+            TStmt::Assign { value, .. }
+            | TStmt::Return(Some(value))
+            | TStmt::ExprStmt(value)
+            | TStmt::DeferClose { close: value, .. } => {
                 collect_expr_ops(value, out)
+            }
+            TStmt::GcEdit {
+                index_temp, stmt, ..
+            } => {
+                if let Some((_, value)) = index_temp {
+                    collect_expr_ops(value, out);
+                }
+                collect_stmt_ops(std::slice::from_ref(stmt.as_ref()), out);
             }
             TStmt::If {
                 cond,
@@ -471,6 +482,7 @@ pub fn jit_stmt_tag(stmt: &TStmt) -> &'static str {
         TStmt::Assign { .. } => "Assign",
         TStmt::Return(_) => "Return",
         TStmt::ExprStmt(_) => "ExprStmt",
+        TStmt::DeferClose { .. } => "DeferClose",
         TStmt::If { .. } => "If",
         TStmt::Loop { .. } => "Loop",
         TStmt::While { .. } => "While",

@@ -143,7 +143,7 @@ fn show_uninit() -> Int {
 // file's single `fn run()` the one program entry.
 @Cli
 struct ServeArgs {
-    @[Doc("port to listen on")] #[Default(3000)] port: Int
+    @[Doc("port to listen on"), Default(3000)] port: Int
     @[Doc("print extra detail")] verbose: Bool
 }
 
@@ -187,7 +187,7 @@ fn decode_account(raw: String) -> String {
     return "id={r.value.id} migrated={r.migration.migrated}"
 }
 
-// --- OS-target gating: `#Target(Os.Linux)` on impl ------------------------
+// --- OS-target gating: `@Target(Os.Linux)` on impl ------------------------
 // D-OSTARGET1=A: only the impl matching the build's OS is compiled in.
 // There is no ratified way yet for ungated code to dispatch to "whichever
 // backend matches this build", so — matching
@@ -201,37 +201,37 @@ struct LinuxBackend {
     name: String
 }
 
-#Target(Os.Linux)
+@Target(Os.Linux)
 impl LinuxBackend.Backend {
     fn label(self) -> String {
         return "linux: {self.name}"
     }
 }
 
-// --- `#Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`
-// D-DOTSCOPE1: contextual dot-member blocks inside a `#Test` marker scope.
+// --- `@Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`
+// D-DOTSCOPE1: contextual dot-member blocks inside a `@Test` marker scope.
 // Run by `jet test`, not by this file's `fn run()`.
-#Test("uninit then write is provably safe") {
+@Test("uninit then write is provably safe") {
     .setup {
         base :: show_uninit()
     }
     require_eq(base, 99)
 }
 
-#Test("expect_fail region must fail") {
+@Test("expect_fail region must fail") {
     .expect_fail {
         require((1 == 2), "one is not two")
     }
     require_eq(twice(2), 4)
 }
 
-#Test("timeout bounds a region") {
+@Test("timeout bounds a region") {
     .timeout(500ms) {
         require_eq(square(5), 25)
     }
 }
 
-#Test("skip one region") {
+@Test("skip one region") {
     require_eq(twice(3), 6)
     .skip {
         require(false)

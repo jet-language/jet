@@ -45,9 +45,9 @@ impl WebPartitionMarker {
 
     /// The marker's source spelling (without the leading `#`), for
     /// re-emission by `jet fmt`. D-MARK-TARGET1=A (ratified 2026-07-11, card
-    /// #498): the per-function override now shares the `#Target(Wasm|Js)`
+    /// #498): the per-function override now shares the `@Target(Wasm|Js)`
     /// spelling with the file/module ceiling — the old bare `#Wasm`/`#Js`
-    /// markers are retired. `#WasmExport` (a different job) is untouched.
+    /// markers are retired. `@WasmExport` (a different job) is untouched.
     pub fn name(self) -> &'static str {
         match self {
             WebPartitionMarker::Wasm => "Target(Wasm)",

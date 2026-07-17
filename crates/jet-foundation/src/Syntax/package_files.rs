@@ -117,7 +117,7 @@ pub const BINPAT_ENDIAN_LITTLE: &str = "le";
 /// no longer exists as a separate constant; use this one.
 pub const ATTR_NUMERIC: &str = "Numeric";
 
-/// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(currency) { usd, eur, gbp }` —
+/// D-QUAL3 (ratified 2026-06-24): `@UnitFamily(currency) { usd, eur, gbp }` —
 /// declares a family of units. Each member mints one distinct `@Numeric` type
 /// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
 /// (`fn subtotal(price: Usd, qty: Int) -> Usd`). The family is the
@@ -130,22 +130,22 @@ pub const ATTR_UNIT_FAMILY: &str = "UnitFamily";
 /// a declared migration is E0910. Written `@PublishedSchema` before `struct`.
 pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 
-/// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `#SingleUse` — marks
+/// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `@SingleUse` — marks
 /// a type whose values must be consumed exactly once on every reachable path
 /// (moved to a `^` parameter or returned). Using one zero times is E0140
 /// (unconsumed at scope end) / E0141 (unconsumed on one branch); aliasing one
-/// with `&`/`view` is E0142. `#SingleUse` implies `#NoCopy`. The tag is
-/// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
+/// with `&`/`view` is E0142. `@SingleUse` implies `#NoCopy`. The tag is
+/// compile-time only and erases in codegen (I3). Written `@SingleUse` before the
 /// `struct`/`enum`, same marker idiom as `@PublishedSchema`.
 pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
 
-/// D-REPLAY1: `#Replayable fn` marks a function whose reachable effects must be
+/// D-REPLAY1: `@Replayable fn` marks a function whose reachable effects must be
 /// deterministic by default. Ambient `Time`/`Rand`/`Net`/`Io` are rejected unless
 /// the work is routed through explicit deterministic/mockable capabilities.
 pub const ATTR_REPLAYABLE: &str = "Replayable";
 
 /// D-REFINE1: directive-plane invariant marker for distinct refinements.
-/// First shipped form is `#Invariant("value >= lo && value < hi")` before a
+/// First shipped form is `@Invariant("value >= lo && value < hi")` before a
 /// `distinct Int` declaration; sema normalizes it to proof-carrying bounds.
 pub const ATTR_INVARIANT: &str = "Invariant";
 
@@ -260,20 +260,20 @@ pub const API_CACHE_SUBDIR: &str = "cache/api";
 /// time (E1102) and flagged again at the detach site (E1103).
 pub const TASK_DETACH: &str = "detach"; // D-DETACH1
 
-/// D-REPRC1 (ratified; D-REPRC1 = B): `#Layout(…)` struct attribute — controls
-/// the memory layout of the generated Rust struct. `#Layout(c)` stamps
+/// D-REPRC1 (ratified; D-REPRC1 = B): `@Layout(…)` struct attribute — controls
+/// the memory layout of the generated Rust struct. `@Layout(c)` stamps
 /// `#[repr(C)]` for C interop. Field order is preserved as written.
 /// Growable fields (`[T]`, `Map`, `String`) are rejected (E1104).
 /// PascalCase per D-MARKERCASE1=A.
 pub const ATTR_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
-/// D-REPRC1: the C-compatible layout variant — `#Layout(c)` → `#[repr(C)]`.
+/// D-REPRC1: the C-compatible layout variant — `@Layout(c)` → `#[repr(C)]`.
 pub const LAYOUT_C: &str = "c"; // D-REPRC1
 /// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
 pub const LAYOUT_PACKED: &str = "packed"; // D-REPRC1 (reserved)
 pub const LAYOUT_ALIGN: &str = "align"; // D-REPRC1 (reserved)
 /// D-SOA1 / D-SOA2A=C (implemented): the struct-of-arrays layout variant —
-/// `#Layout(columnar) struct S` stores a `[S]` collection column-per-field.
-/// Whole-struct only in v1 (D-SOA2B); the partial form `#Layout(columnar: …)`
+/// `@Layout(columnar) struct S` stores a `[S]` collection column-per-field.
+/// Whole-struct only in v1 (D-SOA2B); the partial form `@Layout(columnar: …)`
 /// is rejected (E1109) and the per-container prefix `columnar [T]` is reserved
 /// (D-SOA2C, E1107).
 pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
@@ -296,15 +296,15 @@ pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
 pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3
 pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
-pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
-pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
-pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]
-pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
+pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  @[Rename("wire_key")]
+pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  @[Skip]
+pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  @[Default] / @[Default(expr)]
+pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  @[Flatten]
                                           // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
-pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
+pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  @[RenameAll(camel)]
 pub const ATTR_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
-pub const ATTR_TAG: &str = "Tag"; // D-SERDE7  #[Tag("type")] internal tagging
-pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
+pub const ATTR_TAG: &str = "Tag"; // D-SERDE7  @[Tag("type")] internal tagging
+pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  @[Untagged]
                                             // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
 pub const RENAME_ALL_CAMEL: &str = "camel"; // D-SERDE3
 pub const RENAME_ALL_SNAKE: &str = "snake"; // D-SERDE3
@@ -313,7 +313,7 @@ pub const RENAME_ALL_KEBAB: &str = "kebab"; // D-SERDE3
 pub const RENAME_ALL_SCREAMING: &str = "screaming"; // D-SERDE3
 
 // ── Maturity metadata values (D-MARK-META1=B, ratified 2026-07-12) ──────────
-// Closed values for `#Meta(maturity: .Experimental | .Tested | .Hardened)`.
+// Closed values for `@Meta(maturity: .Experimental | .Tested | .Hardened)`.
 // They are not standalone markers and therefore are absent from marker-plane
 // registries. No sema/codegen effect.
 pub const ATTR_EXPERIMENTAL: &str = "Experimental"; // D-MARK-META1
@@ -366,6 +366,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_BREAK,
     KW_CONTINUE,
     KW_RETURN,
+    KW_DEFER,
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
     KW_STRUCT,
     KW_ENUM,
@@ -397,9 +398,9 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_IMPURE,
     KW_TASKGROUP,
     CTX_BLOCK,
-    // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
+    // Transactions (D-TXN1–D-TXN4): `@Transact(name) { … }`
     KW_TRANSACT,
-    // Schedule-as-code (D-SCHEDULE1, card #505): `#Task fn` — `#Every(…)`
+    // Schedule-as-code (D-SCHEDULE1, card #505): `@Task fn` — `@Every(…)`
     // stays out of this list, matching ATTR_TARGET/ATTR_META (paren-arg
     // config markers aren't bare completion words).
     KW_TASK,
@@ -530,8 +531,8 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // PascalCase spelling kept. `@Numeric` (D-DIST3) and the `@numeric` capability
 // bundle (D-CAPBUNDLE1) are the same job (I8) and merge into one `@Numeric` —
 // see `ATTR_NUMERIC` above; there is no separate bundle constant. Serde field +
-// container markers (`#Rename`, `#Skip`, `#Default`, `#Flatten`,
-// `#RenameAll`, `#DenyUnknownFields`, `#Tag`, `#Untagged`) are wire-format
+// container markers (`@Rename`, `@Skip`, `@Default`, `@Flatten`,
+// `@RenameAll`, `@DenyUnknownFields`, `@Tag`, `@Untagged`) are wire-format
 // machinery, not promises, and stay on `#`.
 //
 // D-MARKERMOVE2 (B, ratified 2026-07-02): whole-move, no carve-out by
@@ -548,7 +549,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // machinery — the built-in/user line IS the plane line.
 use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
-    KW_BREAK, KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_DERIVE, KW_ELSE, KW_ENUM,
+    KW_BREAK, KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_DEFER, KW_DERIVE, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MODULE,
     KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RETURN, KW_SANITIZER,
     KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASK, KW_TASKGROUP, KW_TEST,

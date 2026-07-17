@@ -4,16 +4,14 @@ use super::super::{
 
 impl<'a> Parser<'a> {
         /// Parse one marker name and optional `(args)`; cursor sits on the name.
-        /// `sigil` is the plane prefix the caller already consumed (`'@'` or
-        /// `'#'`) — recorded on the marker for formatter re-emission.
-        fn parse_one_marker(&mut self, sigil: char) -> Result<Marker, Diagnostic> {
+        fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
             let (name, name_span) = self.expect_ident("for a marker name")?;
             let mut args = Vec::new();
             let mut end = name_span.end;
             if matches!(self.peek().kind, TokKind::LParen) {
                 self.bump(); // `(`
                 while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
-                    // D-REPRC2's expert spelling is `#Layout(c, tag: U8)`.
+                    // D-REPRC2's expert spelling is `@Layout(c, tag: U8)`.
                     // Marker arguments otherwise use ordinary expressions; retain the
                     // width as the second expression while the fixed `tag:` label is
                     // reconstructed by the formatter.
@@ -39,42 +37,17 @@ impl<'a> Parser<'a> {
                 name_span,
                 args,
                 span: Span::new(name_span.start, end),
-                sigil,
                 ct: None,
             })
         }
     
-        /// D-ATTR2: parse one `#[ Name (, …)* ]` group; cursor on `#`.
+        /// D-SHAPE2: parse one `@[ Name (, …)* ]` group; cursor on `@`.
         fn parse_marker_bracket_group(&mut self) -> Result<Vec<Marker>, Diagnostic> {
-            self.bump(); // `#`
-            self.bump(); // `[`
-            let mut group = Vec::new();
-            loop {
-                let m = self.parse_one_marker('#')?;
-                self.check_marker_plane(&m, false);
-                group.push(m);
-                if matches!(self.peek().kind, TokKind::Comma) {
-                    self.bump();
-                } else {
-                    break;
-                }
-            }
-            self.expect(TokKind::RBracket, "to close a `#[…]` marker list")?;
-            while matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
-            }
-            Ok(group)
-        }
-    
-        /// D-MARKER-FAMILY1/G2: parse one `@[ Name (, …)* ]` contract-derive
-        /// group; cursor on `@`. The `@` sibling of `parse_marker_bracket_group`.
-        fn parse_contract_marker_bracket_group(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             self.bump(); // `@`
             self.bump(); // `[`
             let mut group = Vec::new();
             loop {
-                let m = self.parse_one_marker('@')?;
-                self.check_marker_plane(&m, true);
+                let m = self.parse_one_marker()?;
                 group.push(m);
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
@@ -82,62 +55,15 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            self.expect(TokKind::RBracket, "to close a `@[…]` marker list")?;
+            self.expect(TokKind::RBracket, "to close an `@[…]` rule list")?;
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
             Ok(group)
         }
     
-        /// D-MARKER-FAMILY1 (I7/R3 chokepoint): after parsing a marker name in a
-        /// bracket/single-marker group, check it landed on the plane its sigil
-        /// implies. `on_at` is true when the enclosing group opened with `@`. A
-        /// moved contract marker (§2a/§2b/G3) written after `#` is E0062; a
-        /// directive name written after `@` is E0063. Any other name (a user
-        /// derive on `#`, or an unrecognized `@` name) is left for downstream —
-        /// derive resolution, or the generic `@` teaching error — to judge.
-        fn check_marker_plane(&mut self, marker: &Marker, on_at: bool) {
-            if on_at {
-                if Syntax::is_directive_marker(&marker.name) {
-                    self.diags
-                        .push(Self::e0063_directive_on_at(&marker.name, marker.name_span));
-                }
-            } else if Syntax::is_contract_marker(&marker.name) {
-                self.diags
-                    .push(Self::e0062_contract_on_hash(&marker.name, marker.name_span));
-            }
-        }
-    
-        /// E0062: a contract marker (moved to `@` by D-MARKERMOVE1/2/3) was
-        /// written with `#`. `name` is the marker's bare name (no sigil).
-        pub(in crate::Parser) fn e0062_contract_on_hash(name: &str, span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0062",
-                format!("`#{name}` states a contract — write it with `@`, not `#`"),
-                "`@` marks a promise about the declaration below it (`@Pure`, `@MustUse`, \
-                 `@Codable`); `#` is for compiler directives (`#Unsafe`, `#Test`). One glance \
-                 at the first character tells a reader which it is (D-MARKER-FAMILY1)."
-                    .to_string(),
-                format!("write `@{name}` (`@` + the same PascalCase name)."),
-                Some(span),
-            )
-        }
-    
-        /// E0063: a directive marker (stays on `#`) was written with `@`.
-        pub(in crate::Parser) fn e0063_directive_on_at(name: &str, span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0063",
-                format!("`@{name}` is a compiler directive — write it with `#`, not `@`"),
-                "`#` changes what compiles or runs (`#Test`, `#Unsafe`, `#Caps`); `@` is \
-                 reserved for contracts stated on the declaration below (D-MARKER-FAMILY1)."
-                    .to_string(),
-                format!("write `#{name}` instead of `@{name}`."),
-                Some(span),
-            )
-        }
-    
-        /// D-ATTR2 / D-SERDE2–8: parse `#[ … ]` bracket-marker groups. A second
-        /// consecutive `#[ … ]` line is teaching error E0999 (merge into one list).
+        /// D-SHAPE2: parse `@[ … ]` applied-rule groups. A second consecutive
+        /// group is teaching error E0999 (merge into one list).
         pub(super) fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             let mut out = Vec::new();
             let mut groups = 0usize;
@@ -146,9 +72,9 @@ impl<'a> Parser<'a> {
                 if groups > 1 {
                     self.diags.push(Diagnostic::error(
                         "E0999",
-                        "multiple `#[…]` marker lines belong in one comma-separated list".to_string(),
-                        "Jet attaches every marker on a type in a single `#[A, B]` group (D-ATTR2); one marker alone is `#A`".to_string(),
-                        "merge them: `#[RenameAll(camel), Skip]`, or use `#RenameAll(camel)` when there is only one".to_string(),
+                        "multiple `@[…]` rule lines belong in one comma-separated list".to_string(),
+                        "Jet attaches every applied rule on a type in a single `@[A, B]` group (D-SHAPE2); one rule alone is `@A`".to_string(),
+                        "merge them: `@[RenameAll(camel), Skip]`, or use `@RenameAll(camel)` when there is only one".to_string(),
                         Some(self.peek().span),
                     ));
                 }
@@ -157,57 +83,21 @@ impl<'a> Parser<'a> {
             Ok(out)
         }
     
-        /// D-MARKER-FAMILY1/G2: parse `@[ … ]` contract-marker bracket groups. A
-        /// second consecutive `@[ … ]` line is E0999 (same rule, same plane only
-        /// — a `@[…]` group and a `#[…]` group may stack on one declaration, so
-        /// this never fires across planes).
-        fn parse_contract_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
-            let mut out = Vec::new();
-            let mut groups = 0usize;
-            while self.at_contract_marker_list() {
-                groups += 1;
-                if groups > 1 {
-                    self.diags.push(Diagnostic::error(
-                        "E0999",
-                        "multiple `@[…]` marker lines belong in one comma-separated list".to_string(),
-                        "Jet attaches every contract marker on a declaration in a single `@[A, B]` group (D-MARKER-FAMILY1); one marker alone is `@A`".to_string(),
-                        "merge them: `@[Codable, Debug]`, or use `@Codable` when there is only one".to_string(),
-                        Some(self.peek().span),
-                    ));
-                }
-                out.extend(self.parse_contract_marker_bracket_group()?);
-            }
-            Ok(out)
-        }
-    
-        /// D-ATTR1: parse a lone `#Marker` (or `#Marker(args)`) before `struct`/`enum`.
+        /// D-SHAPE2: parse a lone `@Marker` (or `@Marker(args)`) before `struct`/`enum`.
         fn parse_single_type_prefix_marker(&mut self) -> Result<Marker, Diagnostic> {
-            self.bump(); // `#`
-            let m = self.parse_one_marker('#')?;
-            self.check_marker_plane(&m, false);
-            Ok(m)
-        }
-    
-        /// D-MARKER-FAMILY1/G3: parse a lone `@Marker` (or `@Marker(args)`) before
-        /// `struct`/`enum` — the `@` sibling of `parse_single_type_prefix_marker`.
-        fn parse_single_contract_type_marker(&mut self) -> Result<Marker, Diagnostic> {
             self.bump(); // `@`
-            let m = self.parse_one_marker('@')?;
-            self.check_marker_plane(&m, true);
+            let m = self.parse_one_marker()?;
             Ok(m)
         }
     
-        /// D-MARKER-FAMILY1/G2: parse leading `@[…]` contract-marker groups
-        /// and/or `#[…]` directive+serde-marker groups before a struct/enum
-        /// field, both optional and stackable (e.g. `@[Redact] #[Rename("x")]`).
+        /// D-SHAPE2: parse leading `@[…]` applied-rule groups before a
+        /// struct/enum field (e.g. `@[Redact, Rename("x")]`).
         /// Used at field position, which only ever supports the bracket form
-        /// (no bare `@Redact`/`#Rename` without brackets).
+        /// (no bare `@Redact`/`@Rename` without brackets).
         pub(super) fn parse_field_markers(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             let mut out = Vec::new();
             loop {
-                if self.at_contract_marker_list() {
-                    out.extend(self.parse_contract_marker_groups()?);
-                } else if self.at_marker_list() {
+                if self.at_marker_list() {
                     out.extend(self.parse_marker_groups()?);
                 } else {
                     break;
@@ -220,9 +110,7 @@ impl<'a> Parser<'a> {
         /// (`Codable`→`Encode`+`Decode`, `Encode`, `Decode`, `Debug`, `Summarize`,
         /// `Comparable`, user traits) are pushed onto `derives`; serde *attribute*
         /// markers are returned raw for sema. Markers arrive already validated for
-        /// plane (E0062/E0063 pushed by the caller if misplaced, D-MARKER-FAMILY1)
-        /// — this only classifies what job each name does, independent of which
-        /// sigil it came from.
+        /// This only classifies each rule's job after the single `@` parser.
         fn split_type_markers(markers: Vec<Marker>, derives: &mut Vec<(String, Span)>) -> Vec<Marker> {
             let mut serde = Vec::new();
             for m in markers {
@@ -242,7 +130,7 @@ impl<'a> Parser<'a> {
                     | Syntax::ATTR_DEFAULT
                     | Syntax::ATTR_FLATTEN => serde.push(m),
                     // Any other name is a derive-trait: the D-MARKERMOVE3 built-ins
-                    // (`@[Debug]`, `@[Summarize]`, `@[Comparable]`) or a `#[…]` user
+                    // (`@[Debug]`, `@[Summarize]`, `@[Comparable]`) or a user
                     // derive-trait name.
                     _ => derives.push((m.name.clone(), m.name_span)),
                 }
@@ -294,7 +182,7 @@ impl<'a> Parser<'a> {
             match &self.peek().kind {
                 TokKind::KwStruct => self.struct_def_after_pub(is_pub).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def_after_pub(is_pub, false).map(Item::Enum),
-                TokKind::Hash
+                TokKind::At
                     if matches!(
                         &self.peek2().kind,
                         TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT
@@ -302,7 +190,7 @@ impl<'a> Parser<'a> {
                 {
                     self.layout_type_def(is_pub)
                 }
-                TokKind::Hash | TokKind::At
+                TokKind::At
                     if matches!(
                         &self.peek2().kind,
                         TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA
@@ -318,34 +206,24 @@ impl<'a> Parser<'a> {
                     ),
                     "derive markers like `@Codable` / `@[Codable]` and serde attributes attach to a type"
                         .to_string(),
-                    "write `@Codable struct Name { … }` or `@[Codable] #[RenameAll(camel)] struct …`"
+                    "write `@Codable struct Name { … }` or `@[Codable, RenameAll(camel)] struct …`"
                         .to_string(),
                     Some(self.peek().span),
                 )),
             }
         }
     
-        /// D-MARKER-FAMILY1/G2: parse leading `@[…]`/`@Name` contract markers
-        /// and/or `#[…]`/`#Name` directive+serde markers, in either order, both
-        /// optional, both stackable on one declaration (E0999 only fires for two
-        /// groups on the SAME plane — a `@[…]` group and a `#[…]` group may
-        /// stack). Then parses the struct/enum they attach to. Single dispatch
-        /// entry point for both sigils at type-marker position (Items.rs top
-        /// match, Modules.rs inline-module body).
+        /// D-SHAPE2: parse leading `@[…]`/`@Name` applied rules, then the
+        /// struct/enum they attach to.
         pub(in crate::Parser) fn type_def_with_any_markers(&mut self) -> Result<Item, Diagnostic> {
             let mut markers = Vec::new();
             loop {
                 // A marker line may end with an auto-inserted/explicit `;` before
-                // the next stacked marker line or the `struct`/`enum` (G2 — both
-                // `@[…]` and `#[…]` groups, or lone forms, may stack).
+                // the next stacked rule line or the `struct`/`enum`.
                 while matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
-                if self.at_contract_marker_list() {
-                    markers.extend(self.parse_contract_marker_groups()?);
-                } else if self.at_single_contract_type_marker() {
-                    markers.push(self.parse_single_contract_type_marker()?);
-                } else if self.at_marker_list() {
+                if self.at_marker_list() {
                     markers.extend(self.parse_marker_groups()?);
                 } else if self.at_single_type_marker() {
                     markers.push(self.parse_single_type_prefix_marker()?);

@@ -52,7 +52,7 @@ const FORBIDDEN: &[&str] = &[
     "List<",
     "List[",
     "Map<",
-    "#Bench \"",
+    "@Bench \"",
     "#[Serialize",
     "Serialize]",
     "#[Deserialize",
@@ -103,33 +103,33 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     (
         "file-target-directives",
         &[
-            "#PubFile",
-            "#NoPrelude",
-            "#Target(Web)",
-            "#Target(Wasm)",
-            "#Target(Js)",
-            "#Html",
-            "#WasmExport",
+            "@PubFile",
+            "@NoPrelude",
+            "@Target(Web)",
+            "@Target(Wasm)",
+            "@Target(Js)",
+            "@Html",
+            "@WasmExport",
         ],
     ),
     (
         "type-layout-directives",
         &[
-            "#Layout(c)",
-            "#Layout(columnar)",
-            "#SingleUse",
-            "#UnitFamily",
+            "@Layout(c)",
+            "@Layout(columnar)",
+            "@SingleUse",
+            "@UnitFamily",
         ],
     ),
     (
         "serde-directive-attributes",
         &[
-            "#[Rename",
-            "#[Skip]",
-            "#[Default]",
-            "#RenameAll",
-            "#Tag",
-            "#Untagged",
+            "@[Rename",
+            "@[Skip]",
+            "@[Default]",
+            "@RenameAll",
+            "@Tag",
+            "@Untagged",
         ],
     ),
     (
@@ -153,25 +153,25 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     ),
     (
         "effect-capability-directives",
-        &["#(Fs)", "#(via f)", "#Caps", "#Grant"],
+        &["#(Fs)", "#(via f)", "@Caps", "@Grant"],
     ),
     (
         "unsafe-impure-gates",
-        &["#Unsafe", "#Impure", "D-UNSAFE-REASON1"],
+        &["@Unsafe", "@Impure", "D-UNSAFE-REASON1"],
     ),
     (
         "test-bench-directives",
-        &["#Test(\"name\")", "#Test fn", "#Bench(\"name\")"],
+        &["@Test(\"name\")", "@Test fn", "@Bench(\"name\")"],
     ),
     (
         "typing-fact-directives",
         &[
-            "#Tainted",
-            "#Sanitizer",
-            "#Replayable",
-            "#State",
-            "#Transition",
-            "#Track",
+            "@Tainted",
+            "@Sanitizer",
+            "@Replayable",
+            "@State",
+            "@Transition",
+            "@Track",
         ],
     ),
     (
@@ -184,11 +184,11 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     ),
     (
         "maturity-markers",
-        &["#Meta(maturity: .Experimental", ".Tested", ".Hardened"],
+        &["@Meta(maturity: .Experimental", ".Tested", ".Hardened"],
     ),
     (
         "retired-paused-marker-spellings",
-        &["@unsafe", "#extern", "#layout", "#Bench \"", "#[Serialize"],
+        &["@unsafe", "#extern", "#layout", "@Bench \"", "#[Serialize"],
     ),
 ];
 
@@ -302,7 +302,7 @@ fn active_maturity_docs_use_meta_field_only() {
         let text = fs::read_to_string(relative)
             .unwrap_or_else(|error| panic!("cannot read maturity surface {relative}: {error}"));
         for required in [
-            "#Meta(maturity:",
+            "@Meta(maturity:",
             ".Experimental",
             ".Tested",
             ".Hardened",
@@ -321,22 +321,16 @@ fn active_maturity_docs_use_meta_field_only() {
     }
     assert!(
         failures.is_empty(),
-        "active maturity docs drifted from the sole `#Meta(maturity: ...)` surface:\n{}",
+        "active maturity docs drifted from the sole `@Meta(maturity: ...)` surface:\n{}",
         failures.join("\n")
     );
 }
 
 #[test]
 fn proposal_marker_census_matches_syntax_registry() {
-    let contracts = jet::Syntax::CONTRACT_MARKERS.len();
-    let directives = jet::Syntax::DIRECTIVE_MARKERS.len();
-    assert!(contracts > 0 && directives > 0, "marker registries must be non-empty");
-    let expected = format!(
-        "{} registered markers ({} `@` / {} `#`)",
-        contracts + directives,
-        contracts,
-        directives
-    );
+    let rules = jet::Syntax::APPLIED_RULES.len();
+    assert!(rules > 0, "applied-rule registry must be non-empty");
+    let expected = format!("{} registered applied rules (all `@`)", rules);
     for relative in MARKER_CENSUS_DOCS {
         let text = fs::read_to_string(relative)
             .unwrap_or_else(|error| panic!("cannot read marker census doc {relative}: {error}"));
@@ -488,7 +482,7 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "ATTR_TARGET",
         "ATTR_LAYOUT",
         "ATTR_CODABLE",
-        "CONTRACT_MARKERS",
+        "APPLIED_RULES",
         "KW_CAPS",
         "KW_GRANT",
         "KW_COMPTIME",
@@ -545,7 +539,7 @@ fn card_511_census_matches_current_law() {
     for value in ["ATTR_EXPERIMENTAL", "ATTR_TESTED", "ATTR_HARDENED"] {
         assert!(
             package.contains(value) && !markers.contains(value),
-            "maturity value `{value}` must remain a #Meta value, not a standalone marker"
+            "maturity value `{value}` must remain a @Meta value, not a standalone marker"
         );
     }
     for law in ["D-MARKER-FAMILY1", "D-DET1", "D-REPLAY1", "D-MARK-META1"] {

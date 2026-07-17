@@ -534,12 +534,12 @@ fn eval_normal_void_run_passes_sema() {
     );
 }
 
-/// D-REACTCORE1: `#Reactive { … }` parses in statement position.
+/// D-REACTCORE1: `@Reactive { … }` parses in statement position.
 #[test]
 fn parse_reactive_block_stmt() {
     let src = r#"
 fn run() {
-    #Reactive {
+    @Reactive {
         print(1)
     }
 }

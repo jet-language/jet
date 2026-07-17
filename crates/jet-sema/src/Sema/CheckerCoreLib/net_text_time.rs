@@ -441,7 +441,7 @@ pub fn binary_reader_method_return(
 /// constructor is handled in `CheckerInfer/calls.rs`). `take_pattern` is NOT
 /// listed here — it needs its pattern-literal argument's hole types to
 /// compute a return type, so it's dispatched directly at the call site
-/// (`CheckerInfer/calls.rs`), same reason `Gc.new<T>`/`Arena.alloc` are
+/// (`CheckerInfer/calls.rs`), for the same reason `Arena.alloc` is
 /// resolved outside their generic method-return tables.
 pub fn text_cursor_method_return(
     type_name: &str,

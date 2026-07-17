@@ -2,9 +2,9 @@
 
 **Status:** READY — all architecture decisions ratified (D-WEBBACKEND1/WASM1/JSBIND1/WEBKIND1/DOMGEN1=A).
 Amended by D-MARK-TARGET1=A (ratified 2026-07-11, card #498): the bare
-per-function `#Wasm`/`#Js` overrides below are retired — `#Target(Wasm)` /
-`#Target(Js)` is the one spelling for both the ceiling and the per-function
-override. `#WasmExport` is untouched.
+per-function `#Wasm`/`#Js` overrides below are retired — `@Target(Wasm)` /
+`@Target(Js)` is the one spelling for both the ceiling and the per-function
+override. `@WasmExport` is untouched.
 
 ## Goal
 
@@ -17,7 +17,7 @@ is inferred from effects, with expert override markers.
 | Decision | Outcome |
 |---|---|
 | D-WEBBACKEND1=A | Hybrid: view/UI → JS DOM; pure/compute → WASM |
-| D-WASM1=A | `Browser` effect added to D-EFF4 closed set; partition by effects; `#Target(Wasm\|Js)` module-level ceilings + per-function `#Wasm`/`#Js`/`#WasmExport` |
+| D-WASM1=A | `Browser` effect added to D-EFF4 closed set; partition by effects; `@Target(Wasm\|Js)` module-level ceilings + per-function `#Wasm`/`#Js`/`@WasmExport` |
 | D-JSBIND1=A | ABI: scalars, String, Codable structs/enums, List/Map of ABI-safe values; generated adapters |
 | D-WEBKIND1=A | Browser-focused WASM + generated JS loader (no WASI) |
 | D-DOMGEN1=A | First-party JS runtime shim for create/update/event wiring |
@@ -27,14 +27,14 @@ is inferred from effects, with expert override markers.
 1. **Effect extension** — add `Browser` to the closed effect set in `Source/Sema/Effects.rs`
    (amending D-EFF4). `Browser` = any call into JS DOM APIs.
 
-2. **Syntax.rs markers** — register `#Target(Wasm|Js)`, `#Wasm`, `#Js`, `#WasmExport`
+2. **Syntax.rs markers** — register `@Target(Wasm|Js)`, `#Wasm`, `#Js`, `@WasmExport`
    per I7. PascalCase (D-MARKER-CANON1=A).
 
 3. **Partition sema pass** — walk the module graph; assign each function to a partition
    bucket (JS or WASM) based on:
    - Direct `Browser` effect → JS bucket.
    - Pure/no-effect → eligible for WASM.
-   - `#Target(Wasm)` / `#Js` / `#Wasm` overrides explicit ceiling.
+   - `@Target(Wasm)` / `#Js` / `#Wasm` overrides explicit ceiling.
    - Cross-bucket call from wrong direction → E-WEB-CROSS-PARTITION.
 
 4. **JS boundary type check** — at every JS/WASM call site, verify parameter/return types

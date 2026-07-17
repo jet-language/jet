@@ -293,13 +293,13 @@ fn prelude_opt_out() {
             || package.contains("MARKER_NO_PRELUDE")
             || syntax.contains("NoPrelude")
             || package.contains("NoPrelude"),
-        "Syntax must register `#NoPrelude`"
+        "Syntax must register `@NoPrelude`"
     );
 
     let example = read("examples/features/io/no_prelude.jet");
     assert!(
-        example.starts_with("#NoPrelude") || example.contains("\n#NoPrelude\n") || example.lines().next() == Some("#NoPrelude"),
-        "I5 example must declare `#NoPrelude`"
+        example.starts_with("@NoPrelude") || example.contains("\n@NoPrelude\n") || example.lines().next() == Some("@NoPrelude"),
+        "I5 example must declare `@NoPrelude`"
     );
     assert!(
         example.contains("use core.io"),
@@ -311,13 +311,13 @@ fn prelude_opt_out() {
 
     let bare = read("tests/ui/no_prelude_print.stderr");
     assert!(
-        bare.contains("E0429") && bare.contains("#NoPrelude"),
-        "bare `print` under `#NoPrelude` must be E0429"
+        bare.contains("E0429") && bare.contains("@NoPrelude"),
+        "bare `print` under `@NoPrelude` must be E0429"
     );
     let dup = read("tests/ui/no_prelude_duplicate.stderr");
     assert!(
         dup.contains("E0428") || dup.contains("NoPrelude"),
-        "duplicate `#NoPrelude` must diagnose"
+        "duplicate `@NoPrelude` must diagnose"
     );
 }
 
@@ -327,7 +327,7 @@ fn maturity_convention() {
     // CAPABILITY_CLAIM: claim.maturity-tags / maturity-convention
     let docs = read("docs/reference/maturity-tags.md");
     assert!(
-        docs.contains("#Meta(maturity: .Experimental)")
+        docs.contains("@Meta(maturity: .Experimental)")
             && docs.contains(".Tested")
             && docs.contains(".Hardened"),
         "reference docs must name all three maturity metadata values"
@@ -350,9 +350,9 @@ fn maturity_convention() {
 
     let example = read("examples/features/syntax/maturity_tags.jet");
     assert!(
-        example.contains("#Meta(maturity: .Experimental)")
-            && example.contains("#Meta(maturity: .Tested)")
-            && example.contains("#Meta(maturity: .Hardened)"),
+        example.contains("@Meta(maturity: .Experimental)")
+            && example.contains("@Meta(maturity: .Tested)")
+            && example.contains("@Meta(maturity: .Hardened)"),
         "I5 example must use all three maturity metadata values"
     );
     let expected = read("examples/features/expected/syntax/maturity_tags.out");
@@ -537,7 +537,7 @@ fn public_build_product() {
 fn static_guarantees_shared_engine() {
     // CAPABILITY_CLAIM: claim.static-guarantees / shared-facts-engine
     let src = r#"
-#Invariant("value >= 0 && value < 4")
+@Invariant("value >= 0 && value < 4")
 Index4 :: distinct Int
 
 @Pre(n >= 0, "n non-negative") @Post(result >= 0, "result non-negative")
@@ -545,11 +545,11 @@ fn absish(n: Int) -> Int {
     return n
 }
 
-#Sanitizer fn clean(raw: String) -> String {
+@Sanitizer fn clean(raw: String) -> String {
     return raw
 }
 
-#Replayable fn add(a: Int, b: Int) -> Int {
+@Replayable fn add(a: Int, b: Int) -> Int {
     return a + b
 }
 
@@ -562,7 +562,7 @@ fn pick(xs: [String#4], i: Index4) -> String {
 }
 
 fn run() {
-    dirty :: #Tainted "x"
+    dirty :: @Tainted "x"
     safe := clean(dirty)
     words: [String#4] :: ["a", "b", "c", "d"]
     print(pick(words, Index4(1)))
@@ -591,7 +591,7 @@ fn run() {
 
     // Existing verticals still ship through the same engine surface.
     assert!(
-        read("examples/features/types/refinements.jet").contains("#Invariant"),
+        read("examples/features/types/refinements.jet").contains("@Invariant"),
         "I5 refinements example must remain"
     );
     assert!(
@@ -599,8 +599,8 @@ fn run() {
         "I5 contracts example must remain"
     );
     assert!(
-        read("examples/features/effects/taint.jet").contains("#Tainted")
-            && read("examples/features/effects/taint.jet").contains("#Sanitizer"),
+        read("examples/features/effects/taint.jet").contains("@Tainted")
+            && read("examples/features/effects/taint.jet").contains("@Sanitizer"),
         "I5 taint/IFC slice example must remain"
     );
     assert!(
@@ -678,7 +678,7 @@ fn project_format_and_test() {
     let test_src = r#"
 fn run() {}
 
-#Test("snapshot updates") {
+@Test("snapshot updates") {
     expect("fresh-value").snapshot()
 }
 "#;
@@ -748,7 +748,7 @@ use core.testing as testing
 
 fn run() {}
 
-#Test("testing.snap updates") {
+@Test("testing.snap updates") {
     require(testing.snap("helper-case", "helper-fresh"))
 }
 "#;

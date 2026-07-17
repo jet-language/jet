@@ -1,9 +1,7 @@
-/// D-MARKER-FAMILY1: the contract-plane prefix — sibling of `ATTR_PREFIX` ("#").
-/// `@` markers attach only to declarations (fn, type, field) plus the
-/// D-MARKERMOVE2 function-type bound carve-out, never to other expressions or
-/// type positions. Loop-label suffix `@` (D-LOOPLABEL2) is a different
-/// grammatical slot and unaffected.
-pub const CONTRACT_PREFIX: &str = "@"; // D-MARKER-FAMILY1
+/// D-SHAPE2=A: the sole prefix for applying a typed rule. A rule may target a
+/// declaration, expression, or brace scope when that rule declares the target
+/// legal. Loop-label suffix `@` (D-LOOPLABEL2) is a different grammatical slot.
+pub const RULE_PREFIX: &str = "@"; // D-SHAPE2
 
 /// D-PREPOST1 / D-CONTRACTCASE1: precondition contract on a function
 /// signature — `@Pre(cond, "msg")`. The condition is a pure expression (same
@@ -59,7 +57,7 @@ pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
 pub const ATTR_ABI: &str = "Abi"; // D-CABI-PLATFORM1
 
 /// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
-/// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
+/// `@[allow(lint_name)]` on a struct or field (e.g. `@[allow(float_money)]`
 /// silences the default-on money lint L0504). Deliberately lowercase: it
 /// names a lint code, not a declaration-shaped feature, so it does not
 /// follow the PascalCase marker convention. Struct/field site collection:
@@ -68,14 +66,11 @@ pub const ATTR_ABI: &str = "Abi"; // D-CABI-PLATFORM1
 /// `crates/jet-foundation/src/Numeric.rs`.
 pub const ATTR_ALLOW: &str = "allow"; // D-LINTPOLICY1
 
-/// D-MARKER-FAMILY1 / D-MARKERMOVE1 / D-MARKERMOVE3 (I7/R3 chokepoint): every
-/// name that lives on the `@` contract plane. Union of the D-MARKERMOVE1
-/// move list (§2a), the D-CONTRACTCASE1 recase set (§2b), D-MARKERMOVE3's
-/// three extra built-in derives, and the D-CLIFLAG1 placeholders (G4). One
-/// source of truth for "which plane is this name" — parser, formatter, sema,
-/// and LSP all dispatch off `is_contract_marker`/`is_directive_marker`
-/// instead of hand-rolled match arms.
-pub const CONTRACT_MARKERS: &[&str] = &[
+/// D-SHAPE2=A (I7/R3 chokepoint): every built-in applied rule. Parser,
+/// formatter, sema, and LSP dispatch through `is_applied_rule`; there is no
+/// second marker plane. User-defined derives share this `@` application shape
+/// but are resolved by sema rather than enumerated here.
+pub const APPLIED_RULES: &[&str] = &[
     // D-MARKERMOVE1 move list (§2a)
     KW_PURE,
     ATTR_MUST_USE,
@@ -85,7 +80,8 @@ pub const CONTRACT_MARKERS: &[&str] = &[
     ATTR_PUBLISHED_SCHEMA,
     ATTR_REDACT,
     ATTR_NUMERIC,
-    // D-MARKERMOVE3: built-in derive markers (user derives stay `#`).
+    // D-MARKERMOVE3: built-in derive markers; user derives resolve through
+    // the same `@` application plane without being enumerated here.
     // ATTR_COMPARABLE ("Comparable") also names the D-CAPBUNDLE1 capability
     // bundle below — same spelling, disambiguated by declaration position
     // (struct/enum derive vs. distinct-type bundle), listed once here.
@@ -113,14 +109,9 @@ pub const CONTRACT_MARKERS: &[&str] = &[
     CONTRACT_DOC,
     // D-PATCH1 (card #181)
     CONTRACT_PATCHABLE,
-];
-
-/// D-MARKER-FAMILY1: every `#`-plane directive name that a moved-marker
-/// reader might confuse for a contract, i.e. the E0063 "did you mean `#`"
-/// set (§2c). Not exhaustive of every `#` spelling in the language — just
-/// the ones with parser-visible dispatch that needs to reject a stray `@`.
-pub const DIRECTIVE_MARKERS: &[&str] = &[
+    // Applied rules formerly spelled with `#`.
     KW_UNSAFE,
+    KW_SHIELD,
     KW_IMPURE,
     KW_REACTIVE,
     KW_TEST,
@@ -137,14 +128,15 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_LIVE,
     ATTR_NONDETERMINISTIC,
     ATTR_POLICY,
-    // D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Task` / `#Every(…)`.
+    CTX_BLOCK,
+    // D-SCHEDULE1 (ratified 2026-07-11, card #505): `@Task` / `@Every(…)`.
     KW_TASK,
     ATTR_EVERY,
     ATTR_TRACK,
     ATTR_OFF,
     ATTR_DEBUG_ONLY,
     ATTR_META,
-    // D-MARK-TARGET1=A (ratified 2026-07-11, card #498): `#Target(Wasm|Js)`
+    // D-MARK-TARGET1=A (ratified 2026-07-11, card #498): `@Target(Wasm|Js)`
     // is the one target-marker family (both the ceiling and the per-function
     // override use); the bare `#Wasm`/`#Js` spellings are retired and no
     // longer registered as directive markers (ordinary unknown-marker error).
@@ -171,10 +163,10 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     // ATTR_UNINIT/ATTR_REF above.
     ATTR_EXTERN_MODULE,
     ATTR_BINDGEN,
-    // D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `#FFI(<lang>) fn`
+    // D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `@FFI(<lang>) fn`
     // inline foreign tier marker.
     ATTR_FFI,
-    "Caller",
+    // `#Caller()` is a compile-time value, not an applied rule.
     ATTR_RENAME,
     ATTR_SKIP,
     ATTR_DEFAULT,
@@ -183,19 +175,27 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_DENY_UNKNOWN_FIELDS,
     ATTR_TAG,
     ATTR_UNTAGGED,
-    // D-LINTPOLICY1=A / D-DECIMAL1 — `#[allow(lint_name)]` per-site suppression.
+    // D-LINTPOLICY1=A / D-DECIMAL1 — `@[allow(lint_name)]` per-site suppression.
     ATTR_ALLOW,
+    // File and const rules use the same applied-rule registry.
+    MARKER_PUB_FILE,
+    MARKER_NO_PRELUDE,
+    "static",
+    "inline",
+    // SIMD reduce operation rules.
+    "Add",
+    "Mul",
+    "Min",
+    "Max",
 ];
 use super::{
-    ATTR_BINDGEN, ATTR_CODABLE, ATTR_COMPARABLE, ATTR_DEBUG_ONLY,
-    ATTR_DECODE, ATTR_DEFAULT,
-    ATTR_DENY_UNKNOWN_FIELDS, ATTR_ENCODE, ATTR_EXTERN_MODULE, ATTR_FFI, ATTR_FLATTEN, ATTR_HTML,
-    ATTR_INVARIANT, ATTR_LAYOUT, ATTR_META, ATTR_MUST_USE,
-    ATTR_NUMERIC, ATTR_OFF, ATTR_PUBLISHED_SCHEMA, ATTR_REDACT, ATTR_RENAME, ATTR_RENAME_ALL,
-    ATTR_REPLAYABLE, ATTR_SINGLE_USE, ATTR_SKIP, ATTR_SUMMARIZE, ATTR_TAG,
-    ATTR_TARGET, ATTR_TRACK, ATTR_UNIT_FAMILY, ATTR_UNTAGGED,
-    ATTR_WASM_EXPORT, ATTR_REGION, ATTR_LIVE, ATTR_NONDETERMINISTIC, ATTR_POLICY,
-    DSL_BLOCK_SQL, KW_BENCH, KW_CAPS, KW_GRANT, KW_IMPURE, KW_PURE,
-    KW_REACTIVE, KW_SANITIZER, KW_STATE, KW_TAINTED, KW_TASK, KW_TEST, KW_TODO, KW_TRANSACT,
-    KW_TRANSITION, KW_UNSAFE, ATTR_EVERY,
+    ATTR_BINDGEN, ATTR_CODABLE, ATTR_COMPARABLE, ATTR_DEBUG_ONLY, ATTR_DECODE,
+    ATTR_DEFAULT, ATTR_DENY_UNKNOWN_FIELDS, ATTR_ENCODE, ATTR_EVERY, ATTR_EXTERN_MODULE, ATTR_FFI,
+    ATTR_FLATTEN, ATTR_HTML, ATTR_INVARIANT, ATTR_LAYOUT, ATTR_LIVE, ATTR_META, ATTR_MUST_USE,
+    ATTR_NONDETERMINISTIC, ATTR_NUMERIC, ATTR_OFF, ATTR_POLICY, ATTR_PUBLISHED_SCHEMA, ATTR_REDACT,
+    ATTR_REGION, ATTR_RENAME, ATTR_RENAME_ALL, ATTR_REPLAYABLE, ATTR_SINGLE_USE, ATTR_SKIP,
+    ATTR_SUMMARIZE, ATTR_TAG, ATTR_TARGET, ATTR_TRACK, ATTR_UNIT_FAMILY, ATTR_UNTAGGED,
+    ATTR_WASM_EXPORT, CTX_BLOCK, DSL_BLOCK_SQL, KW_BENCH, KW_CAPS, KW_GRANT, KW_IMPURE, KW_PURE,
+    KW_REACTIVE, KW_SANITIZER, KW_SHIELD, KW_STATE, KW_TAINTED, KW_TASK, KW_TEST, KW_TODO,
+    KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, MARKER_NO_PRELUDE, MARKER_PUB_FILE,
 };

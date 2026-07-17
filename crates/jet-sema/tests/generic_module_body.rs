@@ -28,6 +28,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             no_prelude: program.no_prelude,
             html_path: program.html_path,
             no_alloc_policy: program.no_alloc_policy,
+            policy_declarations: program.policy_declarations.clone(),
         }],
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
@@ -72,6 +73,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
             imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), source: (*src).into(),
             web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
             html_path: program.html_path, no_alloc_policy: program.no_alloc_policy,
+            policy_declarations: program.policy_declarations.clone(),
         });
     }
     let mut bundle = ProgramBundle {
@@ -79,7 +81,8 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: CFfi::default(), comptime_inputs: Vec::new(),
         import_targets, layer_ceiling: None, inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(), web_partition_enforced: false, web_partition_report: None,
-        dep_roots: HashMap::new(), active_os: Syntax::OsTarget::host(),
+        dep_roots: HashMap::new(),
+        active_os: Syntax::OsTarget::host(),
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
     (bundle, diagnostics)
@@ -215,7 +218,7 @@ fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph()
     let src = r#"
 module Laws<T> {
     tag Audited;
-    fn audited(value: #Audited T) -> #Audited T { return ~value }
+    fn audited(value: @Audited T) -> @Audited T { return ~value }
     trait Reveal { type Output; fn reveal(self) -> T }
     struct Wrapped { value: T }
     impl Wrapped.Reveal { type Output = T; fn reveal(self) -> T { return self.value } }
@@ -315,8 +318,8 @@ fn run() {}
 fn tests_and_benches_are_specialized_once_per_instance_with_unique_names() {
     let (bundle, diagnostics) = check(r#"
 module Checks<T, count: Int> {
-    #Test fn identity(value: T) { expect(count == count) }
-    #Bench("work") { expect(count == count) }
+    @Test fn identity(value: T) { expect(count == count) }
+    @Bench("work") { expect(count == count) }
 }
 module IntChecks = Checks<Int, 2>
 module TextChecks = Checks<String, 4>

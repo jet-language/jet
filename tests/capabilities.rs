@@ -1,5 +1,5 @@
 //! c110 (P0): capability reporting is derived from semantic facts (resolved
-//! Core calls, `#Unsafe` gates, FFI declarations), not from scanning generated
+//! Core calls, `@Unsafe` gates, FFI declarations), not from scanning generated
 //! Rust text. These tests pin the new behavior and the bugs it fixes.
 //!
 //! Note: the legacy `Capabilities::from_rust` text scan turned out to be stale —

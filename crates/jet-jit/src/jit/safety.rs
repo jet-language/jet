@@ -414,7 +414,9 @@ fn resident_safe_builtin_op(
 
 pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
-        TStmt::Let { init, .. } => resident_safe_expr(init, callees),
+        TStmt::Let { init, gc_promotion, gc_transferred, .. } => {
+            gc_promotion.is_none() && !*gc_transferred && resident_safe_expr(init, callees)
+        }
         // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` — the one
         // tuple-destructure shape this tier covers (general `TupleDestructure` /
         // `StructDestructure` / `ListDestructure` are not covered at all otherwise;
@@ -578,6 +580,9 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
 
 pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
+    if program.funcs.iter().any(|function| function.gc_return) {
+        return false;
+    }
     let main_ok = program.funcs.iter().any(|f| {
         f.name == "run"
             && f.params.is_empty()

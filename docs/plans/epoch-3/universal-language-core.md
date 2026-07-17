@@ -60,7 +60,7 @@ These are source-backed defects, not roadmap speculation:
   `/* unsupported */ ()`. Interior-NUL strings also collapse to empty at
   `CModule.rs:36`.
 - `crates/jet-codegen/src/Codegen/Items.rs:691` replaces non-primitive
-  `#[Default(expr)]` values with `Default::default()`, silently changing typed
+  `@[Default(expr)]` values with `Default::default()`, silently changing typed
   CLI and decode semantics. The same file directly emits Rust `Codable` impls
   instead of satisfying R11's re-entry law (`Items.rs:667`).
 - `tests/dev.rs:480` skips four default AOT examples; `tests/jit_gaps.txt`
@@ -223,7 +223,7 @@ Card #436 is governed by `D-CABI-CALLBACK1=A`, `D-CABI-RESULT1=C`, and
 capture-free or named `@Pure`, and restricted to the foreign-thread-safe
 subset. Generic Result stays outside C declarations; raw status/out-pointer
 functions get ordinary Jet wrappers. Alternate native conventions use a local
-per-function `#Abi` marker, with C as the default, the exact target matrix in
+per-function `@Abi` marker, with C as the default, the exact target matrix in
 the syntax ledger, no module inheritance, and no invented symbol decoration.
 
 - Reopen #180 for C FFI types that sema accepts but codegen cannot emit.
@@ -236,7 +236,7 @@ the syntax ledger, no module inheritance, and no invented symbol decoration.
 - Reopen #353 for accepts-invalid, miscompile, generated-unsafe, generic,
   ownership, sendability, and rustc-leak adversary campaigns.
 - Reopen #91 for complete generic modules; reopen #129/#131 for R11-compliant
-  generated Jet and exact `#[Default(expr)]` behavior.
+  generated Jet and exact `@[Default(expr)]` behavior.
 - Reopen #343 so every active diagnostic is reachable and snapshot-covered;
   staged and unimplemented codes cannot sit in informational allowlists.
 - Unsupported target/backend behavior becomes a Jet diagnostic before codegen.

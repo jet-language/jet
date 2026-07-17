@@ -72,7 +72,7 @@ pub struct FuncSig {
     pub return_view_provenance: std::sync::OnceLock<ViewProvenanceMap>,
     /// S50: declared in `extern rust`, implemented by the FFI bridge.
     pub is_extern: bool,
-    /// S58 (E2-M13): `#Unsafe fn` — calling it requires an enclosing `#Unsafe`
+    /// S58 (E2-M13): `@Unsafe fn` — calling it requires an enclosing `@Unsafe`
     /// block (E3103).
     pub is_unsafe: bool,
     /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
@@ -81,12 +81,12 @@ pub struct FuncSig {
     /// D-CABI-CALLBACK1: body contains only allocation-free, panic-free scalar
     /// computation and has no generic parameters or runtime/global access.
     pub is_foreign_thread_safe: bool,
-    /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
+    /// D-TAINT1: `@Sanitizer fn` — its return value is untainted by contract.
     pub is_sanitizer: bool,
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method — return value cannot be
     /// silently ignored as a bare expression statement (E0419).
     pub is_must_use: bool,
-    /// Card #436: true only for a C-boundary extern fn (`#Extern`/`#Bindgen
+    /// Card #436: true only for a C-boundary extern fn (`@Extern`/`@Bindgen
     /// module c.<lib>`, `CModule`), false for everything else including
     /// `extern rust`. A `String` argument to one of these crosses through
     /// `CString::new` in codegen — which fails on an embedded NUL byte — so
@@ -553,7 +553,7 @@ impl CtValue {
             }
             // A `BigInt` doesn't fit in a JSON number without losing
             // precision in most readers, so it round-trips as a string —
-            // matching how AOT's `#[Codable]` handles arbitrary precision.
+            // matching how AOT's `@[Codable]` handles arbitrary precision.
             CtValue::BigInt(b) => format!("\"{}\"", b.to_string_rep()),
             CtValue::Bytes(bs) => {
                 let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();

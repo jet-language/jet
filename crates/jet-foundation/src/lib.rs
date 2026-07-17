@@ -14,6 +14,7 @@ pub mod JSON;
 pub mod Numeric;
 pub mod OsTarget;
 pub mod PerformanceBudget;
+pub mod Policy;
 pub mod RingLayer;
 pub mod SHA256;
 pub mod Syntax;

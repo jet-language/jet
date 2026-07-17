@@ -51,6 +51,28 @@ fn spawn_with_retry(cmd: &mut Command) -> Child {
 }
 
 #[test]
+fn inspect_unsafe_reports_policy_provenance_and_operations() {
+    let dir = isolated_cwd("inspect_unsafe");
+    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value: Int :: 7\n @Unsafe(\"local\", obligations: .Track) {\n  pointer: *Int :: *value\n  assert no_alias\n  print(pointer.*)\n  assert valid_ptr, aligned\n }\n}\n").unwrap();
+    let output = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"schema_version\":1") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"discharged\":true"), "{stdout}");
+}
+
+#[test]
+fn configured_organization_unsafe_policy_fails_closed_and_keeps_path() {
+    let dir = isolated_cwd("organization_unsafe");
+    fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+    let configured = dir.join("org-policy.jet");
+    let output = Command::new(jet()).args(["check", "main.jet"]).current_dir(&dir).env(jet::Syntax::ENV_ORG_UNSAFE_POLICY, &configured).env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("E3109") && stderr.contains(configured.to_str().unwrap()), "{stderr}");
+    check_snapshot("unsafe_org_policy.txt", &stderr.replace(configured.to_str().unwrap(), "ORG_POLICY"));
+}
+
+#[test]
 fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     if Command::new("lua").arg("-v").output().is_err() { return }
     let dir=isolated_cwd("lua_bind_e2e");let root=PathBuf::from(env!("CARGO_MANIFEST_DIR"));let example=root.join("examples/interop/lua");
@@ -292,7 +314,7 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
         enforcement: .Warn,
     }],
 }
-#Bench("parse") {
+@Bench("parse") {
     total := 0
     loop value in 0..100 { total = total + value }
     require_eq(total, 4950)
@@ -329,7 +351,7 @@ module perf.package {
         },
     ],
 }
-#Bench("arena") {
+@Bench("arena") {
     arena :: mem.Arena.new()
     value :: arena.alloc(42)
     require_eq(value, 42)
@@ -1116,6 +1138,48 @@ fn exit_code_unknown_subcommand_is_usage() {
 }
 
 #[test]
+fn gc_report_missing_trace_has_registered_human_and_json_diagnostics() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_gc_report_missing_{}_{}",
+        std::process::id(),
+        line!()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let human = Command::new(jet())
+        .args(["gc", "report"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(1));
+    assert!(human.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&human.stderr);
+    assert!(stderr.contains("Error [E2110]: GC trace cannot be reported"), "{stderr}");
+    assert!(stderr.contains("run `jet run --gc-trace <file.jet>`"), "{stderr}");
+    assert!(!stderr.contains('\u{1b}'), "{stderr}");
+    check_snapshot(
+        "gc_report_missing_trace_e2110.txt",
+        &stderr.replace(root.to_str().unwrap(), "WORKSPACE"),
+    );
+
+    let json = Command::new(jet())
+        .args(["gc", "report", "--json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(1));
+    assert!(json.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&json.stdout);
+    assert!(stdout.contains("\"code\":\"E2110\""), "{stdout}");
+    assert!(stdout.contains("\"severity\":\"error\""), "{stdout}");
+    assert!(!stdout.contains('\u{1b}'), "{stdout}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn frequency_ring_groups_execute_real_handlers() {
     let out = Command::new(jet()).args(["self", "man"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
@@ -1177,7 +1241,7 @@ fn shape_cli_entry_type_drives_shell_inputs_but_remains_optional() {
         r#"@Cli
 struct RunArgs {
     @[Doc("person to greet")] name: String
-    #[Default(2)] retries: Int
+    @[Default(2)] retries: Int
     verbose: Bool
 }
 
@@ -2525,7 +2589,7 @@ fn run() #(Pascal, Io) {
     handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
     print(inv.counter_add(handle, 2) ?? -1)
     print(inv.destroyed_count())
-    inv.counter_close(^handle)
+    close(^handle)
     print(inv.destroyed_count())
 }
 "#).unwrap();

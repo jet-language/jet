@@ -188,7 +188,7 @@ fn core_provider_compiles_ring_package_to_rlib() {
         std::process::id(),
         std::thread::current().id()
     ));
-    let store = base.join("store");
+    let store = base.join("hangar");
     fs::create_dir_all(&store).unwrap();
 
     let roots = Roots {

@@ -245,7 +245,7 @@ pub(super) fn apply_method(
             _ => Err(unsupported("`BigInt.mul` with a non-BigInt argument", span)),
         },
         (CtValue::BigInt(a), "neg") => Ok(CtValue::BigInt(a.neg())),
-        // c139: `.raw()` unwraps a distinct/`#UnitFamily` type (D-DIST1/D-QUAL3).
+        // c139: `.raw()` unwraps a distinct/`@UnitFamily` type (D-DIST1/D-QUAL3).
         // Distinct types have zero runtime representation difference from
         // their base — the interpreter never wraps one, so unwrapping is
         // identity (`eval_distinct_ctor` in methods.rs constructs the same

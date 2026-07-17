@@ -48,7 +48,7 @@ use crate::Syntax;
 use Helpers::block_body;
 use ParseBlocks::{
     parse_build_allow, parse_deps, parse_effects, parse_grants, parse_lints_policy, parse_package,
-    parse_packages, parse_trust_policy,
+    parse_memory_policy, parse_packages, parse_trust_policy,
 };
 
 /// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
@@ -138,7 +138,7 @@ pub struct PackageMeta {
     pub layer: Option<crate::Syntax::RuntimeLayer>,
     /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `target: "web"` — this package's default
     /// CLI backend, the manifest-level counterpart to a loose file's
-    /// `#Target(Web)` marker. `--target=<x>` on the command line still wins.
+    /// `@Target(Web)` marker. `--target=<x>` on the command line still wins.
     pub target: Option<String>,
 }
 
@@ -153,7 +153,7 @@ pub enum PackageKind {
 
 /// One build target of a package (D-TGT1/D-TGT2, ratified 2026-06-21). The six
 /// shipped targets. `benchmark` (c80) routes `jet bench` at the package entry
-/// via the existing `#Bench`/`jet bench` engine — it is not a new mechanism
+/// via the existing `@Bench`/`jet bench` engine — it is not a new mechanism
 /// (I8). `plugin` (c81, D-PLUGIN1=B/D-DEP-WASM1=A) builds a sandboxed `wasm32`
 /// Component Model module instead of a native binary — a package is *loaded*,
 /// not imported or PATH-installed, so it maps to no `PackageKind`.
@@ -164,7 +164,7 @@ pub enum Target {
     Test,
     Example,
     /// c80 / D-TGT2: this package's entry is a benchmark; `jet bench` runs its
-    /// `#Bench` regions via the shipped `compile_benches_with_path` path.
+    /// `@Bench` regions via the shipped `compile_benches_with_path` path.
     Benchmark,
     /// c81 / D-PLUGIN1=B: this package builds to a sandboxed WASM Component
     /// Model module. `export` is the `.wit` world name (D-PLUGIN-EXPORT1=A,
@@ -248,6 +248,8 @@ pub struct PackManifest {
     /// stays the default, I1/D-LINTPOLICY1); `Some(vec![])` is an explicit
     /// empty deny list (a no-op wall).
     pub lints_deny: Option<Vec<String>>,
+    /// D-PACKAGE-POLICY-SCOPE1: typed package policy declarations; tightening only.
+    pub memory_policy: Vec<crate::Policy::PolicyDeclaration>,
 }
 
 /// Why a `pkg.jet` package manifest could not be parsed. These are internal
@@ -296,6 +298,8 @@ pub enum ManifestError {
     /// D-LINTPOLICY1=A: malformed `policy.lints` — an unknown field, a
     /// non-list `deny:` value, or an entry not shaped like a lint code.
     BadLintsPolicy { detail: String },
+    /// D-PACKAGE-POLICY-SCOPE1: malformed or widening package policy.
+    BadMemoryPolicy { detail: String },
 }
 
 /// Top-level keys reserved for a future Jet feature; using them non-empty
@@ -311,8 +315,13 @@ impl PackManifest {
 
     /// Load and parse the package manifest in `dir`, if present.
     pub fn load(dir: &std::path::Path) -> Option<Result<PackManifest, ManifestError>> {
-        let text = std::fs::read_to_string(Self::path_in(dir)).ok()?;
-        Some(parse(&text))
+        let path = Self::path_in(dir);
+        let text = std::fs::read_to_string(&path).ok()?;
+        Some(parse(&text).map(|mut manifest| {
+            let source = path.display().to_string();
+            for declaration in &mut manifest.memory_policy { declaration.source = source.clone(); }
+            manifest
+        }))
     }
 
     /// The declared kind of package `name`, derived from its `targets:` list
@@ -336,7 +345,7 @@ impl PackManifest {
 pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
     let text = Helpers::strip_line_comments(text);
 
-    let package = match block_body(&text, Syntax::MANIFEST_BLOCK_PAYLOAD, '{', '}') {
+    let package = match block_body(&text, Syntax::MANIFEST_BLOCK_PAYLOAD, '{', '}').or_else(|| block_body(&text, "identity", '{', '}')) {
         Some(body) => parse_package(&body)?,
         None => return Err(ManifestError::MissingPayload),
     };
@@ -387,6 +396,10 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         Some(body) => parse_lints_policy(&body)?,
         None => None,
     };
+    let memory_policy = match block_body(&text, Syntax::MANIFEST_BLOCK_POLICY, '{', '}') {
+        Some(body) => parse_memory_policy(&body)?,
+        None => Vec::new(),
+    };
 
     for &section in RESERVED_SECTIONS {
         if let Some(body) = block_body(&text, section, '{', '}') {
@@ -408,7 +421,29 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         grants,
         trust_policy,
         lints_deny,
+        memory_policy,
     })
+}
+
+/// D-UNSAFE-OBLIG1=A: parse the manifest-shaped admin policy document without
+/// requiring package identity. It accepts exactly the ordinary `policy` block.
+pub fn parse_policy_document(text: &str) -> Result<Vec<crate::Policy::PolicyDeclaration>, ManifestError> {
+    let text = Helpers::strip_line_comments(text);
+    let mut rest = text.trim().strip_prefix(Syntax::MANIFEST_BLOCK_POLICY)
+        .ok_or(ManifestError::BadMemoryPolicy { detail: "expected only `policy: .{ … }`".to_string() })?
+        .trim_start();
+    rest = rest.strip_prefix(':')
+        .ok_or(ManifestError::BadMemoryPolicy { detail: "expected `:` after `policy`".to_string() })?
+        .trim_start();
+    rest = rest.strip_prefix('.').unwrap_or(rest).trim_start();
+    rest = rest.strip_prefix('{')
+        .ok_or(ManifestError::BadMemoryPolicy { detail: "expected `.{` after `policy:`".to_string() })?;
+    let close = rest.find('}')
+        .ok_or(ManifestError::BadMemoryPolicy { detail: "missing `}` after organization policy".to_string() })?;
+    if !rest[close + 1..].trim().is_empty() {
+        return Err(ManifestError::BadMemoryPolicy { detail: "organization policy file may contain only the `policy` block".to_string() });
+    }
+    parse_memory_policy(&rest[..close])
 }
 
 #[cfg(test)]
