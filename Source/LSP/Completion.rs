@@ -14,16 +14,13 @@ mod ck {
     pub const FIELD: u8 = 5;
     pub const VARIABLE: u8 = 6;
     pub const CLASS: u8 = 7;
-    pub const INTERFACE: u8 = 8;
     pub const MODULE: u8 = 9;
     pub const PROPERTY: u8 = 10;
     pub const VALUE: u8 = 12;
-    pub const ENUM: u8 = 13;
     pub const KEYWORD: u8 = 14;
     pub const SNIPPET: u8 = 15;
     pub const ENUM_MEMBER: u8 = 20;
     pub const CONSTANT: u8 = 21;
-    pub const STRUCT: u8 = 22;
 }
 
 pub(crate) struct CompletionItem {
