@@ -511,15 +511,9 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close the arm head group")?;
             return Ok(inner);
         }
-        // Single value: parse at comparison level so `&&`/`||` are left for the
-        // outer arm-head grammar (`parse_arm_and_cond`/`parse_arm_value_cond`).
-        // Setting `arm_head_term = true` stops `expr_bitor` before top-level `|`
-        // so the caller (`parse_arm_alternates_cond`) handles alternation itself.
-        let old = self.arm_head_term;
-        self.arm_head_term = true;
-        let raw = self.expr_cmp(false);
-        self.arm_head_term = old;
-        let raw = raw?;
+        // Single value: parse at comparison level so `|`, `&&`, and `||` are
+        // left for the outer arm-head grammar.
+        let raw = self.expr_cmp(false)?;
         Ok(Self::arm_atom_to_cond(subject.clone(), raw))
     }
 

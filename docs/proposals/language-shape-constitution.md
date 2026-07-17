@@ -72,7 +72,6 @@ row and cannot silently choose another.
 | `< ... >` | What type specialization may angles contain? |
 | `.` | When may the expected type supply a missing qualifier? |
 | `|` | Which peer alternatives does a form accept? |
-| `|>` | Should one value move through ordinary calls from left to right? |
 | `_name` | What promise does an internal-looking name make? |
 | `@` | What may this prefix apply to one declaration? |
 | `#` | What may this prefix change about a nested source region? |
@@ -100,22 +99,22 @@ The remaining construction questions are narrower:
 These jobs are separate ballots. A vote on fresh state must not also choose
 conversion or view spelling.
 
-## Calls and flow
+## Calls and reusable flows
 
-Jet should have one declared operation. The existing UFCS decision does not
-allow an ordinary free function to become a receiver call. The open pipe ballot
-asks only whether a left-to-right lens may call that same operation.
+D-SHAPE-PIPE1=C resolved the bar family: single `|` is limited to peer
+alternatives in patterns and choices. Jet has no general flow operator. A
+left-to-right calculation uses ordinary calls and names when those names help
+the reader:
 
 ```jet
-parse(raw)
-raw |> parse
+parsed :: parse(raw)
+validated :: validate(parsed)
+result :: normalize(validated)
 ```
 
-The second line is still only a ballot option. If adopted, both lines must
-resolve the same symbol. There is no fallback search. The pipe cannot add
-separate error, ownership, effect, or scheduling behavior.
-
-Whether Jet admits `|>` and which input receives its value are separate votes.
+Reusable flows are ordinary named functions or library composition helpers.
+They keep normal resolution, failure, ownership, effects, and scheduling; Jet
+adds no second call model.
 
 ## Interface lenses
 

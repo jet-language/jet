@@ -225,6 +225,33 @@ fn live_surface_has_no_retired_spellings() {
 }
 
 #[test]
+fn pipe_family_has_no_stale_flow_reservation() {
+    let decision = fs::read_to_string("docs/spec/syntax-decisions.md").unwrap();
+    assert!(decision.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"));
+    assert!(decision.contains("single `|` is legal only in alternative-list grammar"));
+
+    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax/math_layout.rs").unwrap();
+    assert!(syntax.contains("D-PATO / D-SHAPE-PIPE1=C"));
+    assert!(syntax.contains("`|=` remains bitwise-or-assign under S17"));
+
+    for path in [
+        "docs/proposals/language-shape-constitution.md",
+        "docs/proposals/language-shape-research.md",
+    ] {
+        let text = fs::read_to_string(path).unwrap();
+        assert!(text.contains("D-SHAPE-PIPE1=C"), "{path} lacks the ratified outcome");
+        for stale in [
+            "open pipe ballot",
+            "Jet can support a flow lens",
+            "Whether Jet admits",
+            "Should one value move through ordinary calls",
+        ] {
+            assert!(!text.contains(stale), "{path} retains stale flow text `{stale}`");
+        }
+    }
+}
+
+#[test]
 fn dynamic_encoding_surface_uses_datatree_name() {
     let mut failures = Vec::new();
     for relative in DATATREE_NORMATIVE_SURFACES {

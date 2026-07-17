@@ -274,7 +274,7 @@ impl<'a> Parser<'a> {
         /// `if subject {` never reads `subject { … }` as a struct value.
         pub(in crate::Parser) fn expr_no_struct_lit_no_cmp(&mut self) -> Result<Expr, Diagnostic> {
             let span = self.peek().span;
-            self.with_nesting(span, |p| p.expr_bitor(false))
+            self.with_nesting(span, |p| p.expr_bitxor(false))
         }
     
 }

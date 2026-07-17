@@ -401,23 +401,6 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Lambda(self.parse_bare_lambda()?))
                 }
                 TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
-                TokKind::Pipe if retired_s14_teaching_enabled() => {
-                    let span = self.bump().span;
-                    self.diags.push(Diagnostic::error(
-                        "E0033",
-                        format!("{} doesn't use `|` pipes for lambdas", Syntax::LANG_NAME),
-                        "a short function is written with parentheses and `=>`".to_string(),
-                        "write `(x) => x + 1` instead of `|x| x + 1`".to_string(),
-                        Some(span),
-                    ));
-                    while !matches!(self.peek().kind, TokKind::Pipe | TokKind::Eof) {
-                        self.bump();
-                    }
-                    if matches!(self.peek().kind, TokKind::Pipe) {
-                        self.bump();
-                    }
-                    return self.expr_primary(allow_struct_lit);
-                }
                 TokKind::Ident(name)
                     if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_LAMBDA =>
                 {
@@ -677,7 +660,6 @@ impl<'a> Parser<'a> {
                             type_generic_depth: 0,
                             type_generic_chain: Vec::new(),
                             type_generic_truncated: false,
-                            arm_head_term: false,
                             pub_file_default: false,
                             in_layout_body: self.in_layout_body,
                             module_arg_expr_depth: None,

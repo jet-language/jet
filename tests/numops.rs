@@ -79,10 +79,10 @@ fn bit_operators_and_mixed_width_shift() {
     if !have_rustc() {
         return;
     }
-    // `&`/`|`/`^` keep the U8 width; a shift count may be any integer (here the
-    // literal `2`/`1` default to Int) and the result keeps the left side's width.
+    // `&`/`^` and the separately ratified `|=` keep the U8 width; a shift count
+    // may be any integer and the result keeps the left side's width.
     let src = "fn run() {\n    a: U8 :: 12\n    b: U8 :: 10\n    \
-               print(a & b)\n    print(a | b)\n    print(a ^ b)\n    \
+               print(a & b)\n    c: U8 := a\n    c |= b\n    print(c)\n    print(a ^ b)\n    \
                print(a << 2)\n    print(a >> 1)\n}\n";
     let (code, stdout, stderr) = build_and_run("u8_bitops", src);
     assert_eq!(code, 0, "bit ops should succeed: {stderr}");

@@ -240,13 +240,15 @@ pub const LIT_TRUE: &str = "true";
 pub const LIT_FALSE: &str = "false";
 
 /// M1 (docs/spec/roadmap.md): arithmetic operators. `+ - * /` on Int and Float;
-/// `% & | ^ << >>` on Int only. No `+` on String (S8: interpolate instead).
+/// `% & ^ << >>` on Int only. No `+` on String (S8: interpolate instead).
 pub const OP_PLUS: &str = "+";
 pub const OP_MINUS: &str = "-";
 pub const OP_STAR: &str = "*";
 pub const OP_SLASH: &str = "/";
 pub const OP_PERCENT: &str = "%";
 pub const OP_AMP: &str = "&";
+/// D-PATO / D-SHAPE-PIPE1=C (ratified 2026-07-15): peer alternatives only.
+/// General expressions and reusable flows do not use a single bar.
 pub const OP_PIPE: &str = "|";
 pub const OP_CARET: &str = "^";
 pub const OP_SHL: &str = "<<";
@@ -299,9 +301,11 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // D-PATR (ratified 2026-06-19): range patterns (`lo..hi`) reuse OP_RANGE (S22) at arm-head
 // level and inside variant payload slots. Open Int/Char subjects always still require `else`.
 
-// D-PATO (ratified 2026-06-19): structural or-patterns use OP_PIPE (single `|`).
+// D-PATO (ratified 2026-06-19) and D-SHAPE-PIPE1=C (ratified 2026-07-15):
+// structural or-patterns and choice alternatives use OP_PIPE (single `|`).
 // `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
-// `||` remains value-or / boolean-or; `|=` is bitwise-or-assign.
+// No general single-bar expression or flow operator exists. `||` remains value-or / boolean-or;
+// `|=` remains bitwise-or-assign under S17.
 
 // D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
 // position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —

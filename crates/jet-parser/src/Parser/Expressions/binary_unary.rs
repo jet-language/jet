@@ -143,7 +143,7 @@ impl<'a> Parser<'a> {
         /// error (E0003). A mixed-direction relational chain (`a < b > c`) is
         /// E0333, naming the direction break.
         pub(in crate::Parser) fn expr_cmp(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-            let lhs = self.expr_bitor(allow_struct_lit)?;
+            let lhs = self.expr_bitxor(allow_struct_lit)?;
             let op = match &self.peek().kind {
                 TokKind::EqEq => Some(BinOp::Eq),
                 TokKind::NotEq => Some(BinOp::Ne),
@@ -165,7 +165,7 @@ impl<'a> Parser<'a> {
                     });
                 }
             }
-            let rhs = self.expr_bitor(allow_struct_lit)?;
+            let rhs = self.expr_bitxor(allow_struct_lit)?;
     
             // `==`/`!=` never chain — D-CHAINCMP1 excludes them. Reproduce the
             // pre-existing behavior exactly: any further relational/equality
@@ -209,7 +209,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 self.bump();
-                let next_rhs = self.expr_bitor(allow_struct_lit)?;
+                let next_rhs = self.expr_bitxor(allow_struct_lit)?;
                 operands.push(next_rhs);
                 ops.push(next_op);
             }
@@ -255,23 +255,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        pub(super) fn expr_bitor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-            let mut lhs = self.expr_bitxor(allow_struct_lit)?;
-            // D-MATCHARM1: arm-head term mode — stop before top-level `|` so the
-            // arm-head parser can collect `|`-separated value alternates itself.
-            if self.arm_head_term {
-                return Ok(lhs);
-            }
-            while matches!(self.peek().kind, TokKind::Pipe) {
-                let op_span = self.bump().span;
-                let rhs = self.expr_bitxor(allow_struct_lit)?;
-                let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-                lhs = Expr::Binary(BinOp::BitOr, Box::new(lhs), Box::new(rhs), span);
-            }
-            Ok(lhs)
-        }
-    
-        fn expr_bitxor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        pub(in crate::Parser) fn expr_bitxor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut lhs = self.expr_bitand(allow_struct_lit)?;
             while matches!(self.peek().kind, TokKind::Caret) {
                 let op_span = self.bump().span;

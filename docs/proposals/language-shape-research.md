@@ -208,7 +208,7 @@ answer = Greeter.should_greet(ada)
 Elixir lets patterns define function cases. Its pipe is readable, but it always
 inserts the value into the first argument. See the
 [Elixir patterns and guards guide](https://hexdocs.pm/elixir/patterns-and-guards.html)
-and [`Kernel.|>/2`](https://hexdocs.pm/elixir/Kernel.html#%7C%3E/2).
+and its [pipe operator](https://hexdocs.pm/elixir/Kernel.html#%7C%3E/2).
 
 ### Clojure
 
@@ -323,35 +323,21 @@ information-flow proof. The lesson for Jet is to expose proof without forcing
 users to maintain a second copy of the program. See the
 [SPARK course](https://learn.adacore.com/pdf_books/courses/intro-to-spark.pdf).
 
-## One flow, held constant
+## Reusable flow, resolved
 
-The second comparison assumes these three operations already exist. It changes
-only how the same value moves through them:
+D-SHAPE-PIPE1=C rejected a general flow operator. Single `|` remains limited
+to alternatives in patterns and choices. Ordinary names preserve execution
+order and expose the secondary argument roles without another call model:
 
-```text
-parse_signup(raw)
-fetch_invite(signup, api)
+```jet
+signup :: parse_signup(raw)
+invite :: fetch_invite(signup, api)
 save(invite, db)
 ```
 
-Names adopt each language's normal casing, but argument roles stay fixed: the
-flowing value is first, followed by `api` or `db`.
-
-| Language | Exact shape | Main lesson |
-| --- | --- | --- |
-| Nested calls | `save(fetch_invite(parse_signup(raw), api), db)` | No extra syntax, but reading order runs inside-out. |
-| F# | `raw |> parseSignup |> (fun signup -> fetchInvite signup api) |> (fun invite -> save invite db)` | Lambdas preserve the fixed first slot, but add ceremony. |
-| Elixir | `raw |> parse_signup() |> fetch_invite(api) |> save(db)` | Clear flow; the value always enters the first slot. |
-| Gleam | `raw |> parse_signup |> fetch_invite(api) |> save(db)` | Small surface and fixed first-slot flow; another slot would require a capture. |
-| Clojure | `(-> raw parse-signup (fetch-invite api) (save db))` | Keeps list structure, but belongs to a larger threading family. |
-| D | `raw.parseSignup().fetchInvite(api).save(db)` | Uniform call syntax can make free functions read like methods. |
-| OCaml | `let signup = parse_signup raw in let invite = fetch_invite signup api in save invite db` | Temporary names preserve order without another operator. |
-| Swift | `let signup = parseSignup(raw); let invite = fetchInvite(signup, api: api); save(invite, db: db)` | Call-site labels explain secondary roles. |
-| Smalltalk | `signup := self parseSignup: raw. invite := self fetchInvite: signup using: api. self save: invite using: db.` | Keyword labels are part of each operation name. |
-
-Jet can support a flow lens only if it resolves the same declared operation as
-the ordinary call. The pipe must have one input rule. It must not add new error,
-ownership, dispatch, or effect behavior.
+When a flow must be reusable, Jet uses an ordinary named function or a named
+library composition helper. Resolution, failure, ownership, dispatch, and
+effects remain the ordinary function rules.
 
 ## Ideas worth taking
 
@@ -418,7 +404,7 @@ complete source and make structural views optional. See the
 | Expert | Magic hides the type, authority, provider, or ownership choice. | Every hidden fact can be revealed and pinned. | Explicit construction, effects, copy, package, and provenance forms remain source-writable. | D-SHAPE-LIFECYCLE, D-SHAPE8, D-ECO1, D-SHAPE-MERGEPROVENANCE1 |
 | Enterprise | A build succeeds while important authority or provenance stays implicit. | Policy can require facts and audit their source without changing behavior. | Public-boundary effect rules and complete merge history use the same program facts as ordinary compilation. | D-SHAPE8, D-SHAPE-MERGEPROVENANCE1, D-SHAPE-EXPOSE1 |
 | Construction | Records, fresh state, conversions, views, and units look interchangeable. | Each act has one named semantic category. | Keep record construction separate; choose one spelling each for fresh state, conversion, views, runtime duration creation, whole-unit reading, and dimensional quantities. | D-SHAPE3a, D-SHAPE-CONVERT1, D-SHAPE-VIEW1, D-SHAPE-DURATION1, D-SHAPE-DURATIONCONVERT1, D-SHAPE-QUANTITY1 |
-| Flow | Nested calls reverse the order people trace data. | A lens may change reading order but not call meaning. | The flow choice must lower to ordinary functions and preserve dispatch, failure, effects, and ownership. | D-SHAPE-PIPE1 |
+| Flow | Nested calls reverse the order people trace data. | Reading order must not create a second call model. | Use named intermediates or ordinary named composition helpers; single `|` stays alternatives-only. | D-SHAPE-PIPE1=C (ratified) |
 | Internal API | An underscore may imply privacy, instability, expert support, or replacement. | One visible promise, with access and replacement decided later. | Decide only the contract status communicated by the name. | D-SHAPE-INTERNAL1 |
 | Resources | Automatic cleanup hides the point where early release matters. | Scope cleanup stays guaranteed; early release visibly consumes the handle. | Compare only discovery and naming while preserving the ownership marker. | D-SHAPE-RESOURCE1 |
 | Package author | Role, output, and merge forms repeat types or invent package-only mini-languages. | Reuse ordinary typed values and write each composition rule once. | Decide role shape, output representation, and repeated-field composition independently. | D-SHAPE5a, D-SHAPE5b, D-SHAPE-MERGE1 |

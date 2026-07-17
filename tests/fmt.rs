@@ -12,6 +12,27 @@ fn repr_c_enum_surface_is_stable() {
     let twice = jet::format_source(&once).expect("formatted C-layout enum should parse");
     assert_eq!(once, twice, "C-layout enum formatting must be stable");
 }
+
+#[test]
+fn alternatives_only_bar_formatting_is_stable() {
+    let src = "enum State { Ready Waiting }\n\nfn run() {\n    state :: State.Ready\n    if state == {\n        .Ready | .Waiting -> print(\"known\")\n    }\n}\n";
+    let once = jet::format_source(src).expect("choice alternatives should format");
+    assert!(
+        once.contains(".Ready | .Waiting ->"),
+        "formatter lost the alternatives-only bar:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("formatted alternatives should parse");
+    assert_eq!(once, twice, "alternative formatting must be stable");
+
+    assert!(
+        jet::format_source("fn run() { value :: 1 | 2 }").is_err(),
+        "formatter must not preserve a general single-bar expression"
+    );
+    assert!(
+        jet::format_source("fn run() { value :: 1 |> print }").is_err(),
+        "formatter must not invent a flow path"
+    );
+}
 use std::path::PathBuf;
 
 #[path = "support/fmt_lossless.rs"]

@@ -257,9 +257,6 @@ pub const FOREIGN_AS: &str = "as";
 /// S46 (M8): foreign anonymous-fn spellings for teaching error E0032.
 pub const FOREIGN_LAMBDA: &str = "lambda";
 
-/// S46 (M8): Rust pipe closures for teaching error E0033.
-pub const FOREIGN_PIPE_CLOSURE: &str = "|";
-
 /// S14 (M5): foreign collection spellings for teaching errors.
 pub const FOREIGN_VEC: &str = "Vec";
 pub const FOREIGN_DICT: &str = "dict";

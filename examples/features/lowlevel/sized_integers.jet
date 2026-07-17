@@ -36,13 +36,15 @@ fn run() {
     flags: U8 :: 13
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
-    // Bit operators (D-NUMOPS1). `&`/`|`/`^` keep the operand width; a shift's
-    // count may be any integer (it's a bit-count, not a value of the same width),
-    // and a count past the type's width traps instead of leaking a Rust panic.
+    // Bit operators (D-NUMOPS1). `&`/`^` and compound `|=` keep the operand
+    // width; a shift's count may be any integer (it's a bit-count, not a value
+    // of the same width), and an over-width count traps cleanly.
     mask: U8 :: 12
     bits: U8 :: 10
     print(mask & bits)
-    print(mask | bits)
+    combined: U8 := mask
+    combined |= bits
+    print(combined)
     print(mask ^ bits)
     print(mask << 2)
     print(mask >> 1)

@@ -886,6 +886,16 @@ fn registered_unimplemented_codes_are_expected() {
     let registered = registered_codes();
     let exclusions = all_exclusions();
 
+    assert!(
+        registered.contains("E0033"),
+        "E0033 is a retired reservation and must remain in docs/spec/diagnostics.md"
+    );
+    let parser = read(&root().join("crates/jet-parser/src/Parser/mod.rs"));
+    assert!(
+        parser.contains("\"E0032\", \"E0033\", \"E0036\""),
+        "E0033 must remain in the parser retired-code non-emission guard"
+    );
+
     let spec_ahead_of_impl: BTreeSet<String> = registered
         .iter()
         .filter(|c| !exclusions.contains(*c))

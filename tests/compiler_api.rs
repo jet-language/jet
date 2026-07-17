@@ -38,6 +38,56 @@ fn parser_api_reports_diagnostics_as_values() {
 }
 
 #[test]
+fn single_bar_is_alternatives_only_and_flow_pipe_has_no_foreign_guess() {
+    let bit_or = jet::Compiler::parse_source(
+        "fn run() {\n    left :: 1\n    right :: 2\n    value :: left | right\n}\n",
+    );
+    assert!(
+        bit_or.diagnostics.iter().any(|diag| diag.code == "E0003"),
+        "D-SHAPE-PIPE1=C rejects a general single-bar expression with E0003"
+    );
+
+    let pipe_closure = jet::Compiler::parse_source("fn run() {\n    f :: |x| x + 1\n}\n");
+    assert!(
+        pipe_closure.diagnostics.iter().any(|diag| diag.code == "E0003")
+            && pipe_closure.diagnostics.iter().all(|diag| diag.code != "E0033"),
+        "pipe-closure-shaped input must be ordinary E0003: {:?}",
+        pipe_closure.diagnostics
+    );
+
+    let flow = jet::compile("fn run() {\n    value :: 1 |> print\n}\n")
+        .expect_err("`|>` stays unassigned");
+    assert!(flow.iter().any(|diag| diag.code == "E0003"), "{flow:?}");
+    assert!(flow.iter().all(|diag| diag.code != "E0033"), "{flow:?}");
+    assert!(
+        flow.iter().all(|diag| {
+            !diag.what.contains("pipeline")
+                && !diag.why.contains("pipeline")
+                && !diag.fix.contains("pipeline")
+        }),
+        "an unassigned token must not advertise a future flow alias: {flow:?}"
+    );
+
+    let alternatives = jet::Compiler::parse_source(
+        "enum State { Ready Waiting Done }\nfn run() {\n    state :: State.Ready\n    if state == {\n        .Ready | .Waiting -> { print(\"open\") }\n        .Done -> { print(\"done\") }\n    }\n}\n",
+    );
+    assert!(
+        alternatives.diagnostics.is_empty(),
+        "pattern alternatives remain legal: {:?}",
+        alternatives.diagnostics
+    );
+
+    let boolean_or = jet::Compiler::parse_source(
+        "fn run() {\n    if true || false { print(\"ok\") }\n}\n",
+    );
+    assert!(
+        boolean_or.diagnostics.is_empty(),
+        "`||` keeps its boolean-or meaning: {:?}",
+        boolean_or.diagnostics
+    );
+}
+
+#[test]
 fn check_file_api_includes_semindex_for_clean_program() {
     let path = fixture_file(
         "compiler_api_clean.jet",
