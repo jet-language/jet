@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "skills" / "codeflow" / "scripts" / "run_state.py"
@@ -398,6 +399,103 @@ class CodeflowStateTests(unittest.TestCase):
         report = self.report(artifacts=["src/feature.txt"], changed=["src/feature.txt"])
         with self.assertRaisesRegex(run_state.CodeflowError, "actual changes outside write scope"):
             self.finish(run_dir, "implement", report, "actual-scope.json")
+
+    def test_snapshot_excludes_gitignored_files(self):
+        subprocess.run(["git", "init", "--quiet", str(self.workspace)], check=True)
+        (self.workspace / ".gitignore").write_text("/target\n/.tmp\n", encoding="utf-8")
+        (self.workspace / "src" / "tracked.txt").write_text("source\n", encoding="utf-8")
+        (self.workspace / "target").mkdir()
+        (self.workspace / "target" / "artifact.txt").write_text("generated\n", encoding="utf-8")
+        (self.workspace / ".tmp").mkdir()
+        (self.workspace / ".tmp" / "scratch.txt").write_text("generated\n", encoding="utf-8")
+        (self.workspace / ".codeflow").mkdir()
+        (self.workspace / ".codeflow" / "run.json").write_text("{}\n", encoding="utf-8")
+        (self.workspace / "untracked.txt").write_text("visible\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(self.workspace), "add", ".gitignore", "src/tracked.txt"],
+            check=True,
+        )
+
+        snapshot = run_state.snapshot_workspace(self.workspace)
+
+        self.assertIn("src/tracked.txt", snapshot)
+        self.assertIn("untracked.txt", snapshot)
+        self.assertNotIn("target/artifact.txt", snapshot)
+        self.assertNotIn(".tmp/scratch.txt", snapshot)
+        self.assertNotIn(".codeflow/run.json", snapshot)
+
+    def test_write_node_snapshot_is_compact_json(self):
+        (self.workspace / "src" / "preexisting.txt").write_text("source\n", encoding="utf-8")
+        run_dir = self.init_run()
+        self.pass_inspect(run_dir)
+        self.start(run_dir, "implement", "writer")
+        state = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        snapshot_path = run_dir / state["nodes"]["implement"]["snapshot"]
+
+        self.assertEqual(1, len(snapshot_path.read_text(encoding="utf-8").splitlines()))
+
+    def test_git_snapshot_failure_does_not_fall_back_to_full_walk(self):
+        (self.workspace / ".git").mkdir()
+        (self.workspace / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        failed = subprocess.CompletedProcess([], 128, stdout=b"", stderr=b"denied")
+
+        with mock.patch.object(run_state.subprocess, "run", return_value=failed):
+            with self.assertRaisesRegex(run_state.CodeflowError, "cannot enumerate Git-visible"):
+                run_state.snapshot_workspace(self.workspace)
+
+    def test_snapshot_hashes_gitlink_without_walking_ignored_files(self):
+        subprocess.run(["git", "init", "--quiet", str(self.workspace)], check=True)
+        subrepo = self.root / "subrepo"
+        subprocess.run(["git", "init", "--quiet", str(subrepo)], check=True)
+        (subrepo / ".gitignore").write_text("/target\n", encoding="utf-8")
+        (subrepo / "tracked.txt").write_text("before\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(subrepo), "add", "."], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(subrepo),
+                "-c",
+                "user.name=Codeflow Test",
+                "-c",
+                "user.email=codeflow@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "protocol.file.allow=always",
+                "-C",
+                str(self.workspace),
+                "submodule",
+                "add",
+                "--quiet",
+                str(subrepo),
+                "deps/sub",
+            ],
+            check=True,
+        )
+        submodule = self.workspace / "deps" / "sub"
+        (submodule / "target").mkdir()
+        ignored_artifact = submodule / "target" / "artifact.txt"
+        ignored_artifact.write_text("generated\n", encoding="utf-8")
+
+        before = run_state.snapshot_workspace(self.workspace)
+        ignored_artifact.write_text("regenerated\n", encoding="utf-8")
+        ignored_after = run_state.snapshot_workspace(self.workspace)
+        (submodule / "tracked.txt").write_text("after\n", encoding="utf-8")
+        after = run_state.snapshot_workspace(self.workspace)
+
+        self.assertIn("deps/sub", before)
+        self.assertFalse(any(path.startswith("deps/sub/") for path in before))
+        self.assertEqual(before["deps/sub"], ignored_after["deps/sub"])
+        self.assertNotEqual(ignored_after["deps/sub"], after["deps/sub"])
 
     def test_stale_final_attempt_can_be_recovered(self):
         workflow = copy.deepcopy(self.workflow)

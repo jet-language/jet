@@ -194,7 +194,7 @@ unless the owner explicitly grants an exception.
 Tower owns Jetpack card sequencing, decisions, blockers, and proof state:
 
 ```sh
-nix develop -c node Tower/tower.mjs status
+nix develop -c node plugins/tower/tower.mjs status
 ```
 
 This directory retains only durable master plans and acceptance matrices. Per-card

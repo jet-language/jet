@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#060608">
+  <title>Codeflow flight recorder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/monitor.css">
+</head>
+<body>
+  <a class="skip-link" href="#workflow">Skip to workflow</a>
+  <header class="topbar">
+    <div class="brand" aria-label="Codeflow flight recorder">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 16h6l3-8 6 16 3-8h6"/></svg>
+      <div><span>CODEFLOW</span><small>flight recorder</small></div>
+    </div>
+    <div class="run-title">
+      <span class="eyebrow">Active run</span>
+      <strong id="run-name">Waiting for ledger</strong>
+    </div>
+    <div class="live-cluster">
+      <span class="live-state" id="live-state" role="status" aria-live="polite" aria-atomic="true"><i></i> Connecting</span>
+      <span class="freshness" id="freshness">—</span>
+      <button class="icon-button" id="refresh" type="button" aria-label="Refresh; follow the newest run if this ledger is stale" title="Refresh · follow newest if stale">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.6-2.6L20 11M4 13l2.3 4.6A7 7 0 0 0 18 15"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <aside class="run-rail" aria-label="Workflow runs">
+      <div class="section-heading">
+        <div><span class="eyebrow">Ledger</span><h2>Runs</h2></div>
+        <span class="count" id="run-count">0</span>
+      </div>
+      <div class="run-list" id="run-list"></div>
+      <div class="workspace-path"><span>Workspace</span><code id="workspace">—</code></div>
+    </aside>
+
+    <section class="workspace" id="workflow" tabindex="-1">
+      <div class="overview">
+        <div class="progress-copy">
+          <span class="eyebrow">Run progress</span>
+          <strong id="progress-value">0%</strong>
+          <span id="progress-label">No nodes loaded</span>
+        </div>
+        <div class="status-strip" id="status-strip" aria-label="Filter workflow by status"></div>
+        <div class="run-meta" id="run-meta"></div>
+      </div>
+
+      <div class="graph-head">
+        <div><span class="eyebrow">Dependency signal</span><h1 id="goal">No Codeflow runs found</h1></div>
+        <div class="graph-tools">
+          <label class="search"><span class="sr-only">Search nodes and events</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg><input id="search" type="search" placeholder="Search run" autocomplete="off"></label>
+          <button class="text-button" id="show-all" type="button">Show all</button>
+        </div>
+      </div>
+      <div class="graph-viewport" id="graph-viewport">
+        <svg class="edges" id="edges" aria-hidden="true"></svg>
+        <div class="graph" id="graph" aria-label="Workflow dependency graph"></div>
+        <div class="empty" id="graph-empty" hidden><strong>No run data</strong><span>Start Codeflow or choose another workspace.</span></div>
+      </div>
+
+      <section class="event-tape" aria-labelledby="events-title">
+        <div class="section-heading compact"><div><span class="eyebrow">Runtime tape</span><h2 id="events-title">Events</h2></div><span class="count" id="event-count">0</span></div>
+        <div class="events" id="events" aria-live="polite"></div>
+      </section>
+    </section>
+
+    <aside class="inspector" aria-label="Selected node details">
+      <div class="inspector-head">
+        <div><span class="eyebrow" id="node-kind">Node inspector</span><h2 id="node-name">Select a node</h2></div>
+        <span class="status-badge" id="node-status">—</span>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Inspector section">
+        <button type="button" role="tab" aria-selected="true" data-tab="brief">Brief</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="proof">Proof</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="exposure">Exposure</button>
+      </div>
+      <div class="inspector-body" id="inspector-body"></div>
+    </aside>
+  </main>
+
+  <div class="fatal" id="fatal" hidden role="alert"></div>
+  <script type="module" src="/monitor.js"></script>
+</body>
+</html>

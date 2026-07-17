@@ -179,7 +179,7 @@ fn tower_cards(root: &Path) -> BTreeMap<u64, CardState> {
     // stop-line must read live + history — `card list` alone is live-only.
     let mut cards = BTreeMap::new();
     let live = Command::new("node")
-        .args(["Tower/tower.mjs", "card", "list", "--json"])
+        .args(["plugins/tower/tower.mjs", "card", "list", "--json"])
         .current_dir(root)
         .output()
         .unwrap();

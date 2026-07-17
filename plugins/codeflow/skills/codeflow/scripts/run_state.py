@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -63,9 +64,10 @@ def digest_json(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def atomic_write_json(path: Path, value: Any) -> None:
+def atomic_write_json(path: Path, value: Any, *, compact: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    options = {"separators": (",", ":")} if compact else {"indent": 2}
+    data = json.dumps(value, sort_keys=True, ensure_ascii=False, **options) + "\n"
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -439,9 +441,64 @@ def digest_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def has_git_metadata(path: Path) -> bool:
+    for candidate in (path, *path.parents):
+        metadata = candidate / ".git"
+        if metadata.is_file() or (metadata / "HEAD").is_file():
+            return True
+    return False
+
+
+def digest_gitlink(path: Path) -> str:
+    if not (path / ".git").exists():
+        return "uninitialized"
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise CodeflowError(f"cannot snapshot Git submodule: {path}")
+    digest = hashlib.sha256(result.stdout + b"\0" + canonical_bytes(snapshot_workspace(path)))
+    return digest.hexdigest()
+
+
 def snapshot_workspace(workspace: Path) -> dict[str, list[int | str]]:
     snapshot: dict[str, list[int | str]] = {}
     root = workspace.resolve()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except OSError as exc:
+        if has_git_metadata(root):
+            raise CodeflowError(f"cannot enumerate Git-visible workspace paths: {root}") from exc
+        result = None
+    if result is not None and result.returncode != 0 and has_git_metadata(root):
+        raise CodeflowError(f"cannot enumerate Git-visible workspace paths: {root}")
+    if result is not None and result.returncode == 0:
+        for raw_path in result.stdout.split(b"\0"):
+            if not raw_path:
+                continue
+            relative_path = Path(os.fsdecode(raw_path))
+            if relative_path.parts and relative_path.parts[0] == ".codeflow":
+                continue
+            path = root / relative_path
+            if not path.exists() and not path.is_symlink():
+                continue
+            relative = relative_path.as_posix()
+            stat = path.lstat()
+            if path.is_symlink():
+                snapshot[relative] = ["symlink", os.readlink(path), stat.st_mtime_ns]
+            elif path.is_dir():
+                snapshot[relative] = ["gitlink", digest_gitlink(path), stat.st_mode]
+            else:
+                snapshot[relative] = ["file", digest_path(path), stat.st_mode]
+        return snapshot
     for current, directories, files in os.walk(root, followlinks=False):
         current_path = Path(current)
         kept_directories: list[str] = []
@@ -637,7 +694,7 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
             raise CodeflowError("Sol review must use a different worker than implementation")
     if node["mode"] == "write":
         snapshot_rel = f"snapshots/{args.node_id}-execution-{item['sequence'] + 1}.json"
-        atomic_write_json(run_dir / snapshot_rel, snapshot_workspace(Path(workflow["workspace"])))
+        atomic_write_json(run_dir / snapshot_rel, snapshot_workspace(Path(workflow["workspace"])), compact=True)
         item["snapshot"] = snapshot_rel
     item["status"] = "running"
     item["attempts"] += 1

@@ -28,8 +28,10 @@ Read this file, then relevant code, tests, and the current diff. Load only task-
 - language semantics or syntax: relevant sections of `docs/spec/philosophy.md`,
   `docs/spec/syntax-decisions.md`, and `docs/spec/architecture.md`;
 - diagnostics: `docs/spec/diagnostics.md` and the matching UI snapshots;
-- Tower work or owner decisions: `.agents/skills/tower/SKILL.md`, plus
-  `.agents/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
+- Tower board mechanics or owner decisions: `plugins/tower/skills/tower/SKILL.md`, plus
+  `plugins/tower/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
+- Tower backlog ranking: `plugins/tower/skills/tower-burndown/SKILL.md`; Codeflow owns
+  campaign execution, delegation, checkpoints, and review;
 - completion claims: `.claude/skills/verify/SKILL.md`;
 - systematic, multi-part, ambiguous, or larger-scope work: `codeflow` when available;
 - a specialized task: the matching skill named in the request or skill catalog.

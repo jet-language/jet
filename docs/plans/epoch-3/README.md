@@ -3,8 +3,8 @@
 Tower owns live cards, order, claims, blockers, and decisions:
 
 ```sh
-nix develop -c node Tower/tower.mjs status
-nix develop -c node Tower/tower.mjs next --burndown
+nix develop -c node plugins/tower/tower.mjs status
+nix develop -c node plugins/tower/tower.mjs next --burndown
 ```
 
 This directory keeps only durable cross-card law:
