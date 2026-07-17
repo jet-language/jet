@@ -23,6 +23,23 @@ pub(crate) fn bin_bits_type(width: u8) -> Type {
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn resolve_method_sig(
+        &self,
+        type_name: &str,
+        method: &str,
+    ) -> Option<(usize, MethodSig)> {
+        if let Some(sig) = self.registry.method(type_name, method) {
+            return Some((self.module_idx, sig.clone()));
+        }
+        let mods = self.modules?;
+        self.imports.values().find_map(|&idx| {
+            self.type_is_pub_in(idx, type_name)
+                .then(|| mods[idx].registry.method(type_name, method).cloned())
+                .flatten()
+                .map(|sig| (idx, sig))
+        })
+    }
+
     pub(crate) fn reject_borrowed_param_subplace(
         &mut self,
         expr: &Expr,
@@ -107,7 +124,7 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named("Limits".to_string()));
         }
-        let Some(msig) = self.registry.method(type_name, method).cloned() else {
+        let Some((owner_mod, msig)) = self.resolve_method_sig(type_name, method) else {
             self.diags.push(Diagnostic::error(
                 "E0102",
                 format!("`{}` has no method `{}`", type_name, method),
@@ -120,6 +137,9 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
+        if owner_mod != self.module_idx && !msig.is_pub {
+            self.diags.push(private_item(method, span));
+        }
         self.record_method_reference(type_name, method, span);
         self.record_edge(super::effect_key(Some(type_name), method), span);
         if !msig.is_static {

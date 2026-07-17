@@ -42,6 +42,7 @@ fn run() {
     bound: Counter :: .new(1)
     holder: Holder :: .{ counter: .new(2) }
     pool: Pool<Holder> :: .new()
+    nested_pool: Pool<Pool<Holder>> :: .new()
     explicit :: Counter.new(4)
     print(read(.new(5)))
     print("{bound.value}{holder.counter.value}{explicit.value}")

@@ -21,5 +21,6 @@ nix develop -c env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages --
 | [E0111](E0111.md) | assign to an `::` binding |
 | [E0119](E0119.md) | unknown type |
 | [E0120](E0120.md) | returning a borrowed value |
+| [E0356](E0356.md) | inferred constructor without a receiver type |
 
 Full registry: [diagnostics.md](../../spec/diagnostics.md).

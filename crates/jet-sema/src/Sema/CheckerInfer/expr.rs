@@ -1065,7 +1065,7 @@ impl<'a> Checker<'a> {
                             self.infer(&mut arg.expr);
                         }
                         self.diags.push(Diagnostic::error(
-                            "E0119",
+                            "E0356",
                             "`.new(...)` needs one known receiver type here".to_string(),
                             "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry".to_string(),
                             "add a type annotation or write the full `Type.new(...)` form".to_string(),

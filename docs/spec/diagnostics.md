@@ -304,6 +304,7 @@ renumbered, and no new `W` code may be allocated.
 | E0353 | sema  | a `validate { … }` rule statement isn't `check(cond, at: field, "msg")` (D-VALIDATE1) |
 | E0354 | sema  | `check(…, at: field, …)`'s `at:` doesn't name a field on the struct (D-VALIDATE1) |
 | E0355 | parse/sema | invalid scoped policy: unknown key, prohibited scope, conflict, or widening (D-MARK-SCOPE1) |
+| E0356 | sema  | inferred `.new(...)` has no expected receiver type (D-SHAPE3a) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -1154,6 +1155,7 @@ already-freed arena), these track the views themselves.
 | E0351 | The value tree is named `DataTree`, not `Data`. | `DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields; its variants are `.Null`, `.Bool`, `.Int`, `.Float`, `.Text`, `.Array`, and `.Object`. | Write `DataTree` instead of `Data`. |
 | E0352 | `@Meta` maturity needs a known maturity value. | Maturity metadata is a closed documentation scale. | Write `maturity: .Experimental`, `.Tested`, or `.Hardened`. |
 | E0355 | A scoped policy is unknown, conflicts, widens an inherited constraint, or is attached at a prohibited scope. | One compiler-owned matrix resolves package → module → function → block while keeping the full declaration chain. Audited authority stays at its sound site. | Use `@Policy(no_alloc)`, `@Policy(zero_rc)`, `@Policy(arena_bounded(bytes))`, or `@Policy(gc)`; package policy may only tighten, including `unsafe: .Forbid`. |
+| E0356 | `.new(...)` needs one known receiver type here. | The inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry. | Add a type annotation or write the full `Type.new(...)` form. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

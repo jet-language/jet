@@ -415,7 +415,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "Limits") && method == "safe")
-                    || self.registry.method(type_name, method).is_some() {
+                    || self.resolve_method_sig(type_name, method).is_some() {
                     return self.check_static_method(type_name, method, span, args);
                 }
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as Perf`

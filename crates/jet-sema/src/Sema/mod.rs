@@ -19,6 +19,7 @@ pub use crate::AST::FuncSig;
 #[derive(Debug, Clone)]
 pub(crate) struct MethodSig {
     name_span: Span,
+    is_pub: bool,
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
     is_static: bool,
@@ -308,6 +309,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
     }
     MethodSig {
         name_span: f.name_span,
+        is_pub: f.is_pub,
         params: f
             .params
             .iter()
