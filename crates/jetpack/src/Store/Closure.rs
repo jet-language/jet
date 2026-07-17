@@ -152,18 +152,31 @@ mod registration_tests {
         make_tree_writable_for_removal(&dir).unwrap();
         fs::remove_dir_all(&dir).unwrap();
         fs::remove_dir_all(roots.hangar_dir().join(DB_DIR)).unwrap();
+        let mut disappeared = false;
         let mut disappear = || {
             make_tree_writable_for_removal(&object).unwrap();
             fs::remove_dir_all(&object).unwrap();
+            disappeared = true;
         };
         let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
             register_entry_unlocked_with_hook(&roots, &ingested.entry, &mut disappear)
         })
         .unwrap_err();
+        assert!(disappeared, "race hook must remove the verified output");
         assert!(error.to_string().contains("does not exist"), "{error}");
         assert!(transaction_paths(&journal_dir(&roots)).unwrap().is_empty());
         assert!(list_checked(&roots).unwrap().is_empty());
         assert!(closure_graph(&roots).unwrap().records.is_empty());
+
+        fs::create_dir_all(&object).unwrap();
+        fs::write(object.join("payload"), "bytes").unwrap();
+        seal_node(&object).unwrap();
+        let changed = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &ingested.entry)
+        })
+        .unwrap();
+        assert!(changed);
+        assert_eq!(list_checked(&roots).unwrap(), vec![ingested.entry]);
     }
 }
 
