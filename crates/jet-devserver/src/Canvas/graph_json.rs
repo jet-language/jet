@@ -565,8 +565,13 @@ fn function_metadata_json(src: &str, f: &AST::Func) -> String {
                 .join(",")
         })
         .unwrap_or_default();
+    let effect_via = f
+        .effect_via
+        .as_ref()
+        .map(|(param, _)| json_str(param))
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"returns\":{},\"params\":[{}],\"meta\":{},\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
+        "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"effect_via\":{},\"returns\":{},\"params\":[{}],\"meta\":{},\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
         json_str(&f.name),
         json_str(&function_signature_text(src, f)),
         json_str(function_visibility(f)),
@@ -574,6 +579,7 @@ fn function_metadata_json(src: &str, f: &AST::Func) -> String {
         if f.is_pure { "true" } else { "false" },
         if f.is_unsafe { "true" } else { "false" },
         effects,
+        effect_via,
         json_str(&ret),
         params,
         meta_attr_json(f.meta.as_ref()).unwrap_or_else(|| "null".to_string()),
@@ -616,7 +622,11 @@ fn function_signature_text(src: &str, f: &AST::Func) -> String {
             .join(", "),
     );
     out.push(')');
-    if let Some(effects) = &f.declared_effects {
+    if let Some((param, _)) = &f.effect_via {
+        out.push_str(" --[via ");
+        out.push_str(param);
+        out.push_str("]->");
+    } else if let Some(effects) = &f.declared_effects {
         out.push_str(" --[");
         out.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
         out.push_str("]->");

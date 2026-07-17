@@ -699,11 +699,16 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
         let decorated = matches!(self.peek().kind, TokKind::MinusMinus);
-        if decorated {
-            effect_bound = Some(self.parse_effect_arrow_row()?);
+        let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        if decorated || retired_ballot {
+            if retired_ballot {
+                self.diags.push(Self::retired_effect_syntax(self.peek().span));
+            }
+            effect_bound = Some(self.parse_effect_arrow_row(retired_ballot)?);
         }
-        let ret = if decorated || matches!(self.peek().kind, TokKind::Arrow) {
-            if !decorated {
+        let ret = if decorated || retired_ballot || matches!(self.peek().kind, TokKind::Arrow) {
+            if !decorated && !retired_ballot {
                 self.bump();
             }
             if self.type_starts_here() {
@@ -722,8 +727,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_effect_arrow_row(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
-        self.expect(TokKind::MinusMinus, "to start an effect arrow")?;
+    fn parse_effect_arrow_row(&mut self, retired_ballot: bool) -> Result<Vec<(String, Span)>, Diagnostic> {
+        self.expect(
+            if retired_ballot { TokKind::Minus } else { TokKind::MinusMinus },
+            "to start an effect arrow",
+        )?;
         self.expect(TokKind::LBracket, "after `--` to start an effect row")?;
         let mut effects = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBracket) {

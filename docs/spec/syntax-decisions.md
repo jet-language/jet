@@ -57,7 +57,7 @@ call-site sigils on a single definition.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
 every `#`-marker and every `@`-marker is PascalCase (`@Test`, `@Unsafe`,
-`@Grant`, `@Pure`, `@Pre`); traits are PascalCase. The standard library is
+`@Grant`, `@Pre`); traits are PascalCase. The standard library is
 **"Core"** — never "std"/"stdlib" — in docs, identifiers, and error copy.
 
 **D-CORENS1 — Single `core.*` namespace** *(D-CORENS-CANON1)*: every
@@ -924,11 +924,11 @@ At that decision point, non-rule `#` constructs remained unchanged: effect sets
 `[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
 `$` is splice-only. Loop-label suffix `@` is a different slot.
 
-**D-MARKERMOVE1/2/3 — Plane assignments**: on `@`: `Pure`, `MustUse`,
+**D-MARKERMOVE1/2/3 — Plane assignments**: on `@`: `MustUse`,
 `Codable`, `Encode`, `Decode`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Summarize`, `Comparable`
-(user derives of the same names also use `@`). `@Pure` is also valid as a
-function-type bound (`f: fn(Int) --[]-> Int`). Field-level wire markers
+(user derives of the same names also use `@`). D-SHAPE8 later moved explicit
+purity to the empty function-effect row (`f: fn(Int) --[]-> Int`). Field-level wire markers
 use `@`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 `DenyUnknownFields`, `Tag`, `Untagged`.
 
@@ -1400,7 +1400,7 @@ taint lattice. Credential taint spreads by dataflow and may not reach
 `print`, `log`, or serialization sinks (E0722); `@Sanitizer fn` is the audited
 strip point. Other taint kinds retain the D-TAINT1 injection-sink rules.
 
-**D-DET1 — Determinism** *(D-DET-CAPAPI)*: `@Pure` implies reproducible —
+**D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `--[]->` bound implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 (`now/tick/advance/wait`) and `Rng` (`int/float/bool/pick/shuffle`) are the
 pure-callable capabilities; `@Nondeterministic("reason") { }` expert escape (respelled by D-BLOCKPLANE1, 2026-07-12).
@@ -1728,7 +1728,7 @@ binds scalars and `char*`↔String; `#define` constants only. Old
 **D-CABI-CALLBACK1=A / D-CABI-RESULT1=C / D-CABI-PLATFORM1=A** *(ratified
 2026-07-11, card #436)*: C callbacks accept only C-convention function values
 whose arguments and return are C-safe. A callback is non-null, monomorphic,
-named `@Pure` or a capture-free `@Pure` lambda, and safe for foreign threads:
+explicitly bounded `--[]->` or a capture-free lambda with an inferred empty row, and safe for foreign threads:
 no heap allocation, mutable static or thread-local state, scheduler access, or
 panic-capable path. Its pointer is stable for the program lifetime and may be
 called concurrently or reentrantly. There is no hidden context pointer,
@@ -2579,7 +2579,7 @@ widget FFI, all three desktop platforms against one trait seam *(gated)*.
 
 **D-LIVEQUERY1=A — live queries** *(ratified by owner 2026-07-11, card
 #505)*: `app.live(query, args)` accepts only a function whose effect row
-is inside `Db.Read` and whose body is `@Pure` modulo those reads;
+is inside `Db.Read` and whose body has no effects beyond those reads;
 anything else is a compile error naming the offending effect. Sema
 records the query's read footprint; a committed `@Transact` whose write
 set intersects a live footprint invalidates exactly those subscriptions,

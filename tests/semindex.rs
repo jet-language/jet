@@ -571,6 +571,24 @@ fn semindex_effects_and_calls() {
 }
 
 #[test]
+fn semindex_preserves_via_effect_row_in_signatures() {
+    let path = temp_fixture(
+        "effect_via.jet",
+        "fn invoke(act: fn() --[Io]->) --[via act]-> { act() }\nfn run() {}\n",
+    );
+    let symbols = open_symbols(&path).expect("via function indexes");
+    let invoke = symbols
+        .lookup("invoke")
+        .into_iter()
+        .next()
+        .expect("invoke symbol");
+    assert_eq!(
+        invoke.signature,
+        "fn invoke(act: fn() --[Io]->) --[via act]->"
+    );
+}
+
+#[test]
 fn semindex_references() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     assert!(!idx.references_to("print").is_empty());

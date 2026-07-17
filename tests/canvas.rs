@@ -1604,6 +1604,20 @@ fn canvas_projects_function_metadata_and_callback_event_views() {
 }
 
 #[test]
+fn canvas_preserves_via_effect_row_for_signature_edits() {
+    let path = write_fixture(
+        "function_via_effect",
+        "fn invoke(act: fn() --[Io]->) --[via act]-> { act() }\nfn run() {}\n",
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    assert!(
+        graph.contains("\"signature\":\"fn invoke(act: fn() --[Io]->) --[via act]->\""),
+        "{graph}"
+    );
+    assert!(graph.contains("\"effect_via\":\"act\""), "{graph}");
+}
+
+#[test]
 fn canvas_projects_meta_attribute_on_functions_and_bindings() {
     let path = write_fixture(
         "meta_attribute",
@@ -2805,6 +2819,7 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("function syncVariablesList"), "{js}");
     assert!(js.contains("function renderVariableDetails"), "{js}");
     assert!(js.contains("originalSignature.includes(\"--[\")"), "{js}");
+    assert!(js.contains("fnMeta.effect_via ? \"via \" + fnMeta.effect_via"), "{js}");
     assert!(js.contains("\" --[\" + effects + \"]->\""), "{js}");
     assert!(!js.contains("fnMeta.pure ? \"@Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");

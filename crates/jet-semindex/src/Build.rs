@@ -19,6 +19,7 @@ pub enum SymKind {
         params: Vec<(String, AST::Type)>,
         ret: Option<AST::Type>,
         effects: Option<Vec<(String, Span)>>,
+        effect_via: Option<(String, Span)>,
     },
     Struct {
         fields: Vec<(String, AST::Type)>,
@@ -270,6 +271,7 @@ fn fn_signature(
     params: &[(String, AST::Type)],
     ret: &Option<AST::Type>,
     effects: Option<&Vec<(String, Span)>>,
+    effect_via: Option<&(String, Span)>,
     view_provenance: Option<&AST::ViewProvenanceMap>,
 ) -> String {
     let params = params
@@ -277,10 +279,14 @@ fn fn_signature(
         .map(|(n, t)| format!("{n}: {}", t.name()))
         .collect::<Vec<_>>()
         .join(", ");
-    let arrow = effects.map_or_else(
-        || ret.as_ref().map(|_| " ->".to_string()).unwrap_or_default(),
-        |row| format!(" --[{}]->", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
-    );
+    let arrow = if let Some((param, _)) = effect_via {
+        format!(" --[via {param}]->")
+    } else {
+        effects.map_or_else(
+            || ret.as_ref().map(|_| " ->".to_string()).unwrap_or_default(),
+            |row| format!(" --[{}]->", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
+        )
+    };
     let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
     let mut signature = format!("fn {name}({params}){arrow}{result}");
     if let Some(map) = view_provenance {
@@ -322,6 +328,7 @@ fn method_fact(
             &params,
             &f.return_type,
             f.declared_effects.as_ref(),
+            f.effect_via.as_ref(),
             f.return_view_provenance.as_ref(),
         ),
         module_path: mp.to_string(),
@@ -782,6 +789,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     params: params.clone(),
                     ret: f.return_type.clone(),
                     effects: f.declared_effects.clone(),
+                    effect_via: f.effect_via.clone(),
                 },
             };
             let mut hover_text = hover_for_fn(f);
@@ -935,6 +943,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .collect(),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
+                        effect_via: meth.effect_via.clone(),
                     },
                 });
                 ctx.db.hover.push(HoverEntry {
@@ -991,6 +1000,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             params: method_params(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
+                            effect_via: meth.effect_via.clone(),
                         },
                     });
                     with_caller(
@@ -1088,6 +1098,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .collect(),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
+                        effect_via: meth.effect_via.clone(),
                     },
                 });
                 with_caller(
@@ -1125,6 +1136,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             params: method_params(meth),
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
+                            effect_via: meth.effect_via.clone(),
                         },
                     });
                     with_caller(
@@ -1170,6 +1182,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         params: params.clone(),
                         ret: sig.return_type.clone(),
                         effects: sig.declared_effects.clone(),
+                        effect_via: None,
                     },
                 });
                 ctx.db.members.push(MemberFact {
@@ -1180,7 +1193,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     origin: MemberOrigin::TraitRequirement {
                         trait_name: t.name.clone(),
                     },
-                    signature: fn_signature(&sig.name, &params, &sig.return_type, sig.declared_effects.as_ref(), None),
+                    signature: fn_signature(&sig.name, &params, &sig.return_type, sig.declared_effects.as_ref(), None, None),
                     module_path: mp.to_string(),
                     span: sig.name_span.into(),
                 });
@@ -1232,6 +1245,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .collect(),
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
+                        effect_via: meth.effect_via.clone(),
                     },
                 });
                 for p in &meth.params {
@@ -1343,10 +1357,14 @@ fn hover_for_fn(f: &AST::Func) -> String {
         .filter(|p| p.name != Syntax::KW_SELF)
         .map(|p| format!("{}: {}", p.name, p.ty.name()))
         .collect();
-    let arrow = f.declared_effects.as_ref().map_or_else(
-        || f.return_type.as_ref().map(|_| " ->".to_string()).unwrap_or_default(),
-        |row| format!(" --[{}]->", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
-    );
+    let arrow = if let Some((param, _)) = &f.effect_via {
+        format!(" --[via {param}]->")
+    } else {
+        f.declared_effects.as_ref().map_or_else(
+            || f.return_type.as_ref().map(|_| " ->".to_string()).unwrap_or_default(),
+            |row| format!(" --[{}]->", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
+        )
+    };
     let ret = f.return_type.as_ref().map(|t| format!(" {}", t.name())).unwrap_or_default();
     format!("fn {}({}){}{}", f.name, params.join(", "), arrow, ret)
 }

@@ -1955,6 +1955,42 @@ fn lsp_hover_returns_signature() {
 }
 
 #[test]
+fn lsp_hover_preserves_via_effect_row() {
+    let source = "fn invoke(act: fn() --[Io]->) --[via act]-> { act() }\nfn run() {}\n";
+    let uri = "file:///tmp/lsp_hover_effect_via.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                    .to_string(),
+                expect_contains: Some(vec!["hoverProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["--[via act]->".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
 fn lsp_rename_produces_workspace_edit() {
     let jet = jet_bin();
     if !jet.exists() {

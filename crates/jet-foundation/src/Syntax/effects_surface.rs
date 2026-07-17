@@ -4,16 +4,11 @@
 /// retired spelling → E0054 teaching error pointing at `@Todo`.
 pub const KW_TODO: &str = "Todo";
 
-/// S60 (ratified 2026-06-12; implemented E2-M16; PascalCase marker D-CASING1
-/// follow-on 2026-06-21): the purity modifier, written as the marker `@Pure fn
-/// name() { … }`. A `@Pure fn` may only call other `@Pure fn`s and pure
-/// builtins; impure calls are a compile error (E3401) with the call-trace path.
-/// Bare lowercase `pure` (FOREIGN_PURE) is the retired spelling → E0053 teaching
-/// error pointing at `@Pure`.
-///
-/// D-EFF2 (ratified 2026-06-22): `@Pure` also rides the front of a callback
-/// parameter type — `f: fn(T) --[]-> U` demands a pure callback; passing one
-/// with any effect is E0747. Sibling of the `fn(…) --[E, …]->` bounded form.
+/// S60's former `@Pure fn` marker, retained only so D-SHAPE8=A can reject it
+/// with E0066. Explicit purity is the empty effect arrow `--[]->`; the same row
+/// on a callback type (`f: fn(T) --[]-> U`) demands a pure callback, with E0747
+/// for an argument whose effects exceed it. Bare lowercase `pure`
+/// (FOREIGN_PURE) remains the older E0053 teaching form.
 pub const KW_PURE: &str = "Pure";
 
 /// D-SHAPE8=A (ratified 2026-07-14, owner-amended): an explicit function
@@ -48,9 +43,9 @@ pub const KW_CREDENTIAL: &str = "Credential";
 /// D-TAINT1: the `@Sanitizer fn name(…)` modifier — the one blessed way to strip
 /// taint. A sanitizer's return value is untainted by contract, regardless of
 /// whether its inputs were tainted (it is the audited cleaning step). A fn
-/// modifier in the `@Pure`/`@Unsafe` family; PascalCase per D-CASING1. Erased in
+/// function modifier in the `@Unsafe` family; PascalCase per D-CASING1. Erased in
 /// codegen (I3). NOTE: the ratified card spells the modifier bare `sanitizer fn`;
-/// the D-CASING1 marker convention (which moved `pure fn` → `@Pure fn`) makes
+/// the D-CASING1 marker convention makes
 /// `@Sanitizer fn` the consistent default — a spelling fork queued as D-TAINT-SAN.
 pub const KW_SANITIZER: &str = "Sanitizer";
 

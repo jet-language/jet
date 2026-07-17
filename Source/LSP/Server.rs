@@ -758,13 +758,17 @@ fn signature_help_response(
     };
 
     let (label, params_json, param_count) = match &def.kind {
-        SymKind::Function { params, ret, effects } => {
+        SymKind::Function { params, ret, effects, effect_via } => {
             let parts: Vec<String> = params
                 .iter()
                 .map(|(name, ty)| format!("{}: {}", name, ty.name()))
                 .collect();
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
-            if let Some(effects) = effects {
+            if let Some((param, _)) = effect_via {
+                label.push_str(" --[via ");
+                label.push_str(param);
+                label.push_str("]->");
+            } else if let Some(effects) = effects {
                 label.push_str(" --[");
                 label.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
                 label.push_str("]->");

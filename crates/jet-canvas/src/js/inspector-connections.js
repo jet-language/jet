@@ -84,7 +84,7 @@
     }).join(", ");
     const originalSignature = String(fnMeta.signature || "");
     const hasEffectArrow = originalSignature.includes("--[");
-    const effects = (fnMeta.effects || []).join(", ");
+    const effects = fnMeta.effect_via ? "via " + fnMeta.effect_via : (fnMeta.effects || []).join(", ");
     const arrow = hasEffectArrow ? " --[" + effects + "]->" : " ->";
     const ret = fnMeta.returns && fnMeta.returns !== "Void" ? arrow + " " + fnMeta.returns : (hasEffectArrow ? arrow : "");
     const visibility = fnMeta.visibility === "public" ? "pub " : fnMeta.visibility === "package" ? "pub(package) " : "";

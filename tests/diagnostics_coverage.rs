@@ -834,6 +834,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E0058", // retired (D-MEM1/S3): was `view` return keyword teaching; `-> &T` gone
         "E0206", // retired (D-MEM1/S3): was `view` return escape check; `-> &T` gone
         "E0207", // retired (D-MEM1/S3): was stored-ref `&T` field owner ambiguity, D-REF-SHORTHAND1
+        "E0745", // retired by D-SHAPE8=A: former @Pure plus non-empty #(…) contradiction
         "E0427", // retired (D-MEM1/S3): was `#Ref(owner) name: T` retired-form teaching
         "E0426", // retired by D-UNINIT-SENTINEL1; teaching is synthesized from the retired spelling
         "E0912", // retired (D-MEM1/S2): was frozen capability signature drift, D-CAP8/c129
@@ -894,6 +895,10 @@ fn registered_unimplemented_codes_are_expected() {
     assert!(
         registered.contains("E0033"),
         "E0033 is a retired reservation and must remain in docs/spec/diagnostics.md"
+    );
+    assert!(
+        registered.contains("E0745") && is_retired("E0745", &read(&root().join("docs/spec/diagnostics.md"))),
+        "E0745 is a retired reservation and must remain in docs/spec/diagnostics.md"
     );
     let parser = read(&root().join("crates/jet-parser/src/Parser/mod.rs"));
     assert!(
