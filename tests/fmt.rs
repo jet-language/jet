@@ -1151,11 +1151,11 @@ fn fmt_keeps_parens_around_binary_receiver() {
 fn fmt_comptime_block_is_idempotent() {
     // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` formatting
     // round-trips — the block keyword, brace, and body all survive a second fmt.
-    let src = r#"comptime LIMIT = 1000
+    let src = r#"comptime limit = 1000
 
 fn run() {
     comptime {
-        comptime ratio = LIMIT / 10
+        comptime ratio = limit / 10
         if ratio < 1 { panic("bad") }
     }
     print("ok")
@@ -1707,7 +1707,7 @@ fn fmt_preserves_unit_literal() {
     // D-UNITLIT1: `500ms` must survive with no space inserted between the
     // number and the suffix, and the suffix itself must not be dropped.
     let src = "\
-@UnitFamily(time) { ms, s }
+@UnitFamily(Time) { ms, s }
 
 fn run() {
     a :: 500ms
@@ -2350,6 +2350,14 @@ fn fmt_preserves_per_function_c_abi() {
     let src = "use c.demo as c\n@Extern module c.demo {\n    @Abi(system) fn portable(x: I32) -> I32 = \"portable\"\n    @Abi(sysv64) fn native(x: I32) -> I32 = \"native\"\n}\nfn run() {}\n";
     let once = jet::format_source(src).expect("@Abi C module should format");
     assert!(once.contains("@Abi(system)") && once.contains("@Abi(sysv64)"), "fmt dropped @Abi: {once}");
+    assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
+}
+
+#[test]
+fn fmt_preserves_casing_errors_for_sema() {
+    let src = "struct bad_type { BadField: Int }\nfn BadFunction() {}\n";
+    let once = jet::format_source(src).expect("casing is a sema diagnostic, not a formatter rewrite");
+    assert!(once.contains("bad_type") && once.contains("BadField") && once.contains("BadFunction"));
     assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
 }
 #[test]

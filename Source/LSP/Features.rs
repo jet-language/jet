@@ -3,10 +3,11 @@
 
 use crate::Diagnostics::Span;
 use crate::Lexer::{TokKind, Token};
+use crate::Syntax;
 
 use super::Completion::{JET_KEYWORDS, JET_TYPES};
 use super::Position::byte_offset_to_lsp;
-use super::SymbolDB::{InlayHint, SymbolDB};
+use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
 use jet_foundation::JSON::json_escape;
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
@@ -269,6 +270,21 @@ pub(crate) fn compute_rename(
     };
     if is_keyword(name) {
         return Err(format!("`{}` is a keyword and cannot be renamed", name));
+    }
+    if let Some(def) = db.defs.iter().find(|d| d.name == name) {
+        let (category, case) = match &def.kind {
+            SymKind::Struct { .. } | SymKind::Enum { .. } | SymKind::Trait | SymKind::Tag
+            | SymKind::EnumVariant { .. } => ("type-like name", Syntax::NameCase::Pascal),
+            SymKind::Module | SymKind::Function { .. } | SymKind::Const | SymKind::Field { .. }
+            | SymKind::Local { .. } | SymKind::Param { .. } =>
+                ("value-like name", Syntax::NameCase::Snake),
+        };
+        if !Syntax::name_has_case(new_name, case) {
+            return Err(format!(
+                "`{new_name}` is not a valid {category}; use `{}`",
+                Syntax::canonical_name_case(new_name, case)
+            ));
+        }
     }
     let mut spans: Vec<(String, Span)> = Vec::new();
     // Include definition spans

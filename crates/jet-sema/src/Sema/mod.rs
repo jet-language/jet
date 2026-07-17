@@ -13,6 +13,8 @@ use crate::AST::{AccessConvention, Expr, ExternFn, Func, Stmt, Type, VariantPayl
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
+mod Casing;
+
 /// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.
 pub use crate::AST::FuncSig;
 

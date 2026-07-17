@@ -117,6 +117,17 @@ mod tests {
     }
 
     #[test]
+    fn rename_preserves_identifier_case_category() {
+        let src = "fn greet() {}\nfn run() { greet(); }\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (toks, _) = crate::Lexer::lex(src);
+        let err = compute_rename(&db, &toks, "test.jet", 3, "BadName").unwrap_err();
+        assert!(err.contains("bad_name"), "{err}");
+    }
+
+    #[test]
     fn semantic_tokens_non_empty() {
         let src = "fn run() { x: Int :: 1 }\n";
         let (toks, _) = crate::Lexer::lex(src);

@@ -35,6 +35,67 @@
 // D-SHAPE-INTERNAL1=A and D-SHAPE-DUNDER2=A add no token: the canonical
 // IdentifierClass prefix policy makes `_name` soft-public and reserves every
 // source-written `__name` for Jet and generated tooling.
+// D-SHAPE-CASE1=C owns the identifier category table and its two enforced
+// shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
+
+/// The two identifier tiers fixed by D-SHAPE-CASE1=C.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameCase {
+    Pascal,
+    Snake,
+}
+
+/// One compiler-owned category table. Parser/sema callers select the grammar
+/// category; spelling policy never gets reimplemented at individual sites.
+pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
+    ("type", NameCase::Pascal),
+    ("trait", NameCase::Pascal),
+    ("enum variant", NameCase::Pascal),
+    ("marker", NameCase::Pascal),
+    ("unit family", NameCase::Pascal),
+    ("function", NameCase::Snake),
+    ("method", NameCase::Snake),
+    ("field", NameCase::Snake),
+    ("local", NameCase::Snake),
+    ("module", NameCase::Snake),
+    ("unit member", NameCase::Snake),
+    ("constant", NameCase::Snake),
+];
+
+pub fn name_has_case(name: &str, case: NameCase) -> bool {
+    if name == "_" { return true; }
+    let name = if case == NameCase::Snake { name.strip_prefix('_').unwrap_or(name) } else { name };
+    if name.is_empty() || name.starts_with('_') || name.ends_with('_') || name.contains("__") { return false; }
+    match case {
+        NameCase::Pascal => name.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
+            && name.bytes().all(|b| b.is_ascii_alphanumeric()),
+        NameCase::Snake => name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+            && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+    }
+}
+
+pub fn canonical_name_case(name: &str, case: NameCase) -> String {
+    match case {
+        NameCase::Pascal => name.split('_').filter(|s| !s.is_empty()).map(|s| {
+            let mut chars = s.chars();
+            chars.next().map(|c| c.to_ascii_uppercase().to_string() + chars.as_str()).unwrap_or_default()
+        }).collect(),
+        NameCase::Snake => {
+            let leading = name.starts_with('_');
+            let chars: Vec<char> = name.trim_start_matches('_').chars().collect();
+            let mut out = String::new();
+            for (i, c) in chars.iter().copied().enumerate() {
+                if c.is_ascii_uppercase() {
+                    let prev_lower = i > 0 && chars[i - 1].is_ascii_lowercase();
+                    let next_lower = chars.get(i + 1).is_some_and(char::is_ascii_lowercase);
+                    if !out.is_empty() && (prev_lower || next_lower) && !out.ends_with('_') { out.push('_'); }
+                    out.push(c.to_ascii_lowercase());
+                } else { out.push(c); }
+            }
+            if leading { format!("_{out}") } else { out }
+        }
+    }
+}
 
 mod core_surface;
 pub use core_surface::*;

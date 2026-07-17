@@ -455,6 +455,7 @@ pub(crate) fn check_bundle_opts(
     allow_impure: bool,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = super::BudgetSpecs::validate_bundle(bundle);
+    diags.extend(super::Casing::validate_bundle(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
