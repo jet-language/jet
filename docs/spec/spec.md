@@ -3300,6 +3300,20 @@ typed graph without executing actions. `jet inspect explain-build <target|action
 <file>` reports graph and cache provenance. LSP checking uses the same selected
 root signature validation and the same static graph facts, including E3501.
 
+## Physical dimension algebra
+
+D-SHAPE-QUANTITY1 makes the `Length`, `Time`, `Speed`, and `Area` unit-family
+identities compiler-known. Addition, subtraction, and comparison require equal
+dimensions; E0359 reports a mismatch before codegen. Multiplication adds and
+division subtracts normalized exponents, so `Length / Time` is `Speed`,
+`Length * Length` is `Area`, and `Speed * Time` is `Length`. The semantic index
+and API snapshots serialize the normalized identity and numeric base. Backends
+receive only that numeric base: dimensions have no runtime representation.
+
+Currency remains nominal D-QUAL3 behavior. Unit declaration metadata, affine
+points, conversion spelling, and scaled conversion remain owned by #603 and are
+not introduced by this algebra.
+
 ## Semantic source import
 
 D-MIGRATE-SRC1 extends the canonical import command to foreign source:

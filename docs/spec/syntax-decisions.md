@@ -446,6 +446,13 @@ information costs nothing at runtime and is shared across packages. This adds
 no general type-level programming; declaration and spelling are the
 D-QUANTITY-DECL1/TYPE1/POINT1/CONVERT1 family below.
 
+Implementation identity is a normalized compiler-only exponent vector. The
+initial closed table recognizes `Length`, `Time`, `Speed`, and `Area`; inferred
+types serialize the canonical family name, numeric base, and exponent identity
+(for example `Quantity<Speed, Float; L1T-1>`) for semantic inspection and API
+freeze checks, then erase to the numeric base before backend emission. Currency
+remains outside this table and keeps D-QUAL3's nominal arithmetic behavior.
+
 **D-QUANTITY-DECL1=A — scaled and affine units extend `@UnitFamily`**
 *(ratified 2026-07-16, card #603)*: the post-D-SHAPE2 `@UnitFamily` typed
 rule gains one canonical `base` and exact rational `scale`/`offset`

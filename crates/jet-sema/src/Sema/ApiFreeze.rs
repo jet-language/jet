@@ -582,6 +582,25 @@ mod tests {
     }
 
     #[test]
+    fn sig_carries_normalized_physical_dimension_identity() {
+        let speed = crate::AST::Dimension::for_family("Speed").unwrap();
+        let f = func(
+            "pace",
+            true,
+            vec![param(
+                "value",
+                AccessConvention::Read,
+                Type::quantity(Type::Float, speed),
+            )],
+            Some(Type::quantity(Type::Float, speed)),
+        );
+        assert_eq!(
+            fn_signature(&f),
+            "fn pace(value: Quantity<Speed, Float; L1T-1>) -> Quantity<Speed, Float; L1T-1>"
+        );
+    }
+
+    #[test]
     fn sig_carries_parameter_view_provenance() {
         let mut f = func(
             "first",

@@ -30,6 +30,9 @@ pub(crate) struct Cx {
     pub(crate) distinct_types: HashMap<String, (Type, bool)>,
     /// D-RANGETYPE1: range-constrained distinct type name -> inclusive bounds.
     pub(crate) distinct_ranges: HashMap<String, (i64, i64)>,
+    /// D-SHAPE-QUANTITY1=A: physical unit member -> normalized dimension.
+    /// Consulted only while lowering; dimensions erase from emitted Rust.
+    pub(crate) unit_dimensions: HashMap<String, crate::AST::Dimension>,
     /// D-TYPEALIAS1: transparent generic alias name -> (params, target).
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
@@ -442,6 +445,17 @@ pub(crate) use crate::Syntax::binary_text_handle_rust_type;
 pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
 impl Cx {
+    pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
+        ty.quantity_parts()
+            .map(|(_, dimension)| dimension)
+            .or_else(|| {
+                let Type::Named(name) = ty else {
+                    return None;
+                };
+                self.unit_dimensions.get(name).copied()
+            })
+    }
+
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
         let (alias, leaf) = name.split_once('.')?;
         match (self.core_imports.get(alias).map(String::as_str), leaf) {
@@ -764,6 +778,9 @@ impl Cx {
 
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
+        if let Some((base, _)) = ty.quantity_parts() {
+            return self.rust_type(base);
+        }
         match &ty {
             Type::Int => "i64".to_string(),
             Type::Float => "f64".to_string(),
@@ -1498,6 +1515,30 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
+    // Dimensions are canonical across package/module boundaries. Imported
+    // signatures may carry a unit type declared in another module, so every
+    // lowering context receives the same closed member-to-dimension facts.
+    let imported = bundle.modules[module_idx]
+        .imports
+        .iter()
+        .filter_map(|import| {
+            bundle
+                .import_targets
+                .get(&(module_idx, import.span))
+                .copied()
+        });
+    for target in std::iter::once(module_idx).chain(imported) {
+        let module = &bundle.modules[target];
+        for item in &module.items {
+            if let Item::UnitFamily(family) = item {
+                if let Some(dimension) = crate::AST::Dimension::for_family(&family.family) {
+                    for member in family.distinct_defs() {
+                        cx.unit_dimensions.insert(member.name, dimension);
+                    }
+                }
+            }
+        }
+    }
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -1633,6 +1674,7 @@ pub(crate) fn build_cx_items(
         type_names: HashSet::new(),
         distinct_types: HashMap::new(),
         distinct_ranges: HashMap::new(),
+        unit_dimensions: HashMap::new(),
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
@@ -1909,10 +1951,14 @@ pub(crate) fn build_cx_items(
             // D-QUAL3: each unit-family member registers as a `@Numeric` distinct
             // type erasing to `Float`.
             Item::UnitFamily(uf) => {
+                let dimension = crate::AST::Dimension::for_family(&uf.family);
                 for d in uf.distinct_defs() {
                     cx.type_names.insert(d.name.clone());
                     cx.distinct_types
                         .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
+                    if let Some(dimension) = dimension {
+                        cx.unit_dimensions.insert(d.name.clone(), dimension);
+                    }
                 }
             }
             Item::CodeModule(cm) => {

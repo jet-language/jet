@@ -4,7 +4,7 @@
 #[path = "AST/types.rs"]
 mod types;
 pub use types::{
-    AccessConvention, Type, int_spelling, numeric_type_from_name, int_range,
+    AccessConvention, Dimension, Type, int_spelling, numeric_type_from_name, int_range,
     canonicalize_tuple_fields, CORE_CRYPTO_NOMINAL_MARKER,
 };
 

@@ -99,6 +99,9 @@ pub(crate) enum TypeDef {
 
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// D-SHAPE-QUANTITY1=A: unit-family member type -> normalized physical
+    /// dimension. Currency and unknown families are intentionally absent.
+    unit_dimensions: HashMap<String, crate::AST::Dimension>,
     /// D-FIELDPOL1: struct name → computed field name → (span, declared
     /// type). A computed field never appears in `TypeDef::Struct::fields`
     /// (it's not a stored field, and is never required/allowed in a struct
@@ -110,6 +113,10 @@ pub(crate) struct TypeRegistry {
 impl TypeRegistry {
     pub(crate) fn contains(&self, name: &str) -> bool {
         self.types.contains_key(name)
+    }
+
+    pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
+        self.unit_dimensions.get(name).copied()
     }
 
     fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool)]> {

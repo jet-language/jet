@@ -498,6 +498,7 @@ pub(crate) fn check_bundle_opts(
             field_pkg_pub: HashMap::new(),
             registry: TypeRegistry {
                 types: HashMap::new(),
+                unit_dimensions: HashMap::new(),
                 computed_fields: HashMap::new(),
             },
             consts: HashMap::new(),
@@ -735,8 +736,12 @@ pub(crate) fn check_bundle_opts(
                 // D-QUAL3: a unit family lowers to one `@Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
+                    let dimension = crate::AST::Dimension::for_family(&uf.family);
                     for d in uf.distinct_defs() {
                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+                        if let Some(dimension) = dimension {
+                            st.registry.unit_dimensions.insert(d.name.clone(), dimension);
+                        }
                         st.type_pub
                             .insert(d.name.clone(), d.is_pub && !d.is_package_pub);
                         st.type_pkg_pub.insert(d.name.clone(), d.is_package_pub);
@@ -784,6 +789,7 @@ pub(crate) fn check_bundle_opts(
                         }
                         TypeRegistry {
                             types,
+                            unit_dimensions: st.registry.unit_dimensions.clone(),
                             computed_fields: st.registry.computed_fields.clone(),
                         }
                     });

@@ -341,6 +341,51 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Binary(op, l, r, span) => {
             let lhs = lower_expr(l, cx, env);
             let rhs = lower_expr(r, cx, env);
+            // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
+            // Multiplication/division unwrap nominal unit values and emit a
+            // plain numeric operation; the normalized result type is retained
+            // only as a TIR fact and `rust_type` erases it to the numeric base.
+            let ldim = cx.quantity_dimension(&lhs.ty);
+            let rdim = cx.quantity_dimension(&rhs.ty);
+            if (ldim.is_some() || rdim.is_some()) && matches!(op, BinOp::Mul | BinOp::Div) {
+                let raw = |expr: TExpr| {
+                    if cx.quantity_dimension(&expr.ty).is_some()
+                        && matches!(expr.ty, Type::Named(_))
+                    {
+                        TExpr {
+                            ty: Type::Float,
+                            kind: TExprKind::DistinctRaw(Box::new(expr)),
+                        }
+                    } else {
+                        expr
+                    }
+                };
+                let lhs = raw(lhs);
+                let rhs = raw(rhs);
+                let left = ldim.unwrap_or(crate::AST::Dimension::SCALAR);
+                let right = rdim.unwrap_or(crate::AST::Dimension::SCALAR);
+                let dimension = if *op == BinOp::Mul {
+                    left.multiply(right)
+                } else {
+                    left.divide(right)
+                };
+                let ty = if dimension == crate::AST::Dimension::SCALAR {
+                    Type::Float
+                } else {
+                    Type::quantity(Type::Float, dimension)
+                };
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+                return TExpr {
+                    ty,
+                    kind: TExprKind::Binary {
+                        op: *op,
+                        overflow: false,
+                        line,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                };
+            }
             // D-LAYOUT1 / D-LAYOUT-GATES1: layout-typed `+`/`-`/`>=`/`<=`/`==`.
             // Recompute via the SAME table sema used (mirrors the math/BigInt
             // early-return pattern below) rather than trusting `lhs.ty.clone()`

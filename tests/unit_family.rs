@@ -106,3 +106,87 @@ fn family_erases_in_codegen() {
         "members erase to a transparent newtype over the base"
     );
 }
+
+/// D-SHAPE-QUANTITY1=A: physical families participate in normalized
+/// dimensional algebra while their runtime representation stays numeric.
+#[test]
+fn physical_dimensions_derive_before_codegen_and_erase_at_runtime() {
+    let src = r#"
+@UnitFamily(Length) { meter }
+@UnitFamily(Time) { second }
+
+fn run() {
+    distance :: 12meter
+    elapsed :: 3second
+    speed :: distance / elapsed
+    area :: distance * distance
+    recovered :: speed * elapsed
+    print("ok")
+}
+"#;
+    let out = jet::compile(src).expect("dimensionally valid program should compile");
+    assert!(out.rust.contains("user_Meter"));
+    assert!(out.rust.contains("user_Second"));
+    assert!(out.rust.contains(".0 /"), "unit division must erase to base arithmetic");
+    assert!(out.rust.contains(".0 *"), "unit multiplication must erase to base arithmetic");
+    assert!(!out.rust.contains("Quantity<"), "dimension facts must not reach emitted Rust");
+}
+
+#[test]
+fn physical_dimension_mismatch_is_rejected_in_sema() {
+    let src = r#"
+@UnitFamily(Length) { meter }
+@UnitFamily(Time) { second }
+fn run() { bad :: 1meter + 1second }
+"#;
+    let codes = codes_of(src);
+    assert_eq!(codes, vec!["E0359"], "expected one dimension mismatch, got {codes:?}");
+}
+
+#[test]
+fn currency_keeps_nominal_arithmetic_behavior() {
+    let src = format!(
+        "{}\nfn run() {{ total :: 2usd * 3usd; print(\"{{(total.raw())}}\") }}\n",
+        FAMILY
+    );
+    let codes = codes_of(&src);
+    assert!(codes.is_empty(), "Currency is outside physical dimension math: {codes:?}");
+}
+
+#[test]
+fn physical_dimensions_cross_file_boundaries_canonically() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_quantity_packages_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("units.jet"),
+        r#"
+@UnitFamily(Length) { meter }
+@UnitFamily(Time) { second }
+pub fn distance() -> Meter { return 12meter }
+pub fn elapsed() -> Second { return 3second }
+"#,
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(
+        &entry,
+        r#"
+use "units" as units
+fn run() {
+    speed :: units.distance() / units.elapsed()
+    recovered :: speed * units.elapsed()
+    print("ok")
+}
+"#,
+    )
+    .unwrap();
+    let src = std::fs::read_to_string(&entry).unwrap();
+    let result = jet::compile_with_path(&src, entry.to_str().unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+    let out = result.expect("imported physical units should share canonical dimensions");
+    assert!(!out.rust.contains("Quantity<"));
+}

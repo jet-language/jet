@@ -1,5 +1,70 @@
 use crate::Diagnostics::Span;
 
+/// D-SHAPE-QUANTITY1=A: a normalized compiler-known physical dimension.
+/// Runtime values carry no dimension metadata; this value exists only in the
+/// front-end/TIR type facts. The initial closed table has Length and Time as
+/// bases, which is sufficient to derive Speed, Area, and arbitrary products.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Dimension([i8; 2]);
+
+impl Dimension {
+    pub const SCALAR: Self = Self([0, 0]);
+
+    pub fn for_family(name: &str) -> Option<Self> {
+        crate::Syntax::PHYSICAL_DIMENSIONS
+            .iter()
+            .find_map(|(family, exponents)| (*family == name).then_some(Self(*exponents)))
+    }
+
+    pub fn multiply(self, rhs: Self) -> Self {
+        Self([self.0[0] + rhs.0[0], self.0[1] + rhs.0[1]])
+    }
+
+    pub fn divide(self, rhs: Self) -> Self {
+        Self([self.0[0] - rhs.0[0], self.0[1] - rhs.0[1]])
+    }
+
+    pub fn pow(self, exponent: i8) -> Self {
+        Self([self.0[0] * exponent, self.0[1] * exponent])
+    }
+
+    pub fn family_name(self) -> Option<&'static str> {
+        crate::Syntax::PHYSICAL_DIMENSIONS
+            .iter()
+            .find_map(|(family, exponents)| (*exponents == self.0).then_some(*family))
+    }
+
+    /// Stable, package-independent identity used by API/type serialization.
+    pub fn identity(self) -> String {
+        format!("L{}T{}", self.0[0], self.0[1])
+    }
+
+    pub fn from_identity(identity: &str) -> Option<Self> {
+        let rest = identity.strip_prefix('L')?;
+        let (length, time) = rest.split_once('T')?;
+        Some(Self([length.parse().ok()?, time.parse().ok()?]))
+    }
+
+    pub fn display_name(self) -> String {
+        if let Some(name) = self.family_name() {
+            return name.to_string();
+        }
+        let mut parts = Vec::new();
+        for (name, exponent) in [("Length", self.0[0]), ("Time", self.0[1])] {
+            if exponent == 1 {
+                parts.push(name.to_string());
+            } else if exponent != 0 {
+                parts.push(format!("{name}^{exponent}"));
+            }
+        }
+        if parts.is_empty() {
+            "Scalar".to_string()
+        } else {
+            parts.join(" * ")
+        }
+    }
+}
+
 /// Internal-only provenance tag for purpose-bound `core.crypto` nominal types.
 /// The NUL prefix cannot be written as a Jet marker identifier.
 pub const CORE_CRYPTO_NOMINAL_MARKER: &str = "\0core.crypto";
@@ -263,6 +328,27 @@ fn effect_names(row: &[(String, Span)]) -> String {
 }
 
 impl Type {
+    pub fn quantity(base: Type, dimension: Dimension) -> Type {
+        Type::Apply {
+            name: crate::Syntax::TYPE_QUANTITY.to_string(),
+            args: vec![base, Type::Named(dimension.identity())],
+        }
+    }
+
+    pub fn quantity_parts(&self) -> Option<(&Type, Dimension)> {
+        match self {
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_QUANTITY && args.len() == 2 =>
+            {
+                let Type::Named(identity) = &args[1] else {
+                    return None;
+                };
+                Some((&args[0], Dimension::from_identity(identity)?))
+            }
+            _ => None,
+        }
+    }
+
     /// Plain-words name for diagnostics (docs/spec/diagnostics.md voice: name both types).
     pub fn show(&self) -> String {
         match self {
@@ -293,6 +379,10 @@ impl Type {
             // D-CAP9: the raw-pointer type shows as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("`*{}`", args[0].name())
+            }
+            Type::Apply { .. } if self.quantity_parts().is_some() => {
+                let (_, dimension) = self.quantity_parts().unwrap();
+                format!("{} (a physical quantity)", dimension.display_name())
             }
             Type::Apply { name, args } => {
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
@@ -357,6 +447,15 @@ impl Type {
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*{}", args[0].name())
             }
+            Type::Apply { .. } if self.quantity_parts().is_some() => {
+                let (base, dimension) = self.quantity_parts().unwrap();
+                format!(
+                    "Quantity<{}, {}; {}>",
+                    dimension.display_name(),
+                    base.name(),
+                    dimension.identity()
+                )
+            }
             Type::Apply { name, args } => {
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", name, a)
@@ -389,6 +488,9 @@ impl Type {
     }
 
     pub fn is_scalar(&self) -> bool {
+        if self.quantity_parts().is_some() {
+            return true;
+        }
         match self {
             Type::Tagged { inner, .. } => inner.is_scalar(),
             Type::Apply { name, args }
@@ -410,6 +512,9 @@ impl Type {
 
     /// D-SG9/D-FLOATW1: any float type — the default `Float` or `F32`.
     pub fn is_float(&self) -> bool {
+        if let Some((base, _)) = self.quantity_parts() {
+            return base.is_float();
+        }
         match self {
             Type::Tagged { inner, .. } => inner.is_float(),
             _ => matches!(self, Type::Float | Type::Float32),
@@ -442,7 +547,7 @@ impl Type {
 
 #[cfg(test)]
 mod tests {
-    use super::{Type, CORE_CRYPTO_NOMINAL_MARKER};
+    use super::{Dimension, Type, CORE_CRYPTO_NOMINAL_MARKER};
 
     fn core_secret() -> Type {
         Type::Tagged {
@@ -462,5 +567,21 @@ mod tests {
 
         assert_ne!(core, local);
         assert_eq!(tainted_core, core);
+    }
+
+    #[test]
+    fn physical_dimensions_normalize_and_serialize_stably() {
+        let length = Dimension::for_family("Length").unwrap();
+        let time = Dimension::for_family("Time").unwrap();
+        let speed = length.divide(time);
+        assert_eq!(speed.family_name(), Some("Speed"));
+        assert_eq!(length.multiply(length).family_name(), Some("Area"));
+        assert_eq!(length.pow(2).family_name(), Some("Area"));
+        assert_eq!(speed.multiply(time), length);
+        assert_eq!(Dimension::from_identity(&speed.identity()), Some(speed));
+        assert_eq!(
+            Type::quantity(Type::Float, speed).name(),
+            "Quantity<Speed, Float; L1T-1>"
+        );
     }
 }

@@ -5,7 +5,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::COMPARABLE;
-use crate::AST::{BinOp, Expr, Pattern, Type};
+use crate::AST::{BinOp, Dimension, Expr, Pattern, Type};
 
 impl<'a> Checker<'a> {
     /// Binary operators and type checking.
@@ -87,6 +87,68 @@ impl<'a> Checker<'a> {
 
         let rt = self.infer(rhs);
         let (lt, rt) = (lt?, rt?);
+
+        // D-SHAPE-QUANTITY1=A: physical dimensions are compiler-known and
+        // normalized before the ordinary nominal/numeric operator rules.
+        // Unit-family declarations remain nominal for +/-, while */ derives a
+        // package-independent erased quantity type.
+        let ldim = self.quantity_dimension(&lt);
+        let rdim = self.quantity_dimension(&rt);
+        if ldim.is_some() || rdim.is_some() {
+            match op {
+                BinOp::Add | BinOp::Sub => {
+                    if let (Some(ldim), Some(rdim)) = (ldim, rdim) {
+                        if ldim != rdim {
+                            self.dimension_mismatch(op, ldim, rdim, span);
+                            return None;
+                        }
+                        // Same concrete unit/derived quantity is safe. Different
+                        // units of one dimension still need #603's conversions.
+                        if lt == rt {
+                            return Some(lt);
+                        }
+                    } else {
+                        self.dimension_mismatch(
+                            op,
+                            ldim.unwrap_or(Dimension::SCALAR),
+                            rdim.unwrap_or(Dimension::SCALAR),
+                            span,
+                        );
+                        return None;
+                    }
+                }
+                BinOp::Mul | BinOp::Div => {
+                    if !self.quantity_base_is_compatible(&lt, &rt) {
+                        self.op_mismatch(op, &lt, &rt, span);
+                        return None;
+                    }
+                    let ldim = ldim.unwrap_or(Dimension::SCALAR);
+                    let rdim = rdim.unwrap_or(Dimension::SCALAR);
+                    let result = if op == BinOp::Mul {
+                        ldim.multiply(rdim)
+                    } else {
+                        ldim.divide(rdim)
+                    };
+                    return if result == Dimension::SCALAR {
+                        Some(Type::Float)
+                    } else {
+                        Some(Type::quantity(Type::Float, result))
+                    };
+                }
+                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                    if lt == rt {
+                        return Some(Type::Bool);
+                    }
+                    if let (Some(ldim), Some(rdim)) = (ldim, rdim) {
+                        if ldim != rdim {
+                            self.dimension_mismatch(op, ldim, rdim, span);
+                            return None;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         // D-DIST3 (ratified 2026-06-20): distinct type arithmetic rules (E0127/E0128).
         {
@@ -504,6 +566,62 @@ impl<'a> Checker<'a> {
             ),
             "the two sides of an operator must be the same type".to_string(),
             "make both sides the same type".to_string(),
+            Some(span),
+        ));
+    }
+
+    fn quantity_dimension(&self, ty: &Type) -> Option<Dimension> {
+        if let Some((_, dimension)) = ty.quantity_parts() {
+            return Some(dimension);
+        }
+        let Type::Named(name) = ty else {
+            return None;
+        };
+        if let Some(dimension) = self.registry.unit_dimension(name) {
+            return Some(dimension);
+        }
+        // A local nominal shadows imported names; do not borrow an unrelated
+        // module's dimension merely because its member has the same spelling.
+        if self.registry.contains(name) {
+            return None;
+        }
+        self.modules.and_then(|modules| {
+            self.imports
+                .values()
+                .find_map(|index| modules.get(*index)?.registry.unit_dimension(name))
+        })
+    }
+
+    fn quantity_base_is_compatible(&self, left: &Type, right: &Type) -> bool {
+        let base = |ty: &Type| {
+            if let Some((base, _)) = ty.quantity_parts() {
+                base.clone()
+            } else if self.quantity_dimension(ty).is_some() {
+                Type::Float
+            } else {
+                ty.clone()
+            }
+        };
+        base(left) == Type::Float && base(right) == Type::Float
+    }
+
+    fn dimension_mismatch(
+        &mut self,
+        op: BinOp,
+        left: Dimension,
+        right: Dimension,
+        span: Span,
+    ) {
+        self.diags.push(Diagnostic::error(
+            "E0359",
+            format!(
+                "`{}` can't combine {} with {}",
+                op.spell(),
+                left.display_name(),
+                right.display_name()
+            ),
+            "physical quantities must have compatible dimensions before they can be added, subtracted, or compared".to_string(),
+            "use matching dimensions, or use `*` or `/` to derive a new dimension".to_string(),
             Some(span),
         ));
     }

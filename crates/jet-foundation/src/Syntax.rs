@@ -94,6 +94,20 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
     })
 }
 
+// D-SHAPE-QUANTITY1=A adds no source spelling. Physical dimensions use this
+// unwriteable internal type marker and the compiler-owned identity table below.
+pub const TYPE_QUANTITY: &str = "\0Quantity";
+
+/// Canonical `(Length, Time)` exponent vectors for the first physical
+/// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is
+/// deliberately absent: D-QUAL3 currency units remain nominal quantities.
+pub const PHYSICAL_DIMENSIONS: &[(&str, [i8; 2])] = &[
+    ("Length", [1, 0]),
+    ("Time", [0, 1]),
+    ("Speed", [1, -1]),
+    ("Area", [2, 0]),
+];
+
 /// The two identifier tiers fixed by D-SHAPE-CASE1=C.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameCase {

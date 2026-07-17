@@ -307,6 +307,7 @@ renumbered, and no new `W` code may be allocated.
 | E0355 | parse/sema | invalid scoped policy: unknown key, prohibited scope, conflict, or widening (D-MARK-SCOPE1) |
 | E0356 | sema  | inferred `.new(...)` has no expected receiver type (D-SHAPE3a) |
 | E0357 | sema  | an identifier violates Jet's machine-enforced casing category (D-SHAPE-CASE1) |
+| E0359 | sema  | physical quantity dimensions are incompatible for the requested operator (D-SHAPE-QUANTITY1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -1161,6 +1162,7 @@ already-freed arena), these track the views themselves.
 | E0355 | A scoped policy is unknown, conflicts, widens an inherited constraint, or is attached at a prohibited scope. | One compiler-owned matrix resolves package → module → function → block while keeping the full declaration chain. Audited authority stays at its sound site. | Use `@Policy(no_alloc)`, `@Policy(zero_rc)`, `@Policy(arena_bounded(bytes))`, or `@Policy(gc)`; package policy may only tighten, including `unsafe: .Forbid`. |
 | E0356 | `.new(...)` needs one known receiver type here. | The inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry. | Add a type annotation or write the full `Type.new(...)` form. |
 | E0357 | `{category}` `{name}` must use its category's canonical casing. | Jet has one enforced two-tier law: type-like names are PascalCase and value-like names are snake_case. | Rename it to the spelling shown by the diagnostic. |
+| E0359 | Physical quantity dimensions do not match. | Addition, subtraction, and comparison require compatible dimensions; multiplication and division derive a normalized dimension. | Use matching dimensions, or use `*` or `/` to derive a new dimension. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 
