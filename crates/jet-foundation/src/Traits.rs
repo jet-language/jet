@@ -568,6 +568,9 @@ impl TraitRegistry {
     /// on the same path as ordinary trait-object assignment and inference.
     pub fn type_implements_trait(&self, ty: &Type, trait_name: &str) -> bool {
         match ty {
+            Type::IntN { .. } | Type::Float32 => {
+                Generics::is_builtin_trait(trait_name) && trait_name != CLOSE
+            }
             Type::Named(name) | Type::Apply { name, .. } => {
                 self.implements_trait(name, trait_name)
             }
@@ -1385,4 +1388,18 @@ fn trait_assoc(items: &[Item], type_name: &str, trait_name: &str, assoc: &str) -
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sized_scalars_only_satisfy_builtin_traits() {
+        let traits = TraitRegistry::default();
+        for ty in [Type::IntN { signed: false, bits: 8 }, Type::Float32] {
+            assert!(traits.type_implements_trait(&ty, PRINTABLE));
+            assert!(!traits.type_implements_trait(&ty, "UserTrait"));
+        }
+    }
 }
