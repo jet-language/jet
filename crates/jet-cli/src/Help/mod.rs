@@ -62,6 +62,7 @@ fn command_symbol(cmd: String, usage: String, summary: &str, example: Option<Str
         examples: example.into_iter().collect(),
         provenance: jet_semindex::SemanticProvenance::CommandRegistry,
         span: None,
+        lexical_scope: None,
     }
 }
 
