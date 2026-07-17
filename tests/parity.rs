@@ -56,9 +56,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // approximation was in scope (done, see `TextLite.rs`) but the
     // underlying algorithm gap versus true Unicode isn't this card's job to
     // fix on either tier. (Card #392 ported everything else in core.text.)
-    // core.time: mixes pure value construction (`period`/`hours`/`minutes`/
-    // `seconds`, `Duration`-style) with genuine ambient effects (`now`/
-    // `today`/`utc`/`local_time`/`sleep`/`instant` — wall-clock/monotonic
+    // core.time: mixes pure calendar-period construction with genuine ambient
+    // effects (`now`/`today`/`utc`/`local_time`/`sleep`/`instant` — wall-clock/monotonic
     // clock reads, non-deterministic). Splitting the pure half out and
     // gating the effectful half behind `@Impure` (like `core.files` etc)
     // needs its own pass to avoid rushing the effect boundary.
@@ -77,9 +76,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.time", "period_days"),
     ("core.time", "period_months"),
     ("core.time", "period_years"),
-    ("core.time", "hours"),
-    ("core.time", "minutes"),
-    ("core.time", "seconds"),
     ("core.time", "from_unix_ms"),
     ("core.time", "parse_rfc3339"),
     ("core.time", "parse_time"),

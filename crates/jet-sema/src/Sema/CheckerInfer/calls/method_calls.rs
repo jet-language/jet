@@ -430,10 +430,17 @@ impl<'a> Checker<'a> {
                         args,
                     );
                 }
-                if let Some(ty) = builtin_type_from_ident(type_name) {
-                    if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true)
-                    {
-                        return self.finish_builtin_method(receiver, method, &ty, args, span, ret);
+                // A value binding wins over an ambient built-in type spelling.
+                // Keep this aligned with TIR's static-call shadow check so sema
+                // never accepts code that lowering must reject.
+                if self.lookup(type_name).is_none() {
+                    if let Some(ty) = builtin_type_from_ident(type_name) {
+                        if let Some(ret) =
+                            Collections::builtin_method_return(&ty, method, args.len(), true)
+                        {
+                            return self
+                                .finish_builtin_method(receiver, method, &ty, args, span, ret);
+                        }
                     }
                 }
                 // D-COLLBREADTH1=A: `Set.from([...])` → `Set<T>`.

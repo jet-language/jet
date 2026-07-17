@@ -53,6 +53,17 @@ fn retired_duration_aliases_are_not_callable() {
 }
 
 #[test]
+fn local_duration_binding_shadows_builtin_without_reaching_codegen() {
+    let source = "fn run() {\nDuration :: 1\n_ :: Duration.seconds(1)\n}";
+    let diagnostics = jet::compile(source).expect_err("shadowed Duration should fail in sema");
+    let rendered = jet::render_diagnostics("shadow.jet", source, &diagnostics);
+    assert!(
+        rendered.contains("[E0311]") && rendered.contains("`seconds` isn't a method"),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn formatter_preserves_duration_unit_calls() {
     let source = "fn run(){d::Duration.seconds(1)??panic(\"duration\")\nprint(d.in(.Milliseconds)??panic(\"read\"))}";
     let once = jet::format_source(source).expect("duration source should format");
