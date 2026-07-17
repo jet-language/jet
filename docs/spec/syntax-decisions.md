@@ -175,7 +175,15 @@ function type, a bare `{ }` after `)` stands in for that lambda —
 
 **Declined (functions)**: UFCS (D-UFCS1); call-site macro-method expansion —
 inlining via `@Inline`/`@InlineAlways` contracts instead (D-METHODMACRO1);
-expression-body `fn f() = expr` (D-FP2); pipe `|>` (D-SUGAR2).
+expression-body `fn f() = expr` (D-FP2); the earlier general-pipe proposal
+(D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
+
+**D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
+2026-07-15, card #552)*: single `|` is legal only in alternative-list grammar,
+including structural or-patterns and choice arms. Jet assigns no general flow
+operator or other bar operator. Reusable flows use ordinary calls, named
+intermediate values, and ordinary named composition helpers. `||` and the
+separately ratified `|=` compound assignment keep their existing meanings.
 
 ### Control flow
 

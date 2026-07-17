@@ -1691,14 +1691,16 @@ is also the lambda-capture keyword. `enumerate()` and `zip(other)` return named 
 `(false_: [T], true_: [T])`. All lazy (evaluated at call site, allocation deferred to
 result use).
 
-D-S14-PAUSE: retired `lambda` / anonymous-fn spellings and `|x|` pipes get
-ordinary parse errors. Current lambda syntax is `(x) => …`.
+D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
+parse errors. Current lambda syntax is `(x) => …`. D-SHAPE-PIPE1=C assigns a
+single bar only to pattern and choice alternatives; it has no lambda or flow
+alias.
 
 Examples: `examples/features/basics/closures.jet`, `examples/features/basics/callbacks.jet`,
 `examples/features/collections/iter_adapters.jet`. Ui:
 `tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
 E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
-`tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`
+lint: `tests/ui_lint/lambda_escape_clone.jet`
 (L0801). Integration: `tests/closures.rs`.
 
 ## M10 — Core library (done)

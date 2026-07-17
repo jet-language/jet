@@ -123,7 +123,7 @@ renumbered, and no new `W` code may be allocated.
 | E0030 | parse | *retired by D-S14-PAUSE* (was: `as` teaching) |
 | E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
 | E0032 | parse | *retired by D-S14-PAUSE* (was: lambda teaching) |
-| E0033 | parse | *retired by D-S14-PAUSE* (was: Rust pipe-lambda teaching) |
+| E0033 | parse | *retired by D-S14-PAUSE and reserved by D-SHAPE-PIPE1=C* (was: Rust pipe-lambda teaching) |
 | E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
 | E0035 | parse | teaching: `where` clauses → inline bounds |
 | E0036 | parse | *retired by D-S14-PAUSE* (was: `dyn`/`Box` teaching) |

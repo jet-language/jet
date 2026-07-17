@@ -50,7 +50,6 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
-        arm_head_term: false,
         pub_file_default: false,
         in_layout_body: 0,
         module_arg_expr_depth: None,
@@ -77,7 +76,6 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
-        arm_head_term: false,
         pub_file_default: false,
         in_layout_body: 0,
         module_arg_expr_depth: None,
@@ -165,9 +163,6 @@ struct Parser<'a> {
     type_generic_chain: Vec<String>,
     /// Set when generic depth exceeds the limit mid-parse.
     type_generic_truncated: bool,
-    /// D-MATCHARM1: when true, `expr_bitor` stops before consuming a top-level `|`
-    /// so the arm-head parser can treat `|` as value-alternation.
-    arm_head_term: bool,
     /// D-VISDEFAULT2=A: when true, top-level items default to public unless `priv`.
     pub_file_default: bool,
     /// D-LAYOUT1: >0 while parsing a `layout NAME { … }` body. The general
@@ -686,7 +681,6 @@ fn run() {
             type_generic_depth: 0,
             type_generic_chain: Vec::new(),
             type_generic_truncated: false,
-            arm_head_term: false,
             pub_file_default: false,
             in_layout_body: 0,
             module_arg_expr_depth: None,
@@ -740,6 +734,22 @@ fn run() {
                 codes.iter().all(|code| !RETIRED_CODES.contains(code)),
                 "retired teaching code leaked for {src:?}: {codes:?}"
             );
+        }
+
+        for src in [
+            "fn run() { y :: |x| x + 1 }",
+            "fn run() { y :: 1 | 2 }",
+            "fn run() { y :: 1 |> print }",
+        ] {
+            let (toks, lex_errs) = lex(src);
+            assert!(lex_errs.is_empty(), "lex errors for {src:?}: {lex_errs:?}");
+            let diags = match parse_for_check(&toks) {
+                Ok((_program, recovered)) => recovered,
+                Err(diags) => diags,
+            };
+            let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
+            assert!(codes.contains(&"E0003"), "bar shape must use ordinary E0003: {src:?}: {codes:?}");
+            assert!(!codes.contains(&"E0033"), "reserved E0033 leaked for {src:?}: {codes:?}");
         }
 
         for word in [Syntax::FOREIGN_WHILE, Syntax::FOREIGN_FOR] {
