@@ -6,6 +6,7 @@ use super::*;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::Sema::Diagnostics::soft_public_use;
 use crate::AST::{
     AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, UnOp,
 };
@@ -2268,6 +2269,11 @@ impl<'a> Checker<'a> {
                             {
                                 self.diags.push(private_item(member, span));
                                 return None;
+                            } else if owner_mod != self.module_idx
+                                && Syntax::classify_identifier(member)
+                                    == Syntax::IdentifierClass::SoftPublic
+                            {
+                                self.diags.push(soft_public_use(member, span));
                             }
                         self.record_field_reference(owner_mod, type_name, member, span);
                         return Some(fty);
@@ -2311,6 +2317,11 @@ impl<'a> Checker<'a> {
                             {
                                 self.diags.push(private_item(member, span));
                                 return None;
+                            } else if owner_mod != self.module_idx
+                                && Syntax::classify_identifier(member)
+                                    == Syntax::IdentifierClass::SoftPublic
+                            {
+                                self.diags.push(soft_public_use(member, span));
                             }
                         self.record_field_reference(owner_mod, name, member, span);
                         return Some(self.trait_reg.instantiate_type(&fty, &subst));

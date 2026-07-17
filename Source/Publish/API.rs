@@ -44,22 +44,22 @@ pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
 fn public_api_of_item(item: &crate::AST::Item) -> Option<ApiItem> {
     use crate::AST::Item;
     match item {
-        Item::Func(f) if f.is_pub && !f.is_package_pub => Some(ApiItem {
+        Item::Func(f) if supported_public_name(&f.name) && f.is_pub && !f.is_package_pub => Some(ApiItem {
             kind: "fn".into(),
             name: f.name.clone(),
             signature: format_fn_sig(f),
         }),
-        Item::Struct(s) if s.is_pub && !s.is_package_pub => Some(ApiItem {
+        Item::Struct(s) if supported_public_name(&s.name) && s.is_pub && !s.is_package_pub => Some(ApiItem {
             kind: "struct".into(),
             name: s.name.clone(),
             signature: format_struct_sig(s),
         }),
-        Item::Enum(e) if e.is_pub && !e.is_package_pub => Some(ApiItem {
+        Item::Enum(e) if supported_public_name(&e.name) && e.is_pub && !e.is_package_pub => Some(ApiItem {
             kind: "enum".into(),
             name: e.name.clone(),
             signature: format_enum_sig(e),
         }),
-        Item::Trait(t) if t.is_pub && !t.is_package_pub => Some(ApiItem {
+        Item::Trait(t) if supported_public_name(&t.name) && t.is_pub && !t.is_package_pub => Some(ApiItem {
             kind: "trait".into(),
             name: t.name.clone(),
             signature: format_trait_sig(t),
@@ -70,6 +70,10 @@ fn public_api_of_item(item: &crate::AST::Item) -> Option<ApiItem> {
         Item::Const(_c) => None,
         _ => None,
     }
+}
+
+fn supported_public_name(name: &str) -> bool {
+    crate::Syntax::classify_identifier(name) == crate::Syntax::IdentifierClass::Ordinary
 }
 
 fn format_type(ty: &crate::AST::Type) -> String {
@@ -100,17 +104,18 @@ fn format_struct_sig(s: &crate::AST::StructDef) -> String {
     let fields: Vec<String> = s
         .fields
         .iter()
+        .filter(|f| supported_public_name(&f.name))
         .map(|f| format!("{}: {}", f.name, format_type(&f.ty)))
         .collect();
     format!("struct {} {{ {} }}", s.name, fields.join("; "))
 }
 
 fn format_enum_sig(e: &crate::AST::EnumDef) -> String {
-    let variants: Vec<String> = e.variants.iter().map(|v| v.name.clone()).collect();
+    let variants: Vec<String> = e.variants.iter().filter(|v| supported_public_name(&v.name)).map(|v| v.name.clone()).collect();
     format!("enum {} {{ {} }}", e.name, variants.join(", "))
 }
 
 fn format_trait_sig(t: &crate::AST::TraitDef) -> String {
-    let methods: Vec<String> = t.methods.iter().map(|m| m.name.clone()).collect();
+    let methods: Vec<String> = t.methods.iter().filter(|m| supported_public_name(&m.name)).map(|m| m.name.clone()).collect();
     format!("trait {} {{ {} }}", t.name, methods.join(", "))
 }

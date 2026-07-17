@@ -108,6 +108,15 @@ mod tests {
     }
 
     #[test]
+    fn rename_rejects_reserved_double_underscore_name() {
+        let src = "fn greet() {}\nfn run() { greet(); }\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let (tokens, _) = crate::Lexer::lex(src);
+        assert!(compute_rename(&db, &tokens, "test.jet", 3, "__generated").is_err());
+    }
+
+    #[test]
     fn semantic_tokens_non_empty() {
         let src = "fn run() { x: Int :: 1 }\n";
         let (toks, _) = crate::Lexer::lex(src);
@@ -154,6 +163,24 @@ mod tests {
             items.iter().any(|i| i.label == "use"),
             "expected use (KW_USE) in completions"
         );
+    }
+
+    #[test]
+    fn completion_hides_soft_public_names_until_explicitly_requested() {
+        let src = "pub fn _helper() {}\nfn run() {}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        assert!(db.symbols.lookup("_helper").len() == 1);
+        assert!(!db
+            .symbols
+            .complete_visible_in("", None, Some("test.jet"))
+            .iter()
+            .any(|symbol| symbol.name == "_helper"));
+        assert!(db
+            .symbols
+            .complete_visible_in("_", None, Some("test.jet"))
+            .iter()
+            .any(|symbol| symbol.name == "_helper"));
     }
 
     #[test]

@@ -2651,6 +2651,26 @@ pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
 }
 
 #[test]
+fn soft_public_names_are_not_semver_promises() {
+    use jet::Publish::{diff_public_api, extract_public_api};
+
+    let dir = tmp_dir("soft_public_api");
+    let old = "pub fn stable() {}\npub fn _unstable() {}\n";
+    let new = "pub fn stable() {}\n";
+    let old_path = dir.join("old.jet");
+    let new_path = dir.join("new.jet");
+    fs::write(&old_path, old).unwrap();
+    fs::write(&new_path, new).unwrap();
+
+    let old_api = extract_public_api(old, old_path.to_str().unwrap());
+    let new_api = extract_public_api(new, new_path.to_str().unwrap());
+    assert!(old_api.iter().all(|item| item.name != "_unstable"));
+    assert!(diff_public_api(&old_api, &new_api).is_empty());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resolver_conflict_e2602() {
     // Two packages requiring incompatible versions of a shared dep → E2602.
     use jet::Publish::{check_conflicts, VersionConstraint, VersionReq};

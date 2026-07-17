@@ -1,6 +1,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::Sema::Diagnostics::soft_public_use;
 use crate::AST::{
     AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
     VariantPayload,
@@ -175,6 +176,10 @@ impl<'a> Checker<'a> {
         };
         if owner_mod != self.module_idx && !msig.is_pub {
             self.diags.push(private_item(method, span));
+        } else if owner_mod != self.module_idx
+            && Syntax::classify_identifier(method) == Syntax::IdentifierClass::SoftPublic
+        {
+            self.diags.push(soft_public_use(method, span));
         }
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
@@ -944,6 +949,10 @@ impl<'a> Checker<'a> {
         };
         if owner_mod != self.module_idx && !self.type_is_pub_in(owner_mod, type_name) {
             self.diags.push(private_item(type_name, span));
+        } else if owner_mod != self.module_idx
+            && Syntax::classify_identifier(type_name) == Syntax::IdentifierClass::SoftPublic
+        {
+            self.diags.push(soft_public_use(type_name, span));
         }
         let def_fields: Vec<(String, Span, Type, bool)> = self
             .struct_fields_of(owner_mod, type_name)
@@ -985,6 +994,10 @@ impl<'a> Checker<'a> {
             }
             if owner_mod != self.module_idx && !self.field_is_pub_in(owner_mod, type_name, name) {
                 self.diags.push(private_item(name, *name_span));
+            } else if owner_mod != self.module_idx
+                && Syntax::classify_identifier(name) == Syntax::IdentifierClass::SoftPublic
+            {
+                self.diags.push(soft_public_use(name, *name_span));
             }
             let field_def = def_fields.iter().find(|(n, ..)| n == name);
             let saved_expected = self.expected_type.clone();

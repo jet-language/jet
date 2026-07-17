@@ -7,6 +7,41 @@ use std::fs;
 
 use tir_support::{build_and_run, build_and_run_multi, have_rustc};
 
+#[test]
+fn soft_public_imports_warn_once_per_outside_use() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_soft_public_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("note.jet"),
+        "pub struct Note {\n    pub _title: String\n}\nimpl Note {\n    pub fn _length(self) -> Int { return 1 }\n}\npub fn _legacy() -> Int { return 2 }\n",
+    )
+    .unwrap();
+    let source = "use \"note\"\nuse note._legacy\nfn run() {\n    n :: note.Note.{ _title: \"hi\" }\n    print(n._title)\n    print(n._length())\n    print(note._legacy())\n    print(_legacy())\n}\n";
+    let main = dir.join("main.jet");
+    fs::write(&main, source).unwrap();
+
+    let diagnostics = jet::check_with_path(main.to_str().unwrap());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "L0601")
+            .count(),
+        5,
+        "{diagnostics:#?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Imported public adapters may carry core.data containers across a module
 /// boundary. Their signatures are ordinary TIR types; codegen must not fall out
 /// of the typed-IR seam merely because the row is dynamic or generic.

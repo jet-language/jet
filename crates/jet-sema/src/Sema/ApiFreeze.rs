@@ -177,7 +177,11 @@ pub fn snapshot_from_items(items: &[Item], package: &str, version: &str) -> ApiS
 fn collect_pub_fns(items: &[Item], out: &mut Vec<FrozenFn>) {
     for item in items {
         match item {
-            Item::Func(f) if f.is_pub && !f.is_package_pub => out.push(FrozenFn {
+            Item::Func(f)
+                if f.is_pub
+                    && !f.is_package_pub
+                    && crate::Syntax::classify_identifier(&f.name)
+                        == crate::Syntax::IdentifierClass::Ordinary => out.push(FrozenFn {
                 name: f.name.clone(),
                 signature: fn_signature(f),
             }),
@@ -458,6 +462,8 @@ mod tests {
             )),
             // private fn — excluded
             Item::Func(func("helper", false, vec![], None)),
+            // D-SHAPE-INTERNAL1: callable but not a compatibility promise.
+            Item::Func(func("_unstable", true, vec![], None)),
         ];
         let snap = snapshot_from_items(&items, "mathkit", "1.0.0");
         assert_eq!(snap.funcs.len(), 2);

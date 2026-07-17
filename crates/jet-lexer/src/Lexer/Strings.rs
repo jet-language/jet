@@ -5,7 +5,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 
 use super::Lexer;
-use super::Scan::lex_raw;
+use super::Scan::{lex_raw, lex_raw_generated};
 use super::Tokens::{StrTokPart, TokKind, Token};
 
 impl<'a> Lexer<'a> {
@@ -126,7 +126,11 @@ impl<'a> Lexer<'a> {
                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
                     }
                     // Lex the inner expression; shift spans to absolute.
-                    let (mut inner_toks, inner_diags) = lex_raw(inner);
+                    let (mut inner_toks, inner_diags) = if self.allow_reserved_identifiers {
+                        lex_raw_generated(inner)
+                    } else {
+                        lex_raw(inner)
+                    };
                     for t in &mut inner_toks {
                         t.span = Span::new(
                             t.span.start + inner_start_byte,
@@ -378,7 +382,11 @@ impl<'a> Lexer<'a> {
                     if !lit.is_empty() {
                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
                     }
-                    let (mut inner_toks, inner_diags) = lex_raw(inner);
+                    let (mut inner_toks, inner_diags) = if self.allow_reserved_identifiers {
+                        lex_raw_generated(inner)
+                    } else {
+                        lex_raw(inner)
+                    };
                     for t in &mut inner_toks {
                         t.span = Span::new(
                             t.span.start + inner_start_byte,

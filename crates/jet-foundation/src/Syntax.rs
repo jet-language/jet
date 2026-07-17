@@ -32,6 +32,9 @@
 // receiver arguments only when ordinary input/expected-type inference is unique.
 // D-UNSAFE-OBLIG1=A adds contextual `assert valid_ptr, aligned, no_alias`,
 // the `obligations: .Track/.Skip` @Unsafe field, and ENV_ORG_UNSAFE_POLICY.
+// D-SHAPE-INTERNAL1=A and D-SHAPE-DUNDER2=A add no token: the canonical
+// IdentifierClass prefix policy makes `_name` soft-public and reserves every
+// source-written `__name` for Jet and generated tooling.
 
 mod core_surface;
 pub use core_surface::*;

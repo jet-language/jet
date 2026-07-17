@@ -4,6 +4,44 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[test]
+fn identifier_prefix_contract_is_canonical() {
+    use jet::Syntax::{classify_identifier, IdentifierClass};
+
+    assert_eq!(classify_identifier("name"), IdentifierClass::Ordinary);
+    assert_eq!(classify_identifier("_name"), IdentifierClass::SoftPublic);
+    assert_eq!(classify_identifier("__name"), IdentifierClass::Reserved);
+    assert_eq!(classify_identifier("__"), IdentifierClass::Reserved);
+    assert_eq!(classify_identifier("_"), IdentifierClass::Ordinary);
+}
+
+#[test]
+fn every_double_underscore_source_identifier_is_rejected() {
+    let source = r#"
+module __module
+use thing as __alias
+extern c { fn __ffi(__ffi_arg: Int) }
+fn __call(__arg: Int) { __local :: __arg; value.__field }
+trait Contract { fn __method(self) }
+"#;
+    let (_, diagnostics) = jet::Lexer::lex(source);
+    let reserved = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0067")
+        .count();
+    assert_eq!(reserved, 10, "{diagnostics:#?}");
+}
+
+#[test]
+fn compiler_generated_identifiers_use_the_reserved_lane() {
+    let source = "fn __jet_generated() { print(\"{__jet_value}\") }";
+    let (_, user_diagnostics) = jet::Lexer::lex(source);
+    let (tokens, generated_diagnostics) = jet::Lexer::lex_generated(source);
+    assert!(user_diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"));
+    assert!(generated_diagnostics.is_empty(), "{generated_diagnostics:#?}");
+    assert!(jet::Parser::parse(&tokens).is_ok());
+}
+
 const ROOTS: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",

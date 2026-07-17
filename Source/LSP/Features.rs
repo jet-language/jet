@@ -254,6 +254,9 @@ pub(crate) fn compute_rename(
     if !is_valid_ident(new_name) {
         return Err(format!("`{}` is not a valid identifier", new_name));
     }
+    if crate::Syntax::classify_identifier(new_name) == crate::Syntax::IdentifierClass::Reserved {
+        return Err(format!("`{new_name}` is reserved for Jet and cannot be used as a name"));
+    }
     if is_keyword(new_name) {
         return Err(format!(
             "`{}` is a keyword and cannot be used as a name",

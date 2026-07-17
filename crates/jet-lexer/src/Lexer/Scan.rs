@@ -10,12 +10,21 @@ use super::{keyword, Lexer};
 /// Raw lex with no S6-R terminator insertion. Used for interpolation
 /// sub-streams (`{expr}`), which are single expressions and need no terminator.
 pub fn lex_raw(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+    lex_raw_with_policy(src, false)
+}
+
+pub(super) fn lex_raw_generated(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+    lex_raw_with_policy(src, true)
+}
+
+fn lex_raw_with_policy(src: &str, allow_reserved_identifiers: bool) -> (Vec<Token>, Vec<Diagnostic>) {
     let mut lx = Lexer {
         chars: src.char_indices().collect(),
         end: src.len(),
         src,
         i: 0,
         diags: Vec::new(),
+        allow_reserved_identifiers,
     };
     let mut toks = lx.run();
     toks.push(Token {
@@ -220,6 +229,18 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     let span = Span::new(start, self.pos(self.i));
+                    if !self.allow_reserved_identifiers
+                        && Syntax::classify_identifier(&name) == Syntax::IdentifierClass::Reserved
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0067",
+                            format!("`{name}` is reserved for Jet"),
+                            "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools"
+                                .to_string(),
+                            "rename it without the second leading underscore".to_string(),
+                            Some(span),
+                        ));
+                    }
                     let kind = keyword(&name).unwrap_or(TokKind::Ident(name));
                     toks.push(Token { kind, span });
                 }

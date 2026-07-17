@@ -200,8 +200,9 @@ fn render_dev_change(
         Ok(mut b) => {
             let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
             let errs: Vec<_> = diags
-                .into_iter()
+                .iter()
                 .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+                .cloned()
                 .collect();
             if !errs.is_empty() {
                 let src = fs::read_to_string(file).unwrap_or_default();
@@ -211,6 +212,7 @@ fn render_dev_change(
                 // never became the running version.
                 return None;
             }
+            render_dev_lints(file, mode, &diags);
             b
         }
         Err(diags) => {
@@ -354,20 +356,31 @@ fn render_dev_iteration(
     let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
     let elapsed = started.elapsed();
     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
+    let bundle = if ran_ok {
+        jet::Loader::load_entry(file).ok().map(|mut bundle| {
+            let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+            render_dev_lints(file, mode, &diagnostics);
+            bundle
+        })
+    } else {
+        None
+    };
     render_outcome_timed(outcome, file, Some(elapsed), mode);
     // Load the checked bundle once more as the swap baseline — only when the
     // program actually ran (a broken file has no running version to diff).
-    if ran_ok {
-        let bundle = jet::Loader::load_entry(file).ok().map(|mut b| {
-            let _ = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
-            b
-        });
-        if let Some(ref b) = bundle {
-            run_dev_budget_refresh(file, b, mode);
-        }
-        bundle
+    if let Some(bundle) = bundle {
+        run_dev_budget_refresh(file, &bundle, mode);
+        Some(bundle)
     } else {
         None
+    }
+}
+
+fn render_dev_lints(file: &str, mode: OutputMode, diagnostics: &[jet::Diagnostics::Diagnostic]) {
+    let lints = visible_lints(diagnostics);
+    if !lints.is_empty() {
+        let source = fs::read_to_string(file).unwrap_or_default();
+        report_problems(mode, file, &source, &lints);
     }
 }
 

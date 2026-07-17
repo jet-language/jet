@@ -3,7 +3,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 
-use super::Scan::lex_raw;
+use super::Scan::{lex_raw, lex_raw_generated};
 use super::Tokens::{is_comment, TokKind, Token};
 
 /// Lex the whole file. Always returns a token stream (ending in Eof) plus
@@ -14,6 +14,14 @@ use super::Tokens::{is_comment, TokKind, Token};
 /// The grammar stays terminator-based; users never type `;`.
 pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let (mut toks, mut diags) = lex_raw(src);
+    insert_terminators(src, &mut toks, &mut diags);
+    (toks, diags)
+}
+
+/// Compiler/tool-generated Jet fragments may use the reserved `__name`
+/// namespace. User source must always go through [`lex`].
+pub fn lex_generated(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+    let (mut toks, mut diags) = lex_raw_generated(src);
     insert_terminators(src, &mut toks, &mut diags);
     (toks, diags)
 }

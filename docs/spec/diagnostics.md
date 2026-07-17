@@ -160,6 +160,7 @@ renumbered, and no new `W` code may be allocated.
 | E0063 | retired | former two-plane wrong-sigil diagnostic; D-SHAPE2 makes `@` canonical for every applied rule |
 | E0064 | parse | `@FFI(<lang>) fn` body is not a single foreign-source string literal (D-FFI-INLINE1) |
 | E0066 | parse | retired `@Pure`, `#(Effects)`, or ballot `-[Effects]->` function effect syntax; use exact `--[Effects]->` (D-SHAPE8=A) |
+| E0067 | lex | source-written `__name` is reserved for Jet and generated tooling (D-SHAPE-DUNDER2=A) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
 | E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -350,6 +351,7 @@ renumbered, and no new `W` code may be allocated.
 | L0505 | sema  | heap growth in a loop after `use core.mem` — consider an arena (c26) |
 | L0506 | sema  | hidden allocation inside `@Context` without an allocator (c26) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
+| L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
 | E0601 | sema  | `@Test` block in wrong position / none found |
 | E0602 | jet   | `use` path escapes the project (`..` or outside entry tree) |
 | E0603 | jet   | `use` target file / module not found |

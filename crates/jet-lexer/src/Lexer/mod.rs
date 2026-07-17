@@ -12,7 +12,7 @@ mod Strings;
 mod Terminators;
 mod Tokens;
 
-pub use Terminators::lex;
+pub use Terminators::{lex, lex_generated};
 pub use Tokens::{comments, describe, is_comment, without_comments, StrTokPart, TokKind, Token};
 
 // `lex_raw` is part of the public surface (interpolation sub-streams) and is
@@ -25,6 +25,7 @@ struct Lexer<'a> {
     src: &'a str,
     i: usize,
     diags: Vec<Diagnostic>,
+    allow_reserved_identifiers: bool,
 }
 
 fn keyword(name: &str) -> Option<TokKind> {

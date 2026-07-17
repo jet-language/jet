@@ -1,7 +1,7 @@
 use crate::AST::{AccessConvention, Expr, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::{private_item, type_fix_hint};
+use crate::Sema::Diagnostics::{private_item, soft_public_use, type_fix_hint};
 use crate::Sema::FFI::e3211;
 use crate::Syntax;
 use std::collections::HashMap;
@@ -56,6 +56,10 @@ impl<'a> Checker<'a> {
                     self.infer(&mut a.expr);
                 }
                 return None;
+            }
+            let item = &mangled[alias.len() + 2..];
+            if Syntax::classify_identifier(item) == Syntax::IdentifierClass::SoftPublic {
+                self.diags.push(soft_public_use(item, span));
             }
             if args.len() != sig.params.len() {
                 self.diags.push(Diagnostic::error(
@@ -123,6 +127,12 @@ impl<'a> Checker<'a> {
                         self.infer(&mut a.expr);
                     }
                     return None;
+                }
+                if mod_idx != self.module_idx
+                    && is_pub
+                    && Syntax::classify_identifier(name) == Syntax::IdentifierClass::SoftPublic
+                {
+                    self.diags.push(soft_public_use(name, span));
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
                 let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();

@@ -4453,6 +4453,11 @@ Output, checked `defaults:` entry, then an ambiguity error listing choices.
 outside use is allowed with one unsuppressible warning, but the name is omitted
 from beginner discovery and carries no supported-API or semver promise.
 
+**D-SHAPE-DUNDER2=A — `__name` belongs to Jet** *(ratified 2026-07-15)*:
+every source-written double-underscore identifier is rejected. The namespace is
+reserved for compiler-generated binders, debugger and serializer metadata, and
+tools; user code has no escape spelling.
+
 **D-ECO-JETOS2=A — Systems and Fleets are Outputs of the Package graph**
 *(ratified 2026-07-15)*: Package, environment, image, System, and Fleet share
 locked identity, policy, cache, explanation, and receipts. JetOS consumes that
@@ -4559,7 +4564,6 @@ implementation milestone is pending.
 
 | ID | Question | Needed by |
 | --- | -------- | --------- |
-| D-SHAPE-DUNDER2 | who owns the `__name` namespace | **Epoch 3** — Tower #601 |
 | D-SHAPE-MODULEINTERNAL1 | how `module _name` participates in discovery | **Epoch 3** — Tower #602 |
 
 Blocked follow-ups stay on Tower planning cards and remain outside the owner

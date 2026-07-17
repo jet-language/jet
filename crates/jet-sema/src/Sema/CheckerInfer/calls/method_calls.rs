@@ -2579,7 +2579,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            let Some(mut msig) = self.registry.method(&type_name, method).cloned() else {
+            let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`{}` has no method `{}`", type_name, method),
@@ -2592,6 +2592,12 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
+            if owner_mod != self.module_idx && !msig.is_pub {
+                self.diags.push(crate::Sema::Diagnostics::private_item(method, span));
+            } else if owner_mod != self.module_idx
+                && Syntax::classify_identifier(method) == Syntax::IdentifierClass::SoftPublic {
+                self.diags.push(crate::Sema::Diagnostics::soft_public_use(method, span));
+            }
             let applied_args = match &recv_ty {
                 Type::Apply { args, .. } => Some(args.as_slice()),
                 Type::Option(inner) => match inner.as_ref() {

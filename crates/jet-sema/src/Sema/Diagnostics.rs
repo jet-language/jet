@@ -990,6 +990,21 @@ pub(crate) fn private_item(name: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// D-SHAPE-INTERNAL1=A: crossing a module boundary through a public `_name`
+/// is legal but deliberately never a supported-API promise. There is no allow
+/// marker for this lint, so every resolved use remains visible.
+pub(crate) fn soft_public_use(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::lint(
+        "L0601",
+        format!("`{name}` is a soft-public API"),
+        "a leading underscore allows outside use but carries no compatibility promise across minor releases"
+            .to_string(),
+        "use a public name without a leading underscore when callers need a stable API"
+            .to_string(),
+        Some(span),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{core_crypto_nominal, is_secret_bearing_crypto_type};

@@ -228,6 +228,11 @@ impl SemanticSymbolIndex {
         let explicit_qualified = owner.is_none() && prefix.contains('.');
         let mut visible: Vec<(&str, (u8, usize, usize), &SemanticSymbol)> = Vec::new();
         for symbol in &self.symbols {
+            if prefix.is_empty()
+                && Syntax::classify_identifier(&symbol.name) == Syntax::IdentifierClass::SoftPublic
+            {
+                continue;
+            }
             let matches = if explicit_qualified {
                 symbol.qualified_name.starts_with(prefix)
             } else {

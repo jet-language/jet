@@ -889,7 +889,7 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
         _ => unreachable!(),
     };
     let actual_start = wrapped.find(&fragment).unwrap_or(start);
-    let (tokens, lex_diags) = jet::Lexer::lex(&wrapped);
+    let (tokens, lex_diags) = jet::Lexer::lex_generated(&wrapped);
     if !lex_diags.is_empty() {
         fail("AST pattern failed compiler lexing after capture substitution")
     }
@@ -1153,9 +1153,9 @@ fn normalized(src: &str) -> Vec<String> {
 }
 
 fn lex_jet_source(src: &str) -> Vec<LexToken> {
-    let (tokens, diagnostics) = jet::Lexer::lex(src);
+    let (tokens, diagnostics) = jet::Lexer::lex_generated(src);
     if !diagnostics.is_empty() {
-        fail("staged Jet source no longer lexes while matching an AST template");
+        fail("compiler-owned fragment no longer lexes while matching an AST template");
     }
     tokens
         .into_iter()
@@ -1190,7 +1190,12 @@ fn validate_typed_template(id: &str, node: &str, template: &Template, side: &str
         "type" => format!("fn __codemod() -> {source} {{}}\nfn run() {{}}\n"),
         _ => unreachable!(),
     };
-    if !jet::Compiler::parse_source(&wrapped).diagnostics.is_empty() {
+    let (tokens, diagnostics) = jet::Lexer::lex_generated(&wrapped);
+    let parse_invalid = match jet::Parser::parse_for_check(&tokens) {
+        Ok((_, diagnostics)) => !diagnostics.is_empty(),
+        Err(_) => true,
+    };
+    if !diagnostics.is_empty() || parse_invalid {
         fail(&format!(
             "rule `{id}` {side} is not a valid Jet {node} template"
         ));

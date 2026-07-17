@@ -390,3 +390,23 @@ use super::{
     APPLIED_RULES, CORE_CANONICAL, CORE_EMAIL_MODULE, CORE_SHORT,
     STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER,
 };
+
+/// D-SHAPE-INTERNAL1 / D-SHAPE-DUNDER2: the one prefix classification used by
+/// the lexer, sema, publishing, and tools. Bare `_` remains the pattern/binding
+/// spelling; only longer names participate in the public-name contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentifierClass {
+    Ordinary,
+    SoftPublic,
+    Reserved,
+}
+
+pub fn classify_identifier(name: &str) -> IdentifierClass {
+    if name.starts_with("__") {
+        IdentifierClass::Reserved
+    } else if name.len() > 1 && name.starts_with('_') {
+        IdentifierClass::SoftPublic
+    } else {
+        IdentifierClass::Ordinary
+    }
+}
