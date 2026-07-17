@@ -923,7 +923,7 @@ fn fmt_stable_at_marked_fn_and_struct() {
     // idempotence — idempotence alone misses a formatter that drops a token
     // on the FIRST pass) for an `@`-marked fn and an `@`-marked struct.
     let fn_src = "\
-@Pure fn double(n: Int) -> Int {
+fn double(n: Int) --[]-> Int {
     return (n * 2)
 }
 ";
@@ -937,6 +937,25 @@ struct Particle {
 }
 ";
     assert_fmt_stable(struct_src, "@Codable + @Layout struct round-trip");
+}
+
+#[test]
+fn fmt_stable_effect_arrows() {
+    let src = "\
+fn load(path: String) --[Fs.Read, ..E]-> String {
+    return path
+}
+
+fn visit(callback: fn(Int) --[Io]->) --[via callback]-> {
+    callback(1)
+}
+
+// `--[]->` replaces the retired `@Pure` marker without moving this comment.
+fn hash(n: Int) --[]-> Int {
+    return n
+}
+";
+    assert_fmt_stable(src, "D-SHAPE8 effect arrows");
 }
 
 #[test]
@@ -2158,10 +2177,10 @@ fn fmt_preserves_trait_associated_type() {
 fn fmt_preserves_pure_callback_bound_sigil() {
     // D-EFF2 / D-MARKER-FAMILY1: the empty callback effect bound renders as
     // `@Pure ` (a contract marker, `@`-plane) but the code wrote the literal
-    // `#` directive-plane prefix instead — every `f: @Pure fn(T) -> U`
-    // parameter type downgraded to the retired `@Pure fn(T) -> U` spelling
+    // `#` directive-plane prefix instead — every `f: fn(T) --[]-> U`
+    // parameter type downgraded to the retired `fn(T) --[]-> U` spelling
     // on the first fmt pass, which then fails to parse (E0062).
-    let src = "fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {\n    return items.map((x) => f(x))\n}\n\nfn run() {\n    doubled :: transform([1, 2, 3], (n: Int) => n * 2)\n    print(\"{doubled}\")\n}\n";
+    let src = "fn transform(items: [Int], f: fn(Int) --[]-> Int) -> [Int] {\n    return items.map((x) => f(x))\n}\n\nfn run() {\n    doubled :: transform([1, 2, 3], (n: Int) => n * 2)\n    print(\"{doubled}\")\n}\n";
     assert_fmt_stable(src, "@Pure callback bound");
 }
 
@@ -2172,7 +2191,7 @@ fn fmt_preserves_dotted_effect_paths() {
     // is stored as one opaque string end to end, so fmt needs no new emission
     // logic; this pins that the dot survives every printer that touches an
     // effect list (`#(…)` bounds, prohibitions, `@Caps`/`@Grant` regions).
-    let src = "fn load(path: String) #(Fs.Read) -> String {\n    return path\n}\n\nfn archive(path: String) #(Fs.Write) {\n    print(path)\n}\n\nfn read_only(path: String) #(Fs.Read, !Fs.Write) {\n    load(path)\n}\n\nfn boot() #(Fs) {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    @Caps(Net.Http.Get) {\n        print(\"net\")\n    }\n    @Grant(Fs.Read) { caps ->\n        load(\"app.conf\")\n    }\n}\n";
+    let src = "fn load(path: String) --[Fs.Read]-> String {\n    return path\n}\n\nfn archive(path: String) --[Fs.Write]-> {\n    print(path)\n}\n\nfn read_only(path: String) --[Fs.Read, !Fs.Write]-> {\n    load(path)\n}\n\nfn boot() --[Fs]-> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    @Caps(Net.Http.Get) {\n        print(\"net\")\n    }\n    @Grant(Fs.Read) { caps ->\n        load(\"app.conf\")\n    }\n}\n";
     assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
 }
 

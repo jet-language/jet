@@ -919,7 +919,8 @@ without assigning it another meaning. The source grammar now implements this
 single applied-rule shape.
 
 **D-MARKER-FAMILY1 — superseded by D-SHAPE2**: every typed rule now uses `@`.
-Non-rule `#` constructs remain unchanged: effect sets `#(Fs)`, fixed lists
+At that decision point, non-rule `#` constructs remained unchanged: effect sets
+`#(Fs)`, fixed lists
 `[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
 `$` is splice-only. Loop-label suffix `@` is a different slot.
 
@@ -927,7 +928,7 @@ Non-rule `#` constructs remain unchanged: effect sets `#(Fs)`, fixed lists
 `Codable`, `Encode`, `Decode`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Summarize`, `Comparable`
 (user derives of the same names also use `@`). `@Pure` is also valid as a
-function-type bound (`f: @Pure fn(Int) -> Int`). Field-level wire markers
+function-type bound (`f: fn(Int) --[]-> Int`). Field-level wire markers
 use `@`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 `DenyUnknownFields`, `Tag`, `Untagged`.
 
@@ -1316,12 +1317,20 @@ exits — deadline first, then cancel.
 ### Effects & safety
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
-erased in codegen. Assert/restrict via `#(Net, Db)` on a signature and
+erased in codegen. Assert/restrict via `--[Net, Db]->` on a signature and
 `@Caps(Net) { … }` regions.
 
-**S60 — Purity marking**: `@Pure fn` is a checked signature modifier — the
-empty effect set; violations name the impure call path. Also valid as a
-function-type bound (D-MARKERMOVE2).
+**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
+owner-amended; implemented 2026-07-17, card #543)*: every explicit function
+effect row uses exactly `--[Effects]->`, in declarations, trait methods,
+function values, and callback types. Pure functions keep ordinary `->`;
+`--[]->` explicitly bounds the row empty. Open rows stay inside the brackets
+(`--[Log, ..E]->`). The ballot mockup `-[Effects]->`, former `#(Effects)` /
+`#(via f)` rows, and former `@Pure fn` marker are rejected with E0066; no alias.
+
+**S60 — Purity marking** *(surface superseded by D-SHAPE8=A)*: an explicit
+empty effect row `--[]->` is the checked purity signature; violations name the
+impure call path. The same empty row works in function-type bounds.
 
 **D-EFF4 / D-EFF5 — Vocabulary**: closed set of ten tree ROOTS — `Net`, `Fs`,
 `Io`, `Db`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `Gpu`; unknown root E0119.
@@ -1330,21 +1339,21 @@ and ancestor matching is subsumption. `effect <Name>` user declarations
 reserved, unminted.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the ten
-D-EFF4/5 names are tree roots; a signature/`@Caps`/`@Grant`/`#(!…)` entry may
+D-EFF4/5 names are tree roots; a signature/`@Caps`/`@Grant`/`--[!…]->` entry may
 be a dotted path rooted at one (`Fs.Read`, `Net.Http.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
-learned once and reused: `#(Fs)` accepts any `Fs.*` callee; `#(Fs.Read)`
+learned once and reused: `--[Fs]->` accepts any `Fs.*` callee; `--[Fs.Read]->`
 rejects a sibling `Fs.Write` callee; `@Grant(Fs.Read)` doesn't authorize
-`Fs.Write`; `#(!Fs)` prohibits the whole `Fs.*` subtree. Reverses E0740 for
+`Fs.Write`; `--[!Fs]->` prohibits the whole `Fs.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat root names
 stay valid (no migration break) — Core stdlib calls are still tagged with a
 bare root; leaf precision is a user-declared-contract concept.
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function
-types (`@Pure fn(T) -> U`, `#(Net) fn(T) -> U`; call-site check E0747) and
-`#(via f)` pass-through publication (E0748).
+types (`fn(T) --[]-> U`, `fn(T) --[Net]-> U`; call-site check E0747) and
+`--[via f]->` pass-through publication (E0748).
 
 **D-EFF3 — Traits**: a trait method may declare an effect upper bound — both
 the impl obligation (E0742) and the dispatch contract for trait objects.
@@ -1372,7 +1381,7 @@ fn hash(text: String) --[]-> Int { text.length() }
 trait Renderer { fn render(self) --[Gpu]-> Image }
 ```
 
-**D-PROP1 / D-PROP2 — Prohibition**: `#(!Net)` — the fn and every reachable
+**D-PROP1 / D-PROP2 — Prohibition**: `--[!Net]->` — the fn and every reachable
 callee must not use the effect (E0749).
 
 **D-SCAP1 — Scoped capabilities**: `@Grant(Fs) { caps -> … }` authorizes
@@ -1792,7 +1801,7 @@ the D-FFI-PY1 precedent):**
   recorded in the binding (order mismatch is a checked error, never a
   silent transposition).
 - **D-FFI-LUA1=A**: `lua.*` — in-process VM (embedding is Lua's design
-  point); tables ↔ `[K: V]` zero-copy views; effect root `#(Lua)`.
+  point); tables ↔ `[K: V]` zero-copy views; effect root `--[Lua]->`.
 - **D-FFI-RUBY1=A**: `ruby.*` — sidecar worker (GVL + interpreter global
   state make embedding hostile); RubyGems as jetpack provider.
 - **D-FFI-PERL1=A**: `perl.*` — sidecar worker; CPAN provider; legacy
@@ -1858,7 +1867,7 @@ binder's declaration format inside `rust.*`; D-NPMTYPE1 stubs are the js
 binder's v1; D-DEP1 vendoring/hash-pinning extends to every language's refs.
 Per-language binder depth, all ratified 2026-07-03:
 **D-FFI-PY1 (=A)**: Python's default host is a supervised sidecar CPython
-worker (typed message boundary, crash-isolated, `#(Py)` effect added to the
+worker (typed message boundary, crash-isolated, `--[Py]->` effect added to the
 D-EFF4 set); opt-in `py@embed` switches to in-process libpython for
 zero-copy buffer-protocol arrays. One `use py.X` surface; the tier never
 moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` surface, host chosen by
@@ -2592,17 +2601,16 @@ being a user-declared-contract concept): the shape is rustc special-casing
 a small closed list of known intrinsics, and it touches only the finite
 table the compiler already keeps for its own stdlib signatures — inference
 through ordinary user calls stays bare-root, exactly as D-EFFTREE1
-decided. A read-only query function can therefore *prove* `#(Db.Read)` —
+decided. A read-only query function can therefore *prove* `--[Db.Read]->` —
 the read-footprint qualification `app.live` demands — and a write hiding
 inside such a function is caught by the existing `E0740` check (no new
 diagnostic code). *Reconciliation:* D-LIVEQUERY1's `inWild` stacked
-`@Pure` on top of `#(Db.Read)`; those contradict by design (`@Pure` is the
-empty effect set, any `#(…)` bound is non-empty — `E0745`), so a live
-query qualifies by its `#(Db.Read)` bound alone. `DbConnection` (and
+`@Pure` on top of `#(Db.Read)`; D-SHAPE8 later retired both spellings, so a live
+query now qualifies by its `--[Db.Read]->` bound alone. `DbConnection` (and
 `DbError`) are now nameable types so a query function can annotate its
 connection parameter.
 *Shipped 2026-07-12 (card #505, slice 4 — leaf-inference layer only)*: the
-`Db.Read`/`Db.Write` leaf inference above, the `#(Db.Read)` qualification
+`Db.Read`/`Db.Write` leaf inference above, the `--[Db.Read]->` qualification
 proof, the `E0740` hidden-write reject (`tests/ui/db_read_query_hidden_write`),
 and `DbConnection`/`DbError` nameability, with a runnable example
 (`examples/features/io/db_read_footprint.jet`). The remaining `app.live`

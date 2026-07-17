@@ -312,22 +312,7 @@ fn func_decl_start(f: &Func, src: &str) -> usize {
     } else {
         fn_pos
     };
-    // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: the `@Pure` marker precedes
-    // `pub`/`fn`. The retired `@Pure` spelling still parses (E0062) so it's
-    // searched too, preferring whichever match sits closer to `pos`.
-    if f.is_pure {
-        let at_pos =
-            before[..pos].rfind(&format!("{}{}", Syntax::RULE_PREFIX, Syntax::KW_PURE));
-        let hash_pos = before[..pos].rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_PURE));
-        match (at_pos, hash_pos) {
-            (Some(a), Some(h)) => a.max(h),
-            (Some(a), None) => a,
-            (None, Some(h)) => h,
-            (None, None) => pos,
-        }
-    } else {
-        pos
-    }
+    pos
 }
 
 fn type_decl_start(is_pub: bool, name_start: usize, kw: &str, src: &str) -> usize {

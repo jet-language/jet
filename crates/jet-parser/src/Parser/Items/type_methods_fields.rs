@@ -21,13 +21,20 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::RParen, "to close the parameter list")?;
             self.validate_variadic_params(&params);
-            // D-EFF3: optional `#(Gpu)` effect bound between params and the arrow.
+            // D-EFF3 / D-SHAPE8: optional `--[Gpu]->` effect bound.
             let declared_effects = self.parse_opt_effect_annotation()?;
+            let decorated_arrow = declared_effects.is_some();
+            let is_pure = is_pure
+                || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
             let mut return_type = None;
-            if matches!(self.peek().kind, TokKind::Arrow) {
-                self.bump();
-                let (ty, _) = self.return_type()?;
-                return_type = Some(ty);
+            if decorated_arrow || matches!(self.peek().kind, TokKind::Arrow) {
+                if !decorated_arrow {
+                    self.bump();
+                }
+                if self.type_starts_here() {
+                    let (ty, _) = self.return_type()?;
+                    return_type = Some(ty);
+                }
             }
             // D-LIB2: optional default body `{ … }` instead of `;`.
             let default_body = if matches!(self.peek().kind, TokKind::LBrace) {

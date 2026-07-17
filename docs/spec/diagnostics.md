@@ -159,6 +159,7 @@ renumbered, and no new `W` code may be allocated.
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
 | E0063 | retired | former two-plane wrong-sigil diagnostic; D-SHAPE2 makes `@` canonical for every applied rule |
 | E0064 | parse | `@FFI(<lang>) fn` body is not a single foreign-source string literal (D-FFI-INLINE1) |
+| E0066 | parse | retired `@Pure`, `#(Effects)`, or ballot `-[Effects]->` function effect syntax; use exact `--[Effects]->` (D-SHAPE8=A) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
 | E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -373,7 +374,7 @@ renumbered, and no new `W` code may be allocated.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
-| E0740 | sema  | a function's inferred effects exceed its declared `#(…)` bound (D-EFF1) |
+| E0740 | sema  | a function's inferred effects exceed its declared `--[…]->` bound (D-EFF1) |
 | E0741 | sema  | an effect used inside a `@Caps(…)` region is not in its cap list (D-EFF1) |
 | E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
 | E0711 | sema  | the capability handle bound by a `@Grant(…)` region escapes its scope — returned, stored, or captured (D-SCAP1) |
@@ -383,11 +384,10 @@ renumbered, and no new `W` code may be allocated.
 | E0725 | sema  | a `@Replayable` function reaches ambient `Time`/`Rand`/`Net`/`Io` (D-REPLAY1) |
 | E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
-| E0745 | sema  | a `@Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
 | E0746 | sema  | an irreversible effect (Net/Fs/Exec) used directly inside a `@Transact { … }` block — can't be rolled back (D-TXN2) |
-| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`@Pure fn(…)` / `#(E) fn(…)`) (D-EFF2) |
-| E0748 | sema  | `#(via f)` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
-| E0749 | sema  | a function reaches an effect it prohibits with `#(!E)` in its own call graph (D-PROP1=A) |
+| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) --[]->` / `fn(…) --[E]->`) (D-EFF2) |
+| E0748 | sema  | `--[via f]->` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
+| E0749 | sema  | a function reaches an effect it prohibits with `--[!E]->` in its own call graph (D-PROP1=A) |
 | E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
@@ -453,7 +453,7 @@ renumbered, and no new `W` code may be allocated.
 | E4201 | sema  | HTTPS client TLS handshake failed before any response was received (D-TLS1) |
 | E4202 | sema  | HTTPS client certificate could not be trusted (D-TLS1) |
 | E4203 | sema  | HTTPS client could not find usable system certificate roots (D-TLS1) |
-| E3401 | sema  | impure call inside a `@Pure fn` / pure-eval context (call-trace path) |
+| E3401 | sema  | impure call inside a `fn … --[]->` / pure-eval context (call-trace path) |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
@@ -1165,26 +1165,25 @@ already-freed arena), these track the views themselves.
 ## Effect system diagnostics (D-EFF1, D-QUAL1)
 
 Every function carries an inferred effect set (the ambient powers its body
-reaches — `Net`, `Fs`, `Io`, `Db`, `Time`, …). A `#(…)` list on the signature
+reaches — `Net`, `Fs`, `Io`, `Db`, `Time`, …). A `--[…]->` list on the signature
 declares an upper bound; `@Pure` declares the empty set. The inferred set must
 be a subset of the declared one. Effects are erased in codegen (I3), so these
-are compile-time-only diagnostics. An unknown effect name in a `#(…)` list is
+are compile-time-only diagnostics. An unknown effect name in a `--[…]->` list is
 reported as **E0119** (unknown name).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `#(…)` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `#(…)` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
+| E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `--[…]->` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `--[…]->` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
 | E0741 | This `@Caps` region uses the effect `{effect}`, which it doesn't allow. | `@Caps(…)` restricts a region to a fixed set of effects; anything reached inside — even transitively through a call — must be in that set, so the region is a hard local ceiling. | Add the named effect to the `@Caps(…)` list, or move that work outside the region. |
-| E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`@Pure fn hash(self)`, `fn render(self) #(Gpu)`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
+| E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) --[]->`, `fn render(self) --[Gpu]->`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0711 | The capability `{handle}` can't escape its `@Grant` block. | `@Grant(…)` grants a capability into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `@Grant` block, or perform the work that needs it there. |
 | E0712 | This `@Grant` region uses the effect `{effect}`, which it has no capability for. | `@Grant(…)` authorizes exactly the listed effects through its handle; the dual of `@Caps`, an effect reached inside — even transitively through a call — that the grant omits has no capability backing it (D-SCAP1). | Add the named effect to the `@Grant(…)` list, or move that work outside the grant. |
 | E0721 | Untrusted (`@Tainted`) data reaches `{api}` without being sanitized. | A `@Tainted` value is untrusted input; it spreads to anything derived from it. `{api}` is a sink effect (`Db`/`Exec`/`Net` — a database query, subprocess command, or network request), and an untrusted value used there unchecked is the classic injection bug (D-TAINT1). | Pass the value through a `@Sanitizer fn` first — its return value is trusted by contract, so it may reach the sink. |
 | E0722 | A `@Tainted(Credential)` value reaches `{sink}`, which would leak the credential. | Credentials (tokens, keys, passwords) tainted with `@Tainted(Credential)` must never reach display or serialization sinks (`print`, `log`, `serialize`); a credential appearing in logs, output, or a serialized payload is a security incident (D-TAINT2). | Scrub the credential before logging (e.g. `"[redacted]"`), or redesign the flow so the credential never enters a logging path. |
 | E0725 | `{fn}` is `@Replayable` but reaches `{effect}`. | `@Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function. |
-| E0745 | `{fn}` is `@Pure` but also declares effects. | `@Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `@Pure` to allow the listed effects. |
 | E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `@Transact` block. | A `@Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`Fs`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
-| E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `@Pure fn(…)` parameter demands a pure callback, and a `#(E) fn(…)` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `@Pure fn` for a pure parameter), or widen the parameter's effect bound. |
-| E0748 | `#(via {param})` on `{fn}` names no such parameter / a parameter that isn't a callback. | `#(via f)` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `#(via …)` annotation. |
+| E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `fn(…) --[]->` parameter demands a pure callback, and a `fn(…) --[E]->` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `fn … --[]->` for a pure parameter), or widen the parameter's effect bound. |
+| E0748 | `--[via {param}]->` on `{fn}` names no such parameter / a parameter that isn't a callback. | `--[via f]->` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `--[via …]->` annotation. |
 
 ## Web backend partition diagnostics (c123, D-WASM1 / D-JSBIND1)
 
@@ -1321,9 +1320,9 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `@Pure fn` may only call other `@Pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `@Pure fn`, or remove the call from `{pure_fn}`. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `fn … --[]->` may only call other `fn … --[]->`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `fn … --[]->`, or remove the call from `{pure_fn}`. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
-| E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `@Pure`. |
+| E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or remove the enclosing function's explicit empty effect bound. |
 
 ## REPL diagnostics (E2-M18 `jet repl`)
 
@@ -1473,8 +1472,8 @@ front-end `.jet` diagnostics).
 | E1261 | Service `{name}` never became healthy. | `jet dev`/`jetpack services up` supervises a `services:` process, then polls its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) until it passes or a timeout elapses (U12); it never passed in time. | Check `jetpack services logs {name}` for what the process printed, confirm its `init`/`ready` commands are correct, or raise the timeout isn't configurable yet — fix the service itself. |
 | E1262 | Service `{name}` has a field jetpack doesn't recognize: `{field}`. | A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. | Rename `{field}` to one of the recognized keys (`enable`, `ports`, `init`, `shutdown`, `data_dir`, `ready`), or remove it. |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
-| E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently-inferred default: a bare `fn` with no `#(…)` list, or one that omits `Secret`, is rejected even though the same function calling `core.files`/`core.net` with no declared bound at all would pass silently. | Add `#(Secret)` to `{fn}`'s signature (or widen an existing `#(…)` list to cover it). |
-| E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field/comptime evaluation (`pkg.jet`, `env.jet`, …) runs before secrets are ever decrypted (D-JPK-SECRETCRYPTO1) — a repo's encrypted store is only ever opened at ordinary runtime (`core.vault.get` inside a `#(Secret)`-graned function), and unlike the Tier-2 comptime effect gate (E3410/E3411), there is no `@Impure`/`--allow-impure` escape hatch here: a build artifact must never bake in a decrypted secret. | Move the secret read out of comptime/module-field evaluation and into ordinary runtime code. |
+| E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently-inferred default: a bare `fn` with no `--[…]->` list, or one that omits `Secret`, is rejected even though the same function calling `core.files`/`core.net` with no declared bound at all would pass silently. | Add `--[Secret]->` to `{fn}`'s signature (or widen an existing `--[…]->` list to cover it). |
+| E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field/comptime evaluation (`pkg.jet`, `env.jet`, …) runs before secrets are ever decrypted (D-JPK-SECRETCRYPTO1) — a repo's encrypted store is only ever opened at ordinary runtime (`core.vault.get` inside a `--[Secret]->` function), and unlike the Tier-2 comptime effect gate (E3410/E3411), there is no `@Impure`/`--allow-impure` escape hatch here: a build artifact must never bake in a decrypted secret. | Move the secret read out of comptime/module-field evaluation and into ordinary runtime code. |
 | E1266 | `` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. | Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture. |
 | E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `pkg.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package. |
 | E1268 | `` `jet image <name>` can't push to `<ref>` yet. `` | D-JPK-IMAGE1: `--push` speaks the registry protocol, which needs TLS support jetpack doesn't have yet. `jet image` builds the OCI layout natively either way; it just never fakes the push. | Build without `--push`, then push the OCI layout with another tool for now; `--push` will work once TLS lands. |

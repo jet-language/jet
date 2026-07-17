@@ -55,9 +55,8 @@ module.exports = grammar({
     source_file: ($) => repeat($._item),
 
     // ── Applied rules (D-SHAPE2, D-ATTR1/2/3, D-CASING1) ──────────────────
-    // `@Rule`, `@Rule(args)`, `@[Rule, Rule(args)]` bracket lists, and
-    // `#(Effect, …)` effect annotations. Loop labels keep `@` (D-ATTR3=B).
-    _marker: ($) => choice($.attribute, $.attribute_list, $.effect_set),
+    // `@Rule`, `@Rule(args)`, and `@[Rule, Rule(args)]` bracket lists.
+    _marker: ($) => choice($.attribute, $.attribute_list),
 
     attribute: ($) =>
       prec.right(
@@ -72,14 +71,17 @@ module.exports = grammar({
         "]",
       ),
 
-    // `#(Io, Db)` effect set on a signature, and `#(via name)` pass-through.
-    effect_set: ($) =>
+    // D-SHAPE8=A: one effect-row spelling for declarations, traits, and types.
+    effect_arrow: ($) =>
       seq(
-        "#",
-        "(",
-        commaSep1(choice(seq("via", $.identifier), $.type_identifier)),
-        ")",
+        "--",
+        "[",
+        commaSep(choice(seq("via", $.identifier), seq("..", $.type_identifier), seq(optional("!"), $.effect_path))),
+        "]",
+        "->",
       ),
+
+    effect_path: ($) => seq($.type_identifier, repeat(seq(".", choice($.type_identifier, $.identifier)))),
 
     marker_name: (_) => /[A-Z][a-zA-Z0-9_]*/,
 
@@ -232,8 +234,7 @@ module.exports = grammar({
       ),
 
     // ── Function definition (S1) ───────────────────────────────────────────
-    // Leading markers (`@Pure fn`, `@Unsafe("…") fn`, `@Sanitizer fn`); trailing
-    // `#(effects)` set on the signature.
+    // Leading applied rules plus the D-SHAPE8 return/effect arrow.
     function_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
@@ -242,8 +243,10 @@ module.exports = grammar({
         field("name", choice($.identifier, $.type_identifier)),
         optional($.type_params),
         $.param_list,
-        optional(seq("->", field("return_type", $._type))),
-        optional($.effect_set),
+        optional(choice(
+          seq($.effect_arrow, optional(field("return_type", $._type))),
+          seq("->", field("return_type", $._type)),
+        )),
         $.block,
       ),
 
@@ -371,7 +374,7 @@ module.exports = grammar({
       ),
 
     // A method signature with no body: `fn greet(self) -> String;`, optionally
-    // marked (`@Pure fn area(self) -> Int`).
+    // marked (`fn area(self) --[]-> Int`).
     trait_method_sig: ($) =>
       seq(
         repeat($._marker),
@@ -379,7 +382,10 @@ module.exports = grammar({
         field("name", $.identifier),
         optional($.type_params),
         $.param_list,
-        optional(seq("->", field("return_type", $._type))),
+        optional(choice(
+          seq($.effect_arrow, optional(field("return_type", $._type))),
+          seq("->", field("return_type", $._type)),
+        )),
       ),
 
     // ── Const definition ───────────────────────────────────────────────────
@@ -511,15 +517,14 @@ module.exports = grammar({
     map_type: ($) =>
       seq("[", $._type, ":", $._type, "]"),
 
-    // `@Pure fn(T) -> U` or `#(Io) fn(T) -> U` callback type (D-EFF2).
+    // `fn(T) --[]-> U` or `fn(T) --[Io]-> U` callback type (D-EFF2).
     fn_type: ($) =>
       seq(
-        optional(choice($.attribute, $.effect_set)),
         "fn",
         "(",
         commaSep($._type),
         ")",
-        optional(seq("->", $._type)),
+        optional(choice(seq($.effect_arrow, optional($._type)), seq("->", $._type))),
       ),
 
     paren_type: ($) => seq("(", $._type, ")"),

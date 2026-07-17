@@ -400,7 +400,7 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
 fn convert_kind(kind: &SymKind) -> SymbolKind {
     match kind {
         SymKind::Module => SymbolKind::Module,
-        SymKind::Function { params, ret } => SymbolKind::Function {
+        SymKind::Function { params, ret, .. } => SymbolKind::Function {
             params: params.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
             ret: ret.as_ref().map(|t| t.name()),
         },

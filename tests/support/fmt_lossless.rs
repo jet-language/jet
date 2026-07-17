@@ -29,6 +29,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/dispatch_missing_eq.jet",
     "tests/ui/dispatch_redundant_subject.jet",
     "tests/ui/dotless_struct_e0320.jet",
+    "tests/ui/effect_arrow_retired.jet",
     "tests/ui/empty_map_colon_retired.jet",
     "tests/ui/enum_group_payload.jet",
     "tests/ui/external_method_retired_separator.jet",

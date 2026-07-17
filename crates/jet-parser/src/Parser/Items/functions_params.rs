@@ -76,19 +76,24 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close the parameter list")?;
             self.validate_variadic_params(&params);
     
-            // D-EFF1 / D-QUAL1: an optional `#(Net, Db)` effect bound, between the
-            // parameter list and the return arrow. Effect names are validated in
-            // sema, not here. D-EFF2: the same slot also admits a `#(via f)` tight
-            // pass-through.
+            // D-SHAPE8=A: an optional `--[Net, Db]->` effect arrow. Effect names
+            // are validated in sema. D-EFF2 keeps `via f` in the same row.
             let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
+            let decorated_arrow = declared_effects.is_some() || effect_via.is_some();
+            let is_pure = is_pure
+                || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
     
             let mut return_type = None;
             let mut return_type_span = None;
-            if matches!(self.peek().kind, TokKind::Arrow) {
-                self.bump();
-                let (ty, span) = self.return_type()?;
-                return_type = Some(ty);
-                return_type_span = Some(span);
+            if decorated_arrow || matches!(self.peek().kind, TokKind::Arrow) {
+                if !decorated_arrow {
+                    self.bump();
+                }
+                if self.type_starts_here() {
+                    let (ty, span) = self.return_type()?;
+                    return_type = Some(ty);
+                    return_type_span = Some(span);
+                }
             }
     
             // Single-expression body: `fn name(...) -> T = expr;`
@@ -240,8 +245,8 @@ impl<'a> Parser<'a> {
             )
         }
     
-        /// D-EFF1 / D-QUAL1: parse an optional `#(Net, Db)` effect bound. Returns
-        /// `None` when the cursor is not at `#(`. D-EFFTREE1: an entry may be a
+        /// D-EFF1 / D-SHAPE8: parse an optional `--[Net, Db]->` effect bound.
+        /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
         /// dotted effect path (`Fs.Read`); sema validates the root against the
         /// known effect vocabulary.
         pub(super) fn parse_opt_effect_annotation(&mut self) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
@@ -252,30 +257,64 @@ impl<'a> Parser<'a> {
             Ok(self.parse_opt_func_effects()?.0)
         }
     
-        /// D-EFF1 / D-EFF2: parse the `#(…)` signature annotation, which is either a
-        /// declared effect bound (`#(Net, Db)`) or a `#(via f)` pass-through. Returns
+        /// D-EFF1 / D-EFF2 / D-SHAPE8: parse the decorated effect arrow, which is
+        /// either a declared bound (`--[Net, Db]->`) or a `--[via f]->` pass-through. Returns
         /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
-        /// the cursor is not at `#(`.
+        /// the cursor is not at `--[`.
         pub(super) fn parse_opt_func_effects(
             &mut self,
         ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
-            if !(matches!(self.peek().kind, TokKind::Hash)
-                && matches!(self.peek2().kind, TokKind::LParen))
+            let retired_hash = matches!(self.peek().kind, TokKind::Hash)
+                && matches!(self.peek2().kind, TokKind::LParen);
+            let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
+                && matches!(self.peek2().kind, TokKind::LBracket);
+            if !matches!(self.peek().kind, TokKind::MinusMinus)
+                && !retired_hash
+                && !retired_ballot
             {
                 return Ok((None, None));
             }
-            self.bump(); // `#`
-            self.expect(TokKind::LParen, "after `#` to start an effect list")?;
-            // D-EFF2 `#(via f)`: a tight pass-through publishing param `f`'s effects.
+            let start = self.peek().span;
+            let (open, close) = if retired_hash {
+                self.bump();
+                self.diags.push(Self::retired_effect_syntax(start));
+                (TokKind::LParen, TokKind::RParen)
+            } else if retired_ballot {
+                self.bump();
+                self.diags.push(Self::retired_effect_syntax(start));
+                (TokKind::LBracket, TokKind::RBracket)
+            } else {
+                self.bump(); // `--`
+                (TokKind::LBracket, TokKind::RBracket)
+            };
+            self.expect(open, "to start an effect row")?;
+            // D-EFF2 `--[via f]->`: tight pass-through publishing param `f`'s effects.
             if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
                 self.bump(); // `via`
                 let (param, span) = self.expect_ident("for the callback parameter name after `via`")?;
-                self.expect(TokKind::RParen, "to close the `#(via …)` annotation")?;
+                self.expect(close.clone(), "to close the effect row")?;
+                if retired_hash {
+                    if matches!(self.peek().kind, TokKind::Arrow) {
+                        self.bump();
+                    }
+                } else {
+                    self.expect(TokKind::Arrow, "after the effect row")?;
+                }
                 return Ok((None, Some((param, span))));
             }
             let mut effects = Vec::new();
-            if !matches!(self.peek().kind, TokKind::RParen) {
+            if self.peek().kind != close {
                 loop {
+                    if matches!(self.peek().kind, TokKind::DotDot) {
+                        self.bump();
+                        let (name, span) = self.expect_ident("for an open effect-row name")?;
+                        effects.push((format!("..{name}"), span));
+                        if self.peek().kind == close {
+                            break;
+                        }
+                        self.expect(TokKind::Comma, "between effects in the row")?;
+                        continue;
+                    }
                     // D-PROP2=A: `!Effect` is a prohibition — the function (and its
                     // whole reachable call graph) must not use that effect.
                     let prohibited = matches!(self.peek().kind, TokKind::Bang);
@@ -289,14 +328,31 @@ impl<'a> Parser<'a> {
                         name
                     };
                     effects.push((entry, span));
-                    if matches!(self.peek().kind, TokKind::RParen) {
+                    if self.peek().kind == close {
                         break;
                     }
                     self.expect(TokKind::Comma, "between effects in the list")?;
                 }
             }
-            self.expect(TokKind::RParen, "to close the effect list")?;
+            self.expect(close, "to close the effect row")?;
+            if retired_hash {
+                if matches!(self.peek().kind, TokKind::Arrow) {
+                    self.bump();
+                }
+            } else {
+                self.expect(TokKind::Arrow, "after the effect row")?;
+            }
             Ok((Some(effects), None))
+        }
+
+        pub(in crate::Parser) fn retired_effect_syntax(span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E0066",
+                "effect bounds live inside the return arrow".to_string(),
+                "D-SHAPE8 gives declarations, traits, and callback types one exact effect-row shape".to_string(),
+                "write `--[Effects]->`; use `--[]->` for an explicit purity bound".to_string(),
+                Some(span),
+            )
         }
     
         pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {

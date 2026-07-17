@@ -178,10 +178,10 @@ impl<'a> Checker<'a> {
             if f.is_pure {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`@Reactive fn` can't also be `@Pure fn`".to_string(),
+                    "`@Reactive fn` can't also declare `--[]->`".to_string(),
                     "a reactive effect re-runs when signals change, so it is not a pure function"
                         .to_string(),
-                    "drop `@Pure` or use `reactive.effect` inside a plain `fn`".to_string(),
+                    "drop the `--[]->` bound or use `reactive.effect` inside a plain `fn`".to_string(),
                     Some(f.name_span),
                 ));
             }
@@ -575,12 +575,9 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
 }
 
 
-/// D-EFF1: enforce declared `#(…)` effect bounds against inferred sets. For each
-/// function (and method) carrying a `#(…)` list, the inferred set must be a
-/// subset of the declared set — any extra effect is E0740. A `@Pure fn` with a
-/// non-empty `#(…)` list is the contradiction E0745 (the empty-set contract of
-/// `@Pure` is otherwise enforced by E3401). `@Pure` with no list needs no check
-/// here: its purity is the E3401 path.
+/// D-EFF1/D-SHAPE8: enforce declared effect-arrow bounds against inferred sets.
+/// For each function (and method) carrying a row, the inferred set must be a
+/// subset of the declared set — any extra effect is E0740.
 pub(crate) fn check_effect_boundaries(
     items: &[Item],
     solved: &HashMap<String, EffectSet>,
@@ -595,11 +592,6 @@ pub(crate) fn check_effect_boundaries(
         let Some(declared_list) = &f.declared_effects else {
             return;
         };
-        // E0745: `@Pure` already pins the empty set; a `#(…)` list contradicts it.
-        if f.is_pure && !declared_list.is_empty() {
-            diags.push(e0745(&f.name, f.name_span));
-            return;
-        }
         // Validate names and build the declared set; an unknown name is E0119.
         // A bad name leaves the declared set incomplete, so skip the subset
         // check to avoid a misleading E0740 piled on top of the real problem.

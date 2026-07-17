@@ -1,7 +1,7 @@
 // D-EFF2 expert levers. Beyond the transparent flow-through default, a
 // higher-order function may demand or publish callback effects explicitly.
 //
-//   1. Callback param effect bound — `@Pure fn(T) -> U` (or `#(E) fn(T) -> U`)
+//   1. Callback param effect bound — `fn(T) --[]-> U` (or `fn(T) --[E]-> U`)
 //      on a parameter type requires the actual callback's effects stay within
 //      the bound. Passing one that exceeds it is E0747.
 //
@@ -10,19 +10,19 @@
 //      contract instead of the conservative flow-through.
 // Lever 1: `transform` insists on a pure callback. An impure one is rejected at
 // the call site before it ever runs.
-fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
+fn transform(items: [Int], f: fn(Int) --[]-> Int) -> [Int] {
     return items.map((x) => f(x))
 }
 
 // Lever 2: `run_each` publishes a pass-through — its effects are exactly its
 // callback `act`'s. Callers see the tight set even where the callback escapes.
-fn run_each(items: [Int], act: #(Io) fn(Int)) #(via act) {
+fn run_each(items: [Int], act: fn(Int) --[Io]->) --[via act]-> {
     loop x in items {
         act(x)
     }
 }
 
-@Pure fn double(n: Int) -> Int {
+fn double(n: Int) --[]-> Int {
     return n * 2
 }
 

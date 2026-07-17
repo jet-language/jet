@@ -34,7 +34,7 @@
 (attribute (marker_name) @attribute)
 (attribute_list (marker_name) @attribute)
 (lower_marker_name) @attribute
-(effect_set (type_identifier) @attribute)
+(effect_arrow (effect_path (type_identifier) @attribute))
 (marker_decl (attribute (marker_name) @attribute))
 
 ; Loop labels (@outer)

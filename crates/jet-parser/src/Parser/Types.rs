@@ -31,15 +31,15 @@ impl<'a> Parser<'a> {
         Ok(parsed)
     }
 
-    fn type_starts_here(&self) -> bool {
+    pub(in crate::Parser) fn type_starts_here(&self) -> bool {
         matches!(
             self.peek().kind,
             TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
         )
-        // D-EFF2/D-MARKERMOVE2: `@Pure fn(…)` — a pure-bounded function type
+        // D-EFF2/D-MARKERMOVE2: `fn(…) --[]->` — a pure-bounded function type
         // (G1: the one carve-out where a contract marker prefixes a TYPE, not a
-        // declaration). Retired `@Pure fn(…)` still recognized here so the
-        // callback-bound parser can teach E0062. `#(E) fn(…)` — the general
+        // declaration). Retired `fn(…) --[]->` still recognized here so the
+        // callback-bound parser can teach E0062. `fn(…) --[E]->` — the general
         // effect-bound list — stays on `#`.
         || (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
             && matches!(self.peek().kind, TokKind::At))
@@ -394,20 +394,18 @@ impl<'a> Parser<'a> {
                 ));
             }
             TokKind::KwFn => self.fn_type(None)?,
-            // D-EFF2/D-MARKERMOVE2 (G1): a callback effect bound rides the front
-            // of a function type — `@Pure fn(T) -> U` (the callback must be pure;
-            // the retired `@Pure fn(T) -> U` spelling teaches E0062) or
-            // `#(Net) fn(T) -> U` (at most the listed effects, directive-only,
-            // `#` never `@`). Anything else is not a type and falls through to
-            // the normal "expected a type" error.
+            // Retired pre-D-SHAPE8 callback bounds remain recognized only so a
+            // teaching diagnostic can be emitted; they are not accepted aliases.
             TokKind::Hash if matches!(self.peek2().kind, TokKind::LParen) =>
             {
                 let bound = self.parse_fn_type_effect_bound()?;
+                self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
             }
             TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) =>
             {
                 let bound = self.parse_fn_type_effect_bound()?;
+                self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
             }
             // D-QUAL4=A: `@Marker Type` — a value-tag prefix on a type. The marker
@@ -683,10 +681,9 @@ impl<'a> Parser<'a> {
         Ok((base, start))
     }
 
-    /// Parse a function type `fn(T1, …) -> R`, the cursor at `fn`. `effect_bound`
-    /// is the D-EFF2 callback bound parsed off the front (`@Pure` → `Some([])`,
-    /// `#(E,…)` → `Some([(name, span), …])`), or `None` for an unbounded type.
-    fn fn_type(&mut self, effect_bound: Option<Vec<(String, Span)>>) -> Result<Type, Diagnostic> {
+    /// Parse a function type `fn(T1, …) --[E]-> R`, the cursor at `fn`.
+    /// `effect_bound` is non-None only while recovering retired prefix syntax.
+    fn fn_type(&mut self, mut effect_bound: Option<Vec<(String, Span)>>) -> Result<Type, Diagnostic> {
         self.expect(TokKind::KwFn, "to start a function type")?;
         self.expect(TokKind::LParen, "after `fn` in a function type")?;
         let mut params = Vec::new();
@@ -701,10 +698,20 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
-        let ret = if matches!(self.peek().kind, TokKind::Arrow) {
-            self.bump();
-            let (r, _) = self.type_()?;
-            Some(Box::new(r))
+        let decorated = matches!(self.peek().kind, TokKind::MinusMinus);
+        if decorated {
+            effect_bound = Some(self.parse_effect_arrow_row()?);
+        }
+        let ret = if decorated || matches!(self.peek().kind, TokKind::Arrow) {
+            if !decorated {
+                self.bump();
+            }
+            if self.type_starts_here() {
+                let (r, _) = self.type_()?;
+                Some(Box::new(r))
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -715,15 +722,46 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_effect_arrow_row(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
+        self.expect(TokKind::MinusMinus, "to start an effect arrow")?;
+        self.expect(TokKind::LBracket, "after `--` to start an effect row")?;
+        let mut effects = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBracket) {
+            if matches!(self.peek().kind, TokKind::DotDot) {
+                self.bump();
+                let (name, span) = self.expect_ident("for an open effect-row name")?;
+                effects.push((format!("..{name}"), span));
+                if matches!(self.peek().kind, TokKind::RBracket) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between effects in the row")?;
+                continue;
+            }
+            let prohibited = matches!(self.peek().kind, TokKind::Bang);
+            if prohibited {
+                self.bump();
+            }
+            let (name, span) = self.expect_effect_path_name("for an effect name")?;
+            effects.push((if prohibited { format!("!{name}") } else { name }, span));
+            if matches!(self.peek().kind, TokKind::RBracket) {
+                break;
+            }
+            self.expect(TokKind::Comma, "between effects in the row")?;
+        }
+        self.expect(TokKind::RBracket, "to close the effect row")?;
+        self.expect(TokKind::Arrow, "after the effect row")?;
+        Ok(effects)
+    }
+
     /// D-EFF2: parse the effect bound on the front of a function type, the cursor
     /// at `#`. `@Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
     /// listed names (validated against the effect vocabulary in sema, not here).
     /// The caller has confirmed via lookahead that a `fn` follows.
-    /// D-EFF2/D-MARKERMOVE2 (G1): parse a callback effect bound. `@Pure fn(…)`
+    /// D-EFF2/D-MARKERMOVE2 (G1): parse a callback effect bound. `fn(…) --[]->`
     /// is the one carve-out where a contract marker prefixes a function TYPE
-    /// instead of a declaration — the retired `@Pure fn(…)` spelling still
+    /// instead of a declaration — the retired `fn(…) --[]->` spelling still
     /// parses here so it can teach E0062. The general effect-list form,
-    /// `#(Net) fn(…)`, is a directive and stays on `#` only.
+    /// `fn(…) --[Net]->`, is a directive and stays on `#` only.
     fn parse_fn_type_effect_bound(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
         if matches!(self.peek().kind, TokKind::At) {
             self.bump();

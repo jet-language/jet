@@ -88,7 +88,7 @@ runtime `main`, mapping cleanly to `jet build`. One per unit. It is the
 stays pure and value-level, so there is exactly one place to audit.
 
 ```jet
-fn build(b: BuildContext) #(Fs) -> BuildPlan ? {
+fn build(b: BuildContext) --[Fs]-> BuildPlan ? {
     migrations :: b.find("schema/*.sql")
     b.generate("db_client", gen_db(migrations))?
     return b.plan(sources: ["src/main.jet"], generated: ["db_client"])
@@ -148,7 +148,7 @@ spelling open as **D-BUILDSCOPE1** / **D-BUILDPOLICY1**):
 
 | Layer | Lives | Job |
 |---|---|---|
-| **Declare** | on the code: `@Impure("why") #(Fs, Net)` | what this build fn needs; travels with the file; statically readable |
+| **Declare** | on the code: `@Impure("why") --[Fs, Net]->` | what this build fn needs; travels with the file; statically readable |
 | **Permit** | pkg.jet `build:` block, or a flag/prompt for a lone file | whether this project grants it |
 | **Cap** | workspace.jet policy block | org ceiling no member grant can exceed |
 
@@ -364,7 +364,7 @@ ballots ratified the graph shape:
 Build files must feel like Jet programs, not manifest data. Simple generation:
 
 ```jet
-fn build(b: BuildContext) #(Fs) -> BuildPlan ? {
+fn build(b: BuildContext) --[Fs]-> BuildPlan ? {
     schema :: b.embed("schema/app.sql")?
     b.generate("db_client", make_db_client(schema))?
 
@@ -390,7 +390,7 @@ fn make_db_client(schema: String) -> String {
 Asset pipeline plus tests:
 
 ```jet
-fn build(b: BuildContext) #(Fs, Exec) -> BuildPlan ? {
+fn build(b: BuildContext) --[Fs, Exec]-> BuildPlan ? {
     atlas :: b.action("pack-sprites",
         inputs: b.find("assets/sprites/*.png")?,
         outputs: ["build/sprites.atlas"],
@@ -595,7 +595,7 @@ what the plan names.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) -> BuildPlan ? {   // optional; #(effects) added by POLICY1
+fn build(b: BuildContext) -> BuildPlan ? {   // optional; --[effects]-> added by POLICY1
     return b.plan(sources: ["src/main.jet"])
 }
 
@@ -724,7 +724,7 @@ that dependency. Every granted capability is recorded in lock/provenance.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) #(Fs) -> BuildPlan ? {        // Tier-1 effect declaration
+fn build(b: BuildContext) --[Fs]-> BuildPlan ? {        // Tier-1 effect declaration
     migrations :: b.find("schema/*.sql")                 // Tier 1: locked, ambient-free
     @Impure("probe local openssl for a legacy C dep") {  // Tier 2: gated + permitted
         b.exec(["pkg-config", "--libs", "openssl"])?
@@ -802,9 +802,9 @@ without executing anything.
 // pkg.jet
 payload: .{ name: "atlasgen", version: "1.2.0" }
 packages: .{ atlasgen: library }
-build: .{ allow: #(Fs) }                 // standing grant for this package's fn build
+build: .{ allow: #(Fs) }                    // standing grant for this package's fn build
 
-fn build(b: BuildContext) #(Fs) -> BuildPlan ? { ... }
+fn build(b: BuildContext) --[Fs]-> BuildPlan ? { ... }
 
 // workspace.jet
 module workspace {
@@ -835,7 +835,7 @@ module workspace {
   grant exceeding the workspace `policy:` cap reuses E3504's message shape.
 
 **Example (I5).** `metaprogramming/build_workspace.jet` (+ a `workspace.jet`
-fixture) — a member `fn build` requesting `#(Fs)` under a workspace `policy:`
+fixture) — a member `fn build` requesting `--[Fs]->` under a workspace `policy:`
 that denies `#(Net, Exec)`; expected: member builds run in order, the cap
 holds. Reuse `metaprogramming/build_entry.jet` for the single-file rung.
 

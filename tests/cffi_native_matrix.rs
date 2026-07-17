@@ -124,7 +124,7 @@ enum Packet {{ Ping(Int) = 3; Data(x: Int, y: Int) = 7 }}
 @Layout(c)
 struct Record {{ id: U64; flags: U32 }}
 
-@Pure fn increment(x: I32) -> I32 {{ return x + 1 }}
+fn increment(x: I32) --[]-> I32 {{ return x + 1 }}
 
 @Extern module c.jetmatrix {{
     fn coord_sum(p: Coord) -> Int = "coord_sum"
@@ -133,8 +133,8 @@ struct Record {{ id: U64; flags: U32 }}
     fn packet_size() -> I32 = "packet_size"
     fn packet_align() -> I32 = "packet_align"
     fn packet_payload_offset() -> I32 = "packet_payload_offset"
-    fn callback_twice(cb: @Pure fn(I32) -> I32, x: I32) -> I32 = "callback_twice"
-    fn callback_parallel(cb: @Pure fn(I32) -> I32) -> I32 = "callback_parallel"
+    fn callback_twice(cb: fn(I32) --[]-> I32, x: I32) -> I32 = "callback_twice"
+    fn callback_parallel(cb: fn(I32) --[]-> I32) -> I32 = "callback_parallel"
     fn load_record(id: U64, out: *Record) -> I32 = "load_record"
     fn abi_default(a: I32, b: I32) -> I32 = "abi_default"
     {explicit_abi}fn abi_explicit(a: I32, b: I32) -> I32 = "abi_explicit"

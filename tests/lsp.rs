@@ -2140,7 +2140,7 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
     saved :: copy name
     return saved
 }
-@Pure fn clean(x: Int) -> Int { return x }
+fn clean(x: Int) --[]-> Int { return x }
 fn retain(window: View<Int>) -> View<Int> { return window }
 fn run() {
     old :: 1
@@ -2218,7 +2218,6 @@ fn run() {
     assert_semantic_token(&tokens, "Test", TOKEN_DECORATOR, MOD_RULE);
     assert_semantic_token(&tokens, "Unsafe", TOKEN_DECORATOR, MOD_RULE);
     assert_semantic_token(&tokens, "@", TOKEN_DECORATOR, MOD_RULE);
-    assert_semantic_token(&tokens, "Pure", TOKEN_DECORATOR, MOD_RULE);
     assert!(
         tokens
             .iter()

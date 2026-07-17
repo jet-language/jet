@@ -28,7 +28,7 @@ fn with_store<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
 #[test]
 fn pure_fn_compiles() {
     let src = r#"
-@Pure fn add(a: Int, b: Int) -> Int {
+fn add(a: Int, b: Int) --[]-> Int {
     return a + b;
 }
 fn run() {
@@ -43,7 +43,7 @@ fn run() {
 #[test]
 fn pure_fn_impure_call_is_e3401() {
     let src = r#"
-@Pure fn bad() -> Int {
+fn bad() --[]-> Int {
     print("side effect");
     return 42;
 }
@@ -65,10 +65,10 @@ fn run() {
 #[test]
 fn pure_fn_calling_pure_fn_is_ok() {
     let src = r#"
-@Pure fn square(n: Int) -> Int {
+fn square(n: Int) --[]-> Int {
     return n * n;
 }
-@Pure fn cube(n: Int) -> Int {
+fn cube(n: Int) --[]-> Int {
     return n * square(n);
 }
 fn run() {
@@ -83,11 +83,11 @@ fn run() {
     );
 }
 
-/// `pub pure fn` parses and compiles without error.
+/// A public function with an explicit empty effect row compiles.
 #[test]
 fn pub_pure_fn_compiles() {
     let src = r#"
-@Pure pub fn double(n: Int) -> Int {
+pub fn double(n: Int) --[]-> Int {
     return n * 2;
 }
 fn run() {
@@ -95,7 +95,7 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "@Pure pub fn should compile: {:?}", res.err());
+    assert!(res.is_ok(), "public pure fn should compile: {:?}", res.err());
 }
 
 /// `pure fn` calling an impure user-defined function fires E3401.
@@ -106,7 +106,7 @@ fn read_value() -> Int {
     print("side effect");
     return 1;
 }
-@Pure fn compute() -> Int {
+fn compute() --[]-> Int {
     return read_value();
 }
 fn run() {
@@ -297,7 +297,7 @@ fn transitive_clean_program_no_error() {
     use std::collections::HashMap;
 
     let src = r#"
-@Pure fn square(n: Int) -> Int {
+fn square(n: Int) --[]-> Int {
     return n * n
 }
 fn run() {
@@ -490,7 +490,7 @@ fn store_rollback_invalid_gen() {
 #[test]
 fn eval_type_error_gives_precise_diagnostic_not_e0956() {
     // `"string" + 5` is a String/Int type mismatch — sema must catch this.
-    let src = r#"@Pure fn run() -> Int { return "string" + 5 }"#;
+    let src = r#"fn run() --[]-> Int { return "string" + 5 }"#;
     let diags = jet::check_for_eval(src, "test_eval_type.jet");
     assert!(
         !diags.is_empty(),
@@ -513,23 +513,23 @@ fn eval_type_error_gives_precise_diagnostic_not_e0956() {
 /// `check_for_eval` passes for a valid typed eval program.
 #[test]
 fn eval_valid_typed_run_passes_sema() {
-    let src = r#"@Pure fn run() -> Int { return 2 + 3 }"#;
+    let src = r#"fn run() --[]-> Int { return 2 + 3 }"#;
     let diags = jet::check_for_eval(src, "test_eval_valid.jet");
     assert!(
         diags.is_empty(),
-        "`@Pure fn run() -> Int` with correct body should pass sema, got: {:?}",
+        "`fn run() --[]-> Int` with correct body should pass sema, got: {:?}",
         diags
     );
 }
 
-/// `check_for_eval` passes for a normal `@Pure fn run() -> ()` program.
+/// `check_for_eval` passes for a normal `fn run() --[]-> ()` program.
 #[test]
 fn eval_normal_void_run_passes_sema() {
-    let src = r#"@Pure fn run() { }"#;
+    let src = r#"fn run() --[]-> { }"#;
     let diags = jet::check_for_eval(src, "test_eval_void.jet");
     assert!(
         diags.is_empty(),
-        "`@Pure fn run()` should pass eval sema, got: {:?}",
+        "`fn run() --[]->` should pass eval sema, got: {:?}",
         diags
     );
 }

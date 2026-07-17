@@ -645,7 +645,7 @@ impl<'a> Parser<'a> {
                             self.func().map(Item::Func)
                         }
                     }
-                    // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
+                    // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `fn name(…) --[]->`
                     // purity modifier (old `@Pure` spelling is E0062, taught in `func()`).
                     TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
                     // D-TAINT1: `@Sanitizer fn name(…)` taint-strip modifier.

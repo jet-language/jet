@@ -577,18 +577,19 @@ fn semantic_shape(
 ) -> (SemanticSymbolKind, String) {
     match kind {
         SymKind::Module => (SemanticSymbolKind::Module, format!("module {name}")),
-        SymKind::Function { params, ret } => {
+        SymKind::Function { params, ret, effects } => {
             let params = params
                 .iter()
                 .map(|(name, ty)| format!("{name}: {}", ty.name()))
                 .collect::<Vec<_>>()
                 .join(", ");
             let prefix = owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
-            let result = ret
-                .as_ref()
-                .map(|ty| format!(" -> {}", ty.name()))
-                .unwrap_or_default();
-            (SemanticSymbolKind::Function, format!("{prefix}({params}){result}"))
+            let arrow = effects.as_ref().map_or_else(
+                || ret.as_ref().map(|_| " ->".to_string()).unwrap_or_default(),
+                |row| format!(" --[{}]->", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
+            );
+            let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
+            (SemanticSymbolKind::Function, format!("{prefix}({params}){arrow}{result}"))
         }
         SymKind::Struct { fields } => (
             SemanticSymbolKind::Type,

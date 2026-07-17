@@ -19,10 +19,10 @@ fn pure_fn() {
         return;
     }
     let src = "\
-@Pure fn double(n: Int) -> Int {
+fn double(n: Int) --[]-> Int {
     return (n * 2)
 }
-@Pure fn greeting(name: String) -> String {
+fn greeting(name: String) --[]-> String {
     return \"hi, {name}\"
 }
 fn run() {
@@ -573,7 +573,7 @@ fn caps_block() {
         return;
     }
     let src = "\
-fn announce(label: String, n: Int) #(Io) {
+fn announce(label: String, n: Int) --[Io]-> {
     print(\"{label}: {n}\")
 }
 fn run() {

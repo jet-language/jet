@@ -15,7 +15,7 @@
 #[test]
 fn pure_fn_injected_clock_ok() {
     let src = r#"
-@Pure fn at(clock: Clock) -> Int {
+fn at(clock: Clock) --[]-> Int {
     return clock.now()
 }
 fn run() {
@@ -37,7 +37,7 @@ use core.time as time;
 fn pure_fn_injected_rng_ok() {
     let src = r#"
 use core.random as random;
-@Pure fn draw(rng: &Rng) -> Int {
+fn draw(rng: &Rng) --[]-> Int {
     return rng.int(1, 6)
 }
 fn run() {
@@ -56,7 +56,7 @@ fn pure_fn_constructs_caps_ok() {
     let src = r#"
 use core.time as time;
 use core.random as random;
-@Pure fn seeded() -> Int {
+fn seeded() --[]-> Int {
     c :: time.clock(10)
     r := random.rng(1)
     return c.now() + r.int(0, 0)
@@ -77,7 +77,7 @@ fn run() { print("{seeded()}") }
 fn pure_fn_ambient_time_still_e3403() {
     let src = r#"
 use core.time as time;
-@Pure fn bad() -> Int {
+fn bad() --[]-> Int {
     return time.now()
 }
 fn run() { print("{bad()}") }
@@ -97,7 +97,7 @@ fn run() { print("{bad()}") }
 fn pure_fn_ambient_random_still_e3403() {
     let src = r#"
 use core.random as random;
-@Pure fn bad() -> Int {
+fn bad() --[]-> Int {
     return random.int(1, 6)
 }
 fn run() { print("{bad()}") }
@@ -119,7 +119,7 @@ fn run() { print("{bad()}") }
 fn assume_deterministic_suppresses_e3403() {
     let src = r#"
 use core.time as time;
-@Pure fn risky() -> Int {
+fn risky() --[]-> Int {
     t := 0
     @Nondeterministic("ambient clock is explicit test input") {
         t = time.now()
@@ -140,7 +140,7 @@ fn run() { print("{risky()}") }
 #[test]
 fn assume_deterministic_suppresses_e3401() {
     let src = r#"
-@Pure fn risky() -> Int {
+fn risky() --[]-> Int {
     @Nondeterministic("ambient print is deliberate") {
         print("side effect")
     }
@@ -161,7 +161,7 @@ fn run() { print("{risky()}") }
 fn assume_deterministic_is_scoped() {
     let src = r#"
 use core.time as time;
-@Pure fn risky() -> Int {
+fn risky() --[]-> Int {
     @Nondeterministic("ambient clock is deliberate") {
         a := time.now()
     }
@@ -211,7 +211,7 @@ fn run() {
 fn pure_fn_widened_rng_ok() {
     let src = r#"
 use core.random as random;
-@Pure fn draws(rng: &Rng) -> Bool {
+fn draws(rng: &Rng) --[]-> Bool {
     flip := rng.bool()
     xs := [1, 2, 3]
     chosen := rng.pick(xs) ?? 0
@@ -237,7 +237,7 @@ fn run() {
 fn rng_pick_returns_element_option() {
     let src = r#"
 use core.random as random;
-@Pure fn choose(rng: &Rng) -> String {
+fn choose(rng: &Rng) --[]-> String {
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
 }
@@ -305,7 +305,7 @@ fn run() {
 fn pure_fn_widened_clock_ok() {
     let src = r#"
 use core.time as time;
-@Pure fn drive_clock(clock: &Clock) -> Int {
+fn drive_clock(clock: &Clock) --[]-> Int {
     base := clock.advance(5000)
     span := time.secs(1)
     return base + clock.wait(span)
@@ -350,7 +350,7 @@ fn run() {
 fn pure_fn_duration_ok() {
     let src = r#"
 use core.time as time;
-@Pure fn span_ms() -> Int {
+fn span_ms() --[]-> Int {
     d := time.secs(3)
     return d.millis()
 }

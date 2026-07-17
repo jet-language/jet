@@ -14,8 +14,9 @@ impl<'a> Parser<'a> {
         /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: consume a `@Pure` /
         /// prefix already confirmed present by `at_pure_fn`.
         pub(super) fn bump_pure_marker(&mut self) {
-            self.bump(); // `@`
+            let span = self.bump().span; // `@`
             self.bump(); // `Pure`
+            self.diags.push(Self::retired_effect_syntax(span));
         }
     
         /// D-METHODMACRO1=A (I7/R3 chokepoint): consume a `@Inline`/`@InlineAlways`

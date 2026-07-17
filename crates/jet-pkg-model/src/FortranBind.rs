@@ -465,7 +465,7 @@ fn render(lib: &str, routines: &[Routine]) -> String {
         out.push_str("pub fn ");
         out.push_str(&routine.jet_name);
         render_params(&mut out, &routine.params);
-        out.push_str(" #(Fortran) -> ");
+        out.push_str(" --[Fortran]-> ");
         out.push_str(routine.result.jet());
         out.push_str(" {\n");
         for (name, param) in &routine.params {

@@ -168,7 +168,7 @@ fn run() {
         (
             "curated/pure_boundary".to_string(),
             r#"
-@Pure fn add1(x: Int) -> Int {
+fn add1(x: Int) --[]-> Int {
     return x + 1
 }
 

@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
             self.expect_kw(TokKind::KwFn, "after `@FFI(<lang>)`")?;
 
             // Ordinary Jet signature: name, type params, parameter list, optional
-            // `#(effects)`, optional `-> T`. Reuses the same sub-parsers as a
+            // `--[effects]-> T` or plain `-> T`. Reuses the same sub-parsers as a
             // normal `fn` so the checked contract is identical.
             let (name, name_span) = self.expect_ident("after `fn`")?;
             let type_params = self.parse_opt_type_params()?;
@@ -201,13 +201,18 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close the parameter list")?;
             self.validate_variadic_params(&params);
             let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
+            let decorated_arrow = declared_effects.is_some() || effect_via.is_some();
             let mut return_type = None;
             let mut return_type_span = None;
-            if matches!(self.peek().kind, TokKind::Arrow) {
-                self.bump();
-                let (ty, span) = self.return_type()?;
-                return_type = Some(ty);
-                return_type_span = Some(span);
+            if decorated_arrow || matches!(self.peek().kind, TokKind::Arrow) {
+                if !decorated_arrow {
+                    self.bump();
+                }
+                if self.type_starts_here() {
+                    let (ty, span) = self.return_type()?;
+                    return_type = Some(ty);
+                    return_type_span = Some(span);
+                }
             }
 
             // The body is a single foreign-source string literal, not a Jet block.

@@ -8,7 +8,7 @@ here, queue a Tower ballot before adding it.
 
 D-SHAPE2 supersedes D-MARKER-FAMILY1: `@Rule` is the sole syntax for applying
 a typed rule to a declaration, expression, or brace scope. `@[...]` is the list form.
-Effect sets `#(...)`, fixed lists `[T#N]`, package selectors `pkg#version`, and
+Effect sets `--[...]->`, fixed lists `[T#N]`, package selectors `pkg#version`, and
 `#Caller()` are not rules and retain `#`. `derive T.Trait` is a body form;
 `comptime` and `$name` are metaprogramming syntax.
 
@@ -22,7 +22,7 @@ Current registry census: 75 registered applied rules (all `@`).
 | `derive-contract-markers` | `@` contract | `@Codable`, `@[Encode, Decode]`, `@Summarize`, `@Comparable` | S55, D-SERDE4, D-MARKERMOVE3 | `ATTR_CODABLE`, `ATTR_ENCODE`, `ATTR_DECODE`, `ATTR_SUMMARIZE`, `ATTR_COMPARABLE`; `parse_at_marker_group`; fmt derive/contract tests | Shipped |
 | `general-contract-markers` | `@` rule | `@Pure`, `@MustUse`, `@Pre(...)`, `@Post(...)`, `@Inline`, `@InlineAlways`, `@Persist`, `@Cli`, `@[Doc("...")]`, `@Patchable`, `@PublishedSchema` | D-SHAPE2, D-EFF3, D-MUSTUSE1, D-PREPOST1, D-METHODMACRO1, D-PERSIST1, D-CLIFLAG1, D-PATCH1, D-MIGRATE1 | `APPLIED_RULES`, `ATTR_MUST_USE`, `CONTRACT_PRE`, `CONTRACT_POST`, `CONTRACT_INLINE`, `CONTRACT_INLINE_ALWAYS`, `CONTRACT_PERSIST`, `CONTRACT_CLI`, `CONTRACT_DOC`, `CONTRACT_PATCHABLE`, `ATTR_PUBLISHED_SCHEMA`; parser item/type/field rule paths; fmt rule tests | Shipped |
 | `distinct-capability-bundles` | `@` contract bundle | `@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase` | D-DIST3, D-CAPBUNDLE1 | `ATTR_NUMERIC`, `CONTRACT_BUNDLE_COMPARABLE`, `CONTRACT_BUNDLE_PRINTABLE`, `CONTRACT_BUNDLE_CODABLE_AS_BASE`; `distinct_def`; fmt distinct bundle tests | Shipped |
-| `effect-capability-directives` | `#` effect/capability | `#(Fs)`, `#(Fs.Read, !Fs.Write)`, `#(via f)`, `@Caps(Net) { ... }`, `@Grant(Fs.Read) { caps -> ... }` | D-EFF1, D-EFF2, D-EFFTREE1, D-PROP1, D-SCAP1 | `KW_CAPS`, `KW_GRANT`, `GRANT_ARROW`; parser effect-bound, caps, and grant paths; fmt dotted effect paths test | Shipped |
+| `effect-capability-directives` | `#` effect/capability | `--[Fs]->`, `--[Fs.Read, !Fs.Write]->`, `--[via f]->`, `@Caps(Net) { ... }`, `@Grant(Fs.Read) { caps -> ... }` | D-EFF1, D-EFF2, D-EFFTREE1, D-PROP1, D-SCAP1 | `KW_CAPS`, `KW_GRANT`, `GRANT_ARROW`; parser effect-bound, caps, and grant paths; fmt dotted effect paths test | Shipped |
 | `unsafe-impure-gates` | `#` audit gate | `@Unsafe("reason") { ... }`, `@Unsafe("reason") fn`, `@Impure("reason") { ... }` | D-UNSAFE2, D-UNSAFE-REASON1, D-CTEFFECT1 | `@Unsafe`/`@Impure` parser statement/item paths; fmt unsafe and impure gate tests; diagnostics enforce reason for unsafe | Shipped; bare unsafe is rejected |
 | `test-bench-directives` | `#` runnable block | `@Test("name") { ... }`, `@Test fn prop(p: T)`, `@Bench("name") { ... }` | S43, D-TESTPAREN1, D-TEST1, D-BENCH1, D-BENCH-MARKER1 | `KW_TEST`, `KW_BENCH`; `test_def`, `bench_def`; fmt test marker tests | Shipped for current grammar |
 | `typing-fact-directives` | `#` value/type fact | `@Tainted expr`, `@Tainted String`, `@Sanitizer fn`, `@Replayable fn`, `@State(S)`, `@Transition(A -> B)`, `@Track name :: expr` | D-TAINT1, D-REPLAY1, D-QUAL4, D-STATE1, D-PROVENANCE1 | `KW_TAINTED`, `KW_SANITIZER`, `ATTR_REPLAYABLE`, `ATTR_TRACK`; parser expression/type/fn/binding marker paths; fmt taint/replayable/state/track tests | Shipped; `#Suppress` retired by D-MARK-DISCARD1 |

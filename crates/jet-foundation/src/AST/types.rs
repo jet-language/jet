@@ -63,15 +63,15 @@ pub enum Type {
     },
     /// S47 (M8): function type `fn(T1, T2) -> R` (`ret` omitted = no return value).
     ///
-    /// D-EFF2 (callback param effect bound): an optional effect annotation may
-    /// ride the *front* of a function type — `@Pure fn(T) -> U` (the callback
-    /// must be pure) or `#(Net) fn(T) -> U` (the callback may use at most the
-    /// listed effects). `effect_bound` is `None` when unannotated, `Some(empty)`
-    /// for `@Pure`, and `Some([(name, span), …])` for `#(…)`. Names are validated
+    /// D-EFF2 / D-SHAPE8: an optional effect row lives inside the function
+    /// type's return arrow — `fn(T) --[]-> U` requires purity and
+    /// `fn(T) --[Net]-> U` permits at most the listed effects. `effect_bound`
+    /// is `None` when unannotated, `Some(empty)` for `--[]->`, and
+    /// `Some([(name, span), …])` for a nonempty row. Names are validated
     /// against the effect vocabulary in sema, not the parser. The bound is a
     /// call-site obligation on whatever callback is passed (E0747) — it is **not**
     /// part of structural type identity (see the manual `PartialEq for Type`,
-    /// which ignores it in the `Fn` arm), so `@Pure fn(Int)` and `fn(Int)` are the
+    /// which ignores it in the `Fn` arm), so `fn(Int) --[]->` and `fn(Int)` are the
     /// same type for assignability; the bound is an *extra* check, not a subtype.
     Fn {
         params: Vec<Type>,
@@ -130,7 +130,7 @@ pub enum Type {
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
 /// except the `Fn` arm ignores `effect_bound`: a callback effect bound is a
 /// call-site obligation, not part of a function type's identity, so a
-/// `@Pure fn(Int)` value is assignable wherever a `fn(Int)` is expected. The
+/// `fn(Int) --[]->` value is assignable wherever a `fn(Int)` is expected. The
 /// bound is enforced separately at the call site (E0747).
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
@@ -258,6 +258,10 @@ pub fn canonicalize_tuple_fields<T>(mut fields: Vec<(String, T)>) -> Vec<(String
     fields
 }
 
+fn effect_names(row: &[(String, Span)]) -> String {
+    row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")
+}
+
 impl Type {
     /// Plain-words name for diagnostics (docs/spec/diagnostics.md voice: name both types).
     pub fn show(&self) -> String {
@@ -272,15 +276,17 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, .. } => {
+            Type::Fn { params, ret, effect_bound } => {
                 let ps = params
                     .iter()
                     .map(|p| p.name())
                     .collect::<Vec<_>>()
                     .join(", ");
-                match ret {
-                    Some(r) => format!("fn({}) -> {}", ps, r.name()),
-                    None => format!("fn({})", ps),
+                match (effect_bound, ret) {
+                    (Some(row), Some(r)) => format!("fn({}) --[{}]-> {}", ps, effect_names(row), r.name()),
+                    (Some(row), None) => format!("fn({}) --[{}]->", ps, effect_names(row)),
+                    (None, Some(r)) => format!("fn({}) -> {}", ps, r.name()),
+                    (None, None) => format!("fn({})", ps),
                 }
             }
             Type::Named(n) => format!("`{}`", n),
@@ -333,15 +339,17 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, .. } => {
+            Type::Fn { params, ret, effect_bound } => {
                 let ps = params
                     .iter()
                     .map(|p| p.name())
                     .collect::<Vec<_>>()
                     .join(", ");
-                match ret {
-                    Some(r) => format!("fn({}) -> {}", ps, r.name()),
-                    None => format!("fn({})", ps),
+                match (effect_bound, ret) {
+                    (Some(row), Some(r)) => format!("fn({}) --[{}]-> {}", ps, effect_names(row), r.name()),
+                    (Some(row), None) => format!("fn({}) --[{}]->", ps, effect_names(row)),
+                    (None, Some(r)) => format!("fn({}) -> {}", ps, r.name()),
+                    (None, None) => format!("fn({})", ps),
                 }
             }
             Type::Named(n) => n.clone(),

@@ -12,9 +12,17 @@ pub const KW_TODO: &str = "Todo";
 /// error pointing at `@Pure`.
 ///
 /// D-EFF2 (ratified 2026-06-22): `@Pure` also rides the front of a callback
-/// parameter type — `f: @Pure fn(T) -> U` demands a pure callback; passing one
-/// with any effect is E0747. Sibling of the `#(E, …) fn(…)` bounded form.
+/// parameter type — `f: fn(T) --[]-> U` demands a pure callback; passing one
+/// with any effect is E0747. Sibling of the `fn(…) --[E, …]->` bounded form.
 pub const KW_PURE: &str = "Pure";
+
+/// D-SHAPE8=A (ratified 2026-07-14, owner-amended): an explicit function
+/// effect row lives inside the return arrow: `--[Fs.Read, ..E]->`. The empty
+/// row `--[]->` is an explicit purity bound; an omitted row leaves ordinary
+/// `->` unchanged. These two fragments are the canonical punctuation used by
+/// the parser, formatter, editor grammars, and generated documentation.
+pub const EFFECT_ARROW_OPEN: &str = "--[";
+pub const EFFECT_ARROW_CLOSE: &str = "]->";
 
 /// D-TAINT1 (ratified 2026-06-21, option A; gated on D-EFF1): the value-fact tag
 /// that marks an untrusted value at its source — `@Tainted input`. The taint

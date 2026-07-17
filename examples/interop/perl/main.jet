@@ -1,7 +1,7 @@
 use perl.ops as ops
 use core.encoding.json as json
 
-fn run() #(Perl, Io) {
+fn run() --[Perl, Io]-> {
     session :: ops.open() ?? panic("Perl open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
     first :: ops.Transform(session, ~input, 5000) ?? panic("first call failed")

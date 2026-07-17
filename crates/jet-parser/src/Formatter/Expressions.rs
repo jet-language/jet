@@ -93,26 +93,6 @@ impl<'a> Fmt<'a> {
                 ret,
                 effect_bound,
             } => {
-                // D-EFF2: render the callback effect bound prefix — `@Pure ` for an
-                // empty bound, `#(E1, E2) ` for a listed one. `@Pure` is a
-                // applied rule; listed effects keep their separate `#(…)`
-                // type-bound grammar.
-                if let Some(bound) = effect_bound {
-                    if bound.is_empty() {
-                        self.write(crate::Syntax::RULE_PREFIX);
-                        self.write(crate::Syntax::KW_PURE);
-                        self.write(" ");
-                    } else {
-                        self.write("#(");
-                        for (i, (name, _)) in bound.iter().enumerate() {
-                            if i > 0 {
-                                self.write(", ");
-                            }
-                            self.write(name);
-                        }
-                        self.write(") ");
-                    }
-                }
                 self.write("fn(");
                 for (i, p) in params.iter().enumerate() {
                     if i > 0 {
@@ -121,8 +101,21 @@ impl<'a> Fmt<'a> {
                     self.fmt_type(p);
                 }
                 self.write(")");
+                if let Some(bound) = effect_bound {
+                    self.write(" --[");
+                    for (i, (name, _)) in bound.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.write(name);
+                    }
+                    self.write("]->");
+                }
                 if let Some(r) = ret {
-                    self.write(" -> ");
+                    if effect_bound.is_none() {
+                        self.write(" ->");
+                    }
+                    self.write(" ");
                     self.fmt_type(r);
                 }
             }

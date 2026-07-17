@@ -1293,7 +1293,7 @@ fn validate_build_authority(
                 "E3503",
                 format!("this build uses `{}` without declaring it on `fn build`", effect.name()),
                 "the build signature is the static authority manifest audited before build code executes".to_string(),
-                format!("add `{}` to the build function's `#(...)` effect list", effect.name()),
+                format!("add `{}` to the build function's `--[...]->` effect row", effect.name()),
                 Some(span),
             )]);
         }

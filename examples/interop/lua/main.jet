@@ -7,7 +7,7 @@ struct Payload {
     values: [Int]
 }
 
-fn run() #(Lua, Io) {
+fn run() --[Lua, Io]-> {
     session :: ops.open() ?? panic("Lua open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Null]), "scalar": DataTree.Float(3.5)])
     print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("first call failed")))

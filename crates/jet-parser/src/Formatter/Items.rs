@@ -47,7 +47,7 @@ impl<'a> Fmt<'a> {
             Item::Struct(s) => self.fmt_struct(s, true),
             Item::Enum(e) => self.fmt_enum(e, true),
             Item::Impl(i) => {
-                // External-method sugar (`@Pure fn Type.method(…)`) is
+                // External-method sugar (`fn Type.method(…) --[]->`) is
                 // normalized to an ImplDef by the parser. Its AST deliberately
                 // no longer carries enough ordering information to reconstruct
                 // markers before `fn`, so preserve that source form verbatim.
@@ -198,10 +198,6 @@ impl<'a> Fmt<'a> {
                 f.newline();
             }
             for m in &t.methods {
-                // D-EFF3: `@Pure` prefix bound on a trait method.
-                if m.is_pure {
-                    f.write(&format!("@{} ", Syntax::KW_PURE));
-                }
                 f.write("fn ");
                 f.write(&m.name);
                 f.write("(");
@@ -212,17 +208,21 @@ impl<'a> Fmt<'a> {
                     f.fmt_param(p);
                 }
                 f.write(")");
-                // D-EFF3: `#(Gpu)` effect bound between params and the arrow.
+                // D-EFF3 / D-SHAPE8: effect bound inside the arrow.
                 if let Some(effects) = &m.declared_effects {
                     let list = effects
                         .iter()
                         .map(|(n, _)| n.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    f.write(&format!(" #({})", list));
+                    f.write(&format!(" --[{}]->", list));
+                } else if m.is_pure {
+                    f.write(" --[]->");
+                } else if m.return_type.is_some() {
+                    f.write(" ->");
                 }
                 if let Some(ret) = &m.return_type {
-                    f.write(" -> ");
+                    f.write(" ");
                     f.fmt_return_type(ret);
                 }
                 // D-LIB2: a trait method may carry a default body.
@@ -505,10 +505,6 @@ impl<'a> Fmt<'a> {
         if f.is_reactive {
             self.write(&format!("@{} ", Syntax::KW_REACTIVE));
         }
-        // S60 (D-CASING1 follow-on): `@Pure` marker precedes `pub`/`fn`.
-        if f.is_pure && crate::Policy::rule_allows(Syntax::KW_PURE, crate::Policy::RuleSite::Function) {
-            self.write(&format!("@{} ", Syntax::KW_PURE));
-        }
         // D-TAINT1: the `@Sanitizer` taint-strip modifier precedes `pub`/`fn`.
         if f.is_sanitizer && crate::Policy::rule_allows(Syntax::KW_SANITIZER, crate::Policy::RuleSite::Function) {
             self.write(&format!("@{} ", Syntax::KW_SANITIZER));
@@ -605,28 +601,32 @@ impl<'a> Fmt<'a> {
             self.fmt_param(p);
         }
         self.write(")");
-        // D-EFF1 / D-QUAL1: the `#(Net, Db)` effect bound, between the parameter
-        // list and the return arrow. A `@Pure fn` carries no `#(…)` list.
+        // D-SHAPE8: effect row lives inside the return arrow.
         if let Some(effects) = &f.declared_effects {
-            self.write(" #(");
+            self.write(" --[");
             for (i, (name, _)) in effects.iter().enumerate() {
                 if i > 0 {
                     self.write(", ");
                 }
                 self.write(name);
             }
-            self.write(")");
+            self.write("]->");
+        } else if f.is_pure {
+            self.write(" --[]->");
         }
-        // D-EFF2: the `#(via f)` pass-through annotation occupies the same slot.
+        // D-EFF2: pass-through occupies the same row.
         if let Some((param, _)) = &f.effect_via {
-            self.write(" #(");
+            self.write(" --[");
             self.write(Syntax::KW_VIA);
             self.write(" ");
             self.write(param);
-            self.write(")");
+            self.write("]->");
+        }
+        if f.declared_effects.is_none() && f.effect_via.is_none() && f.return_type.is_some() {
+            self.write(" ->");
         }
         if let Some(ret) = &f.return_type {
-            self.write(" -> ");
+            self.write(" ");
             self.fmt_return_type(ret);
         }
         // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single

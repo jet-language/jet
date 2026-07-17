@@ -1,7 +1,7 @@
 Error [E0740]: `touch` uses the effect `Db.Write`, which its signature doesn't allow
-  --> tests/ui/db_read_query_hidden_write.jet:8:32
+  --> tests/ui/db_read_query_hidden_write.jet:8:33
     |
-  8 | fn touch(conn: DbConnection) #(Db.Read) {
-    |                                ^^^^^^^
- Why: the signature declares `#(Db.Read)`, so the body may only use those; `Db.Write` is outside that set
+  8 | fn touch(conn: DbConnection) --[Db.Read]-> {
+    |                                 ^^^^^^^
+ Why: the signature declares `--[Db.Read]->`, so the body may only use those; `Db.Write` is outside that set
  Fix: add `Db.Write` to the effect list, or stop using it in `touch`

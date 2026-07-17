@@ -593,9 +593,6 @@ fn function_visibility(f: &AST::Func) -> &'static str {
 
 fn function_signature_text(src: &str, f: &AST::Func) -> String {
     let mut out = String::new();
-    if f.is_pure {
-        out.push_str("@Pure ");
-    }
     if f.is_package_pub {
         out.push_str("pub(package) ");
     } else if f.is_pub {
@@ -619,8 +616,15 @@ fn function_signature_text(src: &str, f: &AST::Func) -> String {
             .join(", "),
     );
     out.push(')');
+    if let Some(effects) = &f.declared_effects {
+        out.push_str(" --[");
+        out.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
+        out.push_str("]->");
+    } else if f.return_type.is_some() {
+        out.push_str(" ->");
+    }
     if let Some(ret) = &f.return_type {
-        out.push_str(" -> ");
+        out.push(' ');
         out.push_str(&ret.name());
     }
     out

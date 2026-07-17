@@ -17,12 +17,12 @@ fn codes(src: &str) -> Vec<String> {
 #[test]
 fn effect_annotations_are_erased() {
     let annotated = r#"
-trait Shape { @Pure fn area(self) -> Int; }
+trait Shape { fn area(self) --[]-> Int; }
 struct Square { side: Int }
 impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
-@Pure fn sq(n: Int) -> Int { return n * n; }
-fn load(p: String) #(Io) { print(p); }
-fn invoke(n: Int) #(Io) { load("{sq(n)}"); }
+fn sq(n: Int) --[]-> Int { return n * n; }
+fn load(p: String) --[Io]-> { print(p); }
+fn invoke(n: Int) --[Io]-> { load("{sq(n)}"); }
 fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
 "#;
     let plain = r#"
@@ -76,7 +76,7 @@ fn run() {
 fn declared_bound_matching_body_ok() {
     let src = r#"
 use core.files as fs
-fn load(path: String) #(Fs) -> String {
+fn load(path: String) --[Fs]-> String {
     return fs.read(~path) ?? "";
 }
 fn run() { print(load("x")); }
@@ -93,7 +93,7 @@ fn run() { print(load("x")); }
 fn out_of_set_effect_is_e0740() {
     let src = r#"
 use core.files as fs
-fn load(path: String) #(Net) -> String {
+fn load(path: String) --[Net]-> String {
     return fs.read(path) ?? "";
 }
 fn run() { print(load("x")); }
@@ -112,7 +112,7 @@ fn effects_propagate_transitively() {
     let src = r#"
 use core.files as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
-fn load(path: String) #(Net) -> String { return helper(path); }
+fn load(path: String) --[Net]-> String { return helper(path); }
 fn run() { print(load("x")); }
 "#;
     assert!(
@@ -127,7 +127,7 @@ fn run() { print(load("x")); }
 fn wider_bound_than_body_ok() {
     let src = r#"
 use core.files as fs
-fn load(path: String) #(Fs, Net) -> String {
+fn load(path: String) --[Fs, Net]-> String {
     return fs.read(~path) ?? "";
 }
 fn run() { print(load("x")); }
@@ -143,7 +143,7 @@ fn run() { print(load("x")); }
 #[test]
 fn io_effect_from_print_ok() {
     let src = r#"
-fn announce(n: Int) #(Io) { print("{n}"); }
+fn announce(n: Int) --[Io]-> { print("{n}"); }
 fn run() { announce(1); }
 "#;
     assert!(
@@ -168,18 +168,14 @@ fn run() { print(load("x")); }
     );
 }
 
-/// `@Pure fn` with a non-empty `#(…)` list is the contradiction E0745.
+/// D-SHAPE8: retired effect markers are rejected with the canonical arrow fix.
 #[test]
-fn pure_with_effects_is_e0745() {
+fn retired_effect_marker_is_e0066() {
     let src = r#"
-@Pure fn calc() #(Fs) -> Int { return 1; }
+fn calc() #(Fs) -> Int { return 1; }
 fn run() { print(calc()); }
 "#;
-    assert!(
-        codes(src).iter().any(|c| c == "E0745"),
-        "expected E0745, got {:?}",
-        codes(src)
-    );
+    assert_eq!(codes(src), vec!["E0066"]);
 }
 
 /// D-EFF3: an impl of a `@Pure` trait method that reaches an effect is E0742.
@@ -187,7 +183,7 @@ fn run() { print(calc()); }
 fn trait_impl_exceeding_bound_is_e0742() {
     let src = r#"
 use core.files as fs
-trait Hasher { @Pure fn hash(self) -> Int; }
+trait Hasher { fn hash(self) --[]-> Int; }
 struct Doc { path: String }
 impl Doc.Hasher {
     fn hash(self) -> Int { body :: fs.read(self.path) ?? ""; return body.len(); }
@@ -205,7 +201,7 @@ fn run() { d :: Doc.{ path: "x" }; print(d.hash()); }
 #[test]
 fn trait_impl_within_bound_ok() {
     let src = r#"
-trait Shape { @Pure fn area(self) -> Int; }
+trait Shape { fn area(self) --[]-> Int; }
 struct Square { side: Int }
 impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }
@@ -227,7 +223,7 @@ fn named_callback_flows_through_to_caller() {
 use core.files as fs
 fn readit() -> String { return fs.read("x") ?? ""; }
 fn apply(f: fn() -> String) -> String { return f(); }
-fn caller() #(Net) -> String { return apply(readit); }
+fn caller() --[Net]-> String { return apply(readit); }
 fn run() { print(caller()); }
 "#;
     assert!(
@@ -264,7 +260,7 @@ fn pure_callback_flows_nothing() {
     let src = r#"
 fn inc(n: Int) -> Int { return n + 1; }
 fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x); }
-fn caller() #(Io) { print("{apply(inc, 1)}"); }
+fn caller() --[Io]-> { print("{apply(inc, 1)}"); }
 fn run() { caller(); }
 "#;
     assert!(
@@ -281,7 +277,7 @@ fn run() { caller(); }
 fn pure_fn_with_core_effect_is_e3401() {
     let src = r#"
 use core.files as fs
-@Pure fn readit(p: String) -> String { return fs.read(p) ?? ""; }
+fn readit(p: String) --[]-> String { return fs.read(p) ?? ""; }
 fn run() { print(readit("x")); }
 "#;
     assert!(
@@ -295,7 +291,7 @@ fn run() { print(readit("x")); }
 #[test]
 fn caps_region_within_set_ok() {
     let src = r#"
-fn announce(n: Int) #(Io) { print("{n}"); }
+fn announce(n: Int) --[Io]-> { print("{n}"); }
 fn run() {
     @Caps(Io) {
         announce(1);
@@ -353,7 +349,7 @@ fn run() {
 #[test]
 fn unknown_effect_name_is_e0119_only() {
     let src = r#"
-fn work() #(Bogus) { print("hi"); }
+fn work() --[Bogus]-> { print("hi"); }
 fn run() { work(); }
 "#;
     let c = codes(src);
@@ -817,14 +813,14 @@ fn run() {
 // D-EFF2 expert levers: callback param effect bounds + `#(via f)` pass-through.
 // ---------------------------------------------------------------------------
 
-/// Lever 1: a `@Pure fn(…)` parameter handed a pure callback compiles clean.
+/// Lever 1: a `fn(…) --[]->` parameter handed a pure callback compiles clean.
 #[test]
 fn callback_pure_bound_pure_arg_ok() {
     let src = r#"
-fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
+fn transform(items: [Int], f: fn(Int) --[]-> Int) -> [Int] {
     return items.map((x) => f(x));
 }
-@Pure fn inc(n: Int) -> Int { return n + 1; }
+fn inc(n: Int) --[]-> Int { return n + 1; }
 fn run() { print("{transform([1, 2], inc)}"); }
 "#;
     assert!(
@@ -834,11 +830,11 @@ fn run() { print("{transform([1, 2], inc)}"); }
     );
 }
 
-/// Lever 1: a `@Pure fn(…)` parameter handed an impure callback is E0747.
+/// Lever 1: a `fn(…) --[]->` parameter handed an impure callback is E0747.
 #[test]
 fn callback_pure_bound_impure_arg_is_e0747() {
     let src = r#"
-fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
+fn transform(items: [Int], f: fn(Int) --[]-> Int) -> [Int] {
     return items.map((x) => f(x));
 }
 fn noisy(n: Int) -> Int { print("{n}"); return n; }
@@ -851,11 +847,11 @@ fn run() { print("{transform([1, 2], noisy)}"); }
     );
 }
 
-/// Lever 1: a `#(E) fn(…)` parameter handed a callback within `E` compiles clean.
+/// Lever 1: a `fn(…) --[E]->` parameter handed a callback within `E` compiles clean.
 #[test]
 fn callback_set_bound_within_ok() {
     let src = r#"
-fn invoke(n: Int, act: #(Io) fn(Int)) {
+fn invoke(n: Int, act: fn(Int) --[Io]->) {
     act(n);
 }
 fn show(n: Int) { print("{n}"); }
@@ -868,13 +864,13 @@ fn run() { invoke(5, show); }
     );
 }
 
-/// Lever 1: a `#(E) fn(…)` parameter handed a callback that reaches an effect
+/// Lever 1: a `fn(…) --[E]->` parameter handed a callback that reaches an effect
 /// outside `E` is E0747.
 #[test]
 fn callback_set_bound_exceeded_is_e0747() {
     let src = r#"
 use core.files as fs
-fn invoke(p: String, act: #(Io) fn(String)) {
+fn invoke(p: String, act: fn(String) --[Io]->) {
     act(p);
 }
 fn read_it(p: String) { x :: fs.read(~p) ?? ""; print("{x}"); }
@@ -891,7 +887,7 @@ fn run() { invoke("f.txt", read_it); }
 #[test]
 fn callback_bound_unknown_effect_is_e0119() {
     let src = r#"
-fn invoke(n: Int, act: #(Nope) fn(Int)) { act(n); }
+fn invoke(n: Int, act: fn(Int) --[Nope]->) { act(n); }
 fn show(n: Int) { print("{n}"); }
 fn run() { invoke(5, show); }
 "#;
@@ -908,11 +904,11 @@ fn run() { invoke(5, show); }
 #[test]
 fn effect_via_publishes_callback_effect() {
     let src = r#"
-fn invoke(n: Int, act: #(Io) fn(Int)) #(via act) {
+fn invoke(n: Int, act: fn(Int) --[Io]->) --[via act]-> {
     act(n);
 }
 fn show(n: Int) { print("{n}"); }
-@Pure fn caller() -> Int { invoke(5, show); return 0; }
+fn caller() --[]-> Int { invoke(5, show); return 0; }
 fn run() { print("{caller()}"); }
 "#;
     assert_eq!(
@@ -926,7 +922,7 @@ fn run() { print("{caller()}"); }
 #[test]
 fn effect_via_unknown_param_is_e0748() {
     let src = r#"
-fn invoke(n: Int, act: #(Io) fn(Int)) #(via missing) { act(n); }
+fn invoke(n: Int, act: fn(Int) --[Io]->) --[via missing]-> { act(n); }
 fn show(n: Int) { print("{n}"); }
 fn run() { invoke(5, show); }
 "#;
@@ -937,7 +933,7 @@ fn run() { invoke(5, show); }
 #[test]
 fn effect_via_non_callback_param_is_e0748() {
     let src = r#"
-fn invoke(n: Int) #(via n) { print("{n}"); }
+fn invoke(n: Int) --[via n]-> { print("{n}"); }
 fn run() { invoke(5); }
 "#;
     assert_eq!(
@@ -947,16 +943,16 @@ fn run() { invoke(5); }
     );
 }
 
-/// I3: the D-EFF2 levers are erased — a program using `@Pure fn(…)` callback
+/// I3: the D-EFF2 levers are erased — a program using `fn(…) --[]->` callback
 /// bounds and `#(via f)` generates the same Rust as its annotation-stripped twin.
 #[test]
 fn eff2_levers_are_erased() {
     let annotated = r#"
-fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
+fn transform(items: [Int], f: fn(Int) --[]-> Int) -> [Int] {
     return items.map((x) => f(x));
 }
-fn invoke(n: Int, act: #(Io) fn(Int)) #(via act) { act(n); }
-@Pure fn inc(n: Int) -> Int { return n + 1; }
+fn invoke(n: Int, act: fn(Int) --[Io]->) --[via act]-> { act(n); }
+fn inc(n: Int) --[]-> Int { return n + 1; }
 fn show(n: Int) { print("{n}"); }
 fn run() { print("{transform([1], inc)}"); invoke(5, show); }
 "#;

@@ -170,19 +170,19 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
             let crossed_line = has_newline_between(prev.span.end, cur.span.start);
             if crossed_line && ends_statement(&prev.kind) {
                 // E0986: `->` or `{` split onto the next line from a `)`.
-                if matches!(cur.kind, TokKind::Arrow | TokKind::LBrace)
+                if matches!(cur.kind, TokKind::Arrow | TokKind::MinusMinus | TokKind::LBrace)
                     && matches!(prev.kind, TokKind::RParen)
                 {
                     diags.push(Diagnostic::error(
                         "E0986",
                         format!(
                             "`{}` must stay on the same line as the closing `)`",
-                            if matches!(cur.kind, TokKind::Arrow) { "->" } else { "{" }
+                            if matches!(cur.kind, TokKind::Arrow) { "->" } else if matches!(cur.kind, TokKind::MinusMinus) { "--[…]->" } else { "{" }
                         ),
                         "a return type `-> Type` and an opening `{` follow the parameter list on its line (S44)".to_string(),
                         format!(
                             "move the `{}` up to the `)` line",
-                            if matches!(cur.kind, TokKind::Arrow) { "->" } else { "{" }
+                            if matches!(cur.kind, TokKind::Arrow) { "->" } else if matches!(cur.kind, TokKind::MinusMinus) { "--[…]->" } else { "{" }
                         ),
                         Some(cur.span),
                     ));

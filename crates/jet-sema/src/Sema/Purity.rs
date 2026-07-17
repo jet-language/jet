@@ -3,7 +3,7 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::Func;
 use std::collections::{HashMap, HashSet};
 
-/// Return E3401 if `fn_name` (which is marked `pure`) calls an impure function.
+/// Return E3401 if `fn_name` (which declares `--[]->`) calls an impure function.
 /// `funcs` is the full function-signature map; `call_name` is the callee;
 /// `path` is the chain of calls that led here (for the trace message).
 pub fn e3401(
@@ -14,10 +14,9 @@ pub fn e3401(
 ) -> Diagnostic {
     let why = if path.is_empty() {
         format!(
-            "`{}` is impure, but `{}` is declared `@{} fn`",
+            "`{}` is impure, but `{}` declares `--[]->`",
             call_name,
-            pure_fn_name,
-            crate::Syntax::KW_PURE
+            pure_fn_name
         )
     } else {
         format!(
@@ -35,9 +34,8 @@ pub fn e3401(
         ),
         why,
         format!(
-            "mark `{}` as `@{} fn`, or remove the call from `{}`",
+            "give `{}` an explicit `--[]->` bound, or remove the call from `{}`",
             call_name,
-            crate::Syntax::KW_PURE,
             pure_fn_name
         ),
         Some(span),

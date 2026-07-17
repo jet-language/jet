@@ -544,7 +544,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 //
 // D-MARKERMOVE2 (B, ratified 2026-07-02): whole-move, no carve-out by
 // position — `@Pure` is one spelling everywhere, including the type-position
-// callback bound (`f: @Pure fn(T) -> U`). The plane law gains exactly one
+// callback bound (`f: fn(T) --[]-> U`). The plane law gains exactly one
 // exception: a contract marker may prefix a function TYPE to state a bound;
 // "declarations only" reads "declarations, plus contract bounds on function
 // types".

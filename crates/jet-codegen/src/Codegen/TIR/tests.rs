@@ -1357,7 +1357,7 @@ fn consume(ch: Receiver<Int>) -> Int {
     fn covers_pure_fn() {
         // c109 Phase 23: a `@Pure fn` is covered (purity is sema-only, erased at codegen).
         assert!(covers(
-            "@Pure fn double(n: Int) -> Int {\n return (n * 2)\n}\n",
+            "fn double(n: Int) --[]-> Int {\n return (n * 2)\n}\n",
             "double"
         ));
     }

@@ -553,7 +553,7 @@ fn absish(n: Int) -> Int {
     return a + b
 }
 
-fn stamp(path: String) #(Fs) -> String ? {
+fn stamp(path: String) --[Fs]-> String ? {
     return path
 }
 

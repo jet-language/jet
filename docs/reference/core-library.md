@@ -1064,12 +1064,12 @@ nonces, tokens, salts, and anything security-sensitive.
 | `bytes(n)` | `[U8]` | PRNG bytes for fixtures/simulation; not cryptographic |
 
 The ambient calls above (`int`/`float`/…) read a process-global generator, so a
-`@Pure fn` cannot call them (E3403 — they break reproducibility). To use
-randomness inside a `@Pure fn`, take a seeded `Rng` **as a parameter** and draw
+`fn … --[]->` cannot call them (E3403 — they break reproducibility). To use
+randomness inside a `fn … --[]->`, take a seeded `Rng` **as a parameter** and draw
 through it — the seed makes the stream reproducible on every machine:
 
 ```jet
-@Pure fn roll(rng: &Rng) -> Int {
+fn roll(rng: &Rng) --[]-> Int {
     return rng.int(1, 6)            // inclusive; advances the stream (needs &Rng)
 }
 fn run() {
@@ -1299,13 +1299,13 @@ data reaches Jet.
 integer, `time.now()` returns that value instead of the real clock. Tests use
 this to pin output; normal programs ignore it.
 
-A `@Pure fn` cannot call ambient `time.now()` (E3403 — the wall clock is not
-reproducible). To use time inside a `@Pure fn`, take a seeded `Clock` **as a
+A `fn … --[]->` cannot call ambient `time.now()` (E3403 — the wall clock is not
+reproducible). To use time inside a `fn … --[]->`, take a seeded `Clock` **as a
 parameter** and read through it; the clock only moves when you `tick` it, so the
 result is reproducible:
 
 ```jet
-@Pure fn at(clock: Clock) -> Int {
+fn at(clock: Clock) --[]-> Int {
     return clock.now()             // current value in ms; pure read
 }
 fn run() {
@@ -1328,7 +1328,7 @@ A `Duration` is a deterministic span of milliseconds minted by `time.ms(n)` /
 |-------------------|---------|--------------|
 | `millis()` | `Int` | The span in milliseconds (read) |
 
-**Expert escape — `assume_deterministic { … }`.** Inside a `@Pure fn`, a block
+**Expert escape — `assume_deterministic { … }`.** Inside a `fn … --[]->`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)
 for its body — the "I know this is deterministic" hatch. It is a semantic
 footgun: nothing verifies the claim, so use it only when you can guarantee

@@ -78,7 +78,7 @@ Job: attach a fact/promise/instruction to a fn.
 @Pure                          // contract marker         S60
 @Sanitizer / @Replayable       // directive marker        D-TAINT-SAN / D-REPLAY1
 pub / priv                     // keyword                 S18
-#(Net, !Fs)                    // effect parens           D-EFF1
+--[Net, !Fs]->                    // effect parens           D-EFF1
 effects: { allow: […] }        // manifest field          D-EFFBUDGET1
 ```
 
@@ -256,7 +256,7 @@ Baseline **(b)**–**(f)** as they read today:
 
 ```jet
 // (b)  @Pure @MustUse  @Replayable @Sanitizer
-//      fn parse(input: Tainted<Str>) -> Record ? Error #(Net, !Fs) { … }
+//      fn parse(input: Tainted<Str>) --[Net, !Fs]-> Record ? Error { … }
 // (c)  Deque.new()   Set.from([1,2,3])   time.clock(42)   Wrap.{…}   BigInt(100)   Ok(v)/Val(x)
 // (d)  struct Point { x: Int, y: Int }   alias Pair<T> = (T,T)
 //      UserId :: distinct Int            state Door { Open, Closed }
@@ -414,11 +414,11 @@ module overlay.dev { package("R").with += [cran.jsonlite] }   // was `overlay de
 The product-vs-sum rule (`Wrap.{}` vs `Recipe.Cargo(…)`) is now *stated and
 checked*, which resolves manifest F3 and core F4 by rule instead of memory.
 
-**(b) fn** — every promise on `@`, every instruction on `#`, effects in `#(…)`:
+**(b) fn** — every promise on `@`, every instruction on `#`, effects in `--[…]->`:
 
 ```jet
 @Pure @MustUse @Replayable @Sanitizer
-fn parse(input: Tainted<Str>) -> Record ? Error #(Net, !Fs) { … }
+fn parse(input: Tainted<Str>) --[Net, !Fs]-> Record ? Error { … }
 ```
 
 "Promise → @" is now always right. Cleanest possible fix for Class C, tiny
@@ -498,7 +498,7 @@ predict its ctor; for an opaque stdlib type the user can't see the definition �
 still a doc lookup. ③ Moving `@Sanitizer`/`@Replayable` to `@` is only honest if
 they are statically *checked* like `@Pure`; if enforcement differs, the plane
 line re-blurs. ④ Two marker glyphs survive (`@` and `#`) — a beginner still
-learns which is which before the law pays off. ⑤ Effects keep both `#(…)` and
+learns which is which before the law pays off. ⑤ Effects keep both `--[…]->` and
 `@Pure` touching one lattice (Class C not fully closed) — needs a follow-on
 consolidation (D-SHAPE8 below).
 
@@ -766,8 +766,8 @@ The principle guides; it does not prescribe.
 | **D-SHAPE5a** | Manifest *structure* under the law: `overlay dev`→`module overlay.dev`, resolve bare `executable{}`, **fix the U8-vs-U10 nesting contradiction**, one block/colon rule | D-SHAPE1, D-SHAPE3a | manifest F1, F2, F7, F8 |
 | **D-SHAPE5b** | **Rework the HELD D-ECO wave under the law**, per D-ECO cluster (Recipe/Wrap/Meta/Banner/Tool/alias/…) — each cluster stays its own decision; includes the `Recipe.cargo`→`.Cargo` casing flip | D-SHAPE1, D-SHAPE3a, D-SHAPE5a | manifest F3; supersedes D-ECO2–19 |
 | **D-SHAPE6** | CLI grammar law + **fix the spec/impl drift** (`jet inspect …`/`jet registry …` vs shipped flat verbs): pick noun-verb or ratify-flat-and-amend-spec, unify `jetos`/`jetpack` depth, retire self-relabeling aliases | D-SHAPE1 | manifest F5, F6 |
-| **D-SHAPE7** | External-ref sigil unification across `provider@target`, version-pin, CLI `:` ref, and the three `D-MONOREF1` member forms. **Scope guard: must NOT disturb `[T#N]`, `#(E)`, or the `.{`/`.[` family (bright spots) — the chosen sigil is named and bounded** | D-SHAPE1 | manifest F4, F9; core F8 |
-| **D-SHAPE8** | Effects-plane consolidation: reconcile `@Pure` vs `#(…)` into one signature effect-annotation spelling | D-SHAPE1, D-SHAPE2 | core F7 |
+| **D-SHAPE7** | External-ref sigil unification across `provider@target`, version-pin, CLI `:` ref, and the three `D-MONOREF1` member forms. **Scope guard: must NOT disturb `[T#N]`, `--[E]->`, or the `.{`/`.[` family (bright spots) — the chosen sigil is named and bounded** | D-SHAPE1 | manifest F4, F9; core F8 |
+| **D-SHAPE8** | Effects-plane consolidation: reconcile `@Pure` vs `--[…]->` into one signature effect-annotation spelling | D-SHAPE1, D-SHAPE2 | core F7 |
 | **D-SHAPE9** | Invokable-entry law: reserved `fn run/dev/build` names vs `@Task fn` marker — pick one mechanism | D-SHAPE1, D-SHAPE2 | core F14 |
 | **SHAPE-HYGIENE1** *(card, no owner gate)* | Registry doc casing (`#layout`→`@Layout`), ambiguous planning-number citations → canonical headers, historical `W`-prefix diagnostics note — pure correction, can start now | — | core F12; manifest F10 |
 

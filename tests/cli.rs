@@ -2553,7 +2553,7 @@ func main() {}
 
     fs::write(
         dir.join("main.jet"),
-        "use go.handles as handles\n\nfn run() #(Go, Io) {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
+        "use go.handles as handles\n\nfn run() --[Go, Io]-> {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
     )
     .unwrap();
     let run = Command::new(jet())
@@ -2626,7 +2626,7 @@ fn java_bind_embeds_jvm_handles_methods_and_exceptions() {
     assert!(dir.join(".jet/bindings/java/counter.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use java.counter as counter
 
-fn run() #(Java, Io) {
+fn run() --[Java, Io]-> {
     handle :: counter.new(40) ?? panic("JVM create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
@@ -2665,7 +2665,7 @@ fn dotnet_bind_embeds_coreclr_state_calls_and_errors(){
     assert!(dir.join(".jet/bindings/cs/libjet_cs_counter.a").is_file());assert!(dir.join(".jet/bindings/cs/counter.dotnet/JetBinding.dll").is_file());assert!(dir.join(".jet/bindings/cs/counter.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use cs.counter as counter
 
-fn run() #(DotNet, Io) {
+fn run() --[DotNet, Io]-> {
     handle :: counter.new(40) ?? panic("CoreCLR create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
@@ -2689,7 +2689,7 @@ fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     assert!(dir.join(".jet/bindings/tcl/eda.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use tcl.eda as tcl
 
-fn run() #(Tcl, Io) {
+fn run() --[Tcl, Io]-> {
     session :: tcl.open() ?? panic("Tcl open failed")
     print(tcl.eval_int(session, "incr counter 2") ?? -1)
     print(tcl.eval_int(session, "incr counter 1") ?? -1)
@@ -2740,7 +2740,7 @@ end Geodesy;
     assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use ada.geodesy as geo
 
-fn run() #(Ada, Io) {
+fn run() --[Ada, Io]-> {
     print(geo.double_lat(95.0) ?? -1.0)
     print(geo.calls(0) ?? -1)
     print(geo.double_lat(21.0) ?? -1.0)
@@ -2791,7 +2791,7 @@ end.
     let cache=dir.join(".jet/bindings/pascal");assert!(cache.join("libjet_pascal_inventory.a").is_file());assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());assert!(cache.join("inventory.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use pascal.inventory as inv
 
-fn run() #(Pascal, Io) {
+fn run() --[Pascal, Io]-> {
     print(inv.add_scalar(20, 22))
     handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
     print(inv.counter_add(handle, 2) ?? -1)
@@ -2824,7 +2824,7 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     if Command::new("dart").arg("--version").output().is_err(){return}
     let dir=isolated_cwd("dart_bind_round_trip");let contract=dir.join("callbacks.dart");let compute=dir.join("compute.jet");
     fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n").unwrap();
-    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) #(Dart) -> Int {\n    return callbacks.dartDouble(value) ?? -1\n}\n").unwrap();
+    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) --[Dart]-> Int {\n    return callbacks.dartDouble(value) ?? -1\n}\n").unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","dart"]).arg(&contract).args(["--jet",compute.to_str().unwrap(),"--pkg","callbacks"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(bind.status.success(),"Dart bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/dart");let native=cache.join(if cfg!(target_os="macos"){"libjet_dart_callbacks_compute.dylib"}else if cfg!(target_os="windows"){"libjet_dart_callbacks_compute.dll"}else{"libjet_dart_callbacks_compute.so"});
@@ -2863,7 +2863,7 @@ function Sleep { param($InputObject) Start-Sleep -Seconds 30; return $InputObjec
     fs::write(dir.join("main.jet"),r#"use pwsh.ops as ops
 use core.encoding.json as json
 
-fn run() #(PowerShell, Io) {
+fn run() --[PowerShell, Io]-> {
     session :: ops.open() ?? panic("PowerShell open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
     first :: ops.Get_Stateful(session, ~input, 5000) ?? panic("first call failed")

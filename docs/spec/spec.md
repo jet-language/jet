@@ -603,7 +603,7 @@ impl Circle {
   (D-CASING1).
 - **Applied rules (D-SHAPE2/D-ATTR2):** `@Rule` or `@[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
-  arguments when arguments exist. `@Pure fn` is a prefix marker; `comptime`
+  arguments when arguments exist. An explicit empty effect row is `--[]->`; `comptime`
   stays a prefix keyword.
 - **Statement switch attributes (D-CANVASSTATE1):** `@Off <stmt>` parses and
   type-checks one statement, including block-shaped statements, then emits no
@@ -2277,7 +2277,7 @@ body exercises — touching the network, the filesystem, the clock, and so on.
 The set is **inferred**, never declared by default, **propagated along calls**
 (a caller's set includes every callee's set), and **fully erased in codegen**
 (I3) — effects are a compile-time proof, with no runtime value, handler, or
-monad. A `@Pure fn` is exactly the function whose inferred set is empty.
+monad. A `fn … --[]->` is exactly the function whose inferred set is empty.
 
 ### The effect vocabulary
 
@@ -2378,39 +2378,37 @@ The current Core floor is headless and deterministic: `game.Scene.new`,
 `game.run(scene, replay: replay)` produce a stable transcript without renderer,
 audio, editor, or file-backend dependencies.
 
-### Declaring a boundary — `#(…)` on the signature
+### Declaring a boundary — effects inside the arrow
 
-A function may pin an **upper bound** on its effects by writing `#(E1, E2, …)`
-on its signature, between the parameter list and the return arrow:
+A function may pin an **upper bound** on its effects by writing
+`--[E1, E2, …]->` between its parameter list and return type:
 
 ```ebnf
-fn_effects = "fn" ident "(" params ")" [ "#(" [ effect { "," effect } ] ")" ]
-             [ "->" type ] block ;
+fn_effects = "fn" ident "(" params ")"
+             [ ( "--[" [ effect { "," effect } ] "]->" | "->" ) [ type ] ] block ;
 ```
 
 ```jet
-fn load(path: String) #(Fs) -> String {
+fn load(path: String) --[Fs]-> String {
     return core.files.read(path)?;     // OK: Fs ⊆ {Fs}
 }
 ```
 
 The compiler infers the body's real effect set and checks it is a **subset** of
 the declared bound. An effect the body uses that the bound omits is **E0740**,
-naming the effect, the call that introduced it, and the declared set. `#(…)` is
+naming the effect, the call that introduced it, and the declared set. The row is
 an assertion the author makes a contract — the inferred set may be *smaller*
 than the bound (the bound is a ceiling, not an exact set), but never larger.
 
-`@Pure fn` is the same contract with an empty bound: any effect at all is a
+`--[]->` is the same contract with an empty bound: any effect at all is a
 purity violation (reported as **E3401**, the established purity diagnostic).
-Writing `@Pure fn f() #(Fs)` — a non-empty bound on a `@Pure` function — is a
-contradiction, **E0745**.
 
-Effects are erased: `#(Fs)`, `@Pure`, and an unannotated function with the same
+Effects are erased: `--[Fs]->`, `--[]->`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
 ### Restricting a region — `@Caps(…) { … }`
 
-Where `#(…)` bounds a whole function, `@Caps(…) { … }` restricts a **block**.
+Where `--[…]->` bounds a whole function, `@Caps(…) { … }` restricts a **block**.
 Inside the region, the only effects allowed — directly or through any call it
 reaches — are the ones listed; anything else is **E0741**. It is a hard local
 ceiling, not a grant: the effects still happen and still count toward the
@@ -2443,7 +2441,7 @@ zero-syntax default:
 ```jet
 fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x); }
 
-fn run() #(Io) {
+fn run() --[Io]-> {
     apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {Io}
 }
 ```
@@ -2456,16 +2454,16 @@ fn run() #(Io) {
   call, so it defaults to the **maximal** effect set — sound, conservative.
 
 Two expert levers refine this (ratified D-EFF2, additive to the default above):
-`@Pure fn(…)` / `#(Net) fn(…)` **parameter types** demand/bound a callback
-(passing one with effects outside the bound is **E0744**), and `#(via f)` on a
+`fn(…) --[]->` / `fn(…) --[Net]->` **parameter types** demand/bound a callback
+(passing one with effects outside the bound is **E0747**), and `--[via f]->` on a
 signature publishes a tight pass-through that holds even when the value escapes.
 The conservative default is correct without them; they trade syntax for
 precision.
 
 ### Effects on trait methods (D-EFF3)
 
-A trait method may declare an effect upper bound — `@Pure fn hash(self)` (the
-empty set) or `fn render(self) #(Gpu)`. The bound is two things at once:
+A trait method may declare an effect upper bound — `fn hash(self) --[]->` (the
+empty set) or `fn render(self) --[Gpu]->`. The bound is two things at once:
 
 - **The impl obligation.** Every implementation's inferred effects must fit
   inside the bound, or it is **E0742**. So a trait can promise "all `hash`
@@ -2476,7 +2474,7 @@ empty set) or `fn render(self) #(Gpu)`. The bound is two things at once:
 
 ```jet
 trait Shape {
-    @Pure fn area(self) -> Int;   // every impl must be pure
+    fn area(self) --[]-> Int;   // every impl must be pure
 }
 impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }   // OK — pure
@@ -2533,7 +2531,7 @@ if k == F(n)    { print("F{n}") }
 Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
 
 **Restrictions:**
-- E3401: `live { … }` is impure — rejected in a `@Pure fn`.
+- E3401: `live { … }` is impure — rejected in a `fn … --[]->`.
 - E3301: rejected in `--freestanding` builds (no OS terminal device).
 - REPL: rejected in interactive mode.
 
@@ -3224,7 +3222,7 @@ target_triple)` records the target identity; `b.probe(name, kind, value)`
 supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
-fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
     @Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?
