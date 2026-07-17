@@ -116,7 +116,7 @@ renumbered, and no new `W` code may be allocated.
 | E0017 | parse | *retired by D-S14-PAUSE* (was: `read` teaching) |
 | E0018 | parse | *retired by D-S14-PAUSE* (was: `write` teaching) |
 | E0019 | parse | *retired in M6* (was: `import` staged; S16 shipped) |
-| E0020 | parse | *retired by D-S14-PAUSE* (was: foreign optional teaching) |
+| E0020 | parse | *retired by D-SHAPE3b* (foreign Optional/Result spellings use ordinary current errors) |
 | E0021 | parse | *retired by D-S14-PAUSE* (was: `class` teaching) |
 | E0022 | parse | *retired by D-S14-PAUSE* (was: `trait`/`interface` teaching) |
 | E0023 | parse | *retired by D-S14-PAUSE* (was: `case`/`default` teaching) |

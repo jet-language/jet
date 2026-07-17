@@ -3,25 +3,25 @@
 // if the error actually propagates. Errors are plain text, so each
 // `.context()` crossed on the way out prepends to the same chain.
 fn read_raw() -> String ? {
-    return err("file not found")
+    return Err("file not found")
 }
 
 fn parse_config(path: String) -> String ? {
     raw :: read_raw()?
-    return ok(raw)
+    return Ok(raw)
 }
 
 fn load_config(path: String) -> String ? {
     cfg :: parse_config(path).context("loading config {path}")?
-    return ok(cfg)
+    return Ok(cfg)
 }
 
 fn run() {
     if load_config("app.toml") == {
-        ok(v) -> {
+        Ok(v) -> {
             print("ok: {v}")
         }
-        err(e) -> {
+        Err(e) -> {
             print("failed: {e@Debug}")
         }
 

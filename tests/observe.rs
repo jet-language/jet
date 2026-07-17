@@ -443,22 +443,22 @@ enum ParseError {
 }
 fn parse_age(raw: String) -> Int ? ParseError {
     if raw == "" {
-        return err(ParseError.Empty)
+        return Err(ParseError.Empty)
     }
-    return ok(42)
+    return Ok(42)
 }
 fn load(raw: String) -> Int ? ParseError {
     n :: parse_age(raw)?
-    return ok((n * 2))
+    return Ok((n * 2))
 }
 fn double(raw: String) -> Int ? ParseError {
     n :: load(raw)?
-    return ok((n * 2))
+    return Ok((n * 2))
 }
 fn run() {
     if double("") == {
-        ok(n) -> { print(n) }
-        err(e) -> { print("failed") }
+        Ok(n) -> { print(n) }
+        Err(e) -> { print("failed") }
     }
 }
 "#;

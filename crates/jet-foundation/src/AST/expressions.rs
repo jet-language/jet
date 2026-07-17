@@ -365,9 +365,9 @@ pub enum Expr {
         pattern: Pattern,
         span: Span,
     },
-    /// S34: `ok(expr)` — success value for `T ? E`.
+    /// S34: `Ok(expr)` — success value for `T ? E`.
     Ok(Box<Expr>, Span),
-    /// S34: `err(expr)` — failure value for `T ? E`.
+    /// S34: `Err(expr)` — failure value for `T ? E`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
     /// S7/S80/D-ERR-CONV: `expr?` — propagates failure.

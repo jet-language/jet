@@ -29,6 +29,18 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
     }
 }
 
+fn leading_dot_variant(kind: &TokKind) -> Option<String> {
+    match kind {
+        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+            Some(name.clone())
+        }
+        TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
+        TokKind::KwOk => Some(Syntax::LIT_OK.to_string()),
+        TokKind::KwErr => Some(Syntax::LIT_ERR.to_string()),
+        _ => None,
+    }
+}
+
 impl<'a> Parser<'a> {
         /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
         pub(super) fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -456,11 +468,13 @@ impl<'a> Parser<'a> {
                 // value position. An uppercase ident after `.` with no receiver is a
                 // leading-dot enum literal. type_name="" is the unresolved sentinel;
                 // sema fills it in via expected_type.
-                TokKind::Dot if matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase())) =>
+                TokKind::Dot if leading_dot_variant(&self.peek2().kind).is_some() =>
                 {
                     let dot_start = self.bump().span.start; // consume `.`
-                    let (mut variant, mut variant_span) =
-                        self.expect_ident("after `.` in a leading-dot enum variant")?;
+                    let variant_token = self.bump();
+                    let mut variant = leading_dot_variant(&variant_token.kind)
+                        .expect("leading-dot variant guard and token must agree");
+                    let mut variant_span = variant_token.span;
                     // D-TAG1: a dotted leaf path (`.Fire.Burn`) — further uppercase
                     // segments extend the variant path. `.{` never matches (its second
                     // token is `{`, not an ident), so named-payload construction below

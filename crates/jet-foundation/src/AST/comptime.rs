@@ -509,12 +509,12 @@ impl CtValue {
             }
             CtValue::None(_) => out.push_str("None"),
             CtValue::ResOk(v) => {
-                out.push_str("ok(");
+                out.push_str("Ok(");
                 v.render_pretty_inner(out, depth);
                 out.push(')');
             }
             CtValue::ResErr(e) => {
-                out.push_str("err(");
+                out.push_str("Err(");
                 e.render_pretty_inner(out, depth);
                 out.push(')');
             }

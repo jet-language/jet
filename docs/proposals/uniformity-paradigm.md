@@ -59,7 +59,7 @@ time.clock(42)                 // lowercase module factory D-DET1
 vault.rotting_new(v, ttl, clk) // verb-compound module fn stdlib finding 1
 X25519SecretKey.generate()     // 5th verb "generate"     stdlib finding 1
 Recipe.cargo(lock: "…")        // namespaced fn (sum-ish) D-ECO2
-ok(v) / err(e)                 // lowercase result ctors  S34
+Ok(v) / Err(e)                 // PascalCase Result variants  D-SHAPE3b
 Val(x) / None                  // PascalCase option ctors D-OPT-SPELL1
 ```
 
@@ -257,7 +257,7 @@ Baseline **(b)**–**(f)** as they read today:
 ```jet
 // (b)  @Pure @MustUse  @Replayable @Sanitizer
 //      fn parse(input: Tainted<Str>) -> Record ? Error #(Net, !Fs) { … }
-// (c)  Deque.new()   Set.from([1,2,3])   time.clock(42)   Wrap.{…}   BigInt(100)   ok(v)/Val(x)
+// (c)  Deque.new()   Set.from([1,2,3])   time.clock(42)   Wrap.{…}   BigInt(100)   Ok(v)/Val(x)
 // (d)  struct Point { x: Int, y: Int }   alias Pair<T> = (T,T)
 //      UserId :: distinct Int            state Door { Open, Closed }
 // (e)  if x == { .A -> …, .B -> … }       loop i in 0..10 step 2 { … }
@@ -432,7 +432,7 @@ Set.from([1,2,3])    // convert existing   (rule: from existing → from)
 Clock.new(42)        // was time.clock(42) (module factory retired)
 Wrap.{ … }           // product literal
 Int.from(bigval)     // was BigInt(100) narrowing → from
-Option.Some(x) / Option.None   // was Val/None — sum variants, uniform casing
+Option.Val(x) / Option.None    // D-SHAPE3b owner substitution: never Some
 ```
 
 **(d) type decls** — sub-rule: bodied types use blocks, aliases use `=`:

@@ -85,10 +85,10 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
                     .collect::<Vec<_>>()
                     .join(", ");
                 source.push_str(&format!(
-                    "if (~tree) == .Object(entries) {{ loop key, value in entries {{ if ![{keys}].contains(key) {{ return err(DecodeError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
+                    "if (~tree) == .Object(entries) {{ loop key, value in entries {{ if ![{keys}].contains(key) {{ return Err(DecodeError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
                 ));
             }
-            source.push_str(&format!("return ok({target}.{{\n"));
+            source.push_str(&format!("return Ok({target}.{{\n"));
             for f in s.fields.iter().filter(|f| f.computed.is_none()) {
                 let value = if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP) {
                     serde_source_default(f).unwrap_or_else(|| serde_source_zero(&f.ty))
@@ -218,7 +218,7 @@ fn expand_builtin_enum_serde(
                 match &v.payload {
                     crate::AST::VariantPayload::Unit => {
                         let wire = serde_enum_variant_key(v);
-                        source.push_str(&format!("if (~tree) == .Text(variant_name) {{ if variant_name == {wire:?} {{ return ok({target}.{}) }} }}\n", v.name));
+                        source.push_str(&format!("if (~tree) == .Text(variant_name) {{ if variant_name == {wire:?} {{ return Ok({target}.{}) }} }}\n", v.name));
                     }
                     _ => {
                         let wire = serde_enum_variant_key(v);
@@ -227,7 +227,7 @@ fn expand_builtin_enum_serde(
                         match &v.payload {
                             crate::AST::VariantPayload::Single(t, _) => {
                                 let decoded = format!("decoded_{variant_index}");
-                                object_arms.push_str(&format!("{decoded} := {candidate}.decode<{}>()\nif {decoded} == ok(decoded_value) {{ return ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
+                                object_arms.push_str(&format!("{decoded} := {candidate}.decode<{}>()\nif {decoded} == Ok(decoded_value) {{ return Ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
                             }
                             crate::AST::VariantPayload::Named(_) => {
                                 object_arms.push_str(&format!("{}\n", serde_enum_decode_return(&target, v, &candidate)));
@@ -239,7 +239,7 @@ fn expand_builtin_enum_serde(
             }
             source.push_str(&object_arms);
         }
-        source.push_str("return err(DecodeError.{ path: \"\", reason: \"no matching enum variant\" })\n}\n}\n");
+        source.push_str("return Err(DecodeError.{ path: \"\", reason: \"no matching enum variant\" })\n}\n}\n");
     }
     let trigger_span = e.derives.iter()
         .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
@@ -362,16 +362,16 @@ fn serde_enum_named_pairs(fs: &[crate::AST::VariantField]) -> String {
 }
 
 fn serde_enum_decode_attempt(target: &str, v: &crate::AST::Variant, src: &str, guarded: bool) -> String {
-    if guarded { format!("if {src}.decode<{}>() == ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src)) }
+    if guarded { format!("if {src}.decode<{}>() == Ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src)) }
     else { serde_enum_decode_return(target, v, src) }
 }
 
 fn serde_enum_decode_return(target: &str, v: &crate::AST::Variant, src: &str) -> String {
     let cons = serde_enum_decode_constructor(target, v, src);
     if matches!(v.payload, crate::AST::VariantPayload::Named(_)) {
-        format!("decoded_variant: {target} := {cons}\nreturn ok(decoded_variant)")
+        format!("decoded_variant: {target} := {cons}\nreturn Ok(decoded_variant)")
     } else {
-        format!("return ok({cons})")
+        format!("return Ok({cons})")
     }
 }
 
@@ -512,8 +512,8 @@ fn serde_ct_source(value: &crate::AST::CtValue) -> Option<String> {
         }
         CtValue::Some(value) => format!("Val({})", serde_ct_source(value)?),
         CtValue::None(_) => "None".to_string(),
-        CtValue::ResOk(value) => format!("ok({})", serde_ct_source(value)?),
-        CtValue::ResErr(value) => format!("err({})", serde_ct_source(value)?),
+        CtValue::ResOk(value) => format!("Ok({})", serde_ct_source(value)?),
+        CtValue::ResErr(value) => format!("Err({})", serde_ct_source(value)?),
         CtValue::Unit | CtValue::Closure(_) => return None,
     })
 }

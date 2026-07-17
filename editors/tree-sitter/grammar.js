@@ -16,7 +16,7 @@ const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "continue", "defer", "else", "if
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Pure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "const", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
-const JET_HIGHLIGHT_LITERAL = ["None", "Val", "err", "false", "ok", "true"];
+const JET_HIGHLIGHT_LITERAL = ["Err", "None", "Ok", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "Char", "Computed", "Csv", "DataTree", "DbValue", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "JSON", "JSONError", "Json", "Key", "Lru", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "SortedSet", "Stream", "String", "Subscription", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "Yaml"];
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["Abi", "Add", "Bench", "Bindgen", "Caps", "Cli", "Codable", "CodableAsBase", "Comparable", "Context", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Doc", "Encode", "Every", "Extern", "FFI", "Flatten", "Grant", "Html", "Impure", "Inline", "InlineAlways", "Invariant", "Layout", "Live", "Max", "Meta", "Min", "Mul", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Pure", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Sanitizer", "Shield", "SingleUse", "Skip", "Sql", "State", "Summarize", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "inline", "static"];
@@ -754,7 +754,7 @@ module.exports = grammar({
     float_literal: (_) => token(/[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9]+)?/),
     boolean_literal: (_) => choice("true", "false"),
     null_literal: (_) => "None",
-    ok_err_literal: (_) => choice("ok", "err"),
+    ok_err_literal: (_) => choice("Ok", "Err"),
     char_literal: (_) => token(seq("'", /[^'\\]|\\./, "'")),
 
     string_literal: ($) =>
@@ -792,7 +792,7 @@ module.exports = grammar({
 
     identifier: (_) => /[a-z_][a-zA-Z0-9_]*/,
 
-    // `name(args)`, `Type(args)` constructor / distinct wrap, and `ok(x)`/`err(e)`
+    // `name(args)`, `Type(args)` constructor / distinct wrap, and `Ok(x)`/`Err(e)`
     // result constructors (S34) which also appear as dispatch-arm patterns.
     call_expr: ($) =>
       prec(

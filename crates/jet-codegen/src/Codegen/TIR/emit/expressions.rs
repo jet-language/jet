@@ -999,7 +999,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             line,
             expected_type
         ),
-        // c109 Phase 8: `ok(x)` → `Ok(x)` / `err(e)` → `Err(e)`. Mirrors the AST
+        // c109 Phase 8: `Ok(x)` → `Ok(x)` / `Err(e)` → `Err(e)`. Mirrors the AST
         // `Expr::Ok`/`Expr::Err`.
         TExprKind::Ok(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),
         TExprKind::Err(inner) => format!("Err({})", emit_tir_expr(inner, cx)),

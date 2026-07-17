@@ -23,26 +23,26 @@ impl ParseErr -> AppErr { return AppErr.Parse(self) }
 
 fn read_file(path: String) -> String ? FileErr {
     if path == "" {
-        return err(FileErr.NotFound("(empty path)"))
+        return Err(FileErr.NotFound("(empty path)"))
     }
-    return ok("42")
+    return Ok("42")
 }
 
 fn parse_int(s: String) -> Int ? ParseErr {
     if s == "" {
-        return err(ParseErr.Empty)
+        return Err(ParseErr.Empty)
     }
     if s == "x" {
-        return err(ParseErr.BadInt(s))
+        return Err(ParseErr.BadInt(s))
     }
-    return ok(42)
+    return Ok(42)
 }
 
 // Both `?` calls cross error-type boundaries via the declared conversions.
 fn load(path: String) -> Int ? AppErr {
     raw :: read_file(path)?  // FileErr  -> AppErr.File  (declared)
     port :: parse_int(raw)?  // ParseErr -> AppErr.Parse (declared)
-    return ok(port)
+    return Ok(port)
 }
 
 fn run() {
@@ -51,10 +51,10 @@ fn run() {
     print(n)
     // Trigger FileErr -> AppErr conversion via ?
     if load("") == {
-        ok(v) -> {
+        Ok(v) -> {
             print(v)
         }
-        err(e) -> {
+        Err(e) -> {
             print("error")
         }
         else -> {

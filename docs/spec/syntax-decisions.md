@@ -248,8 +248,8 @@ typestate transition graph itself — no separate surface (D-ROLE1).
 ### Patterns & matching
 
 **S31 — Pattern tests**: `==` with a pattern RHS when the LHS is an enum or
-`T?` — `if s == Rect(w, h)`, `x == None` — yields Bool. Patterns nest to any
-depth (`r == ok(Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
+`T?` — `if s == Rect(w, h)`, `x == .None` — yields Bool. Patterns nest to any
+depth (`r == .Ok(Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
 in scope for the rest of the same condition. No `is`, no Rust `match`.
 
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns take a
@@ -342,14 +342,14 @@ a compile error with a convert fix-it.
 
 **S21 — Float display**: a `Float` always prints a decimal part (`-5.0`).
 
-**S32 / D-OPT-SPELL1 — Option** *(ratified 2026-07-04)*: `T?`; `Val(expr)`
-present, `None` absent; no nullable plain `T`. `Val` is a PascalCase
-constructor call (not a keyword — same non-keyword-identifier mechanism the
-old `value` spelling used); `None` is a real keyword. Old `value`/`null` are
-retired (greenfield: an ordinary unknown-identifier/parse error, no teaching
-text). `Some`/`nil`/`none`/`some` remain foreign guesses for E0020, now
-pointing at `Val`/`None`. **D-RESULT-OPTION-CANON1**: `T?` always means
-Optional; fallible is spaced `T ? E` / `T ?` (S34).
+**S32 / D-OPT-SPELL1 / D-SHAPE3b — Optional and Result variants** *(D-SHAPE3b
+ratified 2026-07-14 with owner substitution `Val`, not `Some`)*: `T?` uses
+`Val(expr)` / `None`; `T ? E` uses `Ok(expr)` / `Err(expr)`. When the wrapper
+type is known, `.Val` / `.None` / `.Ok` / `.Err` are the contextual forms,
+including patterns. `Some` is never a spelling or alias. Old lowercase result
+forms and foreign optional spellings receive ordinary current name/parse
+errors; E0020's teaching path is retired. **D-RESULT-OPTION-CANON1**: `T?`
+always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
 
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
 reserved for collections/indexing/shorthands. No call-site type args in

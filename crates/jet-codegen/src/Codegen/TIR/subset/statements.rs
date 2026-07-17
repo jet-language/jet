@@ -408,7 +408,7 @@ pub(crate) fn forin_method_collection_in_subset(
 /// condition shapes via `if_pattern_test` (Source/Codegen/Statement.rs):
 ///  - a plain boolean expr → in-subset iff `expr_in_subset`, no bindings;
 ///  - an `x == null` test (`Pattern::Absent`) → `is_none`, subject in-subset, no bindings;
-///  - an optional-binding test (`value(b)`/`ok(b)`/`err(b)`) → if-let, subject in-subset,
+///  - an optional-binding test (`value(b)`/`Ok(b)`/`Err(b)`) → if-let, subject in-subset,
 ///    the binding `b` in scope. Variant/Or/Range patterns in an `if` condition stay on
 ///    the AST path (conservative — not covered here).
 pub(crate) fn if_cond_in_subset(
@@ -427,7 +427,7 @@ pub(crate) fn if_cond_in_subset(
     }
     // The optional-binding (if-let) form — only a DIRECT `PatternTest` (not the
     // `Binary(And, …)` shape `if_pattern_test` also admits, which we leave on the AST
-    // path). Covered patterns: `value(b)`/`ok(b)`/`err(b)` (single binding). Variant/
+    // path). Covered patterns: `value(b)`/`Ok(b)`/`Err(b)` (single binding). Variant/
     // Or/Range patterns are excluded (conservative).
     if let Expr::PatternTest {
         subject, pattern, ..
@@ -659,7 +659,7 @@ pub(crate) fn switch_in_subset(
         return true;
     }
     // Shape C (c109 Phase 8): a fallible/optional pattern match — every arm head is
-    // an `ok(b)`/`err(b)`/`value(b)`/`null` pattern over the subject. Lowers to a
+    // an `Ok(b)`/`Err(b)`/`value(b)`/`null` pattern over the subject. Lowers to a
     // Rust `match` over the subject's `Result`/`Option`, exactly like the enum-match
     // shape but with `Ok(..)`/`Err(..)`/`Some(..)`/`None` patterns. The subject must
     // be in-subset (checked above) and resolve to a `Result`/`Option` — but a covered
@@ -671,7 +671,7 @@ pub(crate) fn switch_in_subset(
         for a in arms {
             let pat = arm_fallible_pattern(cx, &a.cond, subject).expect("checked above");
             let mut body_locals = locals.clone();
-            // `ok(b)`/`err(b)`/`value(b)` bind one name; `null` binds nothing.
+            // `Ok(b)`/`Err(b)`/`value(b)` bind one name; `null` binds nothing.
             if let Some(b) = fallible_pattern_binding(&pat) {
                 body_locals.insert(b);
             }

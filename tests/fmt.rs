@@ -220,7 +220,7 @@ fn fmt_keeps_call_comment_outside_lambda_block() {
 #[test]
 fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
     let src = r#"fn parse_count(raw: String) -> Int? {
-    return err("empty");
+    return Err("empty");
 }
 "#;
     let out = jet::format_source(src).expect("fmt should parse default Error return");
@@ -532,6 +532,7 @@ fn fmt_preserves_leading_dot_enum_lit() {
     Red
     Blue
 }
+
 fn paint(c: Color) {
     print(c)
 }
@@ -555,6 +556,27 @@ fn run() {
         out, twice,
         "leading-dot enum literal formatting must be idempotent"
     );
+}
+
+#[test]
+fn fmt_preserves_optional_result_variants() {
+    let src = r#"fn f(flag: Bool) -> Int ? String {
+    maybe: Int? :: .Val(1)
+    empty: Int? :: .None
+    if maybe == {
+        .Val(n) -> { print(n) }
+        .None -> { print(0) }
+    }
+    if flag { return .Ok(1) }
+    return .Err("no")
+}
+"#;
+    let once = jet::format_source(src).expect("variant forms should format");
+    for spelling in [".Val(1)", ".None", ".Val(n)", ".Ok(1)", ".Err(\"no\")"] {
+        assert!(once.contains(spelling), "formatter dropped `{spelling}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("variant output should re-format");
+    assert_eq!(once, twice, "variant formatting must be idempotent");
 }
 
 #[test]

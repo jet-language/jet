@@ -468,15 +468,6 @@ pub const FOREIGN_MATCH: &str = "match";
 /// (the keyword was `switch` before the 2026-06-15 rename).
 pub const FOREIGN_SWITCH: &str = "switch";
 
-/// S32 / D-OPT-SPELL1 (ratified 2026-07-04): foreign optional spellings for
-/// teaching error E0020. `None` is RETIRED from this list — it's the real
-/// absent spelling now, not a foreign guess. `Some`/`nil`/`none`/`some`
-/// remain wrong; all point learners at `Val`/`None`.
-pub const FOREIGN_SOME: &str = "Some";
-pub const FOREIGN_NIL: &str = "nil";
-pub const FOREIGN_NONE_LOWER: &str = "none";
-pub const FOREIGN_SOME_LOWER: &str = "some";
-
 /// S29 (ratified M3): `class` recognized only for teaching error E0021.
 pub const FOREIGN_CLASS: &str = "class";
 
@@ -524,9 +515,10 @@ pub const FOREIGN_OWNED: &str = "owned";
 /// S34 (legacy M4): old fallible type constructor, kept only for diagnostics.
 pub const TYPE_RESULT: &str = "Result";
 
-/// S34 (ratified M4): success / failure constructors for fallible `T ? E`.
-pub const LIT_OK: &str = "ok";
-pub const LIT_ERR: &str = "err";
+/// S34 / D-SHAPE3b: Result variants are `Ok` / `Err`, including `.Ok` / `.Err`
+/// when the expected result type is known.
+pub const LIT_OK: &str = "Ok";
+pub const LIT_ERR: &str = "Err";
 
 /// S35 (ratified M4; spelling updated by S71/D-SG6): the fallback operator,
 /// supplying a value, `return`, or `panic` when a `T?` is absent or a `T ? E`

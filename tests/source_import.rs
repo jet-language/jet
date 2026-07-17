@@ -131,7 +131,7 @@ fn source_import_rejects_unknown_language_and_does_not_follow_symlinks() {
     let root = workspace("hostile");
     fs::write(
         root.join("python/app/good.py"),
-        "def ok() -> int:\n    return 1\n",
+        "def Ok() -> int:\n    return 1\n",
     )
     .unwrap();
     let unknown = run(&root, &["import", "ruby", "python/app"]);

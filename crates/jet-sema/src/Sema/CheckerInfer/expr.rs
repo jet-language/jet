@@ -136,6 +136,51 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
+        // D-SHAPE3b: leading-dot Optional/Result variants are contextual forms.
+        // Rewrite them to the existing canonical AST nodes only when the expected
+        // wrapper type is known; every downstream pass then reuses one mechanism.
+        let contextual_variant = match (&mut *e, self.expected_type.as_ref()) {
+            (
+                Expr::EnumLit { type_name, variant, args, span },
+                Some(Type::Option(_)),
+            ) if type_name.is_empty() && variant == Syntax::LIT_NULL && args.is_empty() => {
+                Some(Expr::Absent(*span))
+            }
+            (
+                Expr::EnumLit { type_name, variant, args, span },
+                Some(Type::Option(_)),
+            ) if type_name.is_empty() && variant == Syntax::LIT_VALUE && args.len() == 1 => {
+                match args.pop().unwrap() {
+                    EnumLitArg::Positional(inner) => Some(Expr::Present(Box::new(inner), *span)),
+                    named @ EnumLitArg::Named { .. } => {
+                        args.push(named);
+                        None
+                    }
+                }
+            }
+            (
+                Expr::EnumLit { type_name, variant, args, span },
+                Some(Type::Result { .. }),
+            ) if type_name.is_empty()
+                && matches!(variant.as_str(), name if name == Syntax::LIT_OK || name == Syntax::LIT_ERR)
+                && args.len() == 1 =>
+            {
+                let is_ok = variant == Syntax::LIT_OK;
+                match args.pop().unwrap() {
+                    EnumLitArg::Positional(inner) if is_ok => Some(Expr::Ok(Box::new(inner), *span)),
+                    EnumLitArg::Positional(inner) => Some(Expr::Err(Box::new(inner), *span)),
+                    named @ EnumLitArg::Named { .. } => {
+                        args.push(named);
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        if let Some(replacement) = contextual_variant {
+            *e = replacement;
+        }
+
         // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
         // expected-type context says Map, rewrite the node to an empty
         // `Expr::MapLit` here so every downstream pass (codegen, comptime,

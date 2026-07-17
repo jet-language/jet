@@ -85,14 +85,14 @@ enum ParseError {
 
 fn parse_age(raw: String) -> Int ? ParseError {
     if raw == "" {
-        return err(ParseError.Empty)
+        return Err(ParseError.Empty)
     }
-    return ok(7)
+    return Ok(7)
 }
 
 fn double_age(raw: String) -> Int ? ParseError {
     n :: parse_age(raw)?
-    return ok(n * 2)
+    return Ok(n * 2)
 }
 
 // --- traits & impl -------------------------------------------------------
@@ -253,10 +253,10 @@ fn run() {
     print("day: {kind}")
     // errors
     if double_age("42") == {
-        ok(n) -> {
+        Ok(n) -> {
             print("ok: {n}")
         }
-        err(e) -> {
+        Err(e) -> {
             print("err: {e}")
         }
 

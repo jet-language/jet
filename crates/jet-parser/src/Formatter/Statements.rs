@@ -577,7 +577,7 @@ impl<'a> Fmt<'a> {
             } => {
                 // D-IF3: a pattern arm head is bare — the `==` marker on the `if`
                 // already binds it to the subject, so the head prints just the
-                // pattern (`Active(id)`, `ok(n)`, `null`), no repeated `subject ==`.
+                // pattern (`Active(id)`, `Ok(n)`, `null`), no repeated `subject ==`.
                 let _ = lhs;
                 self.fmt_pattern(pattern);
             }

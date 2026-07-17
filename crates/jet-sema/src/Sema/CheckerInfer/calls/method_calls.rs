@@ -1479,7 +1479,7 @@ impl<'a> Checker<'a> {
                             "E0511",
                             "`Expiring.force` bypasses expiry checking".to_string(),
                             "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly (D-TTLVAL1)".to_string(),
-                            "use `match item.get(clock) { .ok(v) -> …; .err(Expired) -> … }` instead".to_string(),
+                            "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
                             Some(span),
                         ));
                     }
@@ -1502,7 +1502,7 @@ impl<'a> Checker<'a> {
                             "E0511",
                             "`Rotting.force` bypasses expiry checking".to_string(),
                             "rotting secrets must use fallible `get(clock)` so expired access zeroizes storage (D-TTLVAL1, I1)".to_string(),
-                            "use `match secret.get(clock) { .ok(v) -> …; .err(Expired) -> … }` instead".to_string(),
+                            "use `match secret.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
                             Some(span),
                         ));
                     }

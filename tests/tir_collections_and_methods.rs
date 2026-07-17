@@ -401,16 +401,16 @@ enum ParseError {
 }
 fn parse_age(raw: Int) -> Int ? ParseError {
     if raw == 0 {
-        return err(ParseError.Empty)
+        return Err(ParseError.Empty)
     }
     if raw == 1 {
-        return err(ParseError.BadDigit(raw))
+        return Err(ParseError.BadDigit(raw))
     }
-    return ok((raw * 2))
+    return Ok((raw * 2))
 }
 fn load(raw: Int) -> Int ? ParseError {
     n :: parse_age(raw)?
-    return ok((n + 1))
+    return Ok((n + 1))
 }
 fn run() {
     a :: load(21) ?? 0
@@ -421,8 +421,8 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_fallible", src);
     assert_eq!(code, 0);
-    // load(21): parse_age→ok(42), n=42, ok(43); ?? → 43.
-    // load(0):  parse_age→err(Empty), ? propagates Err; ?? → 99.
+    // load(21): parse_age→Ok(42), n=42, Ok(43); ?? → 43.
+    // load(0):  parse_age→Err(Empty), ? propagates Err; ?? → 99.
     assert_eq!(stdout, "43\n99\n");
 }
 
@@ -435,9 +435,9 @@ fn or_fallback_return_form() {
     let src = "\
 fn checked(x: Int) -> Int ? Error {
     if x == 0 {
-        return err(\"zero\")
+        return Err(\"zero\")
     }
-    return ok((100 / x))
+    return Ok((100 / x))
 }
 fn safe(x: Int) -> Int {
     return checked(x) ?? return -1
@@ -449,7 +449,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_or_return", src);
     assert_eq!(code, 0);
-    // safe(4): checked→ok(25), ?? → 25. safe(0): checked→err, ?? return -1.
+    // safe(4): checked→Ok(25), ?? → 25. safe(0): checked→err, ?? return -1.
     assert_eq!(stdout, "25\n-1\n");
 }
 
@@ -690,24 +690,24 @@ fn fallible_when_match() {
     let src = "\
 fn classify(x: Int) -> Int ? Error {
     if x == 0 {
-        return err(\"bad\")
+        return Err(\"bad\")
     }
-    return ok((x + 10))
+    return Ok((x + 10))
 }
 fn run() {
     if classify(5) == {
-        ok(n) -> {
+        Ok(n) -> {
             print(n)
         }
-        err(e) -> {
+        Err(e) -> {
             print(e)
         }
     }
     if classify(0) == {
-        ok(n) -> {
+        Ok(n) -> {
             print(n)
         }
-        err(e) -> {
+        Err(e) -> {
             print(e)
         }
     }

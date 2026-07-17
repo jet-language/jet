@@ -604,7 +604,7 @@ pub enum TForInMethod {
 /// c109 Phase 22: an `if` condition, resolved at lowering from the AST node shape
 /// (`emit_if`/`if_pattern_test`, Source/Codegen/Statement.rs):
 ///  - `Plain` — a boolean expression: `if {cond} {`.
-///  - `IfLet` — an optional-binding test (`x == value(b)` → `Some(b)`, `ok(b)`/`err(b)`,
+///  - `IfLet` — an optional-binding test (`x == value(b)` → `Some(b)`, `Ok(b)`/`Err(b)`,
 ///    a variant `c == Active(id)`): `if let {pat_str} = {subj} {`. The bound name(s)
 ///    are in scope in the then-branch (the binding's resolved type is bound at lowering,
 ///    mirroring `add_pattern_bindings`).
@@ -762,7 +762,7 @@ pub enum TStmt {
     },
     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
     /// `cond` (c109 Phase 22) is a `TIfCond`: a plain boolean expr, an optional-binding
-    /// `if let <pat> = <subj>` (an `x == value(b)`/`ok(b)`/`err(b)`/variant condition),
+    /// `if let <pat> = <subj>` (an `x == value(b)`/`Ok(b)`/`Err(b)`/variant condition),
     /// or an `<subj>.is_none()` test (`x == null`) — reproducing `emit_if`'s three
     /// condition shapes (Source/Codegen/Statement.rs).
     /// `else_is_elseif` distinguishes the source `ElseBranch`: `true` for a real
@@ -1489,9 +1489,9 @@ pub enum TExprKind {
     Present(Box<TExpr>),
     /// c109 Phase 8: bare `null` — an absent optional (`None`).
     Absent,
-    /// c109 Phase 8: `ok(x)` — a success value of `T ? E` (`Ok(x)`).
+    /// c109 Phase 8: `Ok(x)` — a success value of `T ? E` (`Ok(x)`).
     Ok(Box<TExpr>),
-    /// c109 Phase 8: `err(e)` — a failure value of `T ? E` (`Err(e)`).
+    /// c109 Phase 8: `Err(e)` — a failure value of `T ? E` (`Err(e)`).
     Err(Box<TExpr>),
     /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
     /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a

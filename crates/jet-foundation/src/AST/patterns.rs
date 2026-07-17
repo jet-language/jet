@@ -37,12 +37,12 @@ pub enum Pattern {
         span: Span,
     },
     Absent(Span),
-    /// S34: `ok(binding)` pattern on `T ? E`.
+    /// S34: `Ok(binding)` pattern on `T ? E`.
     Ok {
         binding: String,
         span: Span,
     },
-    /// S34: `err(binding)` pattern on `T ? E`.
+    /// S34: `Err(binding)` pattern on `T ? E`.
     Err {
         binding: String,
         span: Span,

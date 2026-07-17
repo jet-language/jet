@@ -6,17 +6,17 @@ enum ParseError {
 
 fn parse_age(raw: String) -> Int ? ParseError {
     if raw == "" {
-        return err(ParseError.Empty)
+        return Err(ParseError.Empty)
     }
     if raw == "x" {
-        return err(ParseError.BadDigit(raw))
+        return Err(ParseError.BadDigit(raw))
     }
-    return ok(42)
+    return Ok(42)
 }
 
 fn load() -> Int ? ParseError {
     n :: parse_age("7")?
-    return ok((n * 2))
+    return Ok((n * 2))
 }
 
 fn run() {
@@ -25,10 +25,10 @@ fn run() {
     doubled :: load() ?? 0
     print(doubled)
     if parse_age("x") == {
-        ok(n) -> {
+        Ok(n) -> {
             print(n)
         }
-        err(e) -> {
+        Err(e) -> {
             print(e)
         }
 

@@ -929,15 +929,15 @@ fn load(id: U64) -> Record ? String {
         status = store.store_load(id, p)
         if status.to_int() == 0 { slot = ~p.* }
     }
-    if status.to_int() != 0 { return err("status {status}") }
-    return ok(slot)
+    if status.to_int() != 0 { return Err("status {status}") }
+    return Ok(slot)
 }
 
 fn run() {
     print((load(7) ?? panic("success expected")).id)
     if load(8) == {
-        ok(v) -> { print("unexpected {v.id}") }
-        err(e) -> { print(e) }
+        Ok(v) -> { print("unexpected {v.id}") }
+        Err(e) -> { print(e) }
     }
 }
 "#; fs::write(&main,src).unwrap();

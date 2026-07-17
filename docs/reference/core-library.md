@@ -249,7 +249,7 @@ fn count_lines(path: String) -> Int ? IOError {
     loop line in handle.lines() {
         n = (n + 1)
     }
-    return ok(n)
+    return Ok(n)
 }
 ```
 
@@ -1615,7 +1615,7 @@ one mechanism.
 impl Email.Decode {
     fn decode(tree: DataTree) -> Email ? DecodeError {
         address := tree.text()?
-        return ok(Email.{ address })
+        return Ok(Email.{ address })
     }
 }
 
@@ -2186,7 +2186,7 @@ fn run() {
 | `String.lines()` | `[String]` | Split into lines (`\n` and `\r\n`; no trailing empty line) |
 
 `.to_int()` / `.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
-evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
+evaluated at comptime — `Ok(v)` / `Err(e)` construct `Result` values, and
 `?` / `??` propagate or unwrap them in pure comptime expressions
 (`examples/features/comptime/comptime_parse.jet`).
 

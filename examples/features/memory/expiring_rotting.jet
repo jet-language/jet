@@ -7,19 +7,19 @@ fn run() {
     clk := time.clock(1000)
     ttl :: time.secs(5)
     cache :: expiring.new("fresh", ttl, clk)
-    if cache.get(clk) == ok(v) {
+    if cache.get(clk) == Ok(v) {
         print("cache: {v}")
     }
     clk.tick(6000)
-    if cache.get(clk) == err(_) {
+    if cache.get(clk) == Err(_) {
         print("cache expired: true")
     }
     secret_clk := time.clock(1000)
     secret := vault.rotting_new("api-key-123", time.secs(2), secret_clk)
-    if secret.get(secret_clk) == ok(s) {
+    if secret.get(secret_clk) == Ok(s) {
         print("secret once: {s.len()}")
     }
-    if secret.get(secret_clk) == err(_) {
+    if secret.get(secret_clk) == Err(_) {
         print("secret consumed: true")
     }
 }

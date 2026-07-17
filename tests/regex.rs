@@ -148,8 +148,8 @@ use core.regex as re
 
 fn run() {
     if re.is_match("(unclosed", "abc") == {
-        ok(_) -> { print("unexpected-ok") }
-        err(e) -> { print("caught") }
+        Ok(_) -> { print("unexpected-ok") }
+        Err(e) -> { print("caught") }
     }
 }
 "##;

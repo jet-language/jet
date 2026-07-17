@@ -1499,7 +1499,7 @@ fn maybe(values: [Int]) -> (Window?) {
 
 fn result(values: [Int]) -> Window ? String {
     selected :: values[0..1]
-    return ok(Window.{ values: selected })
+    return Ok(Window.{ values: selected })
 }
 
 fn tuple(values: [Int]) -> (window: Window, count: Int) {
@@ -1694,7 +1694,7 @@ impl $TYPE.Select {
     fn fallible(self, left: [Int], right: [Int]) -> Pair ? String {
         left_view :: left[0..1]
         right_view :: right[0..1]
-        return ok(Pair.{ left: left_view, right: right_view })
+        return Ok(Pair.{ left: left_view, right: right_view })
     }
     fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
         left_view :: left[0..1]
@@ -1844,8 +1844,8 @@ fn run() {{
     tcp := net.tcp_connect("{address}") ?? panic("tcp")
     net.set_timeout(&tcp, 25) ?? panic("timeout")
     if tls.client(^tcp, "localhost") == {{
-        ok(_) -> panic("stalled handshake succeeded")
-        err(error) -> print(net.error_message(error))
+        Ok(_) -> panic("stalled handshake succeeded")
+        Err(error) -> print(net.error_message(error))
     }}
 }}
 "#
@@ -2228,16 +2228,16 @@ fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
     }
     let success = r#"
 fn choose_ok() -> Float ? String {
-    return ok(0.25)
+    return Ok(0.25)
 }
 
 fn choose_err() -> Float ? String {
-    return err("typed boom")
+    return Err("typed boom")
 }
 
 fn forward() -> Float ? String {
     value :: choose_ok()?
-    return ok(value + 0.25)
+    return Ok(value + 0.25)
 }
 
 fn run() -> Void ? {
@@ -2280,21 +2280,21 @@ fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
     }
     let one_arm_fallthrough = r#"
 fn direct_ok() -> Int ? {
-    return ok(7)
+    return Ok(7)
 }
 
 fn run() -> Void ? {
     print(direct_ok()?)
     stop :: false
     if stop {
-        return err("one-arm stopped")
+        return Err("one-arm stopped")
     }
     print("one-arm fallthrough")
 }
 "#;
     let nested_fallthrough = r#"
 fn direct_ok() -> Int ? {
-    return ok(7)
+    return Ok(7)
 }
 
 fn run() -> Void ? {
@@ -2303,7 +2303,7 @@ fn run() -> Void ? {
     inner :: false
     if outer {
         if inner {
-            return err("nested stopped")
+            return Err("nested stopped")
         }
     }
     print("nested fallthrough")
@@ -2311,7 +2311,7 @@ fn run() -> Void ? {
 "#;
     let neither_arm_terminates = r#"
 fn direct_ok() -> Int ? {
-    return ok(7)
+    return Ok(7)
 }
 
 fn run() -> Void ? {
@@ -2326,15 +2326,15 @@ fn run() -> Void ? {
 "#;
     let both_arms_terminate = r#"
 fn direct_ok() -> Int ? {
-    return ok(7)
+    return Ok(7)
 }
 
 fn run() -> Void ? {
     print(direct_ok()?)
     if true {
-        return err("left branch")
+        return Err("left branch")
     } else {
-        return err("right branch")
+        return Err("right branch")
     }
 }
 "#;
@@ -3377,7 +3377,7 @@ impl Email.Decode {
     fn decode(tree: DataTree) -> Email ? DecodeError {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
-        return ok(Email.{addr: s})
+        return Ok(Email.{addr: s})
     }
 }
 

@@ -8,17 +8,17 @@ impl<'a> Parser<'a> {
             match self.peek().kind.clone() {
                 TokKind::KwOk => {
                     let span = self.bump().span;
-                    self.expect(TokKind::LParen, "after `ok`")?;
+                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_OK))?;
                     let inner = self.expr()?;
-                    self.expect(TokKind::RParen, "after the value inside `ok(...)`")?;
+                    self.expect(TokKind::RParen, &format!("after the value inside `{}(...)`", Syntax::LIT_OK))?;
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::Ok(Box::new(inner), full))
                 }
                 TokKind::KwErr => {
                     let span = self.bump().span;
-                    self.expect(TokKind::LParen, "after `err`")?;
+                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_ERR))?;
                     let inner = self.expr()?;
-                    self.expect(TokKind::RParen, "after the value inside `err(...)`")?;
+                    self.expect(TokKind::RParen, &format!("after the value inside `{}(...)`", Syntax::LIT_ERR))?;
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::Err(Box::new(inner), full))
                 }
@@ -231,9 +231,9 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0026",
                         format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-                        "a function that can fail returns `T ? E` and signals failure with `err(...)`"
+                        "a function that can fail returns `T ? E` and signals failure with `Err(...)`"
                             .to_string(),
-                        format!("return `err(...)` instead of `{}`", foreign),
+                        format!("return `Err(...)` instead of `{}`", foreign),
                         Some(t.span),
                     ));
                     return self.expr_primary(allow_struct_lit);
@@ -249,10 +249,10 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0024",
                         format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-                        "handle a failure with `or` for a fallback, or test with `== err(...)`"
+                        "handle a failure with `or` for a fallback, or test with `== Err(...)`"
                             .to_string(),
                         format!(
-                            "write `parse(x) or 0` or `if x == err(e) {{ ... }}` instead of `{}`",
+                            "write `parse(x) or 0` or `if x == Err(e) {{ ... }}` instead of `{}`",
                             foreign
                         ),
                         Some(t.span),
@@ -278,56 +278,6 @@ impl<'a> Parser<'a> {
                         Some(t.span),
                     ));
                     return self.expr_primary(allow_struct_lit);
-                }
-                // D-S14-PAUSE: optional spelling teaching is paused.
-                TokKind::Ident(name)
-                    if matches!(
-                        name.as_str(),
-                        Syntax::FOREIGN_SOME
-                            | Syntax::FOREIGN_NIL
-                            | Syntax::FOREIGN_NONE_LOWER
-                            | Syntax::FOREIGN_SOME_LOWER
-                    ) && retired_s14_teaching_enabled() =>
-                {
-                    let t = self.bump();
-                    let foreign = if let TokKind::Ident(n) = &t.kind {
-                        n.clone()
-                    } else {
-                        unreachable!()
-                    };
-                    let (canonical, fix) = match foreign.as_str() {
-                        Syntax::FOREIGN_NONE_LOWER | Syntax::FOREIGN_NIL => {
-                            (Syntax::LIT_NULL, Syntax::LIT_NULL)
-                        }
-                        _ => (Syntax::LIT_VALUE, Syntax::LIT_VALUE),
-                    };
-                    self.diags.push(Diagnostic::error(
-                        "E0020",
-                        format!(
-                            "optional values use `{}` and `{}`, not `{}`",
-                            Syntax::LIT_VALUE,
-                            Syntax::LIT_NULL,
-                            foreign
-                        ),
-                        format!(
-                            "{} uses exactly one spelling for each thing, so all code reads the same",
-                            Syntax::LANG_NAME
-                        ),
-                        format!("replace `{}` with `{}`", foreign, fix),
-                        Some(t.span),
-                    ));
-                    if canonical == Syntax::LIT_NULL {
-                        Ok(Expr::Absent(t.span))
-                    } else {
-                        self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
-                        let inner = self.expr()?;
-                        self.expect(
-                            TokKind::RParen,
-                            &format!("after the value inside `{}(...)`", Syntax::LIT_VALUE),
-                        )?;
-                        let full = Span::new(t.span.start, inner.span().end);
-                        Ok(Expr::Present(Box::new(inner), full))
-                    }
                 }
                 TokKind::Str(parts) => {
                     let span = self.bump().span;

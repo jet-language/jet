@@ -806,7 +806,7 @@ fn mk() {
         // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
         // proven end-to-end by
         // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return err(\"bad\")\n }\n return ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n :: f(x)?\n return ok((n + 1))\n}\n";
+        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n :: f(x)?\n return Ok((n + 1))\n}\n";
         assert!(covers(src, "f"));
         assert!(covers(src, "g"));
     }
@@ -934,9 +934,9 @@ fn mk() {
     fn covers_string_payload_error_enum() {
         // c109 Phase 16: a `T ? E` whose error enum has a String payload is now
         // covered — the error enum is a covered (String-payload) enum, and its
-        // construction (`err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
+        // construction (`Err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
         // (a String literal arg, no borrowed clone) byte-for-byte.
-        let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int ? Oops {\n if x == 0 {\n return err(Oops.Msg(\"bad\"))\n }\n return ok(x)\n}\n";
+        let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int ? Oops {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\n";
         assert!(covers(src, "f"));
     }
 

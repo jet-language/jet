@@ -148,7 +148,7 @@ fn range_type_runtime_try_and_arithmetic_widens() {
 @Numeric Severity :: distinct Int(0..10);
 
 fn checked(raw: Int) -> Severity ? String {
-    return ok(Severity(raw)?)
+    return Ok(Severity(raw)?)
 }
 
 fn run() {

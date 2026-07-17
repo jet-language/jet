@@ -785,7 +785,7 @@ pub(crate) fn stmt_collect_captures(
             expr_collect_captures(subject, bound, read, mut_cap);
             // `it` is synthesised by the when-checker when the subject is a
             // non-ident fallible value; always treat it as bound so that the
-            // `| it == ok(n)` pattern subjects are not treated as free vars.
+            // `| it == Ok(n)` pattern subjects are not treated as free vars.
             let mut when_bound = bound.clone();
             when_bound.insert(Syntax::KW_IT.to_string());
             for a in arms {

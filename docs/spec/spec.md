@@ -750,8 +750,8 @@ impl Circle {
 Fallible functions return **`T ? E`** (S34): `T` is the success payload,
 `E` is any enum, struct, `String`, or the default **`Error`** type. Omitting
 the error side in a function return — **`T ?`** — means **`T ? Error`**.
-Build outcomes with **`ok(v)`** and **`err(e)`**; test them with
-**`== ok(n)`** / **`== err(e)`** (same pattern machinery as M3 optionals).
+Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
+**`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion supports two forms:
 - **`Fallible`** trait (D-ERR2): `impl MyFail.Fallible { fn to_error(self) -> Error { … } }` — converts any typed error to the universal `Error`. Prelude types implement `Fallible` by default.
 - **Declared typed conversion** (D-ERR-CONV): `impl Source -> Target { return Target.Variant(self) }` — converts a `Source` error into a typed `Target` error; `?` applies it automatically. Declared once per (Source, Target) pair; rejected unless declared (orphan rule S28 applies). `E2404` fires when `?` would need an undeclared conversion; `E2405` fires on duplicate declarations; `E2406` fires on orphan-rule violations.
@@ -771,7 +771,7 @@ Cross-type **`?`** conversion supports two forms:
 - **`panic("msg")`** and **`require(cond)`** / **`require(cond, "msg")`**
   (S36) stop the program with a friendly report on stderr and exit code 70.
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
-  name, **`it`** names the subject for pattern arms like **`it == ok(n)`**.
+  name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** may stay bare for beginner programs. Use
   **`fn run() -> Void ?`** only when the entry itself propagates errors with
   **`?`**; returned errors print and exit non-zero.

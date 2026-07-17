@@ -431,7 +431,7 @@ pub(crate) fn missing_arms_text(
                     )
                 }
             }
-            // Result: `ok(v) -> {};` or `err(e) -> {};`
+            // Result: `Ok(v) -> {};` or `Err(e) -> {};`
             Type::Result { .. } => {
                 if v.starts_with(crate::Syntax::LIT_OK) {
                     format!(

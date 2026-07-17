@@ -330,24 +330,24 @@ impl<T: JetDebug> JetDebug for Option<T> {
 impl<T: JetShow, E: JetShow> JetShow for Result<T, E> {
     fn jet_show(&self) -> String {
         match self {
-            Ok(v) => format!("ok({})", v.jet_show()),
-            Err(e) => format!("err({})", e.jet_show()),
+            Ok(v) => format!("Ok({})", v.jet_show()),
+            Err(e) => format!("Err({})", e.jet_show()),
         }
     }
 }
 impl<T: JetDisplay, E: JetDisplay> JetDisplay for Result<T, E> {
     fn jet_display(&self) -> String {
         match self {
-            Ok(v) => format!("ok({})", v.jet_display()),
-            Err(e) => format!("err({})", e.jet_display()),
+            Ok(v) => format!("Ok({})", v.jet_display()),
+            Err(e) => format!("Err({})", e.jet_display()),
         }
     }
 }
 impl<T: JetDebug, E: JetDebug> JetDebug for Result<T, E> {
     fn jet_debug(&self) -> String {
         match self {
-            Ok(v) => format!("ok({})", v.jet_debug()),
-            Err(e) => format!("err({})", e.jet_debug()),
+            Ok(v) => format!("Ok({})", v.jet_debug()),
+            Err(e) => format!("Err({})", e.jet_debug()),
         }
     }
 }

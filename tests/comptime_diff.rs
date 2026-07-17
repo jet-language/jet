@@ -390,8 +390,8 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
 
 fn show(result: DataTree ? XMLError) -> String {
     if result == {
-        ok(_) -> return "ok"
-        err(e) -> {
+        Ok(_) -> return "ok"
+        Err(e) -> {
             return "{e.byte_offset}|{e.line}|{e.column}|{e.path}|{e.reason}"
         }
     }
@@ -481,52 +481,52 @@ fn safe() -> cbor.CBOROptions {
 
 fn show(bytes: [U8]) -> String {
     if cbor.parse(bytes, safe()) == {
-        ok(_) -> return "ok"
-        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        Ok(_) -> return "ok"
+        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 
 fn show_strict(bytes: [U8]) -> String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
-        ok(_) -> return "ok"
-        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        Ok(_) -> return "ok"
+        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_depth(bytes: [U8]) -> String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
-        ok(_) -> return "ok"
-        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        Ok(_) -> return "ok"
+        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_items(bytes: [U8]) -> String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
-        ok(_) -> return "ok"
-        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        Ok(_) -> return "ok"
+        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_bytes(bytes: [U8]) -> String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
-        ok(_) -> return "ok"
-        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        Ok(_) -> return "ok"
+        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_alloc(bytes: [U8]) -> String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
-        ok(_) -> return "ok"
-        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        Ok(_) -> return "ok"
+        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 
 fn show_ints(bytes: [U8]) -> String {
     if cbor.decode<[Int]>(bytes, safe()) == {
-        ok(_) -> return "ok"
-        err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        Ok(_) -> return "ok"
+        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }

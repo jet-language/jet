@@ -605,8 +605,8 @@ fn run() {{
     default_input :: files.open("{default_text}") ?? panic("default open")
     default_reader :: json.reader(^default_input) ?? panic("default reader")
     if default_reader.next() == {{
-        ok(_) -> {{ print(true) }}
-        err(_) -> {{ print(false) }}
+        Ok(_) -> {{ print(true) }}
+        Err(_) -> {{ print(false) }}
     }}
 
     limits := encoding.EncodingLimits.safe()
@@ -617,12 +617,12 @@ fn run() {{
     loop count < 8 {{
         result :: reader.next()
         if result == {{
-            ok(_) -> {{ count++ }}
-            err(first) -> {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
                 again :: reader.next()
                 if again == {{
-                    ok(_) -> {{ print("reader-not-latched") }}
-                    err(second) -> {{
+                    Ok(_) -> {{ print("reader-not-latched") }}
+                    Err(second) -> {{
                         print(first.path)
                         print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
                     }}
@@ -638,12 +638,12 @@ fn run() {{
     finished_writer.finish() ?? panic("finish")
     after_finish :: finished_writer.write(encoding.DataEvent.Null)
     if after_finish == {{
-        ok(_) -> {{ print("finish-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("finish-missed") }}
+        Err(first) -> {{
             after_flush :: finished_writer.flush()
             if after_flush == {{
-                ok(_) -> {{ print("finish-not-latched") }}
-                err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+                Ok(_) -> {{ print("finish-not-latched") }}
+                Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
             }}
         }}
     }}
@@ -654,12 +654,12 @@ fn run() {{
     escaped_writer :: json.writer(^escaped_output, escaped_limits) ?? panic("writer")
     escaped_result :: escaped_writer.write(encoding.DataEvent.Text("\n"))
     if escaped_result == {{
-        ok(_) -> {{ print("escape-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("escape-missed") }}
+        Err(first) -> {{
             escaped_again :: escaped_writer.finish()
             if escaped_again == {{
-                ok(_) -> {{ print("escape-not-latched") }}
-                err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+                Ok(_) -> {{ print("escape-not-latched") }}
+                Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
             }}
         }}
     }}
@@ -703,12 +703,12 @@ fn run() {{
     text_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     text_error :: text_writer.write(encoding.DataEvent.Text("abcd"))
     if text_error == {{
-        ok(_) -> {{ print("text-limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("text-limit-missed") }}
+        Err(first) -> {{
             again :: text_writer.finish()
             if again == {{
-                ok(_) -> {{ print("text-terminal-missed") }}
-                err(second) -> {{ print(first.reason == second.reason) }}
+                Ok(_) -> {{ print("text-terminal-missed") }}
+                Err(second) -> {{ print(first.reason == second.reason) }}
             }}
         }}
     }}
@@ -719,7 +719,7 @@ fn run() {{
     key_writer :: json.writer(^key_output, key_limits) ?? panic("key writer")
     key_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
     key_result :: key_writer.write(encoding.DataEvent.Key("abc"))
-    if key_result == {{ ok(_) -> {{ print("key-limit-missed") }} err(_) -> {{ print(true) }} }}
+    if key_result == {{ Ok(_) -> {{ print("key-limit-missed") }} Err(_) -> {{ print(true) }} }}
 
     depth_limits := encoding.EncodingLimits.safe()
     depth_limits.max_depth = 1
@@ -727,7 +727,7 @@ fn run() {{
     depth_writer :: json.writer(^depth_output, depth_limits) ?? panic("depth writer")
     depth_writer.write(encoding.DataEvent.ArrayStart) ?? panic("outer")
     depth_result :: depth_writer.write(encoding.DataEvent.ArrayStart)
-    if depth_result == {{ ok(_) -> {{ print("depth-limit-missed") }} err(_) -> {{ print(true) }} }}
+    if depth_result == {{ Ok(_) -> {{ print("depth-limit-missed") }} Err(_) -> {{ print(true) }} }}
 
     record_limits := encoding.EncodingLimits.safe()
     record_limits.max_total_bytes = Val(5)
@@ -735,17 +735,17 @@ fn run() {{
     record_writer :: jsonl.writer(^record_output, record_limits) ?? panic("record writer")
     record_result :: record_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("abcd")]))
     if record_result == {{
-        ok(_) -> {{ print("record-limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("record-limit-missed") }}
+        Err(first) -> {{
             again :: record_writer.flush()
-            if again == {{ ok(_) -> {{ print("record-terminal-missed") }} err(second) -> {{ print(first.reason == second.reason) }} }}
+            if again == {{ Ok(_) -> {{ print("record-terminal-missed") }} Err(second) -> {{ print(first.reason == second.reason) }} }}
         }}
     }}
 
     nonfinite_output :: files.create("{nonfinite}") ?? panic("create nonfinite")
     nonfinite_writer :: jsonl.writer(^nonfinite_output) ?? panic("nonfinite writer")
     nonfinite_result :: nonfinite_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Float(0.0 / 0.0)]))
-    if nonfinite_result == {{ ok(_) -> {{ print("nonfinite-missed") }} err(_) -> {{ print(true) }} }}
+    if nonfinite_result == {{ Ok(_) -> {{ print("nonfinite-missed") }} Err(_) -> {{ print(true) }} }}
 }}
 "#
     );
@@ -823,12 +823,12 @@ fn run() {{
     duplicate_writer.write(encoding.DataEvent.Int(1)) ?? panic("first value")
     duplicate_result :: duplicate_writer.write(encoding.DataEvent.Key("same"))
     if duplicate_result == {{
-        ok(_) -> {{ print("duplicate-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("duplicate-missed") }}
+        Err(first) -> {{
             again :: duplicate_writer.finish()
             if again == {{
-                ok(_) -> {{ print("terminal-missed") }}
-                err(second) -> {{ print(first.reason == second.reason) }}
+                Ok(_) -> {{ print("terminal-missed") }}
+                Err(second) -> {{ print(first.reason == second.reason) }}
             }}
         }}
     }}
@@ -842,12 +842,12 @@ fn run() {{
     limited_writer.write(encoding.DataEvent.Text("value")) ?? panic("limited value")
     limited_result :: limited_writer.write(encoding.DataEvent.ObjectEnd)
     if limited_result == {{
-        ok(_) -> {{ print("limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("limit-missed") }}
+        Err(first) -> {{
             again :: limited_writer.flush()
             if again == {{
-                ok(_) -> {{ print("limit-terminal-missed") }}
-                err(second) -> {{ print(first.reason == second.reason) }}
+                Ok(_) -> {{ print("limit-terminal-missed") }}
+                Err(second) -> {{ print(first.reason == second.reason) }}
             }}
         }}
     }}
@@ -906,12 +906,12 @@ fn run() {{
     writer.finish() ?? panic("finish twice")
     after_finish :: writer.write(DataTree.Null)
     if after_finish == {{
-        ok(_) -> {{ print("write-after-finish-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("write-after-finish-missed") }}
+        Err(first) -> {{
             after_terminal :: writer.flush()
             if after_terminal == {{
-                ok(_) -> {{ print("terminal-not-latched") }}
-                err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+                Ok(_) -> {{ print("terminal-not-latched") }}
+                Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
             }}
         }}
     }}
@@ -943,12 +943,12 @@ fn run() {{
     first_malformed :: malformed_reader.next() ?? panic("first malformed record")
     malformed_result :: malformed_reader.next()
     if malformed_result == {{
-        ok(_) -> {{ print("malformed-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("malformed-missed") }}
+        Err(first) -> {{
             malformed_again :: malformed_reader.next()
             if malformed_again == {{
-                ok(_) -> {{ print("malformed-not-latched") }}
-                err(second) -> {{
+                Ok(_) -> {{ print("malformed-not-latched") }}
+                Err(second) -> {{
                     print(first.line ?? -1)
                     print(first.path)
                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
@@ -963,12 +963,12 @@ fn run() {{
     limited_writer :: jsonl.writer(^limited_output, limits) ?? panic("limited writer")
     limited_result :: limited_writer.write(DataTree.Text("three"))
     if limited_result == {{
-        ok(_) -> {{ print("limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("limit-missed") }}
+        Err(first) -> {{
             limited_again :: limited_writer.finish()
             if limited_again == {{
-                ok(_) -> {{ print("limit-not-latched") }}
-                err(second) -> {{
+                Ok(_) -> {{ print("limit-not-latched") }}
+                Err(second) -> {{
                     print(first.byte_offset == second.byte_offset && first.reason == second.reason)
                 }}
             }}
@@ -1030,12 +1030,12 @@ fn run() {{
     near_reader :: jsonl.reader(^near_input, near_limits) ?? panic("near string reader")
     near_result :: near_reader.next()
     if near_result == {{
-        ok(_) -> {{ print("near-string-limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("near-string-limit-missed") }}
+        Err(first) -> {{
             near_again :: near_reader.next()
             if near_again == {{
-                ok(_) -> {{ print("near-string-terminal-missed") }}
-                err(second) -> {{
+                Ok(_) -> {{ print("near-string-terminal-missed") }}
+                Err(second) -> {{
                     print(first.byte_offset == 100003)
                     print(first.path)
                     print(first.reason)
@@ -1061,12 +1061,12 @@ fn run() {{
     scalar_reader :: jsonl.reader(^scalar_input, scalar_limits) ?? panic("scalar reader")
     scalar_result :: scalar_reader.next()
     if scalar_result == {{
-        ok(_) -> {{ print("scalar-limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("scalar-limit-missed") }}
+        Err(first) -> {{
             scalar_again :: scalar_reader.next()
             if scalar_again == {{
-                ok(_) -> {{ print("scalar-terminal-missed") }}
-                err(second) -> {{ print(first.path); print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }}
+                Ok(_) -> {{ print("scalar-terminal-missed") }}
+                Err(second) -> {{ print(first.path); print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }}
             }}
         }}
     }}
@@ -1077,12 +1077,12 @@ fn run() {{
     array_reader :: jsonl.reader(^array_input, array_limits) ?? panic("array reader")
     array_result :: array_reader.next()
     if array_result == {{
-        ok(_) -> {{ print("array-limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("array-limit-missed") }}
+        Err(first) -> {{
             array_again :: array_reader.next()
             if array_again == {{
-                ok(_) -> {{ print("array-terminal-missed") }}
-                err(second) -> {{
+                Ok(_) -> {{ print("array-terminal-missed") }}
+                Err(second) -> {{
                     print(first.byte_offset < 256)
                     print(first.path)
                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
@@ -1097,12 +1097,12 @@ fn run() {{
     object_reader :: jsonl.reader(^object_input, object_limits) ?? panic("object reader")
     object_result :: object_reader.next()
     if object_result == {{
-        ok(_) -> {{ print("object-limit-missed") }}
-        err(first) -> {{
+        Ok(_) -> {{ print("object-limit-missed") }}
+        Err(first) -> {{
             object_again :: object_reader.next()
             if object_again == {{
-                ok(_) -> {{ print("object-terminal-missed") }}
-                err(second) -> {{
+                Ok(_) -> {{ print("object-terminal-missed") }}
+                Err(second) -> {{
                     print(first.byte_offset < 2048)
                     print(first.path)
                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
@@ -1144,12 +1144,12 @@ fn run() {
     print(notes[0].note)
 
     if csv.parse("a,\"unterminated") == {
-        ok(_) -> { print("unterminated-missed") }
-        err(message) -> { print(message.contains("quoted field ended before its closing quote")) }
+        Ok(_) -> { print("unterminated-missed") }
+        Err(message) -> { print(message.contains("quoted field ended before its closing quote")) }
     }
     if csv.parse("a,\"ok\"junk") == {
-        ok(_) -> { print("closing-junk-missed") }
-        err(message) -> { print(message.contains("may follow a closing quote")) }
+        Ok(_) -> { print("closing-junk-missed") }
+        Err(message) -> { print(message.contains("may follow a closing quote")) }
     }
 }
 "#;
@@ -1200,12 +1200,12 @@ fn run() {{
     writer.finish() ?? panic("finish twice")
     after_finish :: writer.write(["late"])
     if after_finish == {{
-        ok(_) -> {{ print("write-after-finish-missed") }}
-        err(writer_first) -> {{
+        Ok(_) -> {{ print("write-after-finish-missed") }}
+        Err(writer_first) -> {{
             after_terminal :: writer.flush()
             if after_terminal == {{
-                ok(_) -> {{ print("writer-terminal-missed") }}
-                err(writer_second) -> {{ print(writer_first.byte_offset == writer_second.byte_offset && writer_first.reason == writer_second.reason) }}
+                Ok(_) -> {{ print("writer-terminal-missed") }}
+                Err(writer_second) -> {{ print(writer_first.byte_offset == writer_second.byte_offset && writer_first.reason == writer_second.reason) }}
             }}
         }}
     }}
@@ -1231,12 +1231,12 @@ fn run() {{
     malformed_reader :: csv.reader(^malformed_input) ?? panic("malformed reader")
     malformed_result :: malformed_reader.next()
     if malformed_result == {{
-        ok(_) -> {{ print("malformed-missed") }}
-        err(malformed_first) -> {{
+        Ok(_) -> {{ print("malformed-missed") }}
+        Err(malformed_first) -> {{
             malformed_again :: malformed_reader.next()
             if malformed_again == {{
-                ok(_) -> {{ print("malformed-terminal-missed") }}
-                err(malformed_second) -> {{ print(malformed_first.path); print(malformed_first.byte_offset == malformed_second.byte_offset && malformed_first.reason == malformed_second.reason) }}
+                Ok(_) -> {{ print("malformed-terminal-missed") }}
+                Err(malformed_second) -> {{ print(malformed_first.path); print(malformed_first.byte_offset == malformed_second.byte_offset && malformed_first.reason == malformed_second.reason) }}
             }}
         }}
     }}
@@ -1245,8 +1245,8 @@ fn run() {{
     invalid_utf8_reader :: csv.reader(^invalid_utf8_input) ?? panic("invalid utf8 reader")
     invalid_utf8_result :: invalid_utf8_reader.next()
     if invalid_utf8_result == {{
-        ok(_) -> {{ print("invalid-utf8-missed") }}
-        err(error) -> {{
+        Ok(_) -> {{ print("invalid-utf8-missed") }}
+        Err(error) -> {{
             print(error.byte_offset)
             print(error.line ?? 0)
             print(error.column ?? 0)
@@ -1260,12 +1260,12 @@ fn run() {{
     item_reader :: csv.reader(^item_input, item_limits) ?? panic("item reader")
     item_result :: item_reader.next()
     if item_result == {{
-        ok(_) -> {{ print("item-limit-missed") }}
-        err(item_first) -> {{
+        Ok(_) -> {{ print("item-limit-missed") }}
+        Err(item_first) -> {{
             item_again :: item_reader.next()
             if item_again == {{
-                ok(_) -> {{ print("item-terminal-missed") }}
-                err(item_second) -> {{ print(item_first.path); print(item_first.byte_offset == item_second.byte_offset && item_first.reason == item_second.reason) }}
+                Ok(_) -> {{ print("item-terminal-missed") }}
+                Err(item_second) -> {{ print(item_first.path); print(item_first.byte_offset == item_second.byte_offset && item_first.reason == item_second.reason) }}
             }}
         }}
     }}
@@ -1276,12 +1276,12 @@ fn run() {{
     total_reader :: csv.reader(^total_input, total_limits) ?? panic("total reader")
     total_result :: total_reader.next()
     if total_result == {{
-        ok(_) -> {{ print("total-limit-missed") }}
-        err(total_first) -> {{
+        Ok(_) -> {{ print("total-limit-missed") }}
+        Err(total_first) -> {{
             total_again :: total_reader.next()
             if total_again == {{
-                ok(_) -> {{ print("total-terminal-missed") }}
-                err(total_second) -> {{ print(total_first.byte_offset); print(total_first.path); print(total_first.reason == total_second.reason) }}
+                Ok(_) -> {{ print("total-terminal-missed") }}
+                Err(total_second) -> {{ print(total_first.byte_offset); print(total_first.path); print(total_first.reason == total_second.reason) }}
             }}
         }}
     }}
@@ -1292,12 +1292,12 @@ fn run() {{
     limited_writer :: csv.writer(^limited_output, writer_limits) ?? panic("limited writer")
     limited_result :: limited_writer.write(["abcd"])
     if limited_result == {{
-        ok(_) -> {{ print("writer-limit-missed") }}
-        err(limited_first) -> {{
+        Ok(_) -> {{ print("writer-limit-missed") }}
+        Err(limited_first) -> {{
             limited_again :: limited_writer.finish()
             if limited_again == {{
-                ok(_) -> {{ print("writer-limit-terminal-missed") }}
-                err(limited_second) -> {{ print(limited_first.path); print(limited_first.reason == limited_second.reason) }}
+                Ok(_) -> {{ print("writer-limit-terminal-missed") }}
+                Err(limited_second) -> {{ print(limited_first.path); print(limited_first.reason == limited_second.reason) }}
             }}
         }}
     }}
@@ -1379,12 +1379,12 @@ fn run() {{
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)
     if after == {{
-        ok(_) -> print(false)
-        err(writer_first) -> {{
+        Ok(_) -> print(false)
+        Err(writer_first) -> {{
             again :: writer.flush()
             if again == {{
-                ok(_) -> print(false)
-                err(writer_second) -> print(writer_first.reason == writer_second.reason)
+                Ok(_) -> print(false)
+                Err(writer_second) -> print(writer_first.reason == writer_second.reason)
             }}
         }}
     }}
@@ -1420,15 +1420,15 @@ fn run() {{
     half_input :: files.open("{half_text}") ?? panic("half open")
     half_reader :: cbor.reader(^half_input) ?? panic("half reader")
     if half_reader.next() == {{
-        ok(_) -> print(true)
-        err(_) -> print(false)
+        Ok(_) -> print(true)
+        Err(_) -> print(false)
     }}
 
     short_input :: files.open("{non_shortest_text}") ?? panic("short open")
     short_reader :: cbor.reader(^short_input) ?? panic("short reader")
     if short_reader.next() == {{
-        ok(_) -> print(true)
-        err(_) -> print(false)
+        Ok(_) -> print(true)
+        Err(_) -> print(false)
     }}
 
     depth_limits := encoding.EncodingLimits.safe()
@@ -1437,20 +1437,20 @@ fn run() {{
     nested_reader :: cbor.reader(^nested_input, depth_limits) ?? panic("nested reader")
     root_event :: nested_reader.next() ?? panic("root array")
     if nested_reader.next() == {{
-        ok(_) -> print(false)
-        err(depth_error) -> print(depth_error.reason == "max_depth 1 exceeded")
+        Ok(_) -> print(false)
+        Err(depth_error) -> print(depth_error.reason == "max_depth 1 exceeded")
     }}
 
     bad_input :: files.open("{truncated_text}") ?? panic("bad open")
     bad_reader :: cbor.reader(^bad_input) ?? panic("bad reader")
     first_bad :: bad_reader.next()
     if first_bad == {{
-        ok(_) -> print("missed")
-        err(bad_first) -> {{
+        Ok(_) -> print("missed")
+        Err(bad_first) -> {{
             second_bad :: bad_reader.next()
             if second_bad == {{
-                ok(_) -> print("unlatched")
-                err(bad_second) -> {{
+                Ok(_) -> print("unlatched")
+                Err(bad_second) -> {{
                     print(bad_first.byte_offset)
                     print(bad_first.path)
                     print(bad_first.reason == bad_second.reason)
@@ -1514,8 +1514,8 @@ use core.files as files
 fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
     repeated :: reader.next()
     if repeated == {{
-        err(error) -> return error.reason == reason
-        ok(_) -> return false
+        Err(error) -> return error.reason == reason
+        Ok(_) -> return false
     }}
     return false
 }}
@@ -1523,8 +1523,8 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
 fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
     repeated :: writer.flush()
     if repeated == {{
-        err(error) -> return error.reason == reason
-        ok(_) -> return false
+        Err(error) -> return error.reason == reason
+        Ok(_) -> return false
     }}
     return false
 }}
@@ -1552,8 +1552,8 @@ fn run() {{
     tight_key :: tight_reader.next() ?? panic("tight key")
     tight_first :: tight_reader.next()
     if tight_first == {{
-        ok(_) -> panic("combined key/chunk budget missed")
-        err(first) -> {{
+        Ok(_) -> panic("combined key/chunk budget missed")
+        Err(first) -> {{
             print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, ~first.reason))
         }}
     }}
@@ -1581,69 +1581,69 @@ fn run() {{
     duplicate_value :: duplicate_reader.next() ?? panic("duplicate value")
     duplicate_first :: duplicate_reader.next()
     if duplicate_first == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, ~first.reason))
         }}
-        ok(_) -> print(false)
+        Ok(_) -> print(false)
     }}
 
     nontext_input :: files.open("{}") ?? panic("nontext open")
     nontext_reader :: cbor.reader(^nontext_input) ?? panic("nontext reader")
     nontext_object :: nontext_reader.next() ?? panic("nontext object")
     if nontext_reader.next() == {{
-        err(e) -> print(e.byte_offset == 1 && e.path == "$" && e.reason == "CBOR map key must be text")
-        ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 1 && e.path == "$" && e.reason == "CBOR map key must be text")
+        Ok(_) -> print(false)
     }}
 
     tag_input :: files.open("{}") ?? panic("tag open")
     tag_reader :: cbor.reader(^tag_input) ?? panic("tag reader")
     if tag_reader.next() == {{
-        err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "CBOR tags are outside DataEvent")
-        ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "CBOR tags are outside DataEvent")
+        Ok(_) -> print(false)
     }}
 
     range_input :: files.open("{}") ?? panic("range open")
     range_reader :: cbor.reader(^range_input) ?? panic("range reader")
     if range_reader.next() == {{
-        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR integer is outside Jet Int")
-        ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR integer is outside Jet Int")
+        Ok(_) -> print(false)
     }}
 
     int_input :: files.open("{}") ?? panic("int open")
     int_reader := cbor.reader(^int_input) ?? panic("int reader")
     if int_reader.next() == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(first.byte_offset == 2 && reader_terminal(&int_reader, ~first.reason))
         }}
-        ok(_) -> print(false)
+        Ok(_) -> print(false)
     }}
 
     float_input :: files.open("{}") ?? panic("float open")
     float_reader := cbor.reader(^float_input) ?? panic("float reader")
     if float_reader.next() == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(first.byte_offset == 3 && reader_terminal(&float_reader, ~first.reason))
         }}
-        ok(_) -> print(false)
+        Ok(_) -> print(false)
     }}
 
     indef_input :: files.open("{}") ?? panic("indef open")
     indef_reader := cbor.reader(^indef_input) ?? panic("indef reader")
     if indef_reader.next() == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(first.byte_offset == 3 && reader_terminal(&indef_reader, ~first.reason))
         }}
-        ok(_) -> print(false)
+        Ok(_) -> print(false)
     }}
 
     trailing_input :: files.open("{}") ?? panic("trailing open")
     trailing_reader := cbor.reader(^trailing_input) ?? panic("trailing reader")
     trailing_root :: trailing_reader.next() ?? panic("root")
     if trailing_reader.next() == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(first.byte_offset == 1 && reader_terminal(&trailing_reader, ~first.reason))
         }}
-        ok(_) -> print(false)
+        Ok(_) -> print(false)
     }}
 
     nested_input :: files.open("{}") ?? panic("nested open")
@@ -1652,8 +1652,8 @@ fn run() {{
     nested_object :: nested_reader.next() ?? panic("nested object")
     nested_key :: nested_reader.next() ?? panic("nested key")
     if nested_reader.next() == {{
-        err(e) -> print(e.byte_offset == 6 && e.path == "$[0][\"x\"]")
-        ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 6 && e.path == "$[0][\"x\"]")
+        Ok(_) -> print(false)
     }}
 
     array_limits := encoding.EncodingLimits.safe()
@@ -1672,10 +1672,10 @@ fn run() {{
     array_fail_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array fail start")
     array_fail_writer.write(encoding.DataEvent.Null) ?? panic("array fail null")
     if array_fail_writer.write(encoding.DataEvent.ArrayEnd) == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(writer_terminal(&array_fail_writer, ~first.reason))
         }}
-        ok(_) -> print(false)
+        Ok(_) -> print(false)
     }}
 
     object_limits := encoding.EncodingLimits.safe()
@@ -1696,8 +1696,8 @@ fn run() {{
     object_fail_writer.write(encoding.DataEvent.Key("a")) ?? panic("object fail key")
     object_fail_writer.write(encoding.DataEvent.Null) ?? panic("object fail null")
     if object_fail_writer.write(encoding.DataEvent.ObjectEnd) == {{
-        err(_) -> print(true)
-        ok(_) -> print(false)
+        Err(_) -> print(true)
+        Ok(_) -> print(false)
     }}
 
     incomplete_output :: files.create("{incomplete}") ?? panic("incomplete output")
@@ -1705,10 +1705,10 @@ fn run() {{
     incomplete_writer.write(encoding.DataEvent.ArrayStart) ?? panic("incomplete start")
     incomplete_writer.flush() ?? panic("incomplete flush")
     if incomplete_writer.finish() == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(writer_terminal(&incomplete_writer, ~first.reason))
         }}
-        ok(_) -> print(false)
+        Ok(_) -> print(false)
     }}
 }}
 "#,
@@ -1744,8 +1744,8 @@ use core.files as files
 fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
     repeated :: writer.finish()
     if repeated == {{
-        err(error) -> return error.reason == reason
-        ok(_) -> return false
+        Err(error) -> return error.reason == reason
+        Ok(_) -> return false
     }}
     return false
 }}
@@ -1753,8 +1753,8 @@ fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
 fn close_array(writer: &cbor.CBORWriter) {{
     result :: writer.write(encoding.DataEvent.ArrayEnd)
     if result == {{
-        err(error) -> panic("{{error.reason}}")
-        ok(_) -> return
+        Err(error) -> panic("{{error.reason}}")
+        Ok(_) -> return
     }}
 }}
 
@@ -1775,11 +1775,11 @@ fn run() {{
     rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
     loop _ in 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
     if rejected_writer.write(encoding.DataEvent.Null) == {{
-        err(first) -> {{
+        Err(first) -> {{
             print(first.reason == "max_item_bytes 7 exceeded")
             print(terminal(&rejected_writer, ~first.reason))
         }}
-        ok(_) -> {{ print(false); print(false) }}
+        Ok(_) -> {{ print(false); print(false) }}
     }}
 }}
 "#);
@@ -1805,8 +1805,8 @@ use core.files as files
 fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
     repeated :: reader.next()
     if repeated == {{
-        err(error) -> return error.reason == reason
-        ok(_) -> return false
+        Err(error) -> return error.reason == reason
+        Ok(_) -> return false
     }}
     return false
 }}
@@ -1814,8 +1814,8 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
 fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
     repeated :: writer.flush()
     if repeated == {{
-        err(error) -> return error.reason == reason
-        ok(_) -> return false
+        Err(error) -> return error.reason == reason
+        Ok(_) -> return false
     }}
     return false
 }}
@@ -1824,15 +1824,15 @@ fn run() {{
     directory_input :: files.open("{directory}") ?? panic("directory open")
     directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
     if directory_reader.next() == {{
-        err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
-        ok(_) -> print(false)
+        Err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
+        Ok(_) -> print(false)
     }}
     full_output :: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
     if full_writer.flush() == {{
-        err(first) -> print(writer_terminal(&full_writer, ~first.reason))
-        ok(_) -> print(false)
+        Err(first) -> print(writer_terminal(&full_writer, ~first.reason))
+        Ok(_) -> print(false)
     }}
 }}
 "#);
@@ -1921,26 +1921,26 @@ use core.encoding.cbor as cbor
 fn run() {
     strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
     if cbor.parse([249, 62, 0], ~strict) == {
-        ok(value) -> print(value.float() ?? -1.0)
-        err(_) -> print(-2.0)
+        Ok(value) -> print(value.float() ?? -1.0)
+        Err(_) -> print(-2.0)
     }
     if cbor.parse([250, 63, 192, 0, 0], ~strict) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
     }
     if cbor.parse([249, 126, 1], ~strict) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
     }
     if cbor.parse([249, 126, 0], ~strict) == {
-        ok(_) -> print(true)
-        err(_) -> print(false)
+        Ok(_) -> print(true)
+        Err(_) -> print(false)
     }
 
     tiny := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }
     if cbor.parse([130, 1, 2], tiny) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR array allocation exceeds max_bytes 3")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR array allocation exceeds max_bytes 3")
     }
 }
 "#;
@@ -1977,45 +1977,45 @@ fn run() {
 
     strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
     if cbor.parse([159, 1, 255], ~strict) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
     }
     if cbor.parse([129, 127, 97, 120, 255], ~strict) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
     }
 
     item_limited := cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
     if cbor.parse([159, 1, 2, 255], item_limited) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 2 && e.path == "$[1]" && e.reason == "max_items 2 exceeded")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 2 && e.path == "$[1]" && e.reason == "max_items 2 exceeded")
     }
     chunk_limited := cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
     if cbor.parse([127, 97, 97, 97, 98, 255], chunk_limited) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 3 && e.path == "$" && e.reason == "max_items 2 exceeded")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 3 && e.path == "$" && e.reason == "max_items 2 exceeded")
     }
     depth_limited := cbor.CBOROptions.{ max_depth: 1, max_items: 100, max_bytes: 64, require_canonical: false }
     if cbor.parse([159, 127, 97, 120, 255, 255], depth_limited) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 1 && e.path == "$[0]" && e.reason == "max_depth 1 exceeded")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]" && e.reason == "max_depth 1 exceeded")
     }
 
     if cbor.parse([127, 65, 120, 255]) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 1 && e.reason == "indefinite CBOR string contains a wrong or indefinite chunk")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 1 && e.reason == "indefinite CBOR string contains a wrong or indefinite chunk")
     }
     if cbor.parse([159, 1]) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 2 && e.reason == "indefinite CBOR array ended before its break")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 2 && e.reason == "indefinite CBOR array ended before its break")
     }
     if cbor.parse([191, 97, 107, 255]) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 3 && e.reason == "indefinite CBOR map break appears where a value is required")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 3 && e.reason == "indefinite CBOR map break appears where a value is required")
     }
     if cbor.parse([255]) == {
-        ok(_) -> print(false)
-        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR break outside an indefinite container")
+        Ok(_) -> print(false)
+        Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR break outside an indefinite container")
     }
 }
 "#;
@@ -2049,16 +2049,16 @@ fn wire(values: [Int]) -> [U8] {
 
 fn accepted(values: [Int]) -> Bool {
     if cbor.parse(wire(values)) == {
-        ok(_) -> return true
-        err(_) -> return false
+        Ok(_) -> return true
+        Err(_) -> return false
     }
     return false
 }
 
 fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
     if cbor.parse(wire(values)) == {
-        ok(_) -> return false
-        err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+        Ok(_) -> return false
+        Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
     }
     return false
 }
@@ -2071,8 +2071,8 @@ fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) 
         require_canonical: true,
     }
     if cbor.parse(wire(values), strict) == {
-        ok(_) -> return false
-        err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+        Ok(_) -> return false
+        Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
     }
     return false
 }
@@ -2165,22 +2165,22 @@ fn run() {
     value := cbor.parse([130, 97, 120, 97, 121], ~options) ?? panic("definite parse")
     indefinite := cbor.parse([159, 97, 120, 97, 121, 255], ~options) ?? panic("indefinite parse")
     if cbor.parse([130, 97, 120], options) == {
-        ok(_) -> panic("truncated array accepted")
-        err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
+        Ok(_) -> panic("truncated array accepted")
+        Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
     }
 
     roomy := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
     if cbor.parse([129, 130, 97, 120], ~roomy) == {
-        ok(_) -> panic("nested truncation accepted")
-        err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
+        Ok(_) -> panic("nested truncation accepted")
+        Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
     }
     if cbor.parse([162, 97, 97, 1, 97, 97, 2], ~roomy) == {
-        ok(_) -> panic("duplicate key accepted")
-        err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
+        Ok(_) -> panic("duplicate key accepted")
+        Err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
     }
     if cbor.decode<[Int]>([129, 97, 120], roomy) == {
-        ok(_) -> panic("typed mismatch accepted")
-        err(e) -> print(e.path == "$[0]" && e.reason.contains("expected Int"))
+        Ok(_) -> panic("typed mismatch accepted")
+        Err(e) -> print(e.path == "$[0]" && e.reason.contains("expected Int"))
     }
     print(true)
 }
@@ -2370,10 +2370,10 @@ fn run() {
     print(parsed.option_int("jobs") ?? 0)
     print(parsed.options("tag").len())
     if spec.parse(["tool", "--verbse"]) == {
-        ok(_) -> {
+        Ok(_) -> {
             print("unexpected")
         }
-        err(e) -> {
+        Err(e) -> {
             print(e)
         }
     }
@@ -3278,16 +3278,16 @@ use core.net as net
 
 fn run() {{
     if net.dns_a_at("{0}", "service.example.test", 1000) == {{
-        ok(_) -> panic("reserved DNS header accepted")
-        err(_) -> print("rejected")
+        Ok(_) -> panic("reserved DNS header accepted")
+        Err(_) -> print("rejected")
     }}
     if net.dns_a_at("{0}", "service.example.test", 1000) == {{
-        ok(_) -> panic("forward DNS pointer accepted")
-        err(_) -> print("rejected")
+        Ok(_) -> panic("forward DNS pointer accepted")
+        Err(_) -> print("rejected")
     }}
     if net.dns_a_at("{0}", "service.example.test", 1000) == {{
-        ok(_) -> panic("impossible DNS counts accepted")
-        err(_) -> print("rejected")
+        Ok(_) -> panic("impossible DNS counts accepted")
+        Err(_) -> print("rejected")
     }}
 }}
 "#,
@@ -3319,8 +3319,8 @@ fn run() {{
     lookup :: tasks.spawn(take(ready_tx) () => {{
         ready_tx.send(1)
         if net.dns_a_at("{}", "service.example.test", 5000) == {{
-            ok(_) -> print("unexpected DNS response")
-            err(error) -> print(net.error_message(error))
+            Ok(_) -> print("unexpected DNS response")
+            Err(error) -> print(net.error_message(error))
         }}
     }})
     _ready :: ready_rx.receive() ?? panic("ready")
@@ -3380,8 +3380,8 @@ fn run() {
         stream := net.tcp_accept(listener) ?? panic("accept")
         ready_tx.send(1)
         if stream.read(1) == {
-            ok(_) -> print("unexpected read")
-            err(error) -> print(net.error_message(error))
+            Ok(_) -> print("unexpected read")
+            Err(error) -> print(net.error_message(error))
         }
     })
     _client :: net.tcp_connect(address) ?? panic("connect")
@@ -3420,7 +3420,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
 
 fn send_four<T: Writer>(&stream: T) -> Int ? IOError {
     stream.write_all([1, 2, 3, 4])?
-    return ok(4)
+    return Ok(4)
 }
 
 fn run() {
@@ -3430,8 +3430,8 @@ fn run() {
     server :: tasks.spawn(take(listener) () => {
         stream := net.tcp_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {
-            ok(_) -> panic("zero limit looked like EOF")
-            err(_) -> print("invalid")
+            Ok(_) -> panic("zero limit looked like EOF")
+            Err(_) -> print("invalid")
         }
         bytes :: receive(&stream, 4) ?? panic("read")
         print("read:{bytes.len()}")
@@ -3474,7 +3474,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {{
 fn send_four<T: Writer>(&stream: T) -> Int ? IOError {{
     first :: stream.write([1, 2])?
     stream.write_all([3, 4])?
-    return ok(first)
+    return Ok(first)
 }}
 
 fn run() {{
@@ -3482,8 +3482,8 @@ fn run() {{
     server :: tasks.spawn(take(listener) () => {{
         stream := net.unix_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {{
-            ok(_) -> panic("zero limit looked like EOF")
-            err(error) -> {{
+            Ok(_) -> panic("zero limit looked like EOF")
+            Err(error) -> {{
                 if error == {{
                     .InvalidInput(context) -> print(if context.operation == .Read {{ "invalid" }} else {{ "wrong-operation" }})
                     else -> {{ print("wrong-error") }}
@@ -3505,14 +3505,14 @@ fn run() {{
     reply :: receive(&client, 1) ?? panic("reply")
     print("reply:{{reply.len()}}")
     if net.unix_write_all_bytes(&client, [5]) == {{
-        ok(_) -> panic("write after half-close succeeded")
-        err(error) -> print(if net.error_operation(error) == "unix write" {{ "half-closed" }} else {{ "wrong-half-close" }})
+        Ok(_) -> panic("write after half-close succeeded")
+        Err(error) -> print(if net.error_operation(error) == "unix write" {{ "half-closed" }} else {{ "wrong-half-close" }})
     }}
     net.unix_close(&client) ?? panic("close")
     net.unix_close(&client) ?? panic("second close")
     if receive(&client, 1) == {{
-        ok(_) -> panic("closed read succeeded")
-        err(error) -> {{
+        Ok(_) -> panic("closed read succeeded")
+        Err(error) -> {{
             if error == {{
                 .Closed(context) -> print(if context.operation == .Read {{ "closed" }} else {{ "wrong-close-operation" }})
                 else -> {{ print("wrong-close-error") }}
@@ -3550,8 +3550,8 @@ fn run() {{
     udp_timeout :: net.udp_bind("127.0.0.1:0") ?? panic("udp timeout bind")
     net.udp_set_timeout(udp_timeout, 20) ?? panic("udp timeout")
     if net.udp_receive(udp_timeout, 8) == {{
-        ok(_) -> panic("udp timeout returned data")
-        err(error) -> print(net.error_message(error))
+        Ok(_) -> panic("udp timeout returned data")
+        Err(error) -> print(net.error_message(error))
     }}
 
     udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
@@ -3559,8 +3559,8 @@ fn run() {{
     udp_wait :: tasks.spawn(take(udp, udp_ready_tx) () => {{
         udp_ready_tx.send(1)
         if net.udp_receive(udp, 8) == {{
-            ok(_) -> panic("udp cancel returned data")
-            err(error) -> print(net.error_message(error))
+            Ok(_) -> panic("udp cancel returned data")
+            Err(error) -> print(net.error_message(error))
         }}
     }})
     _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
@@ -3572,8 +3572,8 @@ fn run() {{
     unix_wait :: tasks.spawn(take(listener, unix_ready_tx) () => {{
         unix_ready_tx.send(1)
         if net.unix_accept(listener) == {{
-            ok(_) -> panic("unix cancel accepted stream")
-            err(error) -> print(net.error_message(error))
+            Ok(_) -> panic("unix cancel accepted stream")
+            Err(error) -> print(net.error_message(error))
         }}
     }})
     _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
@@ -3616,8 +3616,8 @@ fn run() {
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
     if receive(&client, 0) == {
-        ok(_) -> panic("zero read succeeded")
-        err(error) -> {
+        Ok(_) -> panic("zero read succeeded")
+        Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if context.operation == .Read { "invalid-read" } else { "invalid-other" })
                 else -> { print("other") }
@@ -3625,8 +3625,8 @@ fn run() {
         }
     }
     if fs.read("definitely-missing/ioerror-tree") == {
-        ok(_) -> panic("missing file read succeeded")
-        err(error) -> {
+        Ok(_) -> panic("missing file read succeeded")
+        Err(error) -> {
             if error == {
                 .NotFound(context) -> print(context.resource ?? "missing-resource")
                 else -> { print("other") }
@@ -3634,8 +3634,8 @@ fn run() {
         }
     }
     if fs.write(".", "cannot replace directory") == {
-        ok(_) -> panic("directory write succeeded")
-        err(error) -> {
+        Ok(_) -> panic("directory write succeeded")
+        Err(error) -> {
             if error == {
                 .Other(context) -> print(if context.operation == .Write { "write" } else { "wrong-write-operation" })
                 else -> { print("wrong-write-kind") }
@@ -3643,8 +3643,8 @@ fn run() {
         }
     }
     if process.cmd([]).run() == {
-        ok(_) -> panic("empty command succeeded")
-        err(error) -> {
+        Ok(_) -> panic("empty command succeeded")
+        Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if context.operation == .Resolve { "empty-command" } else { "wrong-command-operation" })
                 else -> { print("wrong-command-kind") }
@@ -3652,8 +3652,8 @@ fn run() {
         }
     }
     if process.pipeline([]) == {
-        ok(_) -> panic("empty pipeline succeeded")
-        err(error) -> {
+        Ok(_) -> panic("empty pipeline succeeded")
+        Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if context.operation == .Resolve { "empty-pipeline" } else { "wrong-pipeline-operation" })
                 else -> { print("wrong-pipeline-kind") }
@@ -3661,8 +3661,8 @@ fn run() {
         }
     }
     if process.cmd(["unused"]).env("BAD=NAME", "value").run() == {
-        ok(_) -> panic("invalid environment succeeded")
-        err(error) -> {
+        Ok(_) -> panic("invalid environment succeeded")
+        Err(error) -> {
             if error == {
                 .InvalidInput(context) -> print(if context.operation == .Resolve { context.resource ?? "missing-env-resource" } else { "wrong-env-operation" })
                 else -> { print("wrong-env-kind") }
@@ -3711,8 +3711,8 @@ fn run() {
     output := files.create("/dev/full") ?? panic("open")
     output.write_line("buffered") ?? panic("buffer")
     if output.flush() == {
-        ok(_) -> panic("flush succeeded")
-        err(error) -> {
+        Ok(_) -> panic("flush succeeded")
+        Err(error) -> {
             if error == {
                 .Other(context) -> print(if context.operation == .Flush { "flush" } else { "wrong-flush-operation" })
                 else -> { print("wrong-flush-kind") }
@@ -3757,8 +3757,8 @@ fn run() {
     stream := net.tcp_accept(listener) ?? panic("accept")
     net.set_read_timeout(&stream, 20) ?? panic("timeout")
     if stream.read(1) == {
-        ok(_) -> print("unexpected read")
-        err(error) -> print(net.error_message(error))
+        Ok(_) -> print("unexpected read")
+        Err(error) -> print(net.error_message(error))
     }
     client.join()
 }
@@ -3803,16 +3803,16 @@ fn run() {
     first := net.tcp_connect(address) ?? panic("first connect")
     net.set_read_timeout(&first, 0) ?? panic("zero timeout")
     if first.read(1) == {
-        ok(_) -> print("unexpected first read")
-        err(error) -> print(net.error_message(error))
+        Ok(_) -> print("unexpected first read")
+        Err(error) -> print(net.error_message(error))
     }
     first.close() ?? panic("first close")
 
     second := net.tcp_connect(address) ?? panic("second connect")
     @Context(deadline: time.now() - 1) {
         if second.read(1) == {
-            ok(_) -> print("unexpected second read")
-            err(error) -> print(net.error_message(error))
+            Ok(_) -> print("unexpected second read")
+            Err(error) -> print(net.error_message(error))
         }
     }
     second.close() ?? panic("second close")
@@ -3865,8 +3865,8 @@ fn run() {
     net.set_write_timeout(&client, 80) ?? panic("timeout")
     started := time.now()
     if client.write_text("x".repeat(16000000)) == {
-        ok(_) -> print("unexpected write")
-        err(error) -> print(net.error_message(error))
+        Ok(_) -> print("unexpected write")
+        Err(error) -> print(net.error_message(error))
     }
     elapsed := time.now() - started
     print(elapsed < 300)
@@ -3925,13 +3925,13 @@ fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
 fn send<T: Writer>(&stream: T, bytes: [U8]) -> Int ? IOError {
     empty_count :: stream.write([])?
     stream.write_all(bytes)?
-    return ok(empty_count)
+    return Ok(empty_count)
 }
 
 fn zero_rejected<T: Reader>(&stream: T) -> Bool {
     if stream.read(0) == {
-        ok(_) -> return false
-        err(error) -> {
+        Ok(_) -> return false
+        Err(error) -> {
             if error == {
                 .InvalidInput(context) -> return context.operation == .Read
                 else -> { return false }
@@ -3953,8 +3953,8 @@ fn run() {
     tls.close(&secure) ?? panic("close notify")
     tls.close(&secure) ?? panic("idempotent close")
     if receive(&secure, 1) == {
-        ok(_) -> panic("closed read succeeded")
-        err(error) -> {
+        Ok(_) -> panic("closed read succeeded")
+        Err(error) -> {
             if error == {
                 .Closed(context) -> print(if context.operation == .Read { "closed" } else { "wrong-operation" })
                 else -> { print("wrong-error") }
@@ -3998,8 +3998,8 @@ fn run() {{
     timed := net.tcp_connect("{address}") ?? panic("timeout tcp")
     net.set_timeout(&timed, 30) ?? panic("timeout budget")
     if net.tls_connect(^timed, "localhost") == {{
-        ok(_) -> panic("stalled handshake succeeded")
-        err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
+        Ok(_) -> panic("stalled handshake succeeded")
+        Err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
     }}
 
     (ready_tx, ready_rx) :: tasks.channel<Int>()
@@ -4007,8 +4007,8 @@ fn run() {{
         tcp := net.tcp_connect("{address}") ?? panic("cancel tcp")
         ready_tx.send(1)
         if tls.client(^tcp, "localhost") == {{
-            ok(_) -> panic("cancelled handshake succeeded")
-            err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
+            Ok(_) -> panic("cancelled handshake succeeded")
+            Err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
         }}
     }})
     _ready :: ready_rx.receive() ?? panic("ready")
@@ -4357,26 +4357,26 @@ fn run() {
     recipient :: email.address("Ada <ada@example.net>") ?? panic("recipient")
     hidden :: email.address("audit@example.org") ?? panic("bcc")
     if email.address("attacker@example.com\nBcc: stolen@example.com") == {
-        ok(_) -> panic("address injection accepted")
-        err(_) -> print("address-rejected")
+        Ok(_) -> panic("address injection accepted")
+        Err(_) -> print("address-rejected")
     }
     if email.message(~sender, [~recipient], [], "hello\nBcc: stolen@example.com", "text", "", []) == {
-        ok(_) -> panic("header injection accepted")
-        err(_) -> print("header-rejected")
+        Ok(_) -> panic("header injection accepted")
+        Err(_) -> print("header-rejected")
     }
     recipients := [~recipient]
     count := 1
     loop count < 101 { recipients.push(~recipient); count++ }
     if email.message(~sender, recipients, [], "subject", "text", "", []) == {
-        ok(_) -> panic("recipient bound ignored")
-        err(_) -> print("recipient-bound")
+        Ok(_) -> panic("recipient bound ignored")
+        Err(_) -> print("recipient-bound")
     }
     too_large: [U8] := [0]
     count = 1
     loop count < 26214401 { too_large.push(0); count++ }
     if email.attachment("large.bin", "application/octet-stream", too_large) == {
-        ok(_) -> panic("attachment bound ignored")
-        err(_) -> print("attachment-bound")
+        Ok(_) -> panic("attachment bound ignored")
+        Err(_) -> print("attachment-bound")
     }
     attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
     message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", "<b>html</b>", [attachment]) ?? panic("message")
@@ -4866,17 +4866,17 @@ fn run() {{
     loop true {{
         result :: malformed_reader.next()
         if result == {{
-            ok(maybe) -> {{
+            Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
                     None -> {{ print("malformed-missed"); break }}
                 }}
             }}
-            err(first) -> {{
+            Err(first) -> {{
                 again :: malformed_reader.next()
                 if again == {{
-                    ok(_) -> {{ print("terminal-missed") }}
-                    err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+                    Ok(_) -> {{ print("terminal-missed") }}
+                    Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
                 }}
                 break
             }}
@@ -4890,17 +4890,17 @@ fn run() {{
     loop true {{
         result :: total_reader.next()
         if result == {{
-            ok(maybe) -> {{
+            Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
                     None -> {{ print("total-missed"); break }}
                 }}
             }}
-            err(first) -> {{
+            Err(first) -> {{
                 again :: total_reader.next()
                 if again == {{
-                    ok(_) -> {{ print("total-terminal-missed") }}
-                    err(second) -> {{ print(first.byte_offset); print(first.reason == second.reason) }}
+                    Ok(_) -> {{ print("total-terminal-missed") }}
+                    Err(second) -> {{ print(first.byte_offset); print(first.reason == second.reason) }}
                 }}
                 break
             }}
@@ -5523,8 +5523,8 @@ fn run() {
 use core.encoding.json as json
 fn run() {
     if json.parse("{{\"x\":\"a\\qb\"}}") == {
-        ok(_) -> { print("OK") }
-        err(e) -> { print("ERR: {e.message}") }
+        Ok(_) -> { print("OK") }
+        Err(e) -> { print("ERR: {e.message}") }
     }
 }
 "#,
@@ -5545,8 +5545,8 @@ fn run() {
 use core.encoding.json as json
 fn run() {
     if json.parse(\"{{\\\"x\\\":\\\"a\tb\\\"}}\") == {
-        ok(_) -> { print(\"OK\") }
-        err(e) -> { print(\"ERR: {e.message}\") }
+        Ok(_) -> { print(\"OK\") }
+        Err(e) -> { print(\"ERR: {e.message}\") }
     }
 }
 ",
@@ -6078,7 +6078,7 @@ impl Email.Decode {
     fn decode(tree: DataTree) -> Email ? DecodeError {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
-        return ok(Email.{addr: s})
+        return Ok(Email.{addr: s})
     }
 }
 
@@ -6115,7 +6115,7 @@ struct Email { addr: String }
 impl Email.Decode {
     fn decode(tree: DataTree) -> Email ? DecodeError {
         value := tree.field("address") ?? DataTree.Text("")
-        return ok(Email.{ addr: value.text() ?? "" })
+        return Ok(Email.{ addr: value.text() ?? "" })
     }
 }
 
@@ -6357,7 +6357,7 @@ struct Strict { name: String }
 
 fn run() {
     result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
-    if result == err(e) {
+    if result == Err(e) {
         print(e.path)
         print(e.reason)
     }
@@ -7165,8 +7165,8 @@ fn run() {
     print("local={local == .Closed}")
     bad :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 0, overflow: .Block }, .Collect)
     if bad == {
-        ok(_) -> print("bad accepted")
-        err(_) -> print("invalid capacity")
+        Ok(_) -> print("bad accepted")
+        Err(_) -> print("invalid capacity")
     }
     scope :: event.scope()
     ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
@@ -7218,12 +7218,12 @@ use core.tasks as tasks
 
 fn panic_log_handler(n: Int) -> Void ? String {
     panic("log boom")
-    return err("unreachable")
+    return Err("unreachable")
 }
 
 fn panic_ignore_handler(n: Int) -> Void ? String {
     panic("ignore boom")
-    return err("unreachable")
+    return Err("unreachable")
 }
 
 fn run() {
@@ -7288,26 +7288,26 @@ fn run() {
 
     failure_scope :: event.scope()
     collect :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    collect.on_priority(failure_scope, 10, (n: Int) => err("high"))
-    collect.on_priority(failure_scope, 0, (n: Int) => err("low"))
+    collect.on_priority(failure_scope, 10, (n: Int) => Err("high"))
+    collect.on_priority(failure_scope, 0, (n: Int) => Err("low"))
     collected :: collect.emit_async(1).join()
     print("collect={collected.state() == .HandlerFailed} handlers={collected.delivered_handlers()} failures={collected.failures().len()}")
     print(collected.trace().summary())
 
     stop :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .StopFirst) ?? panic("policy")
-    stop.on_priority(failure_scope, 10, (n: Int) => err("first"))
+    stop.on_priority(failure_scope, 10, (n: Int) => Err("first"))
     stop.on_priority(failure_scope, 0, (n: Int) => {})
     stopped :: stop.emit_async(1).join()
     print("stop={stopped.state() == .HandlerFailed} handlers={stopped.delivered_handlers()} failures={stopped.failures().len()}")
 
     log_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
-    log_errors.on_priority(failure_scope, 10, (n: Int) => err("logged secret"))
+    log_errors.on_priority(failure_scope, 10, (n: Int) => Err("logged secret"))
     log_errors.on_priority(failure_scope, 0, (n: Int) => {})
     logged_error :: log_errors.emit_async(1).join()
     print("log error={logged_error.state() == .Delivered} handlers={logged_error.delivered_handlers()} failures={logged_error.failures().len()} traced={logged_error.trace().summary().contains("failed")}")
 
     ignore_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
-    ignore_errors.on_priority(failure_scope, 10, (n: Int) => err("ignored secret"))
+    ignore_errors.on_priority(failure_scope, 10, (n: Int) => Err("ignored secret"))
     ignore_errors.on_priority(failure_scope, 0, (n: Int) => {})
     ignored_error :: ignore_errors.emit_async(1).join()
     print("ignore error={ignored_error.state() == .Delivered} handlers={ignored_error.delivered_handlers()} failures={ignored_error.failures().len()} traced={ignored_error.trace().summary().contains("failed")}")

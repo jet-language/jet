@@ -85,7 +85,7 @@ pub(crate) fn struct_pattern_values_in_subset(
 }
 
 /// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
-/// subject — `subject == ok(b)` / `err(b)` / `value(b)` / `null`. Returns the
+/// subject — `subject == Ok(b)` / `Err(b)` / `value(b)` / `null`. Returns the
 /// `Pattern::{Ok,Err,Present,Absent}`, else `None` (a variant/range/comparison arm).
 pub(crate) fn arm_fallible_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
     match cond {
@@ -104,7 +104,7 @@ pub(crate) fn arm_fallible_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Opti
     }
 }
 
-/// The single name an `ok(b)`/`err(b)`/`value(b)` pattern binds (`null` binds none).
+/// The single name an `Ok(b)`/`Err(b)`/`value(b)` pattern binds (`null` binds none).
 pub(crate) fn fallible_pattern_binding(pattern: &Pattern) -> Option<String> {
     match pattern {
         Pattern::Ok { binding, .. }

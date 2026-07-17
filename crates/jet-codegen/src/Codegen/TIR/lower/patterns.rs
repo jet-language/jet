@@ -307,7 +307,7 @@ pub(super) fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {
     acc
 }
 
-/// c109 Phase 8: lower a fallible/optional pattern match (`when … { it == ok(n) ->
+/// c109 Phase 8: lower a fallible/optional pattern match (`when … { it == Ok(n) ->
 /// … }`). Reuses the `EnumMatch` TStmt — the scrutinee is the subject's emitted form
 /// (a covered fallible/optional value: a user fallible fn call, an optional local,
 /// etc.; no by-reference clone arises since those subjects are not deref'd enum

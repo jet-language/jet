@@ -756,4 +756,3 @@
             c.is_ascii_alphanumeric() || c == '_' || c == '-'
         }
     }
-

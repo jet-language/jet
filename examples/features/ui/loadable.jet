@@ -2,8 +2,8 @@
 use core.reactive.loadable as L
 
 fn fetch_user(id: Int) -> String ? String {
-    if id == 0 { return err("user not found") }
-    return ok("Alice")
+    if id == 0 { return Err("user not found") }
+    return Ok("Alice")
 }
 
 fn run() {
@@ -12,14 +12,14 @@ fn run() {
     print(idle_state.is_idle())
     print(loading_state.is_loading())
     result :: fetch_user(1)
-    if result == ok(name) {
+    if result == Ok(name) {
         loaded_state :: L.loaded(name)
         print(loaded_state.is_loaded())
         print(loaded_state.loaded() ?? "none")
         print(loaded_state.or_else("unknown"))
     }
     fail_result :: fetch_user(0)
-    if fail_result == err(msg) {
+    if fail_result == Err(msg) {
         failed_state :: L.failed(msg)
         print(failed_state.is_failed())
     }

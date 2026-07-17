@@ -1493,7 +1493,7 @@ impl<'a> Checker<'a> {
                         "this pattern belongs to an optional value, not {}",
                         subject_ty.name()
                     ),
-                    "use `== ok(...)` or `== err(...)` on a fallible result".to_string(),
+                    "use `== Ok(...)` or `== Err(...)` on a fallible result".to_string(),
                     format!(
                         "write `== {}(...)` or `== {}(...)` instead",
                         Syntax::LIT_OK,

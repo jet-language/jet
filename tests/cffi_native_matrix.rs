@@ -148,8 +148,8 @@ fn load(id: U64) -> Record ? String {{
         status = c.load_record(id, p)
         if status.to_int() == 0 {{ slot = ~p.* }}
     }}
-    if status.to_int() != 0 {{ return err("status {{status}}") }}
-    return ok(slot)
+    if status.to_int() != 0 {{ return Err("status {{status}}") }}
+    return Ok(slot)
 }}
 
 fn run() {{
@@ -162,7 +162,7 @@ fn run() {{
     print(c.callback_twice(increment, 40))
     print(c.callback_parallel(increment))
     print((load(7) ?? panic("success expected")).id)
-    if load(8) == {{ ok(v) -> {{ print("unexpected {{v.id}}") }} err(e) -> {{ print(e) }} }}
+    if load(8) == {{ Ok(v) -> {{ print("unexpected {{v.id}}") }} Err(e) -> {{ print(e) }} }}
     print(c.abi_default(20, 22))
     print(c.abi_explicit(19, 23))
 }}

@@ -65,10 +65,10 @@ fn render_jet(lib:&str,s:&Schema)->String{
     o.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\n"));
     for interface in interfaces(s){o.push_str(&format!("pub struct {interface} {{ value: Int }}\n"))}
     o.push_str("pub enum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n");
-    o.push_str(&format!("pub fn open() -> {} ? ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return err(error(code)) }}\n    return ok({}.{{ value: value }})\n}}\n\n",s.root_interface,s.root_interface));
+    o.push_str(&format!("pub fn open() -> {} ? ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",s.root_interface,s.root_interface));
     for interface in interfaces(s){
         o.push_str(&format!("impl {interface}.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        code :: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"));
-        o.push_str(&format!("@Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) -> DataTree ? ComError {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return err(error(code)) }}\n    value := json.parse(raw) ?? return err(ComError.TypeMismatch)\n    return ok(value)\n}}\n\n"));
+        o.push_str(&format!("@Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) -> DataTree ? ComError {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"));
     }
     o.push_str("fn error(code: Int) -> ComError {\n    if code == 1 { return ComError.WrongApartment }\n    if code == 2 { return ComError.InvalidHandle }\n    if code == 3 { return ComError.InvalidArgument }\n    if code == 5 { return ComError.TypeMismatch }\n    if code == 6 { return ComError.Limit }\n    return ComError.MemberFailed\n}\n\n");
     for m in &s.methods{
@@ -77,8 +77,8 @@ fn render_jet(lib:&str,s:&Schema)->String{
         o.push_str(&format!(") -> {} ? ComError {{\n    ",m.result.jet()));
         if m.result!=Kind::Unit{o.push_str("value :: ")}o.push_str(&format!("abi.{name}(object.value"));
         for p in &m.params{o.push_str(&format!(", {}",p.name))}
-        o.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return err(error(code)) }\n");
-        if m.result==Kind::Unit{o.push_str("    return ok(Void)\n")}else{o.push_str("    return ok(value)\n")}
+        o.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return Err(error(code)) }\n");
+        if m.result==Kind::Unit{o.push_str("    return Ok(Void)\n")}else{o.push_str("    return Ok(value)\n")}
         o.push_str("}\n\n");
     }
     o

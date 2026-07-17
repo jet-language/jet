@@ -1175,17 +1175,17 @@ impl<'a> Interp<'a> {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| unsupported(&format!("the name `{}`", name), *span)),
-            // c97/D-STRPARSE1: `ok(expr)` — wraps a value in the success arm.
+            // c97/D-STRPARSE1: `Ok(expr)` — wraps a value in the success arm.
             Expr::Ok(inner, _) => {
                 let v = self.eval(inner, scope)?;
                 Ok(CtValue::ResOk(Box::new(v)))
             }
-            // c97/D-STRPARSE1: `err(expr)` — wraps a value in the failure arm.
+            // c97/D-STRPARSE1: `Err(expr)` — wraps a value in the failure arm.
             Expr::Err(inner, _) => {
                 let v = self.eval(inner, scope)?;
                 Ok(CtValue::ResErr(Box::new(v)))
             }
-            // c97/D-STRPARSE1: `expr?` — unwrap `ok(v)` to `v`, propagate `err(e)`.
+            // c97/D-STRPARSE1: `expr?` — unwrap `Ok(v)` to `v`, propagate `Err(e)`.
             // For `T?` (Option): unwrap `Some(v)` to `v`, propagate `None` as an
             // empty-error sentinel.
             Expr::Try(inner, span, _convert) => {
@@ -1345,7 +1345,7 @@ impl<'a> Interp<'a> {
                 CtValue::ResErr(_) => Ok(false),
                 other => Err(unsupported(
                     &format!(
-                        "matching `ok(..)` against a value that isn't a result (got {})",
+                        "matching `Ok(..)` against a value that isn't a result (got {})",
                         other.jet_show()
                     ),
                     pattern.span(),
@@ -1359,7 +1359,7 @@ impl<'a> Interp<'a> {
                 CtValue::ResOk(_) => Ok(false),
                 other => Err(unsupported(
                     &format!(
-                        "matching `err(..)` against a value that isn't a result (got {})",
+                        "matching `Err(..)` against a value that isn't a result (got {})",
                         other.jet_show()
                     ),
                     pattern.span(),

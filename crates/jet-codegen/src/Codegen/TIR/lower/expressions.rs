@@ -1911,7 +1911,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // c109 Phase 8: `ok(x)` → `Ok(x)`. The result is a `Result` whose ok type is
+        // c109 Phase 8: `Ok(x)` → `Ok(x)`. The result is a `Result` whose ok type is
         // the inner's; the err type is unresolved here (Rust infers it from the
         // function return context, exactly as the AST path's bare `Ok(x)` does).
         Expr::Ok(inner, _) => {
@@ -1924,7 +1924,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Ok(Box::new(t)),
             }
         }
-        // c109 Phase 8: `err(e)` → `Err(e)`. The err type is the inner's; the ok type
+        // c109 Phase 8: `Err(e)` → `Err(e)`. The err type is the inner's; the ok type
         // is unresolved here (inferred from the function return context).
         Expr::Err(inner, _) => {
             let t = lower_expr(inner, cx, env);
@@ -1945,7 +1945,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // `?` unwraps a `Result<T, E>` to `T` (the value type). If the inner type
             // resolved to a Result, take its ok type; else fall back to the inner type
             // (never load-bearing in the covered subset — a `?` result feeds a binding
-            // carrying sema's `b.ty`, or an `ok(...)` wrap whose own type is total).
+            // carrying sema's `b.ty`, or an `Ok(...)` wrap whose own type is total).
             let result_ty = match &inner_t.ty {
                 Type::Result { ok, .. } => (**ok).clone(),
                 other => other.clone(),

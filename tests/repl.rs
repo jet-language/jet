@@ -1001,7 +1001,7 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
             "counts[\"jet\"]",
             "maybe: Int? :: Val(7)",
             "maybe ?? 0",
-            "result: Int ? String :: ok(9)",
+            "result: Int ? String :: Ok(9)",
             "result ?? 0",
             "state :: State.Ready(11)",
             "state_value(state)",

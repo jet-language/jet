@@ -1361,7 +1361,7 @@ fn maybe(values: [Int]) -> (Window?) {
 
 fn result(values: [Int]) -> Window ? String {
     selected :: values[0..1]
-    return ok(Window.{ values: selected })
+    return Ok(Window.{ values: selected })
 }
 
 fn tuple(values: [Int]) -> (window: Window, count: Int) {

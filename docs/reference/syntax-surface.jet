@@ -276,7 +276,7 @@ fn describe(s: Shape) -> String {
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
 fn nested(r: Shape ? Error) -> Bool {
     return if r {
-        ok(Rect(w, h)) && w > h -> true
+        Ok(Rect(w, h)) && w > h -> true
         else -> false
     }
 }
@@ -291,15 +291,15 @@ enum ParseError { Empty }
 
 fn parse_age(raw: String) -> Int ? ParseError {
     if raw == "" {
-        return err(ParseError.Empty)          // err(...) constructor (S35)
+        return Err(ParseError.Empty)          // Err(...) constructor (S35)
     }
-    return ok(7)                              // ok(...) constructor
+    return Ok(7)                              // Ok(...) constructor
 }
 
 fn use_errors(raw: String) -> Int ? ParseError {
     n :: parse_age(raw)?                       // `?` propagates (S7)
     fallback :: parse_age("0") ?? 0            // `??` fallback (S35/S71)
-    return ok(n * 2)
+    return Ok(n * 2)
 }
 
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
@@ -325,7 +325,7 @@ impl FileErr.Fallible {
 // fallible `fn run() -> Void ?`. (The `Fallible` conversion above ships; the
 // structured carrier is still pending.)
 // fn load() -> Config ? {
-//     return err(Error.message("bad config").code(2).with_source(io_err))
+//     return Err(Error.message("bad config").code(2).with_source(io_err))
 // }
 // fn run() -> Void ? {
 //     cfg :: load()?

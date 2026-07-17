@@ -618,7 +618,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
         // the AST path so the TIR never guesses the `(unknown)` fallback.
         Expr::Todo { expected_type, .. } => expected_type.is_some(),
-        // c109 Phase 8: fallible constructors `ok(x)` / `err(e)`. Covered when the
+        // c109 Phase 8: fallible constructors `Ok(x)` / `Err(e)`. Covered when the
         // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is a

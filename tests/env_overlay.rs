@@ -99,7 +99,7 @@ use core.env as env
 use core.process as process
 
 fn remove(name: String) -> Bool ? env.EnvError {
-    return ok(env.unset(name)?)
+    return Ok(env.unset(name)?)
 }
 
 fn run() {
@@ -146,8 +146,8 @@ fn run() {
     child :: process.run(["./raw_probe"]) ?? panic("raw child failed")
     print(child.output)
     if env.vars() == {
-        ok(_) -> { print("unexpected vars success") }
-        err(e) -> { print(e) }
+        Ok(_) -> { print("unexpected vars success") }
+        Err(e) -> { print(e) }
     }
 }
 "#;

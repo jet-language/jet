@@ -1,5 +1,17 @@
 use super::super::*;
 
+fn leading_dot_variant(kind: &TokKind) -> Option<String> {
+    match kind {
+        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+            Some(name.clone())
+        }
+        TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
+        TokKind::KwOk => Some(Syntax::LIT_OK.to_string()),
+        TokKind::KwErr => Some(Syntax::LIT_ERR.to_string()),
+        _ => None,
+    }
+}
+
 impl<'a> Parser<'a> {
     /// D-DOTSCOPE1: parse a scope-member statement `.name { … }` /
     /// `.name(args) { … }`. Purely structural — whether `name` is a valid member
@@ -190,7 +202,7 @@ impl<'a> Parser<'a> {
     /// past `{`), lowering to `Stmt::Switch`. Each arm is `head -> body` where
     /// `head` is a bare value (`200`, `"sat" || "sun"`) compared against the
     /// subject, a bare range (`400..499`), or a bare pattern (`Active(id)`,
-    /// `value(n)`, `ok(n)`, `null`) — the leading `subject ==` is dropped (Q4)
+    /// `value(n)`, `Ok(n)`, `null`) — the leading `subject ==` is dropped (Q4)
     /// and re-bound here. A predicate/Bool head is rejected with E0993; a leftover
     /// `subject ==` prefix with E0994. `body` is a braceless single statement or a
     /// `{ … }` block (D-IF2 Q2). `else -> body` is the catch-all (D-IF2 Q1).
@@ -769,13 +781,14 @@ impl<'a> Parser<'a> {
                     // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
                     // C25: also detect `Int ..= Int ->` (E0318) and `Int .. Int step N ->` (E0319).
                     let cond = if matches!(&self.peek().kind, TokKind::Dot)
-                        && matches!(
-                            self.toks.get(self.pos + 1).map(|t| &t.kind),
-                            Some(TokKind::Ident(_))
-                        ) {
+                        && self.toks.get(self.pos + 1)
+                            .and_then(|token| leading_dot_variant(&token.kind))
+                            .is_some() {
                         let dot_span = self.bump().span; // consume `.`
-                        let (variant, variant_span) =
-                            self.expect_ident("after `.` in a variant pattern")?;
+                        let variant_token = self.bump();
+                        let variant = leading_dot_variant(&variant_token.kind)
+                            .expect("leading-dot variant guard and token must agree");
+                        let variant_span = variant_token.span;
                         let (bindings, end) = if matches!(self.peek().kind, TokKind::LParen) {
                             self.bump(); // consume `(`
                             let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
@@ -831,13 +844,28 @@ impl<'a> Parser<'a> {
                             (vec![], variant_span.end)
                         };
                         let pat_span = Span::new(dot_span.start, end);
-                        Expr::PatternTest {
-                            subject: Box::new(subject.clone()),
-                            pattern: Pattern::Variant {
-                                variant,
-                                bindings,
+                        let one_binding = bindings.first().map(|slot| {
+                            slot.as_bind().unwrap_or(Syntax::PAT_WILDCARD_SLOT).to_string()
+                        });
+                        let pattern = match variant.as_str() {
+                            name if name == Syntax::LIT_NULL && bindings.is_empty() => Pattern::Absent(pat_span),
+                            name if name == Syntax::LIT_VALUE && bindings.len() == 1 => Pattern::Present {
+                                binding: one_binding.unwrap(),
                                 span: pat_span,
                             },
+                            name if name == Syntax::LIT_OK && bindings.len() == 1 => Pattern::Ok {
+                                binding: one_binding.unwrap(),
+                                span: pat_span,
+                            },
+                            name if name == Syntax::LIT_ERR && bindings.len() == 1 => Pattern::Err {
+                                binding: one_binding.unwrap(),
+                                span: pat_span,
+                            },
+                            _ => Pattern::Variant { variant, bindings, span: pat_span },
+                        };
+                        Expr::PatternTest {
+                            subject: Box::new(subject.clone()),
+                            pattern,
                             span: pat_span,
                         }
                     } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {

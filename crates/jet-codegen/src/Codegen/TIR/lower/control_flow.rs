@@ -151,7 +151,7 @@ pub(crate) fn lower_forin_collection(
 /// then-branch binding the condition introduces (name, rust place, resolved type).
 /// Reproduces `emit_if`'s condition handling (Source/Codegen/Statement.rs):
 ///  - `x == null` (`Pattern::Absent`) → `IsNone` (no binding);
-///  - `value(b)`/`ok(b)`/`err(b)` → `IfLet` with the Rust pattern from
+///  - `value(b)`/`Ok(b)`/`Err(b)` → `IfLet` with the Rust pattern from
 ///    `emit_if_let_pattern`, the binding's type resolved off the subject's lowered
 ///    `Option`/`Result` (mirroring `add_pattern_bindings`);
 ///  - binding-free user enum variant/group tests (`d == .Fire`) → `Matches`;

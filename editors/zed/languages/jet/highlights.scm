@@ -103,11 +103,11 @@
   "self"
 ] @keyword
 
-; literal: None Val err false ok true
+; literal: Err None Ok Val false true
 [
-  "err"
+  "Err"
+  "Ok"
   "false"
-  "ok"
   "true"
 ] @constant.builtin
 

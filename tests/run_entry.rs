@@ -7,7 +7,7 @@ fn bare_run_stays_valid() {
 fn fallible_void_run_is_the_only_fallible_entrypoint() {
     let src = r#"
 fn run() -> Void ? {
-    return err("boom")
+    return Err("boom")
 }
 "#;
     let out = jet::compile(src).expect("fallible Void run should compile");
@@ -33,7 +33,7 @@ fn run() -> Void ? {
 fn fallible_void_run_can_finish_normally_after_try() {
     let src = r#"
 fn step() -> Int ? {
-    return ok(1)
+    return Ok(1)
 }
 
 fn run() -> Void ? {
@@ -53,7 +53,7 @@ fn run() -> Void ? {
 fn unit_fallible_run_stays_rejected() {
     let src = r#"
 fn run() -> Unit ? {
-    return err("boom")
+    return Err("boom")
 }
 "#;
     let diags = jet::compile(src).expect_err("Unit ? run should not be accepted");

@@ -257,7 +257,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
     let value_param = Param {
         // D-VALIDATE1: `Type.validate(value)` reads `value` (no `^` at the
         // call site, matching the ratified spelling) and hands back an
-        // owned copy on success (`return ok(copy value)`).
+        // owned copy on success (`return Ok(copy value)`).
         convention: AccessConvention::Read,
         name: VALUE_VAR.to_string(),
         name_span: span,

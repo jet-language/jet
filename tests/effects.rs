@@ -736,10 +736,10 @@ fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
         from -= amount;
         to += amount;
         if amount > 100 {
-            return err(Fail.Bad);
+            return Err(Fail.Bad);
         }
     }
-    return ok(amount);
+    return Ok(amount);
 }
 fn run() {
     a: Int := 100
@@ -775,9 +775,9 @@ enum Fail { Bad }
 fn bump(x: &Int) -> Int ? Fail {
     @Transact(tx) {
         x += 1;
-        return err(Fail.Bad);
+        return Err(Fail.Bad);
     }
-    return ok(0);
+    return Ok(0);
 }
 fn run() { a: Int := 0; n :: bump(&a) ?? (-1); print("{n}"); }
 "#;

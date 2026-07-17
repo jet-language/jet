@@ -600,12 +600,14 @@ impl<'a> Fmt<'a> {
                 self.fmt_pattern(pattern);
             }
             Expr::Ok(inner, _) => {
-                self.write("ok(");
+                self.write(Syntax::LIT_OK);
+                self.write("(");
                 self.fmt_expr(inner, Prec::OrFallback);
                 self.write(")");
             }
             Expr::Err(inner, _) => {
-                self.write("err(");
+                self.write(Syntax::LIT_ERR);
+                self.write("(");
                 self.fmt_expr(inner, Prec::OrFallback);
                 self.write(")");
             }
@@ -762,19 +764,27 @@ impl<'a> Fmt<'a> {
                 }
             }
             Pattern::Present { binding, .. } => {
+                self.write(".");
                 self.write(Syntax::LIT_VALUE);
                 self.write("(");
                 self.write(binding);
                 self.write(")");
             }
-            Pattern::Absent(_) => self.write(Syntax::LIT_NULL),
+            Pattern::Absent(_) => {
+                self.write(".");
+                self.write(Syntax::LIT_NULL);
+            }
             Pattern::Ok { binding, .. } => {
-                self.write("ok(");
+                self.write(".");
+                self.write(Syntax::LIT_OK);
+                self.write("(");
                 self.write(binding);
                 self.write(")");
             }
             Pattern::Err { binding, .. } => {
-                self.write("err(");
+                self.write(".");
+                self.write(Syntax::LIT_ERR);
+                self.write("(");
                 self.write(binding);
                 self.write(")");
             }

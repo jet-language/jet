@@ -28,8 +28,8 @@ fn run() {{
     mux :: Server.mux()
     result :: Server.serve("127.0.0.1:999999", mux, tls: Server.tls({cert}, {key}))
     if result == {{
-        ok(_) -> {{ print("unexpected") }}
-        err(e) -> {{ print(e) }}
+        Ok(_) -> {{ print("unexpected") }}
+        Err(e) -> {{ print(e) }}
     }}
 }}
 "#
@@ -58,8 +58,8 @@ fn run() {
     mux :: Server.mux()
     result :: Server.serve("127.0.0.1:999999", mux, tls: Server.tls("not a cert", "not a key"))
     if result == {
-        ok(_) -> { print("unexpected") }
-        err(e) -> { print(e) }
+        Ok(_) -> { print("unexpected") }
+        Err(e) -> { print(e) }
     }
 }
 "#;

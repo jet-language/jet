@@ -897,7 +897,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("overflow".to_string(), Type::Named("Overflow".to_string())),
         ]),
         // D-SERDE2 / D-SERDE14=A: a hand `decode` builds its own rejection with
-        // `DecodeError.{ path: …, reason: … }` and returns it via `err(…)`. Both
+        // `DecodeError.{ path: …, reason: … }` and returns it via `Err(…)`. Both
         // fields are `String`; `path` is the wire location (e.g. `""` for a
         // whole-value reject, `"email"` for a field). Registering it here is what
         // makes the dot-ctor legal (it was E0119 before this decision).

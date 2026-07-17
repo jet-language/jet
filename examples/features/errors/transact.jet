@@ -23,11 +23,11 @@ fn place_order(items: Int) -> Int ? Fail {
         })
         if items == 0 {
             // `?`-failure: the block never commits, so the hooks are dropped un-run.
-            return err(Fail.Empty)
+            return Err(Fail.Empty)
         }
         print("stock reserved")
     }
-    return ok(items)
+    return Ok(items)
 }
 
 // Layer 1 (auto-snapshot): a money transfer over caller-owned balances. Debit `from`,
@@ -40,10 +40,10 @@ fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
         to += amount  // credit — `to` auto-snapshotted on entry
         if amount > 100 {
             // `?`-failure mid-transfer: the snapshots of `from`/`to` are restored.
-            return err(Fail.Insufficient)
+            return Err(Fail.Insufficient)
         }
     }
-    return ok(amount)
+    return Ok(amount)
 }
 
 // Layer 3 (explicit on_rollback): the author writes the undo by hand.
@@ -54,11 +54,11 @@ fn reserve_seat(ok_path: Bool) -> Int ? Fail {
             print("rollback hook: release seat")
         })
         if !ok_path {
-            return err(Fail.Empty)
+            return Err(Fail.Empty)
         }
         print("seat confirmed")
     }
-    return ok(1)
+    return Ok(1)
 }
 
 fn run() {

@@ -281,12 +281,12 @@ const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() -> Void ? {
 const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem
 
 fn maybe() -> Int ? String {
-    return ok(1)
+    return Ok(1)
 }
 
 fn checked() -> Int ? String {
     n :: maybe()?
-    return ok(n)
+    return Ok(n)
 }
 
 fn run() -> Void ? {
@@ -1152,7 +1152,7 @@ fn canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source()
         "if true",
         "if 0 ==",
         "loop {",
-        "fallible_value: Int ? String :: ok(1)",
+        "fallible_value: Int ? String :: Ok(1)",
         "unwrapped :: fallible_value?",
     ] {
         assert!(written.contains(field), "missing {field}: {written}");

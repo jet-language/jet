@@ -45,9 +45,9 @@ fn bump(c: &Counter) -> Int ? Fail {
     @Transact {
         c.value += 1
         c.ops += 1
-        return err(Fail.Bad)
+        return Err(Fail.Bad)
     }
-    return ok(c.value)
+    return Ok(c.value)
 }
 fn run() {
     c := Counter.{ value: 10, ops: 0 }
@@ -93,7 +93,7 @@ fn bump(c: &Counter) -> Int ? Fail {
         c.value += 1
         c.ops += 1
     }
-    return ok(c.value)
+    return Ok(c.value)
 }
 fn run() {
     c := Counter.{ value: 10, ops: 0 }
@@ -130,9 +130,9 @@ enum Fail { Bad }
 fn bump(c: &Counter) -> Int ? Fail {
     @Transact {
         c.value += 1
-        return err(Fail.Bad)
+        return Err(Fail.Bad)
     }
-    return ok(c.value)
+    return Ok(c.value)
 }
 fn run() {
     c := Counter.{ value: 0 }

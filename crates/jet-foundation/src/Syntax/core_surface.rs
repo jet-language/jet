@@ -228,9 +228,8 @@ pub const KW_ALIAS: &str = "alias";
 /// S32 (ratified M3): optional type suffix — `Int?` is “maybe an Int”.
 pub const TYPE_OPTION_SUFFIX: &str = "?";
 
-/// S32 (ratified M3) / D-OPT-SPELL1 (ratified 2026-07-04): present / absent
-/// spellings for `T?`. `Val(x)` is a PascalCase constructor call (matches
-/// enum-variant-construction style), `None` is a bare keyword-like literal.
+/// S32 / D-OPT-SPELL1 / D-SHAPE3b: Optional variants are `Val` / `None`.
+/// Both also support the expected-type forms `.Val` / `.None`.
 pub const LIT_VALUE: &str = "Val";
 pub const LIT_NULL: &str = "None";
 

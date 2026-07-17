@@ -643,7 +643,7 @@ pub(super) fn apply_insert_structural(
             if !anchor.fallible {
                 return Err(edit_error("unavailable", "needs a fallible function"));
             }
-            "    fallible_value: Int ? String :: ok(1)\n    unwrapped :: fallible_value?\n".to_string()
+            "    fallible_value: Int ? String :: Ok(1)\n    unwrapped :: fallible_value?\n".to_string()
         }
         _ => return Err(edit_error("unsupported", "unknown Canvas structural operation")),
     };
