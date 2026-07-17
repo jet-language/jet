@@ -1010,3 +1010,20 @@ fn insert_completion(buf: &mut Vec<char>, cursor: &mut usize, replace_start: usi
     buf.extend(completion.chars());
     *cursor = buf.len();
 }
+
+fn longest_common_prefix(items: &[String]) -> String {
+    let mut items = items.iter();
+    let Some(first) = items.next() else {
+        return String::new();
+    };
+    let mut prefix: Vec<char> = first.chars().collect();
+    for item in items {
+        let chars: Vec<char> = item.chars().collect();
+        let mut index = 0;
+        while index < prefix.len() && index < chars.len() && prefix[index] == chars[index] {
+            index += 1;
+        }
+        prefix.truncate(index);
+    }
+    prefix.into_iter().collect()
+}
