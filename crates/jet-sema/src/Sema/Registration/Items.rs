@@ -136,7 +136,7 @@ pub(crate) fn eval_comptime_items(
     base_dir: &std::path::Path,
     diags: &mut Vec<Diagnostic>,
     // D-CTCORE1: module alias → Core path so the interpreter can evaluate
-    // whitelisted pure Core calls (e.g. `comptime X = math.sqrt(4.0)`).
+    // whitelisted pure Core calls (e.g. `comptime value = math.sqrt(4.0)`).
     core_imports: &HashMap<String, String>,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {

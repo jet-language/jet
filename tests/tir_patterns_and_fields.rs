@@ -545,9 +545,9 @@ fn run() {
     assert_eq!(stdout, "0\n");
 }
 
-/// c109: a field read off a comptime-const STRUCT value (`comptime P = Pair{…}`;
-/// `P.left`) and an `==` against a comptime-const ENUM value (`comptime L =
-/// Light.Green`; `L == Light.Green`). Each const inlines to its pre-rendered
+/// c109: a field read off a comptime-const STRUCT value (`comptime pair_value = Pair{…}`;
+/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`comptime light_value =
+/// Light.Green`; `light_value == Light.Green`). Each const inlines to its pre-rendered
 /// Rust value; the field read / comparison matches the old emitter baseline.
 /// `main` routes through the TIR; runs to the round-trip output.
 #[test]
@@ -566,22 +566,22 @@ enum Light {
     Green
 }
 
-comptime P = Pair.{left: 7, right: \"seven\"}
-comptime L = Light.Green
+comptime pair_value = Pair.{left: 7, right: \"seven\"}
+comptime light_value = Light.Green
 
 fn run() {
     p :: Pair.{left: 7, right: \"seven\"}
     l :: Light.Green
-    print(\"{P.left}\")
+    print(\"{pair_value.left}\")
     print(\"{p.left}\")
-    print(\"{P.right}\")
+    print(\"{pair_value.right}\")
     print(\"{p.right}\")
-    print(\"{L == Light.Green}\")
+    print(\"{light_value == Light.Green}\")
     print(\"{l == Light.Green}\")
 }
 ";
     let out = jet::compile(src).expect("should compile");
-    // Byte-exact: `P.left` reads a field off the inlined struct literal.
+    // Byte-exact: `pair_value.left` reads a field off the inlined struct literal.
     assert!(
         out.rust.contains(
             "(user_Pair { user_left: 7i64, user_right: \"seven\".to_string() }).user_left"
@@ -589,7 +589,7 @@ fn run() {
         "comptime struct field read not byte-exact:\n{}",
         out.rust
     );
-    // Byte-exact: `L == Light.Green` compares the inlined enum value.
+    // Byte-exact: `light_value == Light.Green` compares the inlined enum value.
     assert!(
         out.rust
             .contains("(user_Light::user_Green) == (user_Light::user_Green)"),

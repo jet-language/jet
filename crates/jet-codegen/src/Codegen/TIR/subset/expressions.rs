@@ -31,7 +31,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // `Box::new(move |…| …) as <fn-type>` wrapper. A non-local that is a const
         // (inlined) or an unqualified module import is still out.
         Expr::Ident(name, _) => {
-            // c109 Phase 24: a comptime CONST ident (`PAGE_HEADER`) inlines its pre-rendered
+            // c109 Phase 24: a comptime const ident (`page_header`) inlines its pre-rendered
             // Rust value at the use site (`cx.consts[name]` — a TOTAL string fact, the same
             // `emit_expr` Ident arm reads). Admit it when it is a known const not shadowed by
             // a local. (A const used as an arithmetic operand resolves to `None` in
@@ -440,7 +440,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 {
                     return true;
                 }
-                // c109: a comptime-CONST receiver (`comptime P = Pair{…}`; then `P.left`).
+                // c109: a comptime-const receiver (`comptime pair_value = Pair{…}`; then
+                // `pair_value.left`).
                 // The const inlines to its pre-rendered Rust value string (`cx.consts[P]`
                 // = `user_Pair { … }`) at the use site, and reading a field off it is a
                 // plain place read — the AST `emit_expr` Field arm routes the const-ident

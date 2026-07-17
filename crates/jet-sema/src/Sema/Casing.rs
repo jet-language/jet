@@ -125,7 +125,10 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             for m in &t.methods { trait_method_names(m, out); }
         }
         Item::Impl(i) => for m in &i.methods { func_names(m, "method", out); },
-        Item::Const(c) => snake(&c.name, c.name_span, "constant", out),
+        Item::Const(c) => {
+            snake(&c.name, c.name_span, "constant", out);
+            expr_names(&c.value, out);
+        }
         Item::Test(t) => { for p in &t.params { snake(&p.name, p.name_span, "parameter", out); } stmt_names(&t.body, out); }
         Item::Bench(b) => stmt_names(&b.body, out),
         Item::Module(m) => {

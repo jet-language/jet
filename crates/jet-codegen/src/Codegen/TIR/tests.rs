@@ -1872,9 +1872,9 @@ fn run() {
 
     #[test]
     fn covers_field_read_and_eq_on_inlined_comptime_values() {
-        // c109: a FIELD READ off a comptime-const struct value (`comptime P =
-        // Pair{…}`; then `P.left`) and an `==` against a comptime-const enum value
-        // (`comptime L = Light.Green`; then `L == Light.Green`). The const inlines to
+        // c109: a FIELD READ off a comptime-const struct value (`comptime pair_value =
+        // Pair{…}`; then `pair_value.left`) and an `==` against a comptime-const enum value
+        // (`comptime light_value = Light.Green`; then `light_value == Light.Green`). The const inlines to
         // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
         // inlined struct / comparing the inlined enum is byte-identical to the AST path.
         // The Field gate now admits a non-local comptime-const receiver.
@@ -1889,13 +1889,13 @@ enum Light {
     Green
 }
 
-comptime P = Pair.{left: 7, right: "seven"}
-comptime L = Light.Green
+comptime pair_value = Pair.{left: 7, right: "seven"}
+comptime light_value = Light.Green
 
 fn run() {
-    print("{P.left}")
-    print("{P.right}")
-    print("{L == Light.Green}")
+    print("{pair_value.left}")
+    print("{pair_value.right}")
+    print("{light_value == Light.Green}")
 }
 "#;
         assert!(
