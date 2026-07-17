@@ -456,6 +456,8 @@ pub const MEM_FIXED: &str = "Fixed";
 /// D-ALLOC1 (ratified 2026-06-19): allocator constructor method name.
 /// D-SHAPE3a=A (ratified 2026-07-14): also the sole fresh-state constructor
 /// spelling, optionally written `.new(...)` when expected type resolves receiver.
+/// D-SHAPE-OPAQUE-INFER1=A (ratified 2026-07-14): generic receiver arguments may
+/// be omitted only when ordinary constructor inputs/expected type resolve them.
 pub const MEM_ALLOC_NEW: &str = "new";
 
 /// D-ALLOC1 (ratified 2026-06-19): allocate a value into an arena/bump/pool/fixed.

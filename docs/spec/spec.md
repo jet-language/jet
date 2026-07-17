@@ -535,6 +535,9 @@ Fresh hidden-state construction uses `Type.new(…)`. Under D-SHAPE3a, the
 receiver may be omitted as `.new(…)` when an expected type from a binding,
 return, field, or call argument determines exactly one receiver. This is
 ordinary expected-type elaboration, not a global constructor search.
+Under D-SHAPE-OPAQUE-INFER1, `Type.new(…)` may likewise omit generic receiver
+arguments when constructor inputs and the surrounding expected type force one
+answer; otherwise write `Type<Args>.new(…)` explicitly.
 
 ```
 struct Circle {

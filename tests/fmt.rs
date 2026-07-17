@@ -1207,9 +1207,11 @@ fn fmt_dot_construction_d_dotctor1() {
 
 #[test]
 fn fmt_inferred_new_stability() {
-    let src = "struct Box {\n    value: Int\n}\n\nimpl Box {\n    fn new(value: Int) -> Box {\n        return Box.{ value: value }\n    }\n}\n\nfn run() {\n    box: Box :: .new(1)\n}\n";
+    let src = "struct Box<T> {\n    value: T\n}\n\nimpl Box {\n    fn new(value: ^T) -> Box<T> {\n        return Box<T>.{ value: value }\n    }\n}\n\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n    expected: Box<Int> :: .new(3)\n}\n";
     let out = jet::format_source(src).expect("fmt should accept `.new(...)`");
-    assert!(out.contains("box: Box :: .new(1)"), "{out}");
+    for spelling in ["Box.new(1)", "Box<Int>.new(2)", ".new(3)"] {
+        assert!(out.contains(spelling), "formatter lost `{spelling}`:\n{out}");
+    }
     assert_eq!(out, jet::format_source(&out).expect("second fmt"));
 }
 

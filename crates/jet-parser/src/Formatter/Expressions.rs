@@ -475,6 +475,16 @@ impl<'a> Fmt<'a> {
                 ..
             } => {
                 self.fmt_expr(receiver, Prec::Postfix);
+                let receiver_type_args = method == Syntax::MEM_ALLOC_NEW
+                    && matches!(
+                        receiver.as_ref(),
+                        Expr::Ident(name, _)
+                            if name.chars().next().is_some_and(char::is_uppercase)
+                    )
+                    && !type_args.is_empty();
+                if receiver_type_args {
+                    self.fmt_method_type_args(type_args);
+                }
                 // S69 (D-SG3): keep an author-placed break before `.method(...)`.
                 if self.chain_break_between(receiver.span().end, method_span.start) {
                     // The receiver's own trailing comment (e.g. `.step()  // note`)
@@ -484,13 +494,17 @@ impl<'a> Fmt<'a> {
                         f.newline();
                         f.write(".");
                         f.write(method);
-                        f.fmt_method_type_args(type_args);
+                        if !receiver_type_args {
+                            f.fmt_method_type_args(type_args);
+                        }
                         f.fmt_view_or_call_args(method, args);
                     });
                 } else {
                     self.write(".");
                     self.write(method);
-                    self.fmt_method_type_args(type_args);
+                    if !receiver_type_args {
+                        self.fmt_method_type_args(type_args);
+                    }
                     self.fmt_view_or_call_args(method, args);
                 }
             }

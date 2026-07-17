@@ -28,6 +28,8 @@
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
 // and ordinary call punctuation, with the receiver resolved by sema.
+// D-SHAPE-OPAQUE-INFER1=A adds no token: `Type.new(...)` may omit generic
+// receiver arguments only when ordinary input/expected-type inference is unique.
 // D-UNSAFE-OBLIG1=A adds contextual `assert valid_ptr, aligned, no_alias`,
 // the `obligations: .Track/.Skip` @Unsafe field, and ENV_ORG_UNSAFE_POLICY.
 

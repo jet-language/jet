@@ -79,6 +79,54 @@ fn run() {
     assert_eq!(stdout, "5\n124\n6\n78\n9\n");
 }
 
+/// D-SHAPE-OPAQUE-INFER1=A: a generic constructor receiver may omit its
+/// arguments when ordinary input/expected-type inference determines one answer.
+#[test]
+fn generic_constructor_arguments_infer_through_tir() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Box<T> {
+    value: T
+}
+
+impl Box {
+    fn new(value: ^T) -> Box<T> {
+        return Box<T>.{ value: value }
+    }
+}
+
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+impl Pair {
+    fn new(first: ^A, second: ^B) -> Pair<A, B> {
+        return Pair<A, B>.{ first: first, second: second }
+    }
+}
+
+fn returned() -> Box<Int> {
+    return Box.new(4)
+}
+
+fn run() {
+    direct :: Box.new(1)
+    expected: Box<[Int]> :: Box.new([])
+    nested :: Box.new(Box.new(2))
+    pair :: Pair.new("three", 3)
+    explicit :: Box<Int>.new(5)
+    print("{direct.value}{nested.value.value}")
+    print("{pair.first}{pair.second}{returned().value}{explicit.value}")
+}
+"#;
+    let (code, stdout) = build_and_run("tir_generic_constructor_infer", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "12\nthree345\n");
+}
+
 // ===========================================================================
 // c109 Phase 23: @Pure / @Todo / default params / named args / distinct / tuples
 // ===========================================================================

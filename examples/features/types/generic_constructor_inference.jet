@@ -1,0 +1,19 @@
+// D-SHAPE-OPAQUE-INFER1=A: constructor inputs or an expected type may hide
+// generic receiver arguments only when they determine one concrete type.
+struct Box<T> {
+    value: T
+}
+
+impl Box {
+    fn new(value: ^T) -> Box<T> {
+        return Box<T>.{ value: value }
+    }
+}
+
+fn run() {
+    inferred :: Box.new(7)
+    nested :: Box.new(Box.new("jet"))
+    expected: Box<[Int]> :: Box.new([])
+    explicit :: Box<Int>.new(9)
+    print("{inferred.value} {nested.value.value} {explicit.value}")
+}

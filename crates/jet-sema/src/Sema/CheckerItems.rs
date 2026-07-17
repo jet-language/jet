@@ -54,6 +54,14 @@ impl<'a> Checker<'a> {
         let Some(params) = declared else {
             return;
         };
+        Self::instantiate_method_sig_from(sig, params, args);
+    }
+
+    fn instantiate_method_sig_from(
+        sig: &mut MethodSig,
+        params: &[crate::AST::TypeParam],
+        args: &[Type],
+    ) {
         let subst: HashMap<String, Type> = params
             .iter()
             .zip(args)
@@ -107,7 +115,7 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
         span: Span,
-        type_args: &[Type],
+        type_args: &mut Vec<Type>,
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         if matches!(type_name, "Arena" | "Bump") && method == "new" {
@@ -168,7 +176,121 @@ impl<'a> Checker<'a> {
         if owner_mod != self.module_idx && !msig.is_pub {
             self.diags.push(private_item(method, span));
         }
-        self.instantiate_method_sig(type_name, &mut msig, type_args);
+        let declared = if owner_mod == self.module_idx {
+            self.trait_reg
+                .struct_params
+                .get(type_name)
+                .or_else(|| self.trait_reg.enum_params.get(type_name))
+                .cloned()
+        } else {
+            self.modules.and_then(|modules| {
+                modules.get(owner_mod).and_then(|module| {
+                    module
+                        .trait_reg
+                        .struct_params
+                        .get(type_name)
+                        .or_else(|| module.trait_reg.enum_params.get(type_name))
+                        .cloned()
+                })
+            })
+        }
+        .unwrap_or_default();
+        let mut pre_inferred = None;
+        if method == "new" && type_args.is_empty() {
+            if !declared.is_empty() {
+                let expected = self.expected_type.clone();
+                let mut inference_args = Vec::new();
+                let mut inferred = self.trait_reg.infer_subst(
+                    &msig.params,
+                    msig.return_type.as_ref(),
+                    &[],
+                    &declared,
+                    expected.as_ref(),
+                );
+                if inferred.is_err() {
+                    let saved_expected = self.expected_type.take();
+                    let actual = args
+                        .iter_mut()
+                        .map(|arg| self.infer(&mut arg.expr))
+                        .collect::<Vec<_>>();
+                    self.expected_type = saved_expected;
+                    if actual.iter().all(Option::is_some) {
+                        let actual_types = actual.iter().flatten().cloned().collect::<Vec<_>>();
+                        inference_args = actual_types.clone();
+                        inferred = self.trait_reg.infer_subst(
+                            &msig.params,
+                            msig.return_type.as_ref(),
+                            &actual_types,
+                            &declared,
+                            expected.as_ref(),
+                        );
+                        pre_inferred = Some(actual);
+                    } else {
+                        return None;
+                    }
+                }
+                let subst = match inferred {
+                    Ok(subst) => subst,
+                    Err(_) => {
+                        let mut unbounded = declared.clone();
+                        for param in &mut unbounded {
+                            param.bounds.clear();
+                        }
+                        if let Ok(subst) = self.trait_reg.infer_subst(
+                            &msig.params,
+                            msig.return_type.as_ref(),
+                            &inference_args,
+                            &unbounded,
+                            expected.as_ref(),
+                        ) {
+                            for param in &declared {
+                                let Some(concrete) = subst.get(&param.name) else {
+                                    continue;
+                                };
+                                let concrete_name = match concrete {
+                                    Type::Named(name) | Type::Apply { name, .. } => name,
+                                    _ => continue,
+                                };
+                                if let Some(bound) = param
+                                    .bounds
+                                    .iter()
+                                    .find(|bound| {
+                                        !self.trait_reg.implements_trait(concrete_name, bound)
+                                    })
+                                {
+                                    self.diags.push(crate::Generics::e0905(
+                                        concrete_name,
+                                        bound,
+                                        span,
+                                        false,
+                                    ));
+                                    return None;
+                                }
+                            }
+                        }
+                        let params = declared
+                            .iter()
+                            .map(|param| param.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        self.diags.push(Diagnostic::error(
+                            "E0904",
+                            format!("`{type_name}.new` needs its generic receiver type here"),
+                            "constructor inputs and the surrounding expected type must determine one concrete receiver type".to_string(),
+                            format!("write the full receiver, such as `{type_name}<{params}>.new(...)`"),
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                };
+                type_args.extend(
+                    declared
+                        .iter()
+                        .filter_map(|param| subst.get(&param.name).cloned()),
+                );
+            }
+        }
+        Self::instantiate_method_sig_from(&mut msig, &declared, type_args);
         self.record_method_reference(type_name, method, span);
         self.record_edge(super::effect_key(Some(type_name), method), span);
         if !msig.is_static {
@@ -180,7 +302,14 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
-        self.check_method_args(type_name, method, &msig, args, span)
+        self.check_method_args(
+            type_name,
+            method,
+            &msig,
+            args,
+            span,
+            pre_inferred.as_deref(),
+        )
     }
 
     pub(crate) fn check_method_args(
@@ -190,6 +319,7 @@ impl<'a> Checker<'a> {
         sig: &MethodSig,
         args: &mut Vec<crate::AST::CallArg>,
         span: Span,
+        pre_inferred: Option<&[Option<Type>]>,
     ) -> Option<Type> {
         let _ = (type_name, method, span);
         let expected_args = if sig.self_conv.is_some() {
@@ -321,10 +451,19 @@ impl<'a> Checker<'a> {
                 if matches!(param_conv, AccessConvention::Read) && !param_ty.is_scalar() {
                     self.borrow_ctx = true;
                 }
-                let saved_expected = self.expected_type.clone();
-                self.expected_type = Some(param_ty.clone());
-                let arg_ty = self.infer(&mut arg.expr);
-                self.expected_type = saved_expected;
+                let arg_ty = if let Some(ty) = pre_inferred
+                    .and_then(|types| types.get(arg_idx))
+                    .cloned()
+                    .flatten()
+                {
+                    Some(ty)
+                } else {
+                    let saved_expected = self.expected_type.clone();
+                    self.expected_type = Some(param_ty.clone());
+                    let inferred = self.infer(&mut arg.expr);
+                    self.expected_type = saved_expected;
+                    inferred
+                };
                 if let Some(arg_ty) = arg_ty {
                     let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
                     if !reported && arg_ty != *param_ty {

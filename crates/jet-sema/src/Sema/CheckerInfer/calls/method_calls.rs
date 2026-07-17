@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
             receiver: &mut Box<Expr>,
             method: &str,
             span: Span,
-            type_args: &[Type],
+            type_args: &mut Vec<Type>,
             args: &mut Vec<crate::AST::CallArg>,
             recv_type_out: &mut Option<String>,
             resolved_ret_out: &mut Option<Type>,
@@ -2703,7 +2703,7 @@ impl<'a> Checker<'a> {
                     self.mark_moved(n.clone(), *nspan);
                 }
             }
-            self.check_method_args(&type_name, method, &msig, args, span)?;
+            self.check_method_args(&type_name, method, &msig, args, span, None)?;
             msig.return_type.clone().map(|t| self.resolve_type(t))
         }
     

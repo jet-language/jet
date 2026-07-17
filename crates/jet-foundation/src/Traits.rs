@@ -571,6 +571,25 @@ impl TraitRegistry {
         type_params: &[TypeParam],
         expected_ret: Option<&Type>,
     ) -> Result<HashMap<String, Type>, String> {
+        self.infer_subst(
+            &sig.params,
+            sig.return_type.as_ref(),
+            arg_types,
+            type_params,
+            expected_ret,
+        )
+    }
+
+    /// Ordinary one-way generic inference shared by functions and static
+    /// constructors. Callers persist the resulting concrete arguments.
+    pub fn infer_subst(
+        &self,
+        params: &[(AccessConvention, Type)],
+        return_type: Option<&Type>,
+        arg_types: &[Type],
+        type_params: &[TypeParam],
+        expected_ret: Option<&Type>,
+    ) -> Result<HashMap<String, Type>, String> {
         if type_params.is_empty() {
             return Ok(HashMap::new());
         }
@@ -578,7 +597,7 @@ impl TraitRegistry {
         // multi-char type params (e.g. `Kind`) in addition to single-char ones.
         let tp_set: HashSet<String> = type_params.iter().map(|p| p.name.clone()).collect();
         let mut subst = HashMap::new();
-        for (i, (_, pty)) in sig.params.iter().enumerate() {
+        for (i, (_, pty)) in params.iter().enumerate() {
             if let Some(arg_ty) = arg_types.get(i) {
                 if !unify_types(pty, arg_ty, &mut subst, &tp_set) {
                     return Err(type_params
@@ -589,7 +608,7 @@ impl TraitRegistry {
             }
         }
         if let Some(expected) = expected_ret {
-            if let Some(ret) = &sig.return_type {
+            if let Some(ret) = return_type {
                 let inst_ret = substitute_type(ret, &subst);
                 let _ = unify_types(&inst_ret, expected, &mut subst, &tp_set);
             }

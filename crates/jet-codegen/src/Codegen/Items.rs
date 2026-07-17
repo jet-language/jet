@@ -1112,8 +1112,12 @@ pub(crate) fn emit_type_impl(
         };
     }
     let tp_use = Generics::type_param_rust_list(type_params);
-    let tp_impl =
-        Generics::rust_type_param_list(type_params, &std::collections::HashMap::new());
+    let impl_bounds = if cx.cloneable.contains(type_name) {
+        Generics::rust_extra_clone_bounds(type_params)
+    } else {
+        std::collections::HashMap::new()
+    };
+    let tp_impl = Generics::rust_type_param_list(type_params, &impl_bounds);
     out.push_str(&format!(
         "impl{} {}{} {{\n",
         tp_impl,

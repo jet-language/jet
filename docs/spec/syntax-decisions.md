@@ -2507,6 +2507,14 @@ reads use only `duration.in(.Milliseconds/.Seconds/.Minutes/.Hours)?`, return
 constructors and per-unit readers leave the surface without aliases. Static
 unit literals remain unchanged.
 
+**D-SHAPE-OPAQUE-INFER1=A — hidden generic constructor arguments** *(ratified by
+owner 2026-07-14, card #568)*: `Type.new(…)` may omit the receiver's generic
+arguments when its inputs and surrounding expected type determine exactly one
+substitution. Empty or conflicting evidence is an error; write the full
+`Type<Args>.new(…)` receiver to pin it. This is the ordinary one-way generic
+solver, including nested types, bounds, and privacy—not a constructor registry,
+alias, or priority rule.
+
 **D-PRELUDE-LAW1=A — ambient-surface registry** *(ratified by owner 2026-07-12, card #514)*: the no-prefix surface is one closed list — always ambient: `print`, `input`, `panic`, `require`; comptime-gated ambient: `embed_file`, `embed_bytes`, `find`, `fetch`. User shadowing wins; libraries never inject (D-PRELUDEX1). Any addition or removal is a ballot.
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
