@@ -202,6 +202,7 @@ fn is_cloneable_rec(
                 && is_cloneable_rec(err, registry, visiting)
         }
         Type::Fn { .. } => false,
+        Type::Named(name) if builtin_resource_type(name) => false,
         Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
         Type::Named(name) => {
             if !visiting.insert(name.clone()) {
@@ -245,10 +246,27 @@ fn is_cloneable_rec(
     }
 }
 
+fn builtin_resource_type(name: &str) -> bool {
+    matches!(
+        name,
+        "FileReader"
+            | "FileWriter"
+            | "FileLock"
+            | "TcpStream"
+            | "UnixStream"
+            | "TlsStream"
+            | "DbConnection"
+            | "Arena"
+            | "Bump"
+            | "Pool"
+            | "Fixed"
+    )
+}
+
 /// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when `ty` owns heap data — directly
 /// (`String`/`[T]`/`[K,V]`/`Shared<T>`/a boxed trait object/a `[T#N]`, which
 /// erases to `Vec<T>` at codegen) or transitively (a struct/enum/tuple/distinct/
-/// alias with a heap-owning part). Backs `#Policy(no_alloc)` struct/enum-
+/// alias with a heap-owning part). Backs `@Policy(no_alloc)` struct/enum-
 /// literal and `copy` checks (E0921) — deliberately narrower than
 /// `is_cloneable`, which asks a different question ("can Rust `.clone()` this",
 /// true for nearly everything including heap types).
@@ -337,26 +355,6 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         Type::FixedList { .. } => true,
         Type::Tagged { inner, .. } => type_owns_heap_rec(inner, registry, visiting),
     }
-}
-
-/// D-POLICY-WORD1: one shared shape for every `#Policy(no_alloc)`
-/// floor violation — only `what` varies by call-site shape (interpolation /
-/// `.push`/`.insert` / heap-owning struct-or-enum literal / `copy` of a
-/// heap-owning type); why and fix are identical across all four (I8: one
-/// mechanism, one diagnostic).
-pub(crate) fn no_alloc_violation(what: String, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0921",
-        what,
-        "this module declares `#Policy(no_alloc)` (D-NOALLOC-SEM1) — every \
-         allocation-shaped expression in its own function bodies is a compile \
-         error; a call to a function defined elsewhere is that function's own \
-         module's problem, not checked here"
-            .to_string(),
-        "avoid the allocation here, or move this code out of the `#Policy(no_alloc)` module"
-            .to_string(),
-        Some(span),
-    )
 }
 
 pub(crate) fn expr_is_same_ident(a: &Expr, name: &str) -> bool {
@@ -738,7 +736,7 @@ pub(crate) fn e0138(
 
 /// D-PREPOST1: a `@Pre`/`@Post` contract condition used an effect — contract
 /// clauses are checked at every call, so they must stay pure (same checker
-/// as `#Pure fn`, E3401). `clause_kw` is `"Pre"`/`"Post"`; `span` is the
+/// as `@Pure fn`, E3401). `clause_kw` is `"Pre"`/`"Post"`; `span` is the
 /// impure call site inside the condition (from `Purity::check_pure_expr`).
 pub(crate) fn e0139(clause_kw: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
@@ -921,6 +919,10 @@ pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> Stri
                 name
             )
         }
+        SendProblemKind::ThreadConfined(name) => format!(
+            "`{}` owns thread-local allocator state and must stay on the thread that created it",
+            name
+        ),
         SendProblemKind::ViewBorrow => "a view is a borrow, not an owned value".to_string(),
     }
 }

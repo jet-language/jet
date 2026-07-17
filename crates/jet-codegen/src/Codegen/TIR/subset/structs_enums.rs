@@ -112,7 +112,7 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
         return true;
     }
     // D-STYLEUNIT1 (Tower c134): a DISTINCT-typed enum payload (`Length(Px)`
-    // where `Px` is a `#UnitFamily` member). Same rationale as the struct-field
+    // where `Px` is a `@UnitFamily` member). Same rationale as the struct-field
     // case in `field_ty_covered`: the distinct newtype is a covered value type,
     // moved/cloned by `lower_enum_arg` with no new decision.
     if is_covered_distinct_ty(ty, cx) {
@@ -323,7 +323,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         return true;
     }
     // D-STYLEUNIT1 (Tower c134): a DISTINCT-typed field (`m: Meters` where
-    // `Meters :: distinct Float`, or a `#UnitFamily` member like `width: Px`).
+    // `Meters :: distinct Float`, or a `@UnitFamily` member like `width: Px`).
     // A distinct type renders via `cx.rust_type` to its generated newtype
     // (`struct user_Meters(f64)`); a struct-lit field value is a distinct
     // constructor call (`Meters(10.0)` → the newtype, a covered expr) and a

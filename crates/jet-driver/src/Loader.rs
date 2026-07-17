@@ -162,12 +162,24 @@ fn load_entry_with_overlays_mode(
     // deps found in the manifest-less branch below, merged into
     // `parse_teaching` once that's declared.
     let mut inline_dep_lints: Vec<Diagnostic> = Vec::new();
-    let (project_root, pkg_dep_dirs, pkg_resolution) = if let Some(manifest_dir) =
+    let organization_policy = load_organization_unsafe_policy()?;
+    let (project_root, pkg_dep_dirs, pkg_resolution, package_policy) = if let Some(manifest_dir) =
         find_manifest_root(&entry_dir)
     {
         // Found a pkg.jet — validate it and collect dep source paths.
         let pack_path = manifest_dir.join(Syntax::PAYLOAD_FILE);
         let raw = fs::read_to_string(&pack_path).unwrap_or_default();
+        let package_manifest = match crate::PackageManifest::parse(&raw) {
+            Ok(manifest) => manifest,
+            Err(crate::PackageManifest::ManifestError::BadMemoryPolicy { detail }) => return Err(vec![Diagnostic::error(
+                "E0355",
+                "invalid package memory policy".to_string(),
+                detail,
+                "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid }` in `package.jet`".to_string(),
+                None,
+            )]),
+            Err(_) => crate::PackageManifest::PackManifest::default(),
+        };
         match Manifest::parse(&pack_path, &raw) {
             Err(d) => return Err(vec![d]),
             Ok(mf) => {
@@ -212,8 +224,8 @@ fn load_entry_with_overlays_mode(
 
                 // E1212/E1213: each packages: entry must have exactly one
                 // module declaration in the source tree (U10 Chunk 3).
-                if let Ok(pm) = crate::PackageManifest::parse(&raw) {
-                    for pkg in &pm.packages {
+                {
+                    for pkg in &package_manifest.packages {
                         match crate::PackageManifest::discover_module_in(
                             &manifest_dir,
                             &pkg.name,
@@ -245,7 +257,11 @@ fn load_entry_with_overlays_mode(
                 let dep_dirs = collect_dep_dirs(&mf, &manifest_dir);
                 // U17: declared package kinds + realized library staging dirs.
                 let resolution = collect_pkg_resolution(&raw);
-                (manifest_dir, dep_dirs, resolution)
+                let mut policy = organization_policy.clone();
+                policy.extend(package_manifest.memory_policy);
+                let source = pack_path.display().to_string();
+                for declaration in policy.iter_mut().filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package) { declaration.source = source.clone(); }
+                (manifest_dir, dep_dirs, resolution, policy)
             }
         }
     } else {
@@ -281,7 +297,7 @@ fn load_entry_with_overlays_mode(
                 }
             }
         }
-        (entry_dir, HashMap::new(), resolution)
+        (entry_dir, HashMap::new(), resolution, organization_policy)
     };
 
     let mut modules = Vec::new();
@@ -295,6 +311,7 @@ fn load_entry_with_overlays_mode(
         &project_root,
         &pkg_dep_dirs,
         &pkg_resolution,
+        &package_policy,
         &mut modules,
         &mut path_to_idx,
         &mut stack,
@@ -333,6 +350,7 @@ fn load_entry_with_overlays_mode(
                     &project_root,
                     &pkg_dep_dirs,
                     &pkg_resolution,
+                    &package_policy,
                     &mut modules,
                     &mut path_to_idx,
                     &mut stack,
@@ -439,11 +457,49 @@ fn load_entry_with_overlays_mode(
         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
         active_os: Syntax::OsTarget::host(),
     };
-    // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
+    // S59 (E2-M14): fold every `@Extern`/`@Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
     crate::Foreign::assemble_active_namespaces(&mut bundle)?;
     bundle.cffi = crate::CFFI::assemble(&mut bundle)?;
     Ok(bundle)
+}
+
+/// D-UNSAFE-OBLIG1=A: optional admin/CI organization floor. The configured
+/// path is an explicit build input; unreadable or malformed input fails closed.
+fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, Vec<Diagnostic>> {
+    let Ok(configured) = std::env::var(Syntax::ENV_ORG_UNSAFE_POLICY) else { return Ok(Vec::new()) };
+    let path = PathBuf::from(&configured);
+    let source = fs::read_to_string(&path).map_err(|error| vec![Diagnostic::error(
+        "E3109",
+        "cannot read the configured organization unsafe policy".to_string(),
+        format!("{} names `{}`, but it could not be read: {error}", Syntax::ENV_ORG_UNSAFE_POLICY, path.display()),
+        "fix the policy path or remove the environment variable".to_string(),
+        None,
+    )])?;
+    let mut declarations = crate::PackageManifest::parse_policy_document(&source).map_err(|error| vec![Diagnostic::error(
+        "E3109",
+        "the configured organization unsafe policy is malformed".to_string(),
+        format!("`{}` must contain a manifest-shaped `policy: .{{ unsafe: .Obligations }}` block: {error:?}", path.display()),
+        "fix the organization policy; configured policy never fails open".to_string(),
+        None,
+    )])?;
+    if declarations.len() != 1
+        || declarations[0].key != crate::Policy::PolicyKey::Unsafe
+        || declarations[0].value != crate::Policy::PolicyValue::UnsafeObligations
+    {
+        return Err(vec![Diagnostic::error(
+            "E3109",
+            "the organization unsafe policy has the wrong shape".to_string(),
+            "this admin input is exactly one mandatory unsafe-obligations floor".to_string(),
+            "use exactly `policy: .{ unsafe: .Obligations }`".to_string(),
+            None,
+        )]);
+    }
+    for declaration in &mut declarations {
+        declaration.scope = crate::Policy::PolicyScope::Organization;
+        declaration.source = path.display().to_string();
+    }
+    Ok(declarations)
 }
 
 /// Walk upward from `start` to find the nearest directory containing `pkg.jet`.
@@ -606,6 +662,7 @@ fn load_file(
     project_root: &Path,
     pkg_dep_dirs: &HashMap<String, PathBuf>,
     pkg_resolution: &PkgResolution,
+    package_policy: &[crate::Policy::PolicyDeclaration],
     modules: &mut Vec<LoadedModule>,
     path_to_idx: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
@@ -678,6 +735,18 @@ fn load_file(
     path_to_idx.insert(norm.clone(), module_idx);
 
     let imports = std::mem::take(&mut prog.imports);
+    for declaration in &mut prog.policy_declarations { declaration.source = display.to_string(); }
+    let mut effective_declarations = package_policy.to_vec();
+    effective_declarations.extend(prog.policy_declarations.clone());
+    for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc] {
+        let module_chain = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Organization | crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module)).cloned().collect::<Vec<_>>();
+        if let Err(error) = crate::Policy::resolve(key, module_chain) { return Err(vec![policy_ladder_diagnostic(key, error)]); }
+        let targets = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Function | crate::Policy::PolicyScope::Block) && d.key == key).filter_map(|d| d.target).collect::<Vec<_>>();
+        for target in targets {
+            let chain = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Organization | crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module) || (matches!(d.scope, crate::Policy::PolicyScope::Function | crate::Policy::PolicyScope::Block) && d.target == Some(target))).cloned().collect::<Vec<_>>();
+            if let Err(error) = crate::Policy::resolve(key, chain) { return Err(vec![policy_ladder_diagnostic(key, error)]); }
+        }
+    }
     modules.push(LoadedModule {
         path: path.to_path_buf(),
         display: display.to_string(),
@@ -690,6 +759,7 @@ fn load_file(
         no_prelude: prog.no_prelude,
         html_path: prog.html_path.clone(),
         no_alloc_policy: prog.no_alloc_policy,
+        policy_declarations: effective_declarations,
     });
 
     for imp in &imports {
@@ -728,6 +798,7 @@ fn load_file(
             project_root,
             pkg_dep_dirs,
             pkg_resolution,
+            package_policy,
             modules,
             path_to_idx,
             stack,
@@ -781,6 +852,7 @@ fn load_file(
             project_root,
             pkg_dep_dirs,
             pkg_resolution,
+            package_policy,
             modules,
             path_to_idx,
             stack,
@@ -815,6 +887,17 @@ fn load_file(
 
     stack.pop();
     Ok(())
+}
+
+fn policy_ladder_diagnostic(key: crate::Policy::PolicyKey, error: crate::Policy::PolicyError) -> Diagnostic {
+    let span = match error { crate::Policy::PolicyError::ProhibitedScope { span, .. } | crate::Policy::PolicyError::Widening { span, .. } => span, crate::Policy::PolicyError::Conflict { second, .. } => second };
+    Diagnostic::error(
+        "E0355",
+        format!("invalid effective `{}` policy", key.name()),
+        "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint".to_string(),
+        "remove the conflict or tighten the inner declaration".to_string(),
+        Some(span),
+    )
 }
 
 /// D-MOD1: find the file for `module name;` — look in the same directory as

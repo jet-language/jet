@@ -95,14 +95,11 @@ impl<'a> Fmt<'a> {
             } => {
                 // D-EFF2: render the callback effect bound prefix — `@Pure ` for an
                 // empty bound, `#(E1, E2) ` for a listed one. `@Pure` is a
-                // contract marker (`@`-plane, D-MARKER-FAMILY1) — it was
-                // being written with the `#` directive-plane prefix instead,
-                // silently downgrading ratified `@Pure` callback bounds back
-                // to the retired `#Pure` spelling on every fmt pass (a real
-                // regression caught reformatting examples/features/effects/effect_levers.jet).
+                // applied rule; listed effects keep their separate `#(…)`
+                // type-bound grammar.
                 if let Some(bound) = effect_bound {
                     if bound.is_empty() {
-                        self.write(crate::Syntax::CONTRACT_PREFIX);
+                        self.write(crate::Syntax::RULE_PREFIX);
                         self.write(crate::Syntax::KW_PURE);
                         self.write(" ");
                     } else {
@@ -172,9 +169,9 @@ impl<'a> Fmt<'a> {
                 self.write(&format!("#{}", len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)));
                 self.write("]");
             }
-            // D-QUAL4=A: `#Marker Type` — prefix value-tag.
+            // D-QUAL4=A: `@Marker Type` — prefix value-tag.
             Type::Tagged { marker, inner } => {
-                self.write("#");
+                self.write(crate::Syntax::RULE_PREFIX);
                 self.write(marker);
                 self.write(" ");
                 self.fmt_type(inner);
@@ -576,12 +573,12 @@ impl<'a> Fmt<'a> {
                     self.write(if named { "}" } else { ")" });
                 }
             }
-            // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
+            // D-TAINT1/TAINT2: `@Tainted expr` or `@Tainted(Kind) expr`.
             Expr::Tainted(inner, kind, _) => {
                 if let Some(k) = kind {
-                    self.write(&format!("#{}({}) ", Syntax::KW_TAINTED, k));
+                    self.write(&format!("@{}({}) ", Syntax::KW_TAINTED, k));
                 } else {
-                    self.write(&format!("#{} ", Syntax::KW_TAINTED));
+                    self.write(&format!("@{} ", Syntax::KW_TAINTED));
                 }
                 self.fmt_expr(inner, Prec::Unary);
             }
@@ -592,9 +589,9 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::Absent(_) => self.write(Syntax::LIT_NULL),
-            // D-SIMD2: a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max` (inside `.reduce(…)`).
-            Expr::ReduceMarker(name, _) => self.write(&format!("#{}", name)),
-            Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
+            // D-SIMD2: a reduce-op marker `@Add`/`@Mul`/`@Min`/`@Max` (inside `.reduce(…)`).
+            Expr::ReduceMarker(name, _) => self.write(&format!("@{}", name)),
+            Expr::Todo { .. } => self.write(&format!("@{}", Syntax::KW_TODO)),
             Expr::PatternTest {
                 subject, pattern, ..
             } => {

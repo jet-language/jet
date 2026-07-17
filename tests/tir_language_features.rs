@@ -8,7 +8,7 @@ use std::fs;
 use tir_support::{build_and_run, build_and_run_full, build_and_run_multi, have_rustc};
 
 // ===========================================================================
-// c109 Phase 23: @Pure / #Todo / default params / named args / distinct / tuples
+// c109 Phase 23: @Pure / @Todo / default params / named args / distinct / tuples
 // ===========================================================================
 
 /// c109 Phase 23: a `@Pure fn` (S60) routes through the TIR — purity is a sema-only
@@ -35,8 +35,8 @@ fn run() {
     assert_eq!(stdout, "42\nhi, jet\n");
 }
 
-/// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`) emits a diverging
-/// `todo!("#Todo at … — expected <ty>")`. The fn compiles + routes; the hole is never
+/// c109 Phase 23: a `@Todo` typed hole (`Expr::Todo`) emits a diverging
+/// `todo!("@Todo at … — expected <ty>")`. The fn compiles + routes; the hole is never
 /// reached at runtime here (only the implemented fn is called).
 #[test]
 fn todo_hole() {
@@ -48,7 +48,7 @@ fn double(n: Int) -> Int {
     return (n * 2)
 }
 fn not_yet(n: Int) -> Int {
-    return #Todo
+    return @Todo
 }
 fn run() {
     print(double(21))
@@ -526,7 +526,7 @@ fn run() {
     assert_eq!(stdout, "ok\n");
 }
 
-/// c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1, effect_caps)
+/// c109 Phase 26: a `@Caps(Io) { … }` effect-restriction region (D-EFF1, effect_caps)
 /// erases to a plain block in codegen; the body runs unchanged.
 #[test]
 fn caps_block() {
@@ -538,7 +538,7 @@ fn announce(label: String, n: Int) #(Io) {
     print(\"{label}: {n}\")
 }
 fn run() {
-    #Caps(Io) {
+    @Caps(Io) {
         announce(\"answer\", 42)
     }
 }

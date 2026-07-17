@@ -30,9 +30,9 @@ fn is_fallible_void_return(ty: &Type) -> bool {
 
 impl<'a> Checker<'a> {
     /// D-FFI-INLINE1=A / D-FFI-ASM1=A / D-FFI-CPP1=A (card #501): validate an
-    /// inline foreign tier function (`#FFI(<lang>) fn`). The systems floor ships
+    /// inline foreign tier function (`@FFI(<lang>) fn`). The systems floor ships
     /// `c`, `cpp`, and `asm`; every one is an unsafe foreign language, so an
-    /// inline body requires the enclosing `#Unsafe("reason")` gate (I1/S58).
+    /// inline body requires the enclosing `@Unsafe("reason")` gate (I1/S58).
     /// Any other language name has no inline binder yet (E3220).
     fn check_inline_foreign_fn(&mut self, f: &Func) {
         let Some(inl) = &f.inline_foreign else {
@@ -49,28 +49,28 @@ impl<'a> Checker<'a> {
                 "E3220",
                 format!("no inline foreign binder for `{}` yet", inl.lang),
                 "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards".to_string(),
-                "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`".to_string(),
+                "use `@FFI(c)`, `@FFI(cpp)`, or `@FFI(asm)`".to_string(),
                 Some(inl.lang_span),
             ));
             return;
         }
-        // I1/S58: an unsafe-language inline body must sit behind an `#Unsafe`
+        // I1/S58: an unsafe-language inline body must sit behind an `@Unsafe`
         // gate so the author states why calling it is sound.
         if !f.is_unsafe {
             self.diags.push(Diagnostic::error(
                 "E3215",
-                format!("`#FFI({})` needs an `#Unsafe(\"reason\")` gate", inl.lang),
+                format!("`@FFI({})` needs an `@Unsafe(\"reason\")` gate", inl.lang),
                 format!(
                     "`{}` is an unsafe foreign language — an inline `{}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)",
                     inl.lang, inl.lang
                 ),
-                format!("add the gate: `#Unsafe(\"…\") #FFI({}) fn …`", inl.lang),
+                format!("add the gate: `@Unsafe(\"…\") @FFI({}) fn …`", inl.lang),
                 Some(inl.marker_span),
             ));
             return;
         }
         // D-FFI-INLINE1/ASM1/CPP1 (card #501): the front end (parse, contract
-        // checking, `#Unsafe` gate, formatter, grammars) is live, but body
+        // checking, `@Unsafe` gate, formatter, grammars) is live, but body
         // lowering is not yet wired for any language. Reject at sema so a valid
         // program never reaches codegen and emits uncompilable Rust (I2). This
         // gate lifts per language as its binder lands — asm awaits the ratified
@@ -78,8 +78,8 @@ impl<'a> Checker<'a> {
         // cpp awaits the clang shim toolchain.
         self.diags.push(Diagnostic::error(
             "E3221",
-            format!("`#FFI({})` inline foreign body can't be compiled yet", inl.lang),
-            "the inline foreign tier is parsed, contract-checked, and `#Unsafe`-gated, but body lowering for this language is still pending (card #501 systems floor)".to_string(),
+            format!("`@FFI({})` inline foreign body can't be compiled yet", inl.lang),
+            "the inline foreign tier is parsed, contract-checked, and `@Unsafe`-gated, but body lowering for this language is still pending (card #501 systems floor)".to_string(),
             "track card #501 for when the inline binder for this language lands".to_string(),
             Some(inl.marker_span),
         ));
@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
                     p.ty.clone()
                 });
                 // D-LIN1: a parameter never carries the consume duty. Passing a
-                // `#SingleUse` value to a `^` parameter IS its terminal consumption
+                // `@SingleUse` value to a `^` parameter IS its terminal consumption
                 // (spec: "passed to a take parameter … or returned"), so the `^`
                 // recipient is where linearity is satisfied — making the param
                 // re-consume would be infinite regress. Borrow/read params can't
@@ -161,7 +161,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        // D-FFI-INLINE1=A (card #501): an inline foreign tier fn (`#FFI(<lang>)
+        // D-FFI-INLINE1=A (card #501): an inline foreign tier fn (`@FFI(<lang>)
         // fn`) has a foreign-source body, not Jet statements. Its parameters are
         // in scope above (the Jet signature is a real, checked contract at call
         // sites); validate the tier gate and skip the ordinary body/return
@@ -170,25 +170,15 @@ impl<'a> Checker<'a> {
             self.check_inline_foreign_fn(f);
             return;
         }
-        // D-UNSAFE2 / D-LIN1-DROP: an `#Unsafe fn` body is an audited region just
-        // like an `#Unsafe { … }` block — its reason is the audit note. Mark the
-        // whole body unsafe so `drop(x)` of a `#SingleUse` value is permitted
+        // D-UNSAFE2 / D-LIN1-DROP: an `@Unsafe fn` body is an audited region just
+        // like an `@Unsafe { … }` block — its reason is the audit note. Mark the
+        // whole body unsafe so `drop(x)` of a `@SingleUse` value is permitted
         // (and any other unsafe-gated operation is reachable directly).
-        if f.is_unsafe && f.unsafe_reason.is_none() {
-            self.diags.push(Diagnostic::lint(
-                "L3101",
-                "this `#Unsafe` function has no reason".to_string(),
-                "every gated function records why callers can rely on its unsafe contract"
-                    .to_string(),
-                "add the reason: `#Unsafe(\"why this is safe\") fn ...`".to_string(),
-                f.unsafe_span.or(Some(f.name_span)),
-            ));
-        }
         if f.is_reactive {
             if f.is_pure {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`#Reactive fn` can't also be `@Pure fn`".to_string(),
+                    "`@Reactive fn` can't also be `@Pure fn`".to_string(),
                     "a reactive effect re-runs when signals change, so it is not a pure function"
                         .to_string(),
                     "drop `@Pure` or use `reactive.effect` inside a plain `fn`".to_string(),
@@ -201,17 +191,17 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`#Reactive fn` must not return a value".to_string(),
-                    "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)"
+                    "`@Reactive fn` must not return a value".to_string(),
+                    "`@Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)"
                         .to_string(),
-                    "drop the return type, or use `#Reactive { … }` inside a plain `fn`"
+                    "drop the return type, or use `@Reactive { … }` inside a plain `fn`"
                         .to_string(),
                     Some(f.name_span),
                 ));
             }
         }
         // D-PREPOST1: check `@Pre`/`@Post` contract clauses. Params are already
-        // in scope above; a condition is pure (same checker as `#Pure fn`,
+        // in scope above; a condition is pure (same checker as `@Pure fn`,
         // E0139) and must be `Bool` (E0110 via `require_bool`). `@Post`
         // additionally binds `result` to the return type while its own
         // conditions are checked — `result` inside a `@Pre` is E0144 (see
@@ -265,7 +255,7 @@ impl<'a> Checker<'a> {
         self.check_variadic_bound_body_shape(f);
         self.lint_unjoined_tasks_in_current_scope();
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
-        // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
+        // never `pop_scope`d, so check its `@SingleUse` locals here (E0140).
         self.check_single_use_consumed_in_current_scope();
         // D-STREAMYIELD1: a generator (`-> Stream<T>`) falling off the end is
         // exactly a bare `return;` — it just ends the stream. Never E0114.
@@ -302,7 +292,7 @@ impl<'a> Checker<'a> {
     /// unrolls per call-site arity. `parts` has no zero-cost Rust representation
     /// outside that loop (heterogeneous elements, boxing is disallowed), so any
     /// other reference — a bare read, `.len()`, indexing, a second loop, passing
-    /// it to another call, use inside a nested block (`#Unsafe { }`, `if`, …) —
+    /// it to another call, use inside a nested block (`@Unsafe { }`, `if`, …) —
     /// is E1314. v1 scope, matching the plan's "conservative v1" call for this
     /// card: exactly the shape the ballot's own `log_all` example needs.
     fn check_variadic_bound_body_shape(&mut self, f: &Func) {
@@ -458,8 +448,8 @@ fn scan_stmt_for_variadic_uses(
                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
             }
         }
-        // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `taskgroup`, `#Transact`, `comptime { }`, …) is out of scope
+        // Every other statement kind (lexical-scope wrappers like `@Unsafe { }`,
+        // `region`, `taskgroup`, `@Transact`, `comptime { }`, …) is out of scope
         // for v1 — a trait-bounded variadic used inside one of these isn't
         // caught here; codegen's own "internal compiler error" guard
         // (`VariadicBound.rs`) is the backstop.
@@ -1072,6 +1062,8 @@ pub(crate) fn synthesize_delegation_method(
         return_type: sig.return_type.clone(),
         return_type_span: None,
         return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
@@ -1142,6 +1134,8 @@ pub(crate) fn synthesize_default_method(
         return_type: sig.return_type.clone(),
         return_type_span: None,
         return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,

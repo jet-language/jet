@@ -60,6 +60,7 @@ pub use jet_driver::{
     Manifest,
     PackageManifest,
     Parser,
+    Policy,
     PhaseTiming,
     ScriptDeps,
     Sema,
@@ -119,7 +120,7 @@ pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Dia
 
 /// Like `compile_with_path`, but threads a `--target=<triple>` (or `None`)
 /// through to codegen's native OS-target gating (D-OSTARGET1=A, ratified
-/// 2026-07-01, c134) — an `impl` gated to a different `#Target(Os.*)` than
+/// 2026-07-01, c134) — an `impl` gated to a different `@Target(Os.*)` than
 /// the resolved active OS is skipped entirely. `jet build`/`jet run`'s real
 /// `--target=` flag is the only caller; `compile_with_path` keeps its
 /// existing host-OS-default behavior unchanged for every other caller.
@@ -162,7 +163,7 @@ pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>
 }
 
 /// Like `compile_with_path` but with `--allow-impure` (D-CTEFFECT1).
-/// Enables Tier-2 ambient comptime effects inside `#Impure` gates.
+/// Enables Tier-2 ambient comptime effects inside `@Impure` gates.
 pub fn compile_allow_impure(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true, false, None)
 }
@@ -370,7 +371,7 @@ pub fn compile_fuzz_with_path(
     Driver::compile_fuzz(file, test_name)
 }
 
-/// D-BENCH1: compile for `jet bench` when the file has `#Bench` blocks —
+/// D-BENCH1: compile for `jet bench` when the file has `@Bench` blocks —
 /// optional `main`, bodies type-checked in `Bench` mode, then lowered to the
 /// timing harness.
 pub fn compile_benches_with_path(
@@ -379,7 +380,7 @@ pub fn compile_benches_with_path(
     Driver::compile_benches(file)
 }
 
-/// D-BENCH1: does this entry file declare any `#Bench` blocks? `jet bench`
+/// D-BENCH1: does this entry file declare any `@Bench` blocks? `jet bench`
 /// uses per-region timing when it does, and falls back to whole-program timing
 /// otherwise. A load failure returns `false` so the caller surfaces the real
 /// compile error on its normal path.
@@ -393,7 +394,7 @@ pub fn has_bench_blocks(file: &str) -> bool {
     }
 }
 
-/// Does the entry file declare any `#Test` block? `jet test` runs the test
+/// Does the entry file declare any `@Test` block? `jet test` runs the test
 /// harness when it does and skips it (running doctests only) when it doesn't, so
 /// a file with only doctests is still testable. A load failure returns `true` so
 /// the caller surfaces the real compile error on the normal harness path.

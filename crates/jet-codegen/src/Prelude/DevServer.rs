@@ -94,7 +94,7 @@ mod jet_devserver_impl {
 
     impl JetDevServer {
         /// Set the companion HTML page — takes priority over the `.jet`
-        /// file's own `#Html(...)` marker / `<stem>.html` sibling convention
+        /// file's own `@Html(...)` marker / `<stem>.html` sibling convention
         /// (both still apply, inside the `jet build --target=web`
         /// subprocess, when `.html` was never called).
         pub fn html(&self, path: String) -> JetDevServer {

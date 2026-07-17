@@ -118,6 +118,8 @@ impl<'a> Parser<'a> {
                     return_type,
                     return_type_span,
                     return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
                     is_unsafe,
                     unsafe_reason,
                     unsafe_span,
@@ -163,6 +165,8 @@ impl<'a> Parser<'a> {
                 return_type,
                 return_type_span,
                 return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
                 is_unsafe,
                 unsafe_reason,
                 unsafe_span,
@@ -424,10 +428,8 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                // D-SERDE5: `#[Rename("x")] who: String` — field-level serde markers.
-                // D-DEBUG-REDACT/D-MARKERMOVE1: `@[Redact] who: String` — contract
-                // plane; stackable with a `#[…]` serde group on the same field.
-                if self.at_marker_list() || self.at_contract_marker_list() {
+                // D-SHAPE2: field rules share one `@[…]` group.
+                if self.at_marker_list() {
                     let field_markers = self.parse_field_markers()?;
                     let mut f = self.field()?;
                     let mut redact = false;

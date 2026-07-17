@@ -51,6 +51,11 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
             } else {
                 rust_return_type(cx, t)
             };
+            let rust = if tir.gc_return {
+                format!("jet_gc::AutomaticRoot<{rust}>")
+            } else {
+                rust
+            };
             format!(" -> {rust}")
         }
         None => String::new(),
@@ -71,9 +76,9 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         .collect::<Vec<_>>()
         .join(", ");
     let vis = if tir.is_main { "" } else { "pub " };
-    // c109 Phase 18: an `#Unsafe fn` lowers to `unsafe fn` — the prefix sits right after
+    // c109 Phase 18: an `@Unsafe fn` lowers to `unsafe fn` — the prefix sits right after
     // `vis`, exactly as `emit_func` (`{vis}{unsafe_kw}fn …`). I1: emitted ONLY when the
-    // source was `#Unsafe fn` (`tir.is_unsafe`).
+    // source was `@Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
     // D-CABI-CALLBACK1: `extern "C" fn` ONLY for a function sema proved is
     // actually passed as a native callback symbol somewhere (`cx.ffi_callback_fns`,
@@ -81,7 +86,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // `crates/jet-sema/src/Sema/Bundle.rs::collect_core_expr`). Never every
     // `@Pure fn`: that leaked the purity lever into codegen and broke I3
     // erasure (`effect_annotations_are_erased`, `eff2_levers_are_erased`,
-    // fixed by 14dd68a5) — but a bare fn reference handed to a `#Extern`
+    // fixed by 14dd68a5) — but a bare fn reference handed to a `@Extern`
     // C-ABI callback parameter (`callback_twice(increment, x)`) genuinely
     // needs the C calling convention: the referenced Rust item's own type
     // must match the raw `extern "C" fn` pointer type the C side expects.
@@ -224,6 +229,11 @@ pub(crate) fn emit_tir_method(
             } else {
                 rust_return_type(cx, t)
             };
+            let rust = if tir.gc_return {
+                format!("jet_gc::AutomaticRoot<{rust}>")
+            } else {
+                rust
+            };
             format!(" -> {rust}")
         }
         None => String::new(),
@@ -260,9 +270,9 @@ pub(crate) fn emit_tir_method(
         };
         params.push(format!("{rust_name}: {rust}"));
     }
-    // c109 Phase 18: an `#Unsafe fn` inherent method lowers to `pub unsafe fn` — the
+    // c109 Phase 18: an `@Unsafe fn` inherent method lowers to `pub unsafe fn` — the
     // prefix sits between `pub ` and `fn`, exactly as `emit_method` (`pub {unsafe_kw}fn`).
-    // I1: emitted ONLY for a source `#Unsafe fn` (`tir.is_unsafe`).
+    // I1: emitted ONLY for a source `@Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
     // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` on a method — same attribute,
     // indented to the method's own line (see `emit_tir_toplevel` for the free-
@@ -300,7 +310,7 @@ pub(crate) fn emit_tir_method(
 /// block (the caller `emit_trait_impl`/`emit_external_trait_impl` opened it).
 /// Byte-identical to `emit_trait_method` (Source/Codegen/Items.rs): a BARE method name
 /// (no `user_` mangle — the trait owns it), NO `pub`, an always-`&self` receiver, and
-/// an `unsafe ` prefix iff the source was an `#Unsafe fn`.
+/// an `unsafe ` prefix iff the source was an `@Unsafe fn`.
 pub(crate) fn emit_tir_trait_method(
     tir: &TFunc,
     is_unsafe: bool,
@@ -333,6 +343,11 @@ pub(crate) fn emit_tir_trait_method(
                 cx.rust_type_with_view_lifetime(t)
             } else {
                 rust_return_type(cx, t)
+            };
+            let ret = if tir.gc_return {
+                format!("jet_gc::AutomaticRoot<{ret}>")
+            } else {
+                ret
             };
             if ret.is_empty() {
                 String::new()

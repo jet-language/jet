@@ -31,7 +31,7 @@ impl<'a> Checker<'a> {
                     },
                 );
             }
-            // D-LIN1: the `#SingleUse` bindings that outlive this `if` — declared in an
+            // D-LIN1: the `@SingleUse` bindings that outlive this `if` — declared in an
             // enclosing scope (not the `if`-cond scope just pushed) and not already
             // consumed before the `if`. These are the candidates for the
             // consumed-on-one-branch check (E0141).
@@ -92,7 +92,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // D-LIN1 / E0141: a `#SingleUse` binding consumed on exactly one branch
+            // D-LIN1 / E0141: a `@SingleUse` binding consumed on exactly one branch
             // leaves the other path with the value unused. Report it once, on the
             // branch where it WAS consumed (asymmetry is the bug), pointing at the
             // binding. (Both-consumed → fine; neither → falls through to E0140.)

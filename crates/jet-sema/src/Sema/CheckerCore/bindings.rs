@@ -4,6 +4,15 @@ use crate::Sema::Diagnostics::{edit_distance, is_task_type, type_fix_hint};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use super::helpers::is_pod_uninit_type;
+
+fn direct_fixed_constructor(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::MethodCall { receiver, method, .. }
+            if matches!(&**receiver, Expr::Field(_, name, _) if name == "Fixed")
+                && matches!(method.as_str(), "new" | "over")
+    )
+}
 pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut seen_category = false;
@@ -15,7 +24,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 if seen_category {
                     diags.push(Diagnostic::error(
                         "E0346",
-                        "`#Meta` repeats `category`".to_string(),
+                        "`@Meta` repeats `category`".to_string(),
                         "`category` has one value; writing it twice would make tooling choose between two labels".to_string(),
                         "keep one `category: \"...\"` field".to_string(),
                         Some(*span),
@@ -26,7 +35,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                     Expr::Str(parts, _) => match parts.as_slice() {
                         [StrPart::Lit(s)] if s.is_empty() => diags.push(Diagnostic::error(
                             "E0348",
-                            "`#Meta` category cannot be empty".to_string(),
+                            "`@Meta` category cannot be empty".to_string(),
                             "Canvas groups use this text as a visible label".to_string(),
                             "write a non-empty category, e.g. `category: \"Movement\"`".to_string(),
                             Some(value.span()),
@@ -34,7 +43,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                         [StrPart::Lit(_)] => {}
                         _ => diags.push(Diagnostic::error(
                             "E0347",
-                            "`#Meta` category needs plain quoted text".to_string(),
+                            "`@Meta` category needs plain quoted text".to_string(),
                             "`category` is compile-time tooling data, not a runtime string".to_string(),
                             "write a string literal, e.g. `category: \"Movement\"`".to_string(),
                             Some(value.span()),
@@ -42,7 +51,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                     },
                     _ => diags.push(Diagnostic::error(
                         "E0347",
-                        "`#Meta` category needs plain quoted text".to_string(),
+                        "`@Meta` category needs plain quoted text".to_string(),
                         "`category` is compile-time tooling data, not a runtime value".to_string(),
                         "write a string literal, e.g. `category: \"Movement\"`".to_string(),
                         Some(value.span()),
@@ -53,7 +62,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 if seen_tunable {
                     diags.push(Diagnostic::error(
                         "E0346",
-                        "`#Meta` repeats `tunable`".to_string(),
+                        "`@Meta` repeats `tunable`".to_string(),
                         "`tunable` is a flag; writing it twice does not add meaning".to_string(),
                         "keep one `tunable` field".to_string(),
                         Some(*span),
@@ -65,7 +74,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 if seen_maturity {
                     diags.push(Diagnostic::error(
                         "E0346",
-                        "`#Meta` repeats `maturity`".to_string(),
+                        "`@Meta` repeats `maturity`".to_string(),
                         "a declaration has one maturity value".to_string(),
                         "keep one `maturity: .Experimental`, `.Tested`, or `.Hardened` field".to_string(),
                         Some(*span),
@@ -83,7 +92,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 if !valid {
                     diags.push(Diagnostic::error(
                         "E0352",
-                        "`#Meta` maturity needs a known maturity value".to_string(),
+                        "`@Meta` maturity needs a known maturity value".to_string(),
                         "maturity metadata is a closed documentation scale".to_string(),
                         "write `maturity: .Experimental`, `.Tested`, or `.Hardened`".to_string(),
                         Some(value.span()),
@@ -107,8 +116,8 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 };
                 diags.push(Diagnostic::error(
                     "E0345",
-                    format!("`#Meta` does not have a `{}` field", name),
-                    "`#Meta` fields are owner-ratified tooling metadata".to_string(),
+                    format!("`@Meta` does not have a `{}` field", name),
+                    "`@Meta` fields are owner-ratified tooling metadata".to_string(),
                     fix,
                     Some(*span),
                 ));
@@ -288,7 +297,10 @@ impl<'a> Checker<'a> {
                     span,
                 );
             }
+            let saved_fixed_constructor = self.allow_fixed_constructor;
+            self.allow_fixed_constructor = direct_fixed_constructor(&b.init);
             let it = self.infer(&mut b.init);
+            self.allow_fixed_constructor = saved_fixed_constructor;
             if b.is_comptime {
                 self.in_comptime = false;
             }
@@ -417,7 +429,7 @@ impl<'a> Checker<'a> {
                 let globals = self.current_ct_globals();
                 // D-CTCORE1: pass core_imports so the interpreter can evaluate
                 // whitelisted pure Core calls (e.g. `math.sqrt(x)`).
-                // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
+                // D-CTEFFECT1: pass impure context so bindings inside @Impure blocks
                 // start with the gate already open.
                 match crate::Comptime::evaluate_owned_with_imports_opts_collecting(
                     &b.init,
@@ -448,7 +460,7 @@ impl<'a> Checker<'a> {
             } else {
                 None
             };
-            // D-LIN1: a binding that owns a `#SingleUse` value carries the duty to
+            // D-LIN1: a binding that owns a `@SingleUse` value carries the duty to
             // consume it exactly once. The duty transfers on `y :: x` (the move marks
             // `x` consumed via `note_move_if_direct_ident`; `y` now owns it).
             let single_use_span = if self.type_is_single_use(&final_ty) {
@@ -467,8 +479,13 @@ impl<'a> Checker<'a> {
                 b.arena_view = true;
                 self.record_arena_view(&b.name, arena, b.name_span);
             } else if let Expr::Ident(src, src_span) = &b.init {
-                if self.is_arena_view(src) {
+                if self.is_arena_view(src) || self.is_fixed_backing_view(src) {
                     self.report_view_escape(src, "be stored in another binding", *src_span);
+                }
+            }
+            if matches!(&final_ty, Type::Named(name) if name == "Fixed") {
+                if let Some(owner) = self.fixed_backing_source(&b.init) {
+                    self.record_fixed_backing(&b.name, owner, b.name_span);
                 }
             }
             // D-SHAPE-PLACE1: `x :: list[a..b]` makes `x` a scope-bound window

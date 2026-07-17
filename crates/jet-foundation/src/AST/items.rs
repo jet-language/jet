@@ -14,7 +14,7 @@ pub enum Item {
     /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — a transparent
     /// type alias for generic shortcuts. Erases at codegen (I3).
     TypeAlias(TypeAliasDef),
-    /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(currency) { usd, eur, gbp }` —
+    /// D-QUAL3 (ratified 2026-06-24): `@UnitFamily(currency) { usd, eur, gbp }` —
     /// a unit family. Sugar: each member mints one `@Numeric` distinct type
     /// (`usd` → `Usd`) erasing to `Float`. Lowers to a `DistinctDef` per member
     /// in sema registration and codegen — it rides the D-DIST1/D-DIST3 machinery.
@@ -28,18 +28,18 @@ pub enum Item {
     Tag(TagDef),
     Impl(ImplDef),
     Const(ConstDef),
-    /// S43 (M6): `#Test "name" { … }` — only at file top level.
+    /// S43 (M6): `@Test "name" { … }` — only at file top level.
     Test(TestDef),
-    /// D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }` — a region
-    /// benchmark, the exact sibling of `#Test`. Run by `jet bench`.
+    /// D-BENCH1/D-BENCH-MARKER1=A: `@Bench("name") { … }` — a region
+    /// benchmark, the exact sibling of `@Test`. Run by `jet bench`.
     Bench(BenchDef),
     /// S50 (M7): `extern rust "crate@version" { … }`.
     ExternRust(ExternRustBlock),
     /// U3 (unified-ecosystem §4): `module name { … }` — a named, composable
     /// declaration contributing typed values to reserved namespaces.
     Module(ModuleDecl),
-    /// S59 (E2-M14): `#Extern module c.<lib> { … }` (user overlay) or
-    /// `#Bindgen module c.<lib>.__bindgen__ { … }` (compiler-generated cache).
+    /// S59 (E2-M14): `@Extern module c.<lib> { … }` (user overlay) or
+    /// `@Bindgen module c.<lib>.__bindgen__ { … }` (compiler-generated cache).
     CModule(CModule),
     /// D-MOD1/2 (code module system): `module name;` (file declaration) or
     /// `module name { … }` (inline body). `body = None` means the items live in
@@ -54,14 +54,14 @@ pub enum Item {
     /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
     /// declares the bounded set of states for a typestate machine. The set erases at
     /// runtime (pure compile-time, no discriminant). Each name in the body is a state
-    /// label; `#State(S)` / `#Transition(From -> To)` markers on `TypeName::*` methods
+    /// label; `@State(S)` / `@Transition(From -> To)` markers on `TypeName::*` methods
     /// must reference names from this set (unknown state = E0151). A declared state with
-    /// no outgoing `#Transition` is a dead-end warning (L0151). Declaration family sibling
+    /// no outgoing `@Transition` is a dead-end warning (L0151). Declaration family sibling
     /// of `tag`/`struct`/`enum`.
     StateDecl(StateDecl),
     /// D-PROTO1 / D-PROTO2 (ratified 2026-06-27): `protocol Name { client -> server:
     /// Msg(…) }` — declares an ordered request/response exchange and expands (R11) into
-    /// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
+    /// `@SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
     /// methods. Erases as generated items; the declaration itself never reaches codegen.
     ProtocolDecl(ProtocolDecl),
     /// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
@@ -187,16 +187,16 @@ pub struct ModuleAliasDef {
 }
 
 /// S59 (E2-M14): which attribute introduced a C FFI module — the user-written
-/// overlay (`#Extern`) or the generated cache surface (`#Bindgen`).
+/// overlay (`@Extern`) or the generated cache surface (`@Bindgen`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CModuleKind {
-    /// `#Extern module c.<lib> { … }` — user overlay, allowed anywhere.
+    /// `@Extern module c.<lib> { … }` — user overlay, allowed anywhere.
     Extern,
-    /// `#Bindgen module c.<lib>.__bindgen__ { … }` — generated, cache files only.
+    /// `@Bindgen module c.<lib>.__bindgen__ { … }` — generated, cache files only.
     Bindgen,
 }
 
-/// S59 (E2-M14): one `#Extern`/`#Bindgen module c.<lib>[.__bindgen__] { … }` block.
+/// S59 (E2-M14): one `@Extern`/`@Bindgen module c.<lib>[.__bindgen__] { … }` block.
 #[derive(Debug, Clone)]
 pub struct CModule {
     pub kind: CModuleKind,
@@ -614,7 +614,7 @@ pub struct ProtocolMessage {
 }
 
 /// D-PROTO1 / D-PROTO2: `protocol Name { … }` — the user-facing session-type
-/// declaration. Expanded in sema into generated `#SingleUse` + typestate items (R11).
+/// declaration. Expanded in sema into generated `@SingleUse` + typestate items (R11).
 #[derive(Debug, Clone)]
 pub struct ProtocolDecl {
     pub is_pub: bool,
@@ -628,7 +628,7 @@ pub struct ProtocolDecl {
 
 /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
 /// a bounded compile-time state-set declaration. Each string in `states` is a valid
-/// state label; `#State(X)` / `#Transition(A -> B)` markers on `TypeName::*` methods
+/// state label; `@State(X)` / `@Transition(A -> B)` markers on `TypeName::*` methods
 /// must reference labels from this set. Erases in codegen (I3, no runtime discriminant).
 #[derive(Debug, Clone)]
 pub struct StateDecl {
@@ -720,10 +720,10 @@ pub struct TestDef {
     pub span: Span,
     pub name: String,
     pub name_span: Span,
-    /// D-TEST1 (ratified 2026-06-22, option B): a property test is an `#Test fn`
+    /// D-TEST1 (ratified 2026-06-22, option B): a property test is an `@Test fn`
     /// with parameters — inputs are generated from the parameter types and a
     /// failing case is automatically shrunk. An empty `params` (the
-    /// `#Test "name" { … }` block form) is a plain unit test. The two forms share
+    /// `@Test "name" { … }` block form) is a plain unit test. The two forms share
     /// one AST node; `params.is_empty()` distinguishes them.
     pub params: Vec<Param>,
     /// D-TEST1: span of the `fn name(…)` signature for diagnostics on a property
@@ -732,7 +732,7 @@ pub struct TestDef {
     pub body: Vec<Stmt>,
 }
 
-/// D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }` — identical structure to `TestDef`. The
+/// D-BENCH1/D-BENCH-MARKER1=A: `@Bench("name") { … }` — identical structure to `TestDef`. The
 /// body is a bare statement list timed by the generated bench harness.
 #[derive(Debug, Clone)]
 pub struct BenchDef {
@@ -743,7 +743,7 @@ pub struct BenchDef {
 }
 
 /// D-MARK-META1=B: doc-only API maturity value on a function. Parsed from
-/// `#Meta(maturity: .…)` and
+/// `@Meta(maturity: .…)` and
 /// formatter-preserved; zero sema/codegen effect (no call-site propagation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaturityTag {
@@ -775,7 +775,7 @@ pub struct Func {
     pub external_type: Option<(String, Span)>,
     pub name: String,
     pub name_span: Span,
-    /// D-CANVASMETA1=B: `#Meta(...)` facts for Canvas/tooling. Checked by sema;
+    /// D-CANVASMETA1=B: `@Meta(...)` facts for Canvas/tooling. Checked by sema;
     /// ignored by codegen.
     pub meta: Option<MetaAttr>,
     /// S45 (M9): `<T: Bound>` after the function name.
@@ -786,8 +786,13 @@ pub struct Func {
     /// D-MEM-VIEWRET1=B: sema-inferred stable source of a named view return.
     /// Parser-created functions start at `None`; sema fills this before TIR.
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
-    /// S58 (E2-M13): `#Unsafe` on the line before `fn` — a whole-function
-    /// contract. Calling such a function requires an enclosing `#Unsafe`
+    /// D-OPTGC1=A: sema proved that this source-level bare return is carried by
+    /// the compiler-private automatic-root representation.
+    pub gc_return: bool,
+    /// Effective shared-policy fact for this function body.
+    pub gc_scope: bool,
+    /// S58 (E2-M13): `@Unsafe` on the line before `fn` — a whole-function
+    /// contract. Calling such a function requires an enclosing `@Unsafe`
     /// block (else E3103). D-UNSAFE-REASON1=B: the reason is optional but
     /// missing it emits L3101.
     pub is_unsafe: bool,
@@ -795,7 +800,7 @@ pub struct Func {
     pub unsafe_span: Option<Span>,
     /// S60 (E2-M16): `pure fn` — impure calls inside the body are E3401.
     pub is_pure: bool,
-    /// D-TAINT1 (ratified 2026-06-21): `#Sanitizer fn` — the blessed taint-strip
+    /// D-TAINT1 (ratified 2026-06-21): `@Sanitizer fn` — the blessed taint-strip
     /// function. Its return value is **untainted by contract** even when its
     /// inputs are tainted; this is the one place taint is cleared before a sink.
     /// Static, erased in codegen (I3).
@@ -813,30 +818,30 @@ pub struct Func {
     /// `declared_effects` (a `#(via f)` annotation occupies the same `#(…)` slot).
     /// Erased in codegen (I3).
     pub effect_via: Option<(String, Span)>,
-    /// D-STATE1 (ratified 2026-06-22): `#State(S) fn …` — a require-state marker.
+    /// D-STATE1 (ratified 2026-06-22): `@State(S) fn …` — a require-state marker.
     /// `Some((state, span))` means the method's receiver must currently be in state
     /// `state`; calling it on a value in any other state is E0150. `None` =
     /// unguarded. Compile-time only, erased in codegen (I3).
     pub state_requires: Option<(String, Span)>,
-    /// D-STATE1: `#Transition(From -> To) fn …` — a transition declaration. The fn
+    /// D-STATE1: `@Transition(From -> To) fn …` — a transition declaration. The fn
     /// consumes a value in state `from` (the wildcard `_` → `None`, an entry
     /// transition with no prior state) and produces one in state `to`. A call
     /// requires the receiver/argument be in `from` (E0150 otherwise) and advances it
     /// to `to`. The `Span` points at the marker. Erased in codegen (I3).
     pub state_transition: Option<StateTransition>,
-    /// D-REACTCORE1: `#Reactive fn` — reactive effect scope; must not return a value.
+    /// D-REACTCORE1: `@Reactive fn` — reactive effect scope; must not return a value.
     pub is_reactive: bool,
-    /// D-REPLAY1: `#Replayable fn` — the reachable effect set must not include
+    /// D-REPLAY1: `@Replayable fn` — the reachable effect set must not include
     /// ambient Time/Rand/Net/Io unless routed through deterministic capabilities.
     pub is_replayable: bool,
     pub replayable_span: Option<Span>,
-    /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `#Task fn` — a top-level
+    /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `@Task fn` — a top-level
     /// function jetpack can invoke by name (`jetpack run <name>`). Top-level
     /// only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
     pub is_task: bool,
     pub task_span: Option<Span>,
-    /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Every(...)` — a
-    /// declarative schedule on a `#Task fn`. `None` means unscheduled (a
+    /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `@Every(...)` — a
+    /// declarative schedule on a `@Task fn`. `None` means unscheduled (a
     /// plain task, invoked manually only). Legal only alongside `is_task`
     /// (E0925 otherwise). Compile-checked (E0926 on a bad argument), then
     /// carried as metadata for `jet dev`/service-runtime/jetos consumers —
@@ -846,7 +851,7 @@ pub struct Func {
     /// drop the return value as a bare expression statement (E0419).
     pub is_must_use: bool,
     pub must_use_span: Option<Span>,
-    /// D-MARK-META1=B: `#Meta(maturity: .…)` — documentation
+    /// D-MARK-META1=B: `@Meta(maturity: .…)` — documentation
     /// stability tag. Stored for fmt/docs/IDE; erased for sema and codegen.
     pub maturity: Option<MaturityTag>,
     pub maturity_span: Option<Span>,
@@ -861,7 +866,7 @@ pub struct Func {
     /// Span of whichever `@Inline`/`@InlineAlways` marker was written (for
     /// diagnostics); `None` when neither is present.
     pub inline_span: Option<Span>,
-    /// D-WASM1: `#Wasm` / `#Js` / `#WasmExport` partition marker on the function.
+    /// D-WASM1: `#Wasm` / `#Js` / `@WasmExport` partition marker on the function.
     pub web_marker: Option<crate::WebPartition::WebPartitionMarker>,
     /// D-PREPOST1: `@Pre(cond, "msg")` clauses — a claim about the arguments,
     /// checked at function entry. Repeatable; empty when none.
@@ -869,7 +874,7 @@ pub struct Func {
     /// D-PREPOST1: `@Post(cond, "msg")` clauses — a claim about `result` (the
     /// return value), checked before each return. Repeatable; empty when none.
     pub post: Vec<ContractClause>,
-    /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `#FFI(<lang>) fn` inline
+    /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `@FFI(<lang>) fn` inline
     /// foreign tier. `None` = an ordinary Jet function (`body` holds its
     /// statements). `Some` = the function's body is one string of foreign source
     /// the per-language binder compiles; `body` is empty and the Jet signature is
@@ -879,16 +884,16 @@ pub struct Func {
 }
 
 /// D-FFI-INLINE1=A (card #501): the inline foreign tier payload on a
-/// `#FFI(<lang>) fn`. `lang` is the raw language name written in `#FFI(<lang>)`
+/// `@FFI(<lang>) fn`. `lang` is the raw language name written in `@FFI(<lang>)`
 /// (validated in sema, not the parser — same convention as effect names);
 /// `source` is the single `"""…"""` string body of foreign source.
 #[derive(Debug, Clone)]
 pub struct InlineForeign {
-    /// The language name inside `#FFI(<lang>)`, e.g. `c`, `cpp`, `asm`.
+    /// The language name inside `@FFI(<lang>)`, e.g. `c`, `cpp`, `asm`.
     pub lang: String,
     /// Span of the language name, for diagnostics.
     pub lang_span: Span,
-    /// Span of the `#FFI(...)` marker as a whole.
+    /// Span of the `@FFI(...)` marker as a whole.
     pub marker_span: Span,
     /// The verbatim foreign source from the `"""…"""` body.
     pub source: String,
@@ -907,7 +912,7 @@ pub struct ContractClause {
     pub span: Span,
 }
 
-/// D-STATE1: the parsed `#Transition(From -> To)` declaration on a function. `from`
+/// D-STATE1: the parsed `@Transition(From -> To)` declaration on a function. `from`
 /// is `None` for an entry transition (`_ -> To`).
 #[derive(Debug, Clone)]
 pub struct StateTransition {
@@ -916,15 +921,15 @@ pub struct StateTransition {
     pub span: Span,
 }
 
-/// D-SCHEDULE1 (ratified 2026-07-11, card #505): the raw `#Every(…)`
-/// argument as the parser saw it — a duration literal (`#Every(5min)`) or a
-/// quoted daily wall-clock time (`#Every("03:00")`). Sema resolves this
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): the raw `@Every(…)`
+/// argument as the parser saw it — a duration literal (`@Every(5min)`) or a
+/// quoted daily wall-clock time (`@Every("03:00")`). Sema resolves this
 /// (`Syntax::resolve_every_schedule`) into a checked `EverySchedule`,
 /// pushing E0926 on a bad value; codegen never reads it (I3, erased).
 #[derive(Debug, Clone)]
 pub enum EveryArg {
-    /// `#Every(5min)` — same raw pieces as `Expr::UnitLit`, minus the
-    /// `#UnitFamily` scoping (a schedule duration is a fixed, closed
+    /// `@Every(5min)` — same raw pieces as `Expr::UnitLit`, minus the
+    /// `@UnitFamily` scoping (a schedule duration is a fixed, closed
     /// vocabulary — `Syntax::schedule_duration_suffix_nanos`).
     Duration {
         int: Option<i64>,
@@ -932,11 +937,11 @@ pub enum EveryArg {
         suffix: String,
         suffix_span: Span,
     },
-    /// `#Every("03:00")` — the plain string content (no interpolation).
+    /// `@Every("03:00")` — the plain string content (no interpolation).
     WallClock { text: String, text_span: Span },
 }
 
-/// D-SCHEDULE1: the whole `#Every(…)` marker — its raw argument plus the
+/// D-SCHEDULE1: the whole `@Every(…)` marker — its raw argument plus the
 /// span of the marker itself (diagnostics point here by default).
 #[derive(Debug, Clone)]
 pub struct EveryMarker {
@@ -944,7 +949,7 @@ pub struct EveryMarker {
     pub span: Span,
 }
 
-/// D-SCHEDULE1: a resolved, checked `#Every(…)` schedule — what
+/// D-SCHEDULE1: a resolved, checked `@Every(…)` schedule — what
 /// `Syntax::resolve_every_schedule` produces from a valid `EveryArg`. One
 /// value; every consumer (`jet dev`, the service runtime, a jetos timer
 /// projection) derives from the same `EveryArg` instead of re-parsing it.
@@ -975,7 +980,7 @@ pub enum EveryScheduleError {
 }
 
 impl EveryArg {
-    /// D-SCHEDULE1: resolve this raw `#Every(…)` argument into a checked
+    /// D-SCHEDULE1: resolve this raw `@Every(…)` argument into a checked
     /// schedule. Sema calls this once to decide E0926; a runtime consumer
     /// (`jet dev`, …) calls it again to get the identical answer — one
     /// function, nothing cached to drift between the two callers.
@@ -1113,7 +1118,7 @@ impl EnumDef {
     }
 }
 
-/// D-ATTR2 / D-SERDE2–8: one `#[Name]` or `#[Name(arg, …)]` bracket marker.
+/// D-SHAPE2 / D-SERDE2–8: one `@[Name]` or `@[Name(arg, …)]` applied rule.
 /// Derive-trait markers (`Codable`/`Encode`/`Decode`/`Comparable`/…) are lifted
 /// into `derives` at parse time (Codable expands to Encode+Decode); the serde
 /// *attribute* markers — container `RenameAll`/`DenyUnknownFields`/`Tag`/`Untagged`
@@ -1127,24 +1132,12 @@ pub struct Marker {
     pub name_span: Span,
     pub args: Vec<Expr>,
     pub span: Span,
-    /// D-MARK-DEBUG1 follow-up (card #498): the sigil this marker was
-    /// actually written with — `'@'` (contract plane) or `'#'` (directive/
-    /// serde plane). Set once at parse time (the parser already knows which
-    /// bracket/prefix it is bumping past). The formatter re-emits a marker
-    /// under THIS sigil, not `Syntax::is_contract_marker(&name)` — that
-    /// classification answers "which plane does this name legally belong
-    /// to" (E0062/E0063 teaching, derive-vs-serde split) and can diverge
-    /// from a marker's written sigil once a name is retired from
-    /// `CONTRACT_MARKERS`/`DIRECTIVE_MARKERS` (e.g. `Debug`, still a real
-    /// `@`-plane trait name a user can type, just no longer a registered
-    /// opt-in derive) — re-emission must preserve what the user wrote.
-    pub sigil: char,
-    /// Card #131 / D-SERDE5: for a `#[Default(expr)]` field marker, the
+    /// Card #131 / D-SERDE5: for an `@[Default(expr)]` field rule, the
     /// compile-time value its argument evaluates to. Sema fills this once
     /// (`eval_default_markers`) so both the AOT codegen tier and the comptime
     /// decode tier bake the *exact same* value (R12 parity) — a non-primitive
     /// default never silently degrades to `Default::default()`. `None` for
-    /// every non-`Default` marker and for a bare `#[Default]` (zero value).
+    /// every non-`Default` rule and for a bare `@[Default]` (zero value).
     pub ct: Option<CtValue>,
 }
 
@@ -1168,7 +1161,7 @@ pub struct StructDef {
     /// before `struct`. The span is retained for pointing at the annotation in E0910.
     pub is_published_schema: bool,
     pub published_schema_span: Option<Span>,
-    /// D-LIN1 (ratified 2026-06-21): `#SingleUse` marker before `struct` — values
+    /// D-LIN1 (ratified 2026-06-21): `@SingleUse` marker before `struct` — values
     /// of this type must be consumed exactly once on every path (E0140/E0141)
     /// and may not be aliased (E0142). Implies `#NoCopy`. The span points at the
     /// marker for diagnostics.
@@ -1252,14 +1245,14 @@ pub struct DistinctDef {
 }
 
 /// D-QUAL3 (ratified 2026-06-24): unit-family declaration —
-/// `#UnitFamily(currency) { usd, eur, gbp }`. Each member mints a distinct
+/// `@UnitFamily(currency) { usd, eur, gbp }`. Each member mints a distinct
 /// `@Numeric` type erasing to `Float`. `members` carries each member's source
 /// spelling (lowercase, e.g. `usd`) and span; the minted type name is the
 /// PascalCase form (`Usd`).
 #[derive(Debug, Clone)]
 pub struct UnitFamilyDef {
     pub is_pub: bool,
-    /// D-PUBPKG1=A: true for `pub(package) #UnitFamily(…) { … }`.
+    /// D-PUBPKG1=A: true for `pub(package) @UnitFamily(…) { … }`.
     pub is_package_pub: bool,
     /// The family label, e.g. `currency` — documentation only; not a type name.
     pub family: String,
@@ -1328,7 +1321,7 @@ pub struct EnumDef {
     pub methods: Vec<Func>,
     pub trait_impls: Vec<TraitImplBlock>,
     pub derives: Vec<(String, Span)>,
-    /// D-LIN1 (ratified 2026-06-21): `#SingleUse` marker before `enum`. See
+    /// D-LIN1 (ratified 2026-06-21): `@SingleUse` marker before `enum`. See
     /// `StructDef::is_single_use`.
     pub is_single_use: bool,
     pub single_use_span: Option<Span>,
@@ -1411,7 +1404,7 @@ pub struct ImplDef {
     /// True only for codec impls synthesized from a serde derive. Parsed user
     /// impls are always false, even when type and trait names match.
     pub is_generated_serde: bool,
-    /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os.Linux|Os.Macos|Os.Windows)`
+    /// D-OSTARGET1=A (ratified 2026-07-01, c134): `@Target(Os.Linux|Os.Macos|Os.Windows)`
     /// before this `impl` block — native OS gating (Phase 8 native backends).
     /// `None` means this impl compiles for every OS. Only ratified at item
     /// (impl) scope, not per-function — the ballot's worked example gates

@@ -28,7 +28,7 @@ Codegen does not read the AST plus side registries; it lowers the checked AST to
 **typed IR** (`crates/jet-codegen/src/Codegen/TIR/`) that carries only sema-approved facts, then emits
 Rust from the TIR with **zero inference** (every type/convention/mangle/overflow decision
 is resolved at lowering — R1/I3). The TIR is the **only** codegen seam (R7) for every emitted
-body: free functions, methods, trait methods, `#Test` block bodies, and error-conversion
+body: free functions, methods, trait methods, `@Test` block bodies, and error-conversion
 `impl Old -> New` bodies all lower through it. A per-surface gate (`tir_covers*`) decides
 coverage, and a construct **outside** the TIR subset is an **internal compiler error** (R5 ICE),
 never an AST fallback or a miscompile. The legacy AST codegen path (`emit_expr`/`emit_stmt`/
@@ -73,17 +73,24 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 
 D-DEP-GC1=A has one dependency-free collector implementation in
 `crates/jet-rt/src/__gc.rs`. `jet-rt` exposes that module directly to dev/JIT;
-codegen embeds the exact same source inside private `jet_gc` for AOT and strips
-it when no generated operation references that module. The pre-#658
-`core.gc`/`Gc<T>` compatibility adapter lives in that module too and delegates
-to this collector; it adds no second heap or scoped-GC policy. #658 owns the
-adapter's retirement.
+codegen embeds the exact same source inside private `jet_gc` for AOT. Generated
+startup initializes trace output even when no allocation is promoted. The
+collector has no source-facing wrapper, constructor, or module; only sema-proven
+automatic promotions call its traced allocation entry.
+
+Sema closes each escaping payload over the promoted bindings stored inside it.
+Codegen translates those proven source relations to collector object IDs at
+creation and updates the same graph on bare assignments and mutations. Cycles
+therefore live in the collector-owned graph without changing Jet's bare value
+syntax. Collector failures cross one E2110 runtime boundary; generated Rust
+never exposes `Fault` through `expect` or a raw panic.
 
 Object identities are monotonic and never reused. RAII root handles keep an
 object live; traced edges are sorted, deduplicated, bounded, and accepted only
 when every target is present in the same heap. A safepoint marks from current
 roots, follows that metadata, and reclaims unreachable objects in identity
-order. Active object access is a temporary mark root, so its transitive children
+order; the private automatic collector runs that safepoint when a lexical root
+is released. Active object access is a temporary mark root, so its transitive children
 survive the safepoint too. A mutation reserves its source version, pins current
 and proposed targets, edits the payload, then commits metadata; reentrant or
 concurrent rewrites fail, and conflict, type failure, or unwind leaves the old
@@ -94,8 +101,8 @@ objects under the same policy. Handles may cross tasks or threads; all payload
 access is serialized, and conflicting, stale, malformed, poisoned, over-limit,
 or impossible state fails closed through the private `Fault` result.
 
-This substrate defines no Jet policy or source surface. #658 owns scoped
-promotion and `core.gc`/`Gc<T>` retirement; #659 owns tracing and reports.
+This substrate defines no Jet source type. D-OPTGC1's shared policy ladder owns
+scoped promotion; #659 owns tracing and reports.
 
 I6 is machine-checked by `tests/truthfulness.rs`: the root compiler and named
 compiler seams may use only workspace path dependencies. Runtime/tool siblings
@@ -215,14 +222,14 @@ must not advertise speculative features.
   **I1 amendment (D-LL1, ratified 2026-06-16, E2-M13).** I1 originally read
   *"no `unsafe` in the language or generated code, ever (v1)."* The expert
   low-level tier (S58) amends it: generated `unsafe` appears **only** inside
-  user-written gated regions — an `#Unsafe("reason") { … }` block (or bare
-  `#Unsafe { … }`, which emits lint L3101) or an `#Unsafe fn` contract, both
+  user-written gated regions — an `@Unsafe("reason") { … }` block (or bare
+  `@Unsafe { … }`, which emits lint L3101) or an `@Unsafe fn` contract, both
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
   sema (E3101/E3102/E3103) and tested in `tests/golden.rs` (every example but
   the audited `48_lowlevel` must contain no `unsafe`, and even there every
   `unsafe` must be a gated `unsafe {`/`unsafe fn` form). Codegen stays dumb:
-  it lowers an already-checked `#Unsafe` region straight to a Rust `unsafe`
+  it lowers an already-checked `@Unsafe` region straight to a Rust `unsafe`
   region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must
   produce Rust that compiles. New language features land as: spec →

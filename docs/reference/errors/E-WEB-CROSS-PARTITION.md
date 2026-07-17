@@ -12,7 +12,7 @@ the web backend keeps DOM/view code in JS and compute in WASM; a direct call acr
 
 ## Fix
 
-move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|Js)` markers
+move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `@Target(Wasm|Js)` markers
 
 ## Example
 

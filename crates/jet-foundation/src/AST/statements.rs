@@ -84,7 +84,7 @@ pub enum Stmt {
         span: Span,
         label: Option<(String, Span)>,
     },
-    /// S58 (E2-M13): `#Unsafe { … }` audited region. `audit` carries the
+    /// S58 (E2-M13): `@Unsafe { … }` audited region. `audit` carries the
     /// optional reason argument. D-UNSAFE-REASON1=B: missing reason emits
     /// L3101 but does not block compilation. `body` is the gated statements.
     Unsafe {
@@ -92,9 +92,9 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the
+    /// D-CTEFFECT1 (ratified 2026-06-25): `@Impure("reason") { … }` — the
     /// audited Tier-2 comptime effect gate. `reason` is the argument of
-    /// `#Impure` itself (lint L3102 fires when it is `None`). Both this gate
+    /// `@Impure` itself (lint L3102 fires when it is `None`). Both this gate
     /// AND `--allow-impure` at build time are required to execute ambient
     /// comptime I/O (Fs/Env/Exec/Io). Erases to a plain block at codegen;
     /// the gate is enforced entirely in the comptime interpreter (I3).
@@ -103,13 +103,13 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-REACTCORE1 (ratified 2026-06-27, opt D): `#Reactive { … }` in statement
+    /// D-REACTCORE1 (ratified 2026-06-27, opt D): `@Reactive { … }` in statement
     /// position. Lowers to a reactive effect registration at codegen.
     Reactive {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — a cancellation
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): `@Shield { … }` — a cancellation
     /// shield region. A cancellation or blown deadline pending against the running
     /// task is deferred until the block exits (deadline first, then cancel).
     /// Lowers to `jet_scheduler_shield_enter()` / `_leave()` around `body` with a
@@ -119,27 +119,33 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-CANVASSTATE1=D (ratified 2026-07-09): `#Off <stmt>` / `#Off { … }`.
+    /// D-CANVASSTATE1=D (ratified 2026-07-09): `@Off <stmt>` / `@Off { … }`.
     /// The body is parsed and checked, but never emitted or executed.
     Off {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-CANVASSTATE1=D (ratified 2026-07-09): `#DebugOnly <stmt>` /
-    /// `#DebugOnly { … }`. The body runs in debug/dev builds and is stripped
+    /// D-CANVASSTATE1=D (ratified 2026-07-09): `@DebugOnly <stmt>` /
+    /// `@DebugOnly { … }`. The body runs in debug/dev builds and is stripped
     /// from release output.
     DebugOnly {
         body: Vec<Stmt>,
         span: Span,
     },
     /// D-REGION1 / D-BLOCKPLANE1: explicit allocation region
-    /// `#Region(r) { … }`. `name` names the region; arena `view`s allocated
-    /// inside may not escape it (E0631). A lexical scope like `loop`/`#Unsafe`,
+    /// `@Region(r) { … }`. `name` names the region; arena `view`s allocated
+    /// inside may not escape it (E0631). A lexical scope like `loop`/`@Unsafe`,
     /// emitted as a plain Rust block — the region bound is enforced entirely in
     /// sema (I3: codegen stays dumb).
     Region {
         name: String,
         name_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-MARK-SCOPE1: lexical scoped policy. Compile-time only; codegen emits its body.
+    Policy {
+        declarations: Vec<crate::Policy::PolicyDeclaration>,
         body: Vec<Stmt>,
         span: Span,
     },
@@ -167,7 +173,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction region. The
+    /// D-EFF1 / D-QUAL1: a `@Caps(Net, Db) { … }` effect-restriction region. The
     /// `caps` list is the only effects the body (and everything it transitively
     /// calls) may use; an out-of-set effect is E0741. `caps` names are validated
     /// in sema. A lexical scope emitted as a plain Rust block — the restriction
@@ -182,7 +188,7 @@ pub enum Stmt {
     /// `#grant(Fs) { caps -> … }`. The listed effects are **authorized** inside
     /// the block via the first-class handle `binding` (here `caps`), and the
     /// capability is **revoked at scope end** by the RAII rule (S63) — the handle
-    /// is bound only for the block's extent. The dual of `#Caps`: `#Caps`
+    /// is bound only for the block's extent. The dual of `@Caps`: `@Caps`
     /// *restricts* a region to a set, `#grant` *authorizes* one. An effect used
     /// inside the block that the grant doesn't cover has no capability backing it
     /// (E0712); letting the handle escape (returned, stored, captured) is E0711.
@@ -240,7 +246,7 @@ pub enum Stmt {
         span: Span,
     },
 
-    /// D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
+    /// D-CTX1 (ratified 2026-06-22, G2): `@Context(field: value, …) { … }`.
     /// Swaps named ambient fields for the block's lexical+dynamic extent, then
     /// restores them on all exit paths (return, break, ?, panic unwind) via
     /// a RAII guard. Expert-tier; never surfaced in beginner diagnostics.
@@ -273,7 +279,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a
+    /// D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` — a
     /// transaction block. `name` binds a user-chosen transaction handle (any
     /// lowercase ident, mirroring `region r { … }`) typed `Transaction`.
     /// Inside the block an irreversible effect (Net/Fs/Exec) that can't be rolled
@@ -283,7 +289,7 @@ pub enum Stmt {
     /// commit, dropped on a `?`-failure/rollback. A lexical scope emitted as a
     /// plain Rust block; effects/transaction state erase (I3).
     Transact {
-        /// The user-chosen handle name, or `None` for a bare `#Transact { … }` with
+        /// The user-chosen handle name, or `None` for a bare `@Transact { … }` with
         /// no hooks (D-TXN4: a transaction without a handle stays legal). A name is
         /// required only to call `name.on_commit(…)`.
         name: Option<String>,
@@ -297,7 +303,7 @@ pub enum Stmt {
     Yield(Expr, Span),
     /// D-DOTSCOPE1: a contextual scope-member statement — `.name { … }` /
     /// `.name(args) { … }` in statement position inside a marker block
-    /// (`#Test { … }`). The member `name` resolves against the enclosing
+    /// (`@Test { … }`). The member `name` resolves against the enclosing
     /// marker's declared vocabulary (`Syntax::scope_members`); using one
     /// outside such a block is E0615, an unknown member E0614. The required
     /// trailing block separates it from a leading-dot enum value (D-ENUMDOT1)
@@ -346,6 +352,7 @@ impl Stmt {
             | Stmt::Off { span, .. }
             | Stmt::DebugOnly { span, .. }
             | Stmt::Region { span, .. }
+            | Stmt::Policy { span, .. }
             | Stmt::TaskGroup { span, .. }
             | Stmt::Layout { span, .. }
             | Stmt::Caps { span, .. }

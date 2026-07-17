@@ -4,11 +4,11 @@
 // `Color` is a plain r/g/b struct.
 //
 // Style lengths are UNIT-FAMILY literals (D-STYLEUNIT1): `core.ui.style`'s
-// length family is declared here as `#UnitFamily(length) { px }` (D-QUAL3), so
+// length family is declared here as `@UnitFamily(length) { px }` (D-QUAL3), so
 // `320px` is a compile-checked `Px` value via the one ratified unit mechanism
 // (D-UNITLIT1) — no second style-only unit system (I8). `Px` erases to `Float`;
 // `.raw()` strips the unit. This supersedes the interim `Length { value, unit }`
-// struct pair: a `#UnitFamily` member is a distinct type, and a distinct-typed
+// struct pair: a `@UnitFamily` member is a distinct type, and a distinct-typed
 // struct/enum field is now a covered value type in the typed-IR subset
 // (`field_ty_covered`/`enum_payload_ty_covered` admit distinct types), so
 // `Style { width: Px }` lowers and emits without the ICE the struct pair worked
@@ -16,7 +16,7 @@
 //
 // Cross-family safety comes free: `320px + 500ms` is E0127 (px and ms are
 // different families) — the same guard `unit_family_mix.jet` pins.
-#UnitFamily(length) { px }
+@UnitFamily(length) { px }
 
 struct Color {
     r: Int

@@ -38,6 +38,14 @@ Record reviewer identity, model/effort, reviewed commit or diff, findings,
 resolutions, and rerun evidence in Tower/PR handoff. Reviewer approval alone is
 not completion evidence; the orchestrator checks the integrated result.
 
+## Owner acceptance boundary
+
+Technical correctness belongs to agents: run and record the machine checks, then
+have the independent reviewer validate that evidence. Do not create a manual owner
+acceptance gate for tests, diagnostics, safety, compatibility, or other technical
+claims. Use owner acceptance only when an explicit decision needs human judgment of
+UX, DX, visual presentation, copy, or taste; name the exact experience to inspect.
+
 ## Blessing snapshots and generated docs
 
 Blessing accepts a reviewed behavior change; it is never a way to make red

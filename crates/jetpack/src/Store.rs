@@ -27,6 +27,7 @@ pub use jet_pkg_model::Store::{
 };
 
 use crate::SHA256;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1646,15 +1647,52 @@ fn integrity_failure(
 }
 
 fn verify_configured_signature(
-    _roots: &Roots,
-    _entry: &StoreEntry,
-    _expectation: &CacheExpectation,
+    roots: &Roots,
+    entry: &StoreEntry,
+    expectation: &CacheExpectation,
 ) -> bool {
-    // The generated crypto bridge lives in a user-writable build cache and is
-    // not an immutable trust root. Until Jetpack ships an in-process vetted
-    // verifier, signed cache imports fail closed. Never execute a mutable
-    // helper to decide whether mutable bytes are trusted.
-    false
+    let Ok(public_key) = fs::read_to_string(roots.root.join("trust/cache.ed25519.pub")) else {
+        return false;
+    };
+    let Some(public_key) = decode_ed25519::<32>(&public_key) else {
+        return false;
+    };
+    let signature = entry
+        .envelope
+        .signature
+        .strip_prefix("ed25519:")
+        .unwrap_or(&entry.envelope.signature);
+    let Some(signature) = decode_hex::<64>(signature) else {
+        return false;
+    };
+    VerifyingKey::from_bytes(&public_key).is_ok_and(|key| {
+        key.verify(
+            cache_signature_message(entry, expectation).as_bytes(),
+            &Signature::from_bytes(&signature),
+        )
+        .is_ok()
+    })
+}
+
+fn decode_ed25519<const N: usize>(text: &str) -> Option<[u8; N]> {
+    decode_hex(text.trim().strip_prefix("ed25519:").unwrap_or(text.trim()))
+}
+
+fn decode_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
+    if text.len() != N * 2 {
+        return None;
+    }
+    let mut bytes = [0; N];
+    for (byte, pair) in bytes.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
+        let digit = |value: u8| match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            b'A'..=b'F' => Some(value - b'A' + 10),
+            _ => None,
+        };
+        *byte = digit(pair[0])? << 4 | digit(pair[1])?;
+    }
+    Some(bytes)
 }
 
 #[cfg(test)]
@@ -1679,7 +1717,6 @@ fn verify_configured_signature_with(
     )
 }
 
-#[cfg(test)]
 fn cache_signature_message(entry: &StoreEntry, expectation: &CacheExpectation) -> String {
     format!(
         "jet-cache-v1\nreference={}\nsource={}\nrecipe={}\npolicy={}\nplatform={}\noutput={}\n",

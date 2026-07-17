@@ -3,7 +3,7 @@ use core.mem
 fn run() {
     slot := 0
     addr :: mem.address_of(slot)
-    #Unsafe("slot is live and pointer never escapes") {
+    @Unsafe("slot is live and pointer never escapes") {
         p :: mem.Ptr<Int>.from_addr(addr)
         mem.volatile_write(p, "wrong")
     }

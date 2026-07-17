@@ -35,6 +35,12 @@ static JET_OBSERVE_ARENA_ALLOCS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static JET_OBSERVE_ARENA_BYTES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+// #648 runtime-only allocator memory measurements. These deliberately do not
+// add snapshot schema/policy vocabulary; D-MEM-FACTS1 owns any public fact.
+static JET_OBSERVE_ARENA_RETAINED_BYTES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+static JET_OBSERVE_ARENA_HIGH_WATER_BYTES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 static JET_OBSERVE_WORKERS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static JET_OBSERVE_QUEUED: std::sync::atomic::AtomicUsize =
@@ -194,9 +200,24 @@ fn jet_observe_arena_open() {
 }
 fn jet_observe_arena_alloc(bytes: usize) {
     JET_OBSERVE_ARENA_ALLOCS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    JET_OBSERVE_ARENA_BYTES.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+    let live = JET_OBSERVE_ARENA_BYTES
+        .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed)
+        .saturating_add(bytes);
+    JET_OBSERVE_ARENA_HIGH_WATER_BYTES.fetch_max(live, std::sync::atomic::Ordering::Relaxed);
     JET_PROBE_ARENA_ALLOCS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     JET_PROBE_ARENA_BYTES.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+}
+fn jet_observe_arena_retain(bytes: usize) {
+    JET_OBSERVE_ARENA_RETAINED_BYTES.fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+}
+fn jet_observe_arena_release(bytes: usize) {
+    JET_OBSERVE_ARENA_RETAINED_BYTES.fetch_sub(bytes, std::sync::atomic::Ordering::Relaxed);
+}
+fn jet_observe_allocator_memory() -> (usize, usize) {
+    (
+        JET_OBSERVE_ARENA_RETAINED_BYTES.load(std::sync::atomic::Ordering::Relaxed),
+        JET_OBSERVE_ARENA_HIGH_WATER_BYTES.load(std::sync::atomic::Ordering::Relaxed),
+    )
 }
 fn jet_observe_arena_reset(allocations: usize, bytes: usize) {
     JET_OBSERVE_ARENA_ALLOCS.fetch_sub(allocations, std::sync::atomic::Ordering::Relaxed);

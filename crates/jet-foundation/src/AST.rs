@@ -44,7 +44,7 @@ pub use statements::{IfStmt, ElseBranch, SwitchArm, Stmt};
 
 #[path = "AST/lvalues.rs"]
 mod lvalues;
-pub use lvalues::{LValue, IndexKind, MetaField, MetaAttr, MetaFacts, ForKind, Binding};
+pub use lvalues::{Binding, ForKind, GcPromotion, GcPromotionEdge, IndexKind, LValue, MetaAttr, MetaFacts, MetaField};
 
 #[path = "AST/expressions.rs"]
 mod expressions;

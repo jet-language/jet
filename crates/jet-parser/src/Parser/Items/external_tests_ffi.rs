@@ -28,28 +28,28 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-VISDEFAULT2=A: is the cursor at `#PubFile`?
+        /// D-VISDEFAULT2=A: is the cursor at `@PubFile`?
         pub(super) fn at_pub_file(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUB_FILE)
         }
 
-        /// D-PRELUDEX1=A: is the cursor at `#NoPrelude`?
+        /// D-PRELUDEX1=A: is the cursor at `@NoPrelude`?
         pub(super) fn at_no_prelude(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NO_PRELUDE)
         }
     
-        /// S43 (D-CASING1 follow-on): true when the cursor is at the `#Test` marker.
+        /// S43 (D-CASING1 follow-on): true when the cursor is at the `@Test` marker.
         pub(in crate::Parser) fn at_test_def(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST)
         }
     
-        /// Parse `#Test "name" { … }` (D-CASING1 follow-on). The bare lowercase
+        /// Parse `@Test "name" { … }` (D-CASING1 follow-on). The bare lowercase
         /// `test` path enters via `test_def_after_kw` after emitting E0052.
         pub(in crate::Parser) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
-            self.expect(TokKind::Hash, "before `Test`")?;
+            self.expect(TokKind::At, "before `Test`")?;
             self.bump(); // the `Test` marker ident (guaranteed by at_test_def)
             self.test_def_after_kw()
         }
@@ -57,9 +57,9 @@ impl<'a> Parser<'a> {
         pub(super) fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
             let item_start = self.toks[self.pos.saturating_sub(1)].span.start;
             // D-TEST1 (ratified 2026-06-22, option B): the property-test form is
-            // `#Test fn name(params) { … }`. A parameter list means inputs are
+            // `@Test fn name(params) { … }`. A parameter list means inputs are
             // generated from the param types and shrunk on failure; the bare
-            // `#Test "name" { … }` block form is a plain unit test.
+            // `@Test "name" { … }` block form is a plain unit test.
             if matches!(self.peek().kind, TokKind::KwFn) {
                 let fn_span = self.bump().span; // the `fn` keyword
                 let (name, name_span) = self.expect_ident("after `fn`")?;
@@ -100,21 +100,21 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// D-BENCH1/D-BENCH-MARKER1=A: true when cursor is at `#Bench`.
+        /// D-BENCH1/D-BENCH-MARKER1=A: true when cursor is at `@Bench`.
         pub(in crate::Parser) fn at_bench_def(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_BENCH)
         }
     
-        /// Parse `#Bench("name") { … }` (D-BENCH1/D-BENCH-MARKER1=A). Structurally identical to
+        /// Parse `@Bench("name") { … }` (D-BENCH1/D-BENCH-MARKER1=A). Structurally identical to
         /// `test_def`; there is no retired lowercase spelling for benches.
         pub(in crate::Parser) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
             let item_start = self.peek().span.start;
-            self.expect(TokKind::Hash, "before `Bench`")?;
+            self.expect(TokKind::At, "before `Bench`")?;
             self.bump(); // the `Bench` marker ident (guaranteed by at_bench_def)
-            self.expect(TokKind::LParen, "after `#Bench`")?;
+            self.expect(TokKind::LParen, "after `@Bench`")?;
             let (name, name_span) = self.expect_marker_name(Syntax::KW_BENCH)?;
-            self.expect(TokKind::RParen, "to close `#Bench(…)`")?;
+            self.expect(TokKind::RParen, "to close `@Bench(…)`")?;
             self.expect(TokKind::LBrace, "to open the benchmark body")?;
             let body = self.block_stmts();
             Ok(crate::AST::BenchDef {
@@ -135,15 +135,15 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0052",
                 format!(
-                    "test blocks are written with `#{}`, not bare `{}`",
+                    "test blocks are written with `@{}`, not bare `{}`",
                     Syntax::KW_TEST,
                     Syntax::FOREIGN_TEST
                 ),
                 format!(
-                    "`#{}` is a marker, like every other `#`-tag, so a test declaration draws the eye",
+                    "`@{}` is a marker, like every other `#`-tag, so a test declaration draws the eye",
                     Syntax::KW_TEST
                 ),
-                format!("write: #{} (\"name\") {{ ... }}", Syntax::KW_TEST),
+                format!("write: @{} (\"name\") {{ ... }}", Syntax::KW_TEST),
                 Some(span),
             )
         }
@@ -152,42 +152,42 @@ impl<'a> Parser<'a> {
         /// `@Pure fn`/`@Pure pub` — or the retired `@Pure` spelling, so `func()`
         /// can consume it and teach E0062 instead of falling through elsewhere.
         pub(in crate::Parser) fn at_pure_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash | TokKind::At)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
-        /// D-TAINT1: true when the cursor is at `#Sanitizer fn`/`#Sanitizer pub fn`.
+        /// D-TAINT1: true when the cursor is at `@Sanitizer fn`/`@Sanitizer pub fn`.
         pub(in crate::Parser) fn at_sanitizer_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SANITIZER)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
-        /// D-REPLAY1: true when the cursor is at `#Replayable fn` /
-        /// `#Replayable pub fn`.
+        /// D-REPLAY1: true when the cursor is at `@Replayable fn` /
+        /// `@Replayable pub fn`.
         pub(in crate::Parser) fn at_replayable_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REPLAYABLE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
 
-        /// D-SCHEDULE1 (card #505): true when the cursor is at `#Task` (a bare
-        /// schedule fn marker). Unlike `#Sanitizer`/`#Replayable`, this does
+        /// D-SCHEDULE1 (card #505): true when the cursor is at `@Task` (a bare
+        /// schedule fn marker). Unlike `@Sanitizer`/`@Replayable`, this does
         /// NOT require `fn`/`pub` immediately next — the ratified spelling
-        /// stacks `#Task` before `#Every(…)` (`#Task #Every(5min) fn …`), so
-        /// the marker after `#Task` is usually another marker, not `fn`
-        /// itself. Same looseness as `#State(`/`#Transition(`/`#Every(`,
+        /// stacks `@Task` before `@Every(…)` (`@Task @Every(5min) fn …`), so
+        /// the marker after `@Task` is usually another marker, not `fn`
+        /// itself. Same looseness as `@State(`/`@Transition(`/`@Every(`,
         /// which only look as far as their own shape.
         pub(in crate::Parser) fn at_task_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TASK)
         }
 
-        /// D-SCHEDULE1: true when the cursor is at `#Every(…)` (a schedule fn
+        /// D-SCHEDULE1: true when the cursor is at `@Every(…)` (a schedule fn
         /// marker). Token stream: `# Every (`.
         pub(in crate::Parser) fn at_every_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_EVERY)
                 && matches!(self.peek3().kind, TokKind::LParen)
         }
@@ -196,7 +196,7 @@ impl<'a> Parser<'a> {
         /// `@MustUse fn` / `@MustUse pub fn` — or the retired `@MustUse` spelling,
         /// so `func()` can consume it and teach E0062.
         pub(in crate::Parser) fn at_must_use_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash | TokKind::At)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
@@ -206,7 +206,7 @@ impl<'a> Parser<'a> {
         /// spelling, so `func()`/`method_in_type()` can consume it and teach
         /// E0062.
         pub(super) fn at_inline_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash | TokKind::At)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n)
                     if n == Syntax::CONTRACT_INLINE || n == Syntax::CONTRACT_INLINE_ALWAYS)
                 && (matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
@@ -214,24 +214,24 @@ impl<'a> Parser<'a> {
                     // order) — recognize the doubled marker too, so `func()` reaches
                     // `parse_inline_marker`'s E0920 conflict check instead of
                     // falling through to the generic `@` teaching error (E0990).
-                    || (matches!(self.peek3().kind, TokKind::Hash | TokKind::At)
+                    || (matches!(self.peek3().kind, TokKind::At)
                         && matches!(&self.peek4().kind, TokKind::Ident(n)
                             if n == Syntax::CONTRACT_INLINE || n == Syntax::CONTRACT_INLINE_ALWAYS)
                         && matches!(self.peek5().kind, TokKind::KwFn | TokKind::KwPub)))
         }
     
-        /// D-STATE1: true when the cursor is at `#State(…)` (a require-state fn marker).
+        /// D-STATE1: true when the cursor is at `@State(…)` (a require-state fn marker).
         /// Token stream: `# State (`.
         pub(in crate::Parser) fn at_state_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE)
                 && matches!(self.peek3().kind, TokKind::LParen)
         }
     
-        /// D-STATE1: true when the cursor is at `#Transition(…)` (a transition fn marker).
+        /// D-STATE1: true when the cursor is at `@Transition(…)` (a transition fn marker).
         /// Token stream: `# Transition (`.
         pub(in crate::Parser) fn at_transition_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSITION)
                 && matches!(self.peek3().kind, TokKind::LParen)
         }
@@ -245,7 +245,7 @@ impl<'a> Parser<'a> {
         /// D-TAINT-SAN: bare lowercase `sanitizer` is the retired spelling of the
         /// taint-strip modifier, recognized only when `fn`/`pub` follows (so an
         /// ordinary identifier named `sanitizer` elsewhere is unaffected). The
-        /// modifier is now the marker `#Sanitizer` — point the user at it (E0059),
+        /// modifier is now the marker `@Sanitizer` — point the user at it (E0059),
         /// mirroring `pure` → `@Pure` (E0053).
         pub(super) fn foreign_sanitizer_follows(&self) -> bool {
             matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
@@ -255,15 +255,15 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0059",
                 format!(
-                    "the taint-strip modifier is written `#{}`, not bare `{}`",
+                    "the taint-strip modifier is written `@{}`, not bare `{}`",
                     Syntax::KW_SANITIZER,
                     Syntax::FOREIGN_SANITIZER
                 ),
                 format!(
-                    "`#{}` is a marker, like every other `#`-tag, so the taint-strip contract draws the eye",
+                    "`@{}` is a marker, like every other `#`-tag, so the taint-strip contract draws the eye",
                     Syntax::KW_SANITIZER
                 ),
-                format!("write: #{} fn name() {{ ... }}", Syntax::KW_SANITIZER),
+                format!("write: @{} fn name() {{ ... }}", Syntax::KW_SANITIZER),
                 Some(span),
             )
         }
@@ -272,49 +272,49 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0053",
                 format!(
-                    "the purity modifier is written `#{}`, not bare `{}`",
+                    "the purity modifier is written `@{}`, not bare `{}`",
                     Syntax::KW_PURE,
                     Syntax::FOREIGN_PURE
                 ),
                 format!(
-                    "`#{}` is a marker, like every other `#`-tag, so the purity contract draws the eye",
+                    "`@{}` is a marker, like every other `#`-tag, so the purity contract draws the eye",
                     Syntax::KW_PURE
                 ),
-                format!("write: #{} fn name() {{ ... }}", Syntax::KW_PURE),
+                format!("write: @{} fn name() {{ ... }}", Syntax::KW_PURE),
                 Some(span),
             )
         }
     
-        /// D-TESTPAREN1=A: `#Test` block name is a parenthesized string — `#Test("name")`.
-        /// Old bare-string form `#Test "name"` emits a teaching error (E0052).
+        /// D-TESTPAREN1=A: `@Test` block name is a parenthesized string — `@Test("name")`.
+        /// Old bare-string form `@Test "name"` emits a teaching error (E0052).
         fn expect_test_name(&mut self) -> Result<(String, Span), Diagnostic> {
-            // Detect old form: bare string directly after `#Test` — teaching error.
+            // Detect old form: bare string directly after `@Test` — teaching error.
             if matches!(&self.peek().kind, TokKind::Str(_)) {
                 let span = self.peek().span;
                 return Err(Diagnostic::error(
                     "E0052",
                     format!(
-                        "test name must be parenthesized: `#{}(\"name\")`",
+                        "test name must be parenthesized: `@{}(\"name\")`",
                         Syntax::KW_TEST
                     ),
                     "the name is now an argument to the marker, not a bare adjacent string".to_string(),
                     format!(
-                        "write: #{} (\"describes this block\") {{ ... }}",
+                        "write: @{} (\"describes this block\") {{ ... }}",
                         Syntax::KW_TEST
                     ),
                     Some(span),
                 ));
             }
-            self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_TEST))?;
+            self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::KW_TEST))?;
             let (name, name_span) = self.expect_test_name_str()?;
             self.expect(
                 TokKind::RParen,
-                &format!("to close `#{}(…)`", Syntax::KW_TEST),
+                &format!("to close `@{}(…)`", Syntax::KW_TEST),
             )?;
             Ok((name, name_span))
         }
     
-        /// Inner: parse the plain string literal inside `#Test("…")`.
+        /// Inner: parse the plain string literal inside `@Test("…")`.
         fn expect_test_name_str(&mut self) -> Result<(String, Span), Diagnostic> {
             let parts = match &self.peek().kind {
                 TokKind::Str(parts) => parts.clone(),
@@ -322,13 +322,13 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         format!(
-                            "expected a name in quotes inside `#{}(…)`, found {}",
+                            "expected a name in quotes inside `@{}(…)`, found {}",
                             Syntax::KW_TEST,
                             describe(other)
                         ),
                         "each test needs a name so failures are easy to find".to_string(),
                         format!(
-                            "write: #{} (\"describes this test\") {{ ... }}",
+                            "write: @{} (\"describes this test\") {{ ... }}",
                             Syntax::KW_TEST
                         ),
                         Some(self.peek().span),
@@ -341,7 +341,7 @@ impl<'a> Parser<'a> {
                     "E0003",
                     "a test name must be one piece of quoted text".to_string(),
                     "names are labels, not interpolated messages".to_string(),
-                    format!("write: #{} (\"my name\") {{ ... }}", Syntax::KW_TEST),
+                    format!("write: @{} (\"my name\") {{ ... }}", Syntax::KW_TEST),
                     Some(span),
                 ));
             }
@@ -351,13 +351,13 @@ impl<'a> Parser<'a> {
                     "E0003",
                     "a test name can't contain `{ }` interpolation".to_string(),
                     "names are fixed labels".to_string(),
-                    format!("write: #{} (\"my name\") {{ ... }}", Syntax::KW_TEST),
+                    format!("write: @{} (\"my name\") {{ ... }}", Syntax::KW_TEST),
                     Some(span),
                 )),
             }
         }
     
-        /// A `#Test`/`#Bench` block name: one plain string literal, no
+        /// A `@Test`/`@Bench` block name: one plain string literal, no
         /// interpolation. `kw` is the marker keyword for the error copy.
         pub(super) fn expect_marker_name(&mut self, kw: &str) -> Result<(String, Span), Diagnostic> {
             let parts = match &self.peek().kind {
@@ -366,12 +366,12 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         format!(
-                            "expected a name in quotes after `#{}`, found {}",
+                            "expected a name in quotes after `@{}`, found {}",
                             kw,
                             describe(other)
                         ),
                         "each block needs a name so results are easy to find".to_string(),
-                        format!("write: #{} \"describes this block\" {{ ... }}", kw),
+                        format!("write: @{} \"describes this block\" {{ ... }}", kw),
                         Some(self.peek().span),
                     ));
                 }
@@ -382,7 +382,7 @@ impl<'a> Parser<'a> {
                     "E0003",
                     "a block name must be one piece of quoted text".to_string(),
                     "names are labels, not interpolated messages".to_string(),
-                    format!("write: #{} \"my name\" {{ ... }}", kw),
+                    format!("write: @{} \"my name\" {{ ... }}", kw),
                     Some(span),
                 ));
             }
@@ -392,7 +392,7 @@ impl<'a> Parser<'a> {
                     "E0003",
                     "a block name can't contain `{ }` interpolation".to_string(),
                     "names are fixed labels".to_string(),
-                    format!("write: #{} \"my name\" {{ ... }}", kw),
+                    format!("write: @{} \"my name\" {{ ... }}", kw),
                     Some(span),
                 )),
             }
@@ -449,13 +449,13 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
-            let abi = if matches!(self.peek().kind, TokKind::Hash) {
+            let abi = if matches!(self.peek().kind, TokKind::At) {
                 self.bump();
-                let (marker, marker_span) = self.expect_ident("after `#`")?;
+                let (marker, marker_span) = self.expect_ident("after `@`")?;
                 if marker != Syntax::ATTR_ABI {
-                    return Err(Diagnostic::error("E3212", format!("unknown C ABI marker `#{marker}`"), "C declarations only accept the per-function `#Abi(name)` marker".to_string(), "use `#Abi(system)` or remove the marker for the default C ABI".to_string(), Some(marker_span)));
+                    return Err(Diagnostic::error("E3212", format!("unknown C ABI marker `@{marker}`"), "C declarations only accept the per-function `@Abi(name)` marker".to_string(), "use `@Abi(system)` or remove the marker for the default C ABI".to_string(), Some(marker_span)));
                 }
-                self.expect(TokKind::LParen, "after `#Abi`")?;
+                self.expect(TokKind::LParen, "after `@Abi`")?;
                 let (name, span) = self.expect_ident("for the ABI name")?;
                 self.expect(TokKind::RParen, "after the ABI name")?;
                 while matches!(self.peek().kind, TokKind::Semi) { self.bump(); }

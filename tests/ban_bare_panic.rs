@@ -56,6 +56,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code",
     ),
     (
+        "crates/jet-codegen/src/Prelude/Mem.rs",
+        3,
+        "include_str! allocator runtime template — user-program RUNTIME_PANIC path, not compiler code",
+    ),
+    (
         "crates/jet-codegen/src/scheduler.rs",
         6,
         "one scheduler runtime unwind boundary plus five #[cfg(test)] fixtures: IOCP completion, deadline, cancel result, shield result, and body-panic cleanup",

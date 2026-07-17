@@ -16,8 +16,8 @@ impl<F: FnOnce()> Drop for JetScopeGuard<F> {
         }
     }
 }
-// ── D-TXN1–D-TXN4 + D-TXN-ROLLBACK (2026-06-24/25): #Transact transaction blocks
-// A `#Transact(tx) { … }` block lowers to:
+// ── D-TXN1–D-TXN4 + D-TXN-ROLLBACK (2026-06-24/25): @Transact transaction blocks
+// A `@Transact(tx) { … }` block lowers to:
 //   { let mut tx = jet_transaction(); <body>; tx.commit(); }
 //
 // Three Drop-backed hook stacks, each LIFO (mirroring scope-guard drop order):
@@ -112,8 +112,8 @@ mod jet_txn {
         }));
     }
 }
-// ── D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of #Transact ──
-// `#Transact(tx) { from.edit(…); to.edit(…) }` on `Shared<T>` handles lowers to:
+// ── D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of @Transact ──
+// `@Transact(tx) { from.edit(…); to.edit(…) }` on `Shared<T>` handles lowers to:
 //   { let mut tx = jet_transaction();
 //     let __jet_stm = jet_stm::begin();
 //     from.edit_txn(move |b| …); to.edit_txn(move |b| …);
@@ -132,7 +132,7 @@ mod jet_txn {
 //
 // Purely safe std Rust (the raw pointer is only read as an ordering key, never
 // dereferenced); no external crate (I6); the compiler decides WHICH `.edit`
-// calls defer (any inside a Shared-touching `#Transact`), this module is the
+// calls defer (any inside a Shared-touching `@Transact`), this module is the
 // dumb runtime (I3). E0746 keeps rejecting irreversible effects inside, so a
 // deferred, all-or-nothing commit is always safe.
 mod jet_stm {
@@ -141,7 +141,7 @@ mod jet_stm {
     use std::sync::{Arc, RwLock};
 
     thread_local! {
-        // A stack, so nested `#Transact` blocks each own their own deferred set;
+        // A stack, so nested `@Transact` blocks each own their own deferred set;
         // an `edit_txn` always attaches to the innermost open transaction.
         static STACK: RefCell<Vec<Txn>> = const { RefCell::new(Vec::new()) };
     }
@@ -185,7 +185,7 @@ mod jet_stm {
         }
     }
 
-    /// `handle.edit(f)` inside a `#Transact` block. Buffers `f` on the innermost
+    /// `handle.edit(f)` inside a `@Transact` block. Buffers `f` on the innermost
     /// open transaction; the actual write happens at `commit()`.
     pub(crate) fn record_edit<T: 'static>(cell: Arc<RwLock<T>>, delta: Box<dyn FnOnce(&mut T)>) {
         let addr = Arc::as_ptr(&cell) as *const () as usize;
@@ -193,7 +193,7 @@ mod jet_stm {
             let mut stack = s.borrow_mut();
             let txn = stack
                 .last_mut()
-                .expect("edit_txn called outside a #Transact block (compiler invariant)");
+                .expect("edit_txn called outside a @Transact block (compiler invariant)");
             for p in txn.parts.iter_mut() {
                 if p.addr() == addr {
                     if let Some(c) = p.as_any_mut().downcast_mut::<Cell<T>>() {
@@ -210,7 +210,7 @@ mod jet_stm {
         });
     }
 
-    /// The RAII guard for one `#Transact` block's Shared plane. Dropping it
+    /// The RAII guard for one `@Transact` block's Shared plane. Dropping it
     /// without `commit()` (a `?`-failure / early return) discards every deferred
     /// edit — the all-or-nothing guarantee.
     pub(crate) struct Guard {

@@ -42,7 +42,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = format!(
         "Error [E3003]: deadline exceeded while waiting in {wait_kind}\n\
-Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
+Why: this wait point observed the task context deadline from `@Context(deadline: …)`\n\
 Fix: raise the deadline budget or shorten the work before this wait point"
     );
     if jet_interrupt_handler_should_unwind()

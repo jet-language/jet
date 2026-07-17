@@ -144,7 +144,7 @@ fn jet_test_shuffle_order(len: usize, seed: u64) -> Vec<usize> {
 }
 "#;
 /// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
-/// the `jet test` harness only when the file declares a parameterized `#Test fn`.
+/// the `jet test` harness only when the file declares a parameterized `@Test fn`.
 /// Std-only (I6): a deterministic splitmix64 PRNG, a `JetGen` trait that
 /// generates and shrinks values per type, and the driver loop that runs N cases
 /// and minimizes a failing input. The seed defaults to a fixed constant so a
@@ -370,20 +370,16 @@ const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 /// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
 const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
-/// Pre-#658 compatibility only. #658 retires this source-facing wrapper.
-const GC_ADAPTER_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
 
 fn push_gc_prelude(out: &mut String) {
     out.push_str("mod jet_gc {\n");
     out.push_str(GC_RUNTIME_PRELUDE);
-    out.push('\n');
-    out.push_str(GC_ADAPTER_PRELUDE);
     out.push_str("\n}\n");
 }
 /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): the `layout NAME { … }`
 /// constraint-solver runtime (`jet_layout`). Pure safe Rust (no `unsafe`), so —
 /// unlike `MEM_PRELUDE` — it never needs stripping; included everywhere
-/// `MEM_PRELUDE`/`GC_PRELUDE` are (not just the UI-specific sites), since a
+/// `MEM_PRELUDE`/private collector runtime are (not just the UI-specific sites), since a
 /// `layout {}` block isn't limited to UI code.
 const LAYOUT_PRELUDE: &str = include_str!("../Prelude/Layout.rs");
 
@@ -559,7 +555,7 @@ fn strip_unused_raylib_prelude(out: String) -> String {
 /// D-TXN-ROLLBACK layer 1: the `jet_txn` module carries the auto-snapshot
 /// restore mechanism, whose Drop-backed writeback uses one vetted raw-pointer
 /// deref (sound: the transaction guard outlives nothing it points at). A program
-/// that never auto-snapshots a `#Transact` value must carry no `unsafe`, so strip
+/// that never auto-snapshots a `@Transact` value must carry no `unsafe`, so strip
 /// `mod jet_txn { … }` whenever nothing references `jet_txn::` — exactly like
 /// `strip_unused_mem_prelude`.
 fn strip_unused_txn_prelude(out: String) -> String {
@@ -733,6 +729,70 @@ pub(crate) fn emit_synthetic_display_trait(out: &mut String) {
     out.push_str("}\n\n");
 }
 
+/// D-SHAPE-RESOURCE2=A: the one nominal consuming, infallible cleanup trait.
+pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
+    out.push_str("pub trait user_Close {\n");
+    out.push_str("    fn close(self);\n");
+    out.push_str("}\n\n");
+    out.push_str("struct JetResource<T: user_Close>(Option<T>);\n");
+    out.push_str("impl<T: user_Close> JetResource<T> { fn new(value: T) -> Self { Self(Some(value)) } fn take(&mut self) -> T { self.0.take().expect(\"resource already consumed\") } fn close(&mut self) { if let Some(value) = self.0.take() { user_Close::close(value); } } }\n");
+    out.push_str("impl<T: user_Close> std::ops::Deref for JetResource<T> { type Target = T; fn deref(&self) -> &T { self.0.as_ref().expect(\"resource already consumed\") } }\n");
+    out.push_str("impl<T: user_Close> std::ops::DerefMut for JetResource<T> { fn deref_mut(&mut self) -> &mut T { self.0.as_mut().expect(\"resource already consumed\") } }\n");
+    out.push_str("impl<T: user_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n");
+}
+
+pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, out: &mut String) {
+    let root = &cx.root_prefix;
+    let imports = |module: &str| cx.core_imports.values().any(|m| m == module);
+    if imports("core.files") {
+        for ty in [
+            format!("{root}JetFileReader"),
+            format!("{root}JetFileWriter"),
+            format!("{root}jet_std::FileLock"),
+        ] {
+            out.push_str(&format!(
+                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+            ));
+        }
+    }
+    if imports("core.net") {
+        for ty in [format!("{root}JetTcpStream"), format!("{root}JetUnixStream")] {
+            out.push_str(&format!(
+                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+            ));
+        }
+        out.push_str(&format!(
+            "impl user_Close for {root}JetTlsStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
+        ));
+    }
+    if imports(crate::Syntax::CORE_MEM_MODULE)
+        || imports(crate::Syntax::CORE_MEM_ALLOC_MODULE)
+    {
+        for ty in [
+            format!("{root}jet_mem::JetArena"),
+            format!("{root}jet_mem::JetBump"),
+            format!("{root}jet_mem::JetPool"),
+            format!("{root}jet_mem::JetFixed"),
+        ] {
+            out.push_str(&format!(
+                "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
+            ));
+        }
+    }
+    if imports("jet.db") {
+        if let Some(ffi) = &cx.ffi_crate {
+            out.push_str(&format!(
+                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\n"
+            ));
+        }
+    }
+    out.push('\n');
+}
+
 /// D-ITER-HOOK / D-INDEX-HOOK: emit Iterable/Iterator/Index/IndexMut when used.
 pub(crate) fn emit_synthetic_iter_index_traits(
     out: &mut String,
@@ -870,6 +930,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
 
     emit_synthetic_display_trait(&mut out);
+    emit_synthetic_close_trait(&mut out);
+    emit_synthetic_close_builtin_impls(&cx, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
     emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
 
@@ -973,20 +1035,17 @@ mod tests {
     fn gc_runtime_source_is_shared_by_aot_and_jit() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let runtime = std::fs::read_to_string(root.join("../jet-rt/src/__gc.rs")).unwrap();
-        let adapter = std::fs::read_to_string(root.join("src/Prelude/Gc.rs")).unwrap();
         assert_eq!(GC_RUNTIME_PRELUDE, runtime);
-        assert_eq!(GC_ADAPTER_PRELUDE, adapter);
 
         let mut emitted = String::new();
         push_gc_prelude(&mut emitted);
         assert!(emitted.starts_with("mod jet_gc {\n"));
         assert_eq!(emitted.matches(runtime.as_str()).count(), 1);
-        assert_eq!(emitted.matches(adapter.as_str()).count(), 1);
 
         let unused = strip_unused_gc_prelude(format!("{emitted}fn main() {{}}\n"));
         assert!(!unused.contains("mod jet_gc"));
         let used = strip_unused_gc_prelude(format!(
-            "{emitted}fn main() {{ jet_gc::gc_collect(); }}\n"
+            "{emitted}fn main() {{ jet_gc::runtime_or_exit(jet_gc::initialize_trace()); }}\n"
         ));
         assert!(used.contains("mod jet_gc"));
     }
@@ -1068,6 +1127,7 @@ mod tests {
                 web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
                 no_prelude: program.no_prelude, html_path: program.html_path,
                 no_alloc_policy: program.no_alloc_policy,
+                policy_declarations: program.policy_declarations.clone(),
             }],
             parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(), import_targets: HashMap::new(), layer_ceiling: None,
@@ -1138,6 +1198,7 @@ mod tests {
                 no_prelude: prog.no_prelude,
                 html_path: prog.html_path.clone(),
                 no_alloc_policy: prog.no_alloc_policy,
+                policy_declarations: prog.policy_declarations.clone(),
             }],
             parse_teaching: Vec::new(),
             used_core: HashSet::new(),
@@ -1185,7 +1246,7 @@ mod tests {
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
-/// every `#Test "…" { }` block (M6 phase 2).
+/// every `@Test "…" { }` block (M6 phase 2).
 pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     let tests: Vec<&TestDef> = prog
         .items
@@ -1220,6 +1281,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
 
     emit_synthetic_display_trait(&mut out);
+    emit_synthetic_close_trait(&mut out);
+    emit_synthetic_close_builtin_impls(&cx, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
     emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
 
@@ -1339,6 +1402,7 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
+    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
     for (i, test) in tests.iter().enumerate() {
@@ -1433,9 +1497,9 @@ fn whole_test_skip(test: &TestDef) -> bool {
     )
 }
 
-/// D-TEST1: emit the per-test functions. A unit test (`#Test "name" { … }`, no
+/// D-TEST1: emit the per-test functions. A unit test (`@Test "name" { … }`, no
 /// params) becomes `fn jet_test_N() -> Result<(), String>` exactly as before. A
-/// property test (`#Test fn name(p…) { … }`) becomes a body fn `jet_prop_N(p…)`
+/// property test (`@Test fn name(p…) { … }`) becomes a body fn `jet_prop_N(p…)`
 /// plus a driver `jet_test_N()` that generates inputs, runs cases, and shrinks
 /// the first failure to a minimal counterexample. Either way `jet_test_N()` is
 /// the single entry the main loop calls, so the reporting loop is shared.
@@ -1546,10 +1610,10 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
     }
 }
 
-/// c109: emit a `#Test` block body through the TIR (R7 — the only codegen seam). A test
+/// c109: emit a `@Test` block body through the TIR (R7 — the only codegen seam). A test
 /// body is a bare statement list (no params, unit context), emitted at indent 1 inside the
 /// `fn jet_test_N()` wrapper the caller opened. A gate-miss is an internal compiler error
-/// (I2-class), never an AST fallback — every `#Test` body routes through the TIR.
+/// (I2-class), never an AST fallback — every `@Test` body routes through the TIR.
 fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
     if TIR::tir_covers_test_body(body, cx) {
         TIR::emit_tir_test_body(body, cx, out);
@@ -1557,7 +1621,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
     }
     jet_foundation::ice!(
         None,
-        "codegen reached a #Test body construct the typed IR does not cover — compiler bug (I2/R7)"
+        "codegen reached a @Test body construct the typed IR does not cover — compiler bug (I2/R7)"
     );
 }
 
@@ -1586,7 +1650,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
 ///
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `active_os` is the resolved
 /// native OS bucket this build targets (from `--target=<triple>`, or the host
-/// OS when absent) — an `impl` gated to a different `#Target(Os.*)` is
+/// OS when absent) — an `impl` gated to a different `@Target(Os.*)` is
 /// skipped entirely (`Codegen/Imports.rs::emit_program_items`).
 pub fn emit_bundle_dbg(
     bundle: &ProgramBundle,
@@ -1833,7 +1897,7 @@ pub fn emit_bundle_tests_cov(
     ))))
 }
 
-/// D-TESTKIT1=A (c308 pass 2, gap #1): pick which property `#Test fn` a `jet
+/// D-TESTKIT1=A (c308 pass 2, gap #1): pick which property `@Test fn` a `jet
 /// fuzz` run targets. `test_name` is the CLI's optional second positional
 /// (`jet fuzz <file> [<name>]`).
 ///   - named: must exist and must be a property test (have params) — else a
@@ -1849,10 +1913,10 @@ fn select_fuzz_target<'a>(
         match tests.iter().position(|t| t.name == name) {
             Some(i) if !tests[i].params.is_empty() => Ok(i),
             Some(_) => Err(format!(
-                "`{}` is a unit `#Test`, not a property test — `jet fuzz` needs a parameterized `#Test fn` (D-TEST1)",
+                "`{}` is a unit `@Test`, not a property test — `jet fuzz` needs a parameterized `@Test fn` (D-TEST1)",
                 name
             )),
-            None => Err(format!("no `#Test` named `{}` in this file", name)),
+            None => Err(format!("no `@Test` named `{}` in this file", name)),
         }
     } else {
         let candidates: Vec<usize> = tests
@@ -1863,8 +1927,8 @@ fn select_fuzz_target<'a>(
             .collect();
         match candidates.len() {
             0 => Err(
-                "no property `#Test fn` (D-TEST1) found to fuzz — `jet fuzz` needs one \
-                 parameterized `#Test fn(...)`, not a unit `#Test(\"name\") { ... }`"
+                "no property `@Test fn` (D-TEST1) found to fuzz — `jet fuzz` needs one \
+                 parameterized `@Test fn(...)`, not a unit `@Test(\"name\") { ... }`"
                     .to_string(),
             ),
             1 => Ok(candidates[0]),
@@ -1913,7 +1977,7 @@ pub fn emit_bundle_fuzz(
         .collect();
     if tests.is_empty() {
         return Err(
-            "no `#Test` blocks in this file — `jet fuzz` needs a parameterized `#Test fn(...)`"
+            "no `@Test` blocks in this file — `jet fuzz` needs a parameterized `@Test fn(...)`"
                 .to_string(),
         );
     }
@@ -2041,6 +2105,7 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
+    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    let corpus_dir = std::env::var(\"JET_FUZZ_CORPUS\").unwrap_or_else(|_| \".jet-fuzz-corpus\".to_string());\n");
     out.push_str("    let _ = std::fs::create_dir_all(&corpus_dir);\n");
     out.push_str("    let iterations: u64 = std::env::var(\"JET_FUZZ_ITERATIONS\").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);\n");
@@ -2138,10 +2203,10 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
-/// that times each `#Bench("…") { }` region and reports ns/iter + ops/sec.
+/// that times each `@Bench("…") { }` region and reports ns/iter + ops/sec.
 /// Mirrors `emit_bundle_tests`; the only divergence is the per-block tail,
 /// which wraps each body in an auto-scaled timed loop instead of a pass/fail
-/// check. Each body is emitted exactly like a `#Test` body (a bare statement
+/// check. Each body is emitted exactly like a `@Test` body (a bare statement
 /// list in a `Result<(), String>` fn), so `return Err(…)` from `require` stays
 /// valid; the timing wrapper ignores that result.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
@@ -2302,6 +2367,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
 
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
+    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    fn hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
     for (i, bench) in benches.iter().enumerate() {
         let name = escape_rust_str(&bench.name);

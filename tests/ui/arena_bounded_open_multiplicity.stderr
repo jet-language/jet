@@ -1,0 +1,7 @@
+Error [E0921]: `arena_bounded(8)` cannot be proved through the open dispatch at tests/ui/arena_bounded_open_multiplicity.jet
+  --> tests/ui/arena_bounded_open_multiplicity.jet:11:9
+    |
+ 11 |         reserve()
+    |         ^^^^^^^^^
+ Why: loop iteration count is not statically bounded for arena accounting is reachable through arena_bounded_open_multiplicity::run -> arena_bounded_open_multiplicity::reserve; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: function arena_bounded(8) declared at tests/ui/arena_bounded_open_multiplicity.jet:8
+ Fix: seal the target set, consume a verified signed dependency summary that proves the fact, or move the dispatch outside this policy scope

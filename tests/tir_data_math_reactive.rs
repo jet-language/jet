@@ -7,7 +7,7 @@ use std::fs;
 
 use tir_support::{build_and_run, have_rustc};
 
-// --- D-SOA1 / D-SOA2A-D: `#Layout(columnar)` struct-of-arrays --------------
+// --- D-SOA1 / D-SOA2A-D: `@Layout(columnar)` struct-of-arrays --------------
 
 /// Compile a program to Rust (front end only) for source-level assertions.
 fn compile_rust(name: &str, src: &str) -> String {
@@ -27,7 +27,7 @@ fn compile_rust(name: &str, src: &str) -> String {
 }
 
 const COLUMNAR_PROG: &str = "\
-#Layout(columnar)
+@Layout(columnar)
 struct P {
     x: Float
     mass: Float
@@ -91,7 +91,7 @@ fn columnar_serialization_is_transparent() {
     let src = "\
 use core.encoding.json as json
 @[Codable]
-#Layout(columnar)
+@Layout(columnar)
 struct Pt { a: Int, b: Int }
 @[Codable]
 struct PlainPt { a: Int, b: Int }
@@ -150,8 +150,8 @@ s: F32x4 :: v + w
     print(s.to_array())
     print(v[2])
     print(v.sum())
-    print(v.reduce(#Max))
-    print(v.reduce(#Mul))
+    print(v.reduce(@Max))
+    print(v.reduce(@Mul))
     print(F32x4.splat(5.0).to_array())
 d: F64x2 :: F64x2.from_array([1.5, 2.5])
     print(d.sum())
@@ -212,7 +212,7 @@ fn run() {
     assert_eq!(stdout, "2\n2\n10\n10\n");
 }
 
-/// D-REACTCORE1 + D-SIGNAL1: `#Reactive { … }` and `reactive.computed`.
+/// D-REACTCORE1 + D-SIGNAL1: `@Reactive { … }` and `reactive.computed`.
 #[test]
 fn reactive_scope_marker() {
     if !have_rustc() {
@@ -224,7 +224,7 @@ fn run() {
     n := reactive.signal(1)
     doubled := reactive.computed(() => (n.get() * 2))
     print(doubled.get())
-    #Reactive {
+    @Reactive {
         print(doubled.get())
     }
     n.set(5)

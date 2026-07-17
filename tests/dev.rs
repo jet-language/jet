@@ -7,7 +7,7 @@
 //! the real build does. This mirrors `tests/comptime_diff.rs`.
 //!
 //! Also tested:
-//!   - the E2201 honest-boundary note (tasks/FFI/`#Unsafe`/native std),
+//!   - the E2201 honest-boundary note (tasks/FFI/`@Unsafe`/native std),
 //!   - the per-iteration `dev_iteration` function the watch loop is built on,
 //!   - the save-to-diagnostic latency budget (D-DEV3, <200ms check-only).
 
@@ -513,12 +513,12 @@ fn print_jit_op_report() {
 ///   - E0953: a deliberate user-authored panic (`require(false, …)`), which is
 ///     the program legitimately failing, not a silent skip.
 ///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.io`/
-///     `core.env`/…) reached with no `#Impure` gate, or a gate present but
+///     `core.env`/…) reached with no `@Impure` gate, or a gate present but
 ///     `--allow-impure` not passed — an honest, named boundary (the golden
 ///     corpus runs with neither), not a silent skip.
 ///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.vault.get` reached through the
 ///     same comptime/interpreter evaluation path — unconditionally denied
-///     (no `#Impure` escape hatch), so an example exercising it always stops
+///     (no `@Impure` escape hatch), so an example exercising it always stops
 ///     here under the interpreter/JIT tiers even though the AOT-compiled
 ///     binary runs it fine (it never goes through this evaluator).
 const BOUNDARY_CODES: &[&str] = &[
@@ -968,7 +968,7 @@ fn interpreter_matches_expected_golden() {
     for stem in all_example_stems() {
         let file = example_path(&stem);
         // D-JPK-TASKRUN1 / R12 (card #476): task_runner's meaningful entries are
-        // its `#Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
+        // its `@Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
         // AOT `--task` battery on the interpreter tier via `run_named_task`,
         // proving the same TIR dispatches each task identically. The bare
         // `fn run()` output is not a golden.
@@ -1299,7 +1299,7 @@ fn run() {
     print("before replace: {before_replace}")
     replaced = [42, 43]
     after_replace :: &replaced[1]
-    #DebugOnly { print("unrelated debug") }
+    @DebugOnly { print("unrelated debug") }
     after_replace = 49
     print("after replace: {after_replace}")
 }
@@ -2772,7 +2772,7 @@ fn cranelift_covers_string_interpolation() {
 #[test]
 fn cranelift_covers_shield_region() {
     let out = run_cranelift_without_fallback(
-        "fn run() {\n    #Shield {\n        print(7)\n    }\n}\n",
+        "fn run() {\n    @Shield {\n        print(7)\n    }\n}\n",
         "shield_region",
     );
     assert_eq!(out.stdout, "7\n");
@@ -2786,7 +2786,7 @@ fn run() {
     (sender, ch) :: tasks.channel<Int>()
     (ack_sender, ack) :: tasks.channel<Int>()
     slow :: tasks.spawn(take(ch, ack_sender) () => {
-               #Shield {
+               @Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)
                    ack_sender.send(1)
@@ -3411,9 +3411,9 @@ fn run() {
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-task tick
-/// consumer. `scheduled_tasks` must enumerate every `#Task #Every(…)` fn
-/// with its resolved schedule (and skip a plain `#Task fn` with no
-/// `#Every(…)`), and `run_named_task` must actually execute one by name
+/// consumer. `scheduled_tasks` must enumerate every `@Task @Every(…)` fn
+/// with its resolved schedule (and skip a plain `@Task fn` with no
+/// `@Every(…)`), and `run_named_task` must actually execute one by name
 /// through the same interpreter tier `dev_iteration` uses — golden-testing
 /// the loop's per-tick logic without the long-running file watcher, same
 /// spirit as `dev_iteration` itself (see the module doc above).
@@ -3441,8 +3441,8 @@ fn schedule_every_dev_loop_consumer() {
     assert_eq!(
         names,
         vec!["nightly_backup", "prune_sessions"],
-        "scheduled_tasks must list every #Task fn carrying #Every(…), and skip the \
-         #Every(…)-less `manual_only` task"
+        "scheduled_tasks must list every @Task fn carrying @Every(…), and skip the \
+         @Every(…)-less `manual_only` task"
     );
     let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =
         tasks.iter().map(|(n, s)| (n.as_str(), s)).collect();
@@ -3451,12 +3451,12 @@ fn schedule_every_dev_loop_consumer() {
         jet::AST::EverySchedule::Interval {
             nanos: 5 * 60 * 1_000_000_000
         },
-        "`#Every(5min)` must resolve to a 5-minute interval"
+        "`@Every(5min)` must resolve to a 5-minute interval"
     );
     assert_eq!(
         *schedules["nightly_backup"],
         jet::AST::EverySchedule::DailyAt { hour: 3, minute: 0 },
-        "`#Every(\"03:00\")` must resolve to 03:00 daily"
+        "`@Every(\"03:00\")` must resolve to 03:00 daily"
     );
 
     // Actually invoking a named task runs it like an ordinary call.

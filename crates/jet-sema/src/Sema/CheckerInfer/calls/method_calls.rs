@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, EnumLitArg, Expr, StrPart, Type};
+use crate::AST::{AccessConvention, CtValue, EnumLitArg, Expr, StrPart, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::e0901;
@@ -6,9 +6,9 @@ use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::{
     alloc_method_return, args_spec_method_return, binary_reader_method_return,
     civil_time_method_return, data_renamed_to_datatree, datatree_method_return,
-    devserver_method_return, db_value_method_return, e3104, expiring_method_return,
-    email_method_return, encoding_handle_method_return, file_handle_method_return, gc_method_return, http_type_method_return, is_db_value_type_name,
-    is_gc_type, is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
+    devserver_method_return, db_value_method_return, expiring_method_return,
+    email_method_return, encoding_handle_method_return, file_handle_method_return, http_type_method_return, is_db_value_type_name,
+    is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
     is_polymorphic_core_special, is_reflect_type_name, is_simd_lane_type, json_ty,
     layout_method_arg_ty, layout_method_return, loadable_method_return, math_method_arg_ty,
     math_method_return, math_scalar_ty, math_static_arg_ty, math_static_return,
@@ -601,6 +601,16 @@ impl<'a> Checker<'a> {
                 // handle (`Arc<RwLock<T>>` class). `T` is inferred from the constructor
                 // argument, no turbofish — a bare type-name call like `Path.from` above.
                 if type_name == "Shared" && method == "new" {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
+                        span,
+                        "`Shared.new` allocates shared storage",
+                    ));
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::RetainRelease,
+                        span,
+                        "`Shared.new` introduces reference-counted ownership",
+                    ));
                     if args.len() != 1 {
                         self.diags.push(Diagnostic::error(
                             "E0104",
@@ -778,6 +788,38 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
+            match &recv_ty {
+                Type::Apply { name, .. } if name == "Pool" && method == "add" => {
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::ArenaBytes(None),
+                        span,
+                        "`Pool.add` has no proven byte bound",
+                    ));
+                }
+                Type::Named(name)
+                    if matches!(name.as_str(), "Arena" | "Bump")
+                        && matches!(method, "new" | "alloc" | "alloc_slice") =>
+                {
+                    if method == "new" {
+                        let bound =
+                        args.first().and_then(|arg| match &arg.expr {
+                            Expr::Int(value, _, _, _) if *value >= 0 => Some(*value as u64),
+                            _ => None,
+                        });
+                        self.record_memory_event(crate::Sema::MemoryEvent::new(
+                            crate::Sema::MemoryEventKind::ArenaBytes(bound),
+                            span,
+                            format!("`{name}.new` reserves bounded arena storage"),
+                        ));
+                    }
+                    self.record_memory_event(crate::Sema::MemoryEvent::new(
+                        crate::Sema::MemoryEventKind::Allocation,
+                        span,
+                        format!("`{name}.{method}` allocates from arena storage"),
+                    ));
+                }
+                _ => {}
+            }
             if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&recv_ty)
                 && matches!(method, "clone" | "encode" | "hash" | "debug" | "display")
             {
@@ -786,7 +828,7 @@ impl<'a> Checker<'a> {
                     "E0311",
                     format!("`{method}` is forbidden on secret-bearing `{shown}`"),
                     "secret-bearing cryptographic values are move-only and expose no clone, hash, serialization, Debug, or Display capability".to_string(),
-                    "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `#Unsafe` region when raw bytes are required".to_string(),
+                    "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `@Unsafe` region when raw bytes are required".to_string(),
                     Some(span),
                 ));
                 for arg in args.iter_mut() {
@@ -930,7 +972,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact`
+            // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `@Transact`
             // transaction handle. Same shape as `scope.guard`: a zero-parameter
             // lambda, Drop-backed, run LIFO on a clean commit and dropped on a
             // `?`-failure/rollback. Returns a guard handle (`TransactionGuard`),
@@ -1003,7 +1045,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a
-            // `#Transact` handle — the exact mirror of `on_commit`. A zero-parameter
+            // `@Transact` handle — the exact mirror of `on_commit`. A zero-parameter
             // lambda, Drop-backed, run LIFO on a `?`-failure/rollback and dropped on a
             // clean commit. Returns the same `TransactionGuard` handle.
             if let Type::Named(handle_ty) = &recv_ty {
@@ -1074,7 +1116,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-DBDRIVER1: method calls on a `DbConnection` handle. A bespoke block
-            // (like the `#Transact` handle above) rather than the generic
+            // (like the `@Transact` handle above) rather than the generic
             // `file_handle_method_return` table, because `.query`/`.query_one`/
             // `.execute` need real expected-type-directed arg elaboration
             // (`sql: String, params: [DbValue]`) — an empty `[]` params literal must
@@ -1297,7 +1339,7 @@ impl<'a> Checker<'a> {
             }
             // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — argument-dependent
             // (the return shape comes from the pattern's holes), resolved
-            // directly here, same reason `Gc.new<T>`/`Arena.alloc` are above.
+            // directly here, for the same reason `Arena.alloc` is above.
             if let Type::Named(handle_ty) = &recv_ty {
                 if handle_ty == "Cursor" && method == Syntax::METHOD_TAKE_PATTERN {
                     *recv_type_out = Some("Cursor".to_string());
@@ -1653,86 +1695,124 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
-            // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
-            if is_gc_type(&recv_ty) && matches!(method, "with" | "with_mut") {
-                if args.len() != 1 {
-                    self.diags.push(Diagnostic::error(
-                        "E0103",
-                        format!("`Gc.{method}` takes exactly one closure argument"),
-                        "pass a closure that receives the inner value".to_string(),
-                        format!("write `handle.{method}(|v| {{ … }})`"),
-                        Some(span),
-                    ));
-                } else if let Some(arg) = args.get_mut(0) {
-                    self.infer(&mut arg.expr);
-                }
-                *recv_type_out = Some(Syntax::GC_TYPE.to_string());
-                return Some(unit_ty());
-            }
+            // Arena/Bump/Pool/Fixed allocators. Reset invalidates live views;
+            // universal `close(^allocator)` owns terminal release.
             if let Type::Named(handle_ty) = &recv_ty {
                 let handle_ty_s = handle_ty.clone();
-                if handle_ty_s == Syntax::GC_TYPE {
-                    if let Some(ret) = gc_method_return(method, type_args, args, span, &mut self.diags)
-                    {
-                        *recv_type_out = Some(handle_ty_s);
-                        if method == "new" {
-                            if let Some(arg) = args.get_mut(0) {
-                                let inferred = self.infer(&mut arg.expr);
-                                if let Some(Some(Type::Apply { name, args: targs })) = Some(&ret) {
-                                    if name == Syntax::GC_TYPE && targs.len() == 1 {
-                                        if let Some(et) = inferred {
-                                            self.check_type_assignable(&targs[0], &et, arg.expr.span());
-                                        }
-                                        let out = Type::Apply {
-                                            name: Syntax::GC_TYPE.to_string(),
-                                            args: targs.clone(),
-                                        };
-                                        *resolved_ret_out = Some(out.clone());
-                                        return Some(out);
-                                    }
-                                }
-                            }
-                        }
-                        if matches!(method, "with" | "with_mut") {
-                            if let Some(arg) = args.get_mut(0) {
-                                self.infer(&mut arg.expr);
-                            }
-                            return Some(unit_ty());
-                        }
-                        return ret;
+                if handle_ty_s == "Fixed" && matches!(method, "new" | "over") {
+                    *recv_type_out = Some(handle_ty_s.clone());
+                    if !self.allow_fixed_constructor {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!("`Fixed.{method}` must directly initialize a lexical binding"),
+                            "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration".to_string(),
+                            format!("write `fixed :: mem.Fixed.{method}(…)`"),
+                            Some(span),
+                        ));
                     }
+                    if args.len() != 1 {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!("`Fixed.{method}` takes exactly one argument"),
+                            if method == "new" {
+                                "the inline backing size must be a positive compile-time integer".to_string()
+                            } else {
+                                "the backing must be one mutable fixed-size byte array".to_string()
+                            },
+                            if method == "new" {
+                                "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
+                            } else {
+                                "write `fixed :: mem.Fixed.over(&bytes)`".to_string()
+                            },
+                            Some(span),
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return Some(Type::Named(handle_ty_s));
+                    }
+                    let inferred = self.infer(&mut args[0].expr);
+                    if method == "new" {
+                        let direct_size = match &args[0].expr {
+                            Expr::Int(value, _, _, _) => Some(*value),
+                            Expr::ComptimeSplice {
+                                value: Some(CtValue::Int(value)),
+                                ..
+                            } => Some(*value),
+                            Expr::Ident(name, _) => match self.current_ct_globals().get(name) {
+                                Some(CtValue::Int(value)) => Some(*value),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        let size = direct_size.or_else(|| {
+                            let globals = self.current_ct_globals();
+                            match crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                                &args[0].expr,
+                                self.ct_funcs,
+                                self.ct_externs,
+                                self.ct_base_dir,
+                                &globals,
+                                self.core_imports,
+                                false,
+                                0,
+                            ) {
+                                Ok((CtValue::Int(value), inputs)) => {
+                                    self.ct_embed_inputs.extend(inputs);
+                                    Some(value)
+                                }
+                                _ => None,
+                            }
+                        });
+                        if let Some(size) = size.filter(|size| *size > 0) {
+                            let arg_span = args[0].expr.span();
+                            args[0].expr = Expr::Int(size, arg_span, None, None);
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0103",
+                                "`Fixed.new` needs a positive compile-time byte size".to_string(),
+                                "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
+                                "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                    } else {
+                        let fixed_bytes = matches!(
+                            inferred,
+                            Some(Type::FixedList { elem, len, .. })
+                                if len > 0 && matches!(*elem, Type::IntN { signed: false, bits: 8 })
+                        );
+                        let direct_mutable_buffer = args[0].convention == AccessConvention::Write
+                            && matches!(&args[0].expr, Expr::Ident(..));
+                        if !fixed_bytes || !direct_mutable_buffer {
+                            self.diags.push(Diagnostic::error(
+                                "E0103",
+                                "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
+                                "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
+                                "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)`".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                    }
+                    return Some(Type::Named(handle_ty_s));
                 }
                 if let Some(ret) =
                     alloc_method_return(&handle_ty_s, method, args, span, &mut self.diags)
                 {
-                    // E3104: check for use-after-free/reset before inferring args.
                     let recv_name = if let Expr::Ident(n, _) = &**receiver {
                         Some(n.clone())
                     } else {
                         None
                     };
-                    // D-ALLOC-D: E3104 — `alloc` after `free` is always wrong (the allocator
-                    // is consumed). After `reset`, further `alloc` is valid (buffer is reused).
-                    if method == "alloc" {
-                        if let Some(ref name) = recv_name {
-                            if self.freed_allocators.contains_key(name.as_str()) {
-                                self.diags.push(e3104(name, "free", span));
-                            }
-                        }
-                    }
-                    // Mark the allocator as freed only on `free`. `reset` keeps it alive.
-                    if method == "free" {
-                        if let Some(ref name) = recv_name {
-                            self.freed_allocators
-                                .insert(name.clone(), "free".to_string());
-                        }
-                    }
-                    // D-ALLOC2: `reset`/`free` invalidate every value previously
+                    // D-ALLOC2: `reset` invalidates every value previously
                     // allocated in this arena. Any view of it used afterward is
-                    // E0632 (use-after-reset/free) — the runtime `&mut self`/`self`
+                    // E0632 (use-after-reset) — the runtime `&mut self`
                     // signatures would also reject, so Jet rejects first (I2).
-                    if method == "reset" || method == "free" {
+                    if method == "reset" {
                         if let Some(ref name) = recv_name {
+                            if handle_ty_s == "Fixed" {
+                                self.check_owner_change(name, "be reset", span);
+                            }
                             self.kill_views_of_arena(name, method, span);
                         }
                     }
@@ -2059,7 +2139,7 @@ impl<'a> Checker<'a> {
                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                     *recv_type_out = Some("Shared".to_string());
                     // D-STM1=A (card #506): a `Shared.edit` on the direct path of a
-                    // `#Transact` block joins the block's atomic commit — the write is
+                    // `@Transact` block joins the block's atomic commit — the write is
                     // DEFERRED, so the call yields nothing (Unit), matching codegen's
                     // `edit_txn(…) -> ()`. Consuming it (`x :: h.edit(…)`) then fails as an
                     // ordinary type error against Unit. `txn_depth` is 0 inside a nested
@@ -2074,7 +2154,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-SIMD2 / D-LINALG1: methods on the built-in math value types
-            // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(#Max)`, `m.matmul(n)`).
+            // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(@Max)`, `m.matmul(n)`).
             // Operator overloading on this closed family is blessed; named methods are
             // the rest of the surface. Set `recv_type_out` so codegen routes to the
             // math-method op (TIR handle-method path).
@@ -2088,16 +2168,16 @@ impl<'a> Checker<'a> {
                                 "E2510",
                                 format!("`reduce` takes one reduce-op marker, got {}", args.len()),
                                 "a lane reduction names its operation with a marker".to_string(),
-                                "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
+                                "write `v.reduce(@Add)`, `@Mul`, `@Min`, or `@Max`".to_string(),
                                 Some(span),
                             ));
                         } else if let Expr::ReduceMarker(op, mspan) = &args[0].expr {
                             if !simd_reduce_markers().contains(&op.as_str()) {
                                 self.diags.push(Diagnostic::error(
                                     "E2510",
-                                    format!("`#{}` isn't a reduce operation", op),
+                                    format!("`@{}` isn't a reduce operation", op),
                                     "a lane reduction folds the lanes with one of a fixed set of operations".to_string(),
-                                    "use `#Add`, `#Mul`, `#Min`, or `#Max`".to_string(),
+                                    "use `@Add`, `@Mul`, `@Min`, or `@Max`".to_string(),
                                     Some(*mspan),
                                 ));
                             }
@@ -2107,7 +2187,7 @@ impl<'a> Checker<'a> {
                                 "`reduce` takes a reduce-op marker, not a value".to_string(),
                                 "the operation is named with a marker so the fold is explicit"
                                     .to_string(),
-                                "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
+                                "write `v.reduce(@Add)`, `@Mul`, `@Min`, or `@Max`".to_string(),
                                 Some(args[0].expr.span()),
                             ));
                             self.infer(&mut args[0].expr);
@@ -2158,9 +2238,14 @@ impl<'a> Checker<'a> {
             }
             if let Type::Named(n) = &recv_ty {
                 if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
+                    let bounds = param.bounds.clone();
                     for (trait_name, info) in &self.trait_reg.traits {
                         if let Some(msig) = info.methods.get(method) {
-                            if !param.bounds.iter().any(|b| b == trait_name) {
+                            self.record_open_memory_dispatch(
+                                span,
+                                "generic trait dispatch has no sealed target set",
+                            );
+                            if !bounds.iter().any(|b| b == trait_name) {
                                 self.diags.push(e0901(method, trait_name, span));
                             }
                             *recv_type_out = Some(n.clone());
@@ -2196,9 +2281,9 @@ impl<'a> Checker<'a> {
                                 method,
                                 recv_ty.show()
                             ),
-                            "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                            "`@Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
                             format!(
-                                "drop `#Layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
+                                "drop `@Layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
                                 elem, method
                             ),
                             Some(span),
@@ -2396,6 +2481,10 @@ impl<'a> Checker<'a> {
                         .map(|msig| (tn, msig))
                 });
                 if let Some((trait_name, msig)) = sig {
+                    self.record_open_memory_dispatch(
+                        span,
+                        "trait-object dispatch has no sealed target set",
+                    );
                     *recv_type_out = Some(trait_name.clone());
                     let ret = msig.return_type.clone();
                     for arg in args.iter_mut() {
@@ -2525,6 +2614,7 @@ impl<'a> Checker<'a> {
                 }
             }
             self.record_method_reference(&type_name, method, span);
+            self.record_edge(crate::Sema::effect_key(Some(&type_name), method), span);
             if msig.is_static {
                 self.diags.push(Diagnostic::error(
                     "E0311",

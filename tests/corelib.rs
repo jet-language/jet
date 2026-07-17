@@ -2284,7 +2284,7 @@ fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
 #[test]
 fn invariant_refinement_proves_fixed_array_index() {
     let src = r#"
-#Invariant("value >= 0 && value < 4")
+@Invariant("value >= 0 && value < 4")
 Index4 :: distinct Int
 
 fn pick(xs: [String#4], i: Index4) -> String {
@@ -2545,7 +2545,7 @@ use core.time as time
 
 fn run() {
     os.on_interrupt(() => {
-        #Context(deadline: time.now()) {
+        @Context(deadline: time.now()) {
             time.sleep(5)
         }
     })
@@ -3809,7 +3809,7 @@ fn run() {
     first.close() ?? panic("first close")
 
     second := net.tcp_connect(address) ?? panic("second connect")
-    #Context(deadline: time.now() - 1) {
+    @Context(deadline: time.now() - 1) {
         if second.read(1) == {
             ok(_) -> print("unexpected second read")
             err(error) -> print(net.error_message(error))
@@ -5200,7 +5200,7 @@ fn run() {
     print(rng.int(1, 4) >= 1)
 }
 
-#Bench("parse") {}
+@Bench("parse") {}
 "#,
         &[],
         None,
@@ -5234,7 +5234,7 @@ fn deadline_context_exceed_reports_e3003() {
 use core.time as time
 
 fn run() {
-    #Context(deadline: time.now()) {
+    @Context(deadline: time.now()) {
         time.sleep(5)
     }
 }
@@ -5278,7 +5278,7 @@ use core.time as time
 
 fn run() {{
     child :: process.cmd(["{sleeper}"]).spawn() ?? panic("spawn failed")
-    #Context(deadline: time.now() + 20) {{
+    @Context(deadline: time.now() + 20) {{
         child.wait() ?? panic("wait failed")
     }}
 }}
@@ -5896,7 +5896,7 @@ struct Wrap<T> {
 @[Codable]
 struct Tagged<K> {
     raw: Int
-    #[Skip] marker: K?
+    @[Skip] marker: K?
 }
 
 fn run() {
@@ -5957,7 +5957,7 @@ struct Wrap<T> {
 @[Codable]
 struct Tagged<K> {
     raw: Int
-    #[Skip] marker: K?
+    @[Skip] marker: K?
 }
 
 fn run() {
@@ -6185,7 +6185,7 @@ fn generated_internal_tagged_enum_round_trips_every_variant_shape() {
 use core.encoding.json as json
 
 @[Codable]
-#[Tag("type")]
+@[Tag("type")]
 enum Event {
     Idle
     Count(Int)
@@ -6282,7 +6282,7 @@ use core.encoding.json as json
 @[Encode]
 struct Wire {
     first: String
-    #[Rename("wireSecond")] second: String
+    @[Rename("wireSecond")] second: String
     maybe: String?
     last: Int
 }
@@ -6319,11 +6319,11 @@ use core.encoding.json as json
 struct Inner { x: Int  y: Bool }
 
 @[Codable]
-#[RenameAll(camel)]
+@[RenameAll(camel)]
 struct Outer {
     display_name: String
-    #[Flatten] inner: Inner
-    #[Default(4 + 5)] count: Int
+    @[Flatten] inner: Inner
+    @[Default(4 + 5)] count: Int
 }
 
 fn run() {
@@ -6352,7 +6352,7 @@ fn generated_struct_decode_denies_unknown_fields() {
 use core.encoding.json as json
 
 @[Codable]
-#[DenyUnknownFields]
+@[DenyUnknownFields]
 struct Strict { name: String }
 
 fn run() {
@@ -6463,7 +6463,7 @@ fn run() {
 
 /// Card #129 / R11: generated declarations are ordinary Jet items. They must
 /// be registered before later generated code (here `@[Codable]`) is checked,
-/// and `#[Default(expr)]` must retain its exact compile-time value.
+/// and `@[Default(expr)]` must retain its exact compile-time value.
 #[test]
 fn user_derive_generated_struct_reenters_registration_and_serde() {
     let dir = std::env::temp_dir().join(format!("jet_derive_reentry_{}", std::process::id()));
@@ -6476,7 +6476,7 @@ derive T.ConfigSchema {
     emit("""
 @[Codable]
 struct GeneratedConfig {{
-    #[Default([80, 443])] ports: [Int]
+    @[Default([80, 443])] ports: [Int]
 }}
 """)
 }
@@ -7400,7 +7400,7 @@ fn run() {
     })
     queued_running :: queued_deadline.emit_async(10)
     queued_started :: queued_started_rx.receive() ?? panic("started")
-    #Context(deadline: time.now() + 20) {
+    @Context(deadline: time.now() + 20) {
         expires_queued :: queued_deadline.emit_async(11)
         queued_expired :: expires_queued.join()
         print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
@@ -7419,7 +7419,7 @@ fn run() {
     pending_running :: pending_deadline.emit_async(20)
     pending_started :: pending_started_rx.receive() ?? panic("started")
     pending_queued :: pending_deadline.emit_async(21)
-    #Context(deadline: time.now() + 20) {
+    @Context(deadline: time.now() + 20) {
         expires_pending :: pending_deadline.emit_async(22)
         pending_expired :: expires_pending.join()
         print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")
@@ -7494,7 +7494,7 @@ fn run() {
 
     cancel_scope :: event.scope()
     cancel_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    #Context(deadline: time.now() + 100000) {
+    @Context(deadline: time.now() + 100000) {
         cancel_queued :: cancel_event.emit_async(1)
         cancel_pending :: cancel_event.emit_async(2)
         cancel_event.on(cancel_scope, (n: Int) => {})
@@ -7518,7 +7518,7 @@ fn run() {
     close_scope :: event.scope()
     close_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     close_event.on(close_scope, (n: Int) => {})
-    #Context(deadline: time.now() + 100000) {
+    @Context(deadline: time.now() + 100000) {
         close_queued :: close_event.emit_async(3)
         close_pending :: close_event.emit_async(4)
         close_event.close()

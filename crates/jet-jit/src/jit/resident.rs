@@ -48,7 +48,7 @@ fn jit_deadline_diag(rendered: &str) -> Diagnostic {
     Diagnostic::error(
         "E3003",
         wait.to_string(),
-        "this wait point observed the task context deadline from `#Context(deadline: …)`"
+        "this wait point observed the task context deadline from `@Context(deadline: …)`"
             .to_string(),
         "raise the deadline budget or shorten the work before this wait point".to_string(),
         None,
@@ -191,6 +191,7 @@ fn resident_invoke() -> Result<RunOutcome, String> {
 }
 
 pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, String> {
+    jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
     ensure_resident_module(program)?;
@@ -198,6 +199,7 @@ pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, Str
 }
 
 pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
+    jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     // Rebuild the module (Cranelift rejects redefining `jet_jit_main`) but keep
     // the live runtime heap — the M2 contract.
     let mut runtime =

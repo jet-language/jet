@@ -398,7 +398,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Star => {
                     // D-CAP9: prefix `*x` is raw-pointer-of (take a raw pointer to
-                    // `x`), gated to `#Unsafe`. Dereference moved to postfix `p.*`.
+                    // `x`), gated to `@Unsafe`. Dereference moved to postfix `p.*`.
                     let span = self.bump().span;
                     let inner = self.expr_unary(allow_struct_lit)?;
                     let full = Span::new(span.start, inner.span().end);

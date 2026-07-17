@@ -14,7 +14,7 @@ pub fn e3401(
 ) -> Diagnostic {
     let why = if path.is_empty() {
         format!(
-            "`{}` is impure, but `{}` is declared `#{} fn`",
+            "`{}` is impure, but `{}` is declared `@{} fn`",
             call_name,
             pure_fn_name,
             crate::Syntax::KW_PURE
@@ -35,7 +35,7 @@ pub fn e3401(
         ),
         why,
         format!(
-            "mark `{}` as `#{} fn`, or remove the call from `{}`",
+            "mark `{}` as `@{} fn`, or remove the call from `{}`",
             call_name,
             crate::Syntax::KW_PURE,
             pure_fn_name
@@ -68,7 +68,7 @@ pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
         ),
         "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
         format!(
-            "remove this call, or do not mark the enclosing function `#{}`",
+            "remove this call, or do not mark the enclosing function `@{}`",
             crate::Syntax::KW_PURE
         ),
         span,
@@ -249,6 +249,7 @@ pub(crate) fn check_pure_stmt(
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -313,7 +314,7 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
-        // D-DOTSCOPE1: a `#Test` scope-member region — check its body for purity.
+        // D-DOTSCOPE1: a `@Test` scope-member region — check its body for purity.
         Stmt::ScopeMember { body, .. } => {
             for st in body {
                 if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
@@ -677,6 +678,7 @@ fn check_pure_stmt_with_path(
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -738,7 +740,7 @@ fn check_pure_stmt_with_path(
             }
             None
         }
-        // D-DOTSCOPE1: a `#Test` scope-member region — recurse into its body.
+        // D-DOTSCOPE1: a `@Test` scope-member region — recurse into its body.
         Stmt::ScopeMember { body, .. } => {
             for st in body {
                 if let Some(d) = rec_s!(st) {
@@ -1181,6 +1183,7 @@ fn walk_stmt_for_calls(
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -1293,7 +1296,7 @@ fn walk_stmt_for_calls(
                 }
             }
         }
-        // D-DOTSCOPE1: a `#Test` scope-member region — walk its body for calls.
+        // D-DOTSCOPE1: a `@Test` scope-member region — walk its body for calls.
         Stmt::ScopeMember { body, .. } => {
             for st in body {
                 walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);

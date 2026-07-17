@@ -299,6 +299,67 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> 
 }
 
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
+    if let Stmt::Assign { target, value, .. } = s {
+        let root_name = match target {
+            LValue::Local { name, .. } => Some(name.as_str()),
+            LValue::Index { base, .. } | LValue::Field { base, .. } => {
+                match base.as_ref() {
+                    Expr::Ident(name, _) => Some(name.as_str()),
+                    _ => None,
+                }
+            }
+        };
+        if let Some(name) = root_name.filter(|name| env.is_gc(name)) {
+            let root = env.place_of(name);
+            let edges = env.gc_edges_for_expr(value, Some(name));
+            let slot = match target {
+                LValue::Local { name, .. } => format!("local:{name}"),
+                LValue::Field { field, .. } => format!("field:{field}"),
+                LValue::Index { span, .. } => format!("index:{}", span.start),
+            };
+            let mut lowered_source = s.clone();
+            let index_temp = if let (
+                LValue::Index { index, span, .. },
+                Stmt::Assign { target, .. },
+            ) = (target, &mut lowered_source)
+            {
+                let lowered = lower_expr(index, cx, env);
+                let source_name = format!("__jet_gc_index_{}", span.start);
+                let rust_name = source_name.clone();
+                let LValue::Index {
+                    index: lowered_index,
+                    ..
+                } = target
+                else {
+                    unreachable!("matched index assignment")
+                };
+                *lowered_index = Box::new(Expr::Ident(source_name.clone(), *span));
+                env.bind(&source_name, rust_name.clone(), Some(lowered.ty.clone()));
+                Some((rust_name, lowered))
+            } else {
+                None
+            };
+            let saved = env.locals.get(name).cloned();
+            env.gc_locals.remove(name);
+            env.bind(name, "(*__jet_value)".to_string(), saved.as_ref().and_then(|(_, ty)| ty.clone()));
+            let stmt = lower_stmt(&lowered_source, cx, env);
+            if let Some((place, ty)) = saved {
+                env.bind(name, place, ty);
+            }
+            env.mark_gc(name);
+            if let Some((temp, _)) = &index_temp {
+                env.locals.remove(temp);
+            }
+            return TStmt::GcEdit {
+                root,
+                slot,
+                edges,
+                replace_all: matches!(target, LValue::Local { .. }),
+                index_temp,
+                stmt: Box::new(stmt),
+            };
+        }
+    }
     match s {
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Struct { .. })) => {
             // c109: a struct-destructuring binding `Type { x, y } :: <init>`. Lower the
@@ -429,6 +490,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         kind: TExprKind::ConstInline(init_str),
                     },
                     track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
                 };
             }
             // c109 Phase 19: an arena `view` binding (`x :: arena.alloc(v)`). The AST
@@ -445,6 +508,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     ty_clause: String::new(),
                     init,
                     track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
                 };
             }
             // D-SHAPE-PLACE1=A: local place windows are references with no
@@ -465,6 +530,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     ty_clause: String::new(),
                     init,
                     track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
                 };
             }
             // D-MEM1 stage S5 (2026-07-04): a string-view binding (`x :: s.trim()` /
@@ -485,6 +552,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     ty_clause: ": &str".to_string(),
                     init,
                     track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
                 };
             }
             // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. The AST `emit_let`
@@ -523,6 +592,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     ty_clause,
                     init,
                     track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
                 };
             }
             let mut init = lower_owned_expr(&b.init, cx, env);
@@ -577,6 +648,16 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // Totality: if the source omitted the type, infer it ONCE here from
             // the init's already-resolved type. Codegen never infers.
             let ty = b.ty.clone().unwrap_or_else(|| init.ty.clone());
+            let is_resource = match &ty {
+                Type::Named(name) | Type::Apply { name, .. } => cx.close_types.contains(name),
+                _ => false,
+            };
+            if is_resource {
+                init = TExpr {
+                    ty: ty.clone(),
+                    kind: TExprKind::ResourceNew(Box::new(init)),
+                };
+            }
             // E2-M7/E2-M10/D-ALLOC1/D-ROUTE1: a handle binding forces `let mut` even
             // when bound immutably (its methods take `&mut self`). Mirror
             // `emit_let`'s `is_file_handle` set exactly.
@@ -609,7 +690,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
             // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
             // inferred binding.
-            let ty_clause =
+            let mut ty_clause =
                 b.ty.as_ref()
                     .map(|t| {
                         if let Type::Fn { params, ret, .. } = t {
@@ -618,15 +699,39 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                             format!(": {}", cx.rust_type(t))
                         }
                     })
-                    .unwrap_or_default();
+                .unwrap_or_default();
+            if is_resource && b.ty.is_some() {
+                ty_clause = format!(": JetResource<{}>", cx.rust_type(&ty));
+            }
+            if b.gc_promotion.is_some() || b.gc_transferred {
+                ty_clause = format!(": jet_gc::AutomaticRoot<{}>", cx.rust_type(&ty));
+            }
             let track_origin = tracked_float_origin(b, &ty, cx);
-            env.bind(&b.name, mangle(&b.name), Some(ty));
+            let binding_name = if is_resource {
+                format!("__jet_resource_{}_{}", b.name, b.name_span.start)
+            } else {
+                b.name.clone()
+            };
+            let place = if is_resource {
+                format!("(*{})", mangle(&binding_name))
+            } else {
+                mangle(&binding_name)
+            };
+            env.bind(&b.name, place, Some(ty));
+            if b.gc_promotion.is_some() || b.gc_transferred {
+                env.mark_gc(&b.name);
+            }
+            if is_resource {
+                env.mark_resource(&b.name);
+            }
             TStmt::Let {
-                name: b.name.clone(),
+                name: binding_name,
                 kw,
                 ty_clause,
                 init,
                 track_origin,
+                gc_promotion: b.gc_promotion.clone(),
+                gc_transferred: b.gc_transferred,
             }
         }
         Stmt::Assign {
@@ -792,6 +897,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 }
             }
         },
+        Stmt::Return(Some(Expr::Ident(name, _)), _) if env.gc_return && env.is_gc(name) => {
+            TStmt::Return(Some(TExpr {
+                ty: env.ty_of(name).unwrap_or(Type::Int),
+                kind: TExprKind::Local(env.place_of(name)),
+            }))
+        }
         Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_owned_expr(e, cx, env))),
         Stmt::Return(None, _) => TStmt::Return(None),
         // D-STREAMYIELD1: `yield e` inside a generator's spawned thread — send on
@@ -811,6 +922,23 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         }
         // D-IGNORERET2=A: `.drop("reason")` — lower only the receiver (for side effects).
         // The method call itself is erased; the "reason" string is audit-only.
+        Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_DEFER_CLOSE => {
+            let close = call
+                .args
+                .first()
+                .expect("parser creates one deferred close argument");
+            let Expr::Call(close_call) = &close.expr else {
+                unreachable!("parser creates a close call for deferred cleanup")
+            };
+            let Expr::Ident(resource, _) = &close_call.args[0].expr else {
+                unreachable!("parser restricts deferred close to one resource binding")
+            };
+            TStmt::DeferClose {
+                close: lower_expr(&close.expr, cx, env),
+                resource: env.rust_name_of(resource),
+                id: call.name_span.start,
+            }
+        }
         Stmt::Expr(Expr::MethodCall {
             receiver, method, ..
         }) if method == Syntax::METHOD_DROP => TStmt::ExprStmt(lower_expr(receiver, cx, env)),
@@ -857,6 +985,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 ty_clause: String::new(),
                 init: init_val,
                 track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
             });
             let cond = lower_expr(cond, cx, &mut scoped);
             let step = Box::new(lower_stmt(step.as_ref(), cx, &mut scoped));
@@ -986,9 +1116,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
-        // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.
+        // D-CANVASSTATE1=D: `@Off` type-checks in sema but emits no runtime TIR.
         Stmt::Off { .. } => TStmt::Inline(vec![]),
-        // D-CANVASSTATE1=D: `#DebugOnly` is a lexical debug-only region. Lower
+        // D-CANVASSTATE1=D: `@DebugOnly` is a lexical debug-only region. Lower
         // on a cloned env so declarations cannot be required by release code.
         Stmt::DebugOnly { body, .. } => {
             let mut scoped = clone_env(env);
@@ -1018,27 +1148,27 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
             TStmt::Inline(lower_stmts(chosen, cx, env))
         }
-        // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). Emission
+        // c109 Phase 18: an audited `@Unsafe { … }` region (`Stmt::Unsafe`). Emission
         // adds a Rust lexical block, so lower its declarations in a child env. The `#Audit("…")`
         // annotation is dropped (codegen is dumb — it emits nothing, matching the AST).
-        // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
+        // I1: the source `@Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
         Stmt::Unsafe { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Unsafe(lower_stmts(body, cx, &mut scoped))
         }
-        // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (comptime-only gate, I3).
+        // D-CTEFFECT1: `@Impure` erases to a plain block at codegen (comptime-only gate, I3).
         Stmt::Impure { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
+        // D-REACTCORE1: `@Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).
         Stmt::Reactive { body, .. } => {
             let closure = render_reactive_block_closure(body, cx, env);
             TStmt::Reactive { closure }
         }
-        // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded lexical block.
+        // D-SHIELDNAME1=A: `@Shield { … }` lowers to a shield-guarded lexical block.
         Stmt::Shield { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Shield {
@@ -1048,6 +1178,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) emits a plain
         // Rust lexical block.
         Stmt::Region { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
+        Stmt::Policy { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
@@ -1075,7 +1209,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lowered_body,
             }
         }
-        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
+        // c109 Phase 26: a `@Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
         Stmt::Caps { body, .. } => {
             let mut scoped = clone_env(env);
@@ -1089,7 +1223,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
+        // c109 Phase 19: a `@Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
         // Resolve each field against the outer env, then lower the guarded Rust block
         // in a lexical child env.
         Stmt::ContextBlock { fields, body, .. } => {
@@ -1110,7 +1244,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lower_stmts(body, cx, &mut scoped),
             }
         }
-        // D-DOTSCOPE1: a `#Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
+        // D-DOTSCOPE1: a `@Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
         // `.skip`). Legality/args were checked in sema; here we pick the lowering
         // kind and fold `.timeout`'s duration literal to a nanosecond budget.
         // `.setup` emits inline, so its bindings are visible to the rest of the test;
@@ -1148,7 +1282,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` block. Bind the
         // handle (typed `Transaction`) in a child env so `name.on_commit(…)` lowers
         // against it without escaping the emitted Rust block. The
         // `let mut <handle> = jet_transaction(); … <handle>.commit();` framing is
@@ -1166,7 +1300,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             });
             // D-TXN-ROLLBACK layer 1 (auto-snapshot): collect the root local names
             // assigned anywhere in the block (recursing into nested control flow, but
-            // NOT into nested `#Transact` blocks or lambda bodies — those own their
+            // NOT into nested `@Transact` blocks or lambda bodies — those own their
             // own rollback scope / are deferred). Snapshot only roots ALREADY in scope
             // at block entry (params / outer locals): a local declared inside the block
             // needs no snapshot, since rollback discards it when the block scope ends.
@@ -1195,7 +1329,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // `Shared<T>.edit` inside routes to the deferred `edit_txn`. `stm_touched`
             // is reset first and read after, so `uses_stm` reflects THIS block only
             // (save/restore isolates nested blocks); a Shared edit in a nested
-            // `#Transact` attaches to that inner block's own transaction, not this one.
+            // `@Transact` attaches to that inner block's own transaction, not this one.
             let prev_in = cx.in_stm_transact.replace(true);
             let prev_touched = cx.stm_touched.replace(false);
             let lowered_body = lower_stmts(body, cx, &mut scoped);

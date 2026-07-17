@@ -385,7 +385,7 @@ fn task_flow_facts(src: &str) -> Vec<String> {
         (".send(", "channel_send"),
         (".receive(", "channel_receive"),
         (".all(", "taskgroup_join_all"),
-        ("#Context", "deadline_context"),
+        ("@Context", "deadline_context"),
     ] {
         for span in text_matches(src, needle) {
             facts.push(format!(
@@ -894,7 +894,7 @@ fn project_stmt(
             g.regions.push(format!(
                 "{{\"region_id\":{},\"kind\":\"unsafe\",\"title\":{},\"source_span\":{}}}",
                 json_str(&format!("{}:region:{ordinal}:unsafe", g.graph_id)),
-                json_str(audit.as_deref().unwrap_or("#Unsafe")),
+                json_str(audit.as_deref().unwrap_or("@Unsafe")),
                 span_json((*span).into())
             ));
             project_stmt_block(g, index, src, body, ordinal * 100 + 95, x + 230, y + 70);
@@ -904,17 +904,17 @@ fn project_stmt(
                 g,
                 ordinal,
                 "impure",
-                reason.as_deref().unwrap_or("#Impure"),
+                reason.as_deref().unwrap_or("@Impure"),
                 *span,
             );
             project_stmt_block(g, index, src, body, ordinal * 100 + 100, x + 230, y + 70);
         }
         Stmt::Reactive { body, span } => {
-            add_region(g, ordinal, "reactive", "#Reactive", *span);
+            add_region(g, ordinal, "reactive", "@Reactive", *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 110, x + 230, y + 70);
         }
         Stmt::Shield { body, span } => {
-            add_region(g, ordinal, "shield", "#Shield", *span);
+            add_region(g, ordinal, "shield", "@Shield", *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70);
         }
         Stmt::Off { body, .. } | Stmt::DebugOnly { body, .. } => {
@@ -925,6 +925,11 @@ fn project_stmt(
         } => {
             add_region(g, ordinal, "region", name, *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 130, x + 230, y + 70);
+        }
+        Stmt::Policy { declarations, body, span } => {
+            let label = declarations.iter().map(|d| d.key.name()).collect::<Vec<_>>().join(", ");
+            add_region(g, ordinal, "policy", &format!("@Policy({label})"), *span);
+            project_stmt_block(g, index, src, body, ordinal * 100 + 135, x + 230, y + 70);
         }
         Stmt::TaskGroup {
             name, body, span, ..

@@ -12,6 +12,7 @@ use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
+use crate::Codegen::TIR::{TExpr, TExprKind, TStmt};
 use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Syntax;
 
@@ -26,6 +27,47 @@ fn line_at_byte_offset(src: &str, offset: usize) -> usize {
         .filter(|&&b| b == b'\n')
         .count()
         + 1
+}
+
+fn bind_resource_param(
+    source_name: &str,
+    rust_name: &str,
+    ty: &Type,
+    convention: AccessConvention,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    guards: &mut Vec<TStmt>,
+    ordinary_place: String,
+) {
+    let resource = matches!(convention, AccessConvention::Move)
+        && matches!(ty, Type::Named(name) | Type::Apply { name, .. } if cx.close_types.contains(name));
+    if !resource {
+        env.bind(source_name, ordinary_place, Some(ty.clone()));
+        return;
+    }
+    let guard_name = format!("__jet_resource_param_{source_name}");
+    let guard_rust = mangle(&guard_name);
+    guards.push(TStmt::Let {
+        name: guard_name,
+        kw: "let mut",
+        ty_clause: format!(": JetResource<{}>", cx.rust_type(ty)),
+        init: TExpr {
+            ty: ty.clone(),
+            kind: TExprKind::ResourceNew(Box::new(TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Local(rust_name.to_string()),
+            })),
+        },
+        track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
+    });
+    env.bind(
+        source_name,
+        format!("(*{guard_rust})"),
+        Some(ty.clone()),
+    );
+    env.mark_resource(source_name);
 }
 
 #[cfg(test)]
@@ -48,7 +90,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
 }
 
 /// Lower a web function through the same executable TIR as every other target,
-/// but retain the one target-boundary fact a flattened `#WasmExport` needs:
+/// but retain the one target-boundary fact a flattened `@WasmExport` needs:
 /// an all-integer Codable struct parameter is an owned typed local inside the
 /// function and scalar fields only at the external ABI. Sema already proved the
 /// export type legal; this pass only materializes resolved names/types.
@@ -62,9 +104,11 @@ pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
 
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.gc_return = f.gc_return;
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
+    let mut resource_param_guards = Vec::new();
     let mut web_param_reconstructions = Vec::new();
     for p in &f.params {
         let rust_name = cx.mangle_name(&p.name);
@@ -111,10 +155,20 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         let mut slot_param = p.clone();
         slot_param.ty = param_ty.clone();
         let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
-        env.bind(&p.name, place, Some(param_ty.clone()));
+        bind_resource_param(
+            &p.name,
+            &rust_name,
+            &param_ty,
+            p.convention,
+            cx,
+            &mut env,
+            &mut resource_param_guards,
+            place,
+        );
         params.push((rust_name, param_ty, p.convention));
     }
-    let body = lower_stmts(&f.body, cx, &mut env);
+    let mut body = resource_param_guards;
+    body.extend(lower_stmts(&f.body, cx, &mut env));
     let clone_types = env.cloned_types.borrow().clone();
     let generics = render_generics(&f.type_params, &clone_types);
     TFunc {
@@ -122,6 +176,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         params,
         web_param_reconstructions,
         ret: f.return_type.clone(),
+        gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         generics,
         clone_types,
@@ -150,6 +205,7 @@ pub(crate) fn render_contract_cond(
     cx: &Cx,
 ) -> String {
     let mut env = LowerEnv::new(f.name.clone());
+    env.gc_return = f.gc_return;
     for p in &f.params {
         let rust_name = cx.mangle_name(&p.name);
         let param_ty = if p.variadic {
@@ -168,7 +224,7 @@ pub(crate) fn render_contract_cond(
     emit_tir_expr(&lower_expr(cond, cx, &mut env), cx)
 }
 
-/// c109: lower + emit a `#Test` block body through the TIR, reproducing the legacy
+/// c109: lower + emit a `@Test` block body through the TIR, reproducing the legacy
 /// `emit_stmts(cx, body, &mut env, out, 1, false)` byte-for-byte. The body is a bare
 /// statement list with no params and an empty env, emitted at indent 1 inside the
 /// `fn jet_test_N() -> Result<(), String>` the caller already opened. The env's
@@ -265,8 +321,10 @@ pub(crate) fn param_place_generic(
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.gc_return = f.gc_return;
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
+    let mut resource_param_guards = Vec::new();
     let mut self_conv: Option<AccessConvention> = None;
     let mut is_static = true;
     for p in &f.params {
@@ -289,10 +347,20 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         let place = param_place(&rust_name, p);
         // A `Self`-typed param resolves to the owning type for totality.
         let pty = resolve_self_ty(&p.ty, type_name);
-        env.bind(&p.name, place, Some(pty.clone()));
+        bind_resource_param(
+            &p.name,
+            &rust_name,
+            &pty,
+            p.convention,
+            cx,
+            &mut env,
+            &mut resource_param_guards,
+            place,
+        );
         params.push((rust_name, pty, p.convention));
     }
-    let body = lower_stmts(&f.body, cx, &mut env);
+    let mut body = resource_param_guards;
+    body.extend(lower_stmts(&f.body, cx, &mut env));
     let clone_types = env.cloned_types.borrow().clone();
     // An instance method carries `Some(conv)`; a static method carries `None`.
     let kind = TFuncKind::Method {
@@ -306,6 +374,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             .return_type
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
+        gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         // The enclosing type params live on `impl<T>`. `emit_type_impl` fills a
         // per-method `where T: Clone` suffix only for lowered clone operations.
@@ -349,8 +418,10 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         _ => None,
     };
     let mut env = LowerEnv::new(f.name.clone());
+    env.gc_return = f.gc_return;
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
+    let mut resource_param_guards = Vec::new();
     let mut self_conv = AccessConvention::Read;
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
@@ -380,10 +451,20 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             param_place(&rust_name, p)
         };
         let pty = resolve_self_ty(&p.ty, type_name);
-        env.bind(&p.name, place, Some(pty.clone()));
+        bind_resource_param(
+            &p.name,
+            &rust_name,
+            &pty,
+            p.convention,
+            cx,
+            &mut env,
+            &mut resource_param_guards,
+            place,
+        );
         params.push((rust_name, pty, p.convention));
     }
-    let body = lower_stmts(&f.body, cx, &mut env);
+    let mut body = resource_param_guards;
+    body.extend(lower_stmts(&f.body, cx, &mut env));
     let clone_types = env.cloned_types.borrow().clone();
     TFunc {
         name: f.name.clone(),
@@ -393,6 +474,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             .return_type
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
+        gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         generics: String::new(),
         clone_types,
@@ -482,13 +564,14 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         params: Vec::new(),
         web_param_reconstructions: Vec::new(),
         ret: f.return_type.clone(),
+        gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         // The signature is fully pre-rendered (`sig`); `is_view`/`generics` are unused for delegation.
         generics: String::new(),
         clone_types: Vec::new(),
         is_main: false,
         line: cov_line(cx, f.name_span.start),
-        // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
+        // A delegation method has no body and never carries `@Unsafe fn` (sema rejects it).
         // Same for `@Inline`/`@InlineAlways` — a delegation method is pure forwarding,
         // never parsed with an inline marker.
         is_unsafe: false,

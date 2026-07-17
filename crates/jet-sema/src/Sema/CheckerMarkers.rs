@@ -1,14 +1,12 @@
 //! E0927 (card #518): the closed marker vocabulary.
 //!
-//! `#Name`/`@Name` markers are structurally accepted by the parser for any
-//! PascalCase identifier (`at_single_type_marker`/`at_single_contract_type_marker`
-//! in `jet-parser`, plus the `#[…]`/`@[…]` bracket-list paths) — the parser
+//! `@Name` rules are structurally accepted by the parser for any PascalCase
+//! identifier (including the `@[…]` bracket-list path) — the parser
 //! only knows "this looks like a marker," not "this is a marker Jet knows
 //! about." An unregistered name used to silently do nothing (I3: codegen
 //! never saw it, so nothing rejected it either). This module is the one
 //! place that closes the vocabulary: every marker name is checked against
-//! the registered `@` (contract) or `#` (directive) plane — `Marker.sigil`
-//! says which — plus, on the `@` plane, any `derive T.Name { … }` provider
+//! the registered applied-rule vocabulary plus any `derive T.Name { … }` provider
 //! visible in this build (D-METADERIVE1=A user derives are a legal, dynamic
 //! addition to the contract vocabulary, not typos).
 //!
@@ -30,11 +28,11 @@ const DEBUG_OWNED_ELSEWHERE: &str = "Debug";
 fn retired_marker_fix(name: &str) -> Option<&'static str> {
     match name {
         "Wasm" => Some(
-            "write `#Target(Wasm)` instead — one target-marker family covers every backend \
+            "write `@Target(Wasm)` instead — one target-rule family covers every backend \
              (D-MARK-TARGET1=A).",
         ),
         "Js" => Some(
-            "write `#Target(Js)` instead — one target-marker family covers every backend \
+            "write `@Target(Js)` instead — one target-rule family covers every backend \
              (D-MARK-TARGET1=A).",
         ),
         "Suppress" => Some(
@@ -53,17 +51,15 @@ fn retired_marker_fix(name: &str) -> Option<&'static str> {
     }
 }
 
-/// E0927: `name` (written with `sigil`) isn't a registered marker on its
-/// plane. `plane` is `"contract (@)"` or `"directive (#)"`, for the message.
-/// `vocab` is the candidate list this plane accepts, for the "did you mean"
-/// suggestion.
-fn e0927_unknown_marker(sigil: char, name: &str, plane: &str, vocab: &[String], span: Span) -> Diagnostic {
+/// E0927: `name` isn't a registered applied rule. `vocab` supplies nearest
+/// spelling suggestions.
+fn e0927_unknown_marker(name: &str, vocab: &[String], span: Span) -> Diagnostic {
     if let Some(fix) = retired_marker_fix(name) {
         return Diagnostic::error(
             "E0927",
-            format!("`{sigil}{name}` is retired — it no longer does anything"),
+            format!("`@{name}` is retired — it no longer does anything"),
             format!(
-                "`{sigil}{name}` used to be a real marker; it was removed and nothing takes \
+                "`@{name}` used to be a real rule; it was removed and nothing takes \
                  its place under that name, so writing it here silently did nothing before \
                  this check existed."
             ),
@@ -72,27 +68,24 @@ fn e0927_unknown_marker(sigil: char, name: &str, plane: &str, vocab: &[String], 
         );
     }
     let fix = match crate::Sema::Diagnostics::suggest_field(name, vocab) {
-        Some(s) => format!("did you mean `{sigil}{s}`?"),
+        Some(s) => format!("did you mean `@{s}`?"),
         None => format!(
-            "check the spelling, or see docs/spec/syntax-decisions.md for the full {plane} \
-             marker list."
+            "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
         ),
     };
     Diagnostic::error(
         "E0927",
-        format!("`{sigil}{name}` isn't a known marker"),
-        format!("`{name}` isn't registered on the {plane} plane — Jet markers are a closed, \
+        format!("`@{name}` isn't a known applied rule"),
+        format!("`{name}` isn't registered as an applied rule — Jet rules are a closed, \
                  registered vocabulary (I7), not any PascalCase word."),
         fix,
         Some(span),
     )
 }
 
-/// True when `name` is legal on the `@` (contract) plane: a built-in
-/// contract marker, or a `derive T.name { … }` provider visible in this
-/// build.
-fn is_legal_contract_name(name: &str, known_derive_names: &HashSet<String>) -> bool {
-    Syntax::is_contract_marker(name) || known_derive_names.contains(name)
+/// True when `name` is a built-in rule or visible user derive.
+fn is_legal_rule_name(name: &str, known_derive_names: &HashSet<String>) -> bool {
+    Syntax::is_applied_rule(name) || known_derive_names.contains(name)
 }
 
 /// Check one marker against its sigil's plane. Returns `None` when it's
@@ -101,38 +94,15 @@ fn is_legal_contract_name(name: &str, known_derive_names: &HashSet<String>) -> b
 ///   parser (`check_marker_plane` in `jet-parser`) — never double-report.
 /// - `@Debug` is E0922's job (see module docs).
 fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnostic> {
-    match m.sigil {
-        '@' => {
-            if m.name == DEBUG_OWNED_ELSEWHERE {
-                return None;
-            }
-            if is_legal_contract_name(&m.name, known_derive_names) {
-                return None;
-            }
-            if Syntax::is_directive_marker(&m.name) {
-                // Already E0063 ("write it with #, not @") from the parser.
-                return None;
-            }
-            let vocab: Vec<String> = Syntax::CONTRACT_MARKERS
-                .iter()
-                .map(|s| s.to_string())
-                .chain(known_derive_names.iter().cloned())
-                .collect();
-            Some(e0927_unknown_marker('@', &m.name, "contract (@)", &vocab, m.name_span))
-        }
-        '#' => {
-            if Syntax::is_directive_marker(&m.name) {
-                return None;
-            }
-            if Syntax::is_contract_marker(&m.name) {
-                // Already E0062 ("write it with @, not #") from the parser.
-                return None;
-            }
-            let vocab: Vec<String> = Syntax::DIRECTIVE_MARKERS.iter().map(|s| s.to_string()).collect();
-            Some(e0927_unknown_marker('#', &m.name, "directive (#)", &vocab, m.name_span))
-        }
-        _ => None,
+    if m.name == DEBUG_OWNED_ELSEWHERE || is_legal_rule_name(&m.name, known_derive_names) {
+        return None;
     }
+    let vocab: Vec<String> = Syntax::APPLIED_RULES
+        .iter()
+        .map(|s| s.to_string())
+        .chain(known_derive_names.iter().cloned())
+        .collect();
+    Some(e0927_unknown_marker(&m.name, &vocab, m.name_span))
 }
 
 /// D-MARK-VOCAB1 (card #518): validate every marker name on `items` against

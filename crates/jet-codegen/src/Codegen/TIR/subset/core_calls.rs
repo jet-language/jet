@@ -19,7 +19,7 @@ use std::collections::HashSet;
 ///     arg type, resolved by bespoke `check_core_call` logic, not the fixed table, so
 ///     a total `ty` would need re-inference (I3) → deferred;
 ///   - **handle-constructor** specials NOT in the table (`tasks.channel`,
-///     `http.router`/`parse`/`dispatch`) and `core.mem` ptr/alloc (`#Unsafe`).
+///     `http.router`/`parse`/`dispatch`) and `core.mem` ptr/alloc (`@Unsafe`).
 /// A handle-PRODUCING call that IS in the table (`files.open` → `FileReader`,
 /// `net.tcp_connect` → `TcpStream`, `time.start` → `Stopwatch`, …) is covered: the
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
@@ -31,7 +31,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // inert address cast (no `unsafe`); `volatile_read(p) -> ptr_elem(p)` reads through a
     // typed pointer, and `volatile_write(p, value) -> Unit` writes through one (the
     // volatile ops are valid because they are only reachable inside an
-    // `#Unsafe` region/fn — sema E3101 — already lowered to a Rust `unsafe` context). The
+    // `@Unsafe` region/fn — sema E3101 — already lowered to a Rust `unsafe` context). The
     // return type is resolved at lowering (see `lower_method_call`), so it is total.
     if module == "core.mem" && matches!(method, "address_of" | "volatile_read" | "volatile_write") {
         return true;

@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
                     (*conv, self.trait_reg.instantiate_type(ty, &subst))
                 }).collect();
                 let target_alias = target.module_alias.clone();
-                self.record_edge(format!("{target_alias}.{name}"));
+                self.record_edge(format!("{target_alias}.{name}"), span);
                 self.record_function_reference(mod_idx, name, span);
                 if args.len() != sig.params.len() {
                     self.diags.push(Diagnostic::error(

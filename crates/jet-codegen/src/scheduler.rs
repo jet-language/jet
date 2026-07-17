@@ -28,7 +28,7 @@ fn jet_deadline_exceeded(_kind: &str) -> ! {
 #[cfg(not(test))]
 fn jet_deadline_exceeded(_kind: &str) -> ! {
     std::panic::panic_any(JetDeadlineUnwind {
-        rendered: "Error [E3003]: deadline exceeded while waiting in a scheduler wait point\nWhy: this wait point observed the task context deadline from `#Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
+        rendered: "Error [E3003]: deadline exceeded while waiting in a scheduler wait point\nWhy: this wait point observed the task context deadline from `@Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
     })
 }
 
@@ -109,7 +109,7 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // already produces. A shielded region (SHIELD_DEPTH > 0) DEFERS the unwind: wait
 // points inside it complete normally and the deferred cancel/deadline lands when
 // the outermost region exits. D-SHIELDNAME1=A (ratified 2026-07-11) spells this
-// region `#Shield { … }`; codegen lowers the block to
+// region `@Shield { … }`; codegen lowers the block to
 // `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
@@ -183,7 +183,7 @@ fn jet_scheduler_shielded() -> bool {
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_enter() {
-    // Outside a scheduler task/catch frame, `#Shield` is a transparent block.
+    // Outside a scheduler task/catch frame, `@Shield` is a transparent block.
     if current_task_control().is_some() && jet_scheduler_panic_should_unwind() {
         SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
     }

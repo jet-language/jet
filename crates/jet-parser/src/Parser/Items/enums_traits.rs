@@ -6,7 +6,7 @@ use super::super::{
 impl<'a> Parser<'a> {
         /// Parse `enum Name { … }` given that pub/is_pub was already handled. Factors
         /// out the body of `enum_def` (mirrors `struct_def_after_pub`) so the
-        /// `#SingleUse enum` path can reuse it.
+        /// `@SingleUse enum` path can reuse it.
         pub(super) fn enum_def_after_pub(
             &mut self,
             is_pub: bool,
@@ -27,7 +27,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                // D-SERDE5/7: `#[Rename("x")]` on a variant — variant-level serde markers.
+                // D-SERDE5/7: `@[Rename("x")]` on a variant — variant-level serde markers.
                 if self.at_marker_list() {
                     let variant_markers = self.parse_marker_groups()?;
                     self.variant_entry("", &mut variants, &mut groups, variant_markers)?;
@@ -342,7 +342,7 @@ impl<'a> Parser<'a> {
             }))
         }
     
-        /// D-OSTARGET1=A: parse the `impl` block that must follow a `#Target(Os.X)`
+        /// D-OSTARGET1=A: parse the `impl` block that must follow a `@Target(Os.X)`
         /// marker and attach `os` to it. Reuses `impl_or_error_conv` (same grammar,
         /// same `impl Type.Trait { … }` / delegation / error-conversion forms) and
         /// stamps the OS gate onto the resulting `ImplDef` afterward — no need to
@@ -362,9 +362,9 @@ impl<'a> Parser<'a> {
                 let span = self.peek().span;
                 return Err(Diagnostic::error(
                     "E0003",
-                    format!("`#Target(Os.{})` isn't valid here", os.name()),
+                    format!("`@Target(Os.{})` isn't valid here", os.name()),
                     "`Os.Linux`/`Os.Macos`/`Os.Windows` gates a whole `impl` block, not a module, function, or any other item".to_string(),
-                    format!("write `#Target(Os.{}) impl Type.Trait {{ … }}`", os.name()),
+                    format!("write `@Target(Os.{}) impl Type.Trait {{ … }}`", os.name()),
                     Some(span),
                 ));
             }
@@ -375,9 +375,9 @@ impl<'a> Parser<'a> {
                 }
                 Item::ErrorConv(ec) => Err(Diagnostic::error(
                     "E0003",
-                    format!("`#Target(Os.{})` isn't valid on an error-conversion `impl`", os.name()),
+                    format!("`@Target(Os.{})` isn't valid on an error-conversion `impl`", os.name()),
                     "`impl Source -> Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
-                    format!("remove the `#Target(Os.{})` marker", os.name()),
+                    format!("remove the `@Target(Os.{})` marker", os.name()),
                     Some(ec.from_span),
                 )),
                 other => Ok(other),
@@ -431,64 +431,32 @@ impl<'a> Parser<'a> {
             Ok((trait_name, start))
         }
     
-        /// True when the cursor is at a `#[ … ]` bracket-marker group (D-ATTR2).
+        /// True when the cursor is at an `@[ … ]` applied-rule group (D-SHAPE2).
         pub(in crate::Parser) fn at_marker_list(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
-        }
-    
-        /// D-MARKER-FAMILY1/G2: true at a `@[ … ]` contract-derive bracket group —
-        /// the `@` sibling of `at_marker_list`.
-        pub(in crate::Parser) fn at_contract_marker_list(&self) -> bool {
             matches!(self.peek().kind, TokKind::At) && matches!(self.peek2().kind, TokKind::LBracket)
         }
     
-        /// D-ATTR1/D-MARKER-CANON1: a PascalCase `#Marker` immediately before `struct`/`enum`.
+        /// D-ATTR1/D-MARKER-CANON1: a PascalCase `@Marker` immediately before `struct`/`enum`.
         pub(in crate::Parser) fn at_single_type_marker(&self) -> bool {
-            if !matches!(self.peek().kind, TokKind::Hash) {
-                return false;
-            }
-            let TokKind::Ident(name) = &self.peek2().kind else {
-                return false;
-            };
-            if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_hash_item_prefix(name) {
-                return false;
-            }
-            self.type_marker_prefix_leads_to_type_def(self.pos + 2)
-        }
-    
-        /// D-MARKER-FAMILY1/G3: a PascalCase `@Marker` immediately before
-        /// `struct`/`enum` — the `@` sibling of `at_single_type_marker` (contract
-        /// derives: Codable, Encode, Decode, Debug, Summarize, Comparable).
-        pub(in crate::Parser) fn at_single_contract_type_marker(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::At) {
                 return false;
             }
             let TokKind::Ident(name) = &self.peek2().kind else {
                 return false;
             };
-            if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_at_item_prefix(name) {
+            if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_item_rule_prefix(name) {
                 return false;
             }
             self.type_marker_prefix_leads_to_type_def(self.pos + 2)
-        }
-    
-        /// `@` markers that own their own item parser (MustUse/PublishedSchema
-        /// struct dispatch, Numeric distinct-type dispatch) — not bare
-        /// contract-derive prefixes routed through the generic marker-list
-        /// mechanism.
-        fn is_reserved_at_item_prefix(name: &str) -> bool {
-            matches!(
-                name,
-                Syntax::ATTR_MUST_USE | Syntax::ATTR_PUBLISHED_SCHEMA | Syntax::ATTR_NUMERIC
-            )
         }
     
         fn is_pascal_type_marker_name(name: &str) -> bool {
             name.chars().next().is_some_and(|c| c.is_uppercase())
         }
     
-        /// `#` markers that own their own item parser — not bare type derive prefixes.
-        fn is_reserved_hash_item_prefix(name: &str) -> bool {
+        /// Applied rules that own dedicated item parsers rather than the generic
+        /// type-derive path.
+        fn is_reserved_item_rule_prefix(name: &str) -> bool {
             matches!(
                 name,
                 Syntax::KW_TEST
@@ -513,7 +481,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        /// After a `#Marker` (and optional `(args)`), does the next real token start a type?
+        /// After a `@Marker` (and optional `(args)`), does the next real token start a type?
         fn type_marker_prefix_leads_to_type_def(&self, mut i: usize) -> bool {
             if i >= self.toks.len() {
                 return false;
@@ -524,9 +492,9 @@ impl<'a> Parser<'a> {
                 None => return false,
             };
             // D-MARKER-FAMILY1/G2: a type declaration may carry several stacked
-            // marker prefixes (`@[Codable] #[RenameAll(camel)] struct …`, or
-            // `@MustUse @[Codable] struct …`) — keep skipping marker-shaped
-            // prefixes (bracket groups or lone `#Name`/`@Name(args)?`) until none
+            // rule prefixes (`@[Codable, RenameAll(camel)] struct …`, or
+            // `@MustUse @[Codable] struct …`) — keep skipping rule-shaped
+            // prefixes (bracket groups or lone `@Name`/`@Name(args)?`) until none
             // remain, then require `pub`? `struct`/`enum`.
             loop {
                 while i < self.toks.len() && matches!(self.toks[i].kind, TokKind::Semi) {
@@ -535,7 +503,7 @@ impl<'a> Parser<'a> {
                 if i >= self.toks.len() {
                     return false;
                 }
-                let is_marker_sigil = matches!(self.toks[i].kind, TokKind::Hash | TokKind::At);
+                let is_marker_sigil = matches!(self.toks[i].kind, TokKind::At);
                 if !is_marker_sigil {
                     break;
                 }

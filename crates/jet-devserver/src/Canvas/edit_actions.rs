@@ -249,7 +249,7 @@ pub(super) fn apply_visible_conversion(
 }
 
 pub(super) fn apply_break_link(path: &Path, src: &str, wire_id: &str) -> Result<String, String> {
-    rewrite_wire_expr(path, src, wire_id, "#Todo")
+    rewrite_wire_expr(path, src, wire_id, "@Todo")
 }
 
 pub(super) fn apply_move_link(
@@ -828,7 +828,7 @@ pub(super) fn extract_inline_candidate(
         ));
     };
     let expr = snippet(src, Span::new(inline.span.start, inline.span.end));
-    if expr.contains("#Unsafe") {
+    if expr.contains("@Unsafe") {
         return Err(edit_error(
             "diagnostic",
             "Error [E2203]: Canvas extract cannot cross an unsafe source span",
@@ -1331,6 +1331,7 @@ fn find_pattern_target_in_children<'a>(
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -1467,6 +1468,7 @@ fn find_pattern_arm_remove_span_in_children(
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -1573,6 +1575,7 @@ fn find_pattern_span_in_children(stmt: &Stmt, pattern_span: SourceSpan, found: &
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -1675,6 +1678,7 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -2186,6 +2190,7 @@ fn collect_child_statement_locs(
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }

@@ -33,6 +33,7 @@ fn err_codes(src: &str) -> Vec<String> {
             no_prelude: prog.no_prelude,
             html_path: prog.html_path.clone(),
             no_alloc_policy: prog.no_alloc_policy,
+            policy_declarations: prog.policy_declarations.clone(),
         }],
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),

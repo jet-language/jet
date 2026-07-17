@@ -8,7 +8,7 @@
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, ATTR_TARGET,
-// ATTR_LAYOUT, ATTR_CODABLE, CONTRACT_MARKERS, KW_CAPS, KW_GRANT,
+// ATTR_LAYOUT, ATTR_CODABLE, APPLIED_RULES, KW_CAPS, KW_GRANT,
 // KW_COMPTIME, KW_DERIVE, ATTR_TRACK. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
@@ -24,6 +24,10 @@
 // It reuses the existing named-type spellings `View`, `ViewMut`, and the
 // restricted `str` element spelling at public string-view boundaries; sema
 // infers and publishes their owner provenance.
+// D-SHAPE-RESOURCE2=A adds contextual `defer` only at statement head in the
+// exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
+// D-UNSAFE-OBLIG1=A adds contextual `assert valid_ptr, aligned, no_alias`,
+// the `obligations: .Track/.Skip` @Unsafe field, and ENV_ORG_UNSAFE_POLICY.
 
 mod core_surface;
 pub use core_surface::*;

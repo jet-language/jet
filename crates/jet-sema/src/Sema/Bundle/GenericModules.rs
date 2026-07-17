@@ -344,6 +344,7 @@ fn substitute_stmts(
             | Stmt::Off { body, .. }
             | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
@@ -1604,6 +1605,7 @@ fn expand_alias(
         let mut nested_traits = TraitRegistry::default();
         nested_traits.register_synthetic_rollback();
         nested_traits.register_synthetic_display_debug();
+        nested_traits.register_synthetic_close();
         nested_traits.register_synthetic_iter_index();
         nested_traits.register_synthetic_io();
         for def in &nested_defs { nested_traits.register_items(&def.body, &mut Vec::new()); }
@@ -1847,6 +1849,7 @@ pub(crate) fn expand_generic_module_aliases(
             let mut traits = TraitRegistry::default();
             traits.register_synthetic_rollback();
             traits.register_synthetic_display_debug();
+            traits.register_synthetic_close();
             traits.register_synthetic_iter_index();
             traits.register_synthetic_io();
             traits.register_items(&module.items, &mut Vec::new());
@@ -1955,6 +1958,7 @@ pub(crate) fn expand_generic_module_aliases(
         let mut traits=TraitRegistry::default();
         traits.register_synthetic_rollback();
         traits.register_synthetic_display_debug();
+        traits.register_synthetic_close();
         traits.register_synthetic_iter_index();
         traits.register_synthetic_io();
         traits.register_items(&module.items,&mut Vec::new());
@@ -2288,8 +2292,8 @@ module Everything<T> {
     module Nested { fn nested() {} }
     module Inner<U> { fn inner(value: U) -> U { return ~value } }
     module IntInner = Inner<Int>
-    #Test("smoke") { expect(answer == 42) }
-    #Bench("work") { expect(answer == 42) }
+    @Test("smoke") { expect(answer == 42) }
+    @Bench("work") { expect(answer == 42) }
 }
 fn run() {}
 "#;

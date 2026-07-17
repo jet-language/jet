@@ -1,6 +1,6 @@
-//! D-LIN1 (ratified 2026-06-21): single-use (must-consume) values, `#SingleUse`.
+//! D-LIN1 (ratified 2026-06-21): single-use (must-consume) values, `@SingleUse`.
 //!
-//! A type marked `#SingleUse` must be consumed exactly once on every reachable
+//! A type marked `@SingleUse` must be consumed exactly once on every reachable
 //! path — moved to a `^` parameter or returned. Dropping it without consuming is
 //! E0140 (E0141 when only one `if` branch consumes it); using it twice is E0121
 //! (the move tracker); lending it (`&`/read) instead of moving is E0142. The tag
@@ -9,7 +9,7 @@
 mod common;
 
 const LOCK: &str = r#"
-#SingleUse struct Lock {
+@SingleUse struct Lock {
     resource: String,
 }
 fn acquire(resource: String) -> Lock {
@@ -196,7 +196,7 @@ fn run() {
 
 // --- D-LIN1-DROP (ratified 2026-06-25): the audited deliberate-discard hatch ---
 
-/// `consume(x)` inside an `#Unsafe("reason") { … }` block counts as terminal
+/// `consume(x)` inside an `@Unsafe("reason") { … }` block counts as terminal
 /// consumption — the duty is discharged, so the program compiles cleanly.
 #[test]
 fn drop_inside_unsafe_block_satisfies_single_use() {
@@ -204,7 +204,7 @@ fn drop_inside_unsafe_block_satisfies_single_use() {
         r#"
 fn run() {
     db :: acquire("db")
-    #Unsafe("the resource is already gone; nothing to release") {
+    @Unsafe("the resource is already gone; nothing to release") {
         consume(db)
     }
 }
@@ -217,19 +217,19 @@ fn run() {
     );
 }
 
-/// `consume(x)` inside an `#Unsafe fn` body is equally audited.
-/// the audit note, so a `#SingleUse` local it owns may be discarded with `drop`.
+/// `consume(x)` inside an `@Unsafe fn` body is equally audited.
+/// the audit note, so a `@SingleUse` local it owns may be discarded with `drop`.
 #[test]
 fn drop_inside_unsafe_fn_satisfies_single_use() {
     let codes = err_codes(
         r#"
-#Unsafe("voids a freshly-acquired lock whose resource is already gone")
+@Unsafe("voids a freshly-acquired lock whose resource is already gone")
 fn void_one() {
     db :: acquire("db")
     consume(db)
 }
 fn run() {
-    #Unsafe("calling the audited voider") {
+    @Unsafe("calling the audited voider") {
         void_one()
     }
 }
@@ -237,13 +237,13 @@ fn run() {
     );
     assert!(
         codes.is_empty(),
-        "drop in #Unsafe fn should compile, got {:?}",
+        "drop in @Unsafe fn should compile, got {:?}",
         codes
     );
 }
 
-/// `consume(x)` outside `#Unsafe` → E0143,
-/// telling the user to wrap it in `#Unsafe("reason")`.
+/// `consume(x)` outside `@Unsafe` → E0143,
+/// telling the user to wrap it in `@Unsafe("reason")`.
 #[test]
 fn drop_outside_unsafe_is_e0143() {
     let codes = err_codes(
@@ -274,7 +274,7 @@ fn reuse_after_drop_is_e0121() {
         r#"
 fn run() {
     db :: acquire("db")
-    #Unsafe("done with it") {
+    @Unsafe("done with it") {
         consume(db)
     }
     release(^db)
@@ -315,7 +315,7 @@ fn run() {
 #[test]
 fn drop_erases_no_unsafe_in_codegen() {
     let src = format!(
-        "{}\nfn run() {{ db :: acquire(\"db\"); #Unsafe(\"gone\") {{ consume(db) }} }}\n",
+        "{}\nfn run() {{ db :: acquire(\"db\"); @Unsafe(\"gone\") {{ consume(db) }} }}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");
@@ -325,11 +325,11 @@ fn drop_erases_no_unsafe_in_codegen() {
     );
 }
 
-/// A `#SingleUse` enum gets the same treatment as a struct.
+/// A `@SingleUse` enum gets the same treatment as a struct.
 #[test]
 fn single_use_enum_dropped_is_e0140() {
     let src = r#"
-#SingleUse enum Ticket {
+@SingleUse enum Ticket {
     Open
     Closed
 }
@@ -351,7 +351,7 @@ fn run() {
     );
 }
 
-/// The `#SingleUse` tag erases in codegen: the generated Rust is a plain struct,
+/// The `@SingleUse` tag erases in codegen: the generated Rust is a plain struct,
 /// with no marker artifact and no `unsafe` (I3 / I1).
 #[test]
 fn tag_erases_in_codegen() {

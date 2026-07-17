@@ -65,6 +65,22 @@ impl<'a> Checker<'a> {
         span: Span,
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
+        if matches!(type_name, "Arena" | "Bump") && method == "new" {
+            let bound = args.first().and_then(|arg| match &arg.expr {
+                Expr::Int(value, _, _, _) if *value >= 0 => Some(*value as u64),
+                _ => None,
+            });
+            self.record_memory_event(crate::Sema::MemoryEvent::new(
+                crate::Sema::MemoryEventKind::ArenaBytes(bound),
+                span,
+                format!("`{type_name}.new` reserves arena storage"),
+            ));
+            self.record_memory_event(crate::Sema::MemoryEvent::new(
+                crate::Sema::MemoryEventKind::Allocation,
+                span,
+                format!("`{type_name}.new` allocates arena backing storage"),
+            ));
+        }
         if type_name == "EncodingLimits" && method == "safe" {
             if !args.is_empty() {
                 self.diags.push(Diagnostic::error("E0101", format!("`EncodingLimits.safe` takes 0 arguments, got {}", args.len()), "the safe encoding limits are fixed defaults".to_string(), "remove the arguments".to_string(), Some(span)));
@@ -105,6 +121,7 @@ impl<'a> Checker<'a> {
             return None;
         };
         self.record_method_reference(type_name, method, span);
+        self.record_edge(super::effect_key(Some(type_name), method), span);
         if !msig.is_static {
             self.diags.push(Diagnostic::error(
                 "E0311",
@@ -813,7 +830,7 @@ impl<'a> Checker<'a> {
             // let the struct (which can outlive the region) keep a dangling
             // borrow into the arena.
             if let Expr::Ident(vname, vspan) = expr {
-                if self.is_arena_view(vname) {
+                if self.is_arena_view(vname) || self.is_fixed_backing_view(vname) {
                     self.report_view_escape(vname, "be stored in a struct field", *vspan);
                 }
                 // D-DYNARRAY1: E2305 — storing a `View<T>` in a struct field

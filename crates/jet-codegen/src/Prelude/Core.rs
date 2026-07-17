@@ -10,9 +10,30 @@ trait JetDebug {
     fn jet_debug(&self) -> String;
 }
 
-// D-PROVENANCE1=B: `#Track x :: <Float>` records local Float provenance by
+// D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
+// Drop consumes it exactly once; declaration order gives reverse cleanup order.
+struct JetDeferredClose<F: FnOnce()> {
+    close: Option<F>,
+}
+impl<F: FnOnce()> JetDeferredClose<F> {
+    fn new(close: F) -> Self {
+        Self { close: Some(close) }
+    }
+    fn run(&mut self) {
+        if let Some(close) = self.close.take() {
+            close();
+        }
+    }
+}
+impl<F: FnOnce()> Drop for JetDeferredClose<F> {
+    fn drop(&mut self) {
+        self.run();
+    }
+}
+
+// D-PROVENANCE1=B: `@Track x :: <Float>` records local Float provenance by
 // address. Plain copies remain plain values; a copied Float is untracked unless
-// rebound under `#Track`.
+// rebound under `@Track`.
 static JET_FLOAT_ORIGINS: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<usize, String>>,
 > = std::sync::OnceLock::new();
@@ -1488,6 +1509,23 @@ fn jet_scheduler_panic_should_unwind() -> bool {
     jet_runtime_should_unwind()
 }
 
+struct JetRuntimeExit;
+
+fn jet_runtime_boundary<F, T>(run: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(value) => value,
+        Err(payload) if payload.is::<JetRuntimeExit>() => std::process::exit(70),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+fn jet_runtime_exit() -> ! {
+    std::panic::resume_unwind(Box::new(JetRuntimeExit))
+}
+
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     jet_proof_record(2, 1, "panic", msg, file, line);
     if jet_runtime_should_unwind() {
@@ -1495,7 +1533,7 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     }
     eprintln!("panic: {}", msg);
     eprintln!("  --> {}:{}", file, line);
-    std::process::exit(70);
+    jet_runtime_exit();
 }
 
 fn jet_runtime_diagnostic(rendered: String) -> ! {
@@ -1503,7 +1541,7 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
         panic!("{}", rendered);
     }
     eprintln!("{}", rendered);
-    std::process::exit(70);
+    jet_runtime_exit();
 }
 /// E3005 (D-PREPOST1): a `@Pre`/`@Post` contract clause failed at runtime.
 /// `clause_kw` is `"Pre"`/`"Post"`; `msg` is the clause's own message text
@@ -1518,7 +1556,7 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
     }
     eprintln!("@{} contract failed: {}", clause_kw, msg);
     eprintln!("  --> {}:{}", file, line);
-    std::process::exit(70);
+    jet_runtime_exit();
 }
 
 /// Private structured producer channel used only when `jet prove` launches a
@@ -1625,7 +1663,7 @@ fn jet_panic_rich(
     if jet_runtime_should_unwind() {
         panic!("{} (at {}:{})", msg, file, line);
     }
-    std::process::exit(70);
+    jet_runtime_exit();
 }
 /// E3002 (E2-M12, D-OBS1): error-return trace frame. In debug builds, when a `?`
 /// actually propagates an `Err`, print one Zig-style frame to stderr, then hand

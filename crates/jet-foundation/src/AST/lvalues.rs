@@ -60,7 +60,7 @@ pub enum IndexKind {
     Pool,
 }
 
-/// D-CANVASMETA1=B: one raw field inside `#Meta(...)`.
+/// D-CANVASMETA1=B: one raw field inside `@Meta(...)`.
 #[derive(Debug, Clone)]
 pub enum MetaField {
     Category { value: Expr, span: Span },
@@ -148,11 +148,11 @@ pub enum ForKind {
 #[derive(Debug, Clone)]
 pub struct Binding {
     pub mutable: bool,
-    /// Binding-level `#Track` marker. Parser/formatter preserve it; sema assigns
+    /// Binding-level `@Track` marker. Parser/formatter preserve it; sema assigns
     /// meaning in the later tracking slice.
     pub track: bool,
     pub track_span: Option<Span>,
-    /// D-CANVASMETA1=B: `#Meta(category: "…", tunable)` for Canvas/tooling.
+    /// D-CANVASMETA1=B: `@Meta(category: "…", tunable)` for Canvas/tooling.
     pub meta: Option<MetaAttr>,
     pub name: String,
     pub name_span: Span,
@@ -177,7 +177,7 @@ pub struct Binding {
     /// `arena.alloc(value)` call, so this binding holds a scope-bound *view*
     /// into the arena's storage (Rust `&mut T`), not an owned `T`. Codegen
     /// binds it as a reference and dereferences reads; sema (E0631/E0632)
-    /// forbids it escaping its arena's scope or outliving a `reset`/`free`.
+    /// forbids it escaping its arena's scope or outliving a reset/close.
     pub arena_view: bool,
     /// D-MEM1 stage S5 (2026-07-04): set by sema when `init` is a zero-copy
     /// string slicing call (`s.trim()` / `s.after(sep)` / `s.before(sep)`) on
@@ -188,4 +188,30 @@ pub struct Binding {
     /// Codegen emits `&str` for the binding and calls the `_view` prelude
     /// helper; sema (E2307) forbids it escaping the owner's scope.
     pub string_view: bool,
+    /// D-OPTGC1=A: sema-authored proof that this heap-owning binding crosses
+    /// an ownership boundary inside an effective scoped-GC policy. Codegen
+    /// consumes this fact verbatim; it never re-runs escape analysis.
+    pub gc_promotion: Option<GcPromotion>,
+    /// The value already arrives as a compiler-private GC root transferred
+    /// from another opted function; no second allocation or trace site.
+    pub gc_transferred: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GcPromotion {
+    pub span: Span,
+    pub scope: String,
+    pub policy_provenance: String,
+    pub reason: String,
+    /// Other promoted bindings directly stored in this payload at creation,
+    /// with the payload slot whose later mutation replaces that relation.
+    pub edges: Vec<GcPromotionEdge>,
+    pub collection_len: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GcPromotionEdge {
+    pub binding: String,
+    pub slot: String,
+    pub group: usize,
 }

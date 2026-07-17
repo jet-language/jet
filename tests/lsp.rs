@@ -12,7 +12,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -21,6 +21,26 @@ fn jet_bin() -> PathBuf {
 fn lsp_process_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn lock_lsp_process() -> MutexGuard<'static, ()> {
+    lock_unpoisoned(lsp_process_lock())
+}
+
+#[test]
+fn lsp_process_lock_recovers_from_poison() {
+    let mutex = Arc::new(Mutex::new(()));
+    let poisoned_mutex = Arc::clone(&mutex);
+    let poisoned = std::thread::spawn(move || {
+        let _guard = poisoned_mutex.lock().unwrap();
+        panic!("intentional LSP lock poison");
+    });
+    assert!(poisoned.join().is_err());
+    let _guard = lock_unpoisoned(&mutex);
 }
 
 fn send_msg(stdin: &mut impl Write, json: &str) {
@@ -566,7 +586,7 @@ mod transcript_parser {
 
 /// Execute one JSON transcript file against a live `jet self lsp` process.
 fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
     let content =
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
     let transcript = transcript_parser::parse(&content);
@@ -646,7 +666,7 @@ fn lsp_initialize_capabilities_have_named_test_coverage() {
     if !jet.exists() {
         return;
     }
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
 
     let mut child = Command::new(&jet)
         .args(["self", "lsp"])
@@ -702,7 +722,7 @@ fn lsp_teaching_autocorrect_let_to_val() {
     if !jet.exists() {
         return;
     }
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
 
     let mut child = Command::new(&jet)
         .args(["self", "lsp"])
@@ -784,7 +804,7 @@ fn lsp_incremental_sync_range_edit_updates_document() {
     if !jet.exists() {
         return;
     }
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
 
     let mut child = Command::new(&jet)
         .args(["self", "lsp"])
@@ -998,7 +1018,7 @@ fn lsp_execute_command_impact_returns_report() {
 fn lsp_budget_reports_projects_canonical_report_without_measuring() {
     let jet = jet_bin();
     if !jet.exists() { return; }
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
     let root = std::env::temp_dir().join(format!("lsp_budget_projection_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -1073,7 +1093,7 @@ fn run_transcript(source: &str, steps: &[TranscriptStep]) {
     if !jet.exists() {
         return;
     }
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
 
     let mut child = Command::new(&jet)
         .args(["self", "lsp"])
@@ -1276,7 +1296,7 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     if !jet.exists() {
         return;
     }
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
 
     let root = std::env::temp_dir().join(format!("lsp_discovery_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -1397,7 +1417,7 @@ fn lsp_document_links_and_code_lenses() {
     let uri = format!("file://{}", path.display());
     let root_uri = format!("file://{}", root.display());
     let target_uri = format!("file://{}", root.join("app/store.jet").display());
-    let source = "use app.store\n\nfn run() {\n    print(1)\n}\n\n#Test(\"smoke\") {\n    expect(1 == 1)\n}\n";
+    let source = "use app.store\n\nfn run() {\n    print(1)\n}\n\n@Test(\"smoke\") {\n    expect(1 == 1)\n}\n";
     std::fs::write(&path, source).expect("write link source");
 
     run_transcript(
@@ -2112,15 +2132,16 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
     if !jet.exists() {
         return;
     }
-    let _guard = lsp_process_lock().lock().unwrap();
+    let _guard = lock_lsp_process();
 
-    let source = r#"#Test("semantic") {
+    let source = r#"@Test("semantic") {
 }
-#Unsafe("audit") fn archive(name: ^String, slot: &Int) -> String {
+@Unsafe("audit") fn archive(name: ^String, slot: &Int) -> String {
     saved :: copy name
     return saved
 }
 @Pure fn clean(x: Int) -> Int { return x }
+fn retain(window: View<Int>) -> View<Int> { return window }
 fn run() {
     old :: 1
     while :: 2
@@ -2128,6 +2149,9 @@ fn run() {
     mut borrowed
     take borrowed
     view borrowed
+    borrowed.read()
+    text := "view .view stays string content"
+    // view and .view stay comment content
 }
 "#;
     let uri = "file:///tmp/lsp_semantic_highlight_stage4.jet";
@@ -2180,22 +2204,27 @@ fn run() {
 
     const TOKEN_OWNERSHIP: u32 = 12;
     const TOKEN_DECORATOR: u32 = 13;
+    const TOKEN_TYPE: u32 = 1;
     const TOKEN_VARIABLE: u32 = 3;
     const MOD_MOVE: u32 = 1 << 2;
     const MOD_WRITE_BORROW: u32 = 1 << 3;
     const MOD_COPY: u32 = 1 << 4;
-    const MOD_DIRECTIVE: u32 = 1 << 5;
-    const MOD_CONTRACT: u32 = 1 << 6;
+    const MOD_RULE: u32 = 1 << 5;
 
     let tokens = decode_semantic_tokens(source, &response);
     assert_semantic_token(&tokens, "copy", TOKEN_OWNERSHIP, MOD_COPY);
     assert_semantic_token(&tokens, "^", TOKEN_OWNERSHIP, MOD_MOVE);
     assert_semantic_token(&tokens, "&", TOKEN_OWNERSHIP, MOD_WRITE_BORROW);
-    assert_semantic_token(&tokens, "#", TOKEN_DECORATOR, MOD_DIRECTIVE);
-    assert_semantic_token(&tokens, "Test", TOKEN_DECORATOR, MOD_DIRECTIVE);
-    assert_semantic_token(&tokens, "Unsafe", TOKEN_DECORATOR, MOD_DIRECTIVE);
-    assert_semantic_token(&tokens, "@", TOKEN_DECORATOR, MOD_CONTRACT);
-    assert_semantic_token(&tokens, "Pure", TOKEN_DECORATOR, MOD_CONTRACT);
+    assert_semantic_token(&tokens, "Test", TOKEN_DECORATOR, MOD_RULE);
+    assert_semantic_token(&tokens, "Unsafe", TOKEN_DECORATOR, MOD_RULE);
+    assert_semantic_token(&tokens, "@", TOKEN_DECORATOR, MOD_RULE);
+    assert_semantic_token(&tokens, "Pure", TOKEN_DECORATOR, MOD_RULE);
+    assert!(
+        tokens
+            .iter()
+            .any(|token| token.text == "View" && token.token_type == TOKEN_TYPE),
+        "public View<T> contracts should remain type tokens: {tokens:?}"
+    );
 
     for ordinary in ["while", "for"] {
         assert!(
@@ -2213,9 +2242,38 @@ fn run() {
         );
     }
 
+    let edited_source = source.replacen("borrowed.read()", "borrowed.view()", 1);
+    let change = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2}},"contentChanges":[{{"range":{{"start":{{"line":15,"character":13}},"end":{{"line":15,"character":17}}}},"rangeLength":4,"text":"view"}}]}}}}"#,
+        uri
+    );
+    send_msg(&mut stdin, &change);
+    let edited_req = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/semanticTokens/full","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+        uri
+    );
+    send_msg(&mut stdin, &edited_req);
+    let edited_response = loop {
+        let message = read_msg(&mut stdout);
+        if message.contains(r#""id":3"#) {
+            break message;
+        }
+    };
+    let edited_tokens = decode_semantic_tokens(&edited_source, &edited_response);
+    assert!(
+        !edited_tokens.iter().any(|token| token.text == "view"),
+        "incrementally introduced `.view` should stay retired: {edited_tokens:?}"
+    );
+    assert!(
+        edited_tokens
+            .iter()
+            .any(|token| token.text == "View" && token.token_type == TOKEN_TYPE),
+        "incremental classification should preserve public View<T>: {edited_tokens:?}"
+    );
+
     send_msg(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":3,"method":"shutdown","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":4,"method":"shutdown","params":{}}"#,
     );
     let _ = read_msg(&mut stdout);
     send_msg(

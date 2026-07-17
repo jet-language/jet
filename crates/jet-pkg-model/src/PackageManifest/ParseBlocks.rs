@@ -53,6 +53,39 @@ pub(super) fn parse_package(body: &str) -> Result<PackageMeta, ManifestError> {
     Ok(meta)
 }
 
+pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::PolicyDeclaration>, ManifestError> {
+    let mut out = Vec::new();
+    for (name, raw) in key_value_entries(body) {
+        let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
+            if matches!(name.as_str(), "trust" | "lints") { continue; }
+            return Err(ManifestError::BadMemoryPolicy { detail: format!("`{name}` is not a registered package policy") });
+        };
+        let value = match key {
+            crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc if raw.trim() == "true" => crate::Policy::PolicyValue::Enabled,
+            crate::Policy::PolicyKey::ArenaBounded => {
+                let n = raw.trim().parse::<u64>().map_err(|_| ManifestError::BadMemoryPolicy { detail: format!("`{name}` needs a positive byte limit") })?;
+                if n == 0 { return Err(ManifestError::BadMemoryPolicy { detail: format!("`{name}` needs a positive byte limit") }); }
+                crate::Policy::PolicyValue::Limit(n)
+            }
+            crate::Policy::PolicyKey::Unsafe => match raw.trim() {
+                ".Forbid" => crate::Policy::PolicyValue::UnsafeForbid,
+                ".Default" => crate::Policy::PolicyValue::UnsafeDefault,
+                ".GateOnly" => crate::Policy::PolicyValue::UnsafeGateOnly,
+                ".Obligations" => crate::Policy::PolicyValue::UnsafeObligations,
+                ".Relaxed" => crate::Policy::PolicyValue::UnsafeRelaxed,
+                ".PerSite" => crate::Policy::PolicyValue::UnsafePerSite,
+                _ => return Err(ManifestError::BadMemoryPolicy { detail: "`unsafe` must be `.Default`, `.GateOnly`, `.Obligations`, `.Relaxed`, `.PerSite`, or `.Forbid`".to_string() }),
+            },
+            _ => return Err(ManifestError::BadMemoryPolicy { detail: format!("package policy `{name}` may only tighten its inherited value") }),
+        };
+        out.push(crate::Policy::PolicyDeclaration { key, value, scope: crate::Policy::PolicyScope::Package, span: crate::Diagnostics::Span::new(0, 0), target: None, source: "package.jet".to_string() });
+    }
+    for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc] {
+        crate::Policy::resolve(key, out.clone()).map_err(|error| ManifestError::BadMemoryPolicy { detail: format!("conflicting `{}` declarations: {error:?}", key.name()) })?;
+    }
+    Ok(out)
+}
+
 pub(super) fn parse_deps(body: &str) -> Result<Vec<Dep>, ManifestError> {
     let mut deps = Vec::new();
     for (name, value) in key_value_entries(body) {
@@ -204,7 +237,7 @@ fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
         k if k == Syntax::TARGET_TEST => Target::Test,
         k if k == Syntax::TARGET_EXAMPLE => Target::Example,
         // c80 / D-TGT2: `benchmark` now has a backend — routes `jet bench` at
-        // the entry via the existing `#Bench`/`compile_benches_with_path` engine.
+        // the entry via the existing `@Bench`/`compile_benches_with_path` engine.
         k if k == Syntax::TARGET_BENCHMARK => Target::Benchmark,
         k if Syntax::TARGET_RESERVED.contains(&k) => {
             return Err(ManifestError::ReservedTarget {

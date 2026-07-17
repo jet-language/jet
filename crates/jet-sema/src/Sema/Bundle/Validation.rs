@@ -15,14 +15,24 @@ pub(super) fn qualified_effect_facts(
     for (alias, summaries) in modules {
         for (key, summary) in summaries {
             let mut summary = summary.clone();
-            summary.edges = summary.edges.iter().map(|edge| {
+            let resolve_edge = |edge: &String| {
                 if edge == "__jet_panic__" { return edge.clone(); }
                 if summaries.contains_key(edge) { return format!("{alias}::{edge}"); }
                 if let Some((module, symbol)) = edge.split_once('.') {
                     if aliases.contains(module) { return format!("{module}::{symbol}"); }
                 }
                 locations.get(edge).and_then(|values| (values.len() == 1).then(|| values[0].clone())).unwrap_or_else(|| edge.clone())
-            }).collect();
+            };
+            summary.edges = summary.edges.iter().map(&resolve_edge).collect();
+            for call in &mut summary.memory.calls {
+                call.callee = resolve_edge(&call.callee);
+            }
+            for region in &mut summary.memory.regions {
+                region.edges = region.edges.iter().map(&resolve_edge).collect();
+                for call in &mut region.calls {
+                    call.callee = resolve_edge(&call.callee);
+                }
+            }
             qualified.insert(format!("{alias}::{key}"), summary);
         }
     }
@@ -264,7 +274,7 @@ pub(crate) fn collect_used_core(
     let mut spans = HashMap::new();
     // D-CABI-CALLBACK1: names of top-level functions sema proved are passed as
     // a stable C callback symbol (`arg.flags.c_callback_symbol`) at some
-    // `#Extern` call site anywhere in the bundle. Collected in this same
+    // `@Extern` call site anywhere in the bundle. Collected in this same
     // whole-program walk (not a second traversal) so codegen knows, before it
     // emits ANY function, which ones must be `extern "C" fn` — never every
     // `@Pure fn` (that leaked the purity lever into codegen and broke I3
@@ -459,6 +469,7 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Off { body, .. }
             | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
@@ -678,7 +689,7 @@ pub(crate) fn collect_core_expr(
             }
             collect_core_expr(receiver, imports, used, spans, ffi_cb);
             for arg in args {
-                // D-CABI-CALLBACK1: a qualified `#Extern`-module call
+                // D-CABI-CALLBACK1: a qualified `@Extern`-module call
                 // (`c.callback_twice(increment, x)`) resolves through
                 // `infer_import_call` (CheckerCoreLib/imports.rs), a separate
                 // path from the bare-name call below — same flag, same fix.
@@ -699,7 +710,7 @@ pub(crate) fn collect_core_expr(
             for arg in &c.args {
                 // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
                 // already proved this bare function name is passed as a stable
-                // C callback at a `#Extern` call site — record the referenced
+                // C callback at a `@Extern` call site — record the referenced
                 // function so codegen emits its definition as `extern "C" fn`.
                 if arg.flags.c_callback_symbol {
                     if let Expr::Ident(name, _) = &arg.expr {
@@ -1251,7 +1262,7 @@ pub(crate) fn check_module_bodies(
                 }
             }
             Item::Test(t) if mode == CompileMode::Test => {
-                // D-TEST1: a parameterized `#Test fn` is a property test — its
+                // D-TEST1: a parameterized `@Test fn` is a property test — its
                 // params must be generatable types so the runner can synthesize
                 // inputs. Validate before checking the body so the error points at
                 // the offending param type.
@@ -1273,6 +1284,8 @@ pub(crate) fn check_module_bodies(
                     return_type: None,
                     return_type_span: None,
                     return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -1321,7 +1334,7 @@ pub(crate) fn check_module_bodies(
                 ));
                 t.body = synthetic.body;
             }
-            // D-BENCH1: a `#Bench` body type-checks exactly like a `#Test` body
+            // D-BENCH1: a `@Bench` body type-checks exactly like a `@Test` body
             // (a bare statement list, no params, unit context) — only the mode
             // gate differs.
             Item::Bench(b) if mode == CompileMode::Bench => {
@@ -1338,6 +1351,8 @@ pub(crate) fn check_module_bodies(
                     return_type: None,
                     return_type_span: None,
                     return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -1442,6 +1457,8 @@ pub(crate) fn check_module_bodies(
                     return_type: Some(Type::Named(ec.to_ty.clone())),
                     return_type_span: Some(ec.to_span),
                     return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -1593,8 +1610,8 @@ pub(crate) fn check_func_body_bundle(
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
-    no_alloc: bool,
-    // D-PRELUDEX1=A: this file's `#NoPrelude` state.
+    _no_alloc: bool,
+    // D-PRELUDEX1=A: this file's `@NoPrelude` state.
     no_prelude: bool,
     reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
 ) -> Vec<Diagnostic> {
@@ -1626,17 +1643,23 @@ pub(crate) fn check_func_body_bundle(
         region_stack: Vec::new(),
         fx_regions: Vec::new(),
         fx_callback_obligations: Vec::new(),
+        fx_memory_events: Vec::new(),
+        fx_memory_open: Vec::new(),
+        memory_policy_stack: Vec::new(),
+        fx_memory_regions: Vec::new(),
+        fx_memory_unbounded_control: Vec::new(),
+        fx_memory_calls: Vec::new(),
+        memory_control_multiplier: Some(1),
         txn_depth: 0,
         det_suppress: 0,
         context_depth: 0,
         context_allocator_active: false,
-        // S58 (E2-M13): an `#Unsafe fn` body is itself an audited region — its
-        // statements may use low-level ops directly without a nested `#Unsafe`
+        // S58 (E2-M13): an `@Unsafe fn` body is itself an audited region — its
+        // statements may use low-level ops directly without a nested `@Unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
         in_pure: f.is_pure,
-        no_alloc,
         no_prelude,
         in_pre_clause: false,
         in_comptime: false,
@@ -1650,12 +1673,12 @@ pub(crate) fn check_func_body_bundle(
             .collect(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
-        freed_allocators: HashMap::new(),
         view_facts: Default::default(),
         return_view_provenance: None,
         views_used_in_stmt: Default::default(),
         uninit: HashMap::new(),
         borrow_ctx: false,
+        allow_fixed_constructor: false,
         allow_string_view_read: false,
         lambda_escapes: true,
         in_lambda_body: false,
@@ -1685,6 +1708,20 @@ pub(crate) fn check_func_body_bundle(
         in_taskgroup_spawn: false,
         inline_addr_taken: HashSet::new(),
     };
+    for (active, name, span) in [
+        (f.is_pure, crate::Syntax::KW_PURE, f.name_span),
+        (f.is_sanitizer, crate::Syntax::KW_SANITIZER, f.name_span),
+        (f.is_unsafe, crate::Syntax::KW_UNSAFE, f.unsafe_span.unwrap_or(f.name_span)),
+        (f.is_replayable, crate::Syntax::ATTR_REPLAYABLE, f.replayable_span.unwrap_or(f.name_span)),
+        (f.is_must_use, crate::Syntax::ATTR_MUST_USE, f.must_use_span.unwrap_or(f.name_span)),
+        (f.is_inline, crate::Syntax::CONTRACT_INLINE, f.inline_span.unwrap_or(f.name_span)),
+        (f.is_inline_always, crate::Syntax::CONTRACT_INLINE_ALWAYS, f.inline_span.unwrap_or(f.name_span)),
+        (f.is_reactive, crate::Syntax::KW_REACTIVE, f.name_span),
+    ] {
+        if active && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
+            ck.diags.push(Diagnostic::error("E0355", format!("`@{name}` cannot attach to a function"), "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain".to_string(), "move the rule to one of its registered sites".to_string(), Some(span)));
+        }
+    }
     ck.check_params_and_body(f, owner_type);
     f.return_view_provenance = ck.return_view_provenance.clone();
     if let Some(owner) = owner_type {
@@ -1711,7 +1748,7 @@ pub(crate) fn check_func_body_bundle(
     if f.is_inline_always {
         ck.diags.extend(check_inline_always_fn(f));
     }
-    // D-SCHEDULE1 (card #505): a bad `#Every(…)` value is E0926.
+    // D-SCHEDULE1 (card #505): a bad `@Every(…)` value is E0926.
     ck.diags.extend(check_every_marker(f));
     global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
@@ -1732,6 +1769,20 @@ pub(crate) fn check_func_body_bundle(
             }
         }
     }
+    for event in &mut ck.fx_memory_events {
+        event.source = st.module_path.clone();
+        event.provenance = format!("{} in {}", effect_key(owner_type, &f.name), st.module_path);
+    }
+    for region in &mut ck.fx_memory_regions {
+        for event in &mut region.events {
+            event.source = st.module_path.clone();
+            event.provenance = format!(
+                "{} block policy in {}",
+                effect_key(owner_type, &f.name),
+                st.module_path
+            );
+        }
+    }
     summaries.insert(
         effect_key(owner_type, &f.name),
         EffectSummary {
@@ -1740,6 +1791,13 @@ pub(crate) fn check_func_body_bundle(
             maximal: ck.fx_maximal,
             regions: std::mem::take(&mut ck.fx_regions),
             callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
+            memory: super::MemoryFacts::MemorySummary {
+                events: std::mem::take(&mut ck.fx_memory_events),
+                open_dispatches: std::mem::take(&mut ck.fx_memory_open),
+                regions: std::mem::take(&mut ck.fx_memory_regions),
+                unbounded_control: std::mem::take(&mut ck.fx_memory_unbounded_control),
+                calls: std::mem::take(&mut ck.fx_memory_calls),
+            },
         },
     );
     ck.diags
@@ -1816,11 +1874,11 @@ pub(super) fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagno
             ty.name()
         ),
         format!(
-            "a parameterized `#{} fn` is a property test (D-TEST1): {} generates inputs from each parameter's type, but this type has no built-in generator",
+            "a parameterized `@{} fn` is a property test (D-TEST1): {} generates inputs from each parameter's type, but this type has no built-in generator",
             Syntax::KW_TEST,
             Syntax::LANG_NAME
         ),
-        "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" { … }` block and construct the value yourself".to_string(),
+        "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `@Test \"name\" { … }` block and construct the value yourself".to_string(),
         Some(span),
     ))
 }

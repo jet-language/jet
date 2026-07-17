@@ -8,10 +8,76 @@ use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TStmt;
 
+#[derive(Clone)]
+enum ActiveCleanup {
+    Deferred(usize),
+    Resource(String),
+}
+
 pub(crate) fn emit_tir_stmts(stmts: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
+    let mut active_cleanups = Vec::new();
+    emit_tir_stmts_inline(stmts, cx, out, indent, &mut active_cleanups);
+}
+
+/// Emit statements in the current lexical scope, retaining newly declared
+/// deferred closes for following siblings.
+fn emit_tir_stmts_inline(
+    stmts: &[TStmt],
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_cleanups: &mut Vec<ActiveCleanup>,
+) {
     for s in stmts {
-        emit_tir_stmt(s, cx, out, indent);
+        emit_tir_stmt(s, cx, out, indent, active_cleanups);
     }
+}
+
+/// Emit a nested lexical scope. Its deferred closes can see all enclosing
+/// guards, but do not remain active after the nested block ends.
+fn emit_tir_stmts_nested(
+    stmts: &[TStmt],
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    inherited_cleanups: &[ActiveCleanup],
+) {
+    let mut active = inherited_cleanups.to_vec();
+    emit_tir_stmts_inline(stmts, cx, out, indent, &mut active);
+}
+
+fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize) {
+    let pad = "    ".repeat(indent);
+    for cleanup in cleanups.iter().rev() {
+        match cleanup {
+            ActiveCleanup::Deferred(id) => {
+                out.push_str(&format!("{}_jet_deferred_close_{}.run();\n", pad, id));
+            }
+            ActiveCleanup::Resource(name) => {
+                out.push_str(&format!("{}{}.close();\n", pad, name));
+            }
+        }
+    }
+}
+
+fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[ActiveCleanup]) -> String {
+    let rendered = emit_tir_expr(e, cx);
+    if !rendered.contains(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER) {
+        return rendered;
+    }
+    let mut cleanup = String::new();
+    for active in cleanups.iter().rev() {
+        match active {
+            ActiveCleanup::Deferred(id) => {
+                cleanup.push_str(&format!("_jet_deferred_close_{}.run(); ", id));
+            }
+            ActiveCleanup::Resource(name) => cleanup.push_str(&format!("{}.close(); ", name)),
+        }
+    }
+    rendered.replace(
+        crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER,
+        &cleanup,
+    )
 }
 
 /// Emit a closure block while preserving Jet's final-expression return rule.
@@ -28,16 +94,36 @@ pub(crate) fn emit_tir_lambda_block(
     let Some((last, prefix)) = stmts.split_last() else {
         return;
     };
-    emit_tir_stmts(prefix, cx, out, indent);
+    let mut active_cleanups = Vec::new();
+    emit_tir_stmts_inline(prefix, cx, out, indent, &mut active_cleanups);
     if let TStmt::ExprStmt(expr) = last {
         let pad = "    ".repeat(indent);
-        out.push_str(&format!("{}{}\n", pad, emit_tir_expr(expr, cx)));
+        if matches!(
+            expr.kind,
+            crate::Codegen::TIR::TExprKind::RequireStop {
+                always_stops: true,
+                ..
+            }
+        ) {
+            emit_cleanups_now(&active_cleanups, out, indent);
+        }
+        out.push_str(&format!(
+            "{}{}\n",
+            pad,
+            emit_expr_with_cleanups(expr, cx, &active_cleanups)
+        ));
     } else {
-        emit_tir_stmt(last, cx, out, indent);
+        emit_tir_stmt(last, cx, out, indent, &mut active_cleanups);
     }
 }
 
-pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
+fn emit_tir_stmt(
+    s: &TStmt,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_deferred_closes: &mut Vec<ActiveCleanup>,
+) {
     let pad = "    ".repeat(indent);
     match s {
         TStmt::Let {
@@ -46,15 +132,103 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             ty_clause,
             init,
             track_origin,
+            gc_promotion,
+            gc_transferred: _,
         } => {
+            let fixed_bytes = match &init.kind {
+                crate::Codegen::TIR::TExprKind::AllocNew { ctor } => {
+                    ctor.strip_prefix("__JET_FIXED_INLINE:")
+                }
+                crate::Codegen::TIR::TExprKind::ResourceNew(inner) => match &inner.kind {
+                    crate::Codegen::TIR::TExprKind::AllocNew { ctor } => {
+                        ctor.strip_prefix("__JET_FIXED_INLINE:")
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(bytes) = fixed_bytes {
+                let backing = format!("{}__fixed_backing", mangle(name));
+                out.push_str(&format!(
+                    "{}let mut {} = [std::mem::MaybeUninit::<u8>::uninit(); {}];\n",
+                    pad, backing, bytes
+                ));
+                let ctor = format!("jet_mem::JetFixed::over_uninit(&mut {})", backing);
+                let value = if matches!(&init.kind, crate::Codegen::TIR::TExprKind::ResourceNew(_)) {
+                    format!("JetResource::new({ctor})")
+                } else {
+                    ctor
+                };
+                out.push_str(&format!(
+                    "{}{} {}{} = {};\n",
+                    pad, kw, mangle(name), ty_clause, value
+                ));
+                if matches!(&init.kind, crate::Codegen::TIR::TExprKind::ResourceNew(_)) {
+                    active_deferred_closes.push(ActiveCleanup::Resource(mangle(name)));
+                }
+                return;
+            }
+            if let Some(promotion) = gc_promotion {
+                let local = mangle(name);
+                let value = format!("_jet_gc_value_{local}");
+                let site = format!("_jet_gc_site_{local}");
+                out.push_str(&format!(
+                    "{}let {} = {};\n",
+                    pad,
+                    value,
+                    emit_expr_with_cleanups(init, cx, active_deferred_closes),
+                ));
+                out.push_str(&format!(
+                    "{}let {} = jet_gc::PromotionSite {{ source: {:?}, span_start: {}, span_end: {}, scope: {:?}, policy_provenance: {:?}, reason: {:?}, type_name: std::any::type_name_of_val(&{}), bytes: std::mem::size_of_val(&{}) as u64 }};\n{}{} {}{} = jet_gc::runtime_or_exit(jet_gc::AutomaticRoot::promote({}, {}));\n",
+                    pad,
+                    site,
+                    cx.file,
+                    promotion.span.start,
+                    promotion.span.end,
+                    promotion.scope,
+                    promotion.policy_provenance,
+                    promotion.reason,
+                    value,
+                    value,
+                    pad,
+                    kw,
+                    local,
+                    ty_clause,
+                    value,
+                    site,
+                ));
+                if !promotion.edges.is_empty() || promotion.collection_len.is_some() {
+                    let edges = promotion
+                        .edges
+                        .iter()
+                        .map(|edge| {
+                            format!(
+                                "({:?}, {}, {}.id())",
+                                edge.slot,
+                                edge.group,
+                                mangle(&edge.binding)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    out.push_str(&format!(
+                        "{}jet_gc::runtime_or_exit({}.replace_edge_slots(&[{}], {:?}));\n",
+                        pad, local, edges, promotion.collection_len
+                    ));
+                }
+                return;
+            }
             out.push_str(&format!(
                 "{}{} {}{} = {};\n",
                 pad,
                 kw,
                 mangle(name),
                 ty_clause,
-                emit_tir_expr(init, cx),
+                emit_expr_with_cleanups(init, cx, active_deferred_closes),
             ));
+            if matches!(&init.kind, crate::Codegen::TIR::TExprKind::ResourceNew(_)) {
+                active_deferred_closes.push(ActiveCleanup::Resource(mangle(name)));
+            }
             if let Some(origin) = track_origin {
                 out.push_str(&format!(
                     "{}{}jet_track_float_origin(&{}, {:?});\n",
@@ -64,6 +238,49 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     origin
                 ));
             }
+        }
+        TStmt::GcEdit {
+            root,
+            slot,
+            edges,
+            replace_all,
+            index_temp,
+            stmt,
+        } => {
+            if let Some((temp, value)) = index_temp {
+                out.push_str(&format!(
+                    "{}let {} = {};\n",
+                    pad,
+                    temp,
+                    emit_expr_with_cleanups(value, cx, active_deferred_closes)
+                ));
+            }
+            if *replace_all {
+                out.push_str(&format!(
+                    "{}jet_gc::runtime_or_exit({}.edit_replacing_all_edges(&[{}], |__jet_value| {{\n",
+                    pad,
+                    root,
+                    edges.join(", ")
+                ));
+            } else if let Some((temp, _)) = index_temp {
+                out.push_str(&format!(
+                    "{}jet_gc::runtime_or_exit({}.edit_edge_slot_index(\"collection\", {} as usize, &[{}], |__jet_value| {{\n",
+                    pad,
+                    root,
+                    temp,
+                    edges.join(", ")
+                ));
+            } else {
+                out.push_str(&format!(
+                    "{}jet_gc::runtime_or_exit({}.edit_edge_slot({:?}, &[{}], |__jet_value| {{\n",
+                    pad,
+                    root,
+                    slot,
+                    edges.join(", ")
+                ));
+            }
+            emit_tir_stmt(stmt, cx, out, indent + 1, active_deferred_closes);
+            out.push_str(&format!("{}}}));\n", pad));
         }
         TStmt::SplitViews {
             owner,
@@ -83,7 +300,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             line,
         } => {
             if let Some(owner) = owner {
-                let owner = emit_tir_expr(owner, cx);
+                let owner = emit_expr_with_cleanups(owner, cx, active_deferred_closes);
                 out.push_str(&format!(
                     "{}let {} = &mut ({})[..];\n{}let {} = ({}).len() as i64;\n",
                     pad, root, owner, pad, len, root
@@ -129,7 +346,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             value,
             clone_value,
         } => {
-            let v = emit_tir_expr(value, cx);
+            let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             // c150: append `.clone()` when the value is a borrowed non-scalar (computed
             // at lowering). `({v}).clone()` matches how other clone sites in the AST
             // path parenthesise the receiver before the method call.
@@ -156,7 +373,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 "{}let {} = &({});\n",
                 pad,
                 tmp,
-                emit_tir_expr(init, cx)
+                emit_expr_with_cleanups(init, cx, active_deferred_closes)
             ));
             for (elem_rust, field_rust) in binds {
                 out.push_str(&format!(
@@ -179,7 +396,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 "{}let {} = &({});\n",
                 pad,
                 tmp,
-                emit_tir_expr(init, cx)
+                emit_expr_with_cleanups(init, cx, active_deferred_closes)
             ));
             for (local_rust, field_rust) in binds {
                 out.push_str(&format!(
@@ -206,7 +423,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 "{}let {} = &({});\n",
                 pad,
                 tmp,
-                emit_tir_expr(init, cx)
+                emit_expr_with_cleanups(init, cx, active_deferred_closes)
             ));
             for (i, elem_rust) in elems.iter().enumerate() {
                 out.push_str(&format!(
@@ -216,13 +433,45 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             }
         }
         TStmt::Return(Some(e)) => {
-            out.push_str(&format!("{}return {};\n", pad, emit_tir_expr(e, cx)));
+            out.push_str(&format!("{}return {};\n", pad, emit_expr_with_cleanups(e, cx, active_deferred_closes)));
         }
         TStmt::Return(None) => {
             out.push_str(&format!("{}return;\n", pad));
         }
         TStmt::ExprStmt(e) => {
-            out.push_str(&format!("{}{};\n", pad, emit_tir_expr(e, cx)));
+            if matches!(
+                e.kind,
+                crate::Codegen::TIR::TExprKind::RequireStop {
+                    always_stops: true,
+                    ..
+                }
+            ) {
+                // `jet_panic` terminates the process instead of unwinding. Run
+                // all lexical deferred closes explicitly before that boundary;
+                // each guard drains its Option so its later Drop is a no-op.
+                emit_cleanups_now(active_deferred_closes, out, indent);
+            }
+            out.push_str(&format!(
+                "{}{};\n",
+                pad,
+                emit_expr_with_cleanups(e, cx, active_deferred_closes)
+            ));
+        }
+        TStmt::DeferClose {
+            close,
+            resource,
+            id,
+        } => {
+            out.push_str(&format!(
+                "{}let mut _jet_deferred_close_{} = JetDeferredClose::new(move || {{ let _ = {}; }});\n",
+                pad,
+                id,
+                emit_expr_with_cleanups(close, cx, active_deferred_closes)
+            ));
+            active_deferred_closes.retain(
+                |cleanup| !matches!(cleanup, ActiveCleanup::Resource(name) if name == resource),
+            );
+            active_deferred_closes.push(ActiveCleanup::Deferred(*id));
         }
         TStmt::If {
             cond,
@@ -234,33 +483,33 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             // `emit_if` (Source/Codegen/Statement.rs).
             match cond {
                 TIfCond::Plain(c) => {
-                    out.push_str(&format!("{}if {} {{\n", pad, emit_tir_expr(c, cx)));
+                    out.push_str(&format!("{}if {} {{\n", pad, emit_expr_with_cleanups(c, cx, active_deferred_closes)));
                 }
                 TIfCond::IfLet { pat_str, subj } => {
                     out.push_str(&format!(
                         "{}if let {} = {} {{\n",
                         pad,
                         pat_str,
-                        emit_tir_expr(subj, cx)
+                        emit_expr_with_cleanups(subj, cx, active_deferred_closes)
                     ));
                 }
                 TIfCond::IsNone { subj } => {
                     out.push_str(&format!(
                         "{}if {}.is_none() {{\n",
                         pad,
-                        emit_tir_expr(subj, cx)
+                        emit_expr_with_cleanups(subj, cx, active_deferred_closes)
                     ));
                 }
                 TIfCond::Matches { pat_str, subj } => {
                     out.push_str(&format!(
                         "{}if matches!(&({}), {}) {{\n",
                         pad,
-                        emit_tir_expr(subj, cx),
+                        emit_expr_with_cleanups(subj, cx, active_deferred_closes),
                         pat_str
                     ));
                 }
             }
-            emit_tir_stmts(then_body, cx, out, indent + 1);
+            emit_tir_stmts_nested(then_body, cx, out, indent + 1, active_deferred_closes);
             match else_body {
                 None => out.push_str(&format!("{}}}\n", pad)),
                 Some(body) => {
@@ -271,11 +520,24 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     if *else_is_elseif {
                         out.push_str(&format!("{}}} else ", pad));
                         let mut nested = String::new();
-                        emit_tir_stmt(&body[0], cx, &mut nested, indent);
+                        let mut branch_deferred = active_deferred_closes.clone();
+                        emit_tir_stmt(
+                            &body[0],
+                            cx,
+                            &mut nested,
+                            indent,
+                            &mut branch_deferred,
+                        );
                         out.push_str(nested.trim_start_matches(&pad as &str));
                     } else {
                         out.push_str(&format!("{}}} else {{\n", pad));
-                        emit_tir_stmts(body, cx, out, indent + 1);
+                        emit_tir_stmts_nested(
+                            body,
+                            cx,
+                            out,
+                            indent + 1,
+                            active_deferred_closes,
+                        );
                         out.push_str(&format!("{}}}\n", pad));
                     }
                 }
@@ -285,7 +547,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         // (Statement.rs) byte-for-byte; all decisions are read off the TIR.
         TStmt::Loop { label, body } => {
             out.push_str(&format!("{}{}loop {{\n", pad, tir_label_prefix(label)));
-            emit_tir_stmts(body, cx, out, indent + 1);
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
         TStmt::While { label, cond, body } => {
@@ -293,9 +555,9 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 "{}{}while {} {{\n",
                 pad,
                 tir_label_prefix(label),
-                emit_tir_expr(cond, cx)
+                emit_expr_with_cleanups(cond, cx, active_deferred_closes)
             ));
-            emit_tir_stmts(body, cx, out, indent + 1);
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
         // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` → scoped Rust block.
@@ -308,7 +570,8 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         } => {
             // Outer scoping block to contain the init variable.
             out.push_str(&format!("{}{{\n", pad));
-            emit_tir_stmt(init, cx, out, indent + 1);
+            let mut counted_deferred = active_deferred_closes.clone();
+            emit_tir_stmt(init, cx, out, indent + 1, &mut counted_deferred);
             let inner_pad = "    ".repeat(indent + 1);
             out.push_str(&format!(
                 "{}{}loop {{\n",
@@ -319,10 +582,10 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             out.push_str(&format!(
                 "{}if !({}) {{ break; }}\n",
                 body_pad,
-                emit_tir_expr(cond, cx)
+                emit_expr_with_cleanups(cond, cx, active_deferred_closes)
             ));
-            emit_tir_stmts(body, cx, out, indent + 2);
-            emit_tir_stmt(step, cx, out, indent + 2);
+            emit_tir_stmts_nested(body, cx, out, indent + 2, &counted_deferred);
+            emit_tir_stmt(step, cx, out, indent + 2, &mut counted_deferred);
             out.push_str(&format!("{}}}\n", inner_pad));
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -335,12 +598,12 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             body,
         } => {
             let lbl = tir_label_prefix(label);
-            let s = emit_tir_expr(start, cx);
-            let e = emit_tir_expr(end, cx);
+            let s = emit_expr_with_cleanups(start, cx, active_deferred_closes);
+            let e = emit_expr_with_cleanups(end, cx, active_deferred_closes);
             // S22 (D-SG8): `..` is inclusive → `..=`; `step` becomes `.step_by`.
             match step {
                 Some(step) => {
-                    let st = emit_tir_expr(step, cx);
+                    let st = emit_expr_with_cleanups(step, cx, active_deferred_closes);
                     out.push_str(&format!(
                         "{}{}for {} in (({})..=({})).step_by(({}) as usize) {{\n",
                         pad,
@@ -362,7 +625,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     ));
                 }
             }
-            emit_tir_stmts(body, cx, out, indent + 1);
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
         TStmt::Break(label) => match label {
@@ -390,13 +653,25 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     }
                     None => out.push_str(&format!("{}    {} => {{\n", pad, arm.pattern)),
                 }
-                emit_tir_stmts(&arm.body, cx, out, indent + 2);
+                emit_tir_stmts_nested(
+                    &arm.body,
+                    cx,
+                    out,
+                    indent + 2,
+                    active_deferred_closes,
+                );
                 out.push_str(&format!("{}    }}\n", pad));
             }
             match else_body {
                 Some(body) => {
                     out.push_str(&format!("{}    _ => {{\n", pad));
-                    emit_tir_stmts(body, cx, out, indent + 2);
+                    emit_tir_stmts_nested(
+                        body,
+                        cx,
+                        out,
+                        indent + 2,
+                        active_deferred_closes,
+                    );
                     out.push_str(&format!("{}    }}\n", pad));
                 }
                 None if *fallthrough => {
@@ -431,10 +706,22 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     "{}{} ({} >= {} && {} <= {}) {{\n",
                     inner_pad, kw, subject_str, lo, subject_str, hi
                 ));
-                emit_tir_stmts(body, cx, out, indent + 2);
+                emit_tir_stmts_nested(
+                    body,
+                    cx,
+                    out,
+                    indent + 2,
+                    active_deferred_closes,
+                );
             }
             out.push_str(&format!("{}}} else {{\n", inner_pad));
-            emit_tir_stmts(else_body, cx, out, indent + 2);
+            emit_tir_stmts_nested(
+                else_body,
+                cx,
+                out,
+                indent + 2,
+                active_deferred_closes,
+            );
             out.push_str(&format!("{}}}\n", inner_pad));
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -447,9 +734,9 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             is_map,
             value,
         } => {
-            let b = emit_tir_expr(base, cx);
-            let i = emit_tir_expr(index, cx);
-            let v = emit_tir_expr(value, cx);
+            let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
+            let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
+            let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             if *is_map {
                 out.push_str(&format!(
                     "{pad}{{ let __jet_v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), __jet_v); }}\n",
@@ -467,9 +754,9 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             value,
         } => {
             let ty = user_type_rust(type_name);
-            let b = emit_tir_expr(base, cx);
-            let i = emit_tir_expr(index, cx);
-            let v = emit_tir_expr(value, cx);
+            let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
+            let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
+            let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             out.push_str(&format!(
                 "{pad}{{ let __jet_v = {v}; <{ty} as user_IndexMut>::set(&mut ({b}), {i}, __jet_v); }}\n",
             ));
@@ -482,8 +769,8 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             value,
             clone_value,
         } => {
-            let b = emit_tir_expr(base, cx);
-            let mut v = emit_tir_expr(value, cx);
+            let b = emit_expr_with_cleanups(base, cx, active_deferred_closes);
+            let mut v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             if *clone_value {
                 v = format!("({v}).clone()");
             }
@@ -643,7 +930,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     }
                 },
             }
-            emit_tir_stmts(body, cx, out, indent + 1);
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
             // D-STDIN1=A: close the outer block holding the JetStdinReader local.
             if needs_extra_close {
@@ -654,7 +941,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         // statements INLINE at the SAME indent, with no wrapper (no `if`, no block),
         // exactly as the AST `emit_stmts` does for `Stmt::ComptimeIf`.
         TStmt::Inline(stmts) => {
-            emit_tir_stmts(stmts, cx, out, indent);
+            emit_tir_stmts_inline(stmts, cx, out, indent, active_deferred_closes);
         }
         // D-CANVASSTATE1=D: stripped from release builds by an internal cfg.
         // `jet run`/`jet dev`/default builds do not set `jet_release`, so debug
@@ -662,15 +949,15 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         TStmt::DebugOnly(stmts) => {
             out.push_str(&format!("{}#[cfg(not(jet_release))]\n", pad));
             out.push_str(&format!("{}{{\n", pad));
-            emit_tir_stmts(stmts, cx, out, indent + 1);
+            emit_tir_stmts_nested(stmts, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
-        // c109 Phase 18: an audited `#Unsafe { … }` region — `unsafe { … }`, byte-for-byte
+        // c109 Phase 18: an audited `@Unsafe { … }` region — `unsafe { … }`, byte-for-byte
         // `emit_stmts`'s `Stmt::Unsafe` arm (the `#Audit` annotation emits nothing). I1:
-        // emitted ONLY for a source `#Unsafe` gate.
+        // emitted ONLY for a source `@Unsafe` gate.
         TStmt::Unsafe(body) => {
             out.push_str(&format!("{}unsafe {{\n", pad));
-            emit_tir_stmts(body, cx, out, indent + 1);
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
         // c109 Phase 19: an explicit `region r { … }` — a plain Rust block, byte-for-byte
@@ -690,10 +977,10 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 "{}let _live_guard = {}jet_scope_guard(|| {{ {}jet_term_leave(); }});\n",
                 inner_pad, cx.root_prefix, cx.root_prefix
             ));
-            emit_tir_stmts(body, cx, out, inner);
+            emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
-        // D-SHIELDNAME1=A: `#Shield { … }` — enter a cancellation-shield region, install
+        // D-SHIELDNAME1=A: `@Shield { … }` — enter a cancellation-shield region, install
         // a scope guard that leaves it, then emit the body. The guard fires on every
         // exit path (normal, return, ?, panic unwind) via Rust's Drop ordering, so a
         // cancel/deadline deferred while shielded lands when the region exits.
@@ -709,10 +996,10 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 "{}let _shield_guard = {}jet_scope_guard(|| {{ {}jet_scheduler_shield_leave(); }});\n",
                 inner_pad, cx.root_prefix, cx.root_prefix
             ));
-            emit_tir_stmts(body, cx, out, inner);
+            emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
-        // D-DOTSCOPE1: a `#Test` scope member, emitted inside `fn jet_test_N() ->
+        // D-DOTSCOPE1: a `@Test` scope member, emitted inside `fn jet_test_N() ->
         // Result<(), String>`. Kind decides the framing; a `require` failure or
         // panic inside a region returns `Err`/unwinds, which each kind handles.
         TStmt::ScopeMember { kind, body } => {
@@ -724,7 +1011,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 // stay visible to the rest of the test. Runs first (sema pins it
                 // to statement one); a failure returns `Err` like any statement.
                 ScopeMemberKind::Setup => {
-                    emit_tir_stmts(body, cx, out, indent);
+                    emit_tir_stmts_inline(body, cx, out, indent, active_deferred_closes);
                 }
                 // `.expect_fail` — the region MUST fail. Run it under a panic
                 // boundary with a silenced hook; if it completes cleanly the test
@@ -743,7 +1030,13 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                         "{}let __ef = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {{\n",
                         ip
                     ));
-                    emit_tir_stmts(body, cx, out, inner + 1);
+                    emit_tir_stmts_nested(
+                        body,
+                        cx,
+                        out,
+                        inner + 1,
+                        active_deferred_closes,
+                    );
                     out.push_str(&format!("{}Ok(())\n", ip2));
                     out.push_str(&format!("{}}}));\n", ip));
                     out.push_str(&format!("{}std::panic::set_hook(__prev_hook);\n", ip));
@@ -760,7 +1053,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 ScopeMemberKind::Timeout(nanos) => {
                     out.push_str(&format!("{}{{\n", pad));
                     out.push_str(&format!("{}let __start = std::time::Instant::now();\n", ip));
-                    emit_tir_stmts(body, cx, out, inner);
+                    emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
                     out.push_str(&format!("{}let __elapsed = __start.elapsed();\n", ip));
                     out.push_str(&format!(
                         "{}let __budget = std::time::Duration::from_nanos({});\n",
@@ -778,12 +1071,12 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 // type-checked but dead; whole-test skip is the harness's job.
                 ScopeMemberKind::Skip => {
                     out.push_str(&format!("{}if false {{\n", pad));
-                    emit_tir_stmts(body, cx, out, inner);
+                    emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
                     out.push_str(&format!("{}}}\n", pad));
                 }
             }
         }
-        // D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
+        // D-REACTCORE1: `@Reactive { … }` — register a reactive effect at this point.
         TStmt::Reactive { closure } => {
             out.push_str(&format!(
                 "{}{}jet_std::jet_reactive_effect({});\n",
@@ -792,7 +1085,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         }
         TStmt::Region(body) => {
             out.push_str(&format!("{}{{\n", pad));
-            emit_tir_stmts(body, cx, out, indent + 1);
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. NOT wrapped in a
@@ -808,9 +1101,9 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 "{}let {} = jet_layout::Handle::new({:?});\n",
                 pad, rust_place, label
             ));
-            emit_tir_stmts(body, cx, out, indent);
+            emit_tir_stmts_inline(body, cx, out, indent, active_deferred_closes);
         }
-        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block — open a
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` block — open a
         // transaction guard, emit the body, then `commit()` on the clean fall-through
         // path. An early `?`/`return` skips `commit()`, so registered `on_commit` hooks
         // drop un-run (D-TXN3). Codegen is dumb (I3): no effect/rollback machinery here.
@@ -868,14 +1161,14 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                             }
                         }
                     }
-                    emit_tir_stmts(body, cx, out, inner);
+                    emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
                     if *uses_stm {
                         out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
                     }
                     out.push_str(&format!("{}{}.commit();\n", inner_pad, handle));
                 }
                 None => {
-                    emit_tir_stmts(body, cx, out, inner);
+                    emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
                     if *uses_stm {
                         out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
                     }
@@ -883,7 +1176,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             }
             out.push_str(&format!("{}}}\n", pad));
         }
-        // c109 Phase 19: a `#Context(field: value) { … }` block — a plain block with one
+        // c109 Phase 19: a `@Context(field: value) { … }` block — a plain block with one
         // RAII/no-op guard per field (declaration order) BEFORE the body, byte-for-byte
         // `emit_stmts`'s `Stmt::ContextBlock` arm.
         TStmt::ContextBlock { guards, body } => {
@@ -891,7 +1184,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             let inner = indent + 1;
             let inner_pad = "    ".repeat(inner);
             for (i, (field_name, value)) in guards.iter().enumerate() {
-                let val = emit_tir_expr(value, cx);
+                let val = emit_expr_with_cleanups(value, cx, active_deferred_closes);
                 match field_name.as_str() {
                     crate::Syntax::CTX_FIELD_ALLOCATOR => {
                         out.push_str(&format!(
@@ -910,7 +1203,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     }
                 }
             }
-            emit_tir_stmts(body, cx, out, inner);
+            emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
         // c109 Phase 15: a mixed comparison/Bool switch — the general `emit_mixed_switch`
@@ -933,9 +1226,15 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     "{}{} {} {{\n",
                     inner_pad,
                     kw,
-                    emit_tir_expr(cond, cx)
+                    emit_expr_with_cleanups(cond, cx, active_deferred_closes)
                 ));
-                emit_tir_stmts(body, cx, out, indent + 2);
+                emit_tir_stmts_nested(
+                    body,
+                    cx,
+                    out,
+                    indent + 2,
+                    active_deferred_closes,
+                );
             }
             // The `else`/fallthrough, byte-for-byte `emit_mixed_switch`: with arms and no
             // else → close the chain (`}`); with an else → `} else { … }`. (An empty
@@ -946,11 +1245,23 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 }
                 None => {}
                 Some(body) if arms.is_empty() => {
-                    emit_tir_stmts(body, cx, out, indent + 1);
+                    emit_tir_stmts_nested(
+                        body,
+                        cx,
+                        out,
+                        indent + 1,
+                        active_deferred_closes,
+                    );
                 }
                 Some(body) => {
                     out.push_str(&format!("{}}} else {{\n", inner_pad));
-                    emit_tir_stmts(body, cx, out, indent + 2);
+                    emit_tir_stmts_nested(
+                        body,
+                        cx,
+                        out,
+                        indent + 2,
+                        active_deferred_closes,
+                    );
                     out.push_str(&format!("{}}}\n", inner_pad));
                 }
             }

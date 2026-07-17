@@ -1,16 +1,16 @@
 # Maturity metadata
 
-`#Meta(maturity: …)` tells readers how stable a public API is without changing
+`@Meta(maturity: …)` tells readers how stable a public API is without changing
 compiler behavior.
 
 ```jet
-#Meta(maturity: .Experimental)
+@Meta(maturity: .Experimental)
 pub fn parse_streaming(src: Stream) -> Doc ? ParseError { ... }
 
-#Meta(maturity: .Tested)
+@Meta(maturity: .Tested)
 pub fn parse(src: String) -> Doc ? ParseError { ... }
 
-#Meta(maturity: .Hardened)
+@Meta(maturity: .Hardened)
 pub fn parse_strict(src: String) -> Doc ? ParseError { ... }
 ```
 

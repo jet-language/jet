@@ -17,7 +17,8 @@ fn run() -> Void ? {
         out.rust
     );
     assert!(
-        out.rust.contains("if let Err(__jet_err) = user_run()"),
+        out.rust
+            .contains("if let Err(__jet_err) = jet_runtime_boundary(|| user_run())"),
         "fallible run wrapper must handle returned errors:\n{}",
         out.rust
     );

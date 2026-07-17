@@ -4,7 +4,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
     self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type,
     unify_types, BUILTIN_TRAITS, COMPARABLE, DEBUG, DECODE, DISPLAY, ENCODE, EQUATABLE, PRINTABLE,
-    RENDERABLE, SERIALIZE,
+    CLOSE, RENDERABLE, SERIALIZE,
 };
 use crate::Syntax;
 use crate::AST::FuncSig;
@@ -24,7 +24,7 @@ pub struct TraitRegistry {
     pub derives: HashMap<String, HashSet<String>>,
     pub local_types: HashSet<String>,
     /// D-SERDE9/10: for each Codable type, the indices of its type params that
-    /// reach the wire (a non-`#[Skip]` field type mentions them). Used at the use
+    /// reach the wire (a non-`@[Skip]` field type mentions them). Used at the use
     /// site so a non-codable type argument fails there (E2411), not on the
     /// emitted impl (I2). A param absent here is phantom/skip-only and is never
     /// required to be codable — `Id<Kind>` serializes regardless of `Kind`.
@@ -289,7 +289,7 @@ impl TraitRegistry {
         if !s.type_params.is_empty() {
             self.struct_params
                 .insert(s.name.clone(), s.type_params.clone());
-            // D-SERDE9/10: record which params reach the wire (a non-`#[Skip]`
+            // D-SERDE9/10: record which params reach the wire (a non-`@[Skip]`
             // field type mentions them) for use-site codability checks.
             let wire_types: Vec<&Type> = s
                 .fields
@@ -523,6 +523,7 @@ impl TraitRegistry {
                 | Syntax::TYPE_STRING
                 | Syntax::TYPE_CHAR
         ) && Generics::is_builtin_trait(trait_name)
+            && trait_name != CLOSE
         {
             return true;
         }
@@ -767,6 +768,24 @@ impl TraitRegistry {
             Some(Type::String),
             AccessConvention::Move,
         );
+    }
+
+    /// D-SHAPE-RESOURCE2=A: one nominal consuming cleanup protocol. The
+    /// ambient `close(^value)` call dispatches only through this trait.
+    pub fn register_synthetic_close(&mut self) {
+        self.register_synthetic_trait_method(
+            crate::Syntax::TRAIT_CLOSE,
+            crate::Syntax::RESOURCE_CLOSE,
+            None,
+            AccessConvention::Move,
+        );
+        for ty in [
+            "FileReader", "FileWriter", "FileLock", "TcpStream", "UnixStream",
+            "TlsStream", "DbConnection", "Arena", "Bump", "Pool", "Fixed",
+        ] {
+            self.trait_impls
+                .insert((ty.to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
+        }
     }
 
     /// D-NETIO-CONTRACT2=B: register one nominal byte-stream contract and the

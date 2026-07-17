@@ -53,6 +53,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         pub_file_default: false,
         in_layout_body: 0,
         module_arg_expr_depth: None,
+        policy_declarations: Vec::new(),
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -79,6 +80,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         pub_file_default: false,
         in_layout_body: 0,
         module_arg_expr_depth: None,
+        policy_declarations: Vec::new(),
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -177,6 +179,7 @@ struct Parser<'a> {
     /// application instead of becoming a comparison. Nested expressions can
     /// still use `>` normally.
     module_arg_expr_depth: Option<usize>,
+    policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
 }
 
 fn too_deep(span: Span) -> Diagnostic {
@@ -224,22 +227,14 @@ impl<'a> Parser<'a> {
         &self.toks[(self.pos + 2).min(self.toks.len() - 1)]
     }
 
-    #[allow(dead_code)] // lookahead helpers kept for symmetry with peek6/peek7
+    #[allow(dead_code)]
     fn peek4(&self) -> &Token {
         &self.toks[(self.pos + 3).min(self.toks.len() - 1)]
     }
 
-    #[allow(dead_code)] // lookahead helpers kept for symmetry with peek6/peek7
+    #[allow(dead_code)]
     fn peek5(&self) -> &Token {
         &self.toks[(self.pos + 4).min(self.toks.len() - 1)]
-    }
-
-    fn peek6(&self) -> &Token {
-        &self.toks[(self.pos + 5).min(self.toks.len() - 1)]
-    }
-
-    fn peek7(&self) -> &Token {
-        &self.toks[(self.pos + 6).min(self.toks.len() - 1)]
     }
 
     /// End byte of the most recently consumed token (the one before the cursor).
@@ -568,7 +563,7 @@ mod s61_tests {
         }
     }
 
-    /// D-FFI-INLINE1=A (card #501): `#FFI(c) fn` parses into an inline foreign
+    /// D-FFI-INLINE1=A (card #501): `@FFI(c) fn` parses into an inline foreign
     /// tier function — the signature is an ordinary Jet signature, the body is
     /// captured as foreign source and the statement body is empty.
     #[test]
@@ -577,7 +572,7 @@ mod s61_tests {
         // interpolates `{expr}` (S8), so a brace-heavy C body must double its
         // braces (`{{`/`}}`) until a raw foreign-body form is ratified. The
         // captured source has the un-doubled single braces.
-        let src = "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"\nlong add(long a, long b) {{ return a + b; }}\n\"\"\"\n}\n";
+        let src = "@FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"\nlong add(long a, long b) {{ return a + b; }}\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -594,11 +589,11 @@ mod s61_tests {
         assert_eq!(func.params.len(), 2);
     }
 
-    /// D-FFI-ASM1=A (card #501): the gated `#Unsafe("…") #FFI(asm) fn` form
+    /// D-FFI-ASM1=A (card #501): the gated `@Unsafe("…") @FFI(asm) fn` form
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "#Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\nrdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n\"\"\"\n}\n";
+        let src = "@Unsafe(\"cycle counter\")\n@FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\nrdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -615,26 +610,26 @@ mod s61_tests {
         assert!(inl.source.contains("; -> return"), "source: {:?}", inl.source);
     }
 
-    /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `#FFI` fns idempotently
+    /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `@FFI` fns idempotently
     /// (formatter-roundtrip-required-for-new-syntax).
     #[test]
     fn ffi_inline_tier_formats_idempotently() {
         use crate::Formatter::format_source;
         for src in [
-            "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"\nlong add(long a, long b) {{ return a + b; }}\n\"\"\"\n}\n",
-            "#Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\nrdtsc\n\"\"\"\n}\n",
+            "@FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"\nlong add(long a, long b) {{ return a + b; }}\n\"\"\"\n}\n",
+            "@Unsafe(\"cycle counter\")\n@FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\nrdtsc\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
-            assert!(once.contains("#FFI("), "formatted output keeps the #FFI marker: {once}");
+            assert!(once.contains("@FFI("), "formatted output keeps the @FFI marker: {once}");
             let twice = format_source(&once).expect("format twice");
-            assert_eq!(once, twice, "jet fmt is idempotent for #FFI fns");
+            assert_eq!(once, twice, "jet fmt is idempotent for @FFI fns");
         }
     }
 
-    /// D-VISDEFAULT2=A: `#PubFile` flips default top-level visibility; `priv` opts out.
+    /// D-VISDEFAULT2=A: `@PubFile` flips default top-level visibility; `priv` opts out.
     #[test]
     fn pub_file_marker_sets_default_visibility() {
-        let src = r#"#PubFile
+        let src = r#"@PubFile
 
 fn greet() -> String {
     return "hi"
@@ -668,7 +663,7 @@ fn run() {
 
     #[test]
     fn pub_file_section_label_emits_e0415() {
-        let src = "#PubFile\n\npriv:\nfn run() { return }\n";
+        let src = "@PubFile\n\npriv:\nfn run() { return }\n";
         let (toks, errs) = lex(src);
         assert!(errs.is_empty(), "lex errors: {errs:?}");
         let toks = crate::Lexer::without_comments(&toks);

@@ -213,8 +213,8 @@ fn run() {
     // Test-only vetted probe: mutate the real host block after main's mandatory
     // snapshot and verify both directions of isolation in this same process.
     let rust = out.rust.replacen(
-        "    jet_std_env_init();\n    user_run();",
-        "    jet_std_env_init();\n    std::env::set_var(\"JET_HOST_ISOLATION\", \"host-after-snapshot\");\n    user_run();\n    assert_eq!(std::env::var(\"JET_HOST_ISOLATION\").as_deref(), Ok(\"host-after-snapshot\"));",
+        "    jet_std_env_init();\n    jet_runtime_boundary(|| user_run());",
+        "    jet_std_env_init();\n    std::env::set_var(\"JET_HOST_ISOLATION\", \"host-after-snapshot\");\n    jet_runtime_boundary(|| user_run());\n    assert_eq!(std::env::var(\"JET_HOST_ISOLATION\").as_deref(), Ok(\"host-after-snapshot\"));",
         1,
     );
     assert_ne!(rust, out.rust, "test probe did not attach after eager init");
@@ -390,9 +390,9 @@ fn jet_test_snapshot_entry() {
         assert!(state == "A" || state == "B", "child observed {state} raw pair");
     }
     assert!(advanced_during_launch, "writer generation never advanced across a child launch");
-    user_run();"#;
+    jet_runtime_boundary(|| user_run());"#;
     let rust = hooked_snapshot.replacen(
-        "    jet_std_env_init();\n    user_run();",
+        "    jet_std_env_init();\n    jet_runtime_boundary(|| user_run());",
         probe,
         1,
     );
@@ -415,9 +415,9 @@ fn fallible_set_runtime_hook_is_typed_for_next_edition() {
     let invalid_value: Result<(), jet_std::EnvError> =
         jet_std_env_set(&"name".to_string(), &"bad\0value".to_string());
     assert!(matches!(invalid_value, Err(jet_std::EnvError::InvalidValue)));
-    user_run();"#;
+    jet_runtime_boundary(|| user_run());"#;
     let rust = out.rust.replacen(
-        "    jet_std_env_init();\n    user_run();",
+        "    jet_std_env_init();\n    jet_runtime_boundary(|| user_run());",
         probe,
         1,
     );

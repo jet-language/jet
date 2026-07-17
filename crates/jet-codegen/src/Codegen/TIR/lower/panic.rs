@@ -6,6 +6,8 @@ use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Diagnostics::Span;
 
+pub(crate) const RESOURCE_CLEANUP_MARKER: &str = "__JET_RESOURCE_CLEANUP__";
+
 /// Resolve the subject's Jet type for binding payloads, mirroring `expr_jet_ty`'s
 /// reach (only an Ident resolves via its slot). Enough for the covered subset (the
 /// subject is an enum-typed local/param). Other forms resolve to `None` (the
@@ -25,6 +27,9 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         self_owner: env.self_owner.clone(),
         string_view_locals: env.string_view_locals.clone(),
+        resource_locals: env.resource_locals.clone(),
+        gc_locals: env.gc_locals.clone(),
+        gc_return: env.gc_return,
         cloned_types: env.cloned_types.clone(),
     }
 }
@@ -37,6 +42,9 @@ pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         self_owner: env.self_owner.clone(),
         string_view_locals: env.string_view_locals.clone(),
+        resource_locals: env.resource_locals.clone(),
+        gc_locals: env.gc_locals.clone(),
+        gc_return: env.gc_return,
         cloned_types: env.cloned_types.clone(),
     }
 }
@@ -60,7 +68,8 @@ pub(crate) fn render_panic_stop(
     let fn_name = env.fn_name.clone();
     let locals_expr = render_safe_locals(env);
     format!(
-        "{{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+        "{{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+        cleanup = RESOURCE_CLEANUP_MARKER,
         file = escape_rust_str(&cx.file),
         line = line,
         fn_name_esc = escape_rust_str(&fn_name),
@@ -101,8 +110,9 @@ pub(crate) fn render_require(call: &crate::AST::Call, cx: &Cx, env: &mut LowerEn
         "\"condition failed\".to_string()".to_string()
     };
     format!(
-        "{{ if !({cond}) {{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+        "{{ if !({cond}) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
         cond = cond,
+        cleanup = RESOURCE_CLEANUP_MARKER,
         file = escape_rust_str(&cx.file),
         line = line,
         fn_name_esc = escape_rust_str(&fn_name),
@@ -132,9 +142,10 @@ pub(crate) fn render_require_eq(call: &crate::AST::Call, cx: &Cx, env: &mut Lowe
     let fn_name = env.fn_name.clone();
     let locals_expr = render_safe_locals(env);
     format!(
-        "{{ let _jet_left = ({left}); let _jet_right = ({right}); if !(_jet_left == _jet_right) {{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+        "{{ let _jet_left = ({left}); let _jet_right = ({right}); if !(_jet_left == _jet_right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
         left = left,
         right = right,
+        cleanup = RESOURCE_CLEANUP_MARKER,
         file = escape_rust_str(&cx.file),
         line = line,
         fn_name_esc = escape_rust_str(&fn_name),

@@ -1,0 +1,12 @@
+use core.mem as mem
+
+fn reserve() {
+    arena :: mem.Arena.new(capacity: 4)
+    close(^arena)
+}
+
+@Policy(arena_bounded(8)) fn run() {
+    loop true {
+        reserve()
+    }
+}

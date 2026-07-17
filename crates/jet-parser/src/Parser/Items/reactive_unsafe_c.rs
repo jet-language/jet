@@ -1,26 +1,26 @@
 use super::super::{Diagnostic, Func, Parser, Span, StrTokPart, Syntax, TokKind, describe};
 
 impl<'a> Parser<'a> {
-        /// D-REACTCORE1: is the cursor at `#Reactive fn …` or `#Reactive pub fn …`?
+        /// D-REACTCORE1: is the cursor at `@Reactive fn …` or `@Reactive pub fn …`?
         pub(crate) fn at_reactive_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
+            matches!(self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_REACTIVE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
         /// D-MARK-TARGET1=A (ratified 2026-07-11, card #498): is the cursor at
-        /// `#Target(Wasm) fn` / `#Target(Js) fn` (per-function bucket
+        /// `@Target(Wasm) fn` / `@Target(Js) fn` (per-function bucket
         /// override, unified with the file/module ceiling spelling) or the
-        /// untouched `#WasmExport fn`?
+        /// untouched `@WasmExport fn`?
         pub(crate) fn at_web_partition_fn(&self) -> bool {
-            if !matches!(self.peek().kind, TokKind::Hash) {
+            if !matches!(self.peek().kind, TokKind::At) {
                 return false;
             }
-            // `#WasmExport fn` (untouched by D-MARK-TARGET1).
+            // `@WasmExport fn` (untouched by D-MARK-TARGET1).
             if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_WASM_EXPORT) {
                 return self.token_after_web_marker_is_fn(2);
             }
-            // `#Target(Wasm) fn` / `#Target(Js) fn` per-function override.
+            // `@Target(Wasm) fn` / `@Target(Js) fn` per-function override.
             if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
                 && matches!(self.peek3().kind, TokKind::LParen)
             {
@@ -49,13 +49,13 @@ impl<'a> Parser<'a> {
             false
         }
     
-        /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive fn …`. The body
+        /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `@Reactive fn …`. The body
         /// lowers to a reactive effect scope at codegen; sema requires a unit return.
         pub(crate) fn reactive_fn(&mut self) -> Result<Func, Diagnostic> {
-            self.expect(TokKind::Hash, "before `Reactive`")?;
-            self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
+            self.expect(TokKind::At, "before `Reactive`")?;
+            self.expect_ident(&format!("`@{}`", Syntax::KW_REACTIVE))?;
             let (is_pub, is_package_pub) = self.parse_item_visibility();
-            self.expect_kw(TokKind::KwFn, "after `#Reactive`")?;
+            self.expect_kw(TokKind::KwFn, "after `@Reactive`")?;
             self.func_after_fn(
                 is_pub,
                 is_package_pub,
@@ -82,20 +82,20 @@ impl<'a> Parser<'a> {
         }
     
         /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): is the cursor at
-        /// `#FFI(<lang>) fn …`, optionally preceded by an `#Unsafe("reason")`
-        /// gate (`#Unsafe("…") #FFI(asm) fn …`)? The unsafe-language gate is
+        /// `@FFI(<lang>) fn …`, optionally preceded by an `@Unsafe("reason")`
+        /// gate (`@Unsafe("…") @FFI(asm) fn …`)? The unsafe-language gate is
         /// enforced in sema; the parser only needs to route the item here.
         pub(super) fn at_ffi_fn(&self) -> bool {
-            if !matches!(self.peek().kind, TokKind::Hash) {
+            if !matches!(self.peek().kind, TokKind::At) {
                 return false;
             }
-            // Direct `#FFI(<lang>)`.
+            // Direct `@FFI(<lang>)`.
             if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_FFI)
                 && matches!(self.peek3().kind, TokKind::LParen)
             {
                 return true;
             }
-            // `#Unsafe(["reason"]) #FFI(<lang>)` — scan past the unsafe gate.
+            // `@Unsafe(["reason"]) @FFI(<lang>)` — scan past the unsafe gate.
             if matches!(self.peek2().kind, TokKind::KwUnsafe) {
                 let mut i = self.pos + 2;
                 if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::LParen)) {
@@ -109,16 +109,16 @@ impl<'a> Parser<'a> {
                 while matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Semi)) {
                     i += 1;
                 }
-                return matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
+                return matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::At))
                     && matches!(self.toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Ident(n)) if n == Syntax::ATTR_FFI)
                     && matches!(self.toks.get(i + 2).map(|t| &t.kind), Some(TokKind::LParen));
             }
             false
         }
 
-        /// D-FFI-INLINE1=A (card #501): parse `#FFI(<lang>) fn name(sig) -> T {
+        /// D-FFI-INLINE1=A (card #501): parse `@FFI(<lang>) fn name(sig) -> T {
         /// """<foreign source>""" }` (the inline foreign tier), optionally
-        /// preceded by an `#Unsafe("reason")` gate. The Jet signature is parsed
+        /// preceded by an `@Unsafe("reason")` gate. The Jet signature is parsed
         /// as an ordinary function signature; the body must be a single
         /// foreign-source string literal, captured into `Func::inline_foreign`
         /// (the statement body is left empty). Language validity and the
@@ -126,8 +126,8 @@ impl<'a> Parser<'a> {
         /// sema, not the parser).
         pub(super) fn ffi_fn(&mut self) -> Result<Func, Diagnostic> {
             let decl_start = self.peek().span.start;
-            // Optional leading `#Unsafe("reason")` gate.
-            let (is_unsafe, unsafe_reason, unsafe_span) = if matches!(self.peek().kind, TokKind::Hash)
+            // Optional leading `@Unsafe("reason")` gate.
+            let (is_unsafe, unsafe_reason, unsafe_span) = if matches!(self.peek().kind, TokKind::At)
                 && matches!(self.peek2().kind, TokKind::KwUnsafe)
             {
                 let start = self.peek().span;
@@ -139,8 +139,8 @@ impl<'a> Parser<'a> {
                     self.bump(); // `(`
                     let (value, _) = self.expect_plain_string(
                         "for the safety reason",
-                        "`#Unsafe` takes one piece of quoted text explaining why the function is safe to call",
-                        "write: #Unsafe(\"caller must ensure …\") #FFI(asm) fn …",
+                        "`@Unsafe` takes one piece of quoted text explaining why the function is safe to call",
+                        "write: @Unsafe(\"caller must ensure …\") @FFI(asm) fn …",
                     )?;
                     reason = Some(value);
                     self.expect(TokKind::RParen, "after the safety reason")?;
@@ -153,9 +153,9 @@ impl<'a> Parser<'a> {
                 (false, None, None)
             };
 
-            // `#FFI(<lang>)`
+            // `@FFI(<lang>)`
             let ffi_start = self.peek().span;
-            self.expect(TokKind::Hash, "before `FFI`")?;
+            self.expect(TokKind::At, "before `FFI`")?;
             let ffi_ident_span = self.peek().span;
             match &self.peek().kind {
                 TokKind::Ident(n) if n == Syntax::ATTR_FFI => {
@@ -164,15 +164,15 @@ impl<'a> Parser<'a> {
                 other => {
                     return Err(Diagnostic::error(
                         "E0003",
-                        format!("expected `{}` after `#`, found {}", Syntax::ATTR_FFI, describe(other)),
-                        "the inline foreign tier is written `#FFI(<lang>) fn` — `#FFI(c)`, `#FFI(cpp)`, `#FFI(asm)`".to_string(),
-                        "write: #FFI(c) fn name(...) -> T { \"\"\"<foreign source>\"\"\" }".to_string(),
+                        format!("expected `{}` after `@`, found {}", Syntax::ATTR_FFI, describe(other)),
+                        "the inline foreign tier is written `@FFI(<lang>) fn` — `@FFI(c)`, `@FFI(cpp)`, `@FFI(asm)`".to_string(),
+                        "write: @FFI(c) fn name(...) -> T { \"\"\"<foreign source>\"\"\" }".to_string(),
                         Some(ffi_ident_span),
                     ));
                 }
             }
-            self.expect(TokKind::LParen, "after `#FFI` to name the foreign language")?;
-            let (lang, lang_span) = self.expect_ident("for the foreign language name in `#FFI(<lang>)`")?;
+            self.expect(TokKind::LParen, "after `@FFI` to name the foreign language")?;
+            let (lang, lang_span) = self.expect_ident("for the foreign language name in `@FFI(<lang>)`")?;
             self.expect(TokKind::RParen, "after the foreign language name")?;
             let marker_span = Span::new(ffi_start.start, self.toks[self.pos - 1].span.end);
             // A synthetic `;` may separate the marker line from `fn`/`pub`.
@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
             let (is_pub, is_package_pub) = self.parse_item_visibility();
-            self.expect_kw(TokKind::KwFn, "after `#FFI(<lang>)`")?;
+            self.expect_kw(TokKind::KwFn, "after `@FFI(<lang>)`")?;
 
             // Ordinary Jet signature: name, type params, parameter list, optional
             // `#(effects)`, optional `-> T`. Reuses the same sub-parsers as a
@@ -211,7 +211,7 @@ impl<'a> Parser<'a> {
             }
 
             // The body is a single foreign-source string literal, not a Jet block.
-            self.expect(TokKind::LBrace, "to open the `#FFI` foreign-source body")?;
+            self.expect(TokKind::LBrace, "to open the `@FFI` foreign-source body")?;
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
-            self.expect(TokKind::RBrace, "to close the `#FFI` foreign-source body")?;
+            self.expect(TokKind::RBrace, "to close the `@FFI` foreign-source body")?;
             let declaration_end = self.toks[self.pos - 1].span.end;
 
             Ok(Func {
@@ -237,6 +237,8 @@ impl<'a> Parser<'a> {
                 return_type,
                 return_type_span,
                 return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
                 is_unsafe,
                 unsafe_reason,
                 unsafe_span,
@@ -274,7 +276,7 @@ impl<'a> Parser<'a> {
         }
 
         /// D-FFI-INLINE1=A (card #501): read the single foreign-source string that
-        /// forms an `#FFI(<lang>) fn` body. Must be exactly one non-interpolated
+        /// forms an `@FFI(<lang>) fn` body. Must be exactly one non-interpolated
         /// string literal (`"""…"""` or `"…"`); anything else — an interpolation,
         /// a Jet statement, or an empty block — is E0064.
         fn expect_inline_foreign_source(
@@ -285,7 +287,7 @@ impl<'a> Parser<'a> {
             let e0064 = |span: Span| {
                 Diagnostic::error(
                     "E0064",
-                    format!("an `#FFI({lang})` function body must be one string of {lang} source"),
+                    format!("an `@FFI({lang})` function body must be one string of {lang} source"),
                     "the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract (D-FFI-INLINE1)".to_string(),
                     format!("write the body as `{{ \"\"\"<{lang} source>\"\"\" }}` — one string literal, no other statements or interpolation"),
                     Some(span),
@@ -304,61 +306,78 @@ impl<'a> Parser<'a> {
             }
         }
 
-        /// D-UNSAFE2: is the cursor at `#Unsafe fn …` or `#Unsafe("…") fn …`?
+        /// D-UNSAFE2: is the cursor at `@Unsafe fn …` or `@Unsafe("…") fn …`?
         pub(super) fn at_unsafe_fn(&self) -> bool {
-            if !matches!(self.peek().kind, TokKind::Hash) {
+            if !matches!(self.peek().kind, TokKind::At) {
                 return false;
             }
             if !matches!(self.peek2().kind, TokKind::KwUnsafe) {
                 return false;
             }
-            // `#Unsafe fn` or `#Unsafe pub fn` (no reason arg)
+            // `@Unsafe fn` or `@Unsafe pub fn` (no reason arg)
             if matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub) {
                 return true;
             }
-            // `#Unsafe("…") fn` or `#Unsafe("…") pub fn`
-            // tokens (same line): `#`[0] `Unsafe`[1] `(`[2] `"str"`[3] `)`[4] `fn`/`pub`[5]
-            // tokens (split line): `#`[0] `Unsafe`[1] `(`[2] `"str"`[3] `)`[4] `;`[5] `fn`/`pub`[6]
-            // S6-R inserts a synthetic `;` after `)` when the reason and `fn` are on separate lines.
             if matches!(self.peek3().kind, TokKind::LParen) {
-                let after_close = if matches!(self.peek6().kind, TokKind::Semi) {
-                    &self.peek7().kind
-                } else {
-                    &self.peek6().kind
-                };
-                return matches!(after_close, TokKind::KwFn | TokKind::KwPub);
+                let mut depth = 0usize;
+                let mut index = self.pos + 2;
+                while let Some(token) = self.toks.get(index) {
+                    match token.kind {
+                        TokKind::LParen => depth += 1,
+                        TokKind::RParen => { depth -= 1; if depth == 0 { index += 1; break; } }
+                        _ => {}
+                    }
+                    index += 1;
+                }
+                if matches!(self.toks.get(index).map(|t| &t.kind), Some(TokKind::Semi)) { index += 1; }
+                return matches!(self.toks.get(index).map(|t| &t.kind), Some(TokKind::KwFn | TokKind::KwPub));
             }
             false
         }
     
-        /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") fn …`
-        /// or bare `#Unsafe fn …` (reason-less; L3101 fires in sema). The body is
+        /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `@Unsafe("reason") fn …`
+        /// or bare `@Unsafe fn …` (reason-less; L3101 fires in sema). The body is
         /// checked like any other fn; the contract is enforced at call sites (E3103).
         pub(super) fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
             let start = self.peek().span;
-            self.expect(TokKind::Hash, "before `Unsafe`")?;
+            self.expect(TokKind::At, "before `Unsafe`")?;
             self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
             let marker_span = Span::new(start.start, self.toks[self.pos - 1].span.end);
-            // Optional `("reason")` argument.
             let mut reason = None;
+            let mut obligation_mode = None;
             if matches!(self.peek().kind, TokKind::LParen) {
                 self.bump(); // `(`
-                let (value, _) = self.expect_plain_string(
-                    "for the safety reason",
-                    "`#Unsafe` takes one piece of quoted text explaining why the function is safe to call",
-                    "write: #Unsafe(\"caller must ensure …\") fn …",
-                )?;
-                reason = Some(value);
+                if matches!(self.peek().kind, TokKind::Str(_)) {
+                    let (value, _) = self.expect_plain_string(
+                        "for the safety reason",
+                        "`@Unsafe` takes quoted text explaining why the function is safe to call",
+                        "write: @Unsafe(\"caller must ensure …\") fn …",
+                    )?;
+                    reason = Some(value);
+                    if matches!(self.peek().kind, TokKind::Comma) { self.bump(); }
+                }
+                if !matches!(self.peek().kind, TokKind::RParen) {
+                    let (field, field_span) = self.expect_ident("for the `@Unsafe` option")?;
+                    if field != "obligations" { return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(field_span))); }
+                    self.expect(TokKind::Colon, "after `obligations`")?;
+                    self.expect(TokKind::Dot, "before the obligation mode")?;
+                    let (mode, mode_span) = self.expect_ident("after `obligations: .`")?;
+                    obligation_mode = Some(match mode.as_str() {
+                        "Track" => crate::Policy::PolicyValue::UnsafeTrack,
+                        "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
+                        _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(mode_span))),
+                    });
+                }
                 self.expect(TokKind::RParen, "after the safety reason")?;
-                // S6-R: when `#Unsafe("reason")` is on its own line above `fn`,
+                // S6-R: when `@Unsafe("reason")` is on its own line above `fn`,
                 // the lexer inserts a synthetic `;` after `)`. Skip it.
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
             }
             let (is_pub, is_package_pub) = self.parse_item_visibility();
-            self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
-            self.func_after_fn(
+            self.expect_kw(TokKind::KwFn, "after `@Unsafe`")?;
+            let function = self.func_after_fn(
                 is_pub,
                 is_package_pub,
                 true,
@@ -380,14 +399,25 @@ impl<'a> Parser<'a> {
                 None,
                 false,
                 None,
-            )
+            )?;
+            if let Some(value) = obligation_mode {
+                self.policy_declarations.push(crate::Policy::PolicyDeclaration {
+                    key: crate::Policy::PolicyKey::Unsafe,
+                    value,
+                    scope: crate::Policy::PolicyScope::Function,
+                    span: marker_span,
+                    target: Some(function.span),
+                    source: "<source>".to_string(),
+                });
+            }
+            Ok(function)
         }
     
-        /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
-        /// module …` or `#Bindgen module …`? Retired lowercase markers are also
+        /// S59 (E2-M14): is the cursor at the start of a C FFI module — `@Extern
+        /// module …` or `@Bindgen module …`? Retired lowercase markers are also
         /// recognized here so E0060 can recover to the canonical form.
         pub(super) fn at_c_module(&self) -> bool {
-            if !matches!(self.peek().kind, TokKind::Hash) {
+            if !matches!(self.peek().kind, TokKind::At) {
                 return false;
             }
             let intro_is_c = match &self.peek2().kind {
@@ -414,8 +444,8 @@ impl<'a> Parser<'a> {
             intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
         }
     
-        /// S59 (E2-M14): parse `#Extern module c.<lib> { … }` (overlay) or
-        /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
+        /// S59 (E2-M14): parse `@Extern module c.<lib> { … }` (overlay) or
+        /// `@Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
         /// declarations share the `extern_fn` shape (`fn name(args) -> T = "Sym";`).
         pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
             use crate::AST::CModuleKind;
@@ -423,9 +453,9 @@ impl<'a> Parser<'a> {
             let kind = match &self.peek().kind {
                 TokKind::KwExtern => {
                     let span = Span::new(start.start, self.bump().span.end);
-                    let old = format!("#{}", "extern");
+                    let old = format!("@{}", "extern");
                     self.diags
-                        .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
+                        .push(self.retired_c_module_marker_diag(&old, "@Extern", span));
                     CModuleKind::Extern
                 }
                 TokKind::Ident(n) if n == Syntax::ATTR_EXTERN_MODULE => {
@@ -438,22 +468,22 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
                     let span = Span::new(start.start, self.bump().span.end);
-                    let old = format!("#{}", Syntax::ATTR_BINDGEN_RETIRED);
+                    let old = format!("@{}", Syntax::ATTR_BINDGEN_RETIRED);
                     self.diags
-                        .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
+                        .push(self.retired_c_module_marker_diag(&old, "@Bindgen", span));
                     CModuleKind::Bindgen
                 }
                 other => {
                     return Err(Diagnostic::error(
                         "E0003",
                         format!(
-                            "expected `{}` or `{}` after `#`, found {}",
+                            "expected `{}` or `{}` after `@`, found {}",
                             Syntax::ATTR_EXTERN_MODULE,
                             Syntax::ATTR_BINDGEN,
                             describe(other)
                         ),
-                        "a C FFI module begins with `#Extern module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`".to_string(),
-                        "write: #Extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
+                        "a C FFI module begins with `@Extern module c.<lib>` or `@Bindgen module c.<lib>.__bindgen__`".to_string(),
+                        "write: @Extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
                         Some(self.peek().span),
                     ));
                 }
@@ -469,14 +499,14 @@ impl<'a> Parser<'a> {
                     let span = Span::new(start.start, self.bump().span.end);
                     let old = format!("@{}", "extern");
                     self.diags
-                        .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
+                        .push(self.retired_c_module_marker_diag(&old, "@Extern", span));
                     CModuleKind::Extern
                 }
                 TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
                     let span = Span::new(start.start, self.bump().span.end);
                     let old = format!("@{}", Syntax::ATTR_BINDGEN_RETIRED);
                     self.diags
-                        .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
+                        .push(self.retired_c_module_marker_diag(&old, "@Bindgen", span));
                     CModuleKind::Bindgen
                 }
                 _ => unreachable!("at_retired_at_c_module guards marker spelling"),
@@ -488,7 +518,7 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0060",
                 format!("C FFI modules use `{}`, not `{}`", new, old),
-                "C FFI markers are PascalCase `#` markers so generated and hand-written bindings share one marker family"
+                "C FFI rules use the one PascalCase `@Rule` family in generated and hand-written bindings"
                     .to_string(),
                 format!("write `{}` before `module c.<lib>`", new),
                 Some(span),
@@ -518,8 +548,8 @@ impl<'a> Parser<'a> {
                     format!(
                         "write: {} module {}.<lib> {{ … }}",
                         match kind {
-                            CModuleKind::Extern => "#Extern",
-                            CModuleKind::Bindgen => "#Bindgen",
+                            CModuleKind::Extern => "@Extern",
+                            CModuleKind::Bindgen => "@Bindgen",
                         },
                         Syntax::C_MODULE_ROOT
                     ),
@@ -541,7 +571,7 @@ impl<'a> Parser<'a> {
                         "E0003",
                         format!("a C FFI module path can't have a `.{}` segment", seg),
                         "the only legal third segment is the reserved `__bindgen__` on a generated cache module".to_string(),
-                        format!("write: #Extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
+                        format!("write: @Extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
                         Some(seg_span),
                     ));
                 }
@@ -557,29 +587,29 @@ impl<'a> Parser<'a> {
                         Syntax::C_MODULE_ROOT, lib, Syntax::C_BINDGEN_SEGMENT, Syntax::C_BINDGEN_SEGMENT
                     ),
                     format!(
-                        "autogen lives in `{}.<lib>.{}`; users declare overlays as `#{} module {}.<lib>` only",
+                        "autogen lives in `{}.<lib>.{}`; users declare overlays as `@{} module {}.<lib>` only",
                         Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT
                     ),
                     format!(
-                        "drop `{}` from your module path, or use `#{} module {}.{} {{ … }}`",
+                        "drop `{}` from your module path, or use `@{} module {}.{} {{ … }}`",
                         Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib
                     ),
                     Some(path_span),
                 ));
             }
-            // A `#Bindgen` module must carry the `__bindgen__` segment (it is the
+            // A `@Bindgen` module must carry the `__bindgen__` segment (it is the
             // generated surface). Without it the path is malformed.
             if kind == CModuleKind::Bindgen && !has_bindgen_seg {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "a `#Bindgen` module path must end in `.{}`",
+                        "a `@Bindgen` module path must end in `.{}`",
                         Syntax::C_BINDGEN_SEGMENT
                     ),
-                    "the compiler generates `#Bindgen module c.<lib>.__bindgen__` cache files"
+                    "the compiler generates `@Bindgen module c.<lib>.__bindgen__` cache files"
                         .to_string(),
                     format!(
-                        "write: #Bindgen module {}.{}.{} {{ … }}",
+                        "write: @Bindgen module {}.{}.{} {{ … }}",
                         Syntax::C_MODULE_ROOT,
                         lib,
                         Syntax::C_BINDGEN_SEGMENT

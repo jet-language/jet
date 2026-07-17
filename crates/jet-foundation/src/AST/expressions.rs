@@ -242,7 +242,7 @@ pub enum Expr {
     },
     /// D-UNITLIT1: a numeric literal with a unit suffix — `500ms`, `12.50usd`.
     /// The lexer only carries the raw value + suffix text (imports aren't
-    /// known to it); sema resolves `suffix` against an in-scope `#UnitFamily`
+    /// known to it); sema resolves `suffix` against an in-scope `@UnitFamily`
     /// member (PascalCased to its minted distinct-type name) and REWRITES
     /// this node in place to an ordinary distinct-type constructor call
     /// (`Ms(500.0)`) — sugar over the existing distinct-type path, not a new
@@ -259,10 +259,10 @@ pub enum Expr {
         span: Span,
     },
     /// D-CAP9: postfix `p.*` — dereference a raw pointer. Lowers to Rust `*p`;
-    /// gated to `#Unsafe` (E0208). Composes with `.field` as `p.*.field`.
+    /// gated to `@Unsafe` (E0208). Composes with `.field` as `p.*.field`.
     Deref(Box<Expr>, Span),
     /// D-CAP9: prefix `*x` — take a raw pointer to `x` (raw-pointer-of). Legal
-    /// only inside an `#Unsafe` region/fn (E0208). Lowers to `&x as *const _`
+    /// only inside an `@Unsafe` region/fn (E0208). Lowers to `&x as *const _`
     /// inside the gated region.
     RawOf(Box<Expr>, Span),
     /// D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb. Produces a fresh,
@@ -332,28 +332,28 @@ pub enum Expr {
         args: Vec<EnumLitArg>,
         span: Span,
     },
-    /// D-TAINT1 (ratified 2026-06-21): `#Tainted expr` — marks a value as
+    /// D-TAINT1 (ratified 2026-06-21): `@Tainted expr` — marks a value as
     /// untrusted at its source. A value-fact tag (D-QUAL1): it rides the value,
     /// taint spreads to anything derived from it, and a tainted value reaching a
-    /// sink effect (`Db`/`Exec`/`Net`) without passing through a `#Sanitizer fn`
+    /// sink effect (`Db`/`Exec`/`Net`) without passing through a `@Sanitizer fn`
     /// is E0721. The tag is static and **erased in codegen** (I3) — lowering
     /// emits the inner expression unchanged, like `Expr::Present` but unwrapped.
     ///
     /// D-TAINT2 (ratified 2026-07-13): the kind is named in parens —
-    /// `#Tainted(Credential) value`. `None` means the default `.Input` kind.
+    /// `@Tainted(Credential) value`. `None` means the default `.Input` kind.
     Tainted(Box<Expr>, Option<String>, Span),
     /// S32: `value(expr)` — present optional.
     Present(Box<Expr>, Span),
     /// S32: bare `null` — absent optional.
     Absent(Span),
-    /// D-TOOL2 (E2-M11; D-CASING1): `#Todo` typed hole. Compiles anywhere; panics at
+    /// D-TOOL2 (E2-M11; D-CASING1): `@Todo` typed hole. Compiles anywhere; panics at
     /// runtime with file, line, and the expected type (filled in by sema).
     Todo {
         span: Span,
         /// The expected type, as a display string — filled by sema.
         expected_type: Option<String>,
     },
-    /// D-SIMD2 (ratified 2026-06-24): a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max`,
+    /// D-SIMD2 (ratified 2026-06-24): a reduce-op marker `@Add`/`@Mul`/`@Min`/`@Max`,
     /// valid ONLY as the sole argument to a SIMD lane `.reduce(#Op)`. The string is
     /// the marker name (without `#`). Sema validates the marker set and that it sits
     /// in a `reduce` arg; codegen lowers it as part of the reduce call (the marker
@@ -405,7 +405,7 @@ pub enum Expr {
     },
     /// S58 (E2-M13): `mem.Ptr<T>.from_addr(addr)` — build a typed pointer from
     /// an integer address. The element type `elem` is the `<T>` argument; the
-    /// result type is `Ptr<elem>`. Only legal inside an `#Unsafe` region in a
+    /// result type is `Ptr<elem>`. Only legal inside an `@Unsafe` region in a
     /// module that did `use core.mem` (else E3101/E3102).
     PtrFromAddr {
         /// The module alias the call came through (`mem` in the example).

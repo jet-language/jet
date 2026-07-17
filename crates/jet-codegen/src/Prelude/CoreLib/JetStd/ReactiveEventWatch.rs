@@ -154,7 +154,7 @@
         });
     }
 
-    /// D-REACTCORE1: `#Reactive` scope marker — alias for `jet_reactive_effect`.
+    /// D-REACTCORE1: `@Reactive` scope marker — alias for `jet_reactive_effect`.
     pub fn jet_reactive_scope<F: Fn() + 'static>(body: F) {
         jet_reactive_effect(body);
     }

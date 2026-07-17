@@ -90,7 +90,7 @@ pub struct SymbolDB {
     pub hover: Vec<HoverEntry>,
     pub inlay: Vec<InlayHint>,
     pub nodes: Vec<StructuralNode>,
-    /// D-LINTPOLICY1=A: every spelled bypass (`#Unsafe`, `.drop(reason)`,
+    /// D-LINTPOLICY1=A: every spelled bypass (`@Unsafe`, `.drop(reason)`,
     /// `#[allow(lint)]`) collected during the walk.
     pub bypasses: Vec<BypassFact>,
     /// Sema-owned returned-view summaries keyed by semantic function identity.
@@ -736,15 +736,27 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     ret: f.return_type.clone(),
                 },
             };
-            let hover_text = hover_for_fn(f);
+            let mut hover_text = hover_for_fn(f);
+            for (active, name) in [(f.is_unsafe, Syntax::KW_UNSAFE), (f.is_pure, Syntax::KW_PURE), (f.is_sanitizer, Syntax::KW_SANITIZER), (f.is_replayable, Syntax::ATTR_REPLAYABLE)] {
+                if active && jet_foundation::Policy::rule_allows(name, jet_foundation::Policy::RuleSite::Function) {
+                    hover_text.push_str(&format!("\nrule: @{name} (function, site-bound)"));
+                }
+            }
+            let declarations = module.policy_declarations.iter().filter(|d| matches!(d.scope, jet_foundation::Policy::PolicyScope::Organization | jet_foundation::Policy::PolicyScope::Package | jet_foundation::Policy::PolicyScope::Module) || (d.scope == jet_foundation::Policy::PolicyScope::Function && d.target == Some(f.span))).cloned().collect::<Vec<_>>();
+            for key in [jet_foundation::Policy::PolicyKey::NoAlloc, jet_foundation::Policy::PolicyKey::ZeroRc, jet_foundation::Policy::PolicyKey::ArenaBounded, jet_foundation::Policy::PolicyKey::Unsafe, jet_foundation::Policy::PolicyKey::ScopedGc] {
+                if let Ok(Some(effective)) = jet_foundation::Policy::resolve(key, declarations.clone()) {
+                    hover_text.push_str("\npolicy: ");
+                    hover_text.push_str(&jet_foundation::Policy::explain(&effective));
+                }
+            }
             ctx.db.hover.push(HoverEntry {
                 span: f.name_span,
                 module_path: mp.to_string(),
                 text: hover_text,
             });
             ctx.db.defs.push(sym);
-            // D-LINTPOLICY1=A: `#Unsafe("reason") fn …` is a spelled
-            // whole-function bypass, distinct from an in-body `#Unsafe`
+            // D-LINTPOLICY1=A: `@Unsafe("reason") fn …` is a spelled
+            // whole-function bypass, distinct from an in-body `@Unsafe`
             // region.
             if f.is_unsafe {
                 ctx.db.bypasses.push(BypassFact {
@@ -1402,7 +1414,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
-        // D-LINTPOLICY1=A: an `#Unsafe("reason") { … }` audited region is a
+        // D-LINTPOLICY1=A: an `@Unsafe("reason") { … }` audited region is a
         // spelled bypass — record it before recursing into its body.
         AST::Stmt::Unsafe { audit, body, span } => {
             ctx.db.bypasses.push(BypassFact {
@@ -1421,6 +1433,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::Off { body, .. }
         | AST::Stmt::DebugOnly { body, .. }
         | AST::Stmt::Region { body, .. }
+        | AST::Stmt::Policy { body, .. }
         | AST::Stmt::TaskGroup { body, .. }
         | AST::Stmt::Layout { body, .. }
         | AST::Stmt::Caps { body, .. }

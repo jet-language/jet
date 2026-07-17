@@ -107,7 +107,7 @@ int32_t abi_explicit(int32_t a, int32_t b) { return a + b; }
     run_ok(&mut archive, "C archiver");
 
     let explicit_abi = match abi.as_str() {
-        "sysv64" => "#Abi(sysv64) ",
+        "sysv64" => "@Abi(sysv64) ",
         "default" => "",
         other => panic!("unsupported matrix ABI {other}"),
     };
@@ -115,18 +115,18 @@ int32_t abi_explicit(int32_t a, int32_t b) { return a + b; }
         r#"use core.mem
 use c.jetmatrix as c
 
-#Layout(c)
+@Layout(c)
 struct Coord {{ x: Int; y: Int }}
-#Layout(c)
+@Layout(c)
 enum Status {{ Ok = 0; Lost = 7 }}
-#Layout(c, tag: U8)
+@Layout(c, tag: U8)
 enum Packet {{ Ping(Int) = 3; Data(x: Int, y: Int) = 7 }}
-#Layout(c)
+@Layout(c)
 struct Record {{ id: U64; flags: U32 }}
 
 @Pure fn increment(x: I32) -> I32 {{ return x + 1 }}
 
-#Extern module c.jetmatrix {{
+@Extern module c.jetmatrix {{
     fn coord_sum(p: Coord) -> Int = "coord_sum"
     fn status_value(s: Status) -> I32 = "status_value"
     fn packet_value(p: Packet) -> I32 = "packet_value"
@@ -143,7 +143,7 @@ struct Record {{ id: U64; flags: U32 }}
 fn load(id: U64) -> Record ? String {{
     slot: Record := Record.{{id: 0, flags: 0}}
     status: I32 := 1
-    #Unsafe("live non-null out slot; read only after status zero") {{
+    @Unsafe("live non-null out slot; read only after status zero") {{
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = c.load_record(id, p)
         if status.to_int() == 0 {{ slot = ~p.* }}

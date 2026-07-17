@@ -60,8 +60,8 @@ The verification skill owns snapshot, golden, formatter, grammar, and full-suite
 Violating an invariant means stop and fix it.
 
 - **I1 — Safety.** Jet is memory-safe and type-safe by default. Expert escape
-  uses user-written audited `#Unsafe("reason") { … }` or
-  `#Unsafe("reason") fn` regions. Generated Rust `unsafe` may appear only
+  uses user-written audited `@Unsafe("reason") { … }` or
+  `@Unsafe("reason") fn` regions. Generated Rust `unsafe` may appear only
   there or in vetted std/mem internals.
 - **I2 — rustc is hidden.** rustc rejection of generated code is an internal
   compiler error (exit 101), never a user diagnostic.
@@ -160,6 +160,12 @@ Every completed change has one implementer and one fresh-context Sol reviewer:
 The reviewer does not implement. They check missing paths, semantic and safety bugs,
 false-green tests, stale decisions, accidental scope, duplicate mechanisms, and
 orphaned work. A green build never waives review.
+
+Technical verification is agent-owned: the implementer runs the machine checks and
+the independent reviewer validates their evidence. Do not create owner-acceptance
+cards or `needsAcceptance` gates for technical correctness. Reserve owner
+acceptance for an explicit human judgment of UX, DX, visual presentation, copy, or
+other taste, and state exactly what experience the owner should inspect.
 
 Use targeted tests during implementation and review. The verification skill owns when to run
 `scripts/agent/jet-env full scripts/agent/verify-full.sh`; CI runs it again. Keep normal parallelism unless reproducing

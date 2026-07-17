@@ -1,5 +1,5 @@
-//! Taint tracking tests (D-TAINT1): `#Tainted` value-fact propagation, the
-//! `#Sanitizer fn` taint-strip contract, and the tainted→sink error E0721. Taint
+//! Taint tracking tests (D-TAINT1): `@Tainted` value-fact propagation, the
+//! `@Sanitizer fn` taint-strip contract, and the tainted→sink error E0721. Taint
 //! is a compile-time proof, erased in codegen (I3).
 
 fn codes(src: &str) -> Vec<String> {
@@ -15,7 +15,7 @@ fn tainted_to_exec_sink_is_error() {
     let src = r#"
 use core.process as process
 fn run() {
-    name :: #Tainted "world; rm -rf /"
+    name :: @Tainted "world; rm -rf /"
     process.run(["echo", name]) ?? return
 }
 "#;
@@ -25,15 +25,15 @@ fn run() {
     );
 }
 
-/// Routing the tainted value through a `#Sanitizer fn` clears taint — the sink
+/// Routing the tainted value through a `@Sanitizer fn` clears taint — the sink
 /// call is then accepted.
 #[test]
 fn sanitized_value_reaches_sink_ok() {
     let src = r#"
 use core.process as process
-#Sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
+@Sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
 fn run() {
-    name :: #Tainted "world; rm -rf /"
+    name :: @Tainted "world; rm -rf /"
     safe := clean(name)
     process.run(["echo", safe]) ?? return
 }
@@ -52,7 +52,7 @@ fn taint_propagates_through_binding() {
     let src = r#"
 use core.process as process
 fn run() {
-    raw :: #Tainted "evil"
+    raw :: @Tainted "evil"
     cmd := raw
     process.run(["echo", cmd]) ?? return
 }
@@ -70,7 +70,7 @@ fn taint_propagates_through_interpolation() {
     let src = r#"
 use core.process as process
 fn run() {
-    user :: #Tainted "bob"
+    user :: @Tainted "bob"
     arg := "hello {user}"
     process.run(["echo", arg]) ?? return
 }
@@ -87,7 +87,7 @@ fn reassign_to_clean_clears_taint() {
     let src = r#"
 use core.process as process
 fn run() {
-    x := #Tainted "evil"
+    x := @Tainted "evil"
     x = "safe-literal"
     process.run(["echo", x]) ?? return
 }
@@ -121,7 +121,7 @@ fn run() {
 fn tainted_at_non_sink_is_ok() {
     let src = r#"
 fn run() {
-    name :: #Tainted "world"
+    name :: @Tainted "world"
     print(name)
 }
 "#;
@@ -131,13 +131,13 @@ fn run() {
     );
 }
 
-/// I3: taint is erased in codegen — a `#Tainted` value and its bare twin generate
-/// byte-identical Rust. The `#Tainted` tag leaves no runtime trace.
+/// I3: taint is erased in codegen — a `@Tainted` value and its bare twin generate
+/// byte-identical Rust. The `@Tainted` tag leaves no runtime trace.
 #[test]
 fn taint_is_erased_in_codegen() {
     let tagged = r#"
 fn run() {
-    name :: #Tainted "world"
+    name :: @Tainted "world"
     print(name)
 }
 "#;
@@ -151,23 +151,23 @@ fn run() {
     let b = jet::compile(plain).expect("plain compiles").rust;
     assert_eq!(
         a, b,
-        "the #Tainted tag must leave no trace in generated Rust (I3)"
+        "the @Tainted tag must leave no trace in generated Rust (I3)"
     );
 }
 
-/// A `#Sanitizer fn` is a real, callable function; its body and signature behave
+/// A `@Sanitizer fn` is a real, callable function; its body and signature behave
 /// exactly like any other function (the modifier only affects the taint pass).
 #[test]
 fn sanitizer_fn_is_a_normal_function() {
     let src = r#"
-#Sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
+@Sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
 "#;
     assert!(
         codes(src).is_empty(),
-        "a #Sanitizer fn must compile and run: {:?}",
+        "a @Sanitizer fn must compile and run: {:?}",
         codes(src)
     );
 }
@@ -175,7 +175,7 @@ fn run() {
 // --- D-TAINT-SAN (ratified 2026-06-25): bare `sanitizer fn` teaching error ---
 
 /// Bare lowercase `sanitizer fn` is the retired spelling → E0059, pointing at
-/// the PascalCase marker `#Sanitizer fn` (mirrors `pure` → `@Pure` / E0053).
+/// the PascalCase marker `@Sanitizer fn` (mirrors `pure` → `@Pure` / E0053).
 #[test]
 fn bare_sanitizer_fn_is_e0059() {
     let src = r#"
@@ -225,14 +225,14 @@ fn run() {
     );
 }
 
-// ── D-TAINT2=A tests: `#Tainted(Credential)` + E0722 ─────────────────────────
+// ── D-TAINT2=A tests: `@Tainted(Credential)` + E0722 ─────────────────────────
 
-/// `#Tainted(Credential)` reaching bare `print` is E0722.
+/// `@Tainted(Credential)` reaching bare `print` is E0722.
 #[test]
 fn tainted_credential_to_print_is_e0722() {
     let src = r#"
 fn run() {
-    token :: #Tainted(Credential) "bearer eyJhbGci..."
+    token :: @Tainted(Credential) "bearer eyJhbGci..."
     print(token)
 }
 "#;
@@ -243,19 +243,19 @@ fn run() {
     );
 }
 
-/// Bare `#Tainted` (no kind) at `print` is NOT E0722 — only Credential kind triggers it.
+/// Bare `@Tainted` (no kind) at `print` is NOT E0722 — only Credential kind triggers it.
 /// (E0721 would fire only at Db/Exec/Net sinks; bare taint at print is permitted.)
 #[test]
 fn tainted_input_to_print_is_not_e0722() {
     let src = r#"
 fn run() {
-    user_input :: #Tainted "hello world"
+    user_input :: @Tainted "hello world"
     print(user_input)
 }
 "#;
     assert!(
         !codes(src).iter().any(|c| c == "E0722"),
-        "bare #Tainted reaching print must NOT be E0722: {:?}",
+        "bare @Tainted reaching print must NOT be E0722: {:?}",
         codes(src)
     );
 }
@@ -265,7 +265,7 @@ fn run() {
 fn tainted_credential_propagates_through_binding() {
     let src = r#"
 fn run() {
-    raw_token :: #Tainted(Credential) "s3cr3t"
+    raw_token :: @Tainted(Credential) "s3cr3t"
     derived := raw_token
     print(derived)
 }

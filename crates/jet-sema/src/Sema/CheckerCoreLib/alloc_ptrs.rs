@@ -12,65 +12,6 @@ pub(crate) fn is_allocator_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if matches!(n.as_str(), "Arena" | "Bump" | "Pool" | "Fixed"))
 }
 
-/// D-OPTGC1: method calls on the `Gc` constructor sentinel (`gc.Gc.new<T>(…)`).
-pub(crate) fn gc_method_return(
-    method: &str,
-    type_args: &[Type],
-    args: &[crate::AST::CallArg],
-    span: Span,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Option<Type>> {
-    match method {
-        "new" => {
-            if type_args.len() != 1 {
-                diags.push(Diagnostic::error(
-                    "E0103",
-                    "`Gc.new` needs exactly one type argument".to_string(),
-                    "pass the element type in angle brackets".to_string(),
-                    "write `gc.Gc.new<Int>(value)`".to_string(),
-                    Some(span),
-                ));
-                return Some(None);
-            }
-            if args.len() != 1 {
-                diags.push(Diagnostic::error(
-                    "E0103",
-                    "`Gc.new` takes exactly one value argument".to_string(),
-                    "pass the owned value to store in the traced heap".to_string(),
-                    "write `gc.Gc.new<MyType>(value)`".to_string(),
-                    Some(span),
-                ));
-                return Some(None);
-            }
-            Some(Some(Type::Apply {
-                name: Syntax::GC_TYPE.to_string(),
-                args: vec![type_args[0].clone()],
-            }))
-        }
-        "with" | "with_mut" => {
-            if args.len() != 1 {
-                diags.push(Diagnostic::error(
-                    "E0103",
-                    format!("`Gc.{method}` takes exactly one closure argument"),
-                    "pass a closure that receives the inner value".to_string(),
-                    format!("write `handle.{method}(|v| {{ … }})`"),
-                    Some(span),
-                ));
-                return Some(None);
-            }
-            Some(Some(Type::Named("__gc_with_infer__".to_string())))
-        }
-        _ => None,
-    }
-}
-
-pub(crate) fn is_gc_type(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Apply { name, .. } if name == Syntax::GC_TYPE
-    )
-}
-
 pub(crate) fn alloc_method_return(
     type_name: &str,
     method: &str,
@@ -102,6 +43,7 @@ pub(crate) fn alloc_method_return(
             }
             Some(Some(Type::Named(type_name.to_string())))
         }
+        "over" if type_name == "Fixed" => Some(Some(Type::Named(type_name.to_string()))),
         // D-ALLOC1: `alloc(value)` — allocates a value into the arena.
         // Returns the value's type; we infer it from the argument.
         "alloc" => {
@@ -132,51 +74,33 @@ pub(crate) fn alloc_method_return(
             }
             Some(Some(unit))
         }
-        // D-ALLOC-D: `free()` — returns the backing memory to the OS.
-        "free" => {
-            if !args.is_empty() {
-                diags.push(Diagnostic::error(
-                    "E0103",
-                    format!("`{}.free` takes no arguments", type_name),
-                    "free releases the backing memory to the OS".to_string(),
-                    "write `arena.free()`".to_string(),
-                    Some(span),
-                ));
-            }
-            Some(Some(unit))
-        }
         _ => {
+            let (why, fix) = if method == "free" {
+                (
+                    "allocator terminal release uses the same nominal `Close` protocol as every resource".to_string(),
+                    "write `close(^allocator)`; use `allocator.reset()` only when reusing its backing storage".to_string(),
+                )
+            } else {
+                let methods = if type_name == "Fixed" {
+                    "`new`, `over`, `alloc`, `reset`"
+                } else {
+                    "`new`, `alloc`, `reset`"
+                };
+                (
+                    format!("`{}` supports: {}", type_name, methods),
+                    format!("check the method name — valid methods are {methods}"),
+                )
+            };
             diags.push(Diagnostic::error(
                 "E0102",
                 format!("`{}` has no method `{}`", type_name, method),
-                format!("`{}` supports: `new`, `alloc`, `reset`, `free`", type_name),
-                format!("check the method name — valid methods are `alloc`, `reset`, `free`"),
+                why,
+                fix,
                 Some(span),
             ));
             None
         }
     }
-}
-
-/// D-ALLOC-D (ratified 2026-06-19): E3104 — use of an allocator value after it was
-/// freed or reset.
-pub(crate) fn e3104(alloc_name: &str, method: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E3104",
-        format!(
-            "`{}` was already {}; this value lives in `{}` which is gone",
-            alloc_name, method, alloc_name
-        ),
-        format!(
-            "calling `{}.{}` invalidated all values allocated in `{}`",
-            alloc_name, method, alloc_name
-        ),
-        format!(
-            "move the `alloc` call before the `{}`, or create a new allocator",
-            method
-        ),
-        Some(span),
-    )
 }
 
 pub(crate) fn io_error_ty() -> Type {
@@ -224,14 +148,14 @@ pub fn ptr_elem(t: &Type) -> Option<Type> {
     }
 }
 
-/// E3101: a low-level memory operation used outside an `#Unsafe` block.
+/// E3101: a low-level memory operation used outside an `@Unsafe` block.
 pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3101",
-        format!("`{}` can only run inside an `#Unsafe` block", op),
+        format!("`{}` can only run inside an `@Unsafe` block", op),
         "this operation can violate memory safety, so it must sit in an audited region".to_string(),
         format!(
-            "wrap it: #{}(\"why this is safe\") {{ … }}",
+            "wrap it: @{}(\"why this is safe\") {{ … }}",
             Syntax::KW_UNSAFE
         ),
         Some(span),

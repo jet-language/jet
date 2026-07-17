@@ -1,6 +1,6 @@
 use crate::AST::{AccessConvention, BinOp, Call, Expr, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::e0904;
+use crate::Generics::{e0904, e0905};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::{
@@ -59,6 +59,54 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+            // D-SHAPE-RESOURCE2=A: `close(^value)` is ambient syntax sugar for
+            // the sole nominal `Close.close(^self)` protocol. It is not a
+            // name-based/free-function cleanup hook.
+            if call.name == Syntax::RESOURCE_CLOSE {
+                if call.args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`close` takes exactly one resource, got {}", call.args.len()),
+                        "`close` consumes one value through its nominal `Close` implementation"
+                            .to_string(),
+                        "write `close(^resource)`".to_string(),
+                        Some(call.name_span),
+                    ));
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(None);
+                }
+                let arg = &mut call.args[0];
+                let ty = self.infer(&mut arg.expr);
+                if arg.convention != AccessConvention::Move {
+                    self.diags.push(Diagnostic::error(
+                        "E0201",
+                        "`close` takes ownership of its resource".to_string(),
+                        "`Close.close(^self)` is consuming so cleanup runs on exactly one owner"
+                            .to_string(),
+                        "write `close(^resource)`".to_string(),
+                        Some(arg.span),
+                    ));
+                } else if let Some(ty) = &ty {
+                    let nominal = match ty {
+                        Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                        _ => None,
+                    };
+                    if !nominal.is_some_and(|name| {
+                        self.trait_reg
+                            .implements_trait(name, Syntax::TRAIT_CLOSE)
+                    }) {
+                        self.diags.push(e0905(&ty.name(), Syntax::TRAIT_CLOSE, arg.expr.span(), false));
+                    }
+                    if let Expr::Ident(name, span) = &arg.expr {
+                        if !ty.is_scalar() {
+                            self.mark_moved(name.clone(), *span);
+                        }
+                    }
+                }
+                return Some(None);
+            }
             // D-NUMOPS1: `wrapping`/`saturating`/`checked` opt-ins wrap a single integer
             // `+`/`-`/`*`/`/`. A user-defined function of the same name shadows them.
             if matches!(
@@ -177,18 +225,18 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0429",
                         format!(
-                            "`{}` is not ambient here — this file opted out with `#{}`",
+                            "`{}` is not ambient here — this file opted out with `@{}`",
                             Syntax::BUILTIN_PRINT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
                         format!(
-                            "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+                            "`@{}` disables the curated prelude auto-imports (`{}` / `{}`)",
                             Syntax::MARKER_NO_PRELUDE,
                             Syntax::BUILTIN_PRINT,
                             Syntax::BUILTIN_INPUT
                         ),
                         format!(
-                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
+                            "write `use core.io as io` and call `io.{}(…)`, or remove `@{}`",
                             Syntax::BUILTIN_PRINT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
@@ -248,7 +296,7 @@ impl<'a> Checker<'a> {
             // D-PRELUDE1 = B: `input` is ambient — no `use core.io` needed.
             // Resolves to the same semantics as `io.input`: optional String prompt,
             // returns Result(String, IoError). Shadowed by any user-defined `input`.
-            // D-PRELUDEX1=A: `#NoPrelude` turns the ambient off.
+            // D-PRELUDEX1=A: `@NoPrelude` turns the ambient off.
             if call.name == Syntax::BUILTIN_INPUT
                 && self.funcs.get(Syntax::BUILTIN_INPUT).is_none()
                 && self.lookup(Syntax::BUILTIN_INPUT).is_none()
@@ -257,18 +305,18 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0429",
                         format!(
-                            "`{}` is not ambient here — this file opted out with `#{}`",
+                            "`{}` is not ambient here — this file opted out with `@{}`",
                             Syntax::BUILTIN_INPUT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
                         format!(
-                            "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+                            "`@{}` disables the curated prelude auto-imports (`{}` / `{}`)",
                             Syntax::MARKER_NO_PRELUDE,
                             Syntax::BUILTIN_PRINT,
                             Syntax::BUILTIN_INPUT
                         ),
                         format!(
-                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
+                            "write `use core.io as io` and call `io.{}(…)`, or remove `@{}`",
                             Syntax::BUILTIN_INPUT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
@@ -332,9 +380,9 @@ impl<'a> Checker<'a> {
     
             // D-LIN1-DROP (ratified 2026-06-25): `drop(x)` deliberately discards a
             // value by moving it to nowhere — its `Drop` runs. The blessed use is to
-            // satisfy a `#SingleUse` value's consume duty when there is genuinely no
+            // satisfy a `@SingleUse` value's consume duty when there is genuinely no
             // job left to do; that decision must be audited, so `drop` of a
-            // `#SingleUse` value is legal only inside an `#Unsafe("reason")`
+            // `@SingleUse` value is legal only inside an `@Unsafe("reason")`
             // region/fn (the reason IS the audit note) — otherwise E0143. Shadowed
             // by any user `drop` fn or local of that name.
             if call.name == Syntax::BUILTIN_CONSUME
@@ -730,12 +778,13 @@ impl<'a> Checker<'a> {
             // the maximal effect set; a Jet callee's effects flow in via its edge.
             if sig.is_extern {
                 if let Some(effect) = &sig.foreign_effect_root {
+                    self.record_open_memory_dispatch(call.name_span, "foreign function body");
                     self.record_effect(effect);
                 } else {
-                    self.record_maximal();
+                    self.record_maximal(call.name_span);
                 }
             } else {
-                self.record_edge(call.name.clone());
+                self.record_edge(call.name.clone(), call.name_span);
             }
     
             // E3211 (card #436): a `String` literal with a known interior NUL
@@ -772,15 +821,15 @@ impl<'a> Checker<'a> {
                 }
             }
 
-            // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
-            // must take responsibility inside their own `#Unsafe` block.
+            // E3103 (S58): an `@Unsafe fn` is a whole-function contract; callers
+            // must take responsibility inside their own `@Unsafe` block.
             if sig.is_unsafe && !self.in_unsafe {
                 self.diags.push(Diagnostic::error(
                     "E3103",
-                    format!("`{}` is an `#Unsafe` function", call.name),
+                    format!("`{}` is an `@Unsafe` function", call.name),
                     "its contract can't be checked by the compiler, so the caller must vouch for it"
                         .to_string(),
-                    format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
+                    format!("call it inside `@{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
                     Some(call.name_span),
                 ));
             }
@@ -1066,11 +1115,16 @@ impl<'a> Checker<'a> {
                         self.fx_maximal,
                     )
                 });
+                let memory_multiplier = self.memory_control_multiplier;
+                if matches!(effective_params.get(i), Some((_, Type::Fn { .. }))) {
+                    self.memory_control_multiplier = None;
+                }
                 let arg_ty = if args_pre_inferred {
                     pre_inferred.get(i).and_then(|t| t.clone())
                 } else {
                     self.infer(&mut arg.expr)
                 };
+                self.memory_control_multiplier = memory_multiplier;
                 if sig.is_c_abi && matches!(effective_params.get(i), Some((_, Type::Fn { .. }))) {
                     let safe = match &arg.expr {
                         Expr::Ident(callback, _) => self.funcs.get(callback).is_some_and(|f| {
@@ -1172,7 +1226,7 @@ impl<'a> Checker<'a> {
                     }
                 }
     
-                // D-LIN1 / E0142: a `#SingleUse` value may only be moved/consumed. If
+                // D-LIN1 / E0142: a `@SingleUse` value may only be moved/consumed. If
                 // it reaches a parameter that does not take ownership (`^`), the call
                 // would borrow it (`&`/`view`/read) or copy it (an implicit clone) —
                 // both are forbidden, since the value has exactly one use to give.
@@ -1192,7 +1246,9 @@ impl<'a> Checker<'a> {
                 match (param_conv, arg.convention) {
                     (AccessConvention::Move, AccessConvention::Read) => {
                         if let Expr::Ident(name, span) = &arg.expr {
-                            if is_cloneable(param_ty, self.registry) {
+                            if !self.is_resource_type(param_ty)
+                                && is_cloneable(param_ty, self.registry)
+                            {
                                 arg.flags.implicit_clone = true;
                                 // D-MEM1/S2 (was D-L0201 lint): a hard error now,
                                 // regardless of liveness — no clone is ever silent.
@@ -1329,6 +1385,13 @@ impl<'a> Checker<'a> {
                         if let Some(info) = self.lookup(name) {
                             if matches!(info.ty, Type::Shared(_)) {
                                 arg.flags.shared_auto_clone = true;
+                                self.record_memory_event(crate::Sema::MemoryEvent::new(
+                                    crate::Sema::MemoryEventKind::RetainRelease,
+                                    *span,
+                                    format!(
+                                        "loop use of `{name}` auto-retains a shared reference"
+                                    ),
+                                ));
                                 self.diags.push(Diagnostic::lint(
                                     "L0202",
                                     format!(

@@ -431,7 +431,7 @@ fn initialize_response(id: &JsonValue) -> String {
         ],
         "tokenModifiers": [
           "declaration","readonly","move","writeBorrow","copy",
-          "directive","contract"
+          "rule"
         ]
       },
       "full": { "delta": true },
@@ -2243,7 +2243,7 @@ fn code_lenses_for(uri: &str, src: &str) -> Vec<String> {
                 "jet.runFile",
                 &[uri.to_string()],
             ));
-        } else if trimmed.starts_with("#Test") {
+        } else if trimmed.starts_with("@Test") {
             out.push(code_lens_json(
                 idx,
                 indent,

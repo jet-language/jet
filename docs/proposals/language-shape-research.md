@@ -264,7 +264,7 @@ Object subclass: User [
 ada := User new
     name: 'Ada';
     active: true;
-    role: #admin;
+    role: @admin;
     yourself.
 
 answer := ada shouldGreet.

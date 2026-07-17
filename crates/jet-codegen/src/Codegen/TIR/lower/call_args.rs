@@ -104,10 +104,20 @@ pub(crate) fn lower_one_call_arg(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TCallArg {
+    let resource_move = matches!(
+        (&a.expr, &conv),
+        (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
+    );
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
     let value = match (&a.expr, &conv) {
+        (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
+            TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::ResourceTake(env.rust_name_of(name)),
+            }
+        }
         (Expr::Ident(name, _), Some((_, Type::Fn { .. }))) if a.flags.c_callback_symbol => TExpr {
             ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
             kind: TExprKind::ConstInline(cx.mangle_name(name)),
@@ -151,13 +161,14 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
-    let clone = a.flags.implicit_clone
+    let clone = !resource_move
+        && (a.flags.implicit_clone
         || matches!(
             (&a.expr, conv.as_ref()),
             (Expr::Ident(name, _), None | Some((AccessConvention::Move, _)))
                 if env.is_borrowed(name)
                     && env.ty_of(name).is_some_and(|ty| !ty.is_scalar())
-        );
+        ));
     let arc_clone = a.flags.shared_auto_clone;
     // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
     let fn_coerce = match &conv {

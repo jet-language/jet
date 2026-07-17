@@ -315,7 +315,7 @@ fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
     }
 }
 
-/// A reasonable zero value for a type with no `#[Default(expr)]` argument —
+/// A reasonable zero value for a type with no `@[Default(expr)]` argument —
 /// mirrors what `Default::default()` would build for AOT's Rust field type.
 fn zero_value(ty: &Type) -> CtValue {
     match ty {

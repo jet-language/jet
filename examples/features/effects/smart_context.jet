@@ -1,4 +1,4 @@
-// D-CTX1 (ratified 2026-06-22, G2): Smart Context — `#Context(field: value) { … }`.
+// D-CTX1 (ratified 2026-06-22, G2): Smart Context — `@Context(field: value) { … }`.
 // Expert tier: swaps an ambient field for a block's lexical+dynamic extent, then
 // restores it on exit (return, break, ?, panic). Q2 = CÎ²: restore is per-block.
 // Q1 = A2: an explicit allocator arg at a call site beats the ambient context.
@@ -8,7 +8,7 @@ fn run() {
     // Arena declared before the block; it outlives the context scope.
     arena :: mem.Arena.new()
     // Swap the ambient allocator to `arena` for this block only.
-    #Context(allocator: arena) {
+    @Context(allocator: arena) {
         // Inside the block the ambient allocator is `arena`.
         // Explicit `arena.alloc(v)` still uses `arena` directly (Q1 = A2).
         x :: arena.alloc(10)
@@ -18,5 +18,5 @@ fn run() {
     // A pre-block allocation is unaffected.
     y :: arena.alloc(20)
     print(y)
-    arena.free()
+    close(^arena)
 }

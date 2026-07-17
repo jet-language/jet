@@ -10,7 +10,7 @@ use jet::Interpreter::{dev_iteration, RunOutcome};
 
 /// Fixtures allowed to emit a *gated* `unsafe { … }` / `unsafe fn` block —
 /// the same stems golden.rs treats as intentionally exercising the audited
-/// `#Unsafe` expert tier (I1). Everything else must generate zero bare
+/// `@Unsafe` expert tier (I1). Everything else must generate zero bare
 /// `unsafe` in user-authored lowering. Corpus files copied from
 /// `examples/features/<dir>/<name>.jet` are named `ex_<dir>_<name>.jet`
 /// (see `original_example_stem`); every other naming scheme (the `ui_*`
@@ -291,7 +291,7 @@ fn full_corpus_meets_minimum_case_count() {
 /// fixture's generated Rust must be free of bare `unsafe` once the vetted
 /// prelude modules (FFI/mem/term/os/atomic/gtk bridges) are stripped —
 /// except the handful of `examples/features/{lowlevel,memory,effects,
-/// crypto}` stems that intentionally exercise the audited `#Unsafe` gate
+/// crypto}` stems that intentionally exercise the audited `@Unsafe` gate
 /// (`GATED_UNSAFE_STEMS`), which may contain only *gated* `unsafe { … }` /
 /// `unsafe fn` forms, never an ungated one. Mirrors golden.rs's per-example
 /// I1 check, applied across the whole soundness corpus.
@@ -338,7 +338,7 @@ fn generated_rust_has_no_unaudited_unsafe() {
             }
         } else if user_code.contains("unsafe") {
             return Err(format!(
-                "{}: generated Rust contains `unsafe` outside the vetted prelude/gated #Unsafe tier",
+                "{}: generated Rust contains `unsafe` outside the vetted prelude/gated @Unsafe tier",
                 relative(path)
             ));
         }

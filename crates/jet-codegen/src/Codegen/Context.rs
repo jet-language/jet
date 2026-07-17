@@ -15,6 +15,7 @@ pub(crate) struct Cx {
     pub(crate) fn_types: HashMap<String, Type>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    pub(crate) method_self_convs: HashMap<(String, String), AccessConvention>,
     /// c109 Phase 6 (TIR): `(TypeName, method)` -> resolved return type (or `None`
     /// for a unit-returning method). Used by TIR lowering to give a method-call
     /// expression its total result `Type` without re-inferring in codegen.
@@ -87,7 +88,7 @@ pub(crate) struct Cx {
     /// M10 helpers proven reachable by sema.
     pub(crate) used_core: HashSet<String>,
     /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
-    /// stable C callback symbol at some `#Extern` call site. Emission must give
+    /// stable C callback symbol at some `@Extern` call site. Emission must give
     /// exactly these functions `extern "C" fn` — never every `@Pure fn` (that
     /// leaked the purity lever into codegen and broke I3 erasure; 14dd68a5).
     pub(crate) ffi_callback_fns: HashSet<String>,
@@ -112,6 +113,8 @@ pub(crate) struct Cx {
     pub(crate) rollback_types: HashSet<String>,
     /// D-DISPLAYDBG1: user types with an explicit `impl Type.Display`.
     pub(crate) display_types: HashSet<String>,
+    /// D-SHAPE-RESOURCE2=A: user types with an ordinary nominal `Close` impl.
+    pub(crate) close_types: HashSet<String>,
     /// D-ITER-HOOK: `for x in coll` on types implementing `Iterable`.
     pub(crate) iterable_hooks: HashMap<String, IterableHook>,
     /// D-INDEX-HOOK: `coll[k]` on types implementing `Index`.
@@ -153,20 +156,20 @@ pub(crate) struct Cx {
     pub(crate) needed_variadic_arities:
         std::cell::RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<usize>>>,
     /// D-OSTARGET1=A (ratified 2026-07-01, c134): the native OS bucket this
-    /// build is compiling for — an `impl` gated to a different `#Target(Os.*)`
+    /// build is compiling for — an `impl` gated to a different `@Target(Os.*)`
     /// is skipped entirely (mirrors how `Codegen/Web.rs` filters by
     /// `WebBucket`). Defaults to the host OS; the real build pipeline
     /// (`emit_bundle_dbg`) overwrites it from the resolved `--target=<triple>`.
     pub(crate) active_os: crate::Syntax::OsTarget,
-    /// D-STM1=A (card #506): true while lowering the body of a `#Transact` block,
+    /// D-STM1=A (card #506): true while lowering the body of a `@Transact` block,
     /// so a `Shared<T>.edit(f)` inside it routes to the deferred `edit_txn` (the
     /// atomic Shared plane) instead of taking a lock immediately. Set/restored
     /// around the block body in `lower_stmt`'s `Stmt::Transact` arm.
     pub(crate) in_stm_transact: std::cell::Cell<bool>,
     /// D-STM1=A (card #506): set true when a `Shared.edit` inside the current
-    /// `#Transact` body routed to `edit_txn` — i.e. the block actually touches the
+    /// `@Transact` body routed to `edit_txn` — i.e. the block actually touches the
     /// Shared plane and so needs the `jet_stm::begin()/commit()` scaffold emitted.
-    /// Save/restored per block so each `#Transact` reports its own use.
+    /// Save/restored per block so each `@Transact` reports its own use.
     pub(crate) stm_touched: std::cell::Cell<bool>,
 }
 
@@ -1318,14 +1321,10 @@ impl Cx {
                 format!("std::collections::VecDeque<{}>", self.rust_type(&args[0]))
             }
             // S58 (E2-M13): `Ptr<T>` lowers to a Rust raw pointer `*mut T`.
-            // Memory safety is enforced in sema (the `#Unsafe` gate); codegen
+            // Memory safety is enforced in sema (the `@Unsafe` gate); codegen
             // is dumb.
             Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*mut {}", self.rust_type(&args[0]))
-            }
-            // D-OPTGC1: `Gc<T>` lowers to the traced handle in the vetted prelude.
-            Type::Apply { name, args } if name == Syntax::GC_TYPE && args.len() == 1 => {
-                format!("jet_gc::Gc<{}>", self.rust_type(&args[0]))
             }
             Type::Apply { name, args } => {
                 let head = if let Some((alias, leaf)) = name.split_once('.') {
@@ -1491,12 +1490,41 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_sigs = import_sig_map(bundle, module_idx);
     cx.import_rets = import_ret_map(bundle, module_idx);
     cx.core_imports = core_import_map(bundle, module_idx);
+    register_core_close_types(cx);
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+}
+
+fn register_core_close_types(cx: &mut Cx) {
+    let imports = |module: &str| cx.core_imports.values().any(|m| m == module);
+    if imports("core.files") {
+        cx.close_types.extend(
+            ["FileReader", "FileWriter", "FileLock"]
+                .into_iter()
+                .map(str::to_string),
+        );
+    }
+    if imports("core.net") {
+        cx.close_types.extend(
+            ["TcpStream", "UnixStream", "TlsStream"]
+                .into_iter()
+                .map(str::to_string),
+        );
+    }
+    if imports(Syntax::CORE_MEM_MODULE) || imports(Syntax::CORE_MEM_ALLOC_MODULE) {
+        cx.close_types.extend(
+            ["Arena", "Bump", "Pool", "Fixed"]
+                .into_iter()
+                .map(str::to_string),
+        );
+    }
+    if imports("jet.db") {
+        cx.close_types.insert("DbConnection".to_string());
+    }
 }
 
 /// Populate value-shape tables that depend on bundle-resolved Core imports.
@@ -1595,6 +1623,7 @@ pub(crate) fn build_cx_items(
         sigs: HashMap::new(),
         fn_types: HashMap::new(),
         method_sigs: HashMap::new(),
+        method_self_convs: HashMap::new(),
         method_rets: HashMap::new(),
         consts: HashMap::new(),
         type_names: HashSet::new(),
@@ -1636,6 +1665,7 @@ pub(crate) fn build_cx_items(
         trait_methods: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),
+        close_types: HashSet::new(),
         iterable_hooks: HashMap::new(),
         index_hooks: HashMap::new(),
         current_fn: std::cell::RefCell::new(String::new()),
@@ -1823,6 +1853,10 @@ pub(crate) fn build_cx_items(
             Item::Trait(t) => {
                 cx.trait_names.insert(t.name.clone());
                 for m in &t.methods {
+                    if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
+                        cx.method_self_convs
+                            .insert((t.name.clone(), m.name.clone()), self_param.convention);
+                    }
                     cx.method_sigs.insert(
                         (t.name.clone(), m.name.clone()),
                         m.params
@@ -1916,6 +1950,10 @@ pub(crate) fn build_cx_items(
                     }
                 }
                 for m in &s.methods {
+                    if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
+                        cx.method_self_convs
+                            .insert((s.name.clone(), m.name.clone()), self_param.convention);
+                    }
                     cx.method_sigs
                         .insert((s.name.clone(), m.name.clone()), method_sig_params(m));
                     cx.method_rets
@@ -1961,6 +1999,10 @@ pub(crate) fn build_cx_items(
                     cx.comparable.insert(e.name.clone());
                 }
                 for m in &e.methods {
+                    if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
+                        cx.method_self_convs
+                            .insert((e.name.clone(), m.name.clone()), self_param.convention);
+                    }
                     cx.method_sigs
                         .insert((e.name.clone(), m.name.clone()), method_sig_params(m));
                     cx.method_rets
@@ -1969,6 +2011,12 @@ pub(crate) fn build_cx_items(
             }
             Item::Impl(i) => {
                 for m in &i.methods {
+                    if let Some(self_param) = m.params.iter().find(|p| p.name == Syntax::KW_SELF) {
+                        cx.method_self_convs.insert(
+                            (i.type_name.clone(), m.name.clone()),
+                            self_param.convention,
+                        );
+                    }
                     cx.method_sigs
                         .insert((i.type_name.clone(), m.name.clone()), method_sig_params(m));
                     cx.method_rets
@@ -2020,6 +2068,9 @@ pub(crate) fn build_cx_items(
             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY) => {
                 cx.display_types.insert(i.type_name.clone());
             }
+            Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_CLOSE) => {
+                cx.close_types.insert(i.type_name.clone());
+            }
             Item::Struct(s) => {
                 for block in &s.trait_impls {
                     if block.trait_name == Syntax::TRAIT_ROLLBACK {
@@ -2027,6 +2078,9 @@ pub(crate) fn build_cx_items(
                     }
                     if block.trait_name == Syntax::TRAIT_DISPLAY {
                         cx.display_types.insert(s.name.clone());
+                    }
+                    if block.trait_name == Syntax::TRAIT_CLOSE {
+                        cx.close_types.insert(s.name.clone());
                     }
                 }
             }
@@ -2037,6 +2091,9 @@ pub(crate) fn build_cx_items(
                     }
                     if block.trait_name == Syntax::TRAIT_DISPLAY {
                         cx.display_types.insert(e.name.clone());
+                    }
+                    if block.trait_name == Syntax::TRAIT_CLOSE {
+                        cx.close_types.insert(e.name.clone());
                     }
                 }
             }

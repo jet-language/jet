@@ -1091,6 +1091,69 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn configured_ed25519_signature_verifies_the_cache_receipt() {
+        use ed25519_dalek::{Signer as _, SigningKey};
+
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("signed-output-real");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "signed").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "cache:demo",
+            "remote-cache",
+        );
+        let mut entry = StoreEntry {
+            id: entry_id("demo", "1", "cache:demo", &out.to_string_lossy()),
+            name: "demo".to_string(),
+            version: "1".to_string(),
+            reference: "cache:demo".to_string(),
+            out: out.to_string_lossy().into_owned(),
+            bin: String::new(),
+            rlib: String::new(),
+            envelope,
+            cache_identity: test_identity(),
+            references: Vec::new(),
+            named_outputs: BTreeMap::new(),
+            platform_artifact_kind: String::new(),
+            producer_record: String::new(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        let expectation = CacheExpectation {
+            identity: test_identity(),
+            owned_output: None,
+            allow_unsigned_local: false,
+        };
+        let signing_key = SigningKey::from_bytes(&[7; 32]);
+        fs::create_dir_all(roots.root.join("trust")).unwrap();
+        fs::write(
+            roots.root.join("trust/cache.ed25519.pub"),
+            hex(&signing_key.verifying_key().to_bytes()),
+        )
+        .unwrap();
+        entry.envelope.signature = format!(
+            "ed25519:{}",
+            hex(&signing_key
+                .sign(cache_signature_message(&entry, &expectation).as_bytes())
+                .to_bytes())
+        );
+        assert!(verify_configured_signature(&roots, &entry, &expectation));
+
+        let replacement = if entry.envelope.signature.as_bytes()[9] == b'0' {
+            "1"
+        } else {
+            "0"
+        };
+        entry.envelope.signature.replace_range(9..10, replacement);
+        assert!(!verify_configured_signature(&roots, &entry, &expectation));
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
     #[cfg(unix)]
     #[test]
     fn mutable_replaced_crypto_helper_is_never_a_trust_root() {

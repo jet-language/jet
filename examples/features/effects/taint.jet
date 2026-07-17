@@ -1,5 +1,5 @@
-// Taint tracking (D-TAINT1). An untrusted value carries a `#Tainted` tag; the
-// tag spreads to anything derived from it. A `#Sanitizer fn` is the one blessed
+// Taint tracking (D-TAINT1). An untrusted value carries a `@Tainted` tag; the
+// tag spreads to anything derived from it. A `@Sanitizer fn` is the one blessed
 // way to clear it — its return value is trusted by contract. A tainted value
 // reaching a sink effect (a database query, subprocess command, or network
 // request) without being sanitized is the error E0721 (see the ui snapshot
@@ -9,13 +9,13 @@ use core.process as process
 // The audited cleaning step: takes untrusted text, returns a value the rest of
 // the program may trust. A real sanitizer would reject shell metacharacters; here
 // it keeps only the part before any space, which is enough to make the point.
-#Sanitizer fn shell_arg(raw: String) -> String {
+@Sanitizer fn shell_arg(raw: String) -> String {
     return raw.split(" ")[0]
 }
 
 fn run() {
     // Untrusted input, marked at its source. Taint spreads through the binding.
-    name :: #Tainted "world danger; rm -rf /"
+    name :: @Tainted "world danger; rm -rf /"
     // Clean it. The sanitizer's result is trusted, so it may reach the sink.
     safe := shell_arg(name)
     // A subprocess command is an `Exec` sink. The argument is sanitized, so this

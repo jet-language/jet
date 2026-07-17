@@ -38,19 +38,27 @@ fn append_view_source_projections(
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn is_resource_type(&self, ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Named(name) | Type::Apply { name, .. }
+                if self.trait_reg.implements_trait(name, Syntax::TRAIT_CLOSE)
+        )
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): scope-bound arena `view`s.
     //
     // `x :: arena.alloc(v)` makes `x` a *view* into `arena`'s storage — Rust
     // `&'arena mut T`. The view is sound only while it stays inside its region
     // (the lexical scope of the `arena` binding / an explicit `region`) and only
-    // until `arena` is `reset`/`free`d. Two diagnostics enforce that, both
+    // until `arena` is reset or closed. Two diagnostics enforce that, both
     // *strictly* at least as strict as Rust's borrow checker, so every
     // Jet-accepted program is rustc-accepted (I2: Jet rejects first):
     //   * E0631 — the view escapes its region (returned, stored in a binding /
     //     ref / struct field, passed where ownership/`mut` is taken, captured by
     //     an escaping closure).
-    //   * E0632 — the view is used after the backing arena was `reset`/`free`d.
+    //   * E0632 — the view is used after the backing arena was reset.
     //
     // v1 restriction (I8): views are non-reassignable, non-escaping locals; we
     // reject anything the analysis can't prove with a teaching error rather than
@@ -83,13 +91,55 @@ impl<'a> Checker<'a> {
         self.record_view(name, Vec::new(), place, ViewKind::Arena, ViewAccess::Write, span);
     }
 
-    /// E0632: when `arena` is `reset`/`free`d, every live view into it dies.
+    /// Return the user buffer borrowed by `Fixed.over`, or a synthetic local
+    /// owner for `Fixed.new`'s compiler-generated inline backing.
+    pub(crate) fn fixed_backing_source(&self, init: &Expr) -> Option<String> {
+        let Expr::MethodCall { receiver, method, args, .. } = init else {
+            return None;
+        };
+        if !matches!(&**receiver, Expr::Field(_, name, _) if name == "Fixed") {
+            return None;
+        }
+        match method.as_str() {
+            "new" => Some("<inline Fixed backing>".to_string()),
+            "over" => args.first().and_then(|arg| match &arg.expr {
+                Expr::Ident(name, _) => Some(name.clone()),
+                _ => None,
+            }),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn record_fixed_backing(&mut self, name: &str, owner: String, span: Span) {
+        let place = ViewPlace {
+            owner: if owner == "<inline Fixed backing>" {
+                ViewOwnerId {
+                    name: owner,
+                    def_span: span,
+                    origin: ViewOwnerOrigin::Local,
+                }
+            } else {
+                self.owner_id(&owner)
+            },
+            projections: Vec::new(),
+        };
+        self.record_view(
+            name,
+            Vec::new(),
+            place,
+            ViewKind::FixedBacking,
+            ViewAccess::Write,
+            span,
+        );
+    }
+
+    /// E0632: when `arena` is reset, every live view into it dies.
     pub(crate) fn kill_views_of_arena(&mut self, arena: &str, verb: &str, span: Span) {
         let owner = self.owner_id(arena);
         self.view_facts.invalidate_owner(&owner, verb, span);
     }
 
-    /// E0632: reading a view whose arena was already `reset`/`free`d.
+    /// E0632: reading a view whose arena was already reset.
     pub(crate) fn check_view_use(&mut self, name: &str, span: Span) {
         self.views_used_in_stmt.insert(name.to_string());
         if let Some(info) = self.view_fact(name) {
@@ -133,6 +183,16 @@ impl<'a> Checker<'a> {
                 ),
                 Some(span),
             )),
+            ViewKind::FixedBacking => self.diags.push(Diagnostic::error(
+                "E0631",
+                format!("`{}` cannot be shared — its fixed backing does not live long enough to {}", name, what),
+                format!(
+                    "`{}` exclusively borrows `{}`; moving or capturing the handle could outlive that inline storage",
+                    name, fact.place.owner.name
+                ),
+                "keep the Fixed handle in its declaring lexical scope and close it after its last allocation view".to_string(),
+                Some(span),
+            )),
             ViewKind::String => self.report_string_view_unsupported_use(name, what, span),
             ViewKind::List | ViewKind::Buffer | ViewKind::Matrix => {
                 self.diags.push(Diagnostic::error(
@@ -159,6 +219,18 @@ impl<'a> Checker<'a> {
     /// at the use sites (return / bind / move-arg / struct field).
     pub(crate) fn is_arena_view(&self, name: &str) -> bool {
         self.view_kind(name) == Some(ViewKind::Arena)
+    }
+
+    pub(crate) fn is_fixed_backing_view(&self, name: &str) -> bool {
+        self.view_kind(name) == Some(ViewKind::FixedBacking)
+    }
+
+    pub(crate) fn reject_fixed_storage(&mut self, expr: &Expr, what: &str) {
+        if let Expr::Ident(name, span) = expr {
+            if self.is_fixed_backing_view(name) {
+                self.report_view_escape(name, what, *span);
+            }
+        }
     }
 
     fn owner_id(&self, owner: &str) -> ViewOwnerId {
@@ -283,6 +355,12 @@ impl<'a> Checker<'a> {
     }
 
     fn view_is_live_now(&self, name: &str) -> bool {
+        if self.view_kind(name) == Some(ViewKind::FixedBacking) {
+            // A Fixed handle still owns cleanup work even after its last source
+            // read. Its exclusive backing borrow ends only on consuming close
+            // (or lexical scope exit), not ordinary last-use shortening.
+            return !self.moved.contains_key(name);
+        }
         self.views_used_in_stmt.contains(name) || self.is_name_live_after(name)
     }
 
@@ -1102,9 +1180,9 @@ impl<'a> Checker<'a> {
     // `return s.after(sep)` written directly (no intermediate binding) always
     // lowers as an ordinary owned `String` — safe, nothing to catch.
 
-    /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `#SingleUse` struct/enum,
+    /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `@SingleUse` struct/enum,
     /// checking the local registry first and then any imported module that exposes
-    /// the type publicly. A `#SingleUse` value must be consumed exactly once and
+    /// the type publicly. A `@SingleUse` value must be consumed exactly once and
     /// may not be aliased.
     pub(crate) fn type_is_single_use(&self, ty: &Type) -> bool {
         let Some(name) = ty.base_name() else {
@@ -1233,7 +1311,7 @@ impl<'a> Checker<'a> {
     }
 
     /// c26 / arena-inference lint: heap growth in a loop after `use core.mem`.
-    /// c26 / allocation-boundary lint: growable calls inside `#Context` without allocator.
+    /// c26 / allocation-boundary lint: growable calls inside `@Context` without allocator.
     pub(crate) fn lint_allocation_hints(&mut self, method: &str, span: Span) {
         let grows_heap = matches!(method, "push" | "append" | "insert" | "add" | "add_new");
         if !grows_heap {
@@ -1251,9 +1329,9 @@ impl<'a> Checker<'a> {
         if self.context_depth > 0 && !self.context_allocator_active {
             self.diags.push(Diagnostic::lint(
                 "L0506",
-                "hidden allocation inside `#Context` without an allocator".to_string(),
+                "hidden allocation inside `@Context` without an allocator".to_string(),
                 "this call may allocate on the global heap while a scoped context is active".to_string(),
-                "add `allocator: …` to the `#Context(…)` fields, or move the allocation outside the block".to_string(),
+                "add `allocator: …` to the `@Context(…)` fields, or move the allocation outside the block".to_string(),
                 Some(span),
             ));
         }
@@ -1314,7 +1392,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value that owns the
+    /// D-LIN1 (ratified 2026-06-21): E0140 — a `@SingleUse` value that owns the
     /// consume duty (`single_use_span` set) but is not in `moved` when its scope
     /// ends was dropped without being used. Mirrors the unjoined-task check: it
     /// looks only at the innermost (just-closing) scope. The branch-divergence
@@ -1412,6 +1490,16 @@ impl<'a> Checker<'a> {
                         kind: SendProblemKind::ClosureNeedsTake,
                     })
                 }
+            }
+            // #648: allocator handles own interior-mutability and raw backing
+            // storage. They are deliberately thread-confined; values allocated
+            // from them may never race reset/close on another task.
+            Type::Named(name) if crate::Syntax::alloc_handle_rust_type(name).is_some() => {
+                Some(SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ThreadConfined(name.clone()),
+                })
             }
             Type::Named(name) if is_type_var_name(name) || core_type_known(name) => None,
             Type::Named(name) => self.named_sendability_problem(name, &[], seen),
@@ -1691,7 +1779,7 @@ impl<'a> Checker<'a> {
         match arg.convention {
             AccessConvention::Read => {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    if is_cloneable(param_ty, self.registry) {
+                    if !self.is_resource_type(param_ty) && is_cloneable(param_ty, self.registry) {
                         arg.flags.implicit_clone = true;
                         // D-MEM1/S2 (was D-L0201 lint): passing a named binding to
                         // a Move param without `^` is always a hard error now.
@@ -2000,13 +2088,13 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value reached the end of
+/// D-LIN1 (ratified 2026-06-21): E0140 — a `@SingleUse` value reached the end of
 /// its scope without being consumed. The fix names the three legal exits.
 pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0140",
         format!("`{}` must be used exactly once, but it is never used", name),
-        "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
+        "this value's type is `@SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
         format!(
             "give it away exactly once: move it to a `{}` parameter, or `return` it",
             Syntax::SIGIL_MOVE
@@ -2015,13 +2103,13 @@ pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LIN1 (ratified 2026-06-21): E0141 — a `#SingleUse` value is consumed on one
+/// D-LIN1 (ratified 2026-06-21): E0141 — a `@SingleUse` value is consumed on one
 /// branch of an `if` but not the other, so some paths leave it unused.
 pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0141",
         format!("`{}` must be used exactly once, but one path through this `if` leaves it unused", name),
-        "a `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job".to_string(),
+        "a `@SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job".to_string(),
         format!(
             "use `{}` exactly once on every branch: consume it in the missing arm, or move it out before the `if`",
             name
@@ -2031,17 +2119,17 @@ pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
 }
 
 /// D-DROP-WORD1: E0143 — `consume(x)` deliberately discards a
-/// `#SingleUse` value, but the discard wasn't audited. Throwing away a value
+/// `@SingleUse` value, but the discard wasn't audited. Throwing away a value
 /// whose whole point is "this job must be done" needs a written justification,
-/// so `consume` of a `#SingleUse` value is legal only inside an `#Unsafe("reason")`
+/// so `consume` of a `@SingleUse` value is legal only inside an `@Unsafe("reason")`
 /// region/fn — the reason IS the audit note (reuses D-UNSAFE2's audited gate).
 pub(crate) fn e0143_drop_unaudited(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0143",
-        format!("`{}` is `#SingleUse` — discarding it with `consume` needs an audited reason", name),
-        "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down".to_string(),
+        format!("`{}` is `@SingleUse` — discarding it with `consume` needs an audited reason", name),
+        "this value's type is `@SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down".to_string(),
         format!(
-            "wrap it in an audited region: `#{}(\"why discarding this is fine\") {{ consume({}) }}`",
+            "wrap it in an audited region: `@{}(\"why discarding this is fine\") {{ consume({}) }}`",
             Syntax::KW_UNSAFE,
             name
         ),
@@ -2049,14 +2137,14 @@ pub(crate) fn e0143_drop_unaudited(name: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LIN1 (ratified 2026-06-21): E0142 — a `#SingleUse` value was passed somewhere
+/// D-LIN1 (ratified 2026-06-21): E0142 — a `@SingleUse` value was passed somewhere
 /// that would borrow or copy it. Such values may only be moved/consumed.
 pub(crate) fn e0142_aliased(name: &str, call: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0142",
         format!("`{}` can't be shared — it must be used exactly once", name),
         format!(
-            "this value's type is `#SingleUse`, so it can only be moved (handed over for good); `{}` would borrow or copy it, and a `#SingleUse` value has no second use to give",
+            "this value's type is `@SingleUse`, so it can only be moved (handed over for good); `{}` would borrow or copy it, and a `@SingleUse` value has no second use to give",
             call
         ),
         format!(

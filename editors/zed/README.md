@@ -79,7 +79,7 @@ nix develop -c cargo test --test grammar
 ```
 
 The LSP semantic overlay refines live editor coloring for ownership (`copy`,
-`^`, `&`) and markers (`#Test`, `#Unsafe`, `@Pure`). Retired/foreign spellings
+`^`, `&`) and rules (`@Test`, `@Unsafe`, `@Pure`). Retired/foreign spellings
 are not colored as live syntax.
 
 ## Reinstall after changes

@@ -53,7 +53,7 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
                     .type_alias_def(is_pub, is_package_pub)
                     .map(Item::TypeAlias),
-                TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY) => {
+                TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY) => {
                     self.unit_family_def(is_pub, is_package_pub)
                         .map(Item::UnitFamily)
                 }
@@ -69,7 +69,7 @@ impl<'a> Parser<'a> {
                             Syntax::KW_PRIV
                         ),
                         format!(
-                            "`{}` marks one top-level item as private in a `#{}` file",
+                            "`{}` marks one top-level item as private in a `@{}` file",
                             Syntax::KW_PRIV,
                             Syntax::MARKER_PUB_FILE
                         ),
@@ -100,7 +100,7 @@ impl<'a> Parser<'a> {
                     "moving an item above or below a label would silently change whether it exports"
                         .to_string(),
                     format!(
-                        "write `#{}` once at the top of the file, then mark exceptions with `{}`",
+                        "write `@{}` once at the top of the file, then mark exceptions with `{}`",
                         Syntax::MARKER_PUB_FILE,
                         Syntax::KW_PRIV
                     ),
@@ -120,7 +120,7 @@ impl<'a> Parser<'a> {
                         "moving an item above or below a label would silently change whether it exports"
                             .to_string(),
                         format!(
-                            "write `#{}` once at the top of the file, then mark exceptions with `{}`",
+                            "write `@{}` once at the top of the file, then mark exceptions with `{}`",
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PRIV
                         ),
@@ -142,7 +142,7 @@ impl<'a> Parser<'a> {
                         Syntax::FOREIGN_PRIVATE
                     ),
                     format!(
-                        "inside a `#{}` file, `{}` marks an item that stays private to this file",
+                        "inside a `@{}` file, `{}` marks an item that stays private to this file",
                         Syntax::MARKER_PUB_FILE,
                         Syntax::KW_PRIV
                     ),
@@ -166,7 +166,7 @@ impl<'a> Parser<'a> {
                         ),
                         "an item is either public or private — pick one qualifier".to_string(),
                         format!(
-                            "drop `{}` (already public in a `#{}` file) or remove `{}`",
+                            "drop `{}` (already public in a `@{}` file) or remove `{}`",
                             Syntax::KW_PUB,
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PRIV
@@ -178,17 +178,17 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0413",
                         format!(
-                            "`{}` only applies inside a `#{}` file",
+                            "`{}` only applies inside a `@{}` file",
                             Syntax::KW_PRIV,
                             Syntax::MARKER_PUB_FILE
                         ),
                         format!(
-                            "without `#{}`, items are private by default and export with `{}`",
+                            "without `@{}`, items are private by default and export with `{}`",
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PUB
                         ),
                         format!(
-                            "add `#{}` at the top of the file, or write `{}` instead of `{}`",
+                            "add `@{}` at the top of the file, or write `{}` instead of `{}`",
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PUB,
                             Syntax::KW_PRIV
@@ -214,7 +214,7 @@ impl<'a> Parser<'a> {
                         ),
                         "an item is either public or private — pick one qualifier".to_string(),
                         format!(
-                            "drop `{}` (already public in a `#{}` file) or remove `{}`",
+                            "drop `{}` (already public in a `@{}` file) or remove `{}`",
                             Syntax::KW_PUB,
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PRIV
@@ -226,17 +226,17 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0413",
                         format!(
-                            "`{}` only applies inside a `#{}` file",
+                            "`{}` only applies inside a `@{}` file",
                             Syntax::KW_PRIV,
                             Syntax::MARKER_PUB_FILE
                         ),
                         format!(
-                            "without `#{}`, items are private by default and export with `{}`",
+                            "without `@{}`, items are private by default and export with `{}`",
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PUB
                         ),
                         format!(
-                            "add `#{}` at the top of the file, or write `{}` instead of `{}`",
+                            "add `@{}` at the top of the file, or write `{}` instead of `{}`",
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PUB,
                             Syntax::KW_PRIV
@@ -252,12 +252,12 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0414",
                         format!(
-                            "`{}` is redundant in a `#{}` file",
+                            "`{}` is redundant in a `@{}` file",
                             Syntax::KW_PUB,
                             Syntax::MARKER_PUB_FILE
                         ),
                         format!(
-                            "after `#{}`, top-level items are already public unless marked `{}`",
+                            "after `@{}`, top-level items are already public unless marked `{}`",
                             Syntax::MARKER_PUB_FILE,
                             Syntax::KW_PRIV
                         ),
@@ -343,7 +343,7 @@ impl<'a> Parser<'a> {
             self.func_with_modifiers(is_pure, false)
         }
     
-        /// Parse a function whose `@Pure`/`#Sanitizer` modifiers are already known.
+        /// Parse a function whose `@Pure`/`@Sanitizer` modifiers are already known.
         pub(super) fn func_with_modifiers(
             &mut self,
             is_pure: bool,
@@ -368,7 +368,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        /// Parse a function whose `@Pure`/`#Sanitizer` and D-STATE1 typestate markers
+        /// Parse a function whose `@Pure`/`@Sanitizer` and D-STATE1 typestate markers
         /// are already known.
         #[allow(clippy::too_many_arguments)]
         pub(super) fn func_with_modifiers_full(

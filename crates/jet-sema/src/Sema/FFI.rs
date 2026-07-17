@@ -29,7 +29,7 @@ pub(crate) fn check_extern_block(
     }
     for ef in &block.functions {
         if let Some((_, span)) = &ef.abi {
-            diags.push(Diagnostic::error("E3212", "`#Abi` only applies to C declarations".to_string(), "Rust FFI uses its declared Rust ABI and cannot select a C calling convention".to_string(), "remove `#Abi` from the `extern rust` function".to_string(), Some(*span)));
+            diags.push(Diagnostic::error("E3212", "`@Abi` only applies to C declarations".to_string(), "Rust FFI uses its declared Rust ABI and cannot select a C calling convention".to_string(), "remove `@Abi` from the `extern rust` function".to_string(), Some(*span)));
             ok = false;
         }
         if !check_extern_fn(ef, registry, diags) {
@@ -90,7 +90,7 @@ pub(crate) fn check_extern_fn(
 /// whose fields are all C-safe. Aggregates (`[T]`, `[K,V]`, `T?`, `T ? E`) have
 /// no stable C ABI and are rejected (E3203). Pointers (`Ptr<T>`, M13/S58) belong
 /// to the gated tier: a `Ptr<T>` in a C signature fires E3202 unless it is behind
-/// `use core.mem` + `#Unsafe`.
+/// `use core.mem` + `@Unsafe`.
 pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
@@ -118,9 +118,9 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
 
 pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
     match registry.types.get(name) {
-        // Card #436 / D-REPRC1: only a `#Layout(c)` struct has a defined,
+        // Card #436 / D-REPRC1: only a `@Layout(c)` struct has a defined,
         // C-matching Rust layout (codegen stamps `#[repr(C)]` on it, and
-        // `#Layout(c)` already bans growable fields via E1104). A plain
+        // `@Layout(c)` already bans growable fields via E1104). A plain
         // struct's Rust field order/size/padding is unspecified — accepting
         // it here would let sema wave through a shape CModule codegen (and
         // rustc) cannot lower correctly (I2/I3).
@@ -138,7 +138,7 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
         // discriminant width, payload union layout are all undecided — see
         // card #436 report). Reject every enum at the C boundary rather than
         // let sema accept a shape CModule codegen can't lower (I2/I3); a
-        // future `#Layout(c) enum` design needs an owner ballot first.
+        // future `@Layout(c) enum` design needs an owner ballot first.
         Some(TypeDef::Enum { variants, c_layout_tag, .. }) => {
             c_layout_tag.is_some() && variants.values().all(|(_, payload)| match payload {
                 VariantPayload::Unit => true,
@@ -183,7 +183,7 @@ pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
             ty.name()
         ),
         format!(
-            "`#{}` / `#{}` functions must use types with a stable C ABI at the edge.",
+            "`@{}` / `@{}` functions must use types with a stable C ABI at the edge.",
             Syntax::ATTR_EXTERN_MODULE,
             Syntax::ATTR_BINDGEN,
         ),
@@ -194,16 +194,16 @@ pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
 }
 
 /// E3202 — a pointer type (`Ptr<T>`, S58) appears by value in a C FFI signature
-/// outside an `#Unsafe` / `core.mem` region. Ordinary C-FFI code passes by-value
-/// scalars and `String`; pointers must stay behind `use core.mem` + `#Unsafe`.
+/// outside an `@Unsafe` / `core.mem` region. Ordinary C-FFI code passes by-value
+/// scalars and `String`; pointers must stay behind `use core.mem` + `@Unsafe`.
 /// Reachable since the M13 pointer tier shipped (commit cd4713d).
 pub fn e3202(ty: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3202",
         format!("Type `{}` cannot cross the C boundary here.", ty),
-        "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58)."
+        "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@Unsafe { … }` region (S58)."
             .to_string(),
-        "Move the call inside `#Unsafe`, or change the type to a C-safe value type.".to_string(),
+        "Move the call inside `@Unsafe`, or change the type to a C-safe value type.".to_string(),
         Some(span),
     )
 }
@@ -260,7 +260,7 @@ pub(crate) fn check_c_module(
         if let Some((abi, span)) = &ef.abi {
             let known = matches!(abi.as_str(), "system" | "cdecl" | "stdcall" | "fastcall" | "win64" | "sysv64");
             if !known {
-                diags.push(Diagnostic::error("E3212", format!("`{abi}` is not a known C calling convention"), "`#Abi` accepts only the ratified native ABI names".to_string(), "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`".to_string(), Some(*span)));
+                diags.push(Diagnostic::error("E3212", format!("`{abi}` is not a known C calling convention"), "`@Abi` accepts only the ratified native ABI names".to_string(), "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`".to_string(), Some(*span)));
                 ok = false;
             } else {
                 let available = match abi.as_str() {
@@ -277,7 +277,7 @@ pub(crate) fn check_c_module(
                 if ef.params.iter().any(|p| p.variadic)
                     && !(abi == "cdecl" && cfg!(all(target_os = "windows", target_arch = "x86")))
                 {
-                    diags.push(Diagnostic::error("E3214", format!("variadic C function `{}` cannot use `{abi}`", ef.name), "variadics allow only the default C ABI, or cdecl on Windows x86".to_string(), "remove `#Abi`, or use `#Abi(cdecl)` on Windows x86".to_string(), Some(*span)));
+                    diags.push(Diagnostic::error("E3214", format!("variadic C function `{}` cannot use `{abi}`", ef.name), "variadics allow only the default C ABI, or cdecl on Windows x86".to_string(), "remove `@Abi`, or use `@Abi(cdecl)` on Windows x86".to_string(), Some(*span)));
                     ok = false;
                 }
             }

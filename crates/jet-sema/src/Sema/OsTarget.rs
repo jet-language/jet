@@ -1,7 +1,7 @@
 //! D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating.
 //! Mirrors `WebPartition.rs`'s shape — one structural check, one signature
-//! check — for the second, mutually-exclusive `#Target(Os.*)` axis of the
-//! same `#Target(...)` marker family.
+//! check — for the second, mutually-exclusive `@Target(Os.*)` axis of the
+//! same `@Target(...)` marker family.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax::{self, OsTarget as Os};
@@ -113,6 +113,7 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: Os, diags: &mut Vec<Diagnostic>
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -294,8 +295,8 @@ fn empty_stmt(span: Span) -> Stmt {
     }
 }
 
-/// Walk the bundle: flag a `#Target(Os.*)`-gated impl whose enclosing file/
-/// module also carries a web-bucket ceiling (`#Target(Wasm)`/`#Target(Js)`)
+/// Walk the bundle: flag a `@Target(Os.*)`-gated impl whose enclosing file/
+/// module also carries a web-bucket ceiling (`@Target(Wasm)`/`@Target(Js)`)
 /// — a structural conflict between the two mutually-exclusive axes
 /// (E-OSTARGET-MIXED-AXIS) — and flag a function/method that isn't itself
 /// gated to match but takes or returns a value of a gated type

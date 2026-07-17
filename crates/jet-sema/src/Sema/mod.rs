@@ -41,7 +41,7 @@ pub(crate) enum TypeDef {
     Struct {
         fields: Vec<(String, Span, Type, bool)>,
         methods: HashMap<String, MethodSig>,
-        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
+        /// D-LIN1 (ratified 2026-06-21): `@SingleUse` was present before `struct`.
         /// Values of this type must be consumed exactly once (E0140/E0141) and
         /// may not be aliased (E0142).
         single_use: bool,
@@ -51,9 +51,9 @@ pub(crate) enum TypeDef {
         /// struct is stored struct-of-arrays; sema gates the list-op surface to
         /// the v1-supported subset (E1108) and codegen lowers it columnar.
         columnar: bool,
-        /// D-REPRC1: `#Layout(c)` was present — codegen stamps `#[repr(C)]`
+        /// D-REPRC1: `@Layout(c)` was present — codegen stamps `#[repr(C)]`
         /// on the generated Rust struct, so field order/size/padding match C.
-        /// A plain struct (no `#Layout(c)`) has an UNSPECIFIED Rust layout and
+        /// A plain struct (no `@Layout(c)`) has an UNSPECIFIED Rust layout and
         /// must never be accepted at the C FFI boundary (card #436 / E3203) —
         /// only this flag makes `c_named_type_ok` (Sema/FFI.rs) say yes.
         is_c_layout: bool,
@@ -65,11 +65,11 @@ pub(crate) enum TypeDef {
         /// its subtree). A group name matches its whole subtree in patterns.
         groups: HashMap<String, (Span, Vec<String>)>,
         methods: HashMap<String, MethodSig>,
-        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `enum`.
+        /// D-LIN1 (ratified 2026-06-21): `@SingleUse` was present before `enum`.
         single_use: bool,
         /// D-MUSTUSE1 (c18iwxqx): `@MustUse` was present before `enum`.
         must_use: bool,
-        /// D-REPRC2: present only for `#Layout(c[, tag: Width])`.
+        /// D-REPRC2: present only for `@Layout(c[, tag: Width])`.
         c_layout_tag: Option<crate::AST::CEnumTag>,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
@@ -191,7 +191,7 @@ impl TypeRegistry {
         }
     }
 
-    /// D-LIN1 (ratified 2026-06-21): true when `name` is a `#SingleUse` struct/enum.
+    /// D-LIN1 (ratified 2026-06-21): true when `name` is a `@SingleUse` struct/enum.
     /// Values of such a type must be consumed exactly once and may not be aliased.
     pub(crate) fn is_single_use(&self, name: &str) -> bool {
         matches!(
@@ -398,7 +398,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
         foreign_effect_root: ef.effect_root.clone(),
         // D-CABI-RESULT1=C: any raw out-pointer declaration is callable only
-        // from an audited `#Unsafe` region. The declaration remains the exact
+        // from an audited `@Unsafe` region. The declaration remains the exact
         // C status/out shape; no Result adapter is invented.
         is_unsafe: is_c_abi
             && ef.params.iter().any(|p| {
@@ -549,7 +549,7 @@ pub(crate) struct LocalInfo {
     /// Binding span for a Task value that must be consumed with `.join()`.
     task_lint_span: Option<Span>,
     /// D-LIN1 (ratified 2026-06-21): set (to the binding name's span) when this
-    /// local owns a `#SingleUse` value that must be consumed exactly once. `None`
+    /// local owns a `@SingleUse` value that must be consumed exactly once. `None`
     /// for ordinary values, for parameters (the caller owns the consume duty), and
     /// for `view`/`&` borrows (which never own). When still in scope and not in
     /// `moved` at scope end, E0140 fires.
@@ -562,6 +562,7 @@ pub(crate) struct LocalInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewKind {
     Arena,
+    FixedBacking,
     List,
     String,
     Buffer,
@@ -627,7 +628,7 @@ pub(crate) struct ViewFact {
     /// `scopes.len()` at declaration; facts disappear with their binding.
     scope_len: usize,
     /// Owner operation that invalidated storage, when invalidation is allowed
-    /// to happen (arena reset/free). Ordinary owner writes/moves are rejected.
+    /// to happen (arena reset). Ordinary owner writes/moves are rejected.
     invalidated: Option<(String, Span)>,
 }
 
@@ -869,6 +870,7 @@ mod view_fact_graph_tests {
         assert!(ViewKind::Buffer.is_named_window());
         assert!(ViewKind::Matrix.is_named_window());
         assert!(!ViewKind::Arena.is_named_window());
+        assert!(!ViewKind::FixedBacking.is_named_window());
         assert!(!ViewKind::String.is_named_window());
     }
 }
@@ -878,6 +880,7 @@ pub(crate) enum SendProblemKind {
     ClosureNeedsTake,
     ClosureCaptures,
     TraitValue(String),
+    ThreadConfined(String),
     ViewBorrow,
 }
 
@@ -902,7 +905,7 @@ pub enum CompileMode {
     Run,
     /// `jet test` — needs at least one test; `run` is optional.
     Test,
-    /// `jet bench` (D-BENCH1) — type-check `#Bench` block bodies and emit the
+    /// `jet bench` (D-BENCH1) — type-check `@Bench` block bodies and emit the
     /// timing harness; `run` is optional, like `Test`.
     Bench,
     /// `jet check` / LSP — type-check only; imported modules and library files
@@ -995,18 +998,27 @@ pub(crate) struct Checker<'a> {
     /// D-EFF1: a foreign (`extern`) call was reached — the body's effects are
     /// the maximal set (an un-inspectable body may do anything).
     fx_maximal: bool,
-    /// D-EFF1: stack of active `#Caps(…)` regions, innermost last. Every effect
+    /// D-EFF1: stack of active `@Caps(…)` regions, innermost last. Every effect
     /// or edge recorded while one is open is also added to it (and all enclosing
     /// regions) so the region's own effect set can be checked against its caps.
     region_stack: Vec<RegionAccum>,
-    /// D-EFF1: completed `#Caps(…)` regions in this body, rolled into the
+    /// D-EFF1: completed `@Caps(…)` regions in this body, rolled into the
     /// `EffectSummary` for the post-pass E0741 check.
     fx_regions: Vec<RegionSummary>,
     /// D-EFF2: callback-bound obligations recorded at higher-order call sites
     /// where the function-typed parameter carries a `@Pure`/`#(…)` bound. Rolled
     /// into the `EffectSummary` for the post-pass E0747 check.
     fx_callback_obligations: Vec<CallbackObligation>,
-    /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
+    /// D-MEM-FACTS1 direct, source-spanned memory evidence accumulated beside
+    /// effects so both policies share one pre-TIR call graph.
+    fx_memory_events: Vec<MemoryFacts::MemoryEvent>,
+    fx_memory_open: Vec<MemoryFacts::OpenMemoryDispatch>,
+    memory_policy_stack: Vec<MemoryFacts::MemoryPolicyRegion>,
+    fx_memory_regions: Vec<MemoryFacts::MemoryPolicyRegion>,
+    fx_memory_unbounded_control: Vec<Span>,
+    fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
+    memory_control_multiplier: Option<u64>,
+    /// D-TXN2: nesting depth of `@Transact(name) { … }` blocks whose body is
     /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
     /// irreversible Core effect (Net/Fs/Exec) reached directly in the block is
     /// E0746 at the call site — the fix is to move it after the block or register
@@ -1020,9 +1032,9 @@ pub(crate) struct Checker<'a> {
     /// (v1-legal per the card); does not relax memory/type safety, only the
     /// determinism check. Zeroed/restored around lambda bodies like `txn_depth`.
     det_suppress: usize,
-    /// D-CTX1 / c26: nesting depth of `#Context { … }` blocks (for L0506).
+    /// D-CTX1 / c26: nesting depth of `@Context { … }` blocks (for L0506).
     context_depth: usize,
-    /// True while inside a `#Context` block that set an `allocator` field.
+    /// True while inside a `@Context` block that set an `allocator` field.
     context_allocator_active: bool,
     in_unsafe: bool,
     /// D-IGNORERET2=A: true while inside a `#Suppress(MustUse) { … }` block.
@@ -1031,13 +1043,7 @@ pub(crate) struct Checker<'a> {
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,
-    /// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when the enclosing module declared
-    /// `policy no_alloc`. Local-only: set once per function-body check from
-    /// that module's own `no_alloc_policy`, never toggled by a call into
-    /// another function — a callee's own allocations are its own module's
-    /// concern (E0921 only fires on shapes written directly in THIS body).
-    no_alloc: bool,
-    /// D-PRELUDEX1=A: true when the enclosing file declared `#NoPrelude`.
+    /// D-PRELUDEX1=A: true when the enclosing file declared `@NoPrelude`.
     /// Disables ambient `print`/`input` resolution for this body.
     no_prelude: bool,
     /// D-PREPOST1: true while type-checking a `@Pre` clause's condition —
@@ -1055,10 +1061,6 @@ pub(crate) struct Checker<'a> {
     expected_type: Option<Type>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
-    /// D-ALLOC-D (ratified 2026-06-19): allocator names that have been freed
-    /// or reset in this scope — maps name → verb ("free"/"reset").
-    /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
-    freed_allocators: HashMap<String, String>,
     /// D-MEM1 S9 / #649: sole provenance/alias state for arena, list, string,
     /// buffer, matrix, and future named mutable views.
     view_facts: ViewFactGraph,
@@ -1078,6 +1080,9 @@ pub(crate) struct Checker<'a> {
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.
     borrow_ctx: bool,
+    /// `Fixed.new` / `Fixed.over` must be the whole initializer of one lexical
+    /// binding so codegen can place and lifetime-order its inline backing.
+    allow_fixed_constructor: bool,
     /// D-MEM1 stage S5: true only while inferring a string-view fact in one of
     /// the TWO positions its bare `&str` Rust place
     /// actually supports — the receiver of a chained `.trim()`/`.after()`/
@@ -1124,10 +1129,10 @@ pub(crate) struct Checker<'a> {
     type_param_scope: Vec<crate::AST::TypeParam>,
     /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
     freestanding: bool,
-    /// D-CTEFFECT1: `--allow-impure` was passed — `#Impure` blocks may execute
+    /// D-CTEFFECT1: `--allow-impure` was passed — `@Impure` blocks may execute
     /// Tier-2 ambient comptime effects (Fs/Env/Exec/Io) at compile time.
     allow_impure: bool,
-    /// D-CTEFFECT1: nesting depth of `#Impure` blocks currently being checked.
+    /// D-CTEFFECT1: nesting depth of `@Impure` blocks currently being checked.
     /// Passed as `initial_impure_depth` to comptime evaluation of bindings
     /// inside, so the interpreter starts with the gate already open.
     ct_impure_depth: usize,
@@ -1185,6 +1190,8 @@ use CheckerTaskGroup::TaskGroupCtx;
 mod CheckerValidate;
 mod Diagnostics;
 mod Effects;
+mod MemoryFacts;
+pub mod UnsafeObligations;
 mod FFI;
 pub mod HotSwap;
 mod OsTarget;
@@ -1235,6 +1242,11 @@ pub use Bundle::{
     check_bundle_with_effect_facts,
 };
 pub use Effects::{DefinitionAnchorFact, EffectSummary, SemIndexEffectFacts};
+pub use MemoryFacts::{
+    check_memory_facts, project_memory_fact, MemoryCall, MemoryEvent, MemoryEventKind, MemoryFact,
+    MemoryFactDeclaration, MemoryPolicyRegion, MemoryProjection, MemorySummary,
+    OpenMemoryDispatch,
+};
 pub use PolicyFacts::{
     collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,
     PolicyFactGraph,

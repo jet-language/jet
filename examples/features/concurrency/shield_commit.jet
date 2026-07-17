@@ -1,11 +1,11 @@
-// D-SHIELDNAME1=A: cancellation is deferred inside `#Shield`. The race cancels
+// D-SHIELDNAME1=A: cancellation is deferred inside `@Shield`. The race cancels
 // the losing task while it sleeps, but the shield lets the critical section
 // finish and print "committed" before cancellation lands at the block exit.
 use core.tasks as tasks
 use core.time as time
 
 fn shielded_commit() -> Int {
-    # Shield {
+    @Shield {
         time.sleep(20)
         print("committed")
     }

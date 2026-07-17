@@ -1,6 +1,6 @@
-// D-STATE-DECL L0151: a declared state with no outgoing `#Transition(S -> …)` is
+// D-STATE-DECL L0151: a declared state with no outgoing `@Transition(S -> …)` is
 // a dead-end warning. `CheckedIn` is declared in the state block but has no method
-// of the form `#Transition(CheckedIn -> ...)` — a value that reaches `CheckedIn` can
+// of the form `@Transition(CheckedIn -> ...)` — a value that reaches `CheckedIn` can
 // never advance further. The machine still compiles; this is only a warning.
 state Reservation { Pending, Confirmed, CheckedIn }
 
@@ -9,16 +9,16 @@ struct Reservation {
 }
 
 impl Reservation {
-    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+    @Transition(_ -> Pending) fn book(guest: String) -> Reservation {
         return Reservation.{ guest: guest }
     }
-    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+    @Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
         return self
     }
-    #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
+    @Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
         return self
     }
-    #State(CheckedIn) fn room_key(self) -> String {
+    @State(CheckedIn) fn room_key(self) -> String {
         return "key for {self.guest}"
     }
 }

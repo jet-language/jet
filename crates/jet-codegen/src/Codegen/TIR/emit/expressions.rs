@@ -87,11 +87,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // D-LIN1-DROP: `drop(x)` → Rust's safe `drop(x)`; the value moves in and
-        // its `Drop` runs. No `unsafe` — the audit is sema-side (the `#Unsafe`
+        // its `Drop` runs. No `unsafe` — the audit is sema-side (the `@Unsafe`
         // gate). The arg was lowered as a plain place/value (a move).
         TExprKind::Drop(arg) => {
             format!("drop({})", emit_tir_expr(arg, cx))
         }
+        TExprKind::Close(arg) => {
+            format!("user_Close::close({})", emit_tir_expr(arg, cx))
+        }
+        TExprKind::ResourceNew(arg) => {
+            format!("JetResource::new({})", emit_tir_expr(arg, cx))
+        }
+        TExprKind::ResourceTake(place) => format!("{}.take()", place),
         // c109 Phase 25: ambient prelude `input(...)`, byte-for-byte the `emit_call`
         // ambient-input branch (Source/Codegen/Expression.rs): a bare call with NO arg
         // emits `{root}jet_std_io_input(None)`; with a prompt arg `{root}jet_std_io_input(Some(&(arg)))`.
@@ -106,7 +113,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `{ … }` block emit string was rendered at lowering (byte-for-byte the AST
         // helper); emit reads it verbatim. As a statement-position call it is wrapped
         // `{ … };` by `TStmt::ExprStmt`, matching the AST `Stmt::Expr` `{ … };`.
-        TExprKind::RequireStop(rendered) => rendered.clone(),
+        TExprKind::RequireStop { rendered, .. } => rendered.replace(
+            crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER,
+            "",
+        ),
         TExprKind::Call { name, args } => {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
@@ -693,19 +703,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             )
         }
         // D-CAP9: postfix `p.*` deref → Rust `(*(p))`. The `unsafe` is supplied by
-        // the enclosing `#Unsafe` region (sema-gated); this node adds no `unsafe`.
+        // the enclosing `@Unsafe` region (sema-gated); this node adds no `unsafe`.
         TExprKind::Deref(operand) => format!("(*({}))", emit_tir_expr(operand, cx)),
         // D-CAP9: prefix `*x` raw-of → `(&({}) as *const _ as *mut _)`. The result
         // is `*mut T` to match the canonical raw-pointer type (`Ptr<T>` lowers to
         // `*mut`). Forming the pointer is safe Rust; only dereferencing it needs
-        // the surrounding `#Unsafe`. The const→mut cast is the standard idiom.
+        // the surrounding `@Unsafe`. The const→mut cast is the standard idiom.
         TExprKind::RawOf(operand) => {
             format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
         }
         // c109 Phase 19: the arena allocator constructor — the ctor tail was rendered whole
         // at lowering (`jet_mem::Jet<Alloc>::new()` / `::with_capacity(...)`), so emit just
         // splices it. Byte-for-byte `emit_method_call`'s arena constructor branch.
-        TExprKind::AllocNew { ctor } => ctor.clone(),
+        TExprKind::AllocNew { ctor } => {
+            debug_assert!(!ctor.starts_with("__JET_FIXED_INLINE:"));
+            ctor.clone()
+        }
         // c109 Phase 4/16: an enum literal. Prefix + payload were resolved at lowering;
         // emit applies each arg's resolved `clone`/`boxed` wrappers (mirroring
         // `emit_boxed_enum_arg`: `(…).clone()` first, then `Box::new(…)`).
@@ -973,7 +986,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `Expr::Present`/`Expr::Absent` exactly.
         TExprKind::Present(inner) => format!("Some({})", emit_tir_expr(inner, cx)),
         TExprKind::Absent => "None".to_string(),
-        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
+        // c109 Phase 23: a `@Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
         // AST `Expr::Todo` arm (Expression.rs): file/line/expected-type baked into the
         // panic string. `cx.file` is program-level (read here, like every other use).
         TExprKind::Todo {
@@ -1437,7 +1450,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("({}).alloc({})", recv, a0)
                 }
                 THandleOp::AllocReset => format!("({}).reset()", recv),
-                THandleOp::AllocFree => format!("drop({})", recv),
                 // c109 Phase 20: HttpRequest/HttpResponse accessors, byte-for-byte the
                 // `emit_builtin_method` arms. The plain field accessors clone the field;
                 // `header` does a map lookup; `param` calls the prelude helper.

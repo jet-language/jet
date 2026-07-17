@@ -6,36 +6,57 @@ use super::TargetMarker;
 use super::helpers::format_version_segment;
 
 impl<'a> Parser<'a> {
-        /// D-POLICY-WORD1=A: `#Policy(no_alloc)` — file allocation floor.
-        /// allocation floor. `no_alloc` is the only ratified policy name today;
-        /// any other name is an ordinary "expected X, found Y" parse error (the
-        /// full policy list is a follow-on ballot, not this stage's business).
-        fn policy_decl(&mut self) -> Result<Span, Diagnostic> {
-            let start = self.bump().span; // consume `#`
-            self.bump(); // `Policy`
-            self.expect(TokKind::LParen, "after `#Policy`")?;
-            match &self.peek().kind {
-                TokKind::Ident(n) if n == Syntax::POLICY_NO_ALLOC => {
-                    let name_span = self.bump().span;
-                    self.expect(TokKind::RParen, "after the policy name")?;
-                    Ok(Span::new(start.start, name_span.end))
+        fn policy_is_file_decl(&self) -> bool {
+            let mut i = self.pos + 2;
+            let mut depth = 0usize;
+            while let Some(token) = self.toks.get(i) {
+                match token.kind {
+                    TokKind::LParen => depth += 1,
+                    TokKind::RParen => { depth = depth.saturating_sub(1); if depth == 0 { return matches!(self.toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Semi) | Some(TokKind::Eof)); } }
+                    _ => {}
                 }
-                other => Err(Diagnostic::error(
-                    "E0003",
-                    format!(
-                        "expected `{}` inside `#{}`, found {}",
-                        Syntax::POLICY_NO_ALLOC,
-                        Syntax::ATTR_POLICY,
-                        describe(other)
-                    ),
-                    format!(
-                        "`{}` is the only ratified policy name today",
-                        Syntax::POLICY_NO_ALLOC
-                    ),
-                    format!("write `#{}({})`", Syntax::ATTR_POLICY, Syntax::POLICY_NO_ALLOC),
-                    Some(self.peek().span),
-                )),
+                i += 1;
             }
+            true
+        }
+        /// D-MARK-SCOPE1: parse one source `@Policy(...)` declaration list.
+        pub(in crate::Parser) fn policy_decl(&mut self, scope: crate::Policy::PolicyScope) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
+            let start = self.bump().span; // consume `@`
+            self.bump(); // `Policy`
+            self.expect(TokKind::LParen, "after `@Policy`")?;
+            let mut out = Vec::new();
+            loop {
+                let (name, name_span) = self.expect_ident("inside `@Policy(...)`")?;
+                let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
+                    let site_bound = crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
+                    return Err(Diagnostic::error(
+                        "E0355",
+                        format!("`{name}` is not a scoped policy"),
+                        if site_bound { "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them".to_string() } else { "the compiler owns the closed policy registry and its scope rules".to_string() },
+                        if site_bound { format!("use `@{name}` at its sound site") } else { "use `no_alloc`, `zero_rc`, or `arena_bounded(bytes)`".to_string() },
+                        Some(name_span),
+                    ));
+                };
+                let value = match key {
+                    crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc => crate::Policy::PolicyValue::Enabled,
+                    crate::Policy::PolicyKey::ArenaBounded => {
+                        self.expect(TokKind::LParen, &format!("after `{name}`"))?;
+                        let TokKind::Int(n, _) = self.peek().kind else { return Err(Diagnostic::error("E0355", format!("`{name}` needs a byte ceiling"), "a memory threshold must have a positive compile-time limit".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); };
+                        let value = n as u64;
+                        if value == 0 { return Err(Diagnostic::error("E0355", format!("`{name}` needs a positive byte ceiling"), "zero cannot bound a usable memory region".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); }
+                        self.bump(); self.expect(TokKind::RParen, "after the byte ceiling")?;
+                        crate::Policy::PolicyValue::Limit(value)
+                    }
+                    crate::Policy::PolicyKey::Unsafe => return Err(Diagnostic::error("E0355", "`unsafe` is not a source policy".to_string(), "package policy may forbid unsafe, but source code can authorize it only at an audited `@Unsafe` site".to_string(), "use `@Unsafe(\"reason\")` at the operation, or `policy: .{ unsafe: .Forbid }` in `package.jet`".to_string(), Some(name_span))),
+                };
+                out.push(crate::Policy::PolicyDeclaration { key, value, scope, span: Span::new(start.start, self.toks[self.pos - 1].span.end), target: None, source: "<source>".to_string() });
+                if matches!(self.peek().kind, TokKind::Comma) { self.bump(); continue; }
+                break;
+            }
+            self.expect(TokKind::RParen, "after the policy list")?;
+            let end = self.toks[self.pos - 1].span.end;
+            for declaration in &mut out { declaration.span = Span::new(start.start, end); }
+            Ok(out)
         }
     
         /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
@@ -306,7 +327,7 @@ impl<'a> Parser<'a> {
     
         /// U11 (D-JPK-SCRIPTDEP1=A): parse `#<version>` on `use pkg#version;` — a
         /// dotted numeric selector (`1`, `1.4`, `1.4.2`, …). `#` is already
-        /// `TokKind::Hash` (the same token `#Marker`/`[T#N]` use); the selector
+        /// `TokKind::Hash` (the same token `@Marker`/`[T#N]` use); the selector
         /// itself isn't its own lexer token, so it's rebuilt segment-by-segment
         /// from the `Int`/`Float` tokens the number lexer already produced
         /// (`1.4.2` lexes as `Float(1.4)`, `Dot`, `Int(2)`). One known edge case:
@@ -387,23 +408,13 @@ impl<'a> Parser<'a> {
                         }
                     },
                     // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — file-scoped
-                    // allocation floor, parsed like `use`/`#PubFile` (not inside any
+                    // allocation floor, parsed like `use`/`@PubFile` (not inside any
                     // `module { … }` body — only the top-level file item list).
-                    TokKind::Hash
-                        if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) => match self.policy_decl() {
-                        Ok(span) => {
-                            if let Some(first) = no_alloc_policy {
-                                self.diags.push(Diagnostic::error(
-                                    "E0003",
-                                    "only one `#Policy(no_alloc)` declaration is allowed per file"
-                                        .to_string(),
-                                    "a file may declare its allocation floor once".to_string(),
-                                    "remove the duplicate `#Policy(no_alloc)` line".to_string(),
-                                    Some(span),
-                                ));
-                                let _ = first;
-                            } else {
-                                no_alloc_policy = Some(span);
+                    TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) && self.policy_is_file_decl() => match self.policy_decl(crate::Policy::PolicyScope::Module) {
+                        Ok(declarations) => {
+                            for declaration in declarations {
+                                if declaration.key == crate::Policy::PolicyKey::NoAlloc { no_alloc_policy = Some(declaration.span); }
+                                self.policy_declarations.push(declaration);
                             }
                             continue;
                         }
@@ -439,15 +450,15 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     }
-                    TokKind::Hash if self.at_pub_file() => {
+                    TokKind::At if self.at_pub_file() => {
                         if pub_file {
                             let span = self.peek().span;
                             self.diags.push(Diagnostic::error(
                                 "E0416",
-                                "only one `#PubFile` marker is allowed per file".to_string(),
+                                "only one `@PubFile` marker is allowed per file".to_string(),
                                 "a file may declare at most one public-by-default visibility marker"
                                     .to_string(),
-                                "remove the duplicate `#PubFile` marker".to_string(),
+                                "remove the duplicate `@PubFile` marker".to_string(),
                                 Some(span),
                             ));
                             self.bump();
@@ -461,15 +472,15 @@ impl<'a> Parser<'a> {
                         self.pub_file_default = true;
                         continue;
                     }
-                    TokKind::Hash if self.at_no_prelude() => {
+                    TokKind::At if self.at_no_prelude() => {
                         if no_prelude {
                             let span = self.peek().span;
                             self.diags.push(Diagnostic::error(
                                 "E0428",
-                                "only one `#NoPrelude` marker is allowed per file".to_string(),
+                                "only one `@NoPrelude` marker is allowed per file".to_string(),
                                 "a file may opt out of the ambient prelude at most once"
                                     .to_string(),
-                                "remove the duplicate `#NoPrelude` marker".to_string(),
+                                "remove the duplicate `@NoPrelude` marker".to_string(),
                                 Some(span),
                             ));
                             self.bump();
@@ -482,22 +493,22 @@ impl<'a> Parser<'a> {
                         no_prelude = true;
                         continue;
                     }
-                    TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
+                    TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
                     {
                         let span = self.peek().span;
                         self.diags.push(Diagnostic::error(
                             "E0418",
                             format!(
-                                "write `#{}`, not `#{}`",
+                                "write `@{}`, not `@{}`",
                                 Syntax::MARKER_PUB_FILE,
                                 Syntax::MARKER_PUBLIC_FILE
                             ),
                             format!(
-                                "`#{}` flips this file to public-by-default (D-VISDEFAULT2)",
+                                "`@{}` flips this file to public-by-default (D-VISDEFAULT2)",
                                 Syntax::MARKER_PUB_FILE
                             ),
                             format!(
-                                "write `#{}` at the top of the file",
+                                "write `@{}` at the top of the file",
                                 Syntax::MARKER_PUB_FILE
                             ),
                             Some(span),
@@ -505,7 +516,7 @@ impl<'a> Parser<'a> {
                         if pub_file {
                             self.diags.push(Diagnostic::error(
                                 "E0416",
-                                "only one `#PubFile` marker is allowed per file".to_string(),
+                                "only one `@PubFile` marker is allowed per file".to_string(),
                                 "a file may declare at most one public-by-default visibility marker"
                                     .to_string(),
                                 "remove the duplicate marker".to_string(),
@@ -519,19 +530,19 @@ impl<'a> Parser<'a> {
                         self.bump();
                         continue;
                     }
-                    // D-MARK-TARGET1=A: `#Target(Wasm)`/`#Target(Js)` immediately
+                    // D-MARK-TARGET1=A: `@Target(Wasm)`/`@Target(Js)` immediately
                     // attached to a following `fn`/`pub fn` is the per-function
                     // bucket override (routed to `at_web_partition_fn` below,
                     // parsed inside `func()`), not the file/module ceiling.
-                    TokKind::Hash if self.at_web_target() && !self.at_web_partition_fn() => match self.parse_web_target_marker() {
+                    TokKind::At if self.at_web_target() && !self.at_web_partition_fn() => match self.parse_web_target_marker() {
                         Ok(TargetMarker::DefaultWeb) => {
                             if matches!(self.peek().kind, TokKind::KwModule) {
                                 let span = self.peek().span;
                                 self.diags.push(Diagnostic::error(
                                         "E0003",
-                                        "`#Target(Web)` isn't valid on a module".to_string(),
+                                        "`@Target(Web)` isn't valid on a module".to_string(),
                                         "`Web` is a file-level default-backend marker, not a partition ceiling".to_string(),
-                                        "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(Js)` on a module".to_string(),
+                                        "move `@Target(Web)` to the top of the file, outside any module; use `@Target(Wasm)` or `@Target(Js)` on a module".to_string(),
                                         Some(span),
                                     ));
                                 self.sync_top();
@@ -541,9 +552,9 @@ impl<'a> Parser<'a> {
                                 let span = self.peek().span;
                                 self.diags.push(Diagnostic::error(
                                     "E0003",
-                                    "only one `#Target(Web)` marker is allowed per file".to_string(),
+                                    "only one `@Target(Web)` marker is allowed per file".to_string(),
                                     "a file may declare at most one default backend".to_string(),
-                                    "remove the duplicate `#Target(Web)` marker".to_string(),
+                                    "remove the duplicate `@Target(Web)` marker".to_string(),
                                     Some(span),
                                 ));
                                 self.sync_top();
@@ -567,9 +578,9 @@ impl<'a> Parser<'a> {
                                 let span = self.peek().span;
                                 self.diags.push(Diagnostic::error(
                                     "E0003",
-                                    "only one `#Target(…)` ceiling is allowed per file".to_string(),
+                                    "only one `@Target(…)` ceiling is allowed per file".to_string(),
                                     "a file may declare at most one web partition ceiling".to_string(),
-                                    "remove the duplicate `#Target(Wasm)` or `#Target(Js)` marker"
+                                    "remove the duplicate `@Target(Wasm)` or `@Target(Js)` marker"
                                         .to_string(),
                                     Some(span),
                                 ));
@@ -579,7 +590,7 @@ impl<'a> Parser<'a> {
                             web_target_ceiling = Some(target);
                             continue;
                         }
-                        // D-OSTARGET1=A: `#Target(Os.X)` attaches to the `impl` block
+                        // D-OSTARGET1=A: `@Target(Os.X)` attaches to the `impl` block
                         // that immediately follows — item scope, not file scope.
                         Ok(TargetMarker::Os(os)) => {
                             match self.os_gated_impl(os) {
@@ -597,17 +608,17 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     },
-                    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — explicit
+                    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `@Html("path.html")` — explicit
                     // companion host page for `--target=web` builds.
-                    TokKind::Hash if self.at_html_marker() => match self.parse_html_marker() {
+                    TokKind::At if self.at_html_marker() => match self.parse_html_marker() {
                         Ok(path) => {
                             if html_path.is_some() {
                                 let span = self.peek().span;
                                 self.diags.push(Diagnostic::error(
                                     "E0003",
-                                    "only one `#Html(…)` marker is allowed per file".to_string(),
+                                    "only one `@Html(…)` marker is allowed per file".to_string(),
                                     "a file may declare at most one companion host page".to_string(),
-                                    "remove the duplicate `#Html(…)` marker".to_string(),
+                                    "remove the duplicate `@Html(…)` marker".to_string(),
                                     Some(span),
                                 ));
                                 self.sync_top();
@@ -624,7 +635,8 @@ impl<'a> Parser<'a> {
                     },
                     TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                     TokKind::KwFn => self.func().map(Item::Func),
-                    TokKind::Hash if self.at_meta_attr() => {
+                    TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) => self.func().map(Item::Func),
+                    TokKind::At if self.at_meta_attr() => {
                         if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
                             self.const_def().map(Item::Const)
                         } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime)) {
@@ -634,36 +646,36 @@ impl<'a> Parser<'a> {
                         }
                     }
                     // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
-                    // purity modifier (old `#Pure` spelling is E0062, taught in `func()`).
-                    TokKind::Hash | TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
-                    // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
-                    TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
-                    // D-REPLAY1: `#Replayable fn name(…)` deterministic replay guard.
-                    TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
-                    // D-SCHEDULE1 (card #505): `#Task fn name(…)` / `#Every(…) fn name(…)`
+                    // purity modifier (old `@Pure` spelling is E0062, taught in `func()`).
+                    TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
+                    // D-TAINT1: `@Sanitizer fn name(…)` taint-strip modifier.
+                    TokKind::At if self.at_sanitizer_fn() => self.func().map(Item::Func),
+                    // D-REPLAY1: `@Replayable fn name(…)` deterministic replay guard.
+                    TokKind::At if self.at_replayable_fn() => self.func().map(Item::Func),
+                    // D-SCHEDULE1 (card #505): `@Task fn name(…)` / `@Every(…) fn name(…)`
                     // schedule-as-code markers on a free function.
-                    TokKind::Hash if self.at_task_fn() || self.at_every_fn() => {
+                    TokKind::At if self.at_task_fn() || self.at_every_fn() => {
                         self.func().map(Item::Func)
                     }
                     // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn name(…)` — result cannot be
                     // silently ignored (old `@MustUse` spelling is E0062, taught in `func()`).
-                    TokKind::Hash | TokKind::At if self.at_must_use_fn() => self.func().map(Item::Func),
+                    TokKind::At if self.at_must_use_fn() => self.func().map(Item::Func),
                     // D-METHODMACRO1=A: `@Inline fn name(…)` / `@InlineAlways fn name(…)`.
-                    TokKind::Hash | TokKind::At if self.at_inline_fn() => self.func().map(Item::Func),
-                    // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` typestate
+                    TokKind::At if self.at_inline_fn() => self.func().map(Item::Func),
+                    // D-STATE1: `@State(S) fn` / `@Transition(From -> To) fn` typestate
                     // markers on a free function.
-                    TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
+                    TokKind::At if self.at_state_fn() || self.at_transition_fn() => {
                         self.func().map(Item::Func)
                     }
                     // D-PREPOST1: `@Pre(cond, "msg")` / `@Post(cond, "msg")` before a
                     // free function — parsed (and repeated/mixed) inside `func()`.
-                    TokKind::Hash | TokKind::At
+                    TokKind::At
                         if self.at_contract_clause_fn(Syntax::CONTRACT_PRE)
                             || self.at_contract_clause_fn(Syntax::CONTRACT_POST) =>
                     {
                         self.func().map(Item::Func)
                     }
-                    TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
+                    TokKind::At if self.at_web_partition_fn() => self.func().map(Item::Func),
                     // D-S14-PAUSE: bare lowercase `pure` teaching is paused.
                     TokKind::Ident(n)
                         if retired_s14_teaching_enabled()
@@ -676,7 +688,7 @@ impl<'a> Parser<'a> {
                     }
                     // D-TAINT-SAN: bare lowercase `sanitizer fn` is the retired
                     // spelling of the taint-strip modifier (E0059). Point at
-                    // `#Sanitizer`, then parse as if `#Sanitizer fn`.
+                    // `@Sanitizer`, then parse as if `@Sanitizer fn`.
                     TokKind::Ident(n)
                         if n == Syntax::FOREIGN_SANITIZER && self.foreign_sanitizer_follows() =>
                     {
@@ -695,7 +707,7 @@ impl<'a> Parser<'a> {
                             "moving an item above or below a label would silently change whether it exports"
                                 .to_string(),
                             format!(
-                                "write `#{}` once at the top of the file, then mark exceptions with `{}`",
+                                "write `@{}` once at the top of the file, then mark exceptions with `{}`",
                                 Syntax::MARKER_PUB_FILE,
                                 Syntax::KW_PRIV
                             ),
@@ -804,7 +816,7 @@ impl<'a> Parser<'a> {
                         } else {
                             match self.peek2().kind {
                                 // D-REPRC1: `pub #layout(c) struct Name { … }`
-                                TokKind::Hash
+                                TokKind::At
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT)
                                     } =>
@@ -814,7 +826,7 @@ impl<'a> Parser<'a> {
                                 }
                                 // D-MIGRATE1/D-MARKERMOVE1: `pub @PublishedSchema struct
                                 // Name { … }` (retired `pub @PublishedSchema` teaches E0062).
-                                TokKind::Hash | TokKind::At
+                                TokKind::At
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
                                     } =>
@@ -822,8 +834,8 @@ impl<'a> Parser<'a> {
                                     self.bump(); // consume `pub`
                                     self.published_schema_struct_def(true).map(Item::Struct)
                                 }
-                                // D-LIN1: `pub #SingleUse struct|enum Name { … }`
-                                TokKind::Hash
+                                // D-LIN1: `pub @SingleUse struct|enum Name { … }`
+                                TokKind::At
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE)
                                     } =>
@@ -833,7 +845,7 @@ impl<'a> Parser<'a> {
                                 }
                                 // D-MUSTUSE1/D-MARKERMOVE1: `pub @MustUse struct|enum Name
                                 // { … }` (retired `pub @MustUse` teaches E0062).
-                                TokKind::Hash | TokKind::At
+                                TokKind::At
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
                                     } =>
@@ -841,8 +853,8 @@ impl<'a> Parser<'a> {
                                     self.bump(); // consume `pub`
                                     self.must_use_type_def(true)
                                 }
-                                // D-QUAL3: `pub #UnitFamily(name) { m, … }`
-                                TokKind::Hash
+                                // D-QUAL3: `pub @UnitFamily(name) { m, … }`
+                                TokKind::At
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
                                     } =>
@@ -890,10 +902,10 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                    // S43 (D-CASING1 follow-on): `#Test "name" { … }`.
-                    TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
-                    // D-BENCH1 + D-BENCH-MARKER1=A: `#Bench("name") { … }`.
-                    TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
+                    // S43 (D-CASING1 follow-on): `@Test "name" { … }`.
+                    TokKind::At if self.at_test_def() => self.test_def().map(Item::Test),
+                    // D-BENCH1 + D-BENCH-MARKER1=A: `@Bench("name") { … }`.
+                    TokKind::At if self.at_bench_def() => self.bench_def().map(Item::Bench),
                     // D-S14-PAUSE: bare lowercase `test "name" { … }` teaching is paused.
                     TokKind::Ident(n)
                         if retired_s14_teaching_enabled()
@@ -911,7 +923,7 @@ impl<'a> Parser<'a> {
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                     TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                     TokKind::KwImpl => self.impl_or_error_conv(),
-                    TokKind::Hash | TokKind::At
+                    TokKind::At
                         if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_INVARIANT)
                             || self.at_bundle_distinct_def() =>
                     {
@@ -919,46 +931,40 @@ impl<'a> Parser<'a> {
                         self.distinct_def(is_pub, is_package_pub)
                             .map(Item::Distinct)
                     }
-                    // D-ATTR2 / D-SERDE: `#[RenameAll(camel)] struct …` (serde stays `#`).
-                    // D-ATTR1: `#Rename(...) struct …` — one marker, no brackets.
-                    // D-MARKER-FAMILY1/G2/G3: `@[Codable, Debug]` / `@Codable struct …`
-                    // — contract-plane derives, stackable with a `#[…]` serde group.
-                    TokKind::Hash | TokKind::At
-                        if self.at_marker_list()
-                            || self.at_single_type_marker()
-                            || self.at_contract_marker_list()
-                            || self.at_single_contract_type_marker() =>
+                    // D-SHAPE2: `@[RenameAll(camel)]`, `@[Codable, Debug]`, or
+                    // `@Codable` type rules use the one applied-rule parser.
+                    TokKind::At if self.at_marker_list() || self.at_single_type_marker() =>
                     {
                         self.type_def_with_any_markers()
                     }
-                    TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
+                    TokKind::At if self.at_c_module() => self.c_module().map(Item::CModule),
                     TokKind::At if self.at_retired_at_c_module() => {
                         self.retired_at_c_module().map(Item::CModule)
                     }
-                    // D-FFI-INLINE1=A (card #501): `#FFI(<lang>) fn` inline
-                    // foreign tier, incl. the `#Unsafe("…") #FFI(asm) fn` gated
+                    // D-FFI-INLINE1=A (card #501): `@FFI(<lang>) fn` inline
+                    // foreign tier, incl. the `@Unsafe("…") @FFI(asm) fn` gated
                     // form. Checked before the unsafe arm so the gated form routes
-                    // here rather than to the plain `#Unsafe fn` path.
-                    TokKind::Hash if self.at_ffi_fn() => self.ffi_fn().map(Item::Func),
-                    TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
-                    TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
-                    TokKind::Hash if self.at_unit_family_def() => {
+                    // here rather than to the plain `@Unsafe fn` path.
+                    TokKind::At if self.at_ffi_fn() => self.ffi_fn().map(Item::Func),
+                    TokKind::At if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
+                    TokKind::At if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
+                    TokKind::At if self.at_unit_family_def() => {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();
                         self.unit_family_def(is_pub, is_package_pub)
                             .map(Item::UnitFamily)
                     }
                     // D-REPRC1: `#layout(c) struct Name { … }`
-                    TokKind::Hash if self.at_layout_struct() => {
+                    TokKind::At if self.at_layout_struct() => {
                         self.layout_type_def(false)
                     }
                     // D-MIGRATE1/D-MARKERMOVE1: `@PublishedSchema struct Name { … }`
-                    TokKind::Hash | TokKind::At if self.at_published_schema_struct() => {
+                    TokKind::At if self.at_published_schema_struct() => {
                         self.published_schema_struct_def(false).map(Item::Struct)
                     }
-                    // D-LIN1: `#SingleUse struct|enum Name { … }`
-                    TokKind::Hash if self.at_single_use_type() => self.single_use_type_def(false),
+                    // D-LIN1: `@SingleUse struct|enum Name { … }`
+                    TokKind::At if self.at_single_use_type() => self.single_use_type_def(false),
                     // D-MUSTUSE1/D-MARKERMOVE1: `@MustUse struct|enum Name { … }`
-                    TokKind::Hash | TokKind::At if self.at_must_use_type() => {
+                    TokKind::At if self.at_must_use_type() => {
                         self.must_use_type_def(false)
                     }
                     // D-MIGRATE1: `migration TypeName { rename a -> b }`
@@ -985,7 +991,7 @@ impl<'a> Parser<'a> {
                     }
                     // D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored derive.
                     TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
-                    TokKind::Hash
+                    TokKind::At
                         if matches!(
                             &self.peek2().kind,
                             TokKind::Ident(n)
@@ -1000,20 +1006,20 @@ impl<'a> Parser<'a> {
                         };
                         self.diags.push(Diagnostic::error(
                             "E0342",
-                            format!("`#{}` belongs before a statement", name),
+                            format!("`@{}` belongs before a statement", name),
                             "statement switch attributes control code inside a function body, not top-level declarations".to_string(),
                             format!(
-                                "move it inside a function, e.g. `#{} print(\"debug\")`, or remove it from the declaration",
+                                "move it inside a function, e.g. `@{} print(\"debug\")`, or remove it from the declaration",
                                 name
                             ),
                             Some(Span::new(hash.start, name_tok.span.end)),
                         ));
                         continue;
                     }
-                    // D-MARK-META1=B: maturity words are closed `#Meta` values,
+                    // D-MARK-META1=B: maturity words are closed `@Meta` values,
                     // never standalone markers on either plane. Reject them as
                     // ordinary unknown markers with no retired-spelling teaching.
-                    TokKind::Hash | TokKind::At
+                    TokKind::At
                         if matches!(&self.peek2().kind, TokKind::Ident(n)
                             if n == Syntax::ATTR_EXPERIMENTAL
                                 || n == Syntax::ATTR_TESTED
@@ -1036,42 +1042,23 @@ impl<'a> Parser<'a> {
                         self.sync_top();
                         continue;
                     }
-                    TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
+                    TokKind::KwConst => self.const_def().map(Item::Const),
                     // D-PERSIST1: `@Persist const NAME = expr;` — module-level
                     // binding that survives a `jet dev` hot reload.
                     TokKind::At if self.at_persist_const() => self.const_def().map(Item::Const),
-                    // D-MARKER-FAMILY1: a `@` not already claimed by a contract-marker
-                    // arm above. If the name is a known `#` directive, teach E0063
-                    // (wrong plane); otherwise it's the old bare-attribute spelling
-                    // (E0990, D-ATTR1) — unknown name, or `@` not followed by an ident.
-                    // `Unsafe` is a dedicated lexer keyword token (`KwUnsafe`), not a
-                    // generic `Ident`, so it needs its own arm of this same guard.
                     TokKind::At
-                        if matches!(&self.peek2().kind, TokKind::Ident(n) if Syntax::is_directive_marker(n))
-                            || matches!(self.peek2().kind, TokKind::KwUnsafe) =>
+                        if matches!(&self.peek2().kind, TokKind::Ident(n) if n == "static" || n == "inline") =>
                     {
-                        let t = self.bump(); // `@`
-                        let name_tok = self.bump(); // the directive name
-                        let name = match &name_tok.kind {
-                            TokKind::Ident(n) => n.clone(),
-                            TokKind::KwUnsafe => Syntax::KW_UNSAFE.to_string(),
-                            _ => String::new(),
-                        };
-                        self.diags.push(Self::e0063_directive_on_at(
-                            &name,
-                            Span::new(t.span.start, name_tok.span.end),
-                        ));
-                        self.sync_top();
-                        continue;
+                        self.const_def().map(Item::Const)
                     }
                     TokKind::At => {
                         let t = self.bump();
                         self.diags.push(Diagnostic::error(
                             "E0990",
-                            format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
-                            "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)"
+                            "unknown applied rule".to_string(),
+                            "`@` applies a registered typed rule; this name is not valid in this position"
                                 .to_string(),
-                            "write `#Unsafe(\"…\")`, `#Test(\"…\")`, or `@Codable`/`@[Codable, MustUse]` instead of `@…`"
+                            "check the rule spelling and its legal targets"
                                 .to_string(),
                             Some(t.span),
                         ));
@@ -1210,7 +1197,7 @@ impl<'a> Parser<'a> {
                         let d = Diagnostic::error(
                             "E0003",
                             format!(
-                                "expected `{}`, `#{}`, `{}`, or `{}` here, found {}",
+                                "expected `{}`, `@{}`, `{}`, or `{}` here, found {}",
                                 Syntax::KW_FN,
                                 Syntax::KW_TEST,
                                 Syntax::KW_STRUCT,
@@ -1219,7 +1206,7 @@ impl<'a> Parser<'a> {
                             ),
                             "at the top level of a file, only definitions can appear".to_string(),
                             format!(
-                                "define a function ({} run() {{ ... }}), #{} block, struct, or const",
+                                "define a function ({} run() {{ ... }}), @{} block, struct, or const",
                                 Syntax::KW_FN,
                                 Syntax::KW_TEST
                             ),
@@ -1239,6 +1226,21 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc] {
+                let module_chain = self.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module).cloned().collect::<Vec<_>>();
+                if let Err(error) = crate::Policy::resolve(key, module_chain) {
+                    let span = match error { crate::Policy::PolicyError::ProhibitedScope { span, .. } | crate::Policy::PolicyError::Widening { span, .. } => span, crate::Policy::PolicyError::Conflict { second, .. } => second };
+                    self.diags.push(Diagnostic::error("E0355", format!("invalid module `{}` policy", key.name()), "the nearest scope may declare a key once, and inner scopes may only tighten it according to the compiler registry".to_string(), "remove the conflict or tighten the inherited value".to_string(), Some(span)));
+                }
+                let targets = self.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Function && d.key == key).filter_map(|d| d.target).collect::<Vec<_>>();
+                for target in targets {
+                    let chain = self.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module || (d.scope == crate::Policy::PolicyScope::Function && d.target == Some(target))).cloned().collect::<Vec<_>>();
+                    if let Err(error) = crate::Policy::resolve(key, chain) {
+                        let span = match error { crate::Policy::PolicyError::ProhibitedScope { span, .. } | crate::Policy::PolicyError::Widening { span, .. } => span, crate::Policy::PolicyError::Conflict { second, .. } => second };
+                        self.diags.push(Diagnostic::error("E0355", format!("invalid function `{}` policy", key.name()), "the nearest scope may declare a key once, and inner scopes may only tighten it according to the compiler registry".to_string(), "remove the conflict or tighten the inherited value".to_string(), Some(span)));
+                    }
+                }
+            }
             Program {
                 imports,
                 items,
@@ -1248,6 +1250,7 @@ impl<'a> Parser<'a> {
                 default_target,
                 html_path,
                 no_alloc_policy,
+                policy_declarations: std::mem::take(&mut self.policy_declarations),
             }
         }
     

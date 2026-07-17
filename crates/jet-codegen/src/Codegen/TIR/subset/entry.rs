@@ -19,7 +19,7 @@ use std::collections::HashSet;
 /// subset does not lower — a comptime `const` (inlined at use) or a bare
 /// function-as-value ident. Those use sites need codegen the TIR omits in Phase 1.
 pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
-    // c109 Phase 18: an `#Unsafe fn` (S58) IS covered — it lowers to a Rust `unsafe fn`
+    // c109 Phase 18: an `@Unsafe fn` (S58) IS covered — it lowers to a Rust `unsafe fn`
     // (the `is_unsafe` flag drives the signature prefix), and its gated body ops are
     // covered below.
     // c109 Phase 23: a `@Pure fn` (S60, E2-M16) IS covered — purity is a sema-only
@@ -74,7 +74,7 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
-/// c109: is a `#Test` block body fully inside the TIR subset? A test body is a bare
+/// c109: is a `@Test` block body fully inside the TIR subset? A test body is a bare
 /// statement list (no params, unit context), emitted at indent 1 inside the generated
 /// `fn jet_test_N() -> Result<(), String>`. No param/return-type gates apply (the wrapper
 /// signature is fixed by `emit_*_tests`); only the body statements must be in-subset.
@@ -108,7 +108,7 @@ pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
 /// **exclude on any doubt**: a false negative just keeps the method on the AST
 /// path, a false positive risks a silent miscompile (a wrong `self` receiver).
 pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
-    // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` method IS covered
+    // Signature shape: no generics. c109 Phase 18: an `@Unsafe fn` method IS covered
     // (it lowers to an `unsafe fn`, the `is_unsafe` flag driving the prefix). c109
     // Phase 23: a `@Pure fn` method IS covered (purity is sema-only; codegen erases it).
     if !f.type_params.is_empty() {
@@ -164,7 +164,7 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
 /// must be in-subset and never reassign `self`.
 ///
 /// Conservative exclusions beyond the inherent-method gate:
-///  - `is_unsafe` (`#Unsafe fn`) is excluded — its body may use gated pointer ops the
+///  - `is_unsafe` (`@Unsafe fn`) is excluded — its body may use gated pointer ops the
 ///    subset does not lower, and the `unsafe fn` prefix is a separate emit concern.
 ///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
 ///    static trait method, rare; exclude it — the emit hook always renders a receiver).
@@ -179,7 +179,7 @@ pub(crate) fn tir_covers_trait_method(
     // Signature shape: source-generated serde methods carry the owner's generic
     // bounds on the parsed method so the whole fragment remains source-native.
     // Other generic trait methods remain outside this subset.
-    // c109 Phase 18: an `#Unsafe fn` trait method IS
+    // c109 Phase 18: an `@Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).
     // c109 Phase 23: a `@Pure` trait method is covered (purity is sema-only; erased).

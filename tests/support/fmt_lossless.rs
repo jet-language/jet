@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use jet::Lexer::{StrTokPart, TokKind, Token};
 
 const UI_PARSE_INVALID: &[&str] = &[
+    "tests/ui/E0927_retired_marker.jet",
+    "tests/ui/E0927_unknown_marker_directive.jet",
+    "tests/ui/E0927_unknown_marker_typo.jet",
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/bad_escape.jet",
@@ -22,6 +25,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/core_reserved_shadow/scoring.jet",
     "tests/ui/core_selective_import.jet",
     "tests/ui/debug_unknown_selector.jet",
+    "tests/ui/defer_only_close.jet",
     "tests/ui/dispatch_missing_eq.jet",
     "tests/ui/dispatch_redundant_subject.jet",
     "tests/ui/dotless_struct_e0320.jet",
@@ -30,6 +34,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/external_method_retired_separator.jet",
     "tests/ui/ffi_body_not_string.jet",
     "tests/ui/ffi_foreign_unsafe.jet",
+    "tests/ui/flow_pipe_unassigned.jet",
     "tests/ui/generic_square_brackets.jet",
     "tests/ui/if_expr_missing_else.jet",
     "tests/ui/impl_colon_separator.jet",
@@ -59,23 +64,12 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/manifest_version_conflict/lib_v1/pkg.jet",
     "tests/ui/manifest_version_conflict/lib_v2/pkg.jet",
     "tests/ui/manifest_version_conflict/pkg.jet",
-    "tests/ui/marker_caps_at.jet",
-    "tests/ui/marker_codable_hash.jet",
-    "tests/ui/marker_decode_hash.jet",
-    "tests/ui/marker_encode_hash.jet",
     "tests/ui/marker_experimental_at.jet",
     "tests/ui/marker_experimental_hash.jet",
     "tests/ui/marker_hardened_at.jet",
     "tests/ui/marker_hardened_hash.jet",
-    "tests/ui/marker_mustuse_hash.jet",
-    "tests/ui/marker_numeric_hash.jet",
-    "tests/ui/marker_publishedschema_hash.jet",
-    "tests/ui/marker_pure_hash.jet",
-    "tests/ui/marker_redact_hash.jet",
-    "tests/ui/marker_test_at.jet",
     "tests/ui/marker_tested_at.jet",
     "tests/ui/marker_tested_hash.jet",
-    "tests/ui/marker_unsafe_at.jet",
     "tests/ui/matcharm_mixing_needs_parens.jet",
     "tests/ui/meta_bad_maturity.jet",
     "tests/ui/meta_on_expression.jet",
@@ -94,6 +88,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/parse_pattern_adjacent_holes.jet",
     "tests/ui/perf_budget_unknown_role_field.jet",
     "tests/ui/persist_not_module_level.jet",
+    "tests/ui/policy_conflicting_module.jet",
+    "tests/ui/policy_site_bound_authority.jet",
     "tests/ui/protocol_bad_endpoint.jet",
     "tests/ui/pub_file_duplicate_marker.jet",
     "tests/ui/pub_file_priv_without_marker.jet",
@@ -111,6 +107,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/return_arrow_split.jet",
     "tests/ui/schedule_every_without_task.jet",
     "tests/ui/schedule_task_on_method.jet",
+    "tests/ui/serde_rename_all_bad_style.jet",
     "tests/ui/shield_arguments.jet",
     "tests/ui/stacked_type_markers.jet",
     "tests/ui/string_lone_brace.jet",
@@ -128,6 +125,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/uninit_marker_retired.jet",
     "tests/ui/uninit_no_type.jet",
     "tests/ui/unknown_char.jet",
+    "tests/ui/unsafe_forbidden/pkg.jet",
+    "tests/ui/unsafe_per_site/pkg.jet",
     "tests/ui/unterminated_block_comment.jet",
     "tests/ui/unterminated_string.jet",
     "tests/ui/unterminated_triple_string.jet",
@@ -301,7 +300,7 @@ fn is_spanless_file_marker_group(tokens: &[Token]) -> bool {
         .collect();
     matches!(
         kinds.as_slice(),
-        [TokKind::Hash, TokKind::Ident(name), ..]
+        [TokKind::At, TokKind::Ident(name), ..]
             if matches!(name.as_str(), jet::Syntax::ATTR_TARGET | jet::Syntax::ATTR_HTML)
     )
 }
@@ -342,7 +341,7 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
         [TokKind::KwPub, rest @ ..] if rest.iter().any(|kind| matches!(kind, TokKind::KwUse)) => {
             1
         }
-        [TokKind::Hash, TokKind::Ident(name), ..]
+        [TokKind::At, TokKind::Ident(name), ..]
             if matches!(
                 name.as_str(),
                 jet::Syntax::MARKER_PUB_FILE | jet::Syntax::MARKER_NO_PRELUDE
@@ -350,12 +349,12 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
         {
             0
         }
-        [TokKind::Hash, TokKind::Ident(name), ..]
+        [TokKind::At, TokKind::Ident(name), ..]
             if matches!(name.as_str(), jet::Syntax::ATTR_TARGET | jet::Syntax::ATTR_HTML) =>
         {
             2
         }
-        [TokKind::Ident(policy), TokKind::Ident(no_alloc), ..]
+        [TokKind::At, TokKind::Ident(policy), TokKind::LParen, TokKind::Ident(no_alloc), ..]
             if policy == jet::Syntax::ATTR_POLICY && no_alloc == jet::Syntax::POLICY_NO_ALLOC =>
         {
             2
@@ -1066,8 +1065,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
     let allowed = [
         (
             "top-level ordering",
-            "#Target(Web)\nuse core.ui as ui\nfn run() {}\n",
-            "use core.ui as ui\n#Target(Web)\nfn run() {}\n",
+            "@Target(Web)\nuse core.ui as ui\nfn run() {}\n",
+            "use core.ui as ui\n@Target(Web)\nfn run() {}\n",
         ),
         (
             "import-hoisted top-level comments",
@@ -1076,13 +1075,13 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "spanless marker comment position",
-            "// web target\n#Target(Web)\nfn run() {}\n",
-            "#Target(Web)\n// web target\nfn run() {}\n",
+            "// web target\n@Target(Web)\nfn run() {}\n",
+            "@Target(Web)\n// web target\nfn run() {}\n",
         ),
         (
             "marker grouping",
-            "@[Codable, Debug]\nstruct S {}\n",
-            "@Codable\n@Debug\nstruct S {}\n",
+            "@Codable\n@RenameAll(camel)\nstruct S {}\n",
+            "@[Codable, RenameAll(camel)]\nstruct S {}\n",
         ),
         (
             "static generic call",
@@ -1165,13 +1164,13 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "spanless marker movement does not delete comments",
-            "// web target\n#Target(Web)\nfn run() {}\n",
-            "#Target(Web)\nfn run() {}\n",
+            "// web target\n@Target(Web)\nfn run() {}\n",
+            "@Target(Web)\nfn run() {}\n",
         ),
         (
             "marker grouping does not reorder markers",
-            "@[Codable, Debug]\nstruct S {}\n",
-            "@Debug\n@Codable\nstruct S {}\n",
+            "@[Codable, RenameAll(camel)]\nstruct S {}\n",
+            "@[RenameAll(camel), Codable]\nstruct S {}\n",
         ),
         (
             "generic-call rewrite requires a call",

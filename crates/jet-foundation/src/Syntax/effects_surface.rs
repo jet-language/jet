@@ -1,7 +1,7 @@
 /// D-TOOL2 (ratified 2026-06-17, E2-M11; PascalCase marker D-CASING1 follow-on
-/// 2026-06-21): typed hole `#Todo` — compiles everywhere, panics at runtime with
+/// 2026-06-21): typed hole `@Todo` — compiles everywhere, panics at runtime with
 /// file, line, and expected type. Bare lowercase `todo` (FOREIGN_TODO) is the
-/// retired spelling → E0054 teaching error pointing at `#Todo`.
+/// retired spelling → E0054 teaching error pointing at `@Todo`.
 pub const KW_TODO: &str = "Todo";
 
 /// S60 (ratified 2026-06-12; implemented E2-M16; PascalCase marker D-CASING1
@@ -17,47 +17,47 @@ pub const KW_TODO: &str = "Todo";
 pub const KW_PURE: &str = "Pure";
 
 /// D-TAINT1 (ratified 2026-06-21, option A; gated on D-EFF1): the value-fact tag
-/// that marks an untrusted value at its source — `#Tainted input`. The taint
+/// that marks an untrusted value at its source — `@Tainted input`. The taint
 /// **spreads** along dataflow (assignment, interpolation, field store, return,
 /// arithmetic); a tainted value reaching a sink effect (`Db`/`Exec`/`Net`)
-/// without passing through a `#Sanitizer fn` is E0721. A value fact, not a
+/// without passing through a `@Sanitizer fn` is E0721. A value fact, not a
 /// declaration: it rides the value (D-QUAL1). PascalCase per D-CASING1 (the
 /// ratified card's lowercase `#tainted` is normalized to the tag convention).
 /// Static, erased in codegen (I3).
 ///
 /// D-TAINT2 (ratified 2026-07-13, option A): the taint kind is named in parens —
-/// `#Tainted(Credential) value`. Without parens the kind defaults to `.Input`
+/// `@Tainted(Credential) value`. Without parens the kind defaults to `.Input`
 /// (backward compatible). The closed kind set from D-TAINT1 is `.Input` /
 /// `.PII` / `.Secret` / `.Credential`; Credential adds log/print/serialize sinks.
 pub const KW_TAINTED: &str = "Tainted";
 
 /// D-TAINT2 (ratified 2026-07-13, option A): the `Credential` taint kind —
-/// `#Tainted(Credential) value`. A credential value reaching `print`, `log`, or
+/// `@Tainted(Credential) value`. A credential value reaching `print`, `log`, or
 /// `serialize` sinks is E0722. Part of the closed kind set already ratified in
 /// D-TAINT1 (`.Input`/`.PII`/`.Secret`/`.Credential`). PascalCase per D-CASING1.
 pub const KW_CREDENTIAL: &str = "Credential";
 
-/// D-TAINT1: the `#Sanitizer fn name(…)` modifier — the one blessed way to strip
+/// D-TAINT1: the `@Sanitizer fn name(…)` modifier — the one blessed way to strip
 /// taint. A sanitizer's return value is untainted by contract, regardless of
 /// whether its inputs were tainted (it is the audited cleaning step). A fn
-/// modifier in the `@Pure`/`#Unsafe` family; PascalCase per D-CASING1. Erased in
+/// modifier in the `@Pure`/`@Unsafe` family; PascalCase per D-CASING1. Erased in
 /// codegen (I3). NOTE: the ratified card spells the modifier bare `sanitizer fn`;
 /// the D-CASING1 marker convention (which moved `pure fn` → `@Pure fn`) makes
-/// `#Sanitizer fn` the consistent default — a spelling fork queued as D-TAINT-SAN.
+/// `@Sanitizer fn` the consistent default — a spelling fork queued as D-TAINT-SAN.
 pub const KW_SANITIZER: &str = "Sanitizer";
 
 /// D-STATE1 (ratified 2026-06-22, option A): the typestate **require-state** fn
-/// modifier — `#State(Confirmed) fn check_in(self, …)`. Declares the method valid
+/// modifier — `@State(Confirmed) fn check_in(self, …)`. Declares the method valid
 /// only when its receiver is currently in state `Confirmed`. Calling it on a value
 /// in any other state is E0150. The state is an ordinary `tag` (D-QUAL2); the
 /// current state of a value is a compile-time fact threaded by forward dataflow,
 /// erased in codegen (I3 — zero runtime cost). A paren-arg fn marker, parallel to
-/// `#Layout(c)` / `#UnitFamily(currency)`. The exact spelling is the implemented
+/// `@Layout(c)` / `@UnitFamily(currency)`. The exact spelling is the implemented
 /// default queued for owner confirmation as D-STATE-REQ.
 pub const KW_STATE: &str = "State";
 
 /// D-STATE1 (ratified 2026-06-22, option A): the typestate **transition** fn
-/// modifier — `#Transition(Pending -> Confirmed) fn confirm(self) -> Reservation`.
+/// modifier — `@Transition(Pending -> Confirmed) fn confirm(self) -> Reservation`.
 /// Declares a function that consumes a value in state `Pending` and yields one in
 /// state `Confirmed` (the ratified mechanism: "a fn takes the old state tag and
 /// returns the next"). The from-state may be `_` for an **entry** transition (a
@@ -71,8 +71,8 @@ pub const KW_TRANSITION: &str = "Transition";
 /// declaration** contextual keyword — `state TypeName { Pending, Confirmed, CheckedIn }`.
 /// Declares the bounded set of states for a type, tied to the type by name. The set
 /// erases at runtime (pure compile-time, no discriminant). A dead-end state (no
-/// outgoing `#Transition`) is a warning (L0151). A state referenced in `#State(X)` or
-/// `#Transition(A -> B)` that is not in the declared set is E0151. Contextual: the
+/// outgoing `@Transition`) is a warning (L0151). A state referenced in `@State(X)` or
+/// `@Transition(A -> B)` that is not in the declared set is E0151. Contextual: the
 /// word `state` stays usable as an ordinary identifier outside a top-level declaration
 /// position (like `migration`). Declaration family sibling of `tag`/`struct`/`enum`.
 pub const KW_STATE_DECL: &str = "state"; // D-STATE-DECL
@@ -80,7 +80,7 @@ pub const KW_STATE_DECL: &str = "state"; // D-STATE-DECL
 /// D-PROTO1 / D-PROTO2 (ratified 2026-06-27, options A+A): the session/protocol
 /// declaration contextual keyword — `protocol Name { client -> server: Msg(…) }`.
 /// Declares an ordered request/response exchange once; sema expands it into
-/// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
+/// `@SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
 /// methods (out-of-order use = E0150). Contextual like `state`/`migration`.
 pub const KW_PROTOCOL: &str = "protocol"; // D-PROTO1, D-PROTO2
 
@@ -88,30 +88,30 @@ pub const KW_PROTOCOL: &str = "protocol"; // D-PROTO1, D-PROTO2
 pub const PROTO_CLIENT: &str = "client"; // D-PROTO2
 pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 
-/// D-STATE1: the entry-transition placeholder — `#Transition(_ -> Pending)` means
+/// D-STATE1: the entry-transition placeholder — `@Transition(_ -> Pending)` means
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 pub const STATE_ENTRY: &str = "_";
 
 /// D-EFF1 / D-QUAL1 (ratified 2026-06-22): the effect-restriction region marker,
-/// written `#Caps(Net, Db) { … }`. Inside the block, the body (and everything it
+/// written `@Caps(Net, Db) { … }`. Inside the block, the body (and everything it
 /// transitively calls) may use only the listed effects; an out-of-set effect is
 /// E0741. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Caps";
 
 /// D-SCAP1 (ratified 2026-06-21): the scoped-capability grant marker, written
-/// `#Grant(Fs) { caps -> … }`. Grants (authorizes) the listed effect(s) inside
+/// `@Grant(Fs) { caps -> … }`. Grants (authorizes) the listed effect(s) inside
 /// the block through the first-class handle bound after `{` (here `caps`), and
 /// **revokes** the capability at scope end (RAII, S63) — the handle is bound only
-/// for the block. The dual of `#Caps` (which restricts): an effect used inside
+/// for the block. The dual of `@Caps` (which restricts): an effect used inside
 /// that the grant doesn't cover has no capability (E0712); letting the handle
 /// escape is E0711. Erased in codegen (I3). PascalCase per D-MARKERCASE1=A.
 pub const KW_GRANT: &str = "Grant";
 
 /// D-SCAP1: the `->` token between the grant handle and the block body —
-/// `#Grant(Fs) { caps -> … }`.
+/// `@Grant(Fs) { caps -> … }`.
 pub const GRANT_ARROW: &str = "->";
 
-/// D-SCAP1: the type of a capability handle bound by `#Grant(…) { caps -> … }`.
+/// D-SCAP1: the type of a capability handle bound by `@Grant(…) { caps -> … }`.
 /// An opaque sema-only handle (authority to perform the granted effects); erased
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
@@ -162,7 +162,7 @@ pub const METHOD_TASK_CANCEL: &str = "cancel";
 pub const METHOD_TASK_TRACE: &str = "trace";
 
 /// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
-/// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
+/// `@Transact(order) { … }`. `order` binds a user-chosen transaction handle
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an
 /// irreversible effect (Net/Fs/Exec) is rejected (E0746, D-TXN2); the fix is to
 /// move it after the block or register it on the handle via
@@ -186,7 +186,7 @@ pub const TXN_ON_COMMIT: &str = "on_commit";
 pub const TXN_ON_ROLLBACK: &str = "on_rollback";
 
 /// D-TXN-ROLLBACK (ratified 2026-06-25, layer 2): the trait a type may derive/impl
-/// to customize how a mutated value is snapshotted and restored inside a `#Transact`
+/// to customize how a mutated value is snapshotted and restored inside a `@Transact`
 /// block (e.g. a cheap diff instead of a full deep copy). When a mutated value's
 /// type implements `Rollback`, the auto-snapshot (layer 1) uses it instead of a
 /// generic clone. A user-derivable trait name (I7).
@@ -214,29 +214,29 @@ pub const INTERP_SELECTOR_DEBUG: &str = "Debug";
 /// from auto-derived Debug output.
 pub const ATTR_REDACT: &str = "Redact";
 
-/// D-TXN4: the type of a transaction handle bound by `#Transact(name)`. An
+/// D-TXN4: the type of a transaction handle bound by `@Transact(name)`. An
 /// opaque sema-only handle; erased in codegen (I3).
 pub const TXN_HANDLE_TYPE: &str = "Transaction";
 
 /// S14 / D-CASING1 follow-on (2026-06-21): the retired lowercase spellings of
 /// the three marker keywords, recognized only for teaching errors that point at
-/// the `#Test` / `@Pure` / `#Todo` marker forms.
+/// the `@Test` / `@Pure` / `@Todo` marker forms.
 pub const FOREIGN_TEST: &str = "test";
 pub const FOREIGN_PURE: &str = "pure";
 pub const FOREIGN_TODO: &str = "todo";
 
 /// D-TAINT-SAN (ratified 2026-06-25, option B): the taint-strip modifier is the
-/// PascalCase marker `#Sanitizer fn`. Bare lowercase `sanitizer` in fn-modifier
+/// PascalCase marker `@Sanitizer fn`. Bare lowercase `sanitizer` in fn-modifier
 /// position (`sanitizer fn …`) is the retired spelling, recognized only for the
-/// teaching error E0059 that points at `#Sanitizer`. An ordinary identifier named
+/// teaching error E0059 that points at `@Sanitizer`. An ordinary identifier named
 /// `sanitizer` elsewhere is unaffected.
 pub const FOREIGN_SANITIZER: &str = "sanitizer";
 
 /// D-LIN1-DROP / D-DROP-WORD1: `consume(x)` is the deliberate
-/// discard of a `#SingleUse` value. Legal ONLY inside an `#Unsafe("reason")`
-/// region/fn — the `#Unsafe` reason IS the audit note (reuses D-UNSAFE2's audited
+/// discard of a `@SingleUse` value. Legal ONLY inside an `@Unsafe("reason")`
+/// region/fn — the `@Unsafe` reason IS the audit note (reuses D-UNSAFE2's audited
 /// gate). It satisfies the single-use consume duty by moving the value to nowhere;
-/// the value's Rust `Drop` runs. Outside an `#Unsafe` context it is E0143. Erased
+/// the value's Rust `Drop` runs. Outside an `@Unsafe` context it is E0143. Erased
 /// to a plain `drop(x)` in codegen (I3 — no `unsafe` emitted). Shadowed by any
 /// user-defined `drop` function or local.
 pub const BUILTIN_CONSUME: &str = "consume"; // D-DROP-WORD1
@@ -507,7 +507,7 @@ pub const TOOL_STATE_DIR: &str = "tools";
 /// hangar providers — emit E1298 instead of silently skipping.
 pub const TOOL_EXTERNAL_PROVIDERS: &[&str] =
     &["npm", "pypi", "cargo", "crates", "brew", "go", "gem"];
-/// Diagnostic class JPK-TOOL-COLLIDE (E1297): install bin shadows a `#Task fn`.
+/// Diagnostic class JPK-TOOL-COLLIDE (E1297): install bin shadows a `@Task fn`.
 pub const TOOL_DIAG_COLLIDE: &str = "E1297";
 /// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
 pub const TOOL_DIAG_PROVIDER: &str = "E1298";

@@ -22,6 +22,7 @@ mod CmdCompile;
 mod CmdDevTools;
 mod CmdDossier;
 mod CmdExpand;
+mod CmdGc;
 mod CmdImpact;
 mod CmdImport;
 mod CmdPkg;
@@ -29,6 +30,7 @@ mod CmdProve;
 mod CmdSchema;
 mod CmdSemIndex;
 mod CmdSupply;
+mod CmdUnsafe;
 mod CmdStructuralMerge;
 mod EngineDispatch;
 
@@ -39,7 +41,7 @@ use CmdCompile::{
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
-    run_eval, run_explain, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
+    run_eval, run_explain, run_explain_marker, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
 };
 use CmdDossier::run_dossier;
 use CmdExpand::run_expand;
@@ -358,12 +360,13 @@ usage:
   {bin} run   <file.{ext}>          build, then run (or `jet run` inside a project)
   {bin} run   <file.{ext}> a b      extra words become program arguments
   {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
+  {bin} run   <file.{ext}> --gc-trace   record bounded automatic-GC promotion evidence
   {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
   {bin} test  <file> --shuffle      run tests in a random (printed) order
   {bin} test  <file> --serial       run one test at a time (default: parallel)
-  {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `#Test fn` (D-TEST1 property test)
+  {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `@Test fn` (D-TEST1 property test)
   {bin} new   <name>                create a new project folder with pkg.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
@@ -392,9 +395,11 @@ usage:
   {bin} self completions <shell>    print shell completions
   {bin} self man                    print the jet self man page (roff)
   {bin} self lsp                    language server (stdio JSON-RPC)
+  {bin} gc report                   explain automatic-GC promotions and ownership rewrites
   {bin} self devtools <verb>        run checked developer generators
   {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
   {bin} inspect expand <file.{ext}> print semantic facts (D-EXPANDCLI1)
+  {bin} inspect unsafe <file.{ext}> audit unsafe policy and typed obligations
   {bin} version                     print compiler version
   {bin} help                        print this help text
   {bin} ?                           same as help
@@ -440,6 +445,7 @@ flags:
   --locked                     with fetch: verify only, refuse network
   --verbose, -v                with build: print the bridge steps
   --json                       emit machine-readable diagnostics
+  --gc-trace                   with run/dev: record automatic-GC promotion evidence
   --color=auto|always|never    control color (auto: only on a terminal)
   --filter=<substr>            with test: only run tests whose name contains it
   --shuffle, --shuffle=<seed>  with test: run tests in random (or given-seed) order
@@ -968,6 +974,9 @@ fn main() {
     if cmd == "dev" || raw.iter().any(|arg| arg == "--observe") {
         std::env::set_var("JET_OBSERVE", "1");
     }
+    if raw.iter().any(|arg| arg == "--gc-trace") {
+        CmdGc::configure_trace();
+    }
 
     // If the first word is not in the single CLI registry, try an external
     // `jet-<cmd>` on PATH (D-DX5, cargo/git style), else teach E2101 with a
@@ -1129,8 +1138,16 @@ fn main() {
             return;
         }
         "explain" => {
+            if args.get(1).map(|s| s.as_str()) == Some("marker") {
+                run_explain_marker(
+                    args.get(2).map(|s| s.as_str()),
+                    args.get(3).map(|s| s.as_str()),
+                    mode,
+                );
+                return;
+            }
             let code = args.get(1).map(|s| s.as_str());
-            if code.map(is_diagnostic_code).unwrap_or(true) {
+            if code.map(|value| is_diagnostic_code(value) || jet::Explain::lookup(value).is_some()).unwrap_or(true) {
                 run_explain(code, mode);
             } else {
                 exit(EngineDispatch::dispatch(
@@ -1206,14 +1223,31 @@ fn main() {
                 json,
             );
         }
-        // D-CLI-SURFACE3=B: the four silent aliases die — `gc` teaches `jet clean`.
+        // D-OPTGC1=A: the grouped report is active; the old bare cleanup alias
+        // still teaches `jet clean`.
         "gc" => {
-            teach_retired(
-                "gc",
-                "jet clean",
-                "`jet clean` is the sole GC+optimize entry (D-CLI-STORE2=A)",
-                json,
-            );
+            match args.get(1).map(|word| word.as_str()) {
+                Some("report") => {
+                    CmdGc::run(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
+                    return;
+                }
+                None => teach_retired(
+                    "gc",
+                    "jet clean",
+                    "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)",
+                    json,
+                ),
+                Some(other) => {
+                    if json {
+                        println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet gc command\",\"why\":\"jet gc currently exposes only the automatic-promotion report\",\"fix\":\"run `jet gc report`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(other));
+                    } else {
+                        eprintln!("Error [E2101]: `{other}` isn't a jet gc command.");
+                        eprintln!(" Why: jet gc currently exposes only the automatic-promotion report.");
+                        eprintln!(" Fix: run `jet gc report`.");
+                    }
+                    exit(ExitCodes::USAGE);
+                }
+            }
         }
         "publish" => {
             let force = raw.iter().any(|a| a == "--force");
@@ -1308,6 +1342,11 @@ fn main() {
             // expand <file>` — the transparency command (card #183).
             let expand_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_expand(&expand_args, mode.json);
+            return;
+        }
+        "unsafe" => {
+            let unsafe_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            CmdUnsafe::run(&unsafe_args, mode.json);
             return;
         }
         "audit" => {
@@ -1538,15 +1577,15 @@ fn main() {
             // its own `jet dev` behavior as ordinary Jet code — a top-level
             // `fn dev()` becomes the program's real (native) entry point,
             // normally configuring and starting a `core.web.devserver` value.
-            // Checked FIRST, ahead of the #Target(Web)-inferred built-in web
+            // Checked FIRST, ahead of the @Target(Web)-inferred built-in web
             // server below: `fn dev()` is the more specific, user-authored
-            // override, so a file that carries BOTH `#Target(Web)` (a build
+            // override, so a file that carries BOTH `@Target(Web)` (a build
             // default) and `fn dev()` (an explicit dev-command override) must
             // run the override, not silently fall back to the built-in server
             // because a *different* marker also happened to be present. (This
             // ordering bug was caught during manual verification — the first
-            // cut checked #Target(Web) first, which made `fn dev()` totally
-            // unreachable on any file that also declared #Target(Web), e.g.
+            // cut checked @Target(Web) first, which made `fn dev()` totally
+            // unreachable on any file that also declared @Target(Web), e.g.
             // ui_web_click.jet, which has both.)
             if has_dev_entry_fn(file) {
                 run_dev_entry(file, mode);
@@ -1558,7 +1597,7 @@ fn main() {
             // loop above, so it's a separate function, not a new branch
             // inside `run_dev`'s interpreter machinery.
             // D-WEBDEFAULT1 (ratified 2026-07-01, c134): no explicit --target= falls back to the
-            // file's own `#Target(Web)` marker, if any.
+            // file's own `@Target(Web)` marker, if any.
             if effective_target("dev", file, cross_target.as_deref()).as_deref()
                 == Some(jet::Syntax::BUILD_TARGET_WEB)
             {
@@ -1909,7 +1948,7 @@ fn main() {
             run_bench(target, mode);
         }
         // D-TESTKIT1=A (c308 pass 2): `jet fuzz <file> [<test-name>]` — fuzz a
-        // parameterized `#Test fn` (D-TEST1's property-test form).
+        // parameterized `@Test fn` (D-TEST1's property-test form).
         "fuzz" => {
             let test_name = args.get(2).map(|s| s.as_str());
             let iterations = jet_argv
@@ -1985,7 +2024,7 @@ fn main() {
                 target.to_string()
             };
             // D-JPK-TASKRUN1: `jet run --task <name> <file>` swaps the named
-            // `#Task fn` in as the entry before codegen (same path as `fn dev`).
+            // `@Task fn` in as the entry before codegen (same path as `fn dev`).
             if cmd == "run" {
                 if let Some(task) = task_name.as_deref() {
                     if task.is_empty() {
@@ -2030,7 +2069,7 @@ fn main() {
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): resolve the effective `--target=` value for
 /// `file`. Precedence: an explicit CLI flag always wins; else `pkg.jet`'s
 /// `target: "web"` (a managed package's project-level default); else a
-/// lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
+/// lightweight parse of `file` for a top-level `@Target(Web)` marker (a loose
 /// file's own default, for standalone examples with no manifest at all).
 /// Reparses the file/manifest — wasteful compared to threading the fact
 /// through the real compile pipeline, but `jet` recompiles from scratch on

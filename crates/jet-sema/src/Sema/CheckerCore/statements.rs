@@ -17,6 +17,16 @@ impl<'a> Checker<'a> {
         /// Check two alternative branches with independent move states, then
         /// keep the union (a value moved in either branch counts as gone).
         pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
+            if let Stmt::While { span, .. }
+            | Stmt::For { span, .. }
+            | Stmt::Loop { span, .. }
+            | Stmt::CountedLoop { span, .. } = stmt
+            {
+                self.fx_memory_unbounded_control.push(*span);
+                for region in &mut self.memory_policy_stack {
+                    region.unbounded_control.push(*span);
+                }
+            }
             match stmt {
                 Stmt::Val(b) => self.check_binding(b),
                 Stmt::Assign {
@@ -243,9 +253,9 @@ impl<'a> Checker<'a> {
                                                 "writing through `[ ]` isn't supported on a columnar list `{}` yet",
                                                 Type::List(inner.clone()).show()
                                             ),
-                                            "`#Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred".to_string(),
+                                            "`@Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred".to_string(),
                                             format!(
-                                                "drop `#Layout(columnar)` from `{}` to assign through `[ ]`, or rebuild the list with `push`",
+                                                "drop `@Layout(columnar)` from `{}` to assign through `[ ]`, or rebuild the list with `push`",
                                                 elem
                                             ),
                                             Some(*span),
@@ -523,9 +533,9 @@ impl<'a> Checker<'a> {
                                             expr_root_ident(ib).unwrap_or("xs"),
                                             field
                                         ),
-                                        "`#Layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred".to_string(),
+                                        "`@Layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred".to_string(),
                                         format!(
-                                            "drop `#Layout(columnar)` from `{}` to write fields in place, or rebuild the element with `push`",
+                                            "drop `@Layout(columnar)` from `{}` to write fields in place, or rebuild the element with `push`",
                                             elem
                                         ),
                                         Some(*span),
@@ -666,6 +676,14 @@ impl<'a> Checker<'a> {
                     let Stmt::Expr(expr) = stmt else {
                         return;
                     };
+                    if let Expr::Call(call) = expr {
+                        if call.name == Syntax::INTERNAL_DEFER_CLOSE {
+                            if let Some(arg) = call.args.first_mut() {
+                                self.infer_fallible_stmt(&mut arg.expr);
+                            }
+                            return;
+                        }
+                    }
                     // D-IGNORERET2=A: `.drop("reason")` is the blessed explicit-discard
                     // terminal. When recognized, infer the *receiver* (for side effects),
                     // validate the reason is a non-empty string literal, and suppress E0402.
@@ -829,7 +847,7 @@ impl<'a> Checker<'a> {
                             // D-ALLOC2: E0631 — returning an arena `view` would let
                             // it outlive the arena (the arena drops at scope end).
                             if let Expr::Ident(n, nspan) = &*e {
-                                if self.is_arena_view(n) {
+                                if self.is_arena_view(n) || self.is_fixed_backing_view(n) {
                                     self.report_view_escape(n, "be returned", *nspan);
                                 }
                             }
@@ -1028,6 +1046,8 @@ impl<'a> Checker<'a> {
                     span: _,
                     label,
                 } => {
+                    let memory_multiplier = self.memory_control_multiplier;
+                    self.memory_control_multiplier = None;
                     self.require_bool(cond, "a `while` condition");
                     if let Some((n, _)) = label {
                         self.loop_labels.push(n.clone());
@@ -1042,6 +1062,7 @@ impl<'a> Checker<'a> {
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
+                    self.memory_control_multiplier = memory_multiplier;
                 }
                 Stmt::For {
                     var,
@@ -1052,6 +1073,12 @@ impl<'a> Checker<'a> {
                     span: _,
                     label,
                 } => {
+                    let memory_multiplier = self.memory_control_multiplier;
+                    let loop_multiplier = memory_multiplier.and_then(|outer| {
+                        statically_bounded_for_iterations(kind)
+                            .and_then(|iterations| outer.checked_mul(iterations))
+                    });
+                    self.memory_control_multiplier = memory_multiplier;
                     if let Some((n, _)) = label {
                         self.loop_labels.push(n.clone());
                     }
@@ -1132,6 +1159,7 @@ impl<'a> Checker<'a> {
                                     single_use_span: None,
                                 },
                             );
+                            self.memory_control_multiplier = loop_multiplier;
                             for s in body.iter_mut() {
                                 self.check_stmt(s);
                             }
@@ -1238,6 +1266,7 @@ impl<'a> Checker<'a> {
                                 }
                                 None => {}
                             }
+                            self.memory_control_multiplier = loop_multiplier;
                             for s in body.iter_mut() {
                                 self.check_stmt(s);
                             }
@@ -1252,6 +1281,7 @@ impl<'a> Checker<'a> {
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
+                    self.memory_control_multiplier = memory_multiplier;
                 }
                 Stmt::Switch {
                     subject,
@@ -1304,6 +1334,8 @@ impl<'a> Checker<'a> {
                     label,
                     ..
                 } => {
+                    let memory_multiplier = self.memory_control_multiplier;
+                    self.memory_control_multiplier = None;
                     if let Some((n, _)) = label {
                         self.loop_labels.push(n.clone());
                     }
@@ -1318,10 +1350,13 @@ impl<'a> Checker<'a> {
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
+                    self.memory_control_multiplier = memory_multiplier;
                 }
                 Stmt::Loop {
                     body: inner, label, ..
                 } => {
+                    let memory_multiplier = self.memory_control_multiplier;
+                    self.memory_control_multiplier = None;
                     if let Some((n, _)) = label {
                         self.loop_labels.push(n.clone());
                     }
@@ -1333,36 +1368,27 @@ impl<'a> Checker<'a> {
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
+                    self.memory_control_multiplier = memory_multiplier;
                 }
                 Stmt::Unsafe { audit, body, span } => {
-                    // L3101 (D-UNSAFE2): every `#Unsafe` block needs a reason argument
-                    // so the safety case is on record.
-                    if audit.is_none() {
-                        self.diags.push(Diagnostic::lint(
-                            "L3101",
-                            "this `#Unsafe` block has no reason".to_string(),
-                            "every gated region records why it can't break memory safety".to_string(),
-                            "add the reason: `#Unsafe(\"why this is safe\") { … }`".to_string(),
-                            Some(*span),
-                        ));
-                    }
+                    let _ = (audit, span); // L3101 is policy-aware in UnsafeObligations.
                     let prev = self.in_unsafe;
                     self.in_unsafe = true;
                     self.check_block(body, true);
                     self.in_unsafe = prev;
                 }
-                // D-CTEFFECT1: `#Impure("reason") { … }` — the Tier-2 comptime effect
+                // D-CTEFFECT1: `@Impure("reason") { … }` — the Tier-2 comptime effect
                 // gate. At runtime (which is what sema is checking here), this block is
                 // semantically a plain block: it has no runtime significance. The gate is
                 // enforced only inside the comptime interpreter. L3102 fires when no
-                // reason was given (matches L3101 pattern for #Unsafe).
+                // reason was given (matches L3101 pattern for @Unsafe).
                 Stmt::Impure { reason, body, span } => {
                     if reason.is_none() {
                         self.diags.push(Diagnostic::lint(
                             "L3102",
-                            "this `#Impure` block has no reason".to_string(),
+                            "this `@Impure` block has no reason".to_string(),
                             "every comptime effect gate records why ambient I/O is needed".to_string(),
-                            "add the reason: `#Impure(\"reading build config\") { … }`".to_string(),
+                            "add the reason: `@Impure(\"reading build config\") { … }`".to_string(),
                             Some(*span),
                         ));
                     }
@@ -1370,21 +1396,21 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.ct_impure_depth -= 1;
                 }
-                // D-SHIELDNAME1=A: `#Shield { … }` — a cancellation-shield region.
+                // D-SHIELDNAME1=A: `@Shield { … }` — a cancellation-shield region.
                 // Legal anywhere ordinary statements are; a no-op outside a task.
                 // Semantically a plain block: check the body, no effects, no gate.
                 Stmt::Shield { body, .. } => {
                     self.check_block(body, true);
                 }
-                // D-REACTCORE1: `#Reactive { … }` — a reactive effect scope.
+                // D-REACTCORE1: `@Reactive { … }` — a reactive effect scope.
                 Stmt::Reactive { body, span } => {
                     if self.in_comptime {
                         self.diags.push(Diagnostic::error(
                             "E2914",
-                            "`#Reactive` can't run at comptime".to_string(),
+                            "`@Reactive` can't run at comptime".to_string(),
                             "reactive effects subscribe to runtime signals and re-run when they change (D-REACTCORE1)"
                                 .to_string(),
-                            "move `#Reactive { … }` out of the `comptime` block".to_string(),
+                            "move `@Reactive { … }` out of the `comptime` block".to_string(),
                             Some(*span),
                         ));
                     }
@@ -1399,6 +1425,13 @@ impl<'a> Checker<'a> {
                     let region_stack = self.region_stack.clone();
                     let fx_regions = self.fx_regions.clone();
                     let fx_callback_obligations = self.fx_callback_obligations.clone();
+                    let fx_memory_events = self.fx_memory_events.clone();
+                    let fx_memory_open = self.fx_memory_open.clone();
+                    let memory_policy_stack = self.memory_policy_stack.clone();
+                    let fx_memory_regions = self.fx_memory_regions.clone();
+                    let fx_memory_unbounded_control = self.fx_memory_unbounded_control.clone();
+                    let fx_memory_calls = self.fx_memory_calls.clone();
+                    let memory_control_multiplier = self.memory_control_multiplier;
                     let prev_suppress = self.suppress_must_use;
                     self.suppress_must_use = true;
                     self.push_scope();
@@ -1415,6 +1448,13 @@ impl<'a> Checker<'a> {
                     self.region_stack = region_stack;
                     self.fx_regions = fx_regions;
                     self.fx_callback_obligations = fx_callback_obligations;
+                    self.fx_memory_events = fx_memory_events;
+                    self.fx_memory_open = fx_memory_open;
+                    self.memory_policy_stack = memory_policy_stack;
+                    self.fx_memory_regions = fx_memory_regions;
+                    self.fx_memory_unbounded_control = fx_memory_unbounded_control;
+                    self.fx_memory_calls = fx_memory_calls;
+                    self.memory_control_multiplier = memory_control_multiplier;
                 }
                 Stmt::DebugOnly { body, .. } => {
                     self.check_block(body, true);
@@ -1427,6 +1467,11 @@ impl<'a> Checker<'a> {
                 // bound is the scope itself.
                 Stmt::Region { body, .. } => {
                     self.check_block(body, true);
+                }
+                Stmt::Policy { declarations, body, span } => {
+                    self.enter_memory_policy_region(declarations.clone(), *span);
+                    self.check_block(body, true);
+                    self.exit_memory_policy_region();
                 }
                 // D-TASKSCOPE1=A / D-NURSERY1=A: `taskgroup g { … }` — structured task scope.
                 Stmt::TaskGroup {
@@ -1581,7 +1626,7 @@ impl<'a> Checker<'a> {
                     }
                     self.pop_scope();
                 }
-                // D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction
+                // D-EFF1 / D-QUAL1: a `@Caps(Net, Db) { … }` effect-restriction
                 // region. Validate the cap names (E0119), open an accumulator so the
                 // effects reached inside are tallied, check the body, then seal the
                 // region for the post-pass E0741 subset check. A lexical scope.
@@ -1628,7 +1673,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 // D-SCAP1 (ratified 2026-06-21, opt A): a `#grant(Fs) { caps -> … }`
-                // scoped-capability grant region — the dual of `#Caps`. Validate the
+                // scoped-capability grant region — the dual of `@Caps`. Validate the
                 // granted effect names (E0119), bind the first-class capability handle
                 // `caps` in a fresh scope (revoked at scope end, RAII), open a grant
                 // accumulator so effects reached inside are tallied against the grant
@@ -1693,7 +1738,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value) { … }`.
+                // D-CTX1 (ratified 2026-06-22, G2): `@Context(field: value) { … }`.
                 // Type-check each field value: `allocator` must be an allocator
                 // handle type; `deadline` must be an Int epoch-ms instant; `logger`
                 // is currently unconstrained. E0762 on mismatch.
@@ -1710,14 +1755,14 @@ impl<'a> Checker<'a> {
                     if self.in_pure {
                         self.diags.push(crate::Sema::e3401(
                             &self.fn_name.clone(),
-                            "#Live { … }",
+                            "@Live { … }",
                             &[],
                             *span,
                         ));
                     }
                     if self.freestanding {
                         self.diags.push(crate::Sema::e3301(
-                            "#Live { … }",
+                            "@Live { … }",
                             "Terminal I/O requires an OS terminal device. Build without `--freestanding`.",
                             *span,
                         ));
@@ -1725,11 +1770,11 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                 }
                 // D-DOTSCOPE1: a scope-member statement (`.setup`/`.expect_fail`/
-                // `.timeout`/`.skip` inside a `#Test` block). Member legality, args,
+                // `.timeout`/`.skip` inside a `@Test` block). Member legality, args,
                 // position, and nesting are validated by the `ScopeMembers` pass; here
                 // the checker only type-checks the region body's ordinary statements.
                 // The member args (`.timeout(500ms)`, `.skip("why")`) are intentionally
-                // NOT inferred — a bare duration literal has no `#UnitFamily` in scope.
+                // NOT inferred — a bare duration literal has no `@UnitFamily` in scope.
                 // `.setup` is init sugar: its bindings leak into the test scope (no new
                 // scope), so the rest of the body can use them. Every other member is
                 // its own region (a closure / block / dead branch in codegen), so its
@@ -1750,7 +1795,7 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.det_suppress -= 1;
                 }
-                // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }`.
+                // D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }`.
                 // Bind the user-chosen handle `name` (typed `Transaction`) so
                 // `name.on_commit(() => { … })` resolves inside the block, then check
                 // the body with the transaction depth raised: an irreversible Core
@@ -1847,4 +1892,27 @@ impl<'a> Checker<'a> {
             }
         }
     
+}
+
+fn statically_bounded_for_iterations(kind: &ForKind) -> Option<u64> {
+    match kind {
+        ForKind::Range { start, end, step } => {
+            let Expr::Int(start, _, _, _) = start else { return None };
+            let Expr::Int(end, _, _, _) = end else { return None };
+            let step = match step {
+                Some(Expr::Int(step, _, _, _)) if *step > 0 => *step as i128,
+                None => 1,
+                _ => return None,
+            };
+            if end < start {
+                return Some(0);
+            }
+            let iterations = ((*end as i128 - *start as i128) / step) + 1;
+            u64::try_from(iterations).ok()
+        }
+        ForKind::In { collection: Expr::ListLit(items, _) } => {
+            u64::try_from(items.len()).ok()
+        }
+        ForKind::In { .. } => None,
+    }
 }

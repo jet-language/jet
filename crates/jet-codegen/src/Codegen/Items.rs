@@ -20,14 +20,6 @@ fn field_self_read(f: &Field) -> String {
     }
 }
 
-fn type_mentions_gc(ty: &Type) -> bool {
-    match ty {
-        Type::Apply { name, .. } if name == Syntax::GC_TYPE => true,
-        Type::Option(inner) => type_mentions_gc(inner),
-        _ => false,
-    }
-}
-
 fn struct_has_view_field(cx: &Cx, s: &StructDef) -> bool {
     s.fields.iter().any(|f| cx.type_contains_view(&f.ty))
 }
@@ -50,26 +42,6 @@ fn add_view_lifetime_arg(args: String) -> String {
     } else {
         args
     }
-}
-
-fn emit_gc_trace_impl(s: &StructDef, out: &mut String) {
-    if !s.fields.iter().any(|f| type_mentions_gc(&f.ty)) {
-        return;
-    }
-    let mut trace_body = String::new();
-    for f in &s.fields {
-        if type_mentions_gc(&f.ty) {
-            trace_body.push_str(&format!(
-                "        jet_gc::GcTrace::trace(&self.{}, out);\n",
-                mangle(&f.name)
-            ));
-        }
-    }
-    out.push_str(&format!(
-        "impl jet_gc::GcTrace for {name} {{\n    fn trace(&self, out: &mut Vec<jet_gc::ObjectId>) {{\n{trace_body}    }}\n}}\n\n",
-        name = user_type_rust(&s.name),
-        trace_body = trace_body
-    ));
 }
 
 pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
@@ -147,7 +119,6 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
-    emit_gc_trace_impl(s, out);
     if !s.type_params.is_empty() {
         let jetshow_extra = Generics::rust_extra_jetshow_bounds(&s.type_params);
         let mut impl_bounds = jetshow_extra.clone();
@@ -570,10 +541,10 @@ pub(crate) fn emit_cli_entry_if_needed(
     if run_fn.params.is_empty() {
         if is_fallible_void_entry_return(run_fn) {
             out.push_str(
-                "fn main() {\n    jet_std_env_init();\n    if let Err(__jet_err) = user_run() {\n        eprintln!(\"{}\", __jet_err);\n        std::process::exit(1);\n    }\n}\n\n",
+                "fn main() {\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    if let Err(__jet_err) = jet_runtime_boundary(|| user_run()) {\n        eprintln!(\"{}\", __jet_err);\n        std::process::exit(1);\n    }\n}\n\n",
             );
         } else {
-            out.push_str("fn main() {\n    jet_std_env_init();\n    user_run();\n}\n\n");
+            out.push_str("fn main() {\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| user_run());\n}\n\n");
         }
         return;
     }
@@ -621,7 +592,7 @@ pub(crate) fn emit_cli_entry_if_needed(
     }) {
         if s.derives.iter().any(|(t, _)| t == "Cli") {
             out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ user_run({call_arg}); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ jet_runtime_boundary(|| user_run({call_arg})); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 name = name,
                 call_arg = arg_expr("__args"),
             ));
@@ -688,7 +659,7 @@ fn emit_cli_subcommand_entry(
         let tag = mangle_variant(&v.name);
         let ctor = format!("{enum_rust}::{tag}(__payload)");
         arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ user_run({call_arg}); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ jet_runtime_boundary(|| user_run({call_arg})); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),
             payload = payload_name,
             call_arg = arg_expr(&ctor),
@@ -697,7 +668,7 @@ fn emit_cli_subcommand_entry(
     let _ = cx;
 
     out.push_str(&format!(
-        "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
+        "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
         usage = usage_lines,
         arms = arms,
         cmds = cmd_names.join(", "),
@@ -907,7 +878,7 @@ fn migration_blocks<'a>(cx: &'a Cx, s: &StructDef) -> Option<&'a [crate::AST::Mi
 }
 
 /// The wire key a field name carries for migration shape detection: the
-/// current struct's `#[Rename]`/`RenameAll` treatment when the name is a
+/// current struct's `@[Rename]`/`RenameAll` treatment when the name is a
 /// current field, else the container casing style applied to the bare name
 /// (fields that only exist in historical shapes can't carry markers).
 fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String {
@@ -1472,7 +1443,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     }
     // D-CAPBUNDLE1 `@CodableAsBase`: encode/decode via the base type's own
     // wire representation (`user_Encode`/`user_Decode`, the same traits
-    // struct/enum `#[Codable]` derives target — I8: one wire mechanism).
+    // struct/enum `@[Codable]` derives target — I8: one wire mechanism).
     if d.is_codable_as_base {
         out.push_str(&format!(
             "impl user_Encode for user_{n} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{ (self.0).jet_encode() }}\n}}\n\n",

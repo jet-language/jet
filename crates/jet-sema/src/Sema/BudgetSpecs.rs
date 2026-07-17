@@ -190,6 +190,7 @@ fn collect_scene_attachments(stmts: &[Stmt], scenes: &mut std::collections::BTre
             | Stmt::Off { body, .. }
             | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. } => collect_scene_attachments(body, scenes),

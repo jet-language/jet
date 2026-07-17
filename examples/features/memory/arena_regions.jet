@@ -2,7 +2,7 @@
 // scope-bound regions. `arena.alloc(value)` hands back a *view* into the
 // arena's storage — readable and writable, but it may not escape the arena's
 // region (the lexical scope of the `arena` binding, or an explicit `region`),
-// and it may not be used after the arena is `reset`/`free`d. Both rules are
+// and it may not be used after the arena is reset or closed. Both rules are
 // compile-time: a use-after-free is an error, never a runtime trap.
 use core.mem
 
@@ -21,7 +21,7 @@ fn run() {
     print(reused)
     // Explicit `region r { … }` (D-REGION1 opt B): a narrower, named region
     // spanning two allocators. Views made inside live only until the block ends.
-    #Region(scratch) {
+    @Region(scratch) {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
         x :: a.alloc(1)

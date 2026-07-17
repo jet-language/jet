@@ -433,6 +433,8 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
     let tuple_shapes = collect_tuple_shapes(items);
     emit_tuple_structs(cx, &tuple_shapes, out);
     emit_synthetic_display_trait(out);
+    emit_synthetic_close_trait(out);
+    emit_synthetic_close_builtin_impls(cx, out);
     let (hi, hj, hk, hm) = program_iter_index_usage(items);
     emit_synthetic_iter_index_traits(out, hi, hj, hk, hm);
     // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff this module has one.

@@ -1,10 +1,10 @@
-# E-WEB-ABI-TYPE: `Point` cannot cross the JS/WASM boundary on a `#WasmExport` parameter
+# E-WEB-ABI-TYPE: `Point` cannot cross the JS/WASM boundary on a `@WasmExport` parameter
 
 **Code:** `E-WEB-ABI-TYPE`
 
 ## What
 
-`Point` cannot cross the JS/WASM boundary on a `#WasmExport` parameter
+`Point` cannot cross the JS/WASM boundary on a `@WasmExport` parameter
 
 ## Why
 

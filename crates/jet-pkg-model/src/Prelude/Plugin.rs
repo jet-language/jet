@@ -11,7 +11,7 @@
 // plugin component that declares any import fails to instantiate — a plugin
 // can only export pure computation over Int/Float/Bool/Text, never reach the
 // host filesystem, network, clock, or process. This is the whole safety
-// boundary; there is no `#Unsafe` gate anywhere in this file or the generated
+// boundary; there is no `@Unsafe` gate anywhere in this file or the generated
 // call sites (I1).
 //
 // Handles are u64 keys into a thread-local HashMap, mirroring `Db.rs`. Handle
