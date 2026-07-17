@@ -332,13 +332,33 @@ linalg types; user structs use methods.
 
 **S42 — Numeric types & conversions**: `Int` (i64) / `Float` (f64) are the
 defaults; sized menu `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` for experts/FFI.
-Conversions are named methods only (`n.to_float()`, `.to_u8()?` fallible
-narrowing, `Int.parse(s) -> Int ? ParseError`); no `as`, no cast punctuation.
+Conversions are destination-owned named methods only (`Float.from_int(n)`,
+`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) -> Int ? ParseError`);
+no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain integer arithmetic **traps on overflow** at every
 width; opt in per-op with `wrapping(…)` / `saturating(…)` /
 `checked(…) -> T?`. Per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON`,
 bit ops. **D-FLOATW1**: `core.math` is width-generic; mixing F32 and Float is
 a compile error with a convert fix-it.
+
+**D-SHAPE-CONVERT1=A — destination type owns explicit conversion** *(ratified
+2026-07-14, card #566)*: typed conversion is always
+`Target.from_source(value)`. The source-kind suffix is canonical and bounded
+(`from_int`, `from_u8`, `from_float`, or a source type's snake-case name), so
+completion stays on the promised result type. Checked narrowing returns the
+ordinary fallible result and is handled with `?`/`??`; widening is infallible.
+Text interpretation remains `Target.parse(text)`; non-parsing materialization
+such as `Secret.from_text` remains an ordinary destination-owned conversion. Numeric,
+distinct/unit, enum, FFI, and user-defined static conversions share this one
+call direction and the normal method coherence law. Source-owned `to_*`, casts,
+and neutral `convert(value)` aliases are not accepted.
+
+```jet
+id :: UserId.from_int(raw_id)
+byte :: U8.from_int(count) ?? return
+ratio :: Float.from_u8(byte)
+parsed :: Int.parse(text) ?? return
+```
 
 **S21 — Float display**: a `Float` always prints a decimal part (`-5.0`).
 

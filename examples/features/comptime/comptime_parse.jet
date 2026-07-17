@@ -1,13 +1,13 @@
 // 86 — Comptime Result/Option evaluation (c97 / D-STRPARSE1).
 // `Ok(v)` / `Err(e)` / `?` / `??` work at compile time for pure parse paths.
 fn safe_int(s: String) -> Int ? String {
-    n :: s.to_int() ?? return Err("not a number")
+    n :: Int.parse(s) ?? return Err("not a number")
     return Ok(n)
 }
 
-comptime a = "10".to_int() ?? -1
+comptime a = Int.parse("10") ?? -1
 
-comptime b = "bad".to_int() ?? -1
+comptime b = Int.parse("bad") ?? -1
 
 comptime c = Int.parse("99") ?? 0
 
@@ -18,10 +18,10 @@ fn run() {
     print(c)
     // Runtime use of comptime constants.
     print((a + c))
-    // .lines() + .to_int() at runtime (sanity check alongside 84_string_parse).
+    // .lines() + Int.parse at runtime (sanity check alongside 84_string_parse).
     total := 0
     loop row in "5\n10\n15".lines() {
-        total += (row.to_int() ?? 0)
+        total += (Int.parse(row) ?? 0)
     }
     print(total)
 }

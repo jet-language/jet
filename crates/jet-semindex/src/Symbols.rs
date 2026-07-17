@@ -775,5 +775,4 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ("String.chars", "String.chars() -> [Char]", "Every character, in order.", None),
     ("String.replace", "String.replace(from: String, to: String) -> String", "Replaces every occurrence of from with to.", None),
     ("String.repeat", "String.repeat(n: Int) -> String", "Concatenates n copies of the string.", None),
-    ("String.to_int", "String.to_int() -> Int ? ParseError", "Parses the string as an Int.", None),
 ];

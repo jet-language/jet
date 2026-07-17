@@ -28,8 +28,12 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
     match (want, got) {
         (Type::Float, Type::Int) => "write the number with a decimal part, like `2.0`".to_string(),
         (Type::Int, Type::Float) => "drop the decimal part, like `2`".to_string(),
-        // S42: sized ints convert by named method, never implicitly.
-        (Type::Int, Type::IntN { .. }) => "widen it explicitly with `.to_int()`".to_string(),
+        // D-SHAPE-CONVERT1: the destination type owns explicit conversion.
+        (Type::Int, Type::IntN { signed, bits }) => format!(
+            "widen it explicitly with `Int.from_{}{}(value)`",
+            if *signed { "i" } else { "u" },
+            bits
+        ),
         (Type::String, _) => "put the value in text with interpolation: \"{x}\"".to_string(),
         _ => format!("use {} here", want.show()),
     }
@@ -951,9 +955,10 @@ pub(crate) fn field_read_to_clone(
 }
 
 pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
+    if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
+        return Some(numeric);
+    }
     match name {
-        Syntax::TYPE_INT => Some(Type::Int),
-        Syntax::TYPE_FLOAT => Some(Type::Float),
         Syntax::TYPE_BOOL => Some(Type::Bool),
         Syntax::TYPE_STRING => Some(Type::String),
         Syntax::TYPE_CHAR => Some(Type::Char),

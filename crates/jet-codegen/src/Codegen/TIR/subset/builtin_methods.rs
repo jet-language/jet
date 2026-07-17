@@ -6,7 +6,7 @@ use crate::Codegen::TIR::TNumericOp;
 /// string surface (`Source/Collections.rs`). The closure-taking methods (`map`/
 /// `filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` — `Collections::
 /// is_closure_method`) are deferred to the lambda phase; the numeric width/predicate/
-/// bit methods (`to_i32`/`is_nan`/`count_ones`/… — D-NUMOPS1) and the handle methods
+/// numeric queries (`is_nan`/`count_ones`/… — D-NUMOPS1) and the handle methods
 /// (FileWriter/TcpStream/HttpRequest/… — Phase 10) carry a `Some(recv_type)`, so the
 /// gate's `recv_type.is_none()` guard already excludes them; this name list is the
 /// final filter. The arg count disambiguates `join()` (no separator) vs `join(sep)`.
@@ -34,10 +34,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("to_upper", 0) | ("to_lower", 0) | ("repeat", 1) | ("slice", 2)
         // D-STR-AFTER1: first-occurrence substring split.
         | ("after", 1) | ("before", 1)
-        // c97/D-STRPARSE1. `to_int`/0 on a String reaches here only with `recv_type ==
-        // None` (the numeric `to_int` sets a numeric `recv_type`, so it never does);
-        // `resolve_builtin_op`'s `is_string` guard is the final filter.
-        | ("lines", 0) | ("to_int", 0)
+        // c97/D-STRPARSE1: parsing stays `Type.parse`.
+        | ("lines", 0)
         // `to_string` (String/Bool/Char receiver — those carry `recv_type == None`;
         // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
         | ("to_string", 0)
@@ -338,16 +336,8 @@ pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bo
     }
 }
 
-/// c109 Phase 12: resolve a numeric method (`is_nan`/`count_ones`/`to_i32`/…) into a
-/// total `TNumericOp`, reproducing `emit_builtin_method`'s numeric arms +
-/// `numeric_conversion`/`conv_rust_target` (Source/Codegen/Expression.rs) EXACTLY.
-/// `src_name` is the receiver's numeric type name (the AST path's `src =
-/// recv_type.or_else(rty.name())`, where `recv_type` is always `Some` for a numeric
-/// method — so the source width is total here). The widening-vs-narrowing decision
-/// (which `numeric_conversion` makes from the source/target int ranges) is decided
-/// HERE, never in emit. Returns `None` for a name this doesn't own (defensive — the
-/// gate already restricted to the covered set).
-pub(crate) fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumericOp> {
+/// Resolve a numeric receiver query into a total TIR operation.
+pub(crate) fn resolve_numeric_op(method: &str, _src_name: &str) -> Option<TNumericOp> {
     // Float predicates → `(recv).{method}()`.
     if let "is_nan" | "is_infinite" | "is_finite" = method {
         return Some(TNumericOp::Predicate(method.to_string()));
@@ -363,57 +353,61 @@ pub(crate) fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumeri
     if method == "to_string" {
         return Some(TNumericOp::ToShow);
     }
-    // Width conversion. Mirror `conv_rust_target` + `numeric_conversion`.
-    let (dst_rust, dst_spelling, dst_int) = conv_rust_target_tir(method)?;
+    None
+}
+
+/// D-SHAPE-CONVERT1=A: resolve `Target.from_source(value)` to the existing
+/// numeric conversion TIR operation. The call direction changes; the checked
+/// widening/narrowing law does not.
+pub(crate) fn resolve_numeric_conversion_op(
+    target_name: &str,
+    source_name: &str,
+) -> Option<TNumericOp> {
+    let (dst_rust, dst_int) = numeric_rust_type_tir(target_name)?;
     let Some((dsigned, dbits)) = dst_int else {
-        // Float target (int→float / float→float): always representable — `as`.
         return Some(TNumericOp::CastAs {
             dst_rust: dst_rust.to_string(),
         });
     };
-    // The AST path's `src = recv_type.or_else(rty.name())`; here `recv_type` is the
-    // total numeric name, so `parse_int_name(src_name)` is the source int width.
-    match parse_int_name_tir(src_name) {
+    match parse_int_name_tir(source_name) {
         Some((ssigned, sbits)) => {
             let (slo, shi) = crate::AST::int_range(ssigned, sbits);
             let (dlo, dhi) = crate::AST::int_range(dsigned, dbits);
             if dlo <= slo && shi <= dhi {
-                // Widening — infallible `as`.
                 Some(TNumericOp::CastAs {
                     dst_rust: dst_rust.to_string(),
                 })
             } else {
-                // Narrowing — checked `try_from` returning `Result<T, String>`.
                 Some(TNumericOp::TryFrom {
                     dst_rust: dst_rust.to_string(),
-                    dst_spelling: dst_spelling.to_string(),
+                    dst_spelling: target_name.to_string(),
                 })
             }
         }
-        // Float (or unknown) source → integer target: a saturating `as` cast.
-        None => Some(TNumericOp::CastAs {
-            dst_rust: dst_rust.to_string(),
-        }),
+        None => {
+            let (lo, hi) = crate::AST::int_range(dsigned, dbits);
+            Some(TNumericOp::FloatToInt {
+                dst_rust: dst_rust.to_string(),
+                dst_spelling: target_name.to_string(),
+                lower: format!("{lo}.0"),
+                upper_exclusive: format!("{}.0", hi + 1),
+            })
+        }
     }
 }
 
-/// c109 Phase 12: TIR-local copy of `conv_rust_target` (Source/Codegen/Expression.rs)
-/// — the Rust type, spelling, and integer `(signed, bits)` (or `None` for a float) a
-/// `to_*` width-conversion method targets. Kept in sync with the AST path.
-pub(crate) fn conv_rust_target_tir(
-    method: &str,
-) -> Option<(&'static str, &'static str, Option<(bool, u8)>)> {
-    Some(match method {
-        "to_i8" => ("i8", "I8", Some((true, 8))),
-        "to_i16" => ("i16", "I16", Some((true, 16))),
-        "to_i32" => ("i32", "I32", Some((true, 32))),
-        "to_i64" | "to_int" => ("i64", "Int", Some((true, 64))),
-        "to_u8" => ("u8", "U8", Some((false, 8))),
-        "to_u16" => ("u16", "U16", Some((false, 16))),
-        "to_u32" => ("u32", "U32", Some((false, 32))),
-        "to_u64" => ("u64", "U64", Some((false, 64))),
-        "to_f32" => ("f32", "F32", None),
-        "to_f64" | "to_float" => ("f64", "Float", None),
+fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>)> {
+    Some(match name {
+        "I8" => ("i8", Some((true, 8))),
+        "I16" => ("i16", Some((true, 16))),
+        "I32" => ("i32", Some((true, 32))),
+        "I64" | "Int" => ("i64", Some((true, 64))),
+        "U8" => ("u8", Some((false, 8))),
+        "U16" => ("u16", Some((false, 16))),
+        "U32" => ("u32", Some((false, 32))),
+        "U64" => ("u64", Some((false, 64))),
+        "F32" => ("f32", None),
+        "F64" | "Float" => ("f64", None),
         _ => return None,
     })
 }
@@ -435,13 +429,12 @@ pub(crate) fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
     }
 }
 
-/// c109 Phase 12: is `method` (with `nargs` args) a numeric predicate / bit-op /
-/// width-conversion method the TIR lowers? This is the D-NUMOPS1 slice of
+/// Is `method` (with `nargs` args) a numeric predicate / bit-op the TIR lowers?
+/// This is the D-NUMOPS1 slice of
 /// `emit_builtin_method` keyed on a numeric receiver (`recv_type == Some(numeric)`):
 /// the float predicates (`is_nan`/`is_infinite`/`is_finite`), the integer bit-pop
-/// queries (`count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`), and the
-/// width conversions (`to_i8`…`to_u64`/`to_int`/`to_f32`/`to_f64`/`to_float`). All
-/// are nullary. `to_string` on a numeric receiver is NOT here — it sets
+/// queries (`count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`). All are
+/// nullary. `to_string` on a numeric receiver is NOT here — it sets
 /// `recv_type == Some(numeric)` too, but the AST routes it through the plain
 /// `to_string` arm (`(recv).jet_show()`), which is the Phase-9 `BuiltinMethod` shape;
 /// a numeric `to_string` carries `recv_type == Some`, so it never reaches the Phase-9
@@ -458,18 +451,6 @@ pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
                 | "count_zeros"
                 | "leading_zeros"
                 | "trailing_zeros"
-                | "to_i8"
-                | "to_i16"
-                | "to_i32"
-                | "to_i64"
-                | "to_int"
-                | "to_u8"
-                | "to_u16"
-                | "to_u32"
-                | "to_u64"
-                | "to_f32"
-                | "to_f64"
-                | "to_float"
                 | "to_string"
         )
 }

@@ -619,7 +619,16 @@ pub(crate) fn expr_collect_captures(
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
         Expr::MethodCall { receiver, args, .. } => {
-            expr_collect_captures(receiver, bound, read, mut_cap);
+            // A leading-capital identifier in receiver position is a static type
+            // (`Int.parse`, `UserId.from_int`), not a value captured by the lambda.
+            let static_type = matches!(
+                receiver.as_ref(),
+                Expr::Ident(name, _)
+                    if name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            );
+            if !static_type {
+                expr_collect_captures(receiver, bound, read, mut_cap);
+            }
             for a in args {
                 expr_collect_captures(&a.expr, bound, read, mut_cap);
             }

@@ -105,6 +105,59 @@ pub(super) fn apply_static_type_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let (Some(target), Some(source_name)) = (
+        crate::AST::numeric_type_from_name(type_name),
+        crate::Syntax::numeric_conversion_source(method),
+    ) {
+        let source = crate::AST::numeric_type_from_name(source_name)?;
+        let value = args.into_iter().next().unwrap_or(CtValue::Unit);
+        let int_kind = |ty: &Type| match ty {
+            Type::Int => Some((true, 64)),
+            Type::IntN { signed, bits } => Some((*signed, *bits)),
+            _ => None,
+        };
+        if let (CtValue::Float(n), Some((signed, bits))) = (&value, int_kind(&target)) {
+            let (lo, hi) = crate::AST::int_range(signed, bits);
+            let in_range = n.is_finite() && *n >= lo as f64 && *n < (hi + 1) as f64;
+            return Some(Ok(if in_range {
+                CtValue::ResOk(Box::new(CtValue::Int(n.trunc() as i64)))
+            } else {
+                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "value doesn't fit in {type_name}"
+                ))))
+            }));
+        }
+        let converted = match (value, &target) {
+            (CtValue::Int(n), Type::Float) => CtValue::Float(n as f64),
+            (CtValue::Int(n), Type::Float32) => CtValue::Float((n as f32) as f64),
+            (CtValue::Float(n), Type::Float) => CtValue::Float(n),
+            (CtValue::Float(n), Type::Float32) => CtValue::Float((n as f32) as f64),
+            (CtValue::Float(n), _) => CtValue::Int(n as i64),
+            (CtValue::Int(n), _) => CtValue::Int(n),
+            _ => return Some(Err(unsupported("numeric conversion with the wrong source type", span))),
+        };
+        let narrowing = match (int_kind(&source), int_kind(&target)) {
+            (Some(src), Some(dst)) => {
+                let (slo, shi) = crate::AST::int_range(src.0, src.1);
+                let (dlo, dhi) = crate::AST::int_range(dst.0, dst.1);
+                !(dlo <= slo && shi <= dhi)
+            }
+            _ => false,
+        };
+        if narrowing {
+            let CtValue::Int(n) = converted else { unreachable!() };
+            let (signed, bits) = int_kind(&target).unwrap();
+            let (lo, hi) = crate::AST::int_range(signed, bits);
+            return Some(Ok(if (lo..=hi).contains(&(n as i128)) {
+                CtValue::ResOk(Box::new(CtValue::Int(n)))
+            } else {
+                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "value doesn't fit in {type_name}"
+                ))))
+            }));
+        }
+        return Some(Ok(converted));
+    }
     match (type_name, method) {
         ("Int", "parse") => {
             let s = match args.into_iter().next() {
@@ -361,17 +414,10 @@ pub(super) fn apply_method(
                 None => CtValue::None(Type::Float),
             })
         }
-        // Int / Float conversions
-        (CtValue::Int(n), "to_float") => Ok(CtValue::Float(*n as f64)),
-        // D-SG9/D-NUMOPS1: sized-float width conversions collapse to identity —
-        // every width (F32/F64/Float) is one `CtValue::Float` in this
-        // interpreter (width bounds are a sema-time concern, S21).
-        (CtValue::Float(f), "to_float") => Ok(CtValue::Float(*f)),
         (CtValue::Int(n), "abs") => n
             .checked_abs()
             .map(CtValue::Int)
             .ok_or_else(|| overflow("take the absolute value of", span)),
-        (CtValue::Float(f), "to_int") => Ok(CtValue::Int(*f as i64)),
         (CtValue::Float(f), "abs") => Ok(CtValue::Float(f.abs())),
         // List
         (CtValue::List(xs), "len") => Ok(CtValue::Int(xs.len() as i64)),
@@ -473,14 +519,6 @@ pub(super) fn apply_method(
         (CtValue::Str(s), "lines") => Ok(CtValue::List(
             s.lines().map(|l| CtValue::Str(l.to_string())).collect(),
         )),
-        // c97/D-STRPARSE1: `.to_int()` — fallible integer parse, returns `Int ? ParseError`.
-        (CtValue::Str(s), "to_int") => Ok(match s.trim().parse::<i64>() {
-            Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
-            Err(_) => CtValue::ResErr(Box::new(CtValue::Str(format!(
-                "cannot parse `{}` as an integer",
-                s
-            )))),
-        }),
         // D-METAREFLECT1=B: `.reflect()` on a TypeInfo struct is identity.
         (CtValue::Struct { type_name, .. }, "reflect") if type_name == "TypeInfo" => {
             Ok(recv.clone())

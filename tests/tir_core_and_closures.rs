@@ -263,9 +263,10 @@ fn run() {
     assert_eq!(stdout, "41\nseen 7\n");
 }
 
-/// c109 Phase 12: numeric width conversions (D-NUMOPS1) — widening (`to_i64`,
-/// infallible `as`), narrowing (`to_u8`, fallible `try_from` unwrapped with `??`),
-/// and int→float (`to_float`, `as`). Each fully-covered function routes through the
+/// c109 Phase 12: destination-owned numeric width conversions (D-SHAPE-CONVERT1) —
+/// widening (`I64.from_u8`, infallible `as`), narrowing (`U8.from_i32`, fallible
+/// `try_from` unwrapped with `??`), and int→float (`Float.from_int`, `as`). Each
+/// fully-covered function routes through the
 /// TIR (`NumericMethod`). rustc accepting + the right runtime values prove parity.
 #[test]
 fn numeric_width_conversions() {
@@ -274,25 +275,30 @@ fn numeric_width_conversions() {
     }
     let src = "\
 fn widen(red: U8) -> I64 {
-    return red.to_i64()
+    return I64.from_u8(red)
 }
 fn narrow(channel: I32) -> U8 {
-    return channel.to_u8() ?? 255
+    return U8.from_i32(channel) ?? 255
 }
 fn to_real(x: Int) -> Float {
-    return x.to_float()
+    return Float.from_int(x)
+}
+fn truncate(x: Float) -> U8 {
+    return U8.from_float(x) ?? 255
 }
 fn run() {
     print(widen(255))
     print(narrow(100))
     print(narrow(100000))
     print(to_real(3))
+    print(truncate(42.9))
+    print(truncate(300.0))
 }
 ";
     let (code, stdout) = build_and_run("tir_numeric_conv", src);
     assert_eq!(code, 0);
-    // 255 (widen), 100 (fits), 255 (overflow → fallback), 3.0 (int→float).
-    assert_eq!(stdout, "255\n100\n255\n3.0\n");
+    // Widening, checked integer narrowing, int→float, and checked float→integer.
+    assert_eq!(stdout, "255\n100\n255\n3.0\n42\n255\n");
 }
 
 /// c109 Phase 12: numeric predicates (`is_nan`/`is_finite`), bit-population queries

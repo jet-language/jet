@@ -363,8 +363,8 @@ impl<'a> Parser<'a> {
                             Syntax::LANG_NAME,
                             Syntax::FOREIGN_AS
                         ),
-                        "convert with methods like `.to_float()` or `.to_string()`".to_string(),
-                        "e.g. `x.to_float()` instead of `x as Float`".to_string(),
+                        "the destination type owns conversion with `Target.from_source(value)`".to_string(),
+                        "e.g. `Float.from_int(x)` instead of `x as Float`".to_string(),
                         Some(t.span),
                     ));
                     return self.expr_primary(allow_struct_lit);

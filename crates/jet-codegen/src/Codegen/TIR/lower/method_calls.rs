@@ -58,6 +58,7 @@ use crate::Codegen::TIR::render_safe_locals;
 use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::resolve_builtin_op;
 use crate::Codegen::TIR::resolve_closure_op;
+use crate::Codegen::TIR::resolve_numeric_conversion_op;
 use crate::Codegen::TIR::resolve_numeric_op;
 use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::solve_new_type;
@@ -1890,12 +1891,11 @@ pub(crate) fn lower_method_call(
             },
         };
     }
-    // c109 Phase 12: a numeric predicate / bit-pop / width-conversion method
-    // (`is_nan`/`count_ones`/`to_i32`/…). The gate proved `recv_type ==
+    // c109 Phase 12: a numeric predicate / bit-pop query
+    // (`is_nan`/`count_ones`/…). The gate proved `recv_type ==
     // Some(<numeric name>)` + a covered nullary numeric op. Resolve the receiver
-    // width source/target + the widening-vs-narrowing branch HERE (reproducing
-    // `numeric_conversion`/`conv_rust_target` from Expression.rs) into a total
-    // `TNumericOp`, so emit makes no decision (I3). The result type comes from
+    // operation HERE into a total `TNumericOp`, so emit makes no decision (I3).
+    // The result type comes from
     // `numeric_method_return` (the sema table), keyed on the receiver type recovered
     // from `recv_type` (the total width source — `src = recv_type.or_else(rty.name())`
     // on the AST side, where `recv_type` is always `Some` for these).
@@ -2162,6 +2162,77 @@ pub(crate) fn lower_method_call(
     // ident and `method` is a registered static method. Mirror the AST path
     // (Expression.rs ~L1644): `user_<Type>::user_<method>(args)`.
     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
+        // D-STRPARSE1: text interpretation stays `Type.parse(text)`. Carry the
+        // text as the builtin receiver so the existing builtin TIR seam owns emit.
+        if let ("Int" | "Float", "parse", Some(arg)) =
+            (type_name.as_str(), method, args.first())
+        {
+            if args.len() == 1 {
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                        ok: Box::new(if type_name == "Int" {
+                            Type::Int
+                        } else {
+                            Type::Float
+                        }),
+                        err: Box::new(Type::Named("ParseError".to_string())),
+                    }),
+                    kind: TExprKind::BuiltinMethod {
+                        recv: Box::new(lower_expr(&arg.expr, cx, env)),
+                        op: if type_name == "Int" {
+                            TBuiltinOp::ParseInt
+                        } else {
+                            TBuiltinOp::ParseFloat
+                        },
+                        args: vec![],
+                    },
+                };
+            }
+        }
+        // D-SHAPE-CONVERT1=A: numeric conversions are static on the destination
+        // type. Reuse NumericMethod by treating the sole value argument as its
+        // input; only the source-level call direction changed.
+        if let (Some(target), Some(source_name), Some(arg)) = (
+            crate::AST::numeric_type_from_name(&type_name),
+            Syntax::numeric_conversion_source(method),
+            args.first(),
+        ) {
+            if args.len() == 1 {
+                let input = lower_expr(&arg.expr, cx, env);
+                let op = resolve_numeric_conversion_op(&type_name, source_name)
+                    .expect("sema admitted a numeric destination conversion");
+                let ty = crate::Collections::builtin_method_return(&target, method, 1, true)
+                    .flatten()
+                    .unwrap_or(target);
+                return TExpr {
+                    ty,
+                    kind: TExprKind::NumericMethod {
+                        recv: Box::new(input),
+                        op,
+                    },
+                };
+            }
+        }
+        if let (Some((base, _)), Some(arg)) = (cx.distinct_types.get(&type_name), args.first()) {
+            if args.len() == 1 && Syntax::numeric_conversion_method(&base.name()) == Some(method) {
+                if matches!(resolved_ret, Some(Type::Result { .. })) {
+                    return TExpr {
+                        ty: resolved_ret.cloned().unwrap(),
+                        kind: TExprKind::RangeCheckedCtor {
+                            name: type_name,
+                            arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                        },
+                    };
+                }
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::Call {
+                        name: type_name,
+                        args: vec![lower_one_call_arg(arg, None, env, cx)],
+                    },
+                };
+            }
+        }
         // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
         // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
         // `Path` itself (a type-name ident) has no value.

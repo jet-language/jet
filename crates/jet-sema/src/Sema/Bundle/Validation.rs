@@ -654,7 +654,7 @@ pub(crate) fn collect_core_expr(
             }
             if matches!(
                 method.as_str(),
-                "bytes" | "from_bytes" | "to_u8" | "elapsed_millis"
+                "bytes" | "from_bytes" | "elapsed_millis"
             ) {
                 note_core_usage(used, spans, format!("core::{method}"), Some(*method_span));
             }

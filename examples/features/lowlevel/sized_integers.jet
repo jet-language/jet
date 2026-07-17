@@ -24,11 +24,11 @@ fn run() {
     // what binary/byte APIs work in.
     bytes: [U8] :: [104, 105, 33]
     print(bytes)
-    // Width conversions are named methods (D-NUMOPS1). Widening is infallible;
+    // Width conversions are destination-owned methods (D-SHAPE-CONVERT1). Widening is infallible;
     // narrowing is fallible (`?`/`??`) because a value might not fit.
-    wide: Int :: red.to_i64()
+    wide: Int :: Int.from_u8(red)
     print(wide)
-    clamped: U8 :: channel.to_u8() ?? 255
+    clamped: U8 :: U8.from_i32(channel) ?? 255
     print(clamped)
     // Numeric surface (D-NUMOPS1): per-type bounds, bit queries, float consts.
     print(U8.MAX)

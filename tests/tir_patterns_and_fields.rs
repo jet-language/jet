@@ -634,21 +634,21 @@ fn run() {
     assert_eq!(stdout, "has value\n");
 }
 
-/// c97/D-STRPARSE1: `String.lines()` (→ `[String]`) and `String.to_int()` (→
-/// `Int ? ParseError`). Both are built-in String methods, so `main` routes
+/// c97/D-STRPARSE1: `String.lines()` (→ `[String]`) and `Int.parse(text)` (→
+/// `Int ? ParseError`). Both are compiler built-ins, so `main` routes
 /// through the TIR — proven by the emitted `jet_string_lines` helper call and
-/// the `to_int` parse form. `to_int` composes with `??`: a good parse yields the
+/// the static parse form. `Int.parse` composes with `??`: a good parse yields the
 /// value, a bad one (`"abc"`) takes the fallback.
 #[test]
-fn string_lines_and_to_int() {
+fn string_lines_and_int_parse() {
     if !have_rustc() {
         return;
     }
     let src = "\
 fn run() {
-    n :: \"42\".to_int() ?? -1
+    n :: Int.parse(\"42\") ?? -1
     print((n + 1))
-    bad :: \"abc\".to_int() ?? -1
+    bad :: Int.parse(\"abc\") ?? -1
     print(bad)
     lines :: \"a\\nb\\nc\".lines()
     print(lines.len())
@@ -657,13 +657,13 @@ fn run() {
     }
     total := 0
     loop row in \"10\\n20\\n30\".lines() {
-        total += (row.to_int() ?? 0)
+        total += (Int.parse(row) ?? 0)
     }
     print(total)
 }
 ";
     let out = jet::compile(src).expect("should compile");
-    // TIR routing: `lines()` lowers to the `jet_string_lines` helper, `to_int()`
+    // TIR routing: `lines()` lowers to the `jet_string_lines` helper, `Int.parse`
     // to the trim+parse form. (The AST emit path is gone — these prove the TIR.)
     assert!(
         out.rust.contains("jet_string_lines(&("),
@@ -672,8 +672,8 @@ fn run() {
     );
     assert!(
         out.rust
-            .contains(".trim().parse::<i64>().map_err(|e| e.to_string())"),
-        "to_int() did not lower through the TIR (no parse form):\n{}",
+            .contains(".trim().parse::<i64>().map_err(|_| format!"),
+        "Int.parse did not lower through the TIR (no parse form):\n{}",
         out.rust
     );
     let (code, stdout) = build_and_run("tir_string_parse", src);

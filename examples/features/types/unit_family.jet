@@ -2,24 +2,24 @@
 // `@UnitFamily(Name) { a, b, … }` mints one distinct `@Numeric` type per
 // member — `usd` becomes the type `Usd`, erasing to `Float`. Signatures then
 // read in plain English, and the compiler keeps the units from mixing.
-// This is sugar over distinct types (D-DIST1/D-DIST3): construct with
-// `Usd(value)`, same-unit arithmetic just works, and `.raw()` strips the unit.
+// This is sugar over distinct types (D-DIST1/D-DIST3): convert with
+// `Usd.from_float(value)`, same-unit arithmetic works, and `.raw()` strips the unit.
 @UnitFamily(Currency) { usd, eur }
 
 fn subtotal(price: Usd, qty: Int) -> Usd {
-    return Usd(price.raw() * qty.to_float())
+    return Usd.from_float(price.raw() * Float.from_int(qty))
 }
 
 fn run() {
-    unit :: Usd(9.99)
+    unit :: Usd.from_float(9.99)
     total :: subtotal(unit, 3)
     print("total {(total.raw())}")
     // Same-unit arithmetic stays in the unit.
-    tax :: Usd(2.5)
+    tax :: Usd.from_float(2.5)
     grand :: total + tax
     print("grand {(grand.raw())}")
     // A different family member is a different type.
-    budget :: Eur(20.0)
+    budget :: Eur.from_float(20.0)
     print("budget {(budget.raw())}")
     // `.raw()` drops back to the base Float.
     bare :: grand.raw()

@@ -113,7 +113,7 @@ pub fn core_usage_layer(usage: &str) -> Option<RuntimeLayer> {
         return Some(match rest {
             "json" => RuntimeLayer::Alloc,
             "bytes" => RuntimeLayer::Alloc,
-            "from_bytes" | "to_u8" => RuntimeLayer::Core,
+            "from_bytes" => RuntimeLayer::Core,
             "elapsed_millis" => RuntimeLayer::Std,
             _ => RuntimeLayer::Std,
         });

@@ -1908,7 +1908,9 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Bytes => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Split => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Lines => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::ToIntString => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
+                Err("jit builtin method unsupported".to_string())
+            }
             TBuiltinOp::StartsWith => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::EndsWith => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Repeat => Err("jit builtin method unsupported".to_string()),

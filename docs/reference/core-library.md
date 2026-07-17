@@ -2167,13 +2167,13 @@ returned, stored, captured, or sent across task/join boundaries.
 
 ## Text parsing
 
-Turn text into values and split it into lines. `to_int` is fallible — it returns
-the same `Int ? ParseError` result `Int.parse` does, so handle it with `?`/`??`.
+Turn text into values with destination-owned `Type.parse` and split it into lines.
+Parsing is fallible, so handle its result with `?`/`??`.
 
 ```jet
 fn run() {
-    n :: "42".to_int() ?? -1                 // 42
-    bad :: "oops".to_int() ?? -1             // -1 (parse failed → fallback)
+    n :: Int.parse("42") ?? -1                 // 42
+    bad :: Int.parse("oops") ?? -1             // -1 (parse failed → fallback)
     print(n + bad)
 
     loop line in "first\nsecond".lines() {   // ["first", "second"]
@@ -2184,10 +2184,11 @@ fn run() {
 
 | API | Returns | What it does |
 |-----|---------|--------------|
-| `String.to_int()` | `Int ? ParseError` | Parse the text as an integer (leading/trailing space ignored) |
+| `Int.parse(text)` | `Int ? ParseError` | Parse text as an integer (leading/trailing space ignored) |
+| `Float.parse(text)` | `Float ? ParseError` | Parse text as a float |
 | `String.lines()` | `[String]` | Split into lines (`\n` and `\r\n`; no trailing empty line) |
 
-`.to_int()` / `.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
+`.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
 evaluated at comptime — `Ok(v)` / `Err(e)` construct `Result` values, and
 `?` / `??` propagate or unwrap them in pure comptime expressions
 (`examples/features/comptime/comptime_parse.jet`).
@@ -2227,9 +2228,9 @@ error (**E1003**).
 
 ```jet
 fn run() {
-b: U8 :: 255
-    print(b.to_int())                       // 255 as Int
-    n :: 42.to_u8() ?? return              // checked conversion
+    b: U8 :: 255
+    print(Int.from_u8(b))                   // 255 as Int
+    n :: U8.from_int(42) ?? return          // checked conversion
     bytes :: "hi".bytes()                  // [U8]
     text :: String.from_bytes(bytes) ?? return
     print(text)
@@ -2240,8 +2241,8 @@ b: U8 :: 255
 |-----|---------|--------------|
 | `String.bytes()` | `[U8]` | UTF-8 bytes of a string |
 | `String.from_bytes(bs)` | `String ? UTF8Error` | Decode UTF-8 bytes |
-| `n.to_u8()` | `U8 ? String` | Checked Int → U8 |
-| `b.to_int()` | `Int` | U8 → Int |
+| `U8.from_int(n)` | `U8 ? String` | Checked Int → U8 |
+| `Int.from_u8(b)` | `Int` | U8 → Int |
 
 Use `fs.read_bytes` / `fs.write` when you need raw file bytes.
 
@@ -2284,7 +2285,7 @@ fn run() {
 | `r.read_u16_le()` / `_be()` | `U16 ? String` | Two bytes, little/big-endian |
 | `r.read_u32_le()` / `_be()` | `U32 ? String` | Four bytes |
 | `r.read_u64_le()` / `_be()` | `U64 ? String` | Eight bytes |
-| `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n: Int`; sized ints widen with `.to_int()`) |
+| `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n: Int`; sized ints widen with `Int.from_u*(n)`) |
 | `r.take_pattern(b"…{h:U<w>}…")` | `(holes…) ? String` | Match + consume a prefix; literal pattern only |
 | `r.remaining()` | `Int` | Bytes left |
 | `r.is_at_end()` | `Bool` | Position at buffer end |
@@ -2352,13 +2353,13 @@ Each wrapper takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005
 type); `<<` `>>` take any integer shift-count and keep the left side's type. A
 shift count past the type's width traps (no leaked Rust panic).
 
-**Width conversions** are named methods — no implicit narrowing or widening:
+**Width conversions** are destination-owned named methods — no implicit narrowing or widening:
 
 | Method | Returns | Direction |
 |--------|---------|-----------|
-| `.to_i64()` / `.to_u32()` / … (widening) | `T` | infallible |
-| `.to_u8()` / `.to_i16()` / … (narrowing) | `T ? String` | fallible (`?`/`??`) |
-| `.to_f32()` / `.to_float()` | `F32` / `Float` | infallible |
+| `Int.from_u8(n)` / `U32.from_u8(n)` / … (widening) | `T` | infallible |
+| `U8.from_int(n)` / `I16.from_int(n)` / … (narrowing) | `T ? String` | fallible (`?`/`??`) |
+| `F32.from_float(n)` / `Float.from_i32(n)` | `F32` / `Float` | infallible |
 
 ---
 

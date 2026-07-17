@@ -2042,7 +2042,7 @@ use core.encoding.cbor as cbor
 fn wire(values: [Int]) -> [U8] {
     bytes: [U8] := []
     loop value in values {
-        bytes.push(value.to_u8() ?? panic("corpus byte outside U8"))
+        bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
     }
     return bytes
 }

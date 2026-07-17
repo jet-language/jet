@@ -632,13 +632,12 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) {
         return expr_in_subset(receiver, cx, locals);
     }
-    // Shape (g) [c109 Phase 12]: a numeric predicate / bit-population / width
-    // conversion (`is_nan`/`count_ones`/`to_i32`/… — D-NUMOPS1). Sema sets
+    // Shape (g) [c109 Phase 12]: a numeric predicate / bit-population query
+    // (`is_nan`/`count_ones` — D-NUMOPS1). Sema sets
     // `recv_type == Some(<numeric name>)` for a numeric receiver (CheckerInfer
     // ~L2248), so a numeric method is uniquely a `MethodCall` whose `recv_type` parses
     // as a numeric type name (`Int`/`Float`/`F32`/`I8..U64`) and whose `method` is a
-    // covered numeric op. All numeric ops are nullary (no args). The width source is
-    // the total `recv_type`, so the widening/narrowing decision is total at lowering.
+    // covered numeric op. All numeric ops are nullary (no args).
     if let Some(numeric_name) = recv_type {
         if crate::AST::numeric_type_from_name(numeric_name).is_some()
             && is_covered_numeric_method(method, args.len())
@@ -1019,6 +1018,20 @@ pub(crate) fn static_method_call_in_subset(
     if locals.contains(type_name) {
         return false;
     }
+    if matches!((type_name, method, args.len()), ("Int" | "Float", "parse", 1)) {
+        return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    if crate::AST::numeric_type_from_name(type_name).is_some()
+        && Syntax::numeric_conversion_source(method).is_some()
+        && args.len() == 1
+    {
+        return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    if let Some((base, _)) = cx.distinct_types.get(type_name) {
+        if Syntax::numeric_conversion_method(&base.name()) == Some(method) && args.len() == 1 {
+            return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+        }
+    }
     if matches!(
         (type_name, method, args.len()),
         ("Secret", "from_text" | "from_bytes", 1)
@@ -1116,11 +1129,9 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "enumerate" | "zip"
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
-        // Numeric predicates / bit ops / width conversions (D-NUMOPS1).
+        // Numeric predicates / bit ops (D-NUMOPS1).
         | "is_nan" | "is_infinite" | "is_finite"
         | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
-        | "to_i8" | "to_i16" | "to_i32" | "to_i64" | "to_int" | "to_u8" | "to_u16"
-        | "to_u32" | "to_u64" | "to_f32" | "to_f64" | "to_float"
         // Stopwatch / file / stdin / net / http / regex / alloc handle methods.
         | "elapsed_millis" | "write_line" | "flush" | "read_line" | "lines"
         | "alloc" | "reset" | "accept" | "local_addr" | "read" | "write"

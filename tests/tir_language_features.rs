@@ -224,7 +224,8 @@ fn run() {
     assert_eq!(stdout, "12\n12\n");
 }
 
-/// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Construction `Name(x)` → newtype
+/// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Destination conversion
+/// `Name.from_kind(x)` → newtype
 /// `user_Name(x)`; `.raw()` → `(recv).0`; `@Numeric` distinct `+`/`==` use the native
 /// operator. A distinct value type passes/returns/binds byte-identically.
 #[test]
@@ -240,14 +241,14 @@ fn greet(id: UserId) -> String {
     return \"user {(id.raw())}\"
 }
 fn run() {
-    uid :: UserId(42)
+    uid :: UserId.from_int(42)
     print(greet(uid))
-    a :: Meters(3.0)
-    b :: Meters(1.5)
+    a :: Meters.from_float(3.0)
+    b :: Meters.from_float(1.5)
     c :: a + b
     print(\"{(c.raw())} m\")
-    x :: UserId(7)
-    y :: UserId(7)
+    x :: UserId.from_int(7)
+    y :: UserId.from_int(7)
     print(\"{(x == y)}\")
 }
 ";
@@ -256,8 +257,8 @@ fn run() {
     assert_eq!(stdout, "user 42\n4.5 m\ntrue\n");
 }
 
-/// D-RANGETYPE1: range-constrained distinct constructors are fallible for
-/// runtime values (`Severity(raw)?`), and arithmetic widens to the base `Int`
+/// D-RANGETYPE1/D-SHAPE-CONVERT1: range-constrained distinct conversions are
+/// fallible for runtime values (`Severity.from_int(raw)?`), and arithmetic widens to the base `Int`
 /// so codegen must not leave an `Int`-typed expression as raw newtype math.
 #[test]
 fn range_type_runtime_try_and_arithmetic_widens() {
@@ -268,7 +269,7 @@ fn range_type_runtime_try_and_arithmetic_widens() {
 @Numeric Severity :: distinct Int(0..10);
 
 fn checked(raw: Int) -> Severity ? String {
-    return Ok(Severity(raw)?)
+    return Ok(Severity.from_int(raw)?)
 }
 
 fn run() {
@@ -808,7 +809,7 @@ fn run() {
 
 /// c109 Phase 28: the full sized-integer surface (82_sized_integers, D-SG9/S42/D-NUMOPS1).
 /// Literal width-elaboration (`U8`/`I32`/`I8`/`I64`), per-element list widening (`[U8]`),
-/// width-preserving overflow-trapping arithmetic, width conversions (`to_i64`/`to_u8() ??`),
+/// width-preserving overflow-trapping arithmetic, destination-owned width conversions,
 /// per-type bounds constants (`U8.MAX`/`I32.MIN`/`Float.INFINITY`), bit/float queries
 /// (`count_ones`/`is_infinite`), and the overflow opt-outs (`wrapping`/`saturating`/
 /// `checked`). The whole `main` routes through the TIR.
@@ -831,9 +832,9 @@ half: U8 :: 100
     print(half + half)
 bytes: [U8] :: [104, 105, 33]
     print(bytes)
-wide: I64 :: red.to_i64()
+wide: I64 :: Int.from_u8(red)
     print(wide)
-clamped: U8 :: channel.to_u8() ?? 255
+clamped: U8 :: U8.from_i32(channel) ?? 255
     print(clamped)
     print(U8.MAX)
     print(I32.MIN)
@@ -850,8 +851,8 @@ fallback: U8 :: 0
 ";
     let (code, stdout) = build_and_run("tir_sized_integers", src);
     assert_eq!(code, 0);
-    // 255; 100000; -120; total+1=9000000001; half+half=200; [104,105,33]; red.to_i64()=255;
-    // channel.to_u8()=None ?? 255 = 255; U8.MAX=255; I32.MIN=-2147483648; 13.count_ones()=3;
+    // 255; 100000; -120; total+1=9000000001; half+half=200; [104,105,33]; Int.from_u8(red)=255;
+    // U8.from_i32(channel)=None ?? 255 = 255; U8.MAX=255; I32.MIN=-2147483648; 13.count_ones()=3;
     // INFINITY.is_infinite()=true; wrapping 200+100=44; saturating=255; checked=None ?? 0 = 0.
     assert_eq!(
         stdout,

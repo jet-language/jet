@@ -37,6 +37,54 @@
 // source-written `__name` for Jet and generated tooling.
 // D-SHAPE-CASE1=C owns the identifier category table and its two enforced
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
+// D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
+// destination-owned `Target.from_source(value)` static method. Text remains
+// the existing `Target.parse(text)` operation; source-owned `to_*` aliases are
+// not part of the language surface.
+
+/// Compiler-owned numeric source names for D-SHAPE-CONVERT1=A.
+pub const NUMERIC_CONVERSION_SOURCES: &[(&str, &str)] = &[
+    ("from_i8", "I8"),
+    ("from_i16", "I16"),
+    ("from_i32", "I32"),
+    ("from_int", "Int"),
+    ("from_u8", "U8"),
+    ("from_u16", "U16"),
+    ("from_u32", "U32"),
+    ("from_u64", "U64"),
+    ("from_f32", "F32"),
+    ("from_float", "Float"),
+];
+
+pub fn numeric_conversion_source(method: &str) -> Option<&'static str> {
+    NUMERIC_CONVERSION_SOURCES
+        .iter()
+        .find_map(|(name, source)| (*name == method).then_some(*source))
+}
+
+pub fn numeric_conversion_method(source: &str) -> Option<&'static str> {
+    NUMERIC_CONVERSION_SOURCES
+        .iter()
+        .find_map(|(method, name)| (*name == source).then_some(*method))
+}
+
+/// Migration-only lookup for source-owned numeric spellings retired by
+/// D-SHAPE-CONVERT1=A. These are diagnostics, not accepted surface.
+pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
+    Some(match method {
+        "to_i8" => "I8",
+        "to_i16" => "I16",
+        "to_i32" => "I32",
+        "to_i64" | "to_int" => "Int",
+        "to_u8" => "U8",
+        "to_u16" => "U16",
+        "to_u32" => "U32",
+        "to_u64" => "U64",
+        "to_f32" => "F32",
+        "to_f64" | "to_float" => "Float",
+        _ => return None,
+    })
+}
 
 /// The two identifier tiers fixed by D-SHAPE-CASE1=C.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

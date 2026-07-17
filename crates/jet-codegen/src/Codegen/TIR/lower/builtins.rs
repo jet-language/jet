@@ -197,14 +197,8 @@ pub(crate) fn resolve_builtin_op(
         ("bytes", 0) => TBuiltinOp::Bytes,
         ("trim", 0) => TBuiltinOp::Trim,
         ("split", 1) => TBuiltinOp::Split,
-        // c97/D-STRPARSE1: String-only builtins. The numeric `to_int` is a `MethodCall`
-        // with a numeric `recv_type` (→ `NumericMethod`) and never reaches this path;
-        // the stream-handle `lines` carries a handle `recv_type` and is likewise routed
-        // elsewhere. There is no list/map `to_int`/`lines`, so an unguarded match here is
-        // unambiguous — no `is_string` test (the loop-var receiver carries `jet_ty: None`,
-        // so it would spuriously fail one).
+        // c97/D-STRPARSE1: String-only `lines`; parsing stays `Type.parse`.
         ("lines", 0) => TBuiltinOp::Lines,
-        ("to_int", 0) => TBuiltinOp::ToIntString,
         ("starts_with", 1) => TBuiltinOp::StartsWith,
         ("ends_with", 1) => TBuiltinOp::EndsWith,
         ("replace", 2) => TBuiltinOp::Replace,

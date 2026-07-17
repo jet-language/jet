@@ -1058,6 +1058,15 @@ impl<'a> Interp<'a> {
                 }
             }
         }
+        // D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion is the
+        // existing distinct constructor with destination-owned spelling.
+        if let Expr::Ident(type_name, _) = receiver {
+            if let Some(range) = self.distinct_ranges.get(type_name).copied() {
+                if crate::Syntax::numeric_conversion_source(method).is_some() && args.len() == 1 {
+                    return self.eval_distinct_ctor(type_name, range, args, span, scope);
+                }
+            }
+        }
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
         if let Expr::Ident(type_name, _) = receiver {
@@ -1102,7 +1111,8 @@ impl<'a> Interp<'a> {
                 });
             }
             // Only intercept known built-in type names; user struct names use normal path.
-            let is_builtin_type = matches!(type_name.as_str(), "Int" | "Float" | "Bool" | "String");
+            let is_builtin_type = crate::AST::numeric_type_from_name(type_name).is_some()
+                || matches!(type_name.as_str(), "Bool" | "String");
             if is_builtin_type {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {

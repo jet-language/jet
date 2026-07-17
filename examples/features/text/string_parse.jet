@@ -1,10 +1,10 @@
 // 84 — String parsing and line splitting (c97 / D-STRPARSE1).
 fn run() {
-    // String.to_int() — fallible integer parse, returns Int ? ParseError.
-    n :: "42".to_int() ?? -1
+    // Int.parse(text) — fallible integer parse, returns Int ? ParseError.
+    n :: Int.parse("42") ?? -1
     print((n + 1))
     // A bad parse takes the `??` fallback.
-    bad :: "oops".to_int() ?? -1
+    bad :: Int.parse("oops") ?? -1
     print(bad)
     // String.lines() — split text into its lines.
     text :: "first\nsecond\nthird"
@@ -16,7 +16,7 @@ fn run() {
     // Sum the numbers on each line.
     total := 0
     loop row in "10\n20\n30".lines() {
-        total += (row.to_int() ?? 0)
+        total += (Int.parse(row) ?? 0)
     }
     print(total)
 }

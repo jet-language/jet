@@ -645,7 +645,6 @@ fn mk() {
             "raw",
             "snapshot",
             "new",
-            "to_i32",
             "is_nan",
             "chars",
             "trim",
@@ -919,14 +918,15 @@ fn mk() {
     }
 
     #[test]
-    fn rejects_numeric_conversion_builtin() {
-        // Numeric width/predicate/bit methods (`to_i32`/`is_nan`/`count_ones`) are
-        // Phase 12 — not covered builtins here, and they carry a `Some(recv_type)`.
-        for name in ["to_i32", "to_u8", "is_nan", "count_ones", "to_f64"] {
+    fn source_owned_numeric_aliases_are_not_builtins() {
+        for name in ["to_i32", "to_u8", "to_f64"] {
             assert!(
                 !is_covered_builtin_name(name, 0),
-                "{name} is a Phase-12 numeric method"
+                "{name} is retired by D-SHAPE-CONVERT1"
             );
+        }
+        for name in ["is_nan", "count_ones"] {
+            assert!(!is_covered_builtin_name(name, 0), "{name} is a Phase-12 query");
         }
     }
 

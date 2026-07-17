@@ -1577,13 +1577,12 @@ pub enum TExprKind {
         op: TClosureOp,
         args: Vec<TExpr>,
     },
-    /// c109 Phase 12: a numeric predicate / bit-population / width-conversion method
-    /// (D-NUMOPS1: `is_nan`/`count_ones`/`to_i32`/…) on a numeric receiver. These
+    /// c109 Phase 12: a numeric predicate / bit-population query
+    /// (D-NUMOPS1: `is_nan`/`count_ones`/…) on a numeric receiver. These
     /// carry `recv_type == Some(<numeric name>)` (sema sets it for numeric receivers
     /// — CheckerInfer ~L2248). The receiver width source/target and the
-    /// widening-vs-narrowing decision are resolved at lowering into a total
-    /// `TNumericOp` (reproducing `numeric_conversion`/`conv_rust_target` exactly), so
-    /// emit makes no type decision (I3). No args (all numeric methods are nullary).
+    /// operation is resolved at lowering into a total `TNumericOp`, so emit makes no
+    /// type decision (I3). No args (all numeric queries are nullary).
     NumericMethod {
         recv: Box<TExpr>,
         op: TNumericOp,
@@ -1774,6 +1773,14 @@ pub enum TNumericOp {
     TryFrom {
         dst_rust: String,
         dst_spelling: String,
+    },
+    /// A float-to-integer conversion. Finite in-range values truncate toward zero;
+    /// non-finite and out-of-range values return `Err`.
+    FloatToInt {
+        dst_rust: String,
+        dst_spelling: String,
+        lower: String,
+        upper_exclusive: String,
     },
     /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
     /// arm of `emit_builtin_method`, which fires for any receiver type).
@@ -2015,9 +2022,10 @@ pub enum TBuiltinOp {
     Split,
     /// c97/D-STRPARSE1: `lines()` → `{root}jet_string_lines(&(recv))`.
     Lines,
-    /// c97/D-STRPARSE1: `to_int()` on a String → fallible parse, mirroring `Int.parse`:
-    /// `(recv).trim().parse::<i64>().map_err(|e| e.to_string())` (`Int ? ParseError`).
-    ToIntString,
+    /// c97/D-STRPARSE1: `Int.parse(text)` → checked integer parse.
+    ParseInt,
+    /// c97/D-STRPARSE1: `Float.parse(text)` → checked floating-point parse.
+    ParseFloat,
     /// `starts_with(s)` → `(recv).starts_with(&a0)`.
     StartsWith,
     /// `ends_with(s)` → `(recv).ends_with(&a0)`.

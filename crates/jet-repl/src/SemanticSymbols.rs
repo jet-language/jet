@@ -78,7 +78,6 @@ pub const SYMBOLS: &[Symbol] = &[
     member!("String", "chars", "String.chars() -> [Char]", "Every character, in order."),
     member!("String", "replace", "String.replace(from: String, to: String) -> String", "Replaces every occurrence of from with to."),
     member!("String", "repeat", "String.repeat(n: Int) -> String", "Concatenates n copies of the string."),
-    member!("String", "to_int", "String.to_int() -> Int ? ParseError", "Parses the string as an Int."),
 ];
 
 pub fn lookup(identity: &str) -> Option<&'static Symbol> {

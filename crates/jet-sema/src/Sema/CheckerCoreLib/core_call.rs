@@ -930,7 +930,7 @@ impl<'a> Checker<'a> {
                 }
                 // D-FLOATW1 (ratified 2026-06-22): sqrt/floor/ceil/pow are width-generic —
                 // they return the same float width they receive (Float→Float, F32→F32).
-                // Mixing widths is a compile error; explicit .to_f32()/.to_f64() converts.
+                // Mixing widths is a compile error; destination-owned conversion is explicit.
                 (
                     "core.math",
                     "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos"
@@ -1114,7 +1114,7 @@ impl<'a> Checker<'a> {
                                 "E0112",
                                 format!("`pow` needs both arguments to have the same float type, but base is {} and exponent is {}", first.show(), second.show()),
                                 "D-FLOATW1: mixing float widths is not allowed — use the same width for both".to_string(),
-                                format!("convert with `.to_f32()` or `.to_float()` to match"),
+                                "convert with `F32.from_float(value)` or `Float.from_f32(value)` to match".to_string(),
                                 Some(args[1].expr.span()),
                             ));
                         }

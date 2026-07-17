@@ -244,7 +244,7 @@ pub fn builtin_method_return(
         // shape), so it is NOT listed here.
         Type::Option(inner) => option_method_return(inner, method, arg_count),
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
-            builtin_static_return(recv_ty, method, arg_count)
+            numeric_method_return(recv_ty, method, arg_count)
         }
         _ => None,
     }
@@ -299,44 +299,6 @@ fn int_kind(ty: &Type) -> Option<(bool, u8)> {
     }
 }
 
-/// The target type a `to_*` width-conversion method names (D-SG9/D-NUMOPS1).
-fn conv_target(method: &str) -> Option<Type> {
-    Some(match method {
-        "to_i8" => Type::IntN {
-            signed: true,
-            bits: 8,
-        },
-        "to_i16" => Type::IntN {
-            signed: true,
-            bits: 16,
-        },
-        "to_i32" => Type::IntN {
-            signed: true,
-            bits: 32,
-        },
-        "to_i64" | "to_int" => Type::Int,
-        "to_u8" => Type::IntN {
-            signed: false,
-            bits: 8,
-        },
-        "to_u16" => Type::IntN {
-            signed: false,
-            bits: 16,
-        },
-        "to_u32" => Type::IntN {
-            signed: false,
-            bits: 32,
-        },
-        "to_u64" => Type::IntN {
-            signed: false,
-            bits: 64,
-        },
-        "to_f32" => Type::Float32,
-        "to_f64" | "to_float" => Type::Float,
-        _ => return None,
-    })
-}
-
 /// D-NUMOPS1: an integer width conversion is *widening* (infallible) when the
 /// target range fully contains the source range; otherwise *narrowing*
 /// (fallible — returns `T ? String`, with no silent truncation).
@@ -346,7 +308,7 @@ fn int_conv_widening(src: (bool, u8), dst: (bool, u8)) -> bool {
     dlo <= slo && shi <= dhi
 }
 
-/// D-SG9/D-NUMOPS1: width-conversion methods and `to_string` for any numeric
+/// D-SG9/D-NUMOPS1: numeric query methods and `to_string` for any numeric
 /// receiver (`Int`, `Float`, and the fixed widths). Returns `None` for names
 /// this doesn't own so callers can keep trying other tables.
 fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -368,29 +330,27 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             return Some(Some(Type::Int));
         }
     }
-    let target = conv_target(method)?;
-    if nargs != 0 {
+    None
+}
+
+/// D-SHAPE-CONVERT1=A: `Target.from_source(value)` numeric conversions.
+fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    if nargs != 1 || !target.is_numeric() {
         return None;
     }
-    // Integer source.
-    if let Some(src) = int_kind(ty) {
-        return Some(Some(match int_kind(&target) {
-            // int → int: widening is infallible, narrowing is fallible.
-            Some(dst) if int_conv_widening(src, dst) => target,
-            Some(_) => Type::Result {
-                ok: Box::new(target),
-                err: Box::new(Type::String),
-            },
-            // int → float: always representable.
-            None => target,
-        }));
-    }
-    // Float source: float→float (explicit precision change) and float→int
-    // (saturating truncation) are both infallible and explicit.
-    if matches!(ty, Type::Float | Type::Float32) {
-        return Some(Some(target));
-    }
-    None
+    let source = crate::Syntax::numeric_conversion_source(method)
+        .and_then(crate::AST::numeric_type_from_name)?;
+    Some(Some(match (int_kind(&source), int_kind(target)) {
+        (Some(src), Some(dst)) if !int_conv_widening(src, dst) => Type::Result {
+            ok: Box::new(target.clone()),
+            err: Box::new(Type::String),
+        },
+        (None, Some(_)) => Type::Result {
+            ok: Box::new(target.clone()),
+            err: Box::new(Type::String),
+        },
+        _ => target.clone(),
+    }))
 }
 
 fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -429,8 +389,8 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "from_bytes", 1) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "from_text", 1) if n == "X25519PublicKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "parse", 1) if n == "PasswordHash" => Some(Some(Type::Result { ok: Box::new(Type::Named("PasswordHash".into())), err: Box::new(Type::Named("CryptoError".into())) })),
-        // D-SG9/D-NUMOPS1: width conversions + `to_string` for any numeric type.
-        _ => numeric_method_return(ty, method, nargs),
+        // D-SHAPE-CONVERT1=A: destination-owned numeric conversion.
+        _ => numeric_conversion_return(ty, method, nargs),
     }
 }
 
@@ -645,10 +605,6 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("repeat", 1) => Some(Some(Type::String)),
         // c97/D-STRPARSE1: fallible integer parse. Same `Int ? ParseError` result
         // `Int.parse(s)` returns, so one error type covers text→int.
-        ("to_int", 0) => Some(Some(Type::Result {
-            ok: Box::new(Type::Int),
-            err: Box::new(Type::Named("ParseError".to_string())),
-        })),
         _ => None,
     }
 }
@@ -1136,6 +1092,13 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
 pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type>> {
     if let Type::Tagged { inner, .. } = recv_ty {
         return builtin_method_arg_types(inner, method);
+    }
+    if recv_ty.is_numeric() {
+        if let Some(source) = crate::Syntax::numeric_conversion_source(method)
+            .and_then(crate::AST::numeric_type_from_name)
+        {
+            return Some(vec![source]);
+        }
     }
     match recv_ty {
         Type::Named(n) if n == "Secret" && method == "from_text" => Some(vec![Type::String]),

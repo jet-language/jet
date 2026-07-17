@@ -155,7 +155,7 @@ fn parse_packet() -> String {
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("bad packet: no magic")
     count :: r.read_u16_le() ?? panic("bad packet: no count")
-    payload :: r.take(count.to_int()) ?? panic("bad packet: short payload")
+    payload :: r.take(Int.from_u16(count)) ?? panic("bad packet: short payload")
     return "magic={magic} count={count} payload_len={payload.len()}"
 }
 

@@ -312,14 +312,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // c97/D-STRPARSE1: `lines()` → `jet_string_lines` (imported via MOD_USE,
                 // like `jet_string_split` — emitted bare, no root prefix).
                 TBuiltinOp::Lines => format!("jet_string_lines(&({}))", recv),
-                // c97/D-STRPARSE1: `to_int()` on a String — fallible parse mirroring
-                // `Int.parse`. The `Err` (a `ParseError`) lowers to a plain message string.
-                TBuiltinOp::ToIntString => {
-                    format!(
-                        "({}).trim().parse::<i64>().map_err(|e| e.to_string())",
-                        recv
-                    )
-                }
+                TBuiltinOp::ParseInt => format!(
+                    "{{ let __jet_text = &({recv}); __jet_text.trim().parse::<i64>()\
+                     .map_err(|_| format!(\"cannot parse `{{}}` as an integer\", __jet_text)) }}"
+                ),
+                TBuiltinOp::ParseFloat => format!(
+                    "{{ let __jet_text = &({recv}); __jet_text.trim().parse::<f64>()\
+                     .map_err(|_| format!(\"cannot parse `{{}}` as a float\", __jet_text)) }}"
+                ),
                 TBuiltinOp::StartsWith => format!("({}).starts_with(&{})", recv, a(0)),
                 TBuiltinOp::EndsWith => format!("({}).ends_with(&{})", recv, a(0)),
                 TBuiltinOp::Replace => format!("({}).replace(&{}, &{})", recv, a(0), a(1)),
@@ -521,6 +521,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 } => format!(
                     "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
                      \"value doesn't fit in {dst_spelling}\".to_string())"
+                ),
+                TNumericOp::FloatToInt {
+                    dst_rust,
+                    dst_spelling,
+                    lower,
+                    upper_exclusive,
+                } => format!(
+                    "{{ let __jet_value = ({recv}); if __jet_value.is_finite() && \
+                     __jet_value >= {lower} && __jet_value < {upper_exclusive} {{ \
+                     Ok(__jet_value.trunc() as {dst_rust}) }} else {{ Err(\
+                     \"value doesn't fit in {dst_spelling}\".to_string()) }} }}"
                 ),
             }
         }

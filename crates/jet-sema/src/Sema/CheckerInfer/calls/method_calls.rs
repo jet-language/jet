@@ -443,6 +443,52 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // D-SHAPE-CONVERT1=A: every numeric-backed distinct type,
+                // including @UnitFamily members, gets the same destination-owned
+                // conversion as its base (`UserId.from_int`, `Meter.from_float`).
+                if self.registry.is_distinct(type_name) {
+                    if let Some(base) = self.registry.distinct_base(type_name).cloned() {
+                        let expected = Syntax::numeric_conversion_method(&base.name());
+                        if expected == Some(method) {
+                            if args.len() != 1 {
+                                self.diags.push(Diagnostic::error(
+                                    "E0104",
+                                    format!("`{type_name}.{method}` takes one value, got {}", args.len()),
+                                    "a distinct conversion wraps exactly one value of its base type".to_string(),
+                                    format!("write `{type_name}.{method}(value)`"),
+                                    Some(span),
+                                ));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                                return None;
+                            }
+                            let old = self.expected_type.replace(base.clone());
+                            let got = self.infer(&mut args[0].expr);
+                            self.expected_type = old;
+                            if got.as_ref().is_some_and(|got| got != &base) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0108",
+                                    format!("argument to `{type_name}.{method}` should be {}, not {}", base.name(), got.as_ref().unwrap().name()),
+                                    "the source name fixes the conversion input type".to_string(),
+                                    format!("pass a {} value", base.name()),
+                                    Some(args[0].expr.span()),
+                                ));
+                            }
+                            let target = Type::Named(type_name.clone());
+                            let ret = if self.registry.distinct_range(type_name).is_some() {
+                                Type::Result {
+                                    ok: Box::new(target),
+                                    err: Box::new(Type::String),
+                                }
+                            } else {
+                                target
+                            };
+                            *resolved_ret_out = Some(ret.clone());
+                            return Some(ret);
+                        }
+                    }
+                }
                 // D-COLLBREADTH1=A: `Set.from([...])` → `Set<T>`.
                 // T is inferred from the list argument's element type.
                 if type_name == "Set" && method == "from" && args.len() == 1 {
@@ -1441,7 +1487,7 @@ impl<'a> Checker<'a> {
             // D-SHIFT1 (c7shift): `binary.Reader` instance methods (every read
             // fallible — bounds miss is an ordinary `?` error, not a panic).
             // `take(n)` wants an `Int` — sized ints convert explicitly per S42
-            // (`count.to_int()`), never implicitly.
+            // (`Int.from_u16(count)`), never implicitly.
             if let Type::Named(handle_ty) = &recv_ty {
                 if let Some(ret) = binary_reader_method_return(handle_ty, method, args.len()) {
                     for a in args.iter_mut() {
@@ -2473,6 +2519,36 @@ impl<'a> Checker<'a> {
                     }
                 }
                 return result;
+            }
+            if recv_ty.is_numeric() {
+                if let Some(target) = Syntax::retired_numeric_conversion_target(method) {
+                    let source = recv_ty.name();
+                    let from = Syntax::numeric_conversion_method(&source).unwrap_or("from_value");
+                    self.diags.push(Diagnostic::error(
+                        "E0311",
+                        format!("source-owned conversion `.{method}()` is retired"),
+                        "explicit conversion belongs to the destination type, so the promised result is visible first".to_string(),
+                        format!("write `{target}.{from}(value)`"),
+                        Some(span),
+                    ));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+            }
+            if recv_ty == Type::String && method == "to_int" {
+                self.diags.push(Diagnostic::error(
+                    "E0311",
+                    "source-owned text parsing `.to_int()` is retired".to_string(),
+                    "text interpretation belongs to the destination type's `parse` operation".to_string(),
+                    "write `Int.parse(text)`".to_string(),
+                    Some(span),
+                ));
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
             }
             if let Type::TraitObject(trait_names) = &recv_ty {
                 // D-ANY-JAI1: a multi-trait bound (`...[A, B]`) types its loop element as a
