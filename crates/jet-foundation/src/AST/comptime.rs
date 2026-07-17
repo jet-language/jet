@@ -1,6 +1,65 @@
 use super::{AccessConvention, Expr, Lambda, Type};
 use std::collections::BTreeMap;
 
+/// D-MEM-VIEWRET1=B: compiler-inferred public owner of a returned/stored view.
+/// Parameter positions are stable across renames and generic instantiation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ViewSource {
+    Receiver,
+    Parameter(usize),
+    Static { module_path: String, name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ViewSourceProjection {
+    Field(String),
+    Index,
+    Range,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ViewProvenance {
+    pub source: ViewSource,
+    pub projections: Vec<ViewSourceProjection>,
+    pub mutable: bool,
+}
+
+/// Canonical returned-view contract keyed by the output slot that contains the
+/// view. An empty path is a direct `View` return; aggregate slots use their
+/// nested field path. BTreeMap makes API fingerprints and fixed points stable.
+pub type ViewProvenanceMap = BTreeMap<Vec<String>, ViewProvenance>;
+
+pub fn canonical_view_provenance_map(map: &ViewProvenanceMap) -> String {
+    map.iter()
+        .map(|(path, provenance)| {
+            let slot = if path.is_empty() {
+                "$".to_string()
+            } else {
+                path.join(".")
+            };
+            format!("{slot}={}", provenance.canonical())
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+impl ViewProvenance {
+    pub fn canonical(&self) -> String {
+        let source = match &self.source {
+            ViewSource::Receiver => "receiver".to_string(),
+            ViewSource::Parameter(index) => format!("parameter:{index}"),
+            ViewSource::Static { module_path, name } => format!("static:{module_path}::{name}"),
+        };
+        let access = if self.mutable { "write" } else { "read" };
+        let path = self.projections.iter().map(|projection| match projection {
+            ViewSourceProjection::Field(name) => format!("field:{name}"),
+            ViewSourceProjection::Index => "index".to_string(),
+            ViewSourceProjection::Range => "range".to_string(),
+        }).collect::<Vec<_>>().join("/");
+        format!("{source};access:{access};path:{path}")
+    }
+}
+
 /// Semantic signature of a function — the compiler's internal view after
 /// registration. Lives in `AST` so that `Traits`, `Codegen`, and `Sema` can
 /// all depend on it without creating cycles.
@@ -8,6 +67,9 @@ use std::collections::BTreeMap;
 pub struct FuncSig {
     pub params: Vec<(AccessConvention, Type)>,
     pub return_type: Option<Type>,
+    /// Sema-proved stable source for a returned view. Callers compose the
+    /// parameter index onto the corresponding actual argument place.
+    pub return_view_provenance: std::sync::OnceLock<ViewProvenanceMap>,
     /// S50: declared in `extern rust`, implemented by the FFI bridge.
     pub is_extern: bool,
     /// S58 (E2-M13): `#Unsafe fn` — calling it requires an enclosing `#Unsafe`

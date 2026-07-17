@@ -719,15 +719,21 @@ fn run() {
 }
 
 #[test]
-fn write_window_cannot_cross_return_boundary() {
+fn write_window_return_uses_mutable_parameter_provenance() {
     let src = r#"
 fn edit_first(xs: &[Int]) -> ViewMut<Int> {
     return &xs[0..1]
 }
 fn run() { print(0) }
 "#;
-    let diags = jet::compile(src).expect_err("write view return must be rejected");
-    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+    let out = jet::compile(src).expect("parameter-rooted write view return must compile");
+    assert!(
+        out.rust.contains(
+            "fn user_edit_first<'__jet_view>(user_xs: &'__jet_view mut Vec<i64>) -> &'__jet_view mut [i64]"
+        ),
+        "generated lifetime must tie the mutable view to parameter 0: {}",
+        out.rust
+    );
 }
 
 #[test]
@@ -956,22 +962,546 @@ fn run() {
 }
 
 #[test]
-fn returned_parameter_view_is_rejected_until_public_provenance_lands() {
+fn returned_parameter_view_uses_stable_parameter_provenance() {
     let src = r#"
-fn first(xs: [Int]) -> View<Int> {
+fn first(xs: [Int], other: [Int]) -> View<Int> {
     return xs[0..1]
 }
 
 fn run() {
-    print(0)
+    left := [7, 8]
+    right := [9, 10]
+    first_view :: first(left, right)
+    print(first_view[0])
 }
 "#;
-    let diags = jet::compile(src).expect_err("returned views remain a checked boundary");
-    assert!(diags.iter().any(|d| d.code == "E2305"), "got {diags:?}");
+    jet::compile(src).expect("parameter 0 provenance must make the returned view safe");
 }
 
 #[test]
-fn nested_returned_view_form_is_rejected() {
+fn returned_view_composes_through_wrapper_call() {
+    let src = r#"
+fn first(left: [Int], right: [Int]) -> View<Int> {
+    return left[0..1]
+}
+
+fn wrapper(left: [Int], right: [Int]) -> View<Int> {
+    return first(left, right)
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    result :: wrapper(left, right)
+    print(result[0])
+}
+"#;
+    jet::compile(src).expect("callee parameter 0 must map to wrapper parameter 0");
+}
+
+#[test]
+fn returned_string_view_uses_parameter_provenance() {
+    let src = r#"
+fn domain(email: String) -> View<str> {
+    result :: email.after("@")
+    return result
+}
+fn run() { print(domain("user@example.com")) }
+"#;
+    let out = jet::compile(src).expect("parameter-rooted string view return must compile");
+    assert!(
+        out.rust.contains(
+            "fn user_domain<'__jet_view>(user_email: &'__jet_view String) -> &'__jet_view str"
+        ),
+        "generated lifetime must tie the string view to parameter 0: {}",
+        out.rust
+    );
+}
+
+#[test]
+fn returned_string_view_cannot_outlive_local_owner() {
+    let src = r#"
+fn bad() -> View<str> {
+    email := "user@example.com"
+    result :: email.after("@")
+    return result
+}
+fn run() { print(bad()) }
+"#;
+    let diags = jet::compile(src).expect_err("locally-owned string view return must fail");
+    assert!(diags.iter().any(|d| d.code == "E2307"), "{diags:?}");
+}
+
+#[test]
+fn returned_aggregate_stabilizes_string_view_field_provenance() {
+    let src = r#"
+struct Domain { value: View<str> }
+
+fn domain(email: String) -> Domain {
+    result :: email.after("@")
+    return Domain.{ value: result }
+}
+fn run() { print(domain("user@example.com").value) }
+"#;
+    let out = jet::compile(src).expect("parameter-rooted string view field must compile");
+    assert!(out.rust.contains("pub struct user_Domain<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub user_value: &'__jet_view str"), "{}", out.rust);
+}
+
+#[test]
+fn returned_string_view_field_cannot_outlive_local_owner() {
+    let src = r#"
+struct Domain { value: View<str> }
+
+fn bad() -> Domain {
+    email := "user@example.com"
+    result :: email.after("@")
+    return Domain.{ value: result }
+}
+fn run() { print(bad().value) }
+"#;
+    let diags = jet::compile(src).expect_err("locally-owned string view field must fail");
+    assert!(diags.iter().any(|d| d.code == "E2307"), "{diags:?}");
+}
+
+#[test]
+fn returned_string_view_rejects_temporary_call_owner_before_codegen() {
+    let src = r#"
+fn domain(email: String) -> View<str> {
+    result :: email.after("@")
+    return result
+}
+fn run() {
+    result :: domain("user@example.com")
+    print(result)
+}
+"#;
+    let diags = jet::compile(src).expect_err("temporary owner must be rejected in sema");
+    assert!(diags.iter().any(|d| d.code == "E2307"), "{diags:?}");
+}
+
+#[test]
+fn returned_view_summary_is_independent_of_declaration_order() {
+    let src = r#"
+fn wrapper(left: [Int], right: [Int]) -> View<Int> {
+    return first(left, right)
+}
+
+fn first(left: [Int], right: [Int]) -> View<Int> {
+    return left[0..1]
+}
+
+fn run() { print(0) }
+"#;
+    jet::compile(src).expect("forward callable provenance must stabilize before validation");
+}
+
+#[test]
+fn mutually_recursive_view_summaries_stabilize() {
+    let src = r#"
+fn first(values: [Int], recurse: Bool) -> View<Int> {
+    if recurse {
+        return second(values, false)
+    }
+    return values[0..1]
+}
+
+fn second(values: [Int], recurse: Bool) -> View<Int> {
+    if recurse {
+        return first(values, false)
+    }
+    return values[0..1]
+}
+
+fn run() { print(0) }
+"#;
+    jet::compile(src).expect("mutually recursive parameter-0 summaries must converge");
+}
+
+#[test]
+fn returned_view_composes_through_inherent_method() {
+    let src = r#"
+struct Selector { marker: Int }
+
+impl Selector {
+    fn first(self, left: [Int], right: [Int]) -> View<Int> {
+        return left[0..1]
+    }
+}
+
+fn wrapper(selector: Selector, left: [Int], right: [Int]) -> View<Int> {
+    return selector.first(left, right)
+}
+
+fn run() {
+    selector :: Selector.{ marker: 0 }
+    left := [7, 8]
+    right := [9, 10]
+    result :: wrapper(selector, left, right)
+    print(result[0])
+}
+"#;
+    jet::compile(src).expect("method parameter 0 must compose onto wrapper parameter 1");
+}
+
+#[test]
+fn trait_view_summary_is_independent_of_impl_order() {
+    let src = r#"
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int>
+}
+
+struct First { marker: Int }
+
+fn wrapper(selector: First, left: [Int], right: [Int]) -> View<Int> {
+    return selector.select(left, right)
+}
+
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int> {
+        return left[0..1]
+    }
+}
+
+fn run() { print(0) }
+"#;
+    jet::compile(src).expect("trait method provenance must stabilize before wrapper validation");
+}
+
+#[test]
+fn trait_view_contract_rejects_disagreeing_implementations() {
+    let src = r#"
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int>
+}
+
+struct First {}
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int> {
+        return left[0..1]
+    }
+}
+
+struct Last {}
+impl Last.Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int> {
+        return right[0..1]
+    }
+}
+
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("one trait method needs one stable view source");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+}
+
+#[test]
+fn aggregate_trait_view_contract_stabilizes_through_wrapper_in_either_impl_order() {
+    let template = r#"
+struct Pair { left: View<Int>, right: View<Int> }
+
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair
+}
+
+fn wrapper(selector: Select, left: [Int], right: [Int]) -> Pair {
+    return selector.select(left, right)
+}
+
+$IMPLS
+
+fn run() { print(0) }
+"#;
+    let first = r#"
+struct First {}
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Pair.{ left: left_view, right: right_view }
+    }
+}
+"#;
+    let last = r#"
+struct Last {}
+impl Last.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Pair.{ left: left_view, right: right_view }
+    }
+}
+"#;
+    for implementations in [format!("{first}{last}"), format!("{last}{first}")] {
+        let src = template.replace("$IMPLS", &implementations);
+        jet::compile(&src).expect("aggregate trait contract must stabilize before wrapper");
+    }
+}
+
+#[test]
+fn aggregate_trait_view_contract_rejects_disagreement_in_either_impl_order() {
+    let template = r#"
+struct Pair { left: View<Int>, right: View<Int> }
+
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair
+}
+
+$IMPLS
+
+fn run() { print(0) }
+"#;
+    let first = r#"
+struct First {}
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Pair.{ left: left_view, right: right_view }
+    }
+}
+"#;
+    let last = r#"
+struct Last {}
+impl Last.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: left[0..1]
+        return Pair.{ left: left_view, right: right_view }
+    }
+}
+"#;
+    for implementations in [format!("{first}{last}"), format!("{last}{first}")] {
+        let src = template.replace("$IMPLS", &implementations);
+        let diags = jet::compile(&src)
+            .expect_err("aggregate trait implementations must agree per output slot");
+        assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+    }
+}
+
+#[test]
+fn returned_view_provenance_transfers_on_binding_move() {
+    let src = r#"
+fn first(values: [Int]) -> View<Int> {
+    initial :: values[0..1]
+    moved :: initial
+    return moved
+}
+
+fn run() {
+    values := [7, 8]
+    result :: first(values)
+    print(result[0])
+}
+"#;
+    jet::compile(src).expect("moving a view binding must transfer its owner provenance");
+}
+
+#[test]
+fn returned_aggregate_stabilizes_view_field_provenance() {
+    let src = r#"
+struct Window { values: View<Int> }
+
+fn window(values: [Int]) -> Window {
+    selected :: values[0..1]
+    return Window.{ values: selected }
+}
+
+fn run() {
+    values := [7, 8]
+    result :: window(values)
+    print(result.values[0])
+}
+"#;
+    let out = jet::compile(src).expect("returned aggregate must keep its view tied to parameter 0");
+    assert!(
+        out.rust.contains("pub struct user_Window<'__jet_view>")
+            && out.rust.contains("pub user_values: &'__jet_view [i64]")
+            && out.rust.contains("-> user_Window<'__jet_view>"),
+        "aggregate and return must share the hidden owner lifetime: {}",
+        out.rust
+    );
+}
+
+#[test]
+fn nested_returned_aggregate_stabilizes_each_view_output_slot() {
+    let src = r#"
+struct Inner { values: View<Int> }
+struct Outer { inner: Inner }
+
+fn outer(values: [Int]) -> Outer {
+    selected :: values[0..1]
+    return Outer.{ inner: Inner.{ values: selected } }
+}
+
+fn run() {
+    values := [7, 8]
+    result :: outer(values)
+    print(result.inner.values[0])
+}
+"#;
+    let out = jet::compile(src).expect("nested returned aggregate must carry transitive view provenance");
+    assert!(out.rust.contains("pub struct user_Inner<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub struct user_Outer<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub user_inner: user_Inner<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("-> user_Outer<'__jet_view>"), "{}", out.rust);
+}
+
+#[test]
+fn wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves() {
+    let src = r#"
+struct Window { values: View<Int> }
+struct Holder { maybe: Window? }
+struct GenericHolder<T> { value: T, maybe: Window? }
+
+fn maybe(values: [Int]) -> (Window?) {
+    selected :: values[0..1]
+    return Val(Window.{ values: selected })
+}
+
+fn result(values: [Int]) -> Window ? String {
+    selected :: values[0..1]
+    return ok(Window.{ values: selected })
+}
+
+fn tuple(values: [Int]) -> (window: Window, count: Int) {
+    selected :: values[0..1]
+    return (window: Window.{ values: selected }, count: 1)
+}
+
+fn run() { print(0) }
+"#;
+    let out = jet::compile(src).expect("wrapper returns must preserve view provenance");
+    assert!(out.rust.contains("Option<user_Window<'__jet_view>>"), "{}", out.rust);
+    assert!(out.rust.contains("Result<user_Window<'__jet_view>, String>"), "{}", out.rust);
+    assert!(out.rust.contains("pub user_window: user_Window<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("pub struct user_GenericHolder<'__jet_view, T"), "{}", out.rust);
+    assert!(out.rust.contains("pub user_maybe: Option<user_Window<'__jet_view>>"), "{}", out.rust);
+    assert!(!out.rust.contains("Option<'__jet_view"), "{}", out.rust);
+    assert!(!out.rust.contains("Result<'__jet_view"), "{}", out.rust);
+}
+
+#[test]
+fn recursive_view_aggregate_graph_terminates_without_ice() {
+    let src = r#"
+struct Node { next: Node?, values: View<Int> }
+
+fn node(values: [Int]) -> Node {
+    selected :: values[0..1]
+    return Node.{ next: None, values: selected }
+}
+
+fn run() { print(0) }
+"#;
+    let out = jet::compile(src).expect("recursive view graph must terminate in sema and codegen");
+    assert!(out.rust.contains("pub struct user_Node<'__jet_view>"), "{}", out.rust);
+    assert!(out.rust.contains("user_Node<'__jet_view>"), "{}", out.rust);
+}
+
+#[test]
+fn returned_aggregate_accepts_distinct_sources_per_output_slot() {
+    let src = r#"
+struct Pair { left: View<Int>, right: View<Int> }
+
+fn pair(left: [Int], right: [Int]) -> Pair {
+    left_view :: left[0..1]
+    right_view :: right[0..1]
+    return Pair.{ left: left_view, right: right_view }
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    result :: pair(left, right)
+    print(result.left[0])
+    print(result.right[0])
+}
+"#;
+    jet::compile(src).expect("each returned output field may name its own stable owner");
+}
+
+#[test]
+fn multi_source_returned_aggregate_still_blocks_owner_invalidation() {
+    for (owner, field) in [("left", "left"), ("right", "right")] {
+        let src = r#"
+struct Pair { left: View<Int>, right: View<Int> }
+
+fn pair(left: [Int], right: [Int]) -> Pair {
+    left_view :: left[0..1]
+    right_view :: right[0..1]
+    return Pair.{ left: left_view, right: right_view }
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    result :: pair(left, right)
+    $OWNER.push(11)
+    print(result.$FIELD[0])
+}
+"#
+        .replace("$OWNER", owner)
+        .replace("$FIELD", field);
+        let diags = jet::compile(&src)
+            .expect_err("each returned output slot must keep its own owner live");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0212"),
+            "{owner}/{field}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn aggregate_view_slot_composes_through_parameter_projection() {
+    let src = r#"
+struct Pair { left: View<Int>, right: View<Int> }
+
+fn pair(left: [Int], right: [Int]) -> Pair {
+    left_view :: left[0..1]
+    right_view :: right[0..1]
+    return Pair.{ left: left_view, right: right_view }
+}
+
+fn first(pair: Pair) -> View<Int> {
+    return pair.left
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    result :: pair(left, right)
+    selected :: first(result)
+    left.push(11)
+    print(selected[0])
+}
+"#;
+    let diags = jet::compile(src)
+        .expect_err("the projected left slot must retain its original owner");
+    assert!(diags.iter().any(|diag| diag.code == "E0212"), "{diags:?}");
+}
+
+#[test]
+fn returned_view_aggregate_cannot_cross_task_boundary() {
+    let src = r#"
+use core.tasks
+struct Window { values: View<Int> }
+
+fn window(values: [Int]) -> Window {
+    selected :: values[0..1]
+    return Window.{ values: selected }
+}
+
+fn run() {
+    task :: tasks.spawn(() => window([7, 8]))
+    print(task.join().values[0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("view aggregates are not task-sendable");
+    assert!(diags.iter().any(|d| d.code == "E1102"), "{diags:?}");
+}
+
+#[test]
+fn nested_returned_view_paths_with_same_source_compile() {
     let src = r#"
 fn choose(xs: [Int]) -> View<Int> {
     if true {
@@ -984,7 +1514,22 @@ fn run() {
     print(0)
 }
 "#;
-    let diags = jet::compile(src).expect_err("all returned-view paths must be rejected");
+    jet::compile(src).expect("all returned-view paths share parameter 0");
+}
+
+#[test]
+fn returned_view_paths_with_different_sources_are_rejected() {
+    let src = r#"
+fn choose(left: [Int], right: [Int], first: Bool) -> View<Int> {
+    if first {
+        return left[0..1]
+    }
+    return right[0..1]
+}
+
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("returned-view paths need one stable owner source");
     assert!(diags.iter().any(|d| d.code == "E2305"), "got {diags:?}");
 }
 
@@ -1100,6 +1645,183 @@ fn run() {
     assert!(out.rust.contains("user_value: &String"), "{}", out.rust);
     assert!(out.rust.contains("((*user_f))(&((*user_value)))"), "{}", out.rust);
     assert!(!out.rust.contains("((*user_value)).clone()"), "{}", out.rust);
+}
+
+#[test]
+fn function_value_returning_view_is_rejected_before_codegen() {
+    let src = r#"
+fn first(values: [Int]) -> View<Int> {
+    return values[0..1]
+}
+
+fn run() {
+    callback :: first
+    values := [7, 8]
+    result :: callback(values)
+    print(result[0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("function-value provenance is erased");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+}
+
+#[test]
+fn stored_lambda_returning_view_is_rejected_before_codegen() {
+    let src = r#"
+fn first(values: [Int]) -> View<Int> {
+    return values[0..1]
+}
+
+fn run() {
+    values := [7, 8]
+    callback :: () => first(values)
+    print(0)
+}
+"#;
+    let diags = jet::compile(src).expect_err("stored lambda view source cannot stabilize");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+}
+
+#[test]
+fn returned_view_composes_from_receiver_field() {
+    let src = r#"
+struct Bucket { values: [Int] }
+impl Bucket {
+    fn first(self) -> View<Int> {
+        return self.values[0..1]
+    }
+}
+fn wrapper(bucket: Bucket) -> View<Int> {
+    return bucket.first()
+}
+fn run() { print(0) }
+"#;
+    let out = jet::compile(src).expect("receiver-rooted method view must compose");
+    assert!(out.rust.contains("&'__jet_view self"), "{}", out.rust);
+}
+
+#[test]
+fn generic_returned_view_composes_through_wrapper() {
+    let src = r#"
+fn first<T>(values: [T]) -> View<T> {
+    return values[0..1]
+}
+fn wrapper(values: [Int]) -> View<Int> {
+    return first(values)
+}
+fn run() {
+    values := [7, 8]
+    result :: wrapper(values)
+    print(result[0])
+}
+"#;
+    jet::compile(src).expect("generic instantiation provenance must compose through wrapper");
+}
+
+#[test]
+fn open_dynamic_trait_view_dispatch_is_rejected() {
+    let src = r#"
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int>
+}
+fn wrapper(selector: Select, left: [Int], right: [Int]) -> View<Int> {
+    return selector.select(left, right)
+}
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("open trait dispatch has no stable source");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+}
+
+#[test]
+fn returned_view_blocks_owner_resize_and_move() {
+    for action in ["values.push(4)", "consume(^values)"] {
+        let src = format!(
+            r#"fn first(values: [Int]) -> View<Int> {{
+    return values[0..1]
+}}
+fn consume(values: ^[Int]) {{ print(values.len()) }}
+fn run() {{
+    values := [1, 2, 3]
+    result :: first(values)
+    {action}
+    print(result[0])
+}}
+"#
+        );
+        let diags = jet::compile(&src).expect_err("live returned view must keep owner stable");
+        assert!(diags.iter().any(|d| d.code == "E0212"), "{diags:?}");
+    }
+}
+
+#[test]
+fn returned_view_aggregate_blocks_owner_resize() {
+    let src = r#"
+struct Window { values: View<Int> }
+fn window(values: [Int]) -> Window {
+    selected :: values[0..1]
+    return Window.{ values: selected }
+}
+fn run() {
+    values := [1, 2, 3]
+    result :: window(values)
+    values.push(4)
+    print(result.values[0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("stored returned view must keep owner stable");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "{diags:?}");
+}
+
+#[test]
+fn returned_mutable_view_conflicts_with_overlapping_view() {
+    let src = r#"
+fn edit(values: &[Int]) -> ViewMut<Int> {
+    return &values[0..1]
+}
+fn run() {
+    values := [1, 2, 3]
+    left :: edit(&values)
+    right :: &values[0..1]
+    print(left[0] + right[0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("returned mutable view must remain exclusive");
+    assert!(diags.iter().any(|d| d.code == "E0212"), "{diags:?}");
+}
+
+#[test]
+fn returned_view_cannot_escape_into_untracked_list() {
+    let src = r#"
+fn first(values: [Int]) -> View<Int> {
+    return values[0..1]
+}
+fn run() {
+    values := [1, 2, 3]
+    result :: first(values)
+    windows :: [result]
+    print(windows[0][0])
+}
+"#;
+    let diags = jet::compile(src).expect_err("list container has no owner provenance slot");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
+}
+
+#[test]
+fn stored_view_field_cannot_be_rebound_to_different_owner() {
+    let src = r#"
+struct Window { values: View<Int> }
+fn replace(left: [Int], right: [Int]) {
+    first :: left[0..1]
+    holder := Window.{ values: first }
+    second :: right[0..1]
+    holder.values = second
+    print(holder.values[0])
+}
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("stored view field source cannot change");
+    assert!(diags.iter().any(|d| d.code == "E2305"), "{diags:?}");
 }
 
 #[test]

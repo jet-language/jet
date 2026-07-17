@@ -122,6 +122,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         params,
         web_param_reconstructions,
         ret: f.return_type.clone(),
+        return_view_provenance: f.return_view_provenance.clone(),
         generics,
         clone_types,
         is_main: false,
@@ -305,6 +306,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             .return_type
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
+        return_view_provenance: f.return_view_provenance.clone(),
         // The enclosing type params live on `impl<T>`. `emit_type_impl` fills a
         // per-method `where T: Clone` suffix only for lowered clone operations.
         generics: String::new(),
@@ -391,6 +393,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             .return_type
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
+        return_view_provenance: f.return_view_provenance.clone(),
         generics: String::new(),
         clone_types,
         is_main: false,
@@ -479,6 +482,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         params: Vec::new(),
         web_param_reconstructions: Vec::new(),
         ret: f.return_type.clone(),
+        return_view_provenance: f.return_view_provenance.clone(),
         // The signature is fully pre-rendered (`sig`); `is_view`/`generics` are unused for delegation.
         generics: String::new(),
         clone_types: Vec::new(),

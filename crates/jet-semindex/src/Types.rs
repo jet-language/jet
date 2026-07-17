@@ -4,7 +4,58 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 9;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewSourceFact {
+    Receiver,
+    Parameter(usize),
+    Static { module_path: String, name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewProjectionFact {
+    Field(String),
+    Index,
+    Range,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewProvenanceFact {
+    pub output_path: Vec<String>,
+    pub source: ViewSourceFact,
+    pub projections: Vec<ViewProjectionFact>,
+    pub mutable: bool,
+}
+
+impl ViewProvenanceFact {
+    pub fn canonical(&self) -> String {
+        let source = match &self.source {
+            ViewSourceFact::Receiver => "receiver".to_string(),
+            ViewSourceFact::Parameter(index) => format!("parameter:{index}"),
+            ViewSourceFact::Static { module_path, name } => {
+                format!("static:{module_path}::{name}")
+            }
+        };
+        let access = if self.mutable { "write" } else { "read" };
+        let path = self
+            .projections
+            .iter()
+            .map(|projection| match projection {
+                ViewProjectionFact::Field(name) => format!("field:{name}"),
+                ViewProjectionFact::Index => "index".to_string(),
+                ViewProjectionFact::Range => "range".to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        let slot = if self.output_path.is_empty() {
+            "$".to_string()
+        } else {
+            self.output_path.join(".")
+        };
+        format!("slot:{slot};{source};access:{access};path:{path}")
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstanceApplicationFact {
@@ -166,6 +217,9 @@ pub struct SymbolDef {
     pub module_path: String,
     pub def_span: SourceSpan,
     pub kind: SymbolKind,
+    /// Sema-proved owner source for a returned view, when this definition is a
+    /// function. Kept beside `kind` to preserve the established enum shape.
+    pub view_provenance: Vec<ViewProvenanceFact>,
 }
 
 /// Compiler-owned definition facts for conservative structural tools.
@@ -488,7 +542,15 @@ fn structural_signature(def: &SymbolDef) -> String {
                 .map(|(n, t)| format!("{n}:{t}"))
                 .collect::<Vec<_>>()
                 .join(",");
-            format!("fn({params})->{}", ret.as_deref().unwrap_or("Void"))
+            format!(
+                "fn({params})->{};view_source={}",
+                ret.as_deref().unwrap_or("Void"),
+                def.view_provenance
+                    .iter()
+                    .map(ViewProvenanceFact::canonical)
+                    .collect::<Vec<_>>()
+                    .join("|"),
+            )
         }
         SymbolKind::Struct { fields } => {
             let fields = fields

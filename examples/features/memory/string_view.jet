@@ -14,10 +14,10 @@ fn run() {
     // still works (this is a read, not a move) — proving the view didn't
     // take ownership away from its owner.
     print("padded still readable: {padded}")
-    // `email` is itself a view (`padded.trim()`); only `~` can carry a
-    // view past its own scope — into another call, a struct field, another
-    // binding, or a return (E2307 otherwise; see
-    // tests/ui/string_view_outlives_owner.jet).
+    // `email` is itself a local, type-invisible view (`padded.trim()`). `~`
+    // materializes an owned String for an owned-String boundary. Named
+    // zero-copy return/field boundaries use `View<str>` instead; see
+    // returned_views.jet. E2307 rejects an owner that dies too soon.
     print("escaped copy={domain_of(~email)}")
 }
 

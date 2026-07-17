@@ -93,6 +93,9 @@ pub struct SymbolDB {
     /// D-LINTPOLICY1=A: every spelled bypass (`#Unsafe`, `.drop(reason)`,
     /// `#[allow(lint)]`) collected during the walk.
     pub bypasses: Vec<BypassFact>,
+    /// Sema-owned returned-view summaries keyed by semantic function identity.
+    /// Kept beside `SymKind` so existing LSP/REPL consumers retain its shape.
+    pub view_provenance: HashMap<String, AST::ViewProvenanceMap>,
 }
 
 struct CallerFrame {
@@ -125,6 +128,7 @@ impl SymbolDB {
             inlay: Vec::new(),
             nodes: Vec::new(),
             bypasses: Vec::new(),
+            view_provenance: HashMap::new(),
         }
     }
 
@@ -152,7 +156,7 @@ impl SymbolDB {
                 }
             }
         }
-        let defs = convert_defs(&self.defs);
+        let defs = convert_defs(&self.defs, &self.view_provenance);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
         let definition_facts = build_definition_facts(&defs, &self.nodes, bundle);
@@ -253,16 +257,31 @@ fn local_identity(scope: &str, kind: &str, name: &str) -> String {
     format!("{kind}:{scope}::{name}")
 }
 
-fn fn_signature(name: &str, params: &[(String, AST::Type)], ret: &Option<AST::Type>) -> String {
+fn fn_signature(
+    name: &str,
+    params: &[(String, AST::Type)],
+    ret: &Option<AST::Type>,
+    view_provenance: Option<&AST::ViewProvenanceMap>,
+) -> String {
     let params = params
         .iter()
         .map(|(n, t)| format!("{n}: {}", t.name()))
         .collect::<Vec<_>>()
         .join(", ");
-    match ret {
+    let mut signature = match ret {
         Some(t) => format!("fn {name}({params}) -> {}", t.name()),
         None => format!("fn {name}({params})"),
+    };
+    if let Some(map) = view_provenance {
+        if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
+            signature.push_str(" ; view_source = ");
+            signature.push_str(&direct.canonical());
+        } else {
+            signature.push_str(" ; view_sources = ");
+            signature.push_str(&AST::canonical_view_provenance_map(map));
+        }
     }
+    signature
 }
 
 fn method_params(f: &AST::Func) -> Vec<(String, AST::Type)> {
@@ -287,7 +306,12 @@ fn method_fact(
         identity: callable_identity(scope, Some(owner), &f.name, f),
         kind: MemberKind::Method,
         origin,
-        signature: fn_signature(&f.name, &params, &f.return_type),
+        signature: fn_signature(
+            &f.name,
+            &params,
+            &f.return_type,
+            f.return_view_provenance.as_ref(),
+        ),
         module_path: mp.to_string(),
         span: f.name_span.into(),
     }
@@ -538,7 +562,7 @@ fn build_definition_facts(
         let source = module.source.get(node.span.start..node.span.end).unwrap_or("");
         out.push(DefinitionFact {
             stable_id: format!("def:{}", &jet_foundation::SHA256::sha256_hex(structural.as_bytes())[..16]),
-            signature_id: format!("sig:{}", &jet_foundation::SHA256::sha256_hex(format!("{}|{}", definition_kind(&def.kind), definition_signature(&def.kind)).as_bytes())[..16]),
+            signature_id: format!("sig:{}", &jet_foundation::SHA256::sha256_hex(format!("{}|{}", definition_kind(&def.kind), definition_signature(def)).as_bytes())[..16]),
             content_id: format!("sha256:{}", jet_foundation::SHA256::sha256_hex(normalize_definition(source).as_bytes())),
             human_identity: def.identity.clone(),
             name: def.name.clone(),
@@ -567,12 +591,21 @@ fn definition_kind(kind: &SymbolKind) -> &'static str {
     }
 }
 
-fn definition_signature(kind: &SymbolKind) -> String {
-    match kind {
-        SymbolKind::Function { params, ret } => format!("({})->{}", params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","), ret.as_deref().unwrap_or("Void")),
+fn definition_signature(def: &SymbolDef) -> String {
+    match &def.kind {
+        SymbolKind::Function { params, ret } => format!(
+            "({})->{};view_source={}",
+            params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","),
+            ret.as_deref().unwrap_or("Void"),
+            def.view_provenance
+                .iter()
+                .map(|provenance| provenance.canonical())
+                .collect::<Vec<_>>()
+                .join("|"),
+        ),
         SymbolKind::Struct { fields } => format!("{{{}}}", fields.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(",")),
         SymbolKind::Enum { variants } => format!("variants:{}", variants.len()),
-        _ => definition_kind(kind).to_string(),
+        _ => definition_kind(&def.kind).to_string(),
     }
 }
 
@@ -687,6 +720,11 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         Item::Func(f) => {
             record_func_type_nodes(f, mp, ctx);
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
+            if let Some(provenance) = &f.return_view_provenance {
+                ctx.db
+                    .view_provenance
+                    .insert(fn_identity.clone(), provenance.clone());
+            }
             let params: Vec<(String, AST::Type)> = method_params(f);
             let sym = SymDef {
                 identity: fn_identity.clone(),
@@ -1077,7 +1115,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     origin: MemberOrigin::TraitRequirement {
                         trait_name: t.name.clone(),
                     },
-                    signature: fn_signature(&sig.name, &params, &sig.return_type),
+                    signature: fn_signature(&sig.name, &params, &sig.return_type, None),
                     module_path: mp.to_string(),
                     span: sig.name_span.into(),
                 });

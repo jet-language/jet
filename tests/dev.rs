@@ -1325,6 +1325,429 @@ fn run() {
 }
 
 #[test]
+fn returned_parameter_view_matches_aot_and_default_dev() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping returned-view AOT/dev regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_returned_parameter_view_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("returned_parameter_view.jet");
+    fs::write(
+        &file,
+        r#"fn first(left: [Int], right: [Int]) -> View<Int> {
+    return left[0..1]
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    result :: first(left, right)
+    print(result[0])
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let aot = compiled_binary_output(
+        &dir,
+        "returned_parameter_view",
+        0,
+        "returned_parameter_view",
+        &shown,
+    );
+    assert_eq!(aot.stdout, "7\n");
+    let dev = match dev_iteration_with_timeout("returned_parameter_view", &shown, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("default dev rejected returned parameter view: {diags:?}")
+        }
+    };
+    assert_eq!(dev, aot);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn returned_view_field_matches_aot_and_default_dev() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping returned-view-field AOT/dev regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_returned_view_field_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("returned_view_field.jet");
+    fs::write(
+        &file,
+        r#"struct Window { values: View<Int> }
+
+fn window(values: [Int]) -> Window {
+    selected :: values[0..1]
+    return Window.{ values: selected }
+}
+
+fn run() {
+    values := [7, 8]
+    result :: window(values)
+    print(result.values[0])
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let aot = compiled_binary_output(
+        &dir,
+        "returned_view_field",
+        0,
+        "returned_view_field",
+        &shown,
+    );
+    assert_eq!(aot.stdout, "7\n");
+    let dev = match dev_iteration_with_timeout("returned_view_field", &shown, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("default dev rejected returned view field: {diags:?}")
+        }
+    };
+    assert_eq!(dev, aot);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn nested_returned_view_field_matches_aot_and_default_dev() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping nested returned-view AOT/dev regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_nested_returned_view_field_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("nested_returned_view_field.jet");
+    fs::write(
+        &file,
+        r#"struct Inner { values: View<Int> }
+struct Outer { inner: Inner }
+
+fn outer(values: [Int]) -> Outer {
+    selected :: values[0..1]
+    return Outer.{ inner: Inner.{ values: selected } }
+}
+
+fn run() {
+    values := [7, 8]
+    result :: outer(values)
+    print(result.inner.values[0])
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let aot = compiled_binary_output(
+        &dir,
+        "nested_returned_view_field",
+        0,
+        "nested_returned_view_field",
+        &shown,
+    );
+    assert_eq!(aot.stdout, "7\n");
+    let dev = match dev_iteration_with_timeout("nested_returned_view_field", &shown, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("default dev rejected nested returned view field: {diags:?}")
+        }
+    };
+    assert_eq!(dev, aot);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn wrapped_returned_view_fields_match_aot_and_default_dev() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping wrapped returned-view AOT/dev regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_wrapped_returned_view_fields_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("wrapped_returned_view_fields.jet");
+    fs::write(
+        &file,
+        r#"struct Window { values: View<Int> }
+struct Holder { maybe: Window? }
+struct GenericHolder<T> { value: T, maybe: Window? }
+struct Node { next: Node?, values: View<Int> }
+
+fn maybe(values: [Int]) -> (Window?) {
+    selected :: values[0..1]
+    return Val(Window.{ values: selected })
+}
+
+fn result(values: [Int]) -> Window ? String {
+    selected :: values[0..1]
+    return ok(Window.{ values: selected })
+}
+
+fn tuple(values: [Int]) -> (window: Window, count: Int) {
+    selected :: values[0..1]
+    return (window: Window.{ values: selected }, count: 1)
+}
+
+fn node(values: [Int]) -> Node {
+    selected :: values[0..1]
+    return Node.{ next: None, values: selected }
+}
+
+fn run() { print(0) }
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let aot = compiled_binary_output(
+        &dir,
+        "wrapped_returned_view_fields",
+        0,
+        "wrapped_returned_view_fields",
+        &shown,
+    );
+    assert_eq!(aot.stdout, "0\n");
+    let dev = match dev_iteration_with_timeout("wrapped_returned_view_fields", &shown, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("default dev rejected wrapped returned view fields: {diags:?}")
+        }
+    };
+    assert_eq!(dev, aot);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn returned_string_view_field_matches_aot_and_default_dev() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping returned-string-view AOT/dev regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_returned_string_view_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("returned_string_view.jet");
+    fs::write(
+        &file,
+        r#"struct Domain { value: View<str> }
+
+fn domain(email: String) -> Domain {
+    result :: email.after("@")
+    return Domain.{ value: result }
+}
+
+fn run() {
+    email := "user@example.com"
+    result :: domain(email)
+    print(result.value)
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let aot = compiled_binary_output(
+        &dir,
+        "returned_string_view",
+        0,
+        "returned_string_view",
+        &shown,
+    );
+    assert_eq!(aot.stdout, "example.com\n");
+    let dev = match dev_iteration_with_timeout("returned_string_view", &shown, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("default dev rejected returned string-view field: {diags:?}")
+        }
+    };
+    assert_eq!(dev, aot);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn returned_view_trait_method_matches_aot_and_default_dev() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping returned-view-trait AOT/dev regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_returned_view_trait_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("returned_view_trait.jet");
+    fs::write(
+        &file,
+        r#"trait Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int>
+}
+
+struct First { marker: Int }
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int> {
+        return left[0..1]
+    }
+}
+
+fn wrapper(selector: First, left: [Int], right: [Int]) -> View<Int> {
+    return selector.select(left, right)
+}
+
+fn run() {
+    selector :: First.{ marker: 0 }
+    left := [7, 8]
+    right := [9, 10]
+    result :: wrapper(selector, left, right)
+    print(result[0])
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let aot = compiled_binary_output(
+        &dir,
+        "returned_view_trait",
+        0,
+        "returned_view_trait",
+        &shown,
+    );
+    assert_eq!(aot.stdout, "7\n");
+    let dev = match dev_iteration_with_timeout("returned_view_trait", &shown, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("default dev rejected returned view trait method: {diags:?}")
+        }
+    };
+    assert_eq!(dev, aot);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping aggregate trait-return AOT/dev regression");
+        return;
+    }
+    let template = r#"struct Pair { left: View<Int>, right: View<Int> }
+struct Envelope<T> { value: T, marker: Int }
+
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?)
+    fn fallible(self, left: [Int], right: [Int]) -> Pair ? String
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair>
+}
+
+fn wrapper(selector: First, left: [Int], right: [Int]) -> Pair {
+    return selector.select(left, right)
+}
+
+$IMPLS
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    pair :: wrapper(First.{ marker: 0 }, left, right)
+    print(pair.left[0])
+    print(pair.right[0])
+}
+"#;
+    let implementation = |name: &str| {
+        r#"struct $TYPE { marker: Int }
+impl $TYPE.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Pair.{ left: left_view, right: right_view }
+    }
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Val(Pair.{ left: left_view, right: right_view })
+    }
+    fn fallible(self, left: [Int], right: [Int]) -> Pair ? String {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return ok(Pair.{ left: left_view, right: right_view })
+    }
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return (pair: Pair.{ left: left_view, right: right_view }, count: 1)
+    }
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair> {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Envelope<Pair>.{
+            value: Pair.{ left: left_view, right: right_view },
+            marker: 0,
+        }
+    }
+}
+"#
+        .replace("$TYPE", name)
+    };
+    let first = implementation("First");
+    let last = implementation("Last");
+    for (index, implementations) in [
+        format!("{first}{last}"),
+        format!("{last}{first}"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dir = std::env::temp_dir().join(format!(
+            "jet_aggregate_trait_returns_{}_{}",
+            std::process::id(),
+            index
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("aggregate_trait_returns.jet");
+        fs::write(&file, template.replace("$IMPLS", &implementations)).unwrap();
+        let shown = file.to_string_lossy().to_string();
+        let stem = format!("aggregate_trait_returns_{index}");
+        let aot = compiled_binary_output(&dir, &stem, 0, &stem, &shown);
+        assert_eq!(aot.stdout, "7\n9\n");
+        let dev = match dev_iteration_with_timeout(&stem, &shown, false) {
+            RunOutcome::Ran { stdout, stderr, exit_code } => {
+                ProgramOutput::ran(stdout, stderr, exit_code)
+            }
+            RunOutcome::Problems(diags) => {
+                panic!("default dev rejected aggregate trait returns: {diags:?}")
+            }
+        };
+        assert_eq!(dev, aot);
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn json_coerce_audit_uses_transparent_aot_fallback() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_json_coerce_fallback_{}",

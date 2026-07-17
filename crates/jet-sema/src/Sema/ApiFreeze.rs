@@ -9,7 +9,7 @@
 //! Format (std-only, lockfile-style — no serde, I6):
 //!
 //! ```text
-//! api_version = 1
+//! api_version = 2
 //! package = mathkit
 //! published_version = 1.2.0
 //! fn scale(v: &Vec3, factor: Float)
@@ -29,7 +29,7 @@ use crate::Syntax;
 use crate::AST::{Func, Item};
 use std::path::{Path, PathBuf};
 
-pub const API_SNAPSHOT_VERSION: u32 = 1;
+pub const API_SNAPSHOT_VERSION: u32 = 2;
 
 /// One frozen public function in a package's capability API.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -141,7 +141,17 @@ pub fn fn_signature(f: &Func) -> String {
         Some(t) => format!(" -> {}", t.name()),
         None => String::new(),
     };
-    format!("fn {}({}){}", f.name, params.join(", "), ret)
+    let provenance = f.return_view_provenance.as_ref().map_or_else(String::new, |map| {
+        if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
+            format!(" ; view_source = {}", direct.canonical())
+        } else {
+            format!(
+                " ; view_sources = {}",
+                crate::AST::canonical_view_provenance_map(map)
+            )
+        }
+    });
+    format!("fn {}({}){}{}", f.name, params.join(", "), ret, provenance)
 }
 
 /// Build a frozen-API snapshot from a list of items (a module's items, post
@@ -283,6 +293,7 @@ mod tests {
             params,
             return_type: ret,
             return_type_span: None,
+            return_view_provenance: None,
             is_unsafe: false,
             unsafe_reason: None,
             unsafe_span: None,
@@ -325,6 +336,99 @@ mod tests {
             None,
         );
         assert_eq!(fn_signature(&f), "fn scale(v: &Vec3, factor: Float)");
+    }
+
+    #[test]
+    fn sig_carries_parameter_view_provenance() {
+        let mut f = func(
+            "first",
+            true,
+            vec![param("xs", AccessConvention::Read, Type::List(Box::new(Type::Int)))],
+            Some(Type::Apply { name: "View".into(), args: vec![Type::Int] }),
+        );
+        f.return_view_provenance = Some(std::collections::BTreeMap::from([(
+            Vec::new(),
+            crate::AST::ViewProvenance {
+                source: crate::AST::ViewSource::Parameter(0),
+                projections: vec![crate::AST::ViewSourceProjection::Range],
+                mutable: false,
+            },
+        )]));
+        assert!(fn_signature(&f).contains("view_source = parameter:0;access:read;path:range"));
+    }
+
+    #[test]
+    fn returned_view_source_round_trips_and_changes_contract() {
+        let snapshot = |source_index| {
+            let mut f = func(
+                "pick",
+                true,
+                vec![
+                    param("left", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                    param("right", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                ],
+                Some(Type::Apply { name: "View".into(), args: vec![Type::Int] }),
+            );
+            f.return_view_provenance = Some(std::collections::BTreeMap::from([(
+                Vec::new(),
+                crate::AST::ViewProvenance {
+                    source: crate::AST::ViewSource::Parameter(source_index),
+                    projections: vec![crate::AST::ViewSourceProjection::Range],
+                    mutable: false,
+                },
+            )]));
+            snapshot_from_items(&[Item::Func(f)], "views", "1.0.0")
+        };
+
+        let left = snapshot(0);
+        let right = snapshot(1);
+        assert_eq!(ApiSnapshot::parse(&left.write()).unwrap(), left);
+        assert_eq!(ApiSnapshot::parse(&right.write()).unwrap(), right);
+        assert_ne!(left.capability_digest(), right.capability_digest());
+        assert!(left.funcs[0].signature.contains("view_source = parameter:0"));
+        assert!(right.funcs[0].signature.contains("view_source = parameter:1"));
+    }
+
+    #[test]
+    fn aggregate_view_sources_round_trip_and_change_contract() {
+        let snapshot = |right_source| {
+            let mut f = func(
+                "pair",
+                true,
+                vec![
+                    param("left", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                    param("right", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                ],
+                Some(Type::Named("Pair".into())),
+            );
+            f.return_view_provenance = Some(std::collections::BTreeMap::from([
+                (
+                    vec!["left".into()],
+                    crate::AST::ViewProvenance {
+                        source: crate::AST::ViewSource::Parameter(0),
+                        projections: vec![crate::AST::ViewSourceProjection::Range],
+                        mutable: false,
+                    },
+                ),
+                (
+                    vec!["right".into()],
+                    crate::AST::ViewProvenance {
+                        source: crate::AST::ViewSource::Parameter(right_source),
+                        projections: vec![crate::AST::ViewSourceProjection::Range],
+                        mutable: false,
+                    },
+                ),
+            ]));
+            snapshot_from_items(&[Item::Func(f)], "views", "1.0.0")
+        };
+
+        let distinct = snapshot(1);
+        let changed = snapshot(0);
+        assert_eq!(ApiSnapshot::parse(&distinct.write()).unwrap(), distinct);
+        assert_ne!(distinct.capability_digest(), changed.capability_digest());
+        assert!(distinct.funcs[0].signature.contains(
+            "view_sources = left=parameter:0;access:read;path:range|right=parameter:1;access:read;path:range"
+        ));
     }
 
     #[test]

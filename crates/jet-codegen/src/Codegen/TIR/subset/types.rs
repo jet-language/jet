@@ -57,6 +57,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_struct_ty(&ty, cx)
         || is_covered_enum_ty(&ty, cx)
         || is_covered_collection_ty(&ty, cx)
+        || is_covered_view_ty(&ty, cx)
         || is_covered_expanded_collection_ty(&ty, cx)
         || is_covered_fallible_ty(&ty, cx)
         || is_covered_fn_ty(&ty, cx)
@@ -68,6 +69,20 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_shared_ty(&ty, cx)
         || is_covered_pool_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
+}
+
+/// D-MEM-VIEWRET1=B: views use the existing slice representation. Sema has
+/// already proved their provenance; the TIR coverage gate only needs to know
+/// that the element type is itself representable.
+fn is_covered_view_ty(ty: &Type, cx: &Cx) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut")
+                && args.len() == 1
+                && (matches!(&args[0], Type::Named(inner) if inner == "str")
+                    || is_subset_param_ty(&args[0], cx))
+    )
 }
 
 pub(crate) fn is_covered_event_ty(ty: &Type, cx: &Cx) -> bool {

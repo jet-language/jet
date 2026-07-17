@@ -28,6 +28,30 @@ fn type_mentions_gc(ty: &Type) -> bool {
     }
 }
 
+fn struct_has_view_field(cx: &Cx, s: &StructDef) -> bool {
+    s.fields.iter().any(|f| cx.type_contains_view(&f.ty))
+}
+
+fn add_view_lifetime_generic(generics: String) -> String {
+    if generics.is_empty() {
+        "<'__jet_view>".to_string()
+    } else if let Some(rest) = generics.strip_prefix('<') {
+        format!("<'__jet_view, {rest}")
+    } else {
+        generics
+    }
+}
+
+fn add_view_lifetime_arg(args: String) -> String {
+    if args.is_empty() {
+        "<'__jet_view>".to_string()
+    } else if let Some(rest) = args.strip_prefix('<') {
+        format!("<'__jet_view, {rest}")
+    } else {
+        args
+    }
+}
+
 fn emit_gc_trace_impl(s: &StructDef, out: &mut String) {
     if !s.fields.iter().any(|f| type_mentions_gc(&f.ty)) {
         return;
@@ -49,16 +73,20 @@ fn emit_gc_trace_impl(s: &StructDef, out: &mut String) {
 }
 
 pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
+    let has_view_field = struct_has_view_field(cx, s);
     let clone_extra = if !s.type_params.is_empty() && cx.cloneable.contains(&s.name) {
         Generics::rust_extra_clone_bounds(&s.type_params)
     } else {
         HashMap::new()
     };
-    let type_params = if s.type_params.is_empty() {
+    let mut type_params = if s.type_params.is_empty() {
         String::new()
     } else {
         Generics::rust_type_param_list(&s.type_params, &clone_extra)
     };
+    if has_view_field {
+        type_params = add_view_lifetime_generic(type_params);
+    }
     let has_fn_field = s.fields.iter().any(|f| matches!(f.ty, Type::Fn { .. }));
     let mut derives: Vec<&str> = Vec::new();
     if !has_fn_field && s.type_params.is_empty() {
@@ -115,7 +143,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     // `s.methods`, so it's emitted below via the normal `emit_type_impl`
     // method-emission path — nothing extra to do here but skip it as a field.
     for f in s.fields.iter().filter(|f| f.computed.is_none()) {
-        let field_ty = cx.struct_field_rust(s, &f.name, &f.ty);
+        let field_ty = cx.struct_field_rust_with_view_lifetime(s, &f.name, &f.ty);
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
@@ -130,7 +158,10 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .extend(v.iter().cloned());
         }
         let tp_bounds = Generics::rust_type_param_list(&s.type_params, &impl_bounds);
-        let tp_plain = Generics::type_param_rust_list(&s.type_params);
+        let mut tp_plain = Generics::type_param_rust_list(&s.type_params);
+        if has_view_field {
+            tp_plain = add_view_lifetime_arg(tp_plain);
+        }
         let show_body = if has_fn_field {
             format!("\"{} {{ ... }}\".to_string()", s.name)
         } else {
@@ -148,6 +179,11 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .join(", ");
             format!("format!(\"{}({})\", {})", s.name, fmt_fields, show_fields)
         };
+        let tp_bounds = if has_view_field {
+            add_view_lifetime_generic(tp_bounds)
+        } else {
+            tp_bounds
+        };
         out.push_str(&format!(
             "impl{} JetShow for {}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
             tp_bounds,
@@ -163,7 +199,10 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .or_default()
                 .extend(v.iter().cloned());
         }
-        let debug_tp_bounds = Generics::rust_type_param_list(&s.type_params, &debug_impl_bounds);
+        let mut debug_tp_bounds = Generics::rust_type_param_list(&s.type_params, &debug_impl_bounds);
+        if has_view_field {
+            debug_tp_bounds = add_view_lifetime_generic(debug_tp_bounds);
+        }
         let debug_body = struct_jet_debug_body(s, has_fn_field);
         out.push_str(&format!(
             "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
@@ -186,20 +225,22 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         } else {
             "format!(\"{:?}\", self)".to_string()
         };
+        let impl_generic = if has_view_field { "<'__jet_view>" } else { "" };
+        let type_arg = if has_view_field { "<'__jet_view>" } else { "" };
         out.push_str(&format!(
-            "impl JetShow for {} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            "impl{impl_generic} JetShow for {}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
             user_type_rust(&s.name),
             show_body
         ));
         let debug_body = struct_jet_debug_body(s, has_fn_field);
         out.push_str(&format!(
-            "impl JetDebug for {} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            "impl{impl_generic} JetDebug for {}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
             user_type_rust(&s.name),
             debug_body
         ));
         if !cx.display_types.contains(&s.name) {
             out.push_str(&format!(
-                "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
+                "impl{impl_generic} JetDisplay for {}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
                 user_type_rust(&s.name),
             ));
         }

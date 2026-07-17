@@ -499,9 +499,165 @@ impl Cx {
         }
     }
 
-    pub(crate) fn struct_field_rust(&self, s: &StructDef, edge: &str, ty: &Type) -> String {
+    pub(crate) fn type_contains_view(&self, ty: &Type) -> bool {
+        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            match ty {
+                Type::Apply { name, args }
+                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                {
+                    true
+                }
+                Type::Named(name) => {
+                    seen.insert(name.clone())
+                        && cx.struct_fields.get(name).is_some_and(|fields| {
+                            fields.iter().any(|(_, ty)| contains(cx, ty, seen))
+                        })
+                }
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| contains(cx, arg, seen))
+                        || (seen.insert(name.clone())
+                            && cx.struct_fields.get(name).is_some_and(|fields| {
+                                fields.iter().any(|(_, ty)| contains(cx, ty, seen))
+                            }))
+                }
+                Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Option(inner)
+                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                    contains(cx, key, seen) || contains(cx, value, seen)
+                }
+                Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
+                Type::FixedList { elem, .. } => contains(cx, elem, seen),
+                Type::Fn { params, ret, .. } => {
+                    params.iter().any(|ty| contains(cx, ty, seen))
+                        || ret.as_deref().is_some_and(|ty| contains(cx, ty, seen))
+                }
+                _ => false,
+            }
+        }
+
+        contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
+    }
+
+    /// Render a type whose view-bearing leaves borrow the function's hidden
+    /// owner lifetime. Wrappers stay wrappers; only references and generated
+    /// aggregate types receive the lifetime argument.
+    pub(crate) fn rust_type_with_view_lifetime(&self, ty: &Type) -> String {
+        self.rust_type_with_view_lifetime_using(ty, &|ty| self.rust_type(ty))
+    }
+
+    pub(crate) fn rust_type_with_view_lifetime_assoc(
+        &self,
+        ty: &Type,
+        assoc: &HashSet<String>,
+    ) -> String {
+        self.rust_type_with_view_lifetime_using(ty, &|ty| {
+            crate::Traits::rust_type_name_assoc(ty, assoc)
+        })
+    }
+
+    fn rust_type_with_view_lifetime_using(
+        &self,
+        ty: &Type,
+        base: &impl Fn(&Type) -> String,
+    ) -> String {
+        fn add_reference_lifetime(rust: String) -> String {
+            if let Some(rest) = rust.strip_prefix("&mut ") {
+                format!("&'__jet_view mut {rest}")
+            } else if let Some(rest) = rust.strip_prefix('&') {
+                format!("&'__jet_view {rest}")
+            } else {
+                rust
+            }
+        }
+
+        fn add_type_lifetime(rust: String) -> String {
+            if let Some(open) = rust.find('<') {
+                format!("{}<'__jet_view, {}", &rust[..open], &rust[open + 1..])
+            } else {
+                format!("{rust}<'__jet_view>")
+            }
+        }
+
+        fn definition_contains_view(cx: &Cx, name: &str) -> bool {
+            cx.struct_fields.get(name).is_some_and(|fields| {
+                fields.iter().any(|(_, ty)| cx.type_contains_view(ty))
+            })
+        }
+
+        fn render(cx: &Cx, ty: &Type, base: &impl Fn(&Type) -> String) -> String {
+            match ty {
+                Type::Apply { name, args }
+                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                {
+                    add_reference_lifetime(base(ty))
+                }
+                Type::List(inner) if cx.type_contains_view(inner) => {
+                    format!("Vec<{}>", render(cx, inner, base))
+                }
+                Type::Map { key, value, .. } if cx.type_contains_view(ty) => format!(
+                    "std::collections::BTreeMap<{}, {}>",
+                    render(cx, key, base),
+                    render(cx, value, base)
+                ),
+                Type::Shared(inner) if cx.type_contains_view(inner) => format!(
+                    "{}jet_std::JetShared<{}>",
+                    cx.root_prefix,
+                    render(cx, inner, base)
+                ),
+                Type::Option(inner) if cx.type_contains_view(inner) => {
+                    format!("Option<{}>", render(cx, inner, base))
+                }
+                Type::Result { ok, err } if cx.type_contains_view(ty) => {
+                    format!("Result<{}, {}>", render(cx, ok, base), render(cx, err, base))
+                }
+                Type::Tuple(fields) if cx.type_contains_view(ty) => {
+                    add_type_lifetime(tuple_struct_name(&tuple_fields_plain(fields)))
+                }
+                Type::FixedList { elem, len, .. } if cx.type_contains_view(elem) => {
+                    format!("[{}; {len}]", render(cx, elem, base))
+                }
+                Type::Tagged { inner, .. } if cx.type_contains_view(inner) => {
+                    render(cx, inner, base)
+                }
+                Type::Named(name) if definition_contains_view(cx, name) => {
+                    add_type_lifetime(base(ty))
+                }
+                Type::Apply { name, args }
+                    if definition_contains_view(cx, name)
+                        || args.iter().any(|arg| cx.type_contains_view(arg)) =>
+                {
+                    let head = base(&Type::Named(name.clone()));
+                    let args = args
+                        .iter()
+                        .map(|arg| render(cx, arg, base))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let life = definition_contains_view(cx, name)
+                        .then_some("'__jet_view")
+                        .into_iter()
+                        .chain((!args.is_empty()).then_some(args.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{head}<{life}>")
+                }
+                _ => base(ty),
+            }
+        }
+
+        render(self, &self.expand_type_aliases(ty), base)
+    }
+
+    pub(crate) fn struct_field_rust_with_view_lifetime(
+        &self,
+        s: &StructDef,
+        edge: &str,
+        ty: &Type,
+    ) -> String {
         let base = match ty {
             Type::Named(n) if s.type_params.iter().any(|p| p.name == *n) => n.clone(),
+            _ if self.type_contains_view(ty) => self.rust_type_with_view_lifetime(ty),
             _ => self.rust_type(ty),
         };
         if self
@@ -1116,7 +1272,11 @@ impl Cx {
             // check proves before this type is ever emitted (I2/I3: sema
             // decides, codegen just emits the reference).
             Type::Apply { name, args } if name == "View" && args.len() == 1 => {
-                format!("&[{}]", self.rust_type(&args[0]))
+                if matches!(&args[0], Type::Named(inner) if inner == "str") {
+                    "&str".to_string()
+                } else {
+                    format!("&[{}]", self.rust_type(&args[0]))
+                }
             }
             Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
                 format!("&mut [{}]", self.rust_type(&args[0]))

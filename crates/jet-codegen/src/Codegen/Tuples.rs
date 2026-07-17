@@ -456,16 +456,26 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
     {
         derives.push("PartialEq");
     }
+    let view_lifetime = fields
+        .iter()
+        .any(|(_, ty)| cx.type_contains_view(ty))
+        .then_some("<'__jet_view>")
+        .unwrap_or("");
     out.push_str(&format!(
-        "#[derive({})]\nstruct {} {{\n",
+        "#[derive({})]\nstruct {}{} {{\n",
         derives.join(", "),
-        name
+        name,
+        view_lifetime,
     ));
     for (fname, fty) in fields {
         out.push_str(&format!(
             "    pub {}: {},\n",
             mangle(fname),
-            cx.rust_type(fty)
+            if cx.type_contains_view(fty) {
+                cx.rust_type_with_view_lifetime(fty)
+            } else {
+                cx.rust_type(fty)
+            }
         ));
     }
     out.push_str("}\n\n");

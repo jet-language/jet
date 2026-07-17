@@ -5,7 +5,8 @@ use jet_foundation::JSON::json_escape;
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
     BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex,
-    SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
+    SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
+    ViewProvenanceFact, ViewSourceFact,
 };
 
 fn json_instance(value: &InstanceFact) -> String {
@@ -28,6 +29,42 @@ fn json_span(span: SourceSpan) -> String {
     format!("{{\"start\":{},\"end\":{}}}", span.start, span.end)
 }
 
+fn json_view_provenance(provenance: &ViewProvenanceFact) -> String {
+    let source = match &provenance.source {
+        ViewSourceFact::Receiver => "{\"kind\":\"receiver\"}".to_string(),
+        ViewSourceFact::Parameter(index) => {
+            format!("{{\"kind\":\"parameter\",\"index\":{index}}}")
+        }
+        ViewSourceFact::Static { module_path, name } => format!(
+            "{{\"kind\":\"static\",\"module\":{},\"name\":{}}}",
+            json_str(module_path),
+            json_str(name),
+        ),
+    };
+    let projections = provenance
+        .projections
+        .iter()
+        .map(|projection| match projection {
+            ViewProjectionFact::Field(name) => {
+                format!("{{\"kind\":\"field\",\"name\":{}}}", json_str(name))
+            }
+            ViewProjectionFact::Index => "{\"kind\":\"index\"}".to_string(),
+            ViewProjectionFact::Range => "{\"kind\":\"range\"}".to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"output_path\":[{}],\"source\":{source},\"projections\":[{projections}],\"mutable\":{}}}",
+        provenance
+            .output_path
+            .iter()
+            .map(|part| json_str(part))
+            .collect::<Vec<_>>()
+            .join(","),
+        provenance.mutable,
+    )
+}
+
 fn json_kind(kind: &SymbolKind) -> String {
     match kind {
         SymbolKind::Module => "{\"kind\":\"module\"}".to_string(),
@@ -42,8 +79,7 @@ fn json_kind(kind: &SymbolKind) -> String {
             };
             format!(
                 "{{\"kind\":\"function\",\"params\":[{}],\"ret\":{}}}",
-                ps.join(","),
-                ret_json
+                ps.join(","), ret_json
             )
         }
         SymbolKind::Struct { fields } => {
@@ -85,13 +121,22 @@ fn json_kind(kind: &SymbolKind) -> String {
 }
 
 fn json_def(d: &SymbolDef) -> String {
+    let view_json = format!(
+        "[{}]",
+        d.view_provenance
+            .iter()
+            .map(json_view_provenance)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     format!(
-        "{{\"identity\":{},\"name\":{},\"module\":{},\"span\":{},\"detail\":{}}}",
+        "{{\"identity\":{},\"name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{}}}",
         json_str(&d.identity),
         json_str(&d.name),
         json_str(&d.module_path),
         json_span(d.def_span),
-        json_kind(&d.kind)
+        json_kind(&d.kind),
+        view_json,
     )
 }
 
@@ -317,7 +362,10 @@ fn origin_text(origin: &MemberOrigin) -> String {
     }
 }
 
-pub(crate) fn convert_defs(defs: &[SymDef]) -> Vec<SymbolDef> {
+pub(crate) fn convert_defs(
+    defs: &[SymDef],
+    view_provenance: &std::collections::HashMap<String, jet_foundation::AST::ViewProvenanceMap>,
+) -> Vec<SymbolDef> {
     defs.iter()
         .map(|d| SymbolDef {
             identity: d.identity.clone(),
@@ -325,6 +373,14 @@ pub(crate) fn convert_defs(defs: &[SymDef]) -> Vec<SymbolDef> {
             module_path: d.module_path.clone(),
             def_span: d.def_span.into(),
             kind: convert_kind(&d.kind),
+            view_provenance: view_provenance
+                .get(&d.identity)
+                .map(|map| {
+                    map.iter()
+                        .map(|(path, provenance)| convert_view_provenance(path, provenance))
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
         .collect()
 }
@@ -369,6 +425,35 @@ fn convert_kind(kind: &SymKind) -> SymbolKind {
             ty: ty.as_ref().map(|t| t.name()),
         },
         SymKind::Param { ty } => SymbolKind::Param { ty: ty.name() },
+    }
+}
+
+fn convert_view_provenance(
+    output_path: &[String],
+    provenance: &jet_foundation::AST::ViewProvenance,
+) -> ViewProvenanceFact {
+    use jet_foundation::AST::{ViewSource, ViewSourceProjection};
+
+    ViewProvenanceFact {
+        output_path: output_path.to_vec(),
+        source: match &provenance.source {
+            ViewSource::Receiver => ViewSourceFact::Receiver,
+            ViewSource::Parameter(index) => ViewSourceFact::Parameter(*index),
+            ViewSource::Static { module_path, name } => ViewSourceFact::Static {
+                module_path: module_path.clone(),
+                name: name.clone(),
+            },
+        },
+        projections: provenance
+            .projections
+            .iter()
+            .map(|projection| match projection {
+                ViewSourceProjection::Field(name) => ViewProjectionFact::Field(name.clone()),
+                ViewSourceProjection::Index => ViewProjectionFact::Index,
+                ViewSourceProjection::Range => ViewProjectionFact::Range,
+            })
+            .collect(),
+        mutable: provenance.mutable,
     }
 }
 

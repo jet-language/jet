@@ -1949,6 +1949,11 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .map(|p| (p.convention.clone(), p.ty.clone()))
                             .collect(),
                         return_type: f.return_type.clone(),
+                        return_view_provenance: f
+                            .return_view_provenance
+                            .clone()
+                            .map(std::sync::OnceLock::from)
+                            .unwrap_or_default(),
                         is_extern: false,
                         is_c_abi: false,
                         c_abi_name: None,

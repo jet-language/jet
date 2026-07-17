@@ -877,6 +877,213 @@ pub(crate) fn check_module_bodies(
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+    // D-MEM-VIEWRET1=B: resolve callable view summaries before the real body
+    // pass so declaration order cannot affect a public owner contract. Each
+    // iteration checks pristine clones and publishes only the canonical fact;
+    // diagnostics and other analysis products are discarded. Tentative facts
+    // let mutually recursive SCCs converge; the real pass below still rejects
+    // any path that ultimately conflicts or cannot stabilize.
+    #[derive(Clone)]
+    struct ViewSummaryJob {
+        key: String,
+        owner: Option<String>,
+        trait_name: Option<String>,
+        function: Func,
+    }
+    let mut view_jobs = Vec::new();
+    for item in &module.items {
+        match item {
+            Item::Func(function) => view_jobs.push(ViewSummaryJob {
+                key: function.name.clone(),
+                owner: None,
+                trait_name: None,
+                function: function.clone(),
+            }),
+            Item::Struct(definition) => {
+                for function in &definition.methods {
+                    view_jobs.push(ViewSummaryJob {
+                        key: format!("{}::{}", definition.name, function.name),
+                        owner: Some(definition.name.clone()),
+                        trait_name: None,
+                        function: function.clone(),
+                    });
+                }
+                for implementation in &definition.trait_impls {
+                    for function in &implementation.methods {
+                        view_jobs.push(ViewSummaryJob {
+                            key: format!(
+                                "{}::{}::{}",
+                                definition.name, implementation.trait_name, function.name
+                            ),
+                            owner: Some(definition.name.clone()),
+                            trait_name: Some(implementation.trait_name.clone()),
+                            function: function.clone(),
+                        });
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for function in &definition.methods {
+                    view_jobs.push(ViewSummaryJob {
+                        key: format!("{}::{}", definition.name, function.name),
+                        owner: Some(definition.name.clone()),
+                        trait_name: None,
+                        function: function.clone(),
+                    });
+                }
+                for implementation in &definition.trait_impls {
+                    for function in &implementation.methods {
+                        view_jobs.push(ViewSummaryJob {
+                            key: format!(
+                                "{}::{}::{}",
+                                definition.name, implementation.trait_name, function.name
+                            ),
+                            owner: Some(definition.name.clone()),
+                            trait_name: Some(implementation.trait_name.clone()),
+                            function: function.clone(),
+                        });
+                    }
+                }
+            }
+            Item::Impl(implementation) => {
+                for function in &implementation.methods {
+                    view_jobs.push(ViewSummaryJob {
+                        key: format!(
+                            "{}::{}::{}",
+                            implementation.type_name,
+                            implementation.trait_name.as_deref().unwrap_or("inherent"),
+                            function.name
+                        ),
+                        owner: Some(implementation.type_name.clone()),
+                        trait_name: implementation.trait_name.clone(),
+                        function: function.clone(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    fn contains_view(registry: &TypeRegistry, ty: &Type, seen: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 => true,
+            Type::Named(name) => {
+                seen.insert(name.clone())
+                    && registry.struct_fields(name).is_some_and(|fields| {
+                        fields.iter().any(|(_, _, field_ty, _)| {
+                            contains_view(registry, field_ty, seen)
+                        })
+                    })
+            }
+            Type::Apply { name, args } => {
+                args.iter().any(|arg| contains_view(registry, arg, seen))
+                    || (seen.insert(name.clone())
+                        && registry.struct_fields(name).is_some_and(|fields| {
+                            fields.iter().any(|(_, _, field_ty, _)| {
+                                contains_view(registry, field_ty, seen)
+                            })
+                        }))
+            }
+            Type::Option(inner)
+            | Type::List(inner)
+            | Type::Shared(inner)
+            | Type::Tagged { inner, .. } => contains_view(registry, inner, seen),
+            Type::Result { ok, err } => {
+                contains_view(registry, ok, seen) || contains_view(registry, err, seen)
+            }
+            Type::Map { key, value, .. } => {
+                contains_view(registry, key, seen) || contains_view(registry, value, seen)
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .any(|(_, field_ty)| contains_view(registry, field_ty, seen)),
+            Type::FixedList { elem, .. } => contains_view(registry, elem, seen),
+            Type::Fn { params, ret, .. } => {
+                params
+                    .iter()
+                    .any(|param| contains_view(registry, param, seen))
+                    || ret
+                        .as_deref()
+                        .is_some_and(|ret| contains_view(registry, ret, seen))
+            }
+            _ => false,
+        }
+    }
+    view_jobs.retain(|job| {
+        job.function.return_type.as_ref().is_some_and(|return_type| {
+            contains_view(&st.registry, return_type, &mut HashSet::new())
+        })
+    });
+    view_jobs.sort_by(|left, right| left.key.cmp(&right.key));
+    let trait_job_counts = view_jobs.iter().fold(
+        HashMap::<(String, String), usize>::new(),
+        |mut counts, job| {
+            if let Some(trait_name) = &job.trait_name {
+                *counts
+                    .entry((trait_name.clone(), job.function.name.clone()))
+                    .or_default() += 1;
+            }
+            counts
+        },
+    );
+    for _ in 0..=view_jobs.len() {
+        let mut trait_candidates = HashMap::<
+            (String, String),
+            Vec<crate::AST::ViewProvenanceMap>,
+        >::new();
+        for job in &view_jobs {
+            let mut function = job.function.clone();
+            let mut scratch_summaries = HashMap::new();
+            let mut scratch_inputs = Vec::new();
+            let mut scratch_addr_taken = HashSet::new();
+            let mut scratch_anchors = HashMap::new();
+            let _ = check_func_body_bundle(
+                &mut function,
+                module_idx,
+                states,
+                job.owner.as_deref(),
+                &ct_funcs,
+                &ct_externs,
+                &ct_base_dir,
+                &ct_globals,
+                freestanding,
+                allow_impure,
+                &mut scratch_summaries,
+                &mut scratch_inputs,
+                &mut scratch_addr_taken,
+                no_alloc,
+                no_prelude,
+                &mut scratch_anchors,
+            );
+            if let (Some(trait_name), Some(provenance)) =
+                (&job.trait_name, function.return_view_provenance)
+            {
+                trait_candidates
+                    .entry((trait_name.clone(), function.name.clone()))
+                    .or_default()
+                    .push(provenance);
+            }
+        }
+        for (key, candidates) in trait_candidates {
+            if candidates.len() != trait_job_counts.get(&key).copied().unwrap_or(0) {
+                continue;
+            }
+            let Some(first) = candidates.first() else {
+                continue;
+            };
+            if !candidates.iter().all(|candidate| candidate == first) {
+                continue;
+            }
+            if let Some(signature) = st
+                .trait_reg
+                .traits
+                .get(&key.0)
+                .and_then(|info| info.methods.get(&key.1))
+            {
+                let _ = signature.return_view_provenance.set(first.clone());
+            }
+        }
+    }
     for item in &mut module.items {
         match item {
             Item::Func(f) => {
@@ -1065,6 +1272,7 @@ pub(crate) fn check_module_bodies(
                     params: t.params.clone(),
                     return_type: None,
                     return_type_span: None,
+                    return_view_provenance: None,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -1129,6 +1337,7 @@ pub(crate) fn check_module_bodies(
                     params: Vec::new(),
                     return_type: None,
                     return_type_span: None,
+                    return_view_provenance: None,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -1232,6 +1441,7 @@ pub(crate) fn check_module_bodies(
                     }],
                     return_type: Some(Type::Named(ec.to_ty.clone())),
                     return_type_span: Some(ec.to_span),
+                    return_view_provenance: None,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -1288,6 +1498,80 @@ pub(crate) fn check_module_bodies(
                 ec.body = synthetic.body;
             }
             _ => {}
+        }
+    }
+    // D-MEM-VIEWRET1=B: a trait method has one public owner contract. Infer
+    // it from checked implementations and reject disagreement before TIR.
+    let mut trait_view_contracts: HashMap<
+        (String, String),
+        (crate::AST::ViewProvenanceMap, crate::Diagnostics::Span),
+    > = HashMap::new();
+    let mut record_trait_methods =
+        |trait_name: &str, methods: &[Func], diags: &mut Vec<Diagnostic>| {
+            for method in methods {
+                let Some(provenance) = method.return_view_provenance.clone() else {
+                    continue;
+                };
+                if provenance.is_empty() {
+                    continue;
+                }
+                let key = (trait_name.to_string(), method.name.clone());
+                if let Some((existing, _)) = trait_view_contracts.get(&key) {
+                    if existing != &provenance {
+                        diags.push(Diagnostic::error(
+                            "E2305",
+                            format!(
+                                "implementations of `{}.{}` disagree about the returned view owner",
+                                trait_name, method.name
+                            ),
+                            "one trait method has one public owner contract for every static or dynamic call"
+                                .to_string(),
+                            "return each view-bearing output slot from the same receiver or parameter position in every implementation"
+                                .to_string(),
+                            Some(method.name_span),
+                        ));
+                    }
+                } else {
+                    trait_view_contracts.insert(key, (provenance, method.name_span));
+                }
+            }
+        };
+    for item in &module.items {
+        match item {
+            Item::Impl(implementation) => {
+                if let Some(trait_name) = implementation.trait_name.as_deref() {
+                    record_trait_methods(trait_name, &implementation.methods, &mut diags);
+                }
+            }
+            Item::Struct(definition) => {
+                for implementation in &definition.trait_impls {
+                    record_trait_methods(
+                        &implementation.trait_name,
+                        &implementation.methods,
+                        &mut diags,
+                    );
+                }
+            }
+            Item::Enum(definition) => {
+                for implementation in &definition.trait_impls {
+                    record_trait_methods(
+                        &implementation.trait_name,
+                        &implementation.methods,
+                        &mut diags,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    for ((trait_name, method_name), (provenance, _)) in trait_view_contracts {
+        if let Some(signature) = st
+            .trait_reg
+            .traits
+            .get(&trait_name)
+            .and_then(|info| info.methods.get(&method_name))
+        {
+            let _ = signature.return_view_provenance.set(provenance);
         }
     }
     let _ = st;
@@ -1358,10 +1642,17 @@ pub(crate) fn check_func_body_bundle(
         in_comptime: false,
         ret: f.return_type.clone(),
         fn_name: f.name.clone(),
+        current_param_names: f
+            .params
+            .iter()
+            .filter(|param| param.name != crate::Syntax::KW_SELF)
+            .map(|param| param.name.clone())
+            .collect(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
         freed_allocators: HashMap::new(),
         view_facts: Default::default(),
+        return_view_provenance: None,
         views_used_in_stmt: Default::default(),
         uninit: HashMap::new(),
         borrow_ctx: false,
@@ -1395,6 +1686,20 @@ pub(crate) fn check_func_body_bundle(
         inline_addr_taken: HashSet::new(),
     };
     ck.check_params_and_body(f, owner_type);
+    f.return_view_provenance = ck.return_view_provenance.clone();
+    if let Some(owner) = owner_type {
+        if let (Some(signature), Some(provenance)) =
+            (st.registry.method(owner, &f.name), f.return_view_provenance.clone())
+        {
+            let _ = signature.return_view_provenance.set(provenance);
+        }
+    } else {
+        if let (Some(signature), Some(provenance)) =
+            (st.funcs.get(&f.name), f.return_view_provenance.clone())
+        {
+            let _ = signature.return_view_provenance.set(provenance);
+        }
+    }
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));

@@ -55,7 +55,11 @@ pub use expressions::{
 
 #[path = "AST/comptime.rs"]
 mod comptime;
-pub use comptime::{ClosureData, CtKey, CtValue, FuncSig};
+pub use comptime::{
+    canonical_view_provenance_map, ClosureData, CtKey, CtValue, FuncSig, ViewProvenance,
+    ViewProvenanceMap, ViewSource,
+    ViewSourceProjection,
+};
 
 #[path = "AST/ffi.rs"]
 mod ffi;

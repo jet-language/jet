@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, Type};
+use crate::AST::{AccessConvention, Type, ViewSource};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::rust_param_type;
@@ -34,14 +34,40 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
 /// A module-level free function: `pub fn name(params) -> ret { … }`.
 /// Byte-identical to `emit_func`'s output.
 pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
+    let view_provenance = tir.return_view_provenance.as_ref();
+    let view_owner_params = view_provenance
+        .into_iter()
+        .flat_map(|map| map.values())
+        .filter_map(|p| match p.source {
+            ViewSource::Parameter(index) => Some(index),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let has_view_return = view_provenance.is_some_and(|map| !map.is_empty());
     let ret_clause = match &tir.ret {
-        Some(t) => format!(" -> {}", rust_return_type(cx, t)),
+        Some(t) => {
+            let rust = if has_view_return {
+                cx.rust_type_with_view_lifetime(t)
+            } else {
+                rust_return_type(cx, t)
+            };
+            format!(" -> {rust}")
+        }
         None => String::new(),
     };
     let params = tir
         .params
         .iter()
-        .map(|(rust_name, ty, conv)| format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)))
+        .enumerate()
+        .map(|(index, (rust_name, ty, conv))| {
+            let rust = rust_param_type(cx, *conv, ty);
+            let rust = if view_owner_params.contains(&index) {
+                add_hidden_view_lifetime(rust)
+            } else {
+                rust
+            };
+            format!("{rust_name}: {rust}")
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let vis = if tir.is_main { "" } else { "pub " };
@@ -79,10 +105,15 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // E2-M12 D-OBS1: track the current function name for rich panic reports —
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
+    let generics = if has_view_return {
+        add_hidden_view_generic(&tir.generics)
+    } else {
+        tir.generics.clone()
+    };
     out.push_str(&format!(
         "{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
-        gen = tir.generics,
+        gen = generics,
         params = params,
         ret = ret_clause,
         abi = abi,
@@ -102,6 +133,26 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         out.push_str("    Ok(())\n");
     }
     out.push_str("}\n\n");
+}
+
+fn add_hidden_view_lifetime(rust_type: String) -> String {
+    if let Some(rest) = rust_type.strip_prefix("&mut ") {
+        format!("&'__jet_view mut {rest}")
+    } else if let Some(rest) = rust_type.strip_prefix('&') {
+        format!("&'__jet_view {rest}")
+    } else {
+        rust_type
+    }
+}
+
+fn add_hidden_view_generic(generics: &str) -> String {
+    if generics.is_empty() {
+        "<'__jet_view>".to_string()
+    } else if let Some(rest) = generics.strip_prefix('<') {
+        format!("<'__jet_view, {rest}")
+    } else {
+        generics.to_string()
+    }
 }
 
 fn is_fallible_void_return(ret: &Option<Type>) -> bool {
@@ -161,14 +212,36 @@ pub(crate) fn emit_tir_method(
 ) {
     let indent = 1;
     let pad = "    ".repeat(indent);
+    let view_provenance = tir.return_view_provenance.as_ref();
+    let has_view_return = view_provenance.is_some_and(|map| !map.is_empty());
+    let borrows_receiver = view_provenance.is_some_and(|map| {
+        map.values().any(|p| matches!(p.source, ViewSource::Receiver))
+    });
     let ret_clause = match &tir.ret {
-        Some(t) => format!(" -> {}", rust_return_type(cx, t)),
+        Some(t) => {
+            let rust = if has_view_return {
+                cx.rust_type_with_view_lifetime(t)
+            } else {
+                rust_return_type(cx, t)
+            };
+            format!(" -> {rust}")
+        }
         None => String::new(),
     };
     let mut params: Vec<String> = Vec::new();
     if let Some(conv) = self_conv {
         params.push(
             match conv {
+                AccessConvention::Read
+                    if borrows_receiver =>
+                {
+                    "&'__jet_view self"
+                }
+                AccessConvention::Write
+                    if borrows_receiver =>
+                {
+                    "&'__jet_view mut self"
+                }
                 AccessConvention::Read => "&self",
                 AccessConvention::Write => "&mut self",
                 AccessConvention::Move => "self",
@@ -176,8 +249,16 @@ pub(crate) fn emit_tir_method(
             .to_string(),
         );
     }
-    for (rust_name, ty, conv) in &tir.params {
-        params.push(format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)));
+    for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
+        let rust = rust_param_type(cx, *conv, ty);
+        let rust = if view_provenance.is_some_and(|map| map.values().any(|p| {
+            matches!(p.source, ViewSource::Parameter(source) if source == index)
+        })) {
+            add_hidden_view_lifetime(rust)
+        } else {
+            rust
+        };
+        params.push(format!("{rust_name}: {rust}"));
     }
     // c109 Phase 18: an `#Unsafe fn` inherent method lowers to `pub unsafe fn` — the
     // prefix sits between `pub ` and `fn`, exactly as `emit_method` (`pub {unsafe_kw}fn`).
@@ -196,8 +277,9 @@ pub(crate) fn emit_tir_method(
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{inline_attr}{pad}pub {unsafe_kw}fn {name}({params}){ret}{where_clause} {{\n",
+        "{inline_attr}{pad}pub {unsafe_kw}fn {name}{view_generic}({params}){ret}{where_clause} {{\n",
         name = mangle(&tir.name),
+        view_generic = if has_view_return { "<'__jet_view>" } else { "" },
         params = params.join(", "),
         ret = ret_clause,
         where_clause = tir.generics,
@@ -238,11 +320,20 @@ pub(crate) fn emit_tir_trait_method(
     }
     let indent = 1;
     let pad = "    ".repeat(indent);
+    let view_provenance = tir.return_view_provenance.as_ref();
+    let has_view_return = view_provenance.is_some_and(|map| !map.is_empty());
+    let borrows_receiver = view_provenance.is_some_and(|map| {
+        map.values().any(|p| matches!(p.source, ViewSource::Receiver))
+    });
     let ret_clause = match &tir.ret {
         // `emit_trait_method` computes `ret = rust_return_type(...)` then, if non-empty,
         // ` -> ret`. A unit return yields the empty clause.
         Some(t) => {
-            let ret = rust_return_type(cx, t);
+            let ret = if has_view_return {
+                cx.rust_type_with_view_lifetime(t)
+            } else {
+                rust_return_type(cx, t)
+            };
             if ret.is_empty() {
                 String::new()
             } else {
@@ -254,20 +345,35 @@ pub(crate) fn emit_tir_trait_method(
     // D-MUTSELF1: the receiver honors the source convention — `&self` / `&mut self` /
     // `self` — matching `emit_trait_method` and the trait declaration (emit_trait_def).
     let self_recv = match self_conv {
+        AccessConvention::Read if borrows_receiver => {
+            "&'__jet_view self"
+        }
+        AccessConvention::Write if borrows_receiver => {
+            "&'__jet_view mut self"
+        }
         AccessConvention::Read => "&self",
         AccessConvention::Write => "&mut self",
         AccessConvention::Move => "self",
     };
     let mut params: Vec<String> = vec![self_recv.to_string()];
-    for (rust_name, ty, conv) in &tir.params {
-        params.push(format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)));
+    for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
+        let rust = rust_param_type(cx, *conv, ty);
+        let rust = if view_provenance.is_some_and(|map| map.values().any(|p| {
+            matches!(p.source, ViewSource::Parameter(source) if source == index)
+        })) {
+            add_hidden_view_lifetime(rust)
+        } else {
+            rust
+        };
+        params.push(format!("{rust_name}: {rust}"));
     }
     let unsafe_kw = if is_unsafe { "unsafe " } else { "" };
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{pad}{unsafe_kw}fn {name}({params}){ret} {{\n",
+        "{pad}{unsafe_kw}fn {name}{view_generic}({params}){ret} {{\n",
         name = tir.name,
+        view_generic = if has_view_return { "<'__jet_view>" } else { "" },
         params = params.join(", "),
         ret = ret_clause,
     ));

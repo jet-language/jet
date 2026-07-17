@@ -702,6 +702,7 @@ impl TraitRegistry {
             default_body: None,
             is_pure: false,
             declared_effects: None,
+            return_view_provenance: Default::default(),
         };
         // restore(&self, snap: ^Snapshot)
         let restore_sig = TraitMethodSig {
@@ -734,6 +735,7 @@ impl TraitRegistry {
             default_body: None,
             is_pure: false,
             declared_effects: None,
+            return_view_provenance: Default::default(),
         };
         let mut methods = HashMap::new();
         methods.insert("snapshot".to_string(), snapshot_sig);
@@ -795,6 +797,7 @@ impl TraitRegistry {
                 }],
                 return_type: Some(Type::Result { ok: Box::new(bytes.clone()), err: Box::new(io_error.clone()) }),
                 span: dummy, default_body: None, is_pure: false, declared_effects: None,
+                return_view_provenance: Default::default(),
             });
             self.local_traits.insert(Syntax::TRAIT_IO_READER.to_string());
             self.traits.insert(Syntax::TRAIT_IO_READER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
@@ -811,12 +814,14 @@ impl TraitRegistry {
                 params: vec![write_self.clone(), bytes_param.clone()],
                 return_type: Some(Type::Result { ok: Box::new(Type::Int), err: Box::new(io_error.clone()) }),
                 span: dummy, default_body: None, is_pure: false, declared_effects: None,
+                return_view_provenance: Default::default(),
             });
             methods.insert("write_all".to_string(), TraitMethodSig {
                 name: "write_all".to_string(), name_span: dummy,
                 params: vec![write_self, bytes_param],
                 return_type: Some(Type::Result { ok: Box::new(Type::Named("Unit".to_string())), err: Box::new(io_error) }),
                 span: dummy, default_body: None, is_pure: false, declared_effects: None,
+                return_view_provenance: Default::default(),
             });
             self.local_traits.insert(Syntax::TRAIT_IO_WRITER.to_string());
             self.traits.insert(Syntax::TRAIT_IO_WRITER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
@@ -851,6 +856,7 @@ impl TraitRegistry {
                 default_body: None,
                 is_pure: false,
                 declared_effects: None,
+                return_view_provenance: Default::default(),
             };
             let mut methods = HashMap::new();
             methods.insert("next".to_string(), next_sig);
@@ -884,6 +890,7 @@ impl TraitRegistry {
                 default_body: None,
                 is_pure: false,
                 declared_effects: None,
+                return_view_provenance: Default::default(),
             };
             let mut methods = HashMap::new();
             methods.insert("iter".to_string(), iter_sig);
@@ -929,6 +936,7 @@ impl TraitRegistry {
                 default_body: None,
                 is_pure: false,
                 declared_effects: None,
+                return_view_provenance: Default::default(),
             };
             let mut methods = HashMap::new();
             methods.insert("get".to_string(), get_sig);
@@ -984,6 +992,7 @@ impl TraitRegistry {
                 default_body: None,
                 is_pure: false,
                 declared_effects: None,
+                return_view_provenance: Default::default(),
             };
             let mut methods = HashMap::new();
             methods.insert("set".to_string(), set_sig);
@@ -1085,6 +1094,7 @@ impl TraitRegistry {
             default_body: None,
             is_pure: false,
             declared_effects: None,
+            return_view_provenance: Default::default(),
         };
         let mut methods = HashMap::new();
         methods.insert(method.to_string(), sig);
@@ -1158,6 +1168,16 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::Named(n) if n.is_empty() => "Self".to_string(),
         Type::Named(n) if assoc.contains(n) => format!("Self::{n}"),
         Type::Named(n) => format!("user_{n}"),
+        Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+            if matches!(&args[0], Type::Named(inner) if inner == "str") {
+                "&str".to_string()
+            } else {
+                format!("&[{}]", rust_type_name_assoc(&args[0], assoc))
+            }
+        }
+        Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
+            format!("&mut [{}]", rust_type_name_assoc(&args[0], assoc))
+        }
         Type::Apply { name, args } => format!(
             "user_{name}<{}>",
             args.iter()
@@ -1185,7 +1205,21 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
     }
 }
 
-pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
+fn add_view_lifetime(rust: String) -> String {
+    if let Some(rest) = rust.strip_prefix("&mut ") {
+        format!("&'__jet_view mut {rest}")
+    } else if let Some(rest) = rust.strip_prefix('&') {
+        format!("&'__jet_view {rest}")
+    } else {
+        rust
+    }
+}
+
+pub fn emit_trait_def(
+    t: &TraitDef,
+    out: &mut String,
+    render_view_return: impl Fn(&Type, &HashSet<String>) -> String,
+) {
     out.push_str(&format!("pub trait user_{} {{\n", t.name));
     // D-LIB2: declare each associated type; method sigs below render uses of it
     // as `Self::Name`, and each impl emits `type Name = <concrete>;`.
@@ -1194,11 +1228,24 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
         out.push_str(&format!("    type {name};\n"));
     }
     for m in &t.methods {
+        let view_provenance = m.return_view_provenance.get();
+        let has_view_return = view_provenance.is_some_and(|map| !map.is_empty());
+        let borrows_receiver = view_provenance.is_some_and(|map| {
+            map.values()
+                .any(|p| matches!(p.source, crate::AST::ViewSource::Receiver))
+        });
         let ret = m
             .return_type
             .as_ref()
-            .map(|t| rust_type_name_assoc(t, &assoc))
+            .map(|ty| {
+                if has_view_return {
+                    render_view_return(ty, &assoc)
+                } else {
+                    rust_type_name_assoc(ty, &assoc)
+                }
+            })
             .unwrap_or_else(|| "()".to_string());
+        let mut param_index = 0usize;
         let params: Vec<String> = m
             .params
             .iter()
@@ -1209,6 +1256,16 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
                     // impl side (emit_trait_method) renders the same receiver. `self` /
                     // `take self` stay `&self` / `self`.
                     match p.convention {
+                        AccessConvention::Write
+                            if borrows_receiver =>
+                        {
+                            "&'__jet_view mut self".to_string()
+                        }
+                        AccessConvention::Read
+                            if borrows_receiver =>
+                        {
+                            "&'__jet_view self".to_string()
+                        }
                         AccessConvention::Write => "&mut self".to_string(),
                         AccessConvention::Move => "self".to_string(),
                         AccessConvention::Read => "&self".to_string(),
@@ -1216,7 +1273,7 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
                 } else {
                     // Match the convention applied by emit_trait_method / rust_param_type.
                     let base = rust_type_name_assoc(&p.ty, &assoc);
-                    let rust_ty = match p.convention {
+                    let mut rust_ty = match p.convention {
                         AccessConvention::Read if p.ty.is_scalar() => {
                             base
                         }
@@ -1224,13 +1281,20 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
                         AccessConvention::Write => format!("&mut {}", base),
                         AccessConvention::Move => base,
                     };
+                    if view_provenance.is_some_and(|map| map.values().any(|p| {
+                        matches!(p.source, crate::AST::ViewSource::Parameter(index) if index == param_index)
+                    })) {
+                        rust_ty = add_view_lifetime(rust_ty);
+                    }
+                    param_index += 1;
                     format!("_{}: {}", p.name, rust_ty)
                 }
             })
             .collect();
         out.push_str(&format!(
-            "    fn {}({}) -> {};\n",
+            "    fn {}{}({}) -> {};\n",
             m.name,
+            if has_view_return { "<'__jet_view>" } else { "" },
             params.join(", "),
             ret
         ));

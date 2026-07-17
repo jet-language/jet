@@ -786,10 +786,23 @@ impl<'a> Checker<'a> {
                     Some(inst)
                 };
             }
+            let string_view_field = self.expected_type.as_ref().is_some_and(|ty| {
+                matches!(
+                    ty,
+                    Type::Apply { name, args }
+                        if name == "View"
+                            && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+                )
+            });
             if matches!(expr, Expr::Lambda(_)) {
                 self.lambda_escapes = true;
             }
+            let saved_string_view_read = self.allow_string_view_read;
+            if string_view_field {
+                self.allow_string_view_read = true;
+            }
             let et = self.infer(expr);
+            self.allow_string_view_read = saved_string_view_read;
             self.expected_type = saved_expected;
             self.lambda_escapes = saved_esc;
             // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
@@ -806,21 +819,29 @@ impl<'a> Checker<'a> {
                 // D-DYNARRAY1: E2305 — storing a `View<T>` in a struct field
                 // would let the struct outlive the list it borrows from.
                 if self.is_list_view(vname) {
-                    self.report_view_escape(vname, "be stored in a struct field", *vspan);
+                    if !self.named_view_has_stable_owner(vname) {
+                        self.report_view_escape(vname, "be stored in a struct field", *vspan);
+                    }
                 }
-                // D-MEM1 stage S5: no dedicated check here — the general
-                // E2307 check on the `Expr::Ident` read (the field value was
-                // already inferred earlier in this function) already caught
-                // a live string view stored in a struct field.
+                if string_view_field && self.is_string_view(vname) {
+                    if !self.named_view_has_stable_owner(vname) {
+                        self.report_string_view_unsupported_use(
+                            vname,
+                            "be stored in a struct field",
+                            *vspan,
+                        );
+                    }
+                }
             }
             if let Some((_, _, fty, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 if let Some(et) = et {
+                    let string_view_compatible = string_view_field && et == Type::String;
                     if is_patch_lit {
                         if let Some(inner) = inst.unwrap_option() {
                             self.check_type_assignable(&inner, &et, expr.span());
                         }
-                    } else {
+                    } else if !string_view_compatible {
                         self.check_type_assignable(&inst, &et, expr.span());
                     }
                 }

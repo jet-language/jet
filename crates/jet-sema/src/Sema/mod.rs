@@ -32,6 +32,8 @@ pub(crate) struct MethodSig {
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse` method — return cannot be silently ignored (E0419).
     pub(crate) must_use: bool,
+    pub(crate) return_view_provenance:
+        std::sync::Arc<std::sync::OnceLock<crate::AST::ViewProvenanceMap>>,
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +302,10 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
     // param_info and defaults exclude `self` — they parallel the args a
     // caller provides (no `self` in the call-site arg list).
     let non_self_params = f.params.iter().filter(|p| p.name != "self");
+    let return_view_provenance = std::sync::Arc::new(std::sync::OnceLock::new());
+    if let Some(provenance) = &f.return_view_provenance {
+        let _ = return_view_provenance.set(provenance.clone());
+    }
     MethodSig {
         name_span: f.name_span,
         params: f
@@ -318,11 +324,16 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
         must_use: f.is_must_use,
+        return_view_provenance,
     }
 }
 
 fn func_to_sig(f: &Func) -> FuncSig {
     let param_variadic: Vec<bool> = f.params.iter().map(|p| p.variadic).collect();
+    let return_view_provenance = std::sync::OnceLock::new();
+    if let Some(provenance) = &f.return_view_provenance {
+        let _ = return_view_provenance.set(provenance.clone());
+    }
     FuncSig {
         params: f
             .params
@@ -349,6 +360,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         param_variadic,
         variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: f.return_type.clone(),
+        return_view_provenance,
         is_extern: false,
         is_c_abi: false,
         c_abi_name: None,
@@ -380,6 +392,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: ef.return_type.clone(),
+        return_view_provenance: std::sync::OnceLock::new(),
         is_extern: true,
         is_c_abi,
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
@@ -570,6 +583,7 @@ pub(crate) enum ViewAccess {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewOwnerOrigin {
     Local,
+    Receiver,
     Parameter(usize),
     Static,
 }
@@ -605,6 +619,8 @@ pub(crate) struct ViewFact {
     /// Definition identity of the view binding itself. Prevents a non-view
     /// shadow with the same spelling from exposing an outer fact.
     binding_span: Span,
+    /// Returned aggregate slot this fact describes; empty for a direct view.
+    output_path: Vec<String>,
     place: ViewPlace,
     kind: ViewKind,
     access: ViewAccess,
@@ -633,6 +649,15 @@ impl ViewFactGraph {
     fn current_for_binding(&self, name: &str, binding_span: Span) -> Option<&ViewFact> {
         self.current(name)
             .filter(|fact| fact.binding_span == binding_span)
+    }
+
+    fn all_for_binding(&self, name: &str, binding_span: Span) -> Vec<&ViewFact> {
+        self.bindings
+            .iter()
+            .filter_map(|(binding, fact)| {
+                (binding == name && fact.binding_span == binding_span).then_some(fact)
+            })
+            .collect()
     }
 
     fn push(&mut self, name: String, fact: ViewFact) {
@@ -690,6 +715,7 @@ mod view_fact_graph_tests {
     fn fact(owner_span: usize, scope_len: usize, kind: ViewKind) -> ViewFact {
         ViewFact {
             binding_span: Span::new(owner_span + 10, owner_span + 11),
+            output_path: Vec::new(),
             place: ViewPlace {
                 owner: ViewOwnerId {
                     name: "owner".to_string(),
@@ -1023,6 +1049,8 @@ pub(crate) struct Checker<'a> {
     in_comptime: bool,
     ret: Option<Type>,
     fn_name: String,
+    /// Canonical caller-visible parameter order; excludes `self`.
+    current_param_names: Vec<String>,
     /// Context type for bare `null` (E0308).
     expected_type: Option<Type>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
@@ -1034,6 +1062,9 @@ pub(crate) struct Checker<'a> {
     /// D-MEM1 S9 / #649: sole provenance/alias state for arena, list, string,
     /// buffer, matrix, and future named mutable views.
     view_facts: ViewFactGraph,
+    /// D-MEM-VIEWRET1=B: one canonical public source inferred from every
+    /// successful named-view return in this function.
+    return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
     /// View names read in the statement currently being checked. Together
     /// with the existing statement-tail analysis, this makes local window
     /// conflicts end at last use instead of lexical scope end.

@@ -14,6 +14,29 @@ fn const_place_int(expr: &Expr) -> Option<i64> {
     }
 }
 
+fn append_view_source_projections(
+    place: &mut ViewPlace,
+    projections: &[crate::AST::ViewSourceProjection],
+    span: Span,
+) {
+    for projection in projections {
+        place.projections.push(match projection {
+            crate::AST::ViewSourceProjection::Field(name) => {
+                ViewProjection::Field(name.clone())
+            }
+            crate::AST::ViewSourceProjection::Index => ViewProjection::Index {
+                value: None,
+                span,
+            },
+            crate::AST::ViewSourceProjection::Range => ViewProjection::Range {
+                start: None,
+                end: None,
+                span,
+            },
+        });
+    }
+}
+
 impl<'a> Checker<'a> {
     // ──────────────────────────────────────────────────────────────────────
     // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): scope-bound arena `view`s.
@@ -57,7 +80,7 @@ impl<'a> Checker<'a> {
             owner: self.owner_id(&arena),
             projections: vec![ViewProjection::Fresh(span)],
         };
-        self.record_view(name, place, ViewKind::Arena, ViewAccess::Write, span);
+        self.record_view(name, Vec::new(), place, ViewKind::Arena, ViewAccess::Write, span);
     }
 
     /// E0632: when `arena` is `reset`/`free`d, every live view into it dies.
@@ -143,7 +166,13 @@ impl<'a> Checker<'a> {
             .lookup(owner)
             .map(|info| info.def_span)
             .unwrap_or_else(|| Span::new(0, 0));
-        if self.consts.contains_key(owner) {
+        if owner == Syntax::KW_SELF {
+            ViewOwnerId {
+                name: owner.to_string(),
+                def_span,
+                origin: ViewOwnerOrigin::Receiver,
+            }
+        } else if self.consts.contains_key(owner) {
             ViewOwnerId {
                 name: owner.to_string(),
                 def_span,
@@ -151,9 +180,9 @@ impl<'a> Checker<'a> {
             }
         } else if self.lookup(owner).is_some_and(|info| info.param_conv.is_some()) {
             let index = self
-                .funcs
-                .get(&self.fn_name)
-                .and_then(|sig| sig.param_info.iter().position(|(name, _)| name == owner))
+                .current_param_names
+                .iter()
+                .position(|name| name == owner)
                 .unwrap_or(0);
             ViewOwnerId {
                 name: owner.to_string(),
@@ -172,6 +201,7 @@ impl<'a> Checker<'a> {
     fn record_view(
         &mut self,
         name: &str,
+        output_path: Vec<String>,
         place: ViewPlace,
         kind: ViewKind,
         access: ViewAccess,
@@ -194,6 +224,7 @@ impl<'a> Checker<'a> {
         }
         let fact = ViewFact {
             binding_span: span,
+            output_path,
             place,
             kind,
             access,
@@ -206,6 +237,49 @@ impl<'a> Checker<'a> {
     fn view_fact(&self, name: &str) -> Option<&ViewFact> {
         let binding = self.lookup(name)?;
         self.view_facts.current_for_binding(name, binding.def_span)
+    }
+
+    fn view_facts(&self, name: &str) -> Vec<&ViewFact> {
+        let Some(binding) = self.lookup(name) else {
+            return Vec::new();
+        };
+        self.view_facts.all_for_binding(name, binding.def_span)
+    }
+
+    fn view_fact_at_path(&self, name: &str, output_path: &[String]) -> Option<&ViewFact> {
+        self.view_facts(name)
+            .into_iter()
+            .filter(|fact| output_path.starts_with(&fact.output_path))
+            .max_by_key(|fact| fact.output_path.len())
+    }
+
+    fn compose_view_source_place(
+        &self,
+        actual: &Expr,
+        projections: &[crate::AST::ViewSourceProjection],
+        span: Span,
+    ) -> Option<ViewPlace> {
+        let leading_fields: Vec<String> = projections
+            .iter()
+            .map_while(|projection| match projection {
+                crate::AST::ViewSourceProjection::Field(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        if let Expr::Ident(name, _) = actual {
+            if let Some(fact) = self.view_fact_at_path(name, &leading_fields) {
+                let mut place = fact.place.clone();
+                append_view_source_projections(
+                    &mut place,
+                    &projections[fact.output_path.len()..],
+                    span,
+                );
+                return Some(place);
+            }
+        }
+        let mut place = self.place_from_expr(actual)?;
+        append_view_source_projections(&mut place, projections, span);
+        Some(place)
     }
 
     fn view_is_live_now(&self, name: &str) -> bool {
@@ -264,17 +338,37 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
+        fn named_field_path(expr: &Expr, fields: &mut Vec<String>) -> Option<String> {
+            match expr {
+                Expr::Ident(name, _) => Some(name.clone()),
+                Expr::Field(base, field, _) => {
+                    let name = named_field_path(base, fields)?;
+                    fields.push(field.clone());
+                    Some(name)
+                }
+                _ => None,
+            }
+        }
+        let mut output_path = Vec::new();
+        if let Some(name) = named_field_path(expr, &mut output_path) {
+            if let Some(fact) = self.view_fact_at_path(&name, &output_path) {
+                let mut place = fact.place.clone();
+                place.projections.extend(
+                    output_path[fact.output_path.len()..]
+                        .iter()
+                        .cloned()
+                        .map(ViewProjection::Field),
+                );
+                return Some(place);
+            }
+        }
         match expr {
-            Expr::Ident(name, _) => self
-                .view_fact(name)
-                .map(|fact| fact.place.clone())
-                .or_else(|| {
-                    (self.lookup(name).is_some() || self.consts.contains_key(name))
-                        .then(|| ViewPlace {
-                            owner: self.owner_id(name),
-                            projections: Vec::new(),
-                        })
-                }),
+            Expr::Ident(name, _) => (self.lookup(name).is_some()
+                || self.consts.contains_key(name))
+            .then(|| ViewPlace {
+                owner: self.owner_id(name),
+                projections: Vec::new(),
+            }),
             Expr::Field(base, field, _) => {
                 let mut place = self.place_from_expr(base)?;
                 place.projections.push(ViewProjection::Field(field.clone()));
@@ -487,29 +581,131 @@ impl<'a> Checker<'a> {
     /// function's return/scope exit). A parameter or const outlives the call,
     /// so a view into it is sound without tracking (mirrors `E2301`'s
     /// param/const exemption in `view_return_local_owner`).
-    pub(crate) fn view_call_source(
-        &self,
+    pub(crate) fn view_call_sources(
+        &mut self,
         init: &Expr,
-    ) -> Option<(ViewPlace, ViewKind, ViewAccess)> {
+    ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
+        if let Expr::Call(call) = init {
+            let Some(sig) = self.funcs.get(&call.name) else {
+                return Vec::new();
+            };
+            let Some(map) = sig.return_view_provenance.get().cloned() else {
+                return Vec::new();
+            };
+            let string_view = sig.return_type.as_ref().is_some_and(|ty| {
+                matches!(
+                    ty,
+                    Type::Apply { name, args }
+                        if name == "View"
+                            && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+                ) || matches!(ty, Type::Named(name) if self.registry.struct_fields(name).is_some_and(|fields| {
+                    fields.iter().any(|(_, _, field_ty, _)| matches!(
+                        field_ty,
+                        Type::Apply { name, args }
+                            if name == "View"
+                                && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+                    ))
+                }))
+            });
+            let mut sources = Vec::new();
+            for (output_path, provenance) in map {
+                let crate::AST::ViewSource::Parameter(index) = provenance.source else {
+                    continue;
+                };
+                let Some(actual) = call.args.get(index).map(|arg| &arg.expr) else {
+                    continue;
+                };
+                let Some(place) = self.compose_view_source_place(
+                    actual,
+                    &provenance.projections,
+                    init.span(),
+                ) else {
+                    self.report_temporary_view_source(actual.span(), string_view);
+                    continue;
+                };
+                let kind = self.view_kind_for_place(&place);
+                let access = if provenance.mutable {
+                    ViewAccess::Write
+                } else {
+                    ViewAccess::Read
+                };
+                sources.push((output_path, place, kind, access));
+            }
+            return sources;
+        }
+        if let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            recv_type: Some(recv_type),
+            ..
+        } = init
+        {
+            let Some(map) = self
+                .registry
+                .method(recv_type, method)
+                .and_then(|sig| sig.return_view_provenance.get())
+                .or_else(|| {
+                    self.trait_reg
+                        .traits
+                        .get(recv_type)
+                        .and_then(|info| info.methods.get(method))
+                        .and_then(|sig| sig.return_view_provenance.get())
+                })
+                .cloned()
+            else {
+                return Vec::new();
+            };
+            let mut sources = Vec::new();
+            for (output_path, provenance) in map {
+                let actual = match provenance.source {
+                    crate::AST::ViewSource::Receiver => receiver.as_ref(),
+                    crate::AST::ViewSource::Parameter(index) => {
+                        let Some(arg) = args.get(index) else { continue };
+                        &arg.expr
+                    }
+                    crate::AST::ViewSource::Static { .. } => continue,
+                };
+                let Some(place) = self.compose_view_source_place(
+                    actual,
+                    &provenance.projections,
+                    init.span(),
+                ) else {
+                    continue;
+                };
+                let kind = self.view_kind_for_place(&place);
+                let access = if provenance.mutable {
+                    ViewAccess::Write
+                } else {
+                    ViewAccess::Read
+                };
+                sources.push((output_path, place, kind, access));
+            }
+            return sources;
+        }
         if let Expr::Place(inner, access, _) = init {
-            let place = self.place_from_expr(inner)?;
+            let Some(place) = self.place_from_expr(inner) else {
+                return Vec::new();
+            };
             let kind = self.view_kind_for_place(&place);
             let access = match access {
                 crate::AST::PlaceAccess::Read => ViewAccess::Read,
                 crate::AST::PlaceAccess::Write => ViewAccess::Write,
             };
-            return Some((place, kind, access));
+            return vec![(Vec::new(), place, kind, access)];
         }
         let Expr::MethodCall {
             receiver, method, ..
         } = init
         else {
-            return None;
+            return Vec::new();
         };
         if method != Syntax::METHOD_VIEW {
-            return None;
+            return Vec::new();
         }
-        let mut place = self.place_from_expr(receiver)?;
+        let Some(mut place) = self.place_from_expr(receiver) else {
+            return Vec::new();
+        };
         let kind = match receiver.as_ref() {
             Expr::Ident(name, _) => self
                 .view_kind(name)
@@ -521,24 +717,114 @@ impl<'a> Checker<'a> {
             end: None,
             span: init.span(),
         });
-        Some((place, kind, ViewAccess::Read))
+        vec![(Vec::new(), place, kind, ViewAccess::Read)]
+    }
+
+    fn report_temporary_view_source(&mut self, span: Span, string_view: bool) {
+        self.diags.push(Diagnostic::error(
+            if string_view { "E2307" } else { "E2305" },
+            "a returned view cannot borrow from a temporary argument".to_string(),
+            "the temporary owner is dropped at the end of this statement, while the returned view remains live"
+                .to_string(),
+            "store the owner in a named binding first, then pass that binding to the view-returning call"
+                .to_string(),
+            Some(span),
+        ));
     }
 
     /// Record `name` as a view into `owner`, declared at the current scope depth.
     pub(crate) fn record_list_view(
         &mut self,
         name: &str,
+        output_path: Vec<String>,
         place: ViewPlace,
         kind: ViewKind,
         access: ViewAccess,
         span: Span,
     ) {
-        self.record_view(name, place, kind, access, span);
+        self.record_view(name, output_path, place, kind, access, span);
+    }
+
+    pub(crate) fn transfer_named_view(&mut self, target: &str, source: &str, span: Span) -> bool {
+        let facts: Vec<_> = self.view_facts(source).into_iter().cloned().collect();
+        if facts.is_empty() {
+            return false;
+        }
+        for fact in facts {
+            self.record_view(
+                target,
+                fact.output_path,
+                fact.place,
+                fact.kind,
+                fact.access,
+                span,
+            );
+        }
+        true
     }
 
     /// True if `name` is currently a live `View<T>` binding.
     pub(crate) fn is_list_view(&self, name: &str) -> bool {
         self.view_kind(name).is_some_and(ViewKind::is_named_window)
+    }
+
+    pub(crate) fn type_contains_view_boundary(&self, ty: &Type) -> bool {
+        fn contains(
+            registry: &TypeRegistry,
+            ty: &Type,
+            seen: &mut HashSet<String>,
+        ) -> bool {
+            match ty {
+                Type::Apply { name, args }
+                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                {
+                    true
+                }
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    if !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    registry.struct_fields(name).is_some_and(|fields| {
+                        fields
+                            .iter()
+                            .any(|(_, _, field_ty, _)| contains(registry, field_ty, seen))
+                    })
+                }
+                Type::Option(inner)
+                | Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Tagged { inner, .. } => contains(registry, inner, seen),
+                Type::Result { ok, err } => {
+                    contains(registry, ok, seen) || contains(registry, err, seen)
+                }
+                Type::Map { key, value, .. } => {
+                    contains(registry, key, seen) || contains(registry, value, seen)
+                }
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .any(|(_, field_ty)| contains(registry, field_ty, seen)),
+                Type::FixedList { elem, .. } => contains(registry, elem, seen),
+                Type::Fn { params, ret, .. } => {
+                    params.iter().any(|param| contains(registry, param, seen))
+                        || ret
+                            .as_deref()
+                            .is_some_and(|ret| contains(registry, ret, seen))
+                }
+                _ => false,
+            }
+        }
+        contains(self.registry, ty, &mut HashSet::new())
+    }
+
+    pub(crate) fn named_view_has_stable_owner(&self, name: &str) -> bool {
+        self.view_fact(name).is_some_and(|fact| {
+            matches!(
+                fact.place.owner.origin,
+                ViewOwnerOrigin::Receiver
+                    | ViewOwnerOrigin::Parameter(_)
+                    | ViewOwnerOrigin::Static
+            )
+        })
     }
 
     /// E2305: `return list[a..b]` made fresh right in the `return` — `owner`
@@ -563,12 +849,147 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    /// D-MEM-VIEWRET1=B: accept a returned named view only when its source is
+    /// stable at the public boundary. Parameter position, never spelling, is
+    /// the canonical identity. Multiple return paths must agree exactly.
+    pub(crate) fn check_named_view_return(
+        &mut self,
+        place: &ViewPlace,
+        access: ViewAccess,
+        output_path: Vec<String>,
+        span: Span,
+    ) {
+        let source = match place.owner.origin {
+            ViewOwnerOrigin::Receiver => crate::AST::ViewSource::Receiver,
+            ViewOwnerOrigin::Parameter(index) => crate::AST::ViewSource::Parameter(index),
+            _ => {
+                self.report_view_owns_return(place, span);
+                return;
+            }
+        };
+        let mut projections = Vec::new();
+        for projection in &place.projections {
+            projections.push(match projection {
+                ViewProjection::Field(name) => crate::AST::ViewSourceProjection::Field(name.clone()),
+                ViewProjection::Index { .. } => crate::AST::ViewSourceProjection::Index,
+                ViewProjection::Range { .. } => crate::AST::ViewSourceProjection::Range,
+                ViewProjection::Fresh(_) => {
+                    self.report_view_return_boundary(span);
+                    return;
+                }
+            });
+        }
+        let provenance = crate::AST::ViewProvenance {
+            source,
+            projections,
+            mutable: access == ViewAccess::Write,
+        };
+        let map = self.return_view_provenance.get_or_insert_with(Default::default);
+        if map.get(&output_path).is_some_and(|existing| existing != &provenance) {
+            self.diags.push(Diagnostic::error(
+                "E2305",
+                "returned view paths disagree about their owner".to_string(),
+                "each public output slot must name one stable owner source on every return path".to_string(),
+                "for this output field, return views derived from the same parameter and place shape on every path, or return an owned copy".to_string(),
+                Some(span),
+            ));
+            return;
+        }
+        map.insert(output_path, provenance);
+    }
+
+    pub(crate) fn check_named_view_binding_return(&mut self, name: &str, span: Span) {
+        let Some(fact) = self.view_fact(name).cloned() else {
+            self.report_view_return_boundary(span);
+            return;
+        };
+        self.check_named_view_return(&fact.place, fact.access, Vec::new(), span);
+    }
+
+    pub(crate) fn check_named_string_view_binding_return(&mut self, name: &str, span: Span) {
+        let Some(fact) = self.view_fact(name).cloned() else {
+            self.report_string_view_boundary(span);
+            return;
+        };
+        if !matches!(
+            fact.place.owner.origin,
+            ViewOwnerOrigin::Receiver | ViewOwnerOrigin::Parameter(_)
+        ) {
+            self.report_string_view_unsupported_use(name, "be returned", span);
+            return;
+        }
+        self.check_named_view_return(&fact.place, fact.access, Vec::new(), span);
+    }
+
+    pub(crate) fn check_aggregate_view_return(&mut self, expr: &Expr) {
+        fn walk(checker: &mut Checker<'_>, expr: &Expr, path: &mut Vec<String>) {
+            match expr {
+                Expr::StructLit { fields, .. } => {
+                    for (field, _, value) in fields {
+                        path.push(field.clone());
+                        walk(checker, value, path);
+                        path.pop();
+                    }
+                }
+                Expr::TupleLit(fields, ..) => {
+                    for (field, value) in fields {
+                        path.push(field.clone());
+                        walk(checker, value, path);
+                        path.pop();
+                    }
+                }
+                Expr::Present(inner, _)
+                | Expr::Ok(inner, _)
+                | Expr::Err(inner, _)
+                | Expr::Paren(inner, _) => walk(checker, inner, path),
+                Expr::Ident(name, span) => {
+                    let facts: Vec<_> = checker.view_facts(name).into_iter().cloned().collect();
+                    for fact in facts {
+                        let mut output_path = path.clone();
+                        output_path.extend(fact.output_path);
+                        checker.check_named_view_return(
+                            &fact.place,
+                            fact.access,
+                            output_path,
+                            *span,
+                        );
+                    }
+                }
+                _ => {
+                    for (suffix, place, _, access) in checker.view_call_sources(expr) {
+                        let mut output_path = path.clone();
+                        output_path.extend(suffix);
+                        checker.check_named_view_return(
+                            &place,
+                            access,
+                            output_path,
+                            expr.span(),
+                        );
+                    }
+                }
+            }
+        }
+        walk(self, expr, &mut Vec::new());
+    }
+
     pub(crate) fn report_view_return_boundary(&mut self, span: Span) {
         self.diags.push(Diagnostic::error(
             "E2305",
             "returned views need a stable owner relationship".to_string(),
             "public view provenance is not carried through compiler APIs and TIR yet, so this return could outlive its owner".to_string(),
             "keep the view local, or return an owned copy instead".to_string(),
+            Some(span),
+        ));
+    }
+
+    pub(crate) fn report_string_view_boundary(&mut self, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E2307",
+            "returned string views need a stable owner relationship".to_string(),
+            "the compiler could not prove which caller-owned `String` keeps this `View<str>` alive"
+                .to_string(),
+            "return a view derived from one parameter or receiver on every path, or return an owned `String` copy"
+                .to_string(),
             Some(span),
         ));
     }
@@ -589,9 +1010,8 @@ impl<'a> Checker<'a> {
 
     /// If `init` is `s.trim()` / `s.after(sep)` / `s.before(sep)` on a plain
     /// local `String` name, return `s`'s name — but only when `s` is a genuine
-    /// local (dies at this function's return/scope exit). A parameter or const
-    /// outlives the call, so a view into it is sound without tracking (mirrors
-    /// `view_call_source`'s exemption).
+    /// local or parameter. Parameters must remain tracked so a `View<str>`
+    /// return can publish their stable source provenance.
     pub(crate) fn string_view_call_source(&self, init: &Expr) -> Option<ViewPlace> {
         let Expr::MethodCall {
             receiver,
@@ -622,16 +1042,13 @@ impl<'a> Checker<'a> {
         if !matches!(info.ty, Type::String) {
             return None;
         }
-        if info.param_conv.is_some() {
-            return None;
-        }
         self.place_from_expr(receiver)
     }
 
     /// Record `name` as a string view into `owner`, declared at the current
     /// scope depth.
     pub(crate) fn record_string_view(&mut self, name: &str, place: ViewPlace, span: Span) {
-        self.record_view(name, place, ViewKind::String, ViewAccess::Read, span);
+        self.record_view(name, Vec::new(), place, ViewKind::String, ViewAccess::Read, span);
     }
 
     /// True if `name` is currently a live string-view binding.

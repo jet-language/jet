@@ -289,6 +289,13 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
         return true;
     }
+    // D-MEM-VIEWRET1=B: sema is the sole authority for whether a stored view
+    // has a stable owner. Once admitted, a View field is an ordinary borrowed
+    // slice value for TIR; codegen only threads the hidden Rust lifetime.
+    if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1)
+    {
+        return true;
+    }
     // c109 Phase 19: a generic struct's field may be a bare type VARIABLE (`first: T`
     // in `Pair<T>`). It renders to the bare `T` via `cx.rust_type` and a struct-lit
     // field value is the type-var value itself (by value), so a type-var field needs no

@@ -236,6 +236,7 @@ impl<'a> Parser<'a> {
                 params,
                 return_type,
                 return_type_span,
+                return_view_provenance: None,
                 is_unsafe,
                 unsafe_reason,
                 unsafe_span,

@@ -137,6 +137,7 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                     param_info: vec![("patch".to_string(), false)],
                     defaults: vec![None],
                     must_use: false,
+                    return_view_provenance: Default::default(),
                 },
             );
             methods.insert(
@@ -153,6 +154,7 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                     param_info: vec![("new".to_string(), false), ("old".to_string(), false)],
                     defaults: vec![None, None],
                     must_use: false,
+                    return_view_provenance: Default::default(),
                 },
             );
         }
@@ -171,6 +173,7 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                     param_info: vec![("other".to_string(), false)],
                     defaults: vec![None],
                     must_use: false,
+                    return_view_provenance: Default::default(),
                 },
             );
         }

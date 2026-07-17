@@ -411,6 +411,20 @@ impl<'a> Checker<'a> {
             } else {
                 body_ret
             };
+            if ret_ty
+                .as_ref()
+                .is_some_and(|ty| self.type_contains_view_boundary(ty))
+            {
+                self.diags.push(Diagnostic::error(
+                    "E2305",
+                    "a lambda cannot return a stored or borrowed view".to_string(),
+                    "a lambda value has no stable public owner slot for the returned view, and captured owners may move with the closure"
+                        .to_string(),
+                    "use a named function or method whose returned-view provenance can be inferred and published"
+                        .to_string(),
+                    Some(lam.span),
+                ));
+            }
     
             Some(Type::Fn {
                 params: param_types,

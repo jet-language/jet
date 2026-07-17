@@ -1,10 +1,10 @@
-Error [E2305]: this view points into `xs`, which this function owns
-  --> tests/ui/task_view_result.jet:3:14
+Error [E2305]: a lambda cannot return a stored or borrowed view
+  --> tests/ui/task_view_result.jet:6:22
     |
-  3 |     return xs[0..2]
-    |              ^^^^^^
- Why: `xs` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
- Fix: return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it
+  6 |     t :: tasks.spawn(() => peek([1, 2, 3]))
+    |                      ^^^^^^^^^^
+ Why: a lambda value has no stable public owner slot for the returned view, and captured owners may move with the closure
+ Fix: use a named function or method whose returned-view provenance can be inferred and published
 
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
   --> tests/ui/task_view_result.jet:6:22

@@ -1350,6 +1350,17 @@ impl<'a> Checker<'a> {
                 }
                 _ => {
                     if let Some(t) = self.infer(e) {
+                        if self.type_contains_view_boundary(&t) {
+                            self.diags.push(Diagnostic::error(
+                                "E2305",
+                                "a view cannot be stored in a list".to_string(),
+                                "lists have no public owner-provenance slot, so moving the list could outlive the storage this element views"
+                                    .to_string(),
+                                "store the view in a named struct field whose provenance sema can publish, or copy the viewed values into an owned list"
+                                    .to_string(),
+                                Some(e.span()),
+                            ));
+                        }
                         elem_types.push(t);
                     }
                 }

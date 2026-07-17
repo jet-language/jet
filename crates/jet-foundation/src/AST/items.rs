@@ -672,6 +672,9 @@ pub struct TraitMethodSig {
     /// the impl obligation (inferred ⊆ bound, else E0742) AND the dispatch
     /// contract (a trait-object call's effect IS the bound).
     pub declared_effects: Option<Vec<(String, Span)>>,
+    /// D-MEM-VIEWRET1=B: inferred owner contract shared by the declaration,
+    /// every implementation, and dynamic dispatch.
+    pub return_view_provenance: std::sync::Arc<std::sync::OnceLock<super::ViewProvenanceMap>>,
 }
 
 /// S28: `impl Trait { … }` inside a struct or enum body.
@@ -780,6 +783,9 @@ pub struct Func {
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub return_type_span: Option<Span>,
+    /// D-MEM-VIEWRET1=B: sema-inferred stable source of a named view return.
+    /// Parser-created functions start at `None`; sema fills this before TIR.
+    pub return_view_provenance: Option<super::ViewProvenanceMap>,
     /// S58 (E2-M13): `#Unsafe` on the line before `fn` — a whole-function
     /// contract. Calling such a function requires an enclosing `#Unsafe`
     /// block (else E3103). D-UNSAFE-REASON1=B: the reason is optional but

@@ -475,12 +475,12 @@ impl<'a> Checker<'a> {
             // into `list`. E2305 fires the same way E0631 does for arena views —
             // rebinding a live view to a second name is itself an escape (views
             // are non-reassignable non-escaping locals, I8), not re-tracked.
-            if let Some((place, kind, access)) = self.view_call_source(&b.init) {
-                self.record_list_view(&b.name, place, kind, access, b.name_span);
-            } else if let Expr::Ident(src, src_span) = &b.init {
-                if self.is_list_view(src) {
-                    self.report_view_escape(src, "be stored in another binding", *src_span);
-                }
+            for (output_path, place, kind, access) in self.view_call_sources(&b.init) {
+                self.record_list_view(&b.name, output_path, place, kind, access, b.name_span);
+            }
+            if let Expr::Ident(src, src_span) = &b.init {
+                let _ = src_span;
+                self.transfer_named_view(&b.name, src, b.name_span);
             }
             // D-MEM1 stage S5: `x :: s.trim()` / `x :: s.after(sep)` / `x ::
             // s.before(sep)` makes `x` a scope-bound string view into `s` — the

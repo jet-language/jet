@@ -158,7 +158,22 @@ impl<'a> Checker<'a> {
                     self.infer(&mut arg.expr);
                 }
             }
-            ret.map(|r| *r)
+            let ret = ret.map(|r| *r);
+            if ret
+                .as_ref()
+                .is_some_and(|ty| self.type_contains_view_boundary(ty))
+            {
+                self.diags.push(Diagnostic::error(
+                    "E2305",
+                    "a function value cannot return a stored or borrowed view".to_string(),
+                    "function-value types do not carry the public owner provenance needed to prove which argument keeps the result alive"
+                        .to_string(),
+                    "call the named view-returning function or method directly so sema can compose its source contract"
+                        .to_string(),
+                    Some(span),
+                ));
+            }
+            ret
         }
     
 }

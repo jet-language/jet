@@ -461,6 +461,9 @@ pub struct TFunc {
     pub web_param_reconstructions: Vec<TWebParamReconstruction>,
     /// Resolved return type, or `None` for a unit-returning function.
     pub ret: Option<Type>,
+    /// Sema-proved owner source for a returned `View`/`ViewMut`. Codegen reads
+    /// this fact mechanically when spelling hidden Rust lifetimes.
+    pub return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
     /// c109 Phase 17: the rendered Rust generic clause (`<T: Clone>` / `<T, U>` / empty),
     /// resolved at lowering via `Generics::rust_type_param_list(&f.type_params, …)` exactly
     /// as `emit_func` does, including only bounds required by lowered operations.

@@ -2571,6 +2571,32 @@ fn semver_break_e2601() {
 }
 
 #[test]
+fn returned_view_source_change_feeds_e1218_and_e2601() {
+    use jet::Publish::SemVer::SemVer;
+    use jet::Publish::{classify_bump, diff_public_api, e1218, e2601, ApiItem, BumpKind};
+
+    let item = |source: usize| ApiItem {
+        kind: "fn".into(),
+        name: "pick".into(),
+        signature: format!(
+            "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = parameter:{source};access:read;path:range"
+        ),
+    };
+    let changes = diff_public_api(&[item(0)], &[item(1)]);
+    assert_eq!(changes.len(), 1, "owner-source drift must be breaking");
+    assert!(changes[0].description.contains("parameter:0"));
+    assert!(changes[0].description.contains("parameter:1"));
+
+    let bump = classify_bump(
+        &SemVer::parse("1.0.0").unwrap(),
+        &SemVer::parse("1.1.0").unwrap(),
+    );
+    assert_eq!(bump, BumpKind::Minor);
+    assert_eq!(e1218("1.0.0", "1.1.0", bump, &changes[0], 2).code, "E1218");
+    assert_eq!(e2601("1.1.0", bump, &changes[0], 2).code, "E2601");
+}
+
+#[test]
 fn capability_sigil_frozen_in_public_api() {
     // c129 (D-MEM1, was D-CAP7/D-CAP8): the resolved capability sigil is part of
     // a pub fn's published signature, and a read -> write drift is a breaking change.

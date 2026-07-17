@@ -281,6 +281,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
             err: Box::new(Type::List(Box::new(field_error_ty()))),
         }),
         return_type_span: Some(span),
+        return_view_provenance: None,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,

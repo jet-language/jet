@@ -434,7 +434,9 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
     }
     for item in items {
         match item {
-            Item::Trait(t) => Traits::emit_trait_def(t, out),
+            Item::Trait(t) => Traits::emit_trait_def(t, out, |ty, assoc| {
+                cx.rust_type_with_view_lifetime_assoc(ty, assoc)
+            }),
             Item::Struct(s) => emit_struct(cx, s, out),
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),

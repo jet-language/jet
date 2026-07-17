@@ -122,6 +122,24 @@ impl<T: JetDebug> JetDebug for &T {
         (**self).jet_debug()
     }
 }
+impl<T: JetShow> JetShow for [T] {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDisplay> JetDisplay for [T] {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDebug> JetDebug for [T] {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
 impl<T: JetShow> JetShow for Vec<T> {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();

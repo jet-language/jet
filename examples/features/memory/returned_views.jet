@@ -1,0 +1,21 @@
+// D-MEM-VIEWRET1=B: named View boundaries carry inferred owner provenance.
+// The caller keeps each owner alive; no user-written lifetime syntax is needed.
+struct Domain {
+    value: View<str>
+}
+
+fn first(values: [Int]) -> View<Int> {
+    return values[0..1]
+}
+
+fn domain(email: String) -> Domain {
+    value :: email.after("@")
+    return Domain.{ value: value }
+}
+
+fn run() {
+    values := [7, 8]
+    email := "user@example.com"
+    print(first(values)[0])
+    print(domain(email).value)
+}

@@ -640,7 +640,11 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::List(inner) => is_printable(inner, registry),
         Type::Map { value, .. } => is_printable(value, registry),
         Type::Named(n) => registry.contains(n) || core_type_known(n),
-        Type::Apply { args, .. } => args.iter().all(|a| is_printable(a, registry)),
+        Type::Apply { name, args } => {
+            (name == "View"
+                && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
+                || args.iter().all(|a| is_printable(a, registry))
+        }
         Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_printable(elem, registry),
@@ -679,7 +683,9 @@ pub(crate) fn is_displayable(
                 )
         }
         Type::Apply { name, args } => {
-            trait_reg.implements_trait(name, Generics::DISPLAY)
+            (name == "View"
+                && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
+                || trait_reg.implements_trait(name, Generics::DISPLAY)
                 || args.iter().all(|a| is_displayable(a, type_reg, trait_reg))
         }
         Type::Tuple(fields) => fields

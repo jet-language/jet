@@ -320,16 +320,28 @@ operation that may resize or relocate its storage is rejected while a view is
 live (**E0212**). Arena reset/free invalidates its views; a later read is
 **E0632**. A local fact ends after its last use or at lexical scope, whichever
 comes first. At control-flow joins, invalidation on any reachable branch
-survives; loops use the same conservative rule across iterations. Captures,
-fields, and task boundaries preserve the fact rather than rebuilding it from a
-type name. Tasks and channels reject a captured view once as **E1102**. Public
-calls, returns, stored fields, generic substitution, and trait dispatch remain
-rejected until #643 carries the same fact through those boundaries.
+survives; loops use the same conservative rule across iterations. Captures and
+field projections preserve the fact rather than rebuilding it from a type name.
+Tasks and channels reject a captured or returned view once as **E1102**.
 
-TIR receives only sema-approved local lowering flags. It does not infer owners,
-overlap, lifetimes, or escape safety, and no returned-view signature is admitted
-yet. Generated Rust references are one representation of local facts, never
-their definition.
+D-MEM-VIEWRET1 carries the same fact through public calls, returns, named struct
+fields, generic instantiation, methods, and closed trait dispatch. Each returned
+view slot is keyed by its full output-field path; its source is the receiver, a
+zero-based parameter, or static storage, followed by field/index/range
+projections. Sema computes these maps to a deterministic fixed point, so
+declaration and implementation order do not change the result. All return paths
+and trait implementations must agree on the source for each output slot. Open or
+dynamic trait dispatch without one stable contract, function values and lambdas
+whose type erases the source, temporary owners, and list/tuple storage are
+rejected as **E2305** (or **E2307** for string views). A named struct view field
+may be constructed from a stable source, but cannot later be overwritten with a
+different source.
+
+TIR receives only sema-approved provenance and lowering flags. It does not infer
+owners, overlap, lifetimes, or escape safety. Codegen uses the approved source to
+emit a hidden Rust lifetime for `View<T>`/`ViewMut<T>` returns and containing
+structs; generated references are a representation of sema facts, never their
+definition or a validation mechanism.
 
 ### Zero-copy string views
 
@@ -347,10 +359,13 @@ print("padded still readable: {padded}")   // reading the owner still works
 
 (examples/features/memory/string_view.jet) A local view may chain another
 `.trim()/.after()/.before()`, be interpolated (`"{domain}"`), or be copied into
-an owned `String` with `~`. It may also be rebound, passed, stored, or returned
-only within the same local scope. **E2307** reports an unsupported string-view
-escape or use. `[T]` slice-view boundaries are **E2305** until #643. Either kind
-of view crossing a `tasks.spawn`/
+an owned `String` with `~`. At a named boundary, `View<str>` states the same
+owner-tied contract as `View<T>`: a parameter- or receiver-rooted view may be
+returned directly or stored in a named struct field, with public provenance
+inferred by sema. **E2307** reports a local or temporary owner that cannot
+outlive the view, an unstable public source, or a use that requires an owned
+`String`. See `examples/features/memory/returned_views.jet` for both boundary
+forms. Either kind of view crossing a `tasks.spawn`/
 `Sender.send` boundary is reported once, as **E1102** (unsendable value) —
 a task or channel moves owned data between threads, and a view can't cross
 without ownership.

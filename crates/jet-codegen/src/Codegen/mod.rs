@@ -880,7 +880,9 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
-            Item::Trait(t) => Traits::emit_trait_def(t, &mut out),
+            Item::Trait(t) => Traits::emit_trait_def(t, &mut out, |ty, assoc| {
+                cx.rust_type_with_view_lifetime_assoc(ty, assoc)
+            }),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
@@ -1228,7 +1230,9 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
-            Item::Trait(t) => Traits::emit_trait_def(t, &mut out),
+            Item::Trait(t) => Traits::emit_trait_def(t, &mut out, |ty, assoc| {
+                cx.rust_type_with_view_lifetime_assoc(ty, assoc)
+            }),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),

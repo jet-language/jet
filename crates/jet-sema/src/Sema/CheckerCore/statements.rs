@@ -576,6 +576,18 @@ impl<'a> Checker<'a> {
                             // bad field). The value's type must match the field type (E0108).
                             if let Some(bt) = &base_ty {
                                 if let Some(ft) = self.field_type(bt, field, *span) {
+                                    if self.type_contains_view_boundary(&ft) {
+                                        self.diags.push(Diagnostic::error(
+                                            "E2305",
+                                            format!("view field `{field}` cannot be assigned a new source"),
+                                            "a stored view field has one stabilized owner relationship; overwriting it would erase or change that public provenance"
+                                                .to_string(),
+                                            "construct a new value with the new view, or keep the original field source unchanged"
+                                                .to_string(),
+                                            Some(*span),
+                                        ));
+                                        return;
+                                    }
                                     if let Some(vt) = &vt {
                                         if *vt != ft && ft != Type::Named(String::new()) {
                                             self.diags.push(Diagnostic::error(
@@ -779,11 +791,18 @@ impl<'a> Checker<'a> {
                     }
                     match (&mut *expr, resolved_ret) {
                         (Some(e), Some(rt)) => {
+                            let string_view_return = matches!(
+                                &rt,
+                                Type::Apply { name, args }
+                                    if name == "View"
+                                        && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+                            );
                             // D-SHAPE-PLACE1=A: a bare maximal place is a read
                             // window. At a named `View<T>` return boundary, make
                             // that local acquisition explicit in the AST before
                             // inference; E2305 then checks today's provenance gate.
                             if matches!(&rt, Type::Apply { name, .. } if name == "View")
+                                && !string_view_return
                                 && !matches!(e, Expr::Copy(..) | Expr::Place(..))
                                 && self.place_from_expr(e).is_some()
                             {
@@ -799,8 +818,14 @@ impl<'a> Checker<'a> {
                             self.expected_type = Some(rt.clone());
                             // Spawned task returns are checked separately by E1102.
                             self.borrow_ctx = self.is_task_spawn;
+                            let saved_string_view_read = self.allow_string_view_read;
+                            if string_view_return {
+                                self.allow_string_view_read = true;
+                            }
                             let et = self.infer(e);
+                            self.allow_string_view_read = saved_string_view_read;
                             self.expected_type = saved_expected;
+                            self.check_aggregate_view_return(e);
                             // D-ALLOC2: E0631 — returning an arena `view` would let
                             // it outlive the arena (the arena drops at scope end).
                             if let Expr::Ident(n, nspan) = &*e {
@@ -814,15 +839,27 @@ impl<'a> Checker<'a> {
                             // and a fresh range place made right in the
                             // `return` (`return incidents[0..2]`) — the latter
                             // needs `view_call_source` directly.
-                            if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
+                            if string_view_return {
+                                if let Expr::Ident(n, nspan) = &*e {
+                                    if self.is_string_view(n) {
+                                        self.check_named_string_view_binding_return(n, *nspan);
+                                    } else {
+                                        self.report_string_view_boundary(e.span());
+                                    }
+                                } else {
+                                    self.report_string_view_boundary(e.span());
+                                }
+                            } else if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                                 if let Expr::Ident(n, nspan) = &*e {
                                     if self.is_list_view(n) {
-                                        self.report_view_escape(n, "be returned", *nspan);
+                                        self.check_named_view_binding_return(n, *nspan);
                                     } else {
                                         self.report_view_return_boundary(e.span());
                                     }
-                                } else if let Some((place, _, _)) = self.view_call_source(e) {
-                                    self.report_view_owns_return(&place, e.span());
+                                } else if let Some((_, place, _, access)) =
+                                    self.view_call_sources(e).into_iter().find(|(path, ..)| path.is_empty())
+                                {
+                                    self.check_named_view_return(&place, access, Vec::new(), e.span());
                                 } else {
                                     self.report_view_return_boundary(e.span());
                                 }
@@ -875,7 +912,9 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                             }
-                            self.note_move_if_direct_ident(e);
+                            if !string_view_return {
+                                self.note_move_if_direct_ident(e);
+                            }
                             if let Some(et) = et {
                                 let http_handler_lambda = matches!(
                                     (&rt, &et),
@@ -884,7 +923,8 @@ impl<'a> Checker<'a> {
                                             && params == &vec![Type::Named("HttpSrvReq".to_string())]
                                             && ret.as_ref() == &Type::Named("HttpSrvResp".to_string())
                                 );
-                                if et != rt && !http_handler_lambda {
+                                let string_view_compatible = string_view_return && et == Type::String;
+                                if et != rt && !http_handler_lambda && !string_view_compatible {
                                     self.diags.push(Diagnostic::error(
                                         "E0113",
                                         format!(
