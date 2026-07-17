@@ -47,6 +47,7 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
             examples: Vec::new(),
             provenance: jet_semindex::SemanticProvenance::Session,
             span: None,
+            lexical_scope: None,
         });
     }
     index

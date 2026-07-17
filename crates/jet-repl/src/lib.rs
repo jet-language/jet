@@ -1732,6 +1732,7 @@ fn check_program(src: &str, mut prog: crate::AST::Program) -> Vec<Diagnostic> {
             html_path: prog.html_path,
             no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: prog.policy_declarations.clone(),
+            block_spans: prog.block_spans.clone(),
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
