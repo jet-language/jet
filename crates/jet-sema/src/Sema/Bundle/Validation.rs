@@ -1250,7 +1250,16 @@ pub(crate) fn check_module_bodies(
                 }) {
                     continue;
                 }
+                let owner_params = st
+                    .trait_reg
+                    .struct_params
+                    .get(&i.type_name)
+                    .or_else(|| st.trait_reg.enum_params.get(&i.type_name));
                 for m in &mut i.methods {
+                    let own_params = std::mem::take(&mut m.type_params);
+                    if i.trait_name.is_none() && own_params.is_empty() {
+                        m.type_params = owner_params.cloned().unwrap_or_default();
+                    }
                     diags.extend(check_func_body_bundle(
                         m,
                         module_idx,
@@ -1266,9 +1275,10 @@ pub(crate) fn check_module_bodies(
                         embed_inputs_out,
                         global_addr_taken,
                         no_alloc,
-                    no_prelude,
-                    reference_anchors,
+                        no_prelude,
+                        reference_anchors,
                     ));
+                    m.type_params = own_params;
                 }
             }
             Item::Test(t) if mode == CompileMode::Test => {

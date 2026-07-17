@@ -26,9 +26,16 @@ struct Holder {
 
 struct GenericHolder<T> {
     value: T
+    step: fn(Int) -> Int
+}
 
+impl GenericHolder {
     fn new(value: ^T) -> GenericHolder<T> {
-        return GenericHolder<T>.{ value: value }
+        return GenericHolder<T>.{ value: value, step: (n: Int) => n + 9 }
+    }
+
+    fn marker(self) -> Int {
+        return self.step(0)
     }
 }
 
@@ -46,6 +53,10 @@ fn read(counter: Counter) -> Int {
     return counter.value
 }
 
+fn increment(value: Int) -> Int {
+    return value + 1
+}
+
 fn run() {
     bound: Counter :: .new(1)
     holder: Holder :: .{ counter: .new(2) }
@@ -53,16 +64,19 @@ fn run() {
     nested_pool: Pool<Pool<Holder>> :: .new()
     nested: GenericHolder<GenericHolder<Int>> :: .new(.new(7))
     nested_explicit: GenericHolder<GenericHolder<Int>> :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
+    callback :: increment
+    callback_holder: GenericHolder<fn(Int) -> Int> :: .new(^callback)
     explicit :: Counter.new(4)
     print(read(.new(5)))
     print("{bound.value}{holder.counter.value}{explicit.value}")
     print(fresh(6).value)
     print("{nested.value.value}{nested_explicit.value.value}")
+    print(callback_holder.marker())
 }
 "#;
     let (code, stdout) = build_and_run("tir_inferred_new", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "5\n124\n6\n78\n");
+    assert_eq!(stdout, "5\n124\n6\n78\n9\n");
 }
 
 // ===========================================================================
