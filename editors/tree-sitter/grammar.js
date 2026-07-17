@@ -239,7 +239,7 @@ module.exports = grammar({
         repeat(choice($._marker, $._lower_marker)),
         optional("pub"),
         "fn",
-        field("name", $.identifier),
+        field("name", choice($.identifier, $.type_identifier)),
         optional($.type_params),
         $.param_list,
         optional(seq("->", field("return_type", $._type))),
@@ -754,7 +754,9 @@ module.exports = grammar({
     float_literal: (_) => token(/[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9]+)?/),
     boolean_literal: (_) => choice("true", "false"),
     null_literal: (_) => "None",
-    ok_err_literal: (_) => choice("Ok", "Err"),
+    // Contextual Result constructors: regex tokens avoid reserving these names
+    // in enum/function definition positions.
+    ok_err_literal: (_) => token(/Ok|Err/),
     char_literal: (_) => token(seq("'", /[^'\\]|\\./, "'")),
 
     string_literal: ($) =>

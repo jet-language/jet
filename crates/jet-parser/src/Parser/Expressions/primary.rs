@@ -6,22 +6,6 @@ use super::super::{
 impl<'a> Parser<'a> {
         pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             match self.peek().kind.clone() {
-                TokKind::KwOk => {
-                    let span = self.bump().span;
-                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_OK))?;
-                    let inner = self.expr()?;
-                    self.expect(TokKind::RParen, &format!("after the value inside `{}(...)`", Syntax::LIT_OK))?;
-                    let full = Span::new(span.start, inner.span().end);
-                    Ok(Expr::Ok(Box::new(inner), full))
-                }
-                TokKind::KwErr => {
-                    let span = self.bump().span;
-                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_ERR))?;
-                    let inner = self.expr()?;
-                    self.expect(TokKind::RParen, &format!("after the value inside `{}(...)`", Syntax::LIT_ERR))?;
-                    let full = Span::new(span.start, inner.span().end);
-                    Ok(Expr::Err(Box::new(inner), full))
-                }
                 TokKind::KwIt => {
                     let span = self.bump().span;
                     Ok(Expr::Ident(Syntax::KW_IT.to_string(), span))

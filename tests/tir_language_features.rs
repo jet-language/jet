@@ -329,6 +329,7 @@ pub struct Note {
     pub note_type: NoteType
     pub parent: String?
 }
+
 pub fn make_note(name: ^String, t: ^NoteType) -> Note {
     return Note.{name: name, note_type: t, parent: None}
 }
@@ -376,6 +377,44 @@ fn run() {
     );
     assert_eq!(code, 0);
     assert_eq!(stdout, "kind:user\ntag:design\n");
+}
+
+/// D-SHAPE3b: Result spellings stay contextual identifiers, and dotted
+/// Optional-looking names remain ordinary variants on user enums.
+#[test]
+fn result_names_do_not_reserve_user_functions_or_variants() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+enum Wrapped {
+    Val(Int)
+    Ok(Int)
+    Err(Int)
+}
+
+fn Ok(value: Int) -> Int {
+    return (value + 10)
+}
+
+fn Err(value: Int) -> Int {
+    return (value + 20)
+}
+
+fn run() {
+    print(Ok(1))
+    print(Err(2))
+    wrapped :: Wrapped.Val(7)
+    if wrapped == {
+        .Val(value) -> { print(value) }
+        .Ok(value) -> { print(value) }
+        .Err(value) -> { print(value) }
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("tir_contextual_result_names", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "11\n22\n7\n");
 }
 
 /// c109 Phase 25: a STATIC constructor `Type.new(args)` (D-NARG1, 63_named_args). `new`

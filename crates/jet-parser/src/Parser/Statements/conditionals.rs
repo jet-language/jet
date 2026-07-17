@@ -6,8 +6,6 @@ fn leading_dot_variant(kind: &TokKind) -> Option<String> {
             Some(name.clone())
         }
         TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
-        TokKind::KwOk => Some(Syntax::LIT_OK.to_string()),
-        TokKind::KwErr => Some(Syntax::LIT_ERR.to_string()),
         _ => None,
     }
 }
@@ -844,25 +842,7 @@ impl<'a> Parser<'a> {
                             (vec![], variant_span.end)
                         };
                         let pat_span = Span::new(dot_span.start, end);
-                        let one_binding = bindings.first().map(|slot| {
-                            slot.as_bind().unwrap_or(Syntax::PAT_WILDCARD_SLOT).to_string()
-                        });
-                        let pattern = match variant.as_str() {
-                            name if name == Syntax::LIT_NULL && bindings.is_empty() => Pattern::Absent(pat_span),
-                            name if name == Syntax::LIT_VALUE && bindings.len() == 1 => Pattern::Present {
-                                binding: one_binding.unwrap(),
-                                span: pat_span,
-                            },
-                            name if name == Syntax::LIT_OK && bindings.len() == 1 => Pattern::Ok {
-                                binding: one_binding.unwrap(),
-                                span: pat_span,
-                            },
-                            name if name == Syntax::LIT_ERR && bindings.len() == 1 => Pattern::Err {
-                                binding: one_binding.unwrap(),
-                                span: pat_span,
-                            },
-                            _ => Pattern::Variant { variant, bindings, span: pat_span },
-                        };
+                        let pattern = Pattern::Variant { variant, bindings, span: pat_span };
                         Expr::PatternTest {
                             subject: Box::new(subject.clone()),
                             pattern,

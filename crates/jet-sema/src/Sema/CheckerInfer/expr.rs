@@ -136,6 +136,31 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
+        // D-SHAPE3b: `Ok`/`Err` are contextual identifiers, not reserved words.
+        // A user function wins; otherwise the canonical one-argument spelling
+        // reuses the existing Result AST nodes and diagnostics.
+        let contextual_result = match &mut *e {
+            Expr::Call(call)
+                if !self.funcs.contains_key(&call.name)
+                    && matches!(call.name.as_str(), name if name == Syntax::LIT_OK || name == Syntax::LIT_ERR)
+                    && call.args.len() == 1
+                    && call.args[0].label.is_none() =>
+            {
+                let is_ok = call.name == Syntax::LIT_OK;
+                let arg = call.args.pop().unwrap().expr;
+                let span = Span::new(call.name_span.start, arg.span().end);
+                Some(if is_ok {
+                    Expr::Ok(Box::new(arg), span)
+                } else {
+                    Expr::Err(Box::new(arg), span)
+                })
+            }
+            _ => None,
+        };
+        if let Some(replacement) = contextual_result {
+            *e = replacement;
+        }
+
         // D-SHAPE3b: leading-dot Optional/Result variants are contextual forms.
         // Rewrite them to the existing canonical AST nodes only when the expected
         // wrapper type is known; every downstream pass then reuses one mechanism.

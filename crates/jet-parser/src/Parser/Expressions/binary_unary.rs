@@ -35,8 +35,6 @@ fn leading_dot_variant(kind: &TokKind) -> Option<String> {
             Some(name.clone())
         }
         TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
-        TokKind::KwOk => Some(Syntax::LIT_OK.to_string()),
-        TokKind::KwErr => Some(Syntax::LIT_ERR.to_string()),
         _ => None,
     }
 }

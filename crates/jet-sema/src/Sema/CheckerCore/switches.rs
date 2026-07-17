@@ -4,6 +4,56 @@ use crate::Sema::Diagnostics::{missing_arms_text, missing_pattern_coverage, patt
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
+
+pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &Type) {
+    if let Pattern::Or(alts, _) = pattern {
+        for alt in alts {
+            normalize_contextual_pattern(alt, subject_ty);
+        }
+        return;
+    }
+    let Pattern::Variant {
+        variant,
+        bindings,
+        span,
+    } = pattern
+    else {
+        return;
+    };
+    let binding = || {
+        bindings
+            .first()
+            .map(|slot| {
+                slot.as_bind()
+                    .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
+                    .to_string()
+            })
+    };
+    let replacement = match (subject_ty, variant.as_str(), bindings.len()) {
+        (Type::Option(_), name, 0) if name == Syntax::LIT_NULL => {
+            Some(Pattern::Absent(*span))
+        }
+        (Type::Option(_), name, 1) if name == Syntax::LIT_VALUE => {
+            Some(Pattern::Present {
+                binding: binding().unwrap(),
+                span: *span,
+            })
+        }
+        (Type::Result { .. }, name, 1) if name == Syntax::LIT_OK => Some(Pattern::Ok {
+            binding: binding().unwrap(),
+            span: *span,
+        }),
+        (Type::Result { .. }, name, 1) if name == Syntax::LIT_ERR => Some(Pattern::Err {
+            binding: binding().unwrap(),
+            span: *span,
+        }),
+        _ => None,
+    };
+    if let Some(replacement) = replacement {
+        *pattern = replacement;
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn check_condition_with_bindings(
             &mut self,
@@ -78,6 +128,13 @@ impl<'a> Checker<'a> {
                             single_use_span: None,
                         },
                     );
+                }
+            }
+            if let Some(st) = &subj_ty {
+                for arm in arms.iter_mut() {
+                    if let Expr::PatternTest { pattern, .. } = &mut arm.cond {
+                        normalize_contextual_pattern(pattern, st);
+                    }
                 }
             }
             let all_pattern = subj_ty.is_some()

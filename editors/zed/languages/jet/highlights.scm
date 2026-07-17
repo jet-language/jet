@@ -105,8 +105,6 @@
 
 ; literal: Err None Ok Val false true
 [
-  "Err"
-  "Ok"
   "false"
   "true"
 ] @constant.builtin

@@ -6,8 +6,6 @@ fn leading_dot_variant(kind: &TokKind) -> Option<String> {
             Some(name.clone())
         }
         TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
-        TokKind::KwOk => Some(Syntax::LIT_OK.to_string()),
-        TokKind::KwErr => Some(Syntax::LIT_ERR.to_string()),
         _ => None,
     }
 }
@@ -234,26 +232,6 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     return Ok(Some(Pattern::Absent(span)));
                 }
-                TokKind::KwOk => {
-                    let start = self.bump().span;
-                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_OK))?;
-                    let (binding, binding_span) = self.expect_ident(&format!("inside `{}(...)`", Syntax::LIT_OK))?;
-                    self.expect(TokKind::RParen, &format!("after the binding in `{}(...)`", Syntax::LIT_OK))?;
-                    return Ok(Some(Pattern::Ok {
-                        binding,
-                        span: Span::new(start.start, binding_span.end),
-                    }));
-                }
-                TokKind::KwErr => {
-                    let start = self.bump().span;
-                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_ERR))?;
-                    let (binding, binding_span) = self.expect_ident(&format!("inside `{}(...)`", Syntax::LIT_ERR))?;
-                    self.expect(TokKind::RParen, &format!("after the binding in `{}(...)`", Syntax::LIT_ERR))?;
-                    return Ok(Some(Pattern::Err {
-                        binding,
-                        span: Span::new(start.start, binding_span.end),
-                    }));
-                }
                 TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
                     let start = self.bump().span;
                     self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
@@ -451,25 +429,7 @@ impl<'a> Parser<'a> {
                         (vec![], variant_span.end)
                     };
                     let span = Span::new(span_start, end);
-                    let one_binding = || bindings.first().map(|slot| {
-                        slot.as_bind().unwrap_or(Syntax::PAT_WILDCARD_SLOT).to_string()
-                    });
-                    let base = match variant.as_str() {
-                        name if name == Syntax::LIT_NULL && bindings.is_empty() => Pattern::Absent(span),
-                        name if name == Syntax::LIT_VALUE && bindings.len() == 1 => Pattern::Present {
-                            binding: one_binding().unwrap(),
-                            span,
-                        },
-                        name if name == Syntax::LIT_OK && bindings.len() == 1 => Pattern::Ok {
-                            binding: one_binding().unwrap(),
-                            span,
-                        },
-                        name if name == Syntax::LIT_ERR && bindings.len() == 1 => Pattern::Err {
-                            binding: one_binding().unwrap(),
-                            span,
-                        },
-                        _ => Pattern::Variant { variant, bindings, span },
-                    };
+                    let base = Pattern::Variant { variant, bindings, span };
                     if matches!(self.peek().kind, TokKind::Pipe) {
                         let or_start = Span::new(span_start, end);
                         let mut alts = vec![base];

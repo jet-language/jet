@@ -159,8 +159,6 @@ impl<'a> Parser<'a> {
                     | TokKind::KwTrue
                     | TokKind::KwFalse
                     | TokKind::KwNull
-                    | TokKind::KwOk
-                    | TokKind::KwErr
                     | TokKind::KwIt
                     | TokKind::LParen
                     | TokKind::Minus

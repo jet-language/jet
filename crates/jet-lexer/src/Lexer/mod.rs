@@ -51,8 +51,6 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == Syntax::KW_DERIVE => Some(TokKind::KwDerive),
         s if s == Syntax::KW_SELF => Some(TokKind::KwSelf),
         s if s == Syntax::LIT_NULL => Some(TokKind::KwNull),
-        s if s == Syntax::LIT_OK => Some(TokKind::KwOk),
-        s if s == Syntax::LIT_ERR => Some(TokKind::KwErr),
         s if s == Syntax::KW_IT => Some(TokKind::KwIt),
         s if s == Syntax::KW_CONST => Some(TokKind::KwConst),
         s if s == Syntax::KW_COMPTIME => Some(TokKind::KwComptime),

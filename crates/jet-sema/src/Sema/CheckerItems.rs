@@ -1328,13 +1328,14 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_pattern_test(
         &mut self,
         subject: &mut Box<Expr>,
-        pattern: &Pattern,
+        pattern: &mut Pattern,
         span: Span,
     ) -> HashMap<String, Type> {
         let subj_ty = self.infer(subject);
         let Some(st) = subj_ty else {
             return HashMap::new();
         };
+        super::CheckerCore::normalize_contextual_pattern(pattern, &st);
         let bindings = self.validate_pattern(&st, pattern, span);
         if !matches!(pattern, Pattern::Struct { .. }) {
             self.mark_pattern_subject_moved(subject, &bindings);
