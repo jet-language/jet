@@ -58,6 +58,24 @@ fn err_codes(src: &str) -> Vec<String> {
 }
 
 #[test]
+fn top_level_impl_method_keeps_owned_generic_scope() {
+    let codes = err_codes(
+        r#"
+struct Counter { value: Int }
+
+impl Counter {
+    fn identity<T>(value: ^T) -> T {
+        return value
+    }
+}
+
+fn run() {}
+"#,
+    );
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
 fn must_use_fn_ignored_is_e0419() {
     let src = r#"
 @MustUse fn ticket() -> Int {

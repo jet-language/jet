@@ -1259,6 +1259,8 @@ pub(crate) fn check_module_bodies(
                     let own_params = std::mem::take(&mut m.type_params);
                     if i.trait_name.is_none() && own_params.is_empty() {
                         m.type_params = owner_params.cloned().unwrap_or_default();
+                    } else {
+                        m.type_params = own_params.clone();
                     }
                     diags.extend(check_func_body_bundle(
                         m,
