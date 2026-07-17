@@ -1278,11 +1278,87 @@ mod tests {
         assert!(list_checked(&roots).unwrap().is_empty());
         assert!(closure_graph(&roots).unwrap().records.is_empty());
         assert!(find_by_reference(&roots, "path:late-ingest").is_none());
+        assert!(
+            find_verified_by_reference(&roots, "path:late-ingest", &test_expectation(&src))
+                .unwrap()
+                .is_none()
+        );
+        assert!(!roots.root.join("leases").exists());
 
         fs::create_dir_all(&src).unwrap();
         fs::write(src.join("payload"), "now-real").unwrap();
         let ingested = ingest_tree(&roots, &request(src)).unwrap();
-        assert_eq!(find_by_reference(&roots, "path:late-ingest"), Some(ingested.entry));
+        assert_eq!(
+            find_by_reference(&roots, "path:late-ingest"),
+            Some(ingested.entry.clone())
+        );
+        let expectation = test_expectation(Path::new(&ingested.entry.out));
+        let hit = find_verified_by_reference(&roots, "path:late-ingest", &expectation)
+            .unwrap()
+            .expect("retry must publish one verified cache hit");
+        assert_eq!(hit.entry, ingested.entry);
+    }
+
+    #[test]
+    fn ingest_child_replaced_after_copy_is_typed_atomic_and_retryable() {
+        let (roots, _g) = temp_roots();
+        let src = roots.root.join("racing-tree");
+        let replaced = src.join("replaced-after-copy");
+        let replacement = roots.root.join("replacement");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(&replaced, "first").unwrap();
+        fs::write(&replacement, "later").unwrap();
+        fs::write(src.join("stable"), "stable").unwrap();
+        let request = |src: PathBuf| IngestRequest {
+            name: "child-race".into(),
+            version: "1".into(),
+            reference: "path:child-race".into(),
+            cache_identity: test_identity(),
+            references: Vec::new(),
+            outputs: BTreeMap::from([("out".into(), src)]),
+            signature: String::new(),
+            provenance: String::new(),
+            platform_artifact_kind: String::new(),
+        };
+        let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook_fired = fired.clone();
+        let hook_replaced = replaced.clone();
+        let hook_replacement = replacement.clone();
+
+        let attempted = super::Ingest::with_after_child_copy_hook(
+            move |copied| {
+                if copied == hook_replaced
+                    && !hook_fired.swap(true, std::sync::atomic::Ordering::SeqCst)
+                {
+                    #[cfg(not(unix))]
+                    fs::remove_file(&hook_replaced).unwrap();
+                    fs::rename(&hook_replacement, &hook_replaced).unwrap();
+                }
+            },
+            || ingest_tree(&roots, &request(src.clone())),
+        );
+        assert!(fired.load(std::sync::atomic::Ordering::SeqCst));
+        let error = attempted.expect_err("source mutation must not return a success receipt");
+        assert!(matches!(&error, IngestError::Mutated(_)), "{error:?}");
+        assert_eq!(error.code(), "E1315");
+        assert!(list_checked(&roots).unwrap().is_empty());
+        assert!(closure_graph(&roots).unwrap().records.is_empty());
+        assert!(find_by_reference(&roots, "path:child-race").is_none());
+        assert!(
+            find_verified_by_reference(&roots, "path:child-race", &test_expectation(&src))
+                .unwrap()
+                .is_none()
+        );
+        assert!(!roots.root.join("leases").exists());
+
+        fs::write(&replaced, "first").unwrap();
+        let ingested = ingest_tree(&roots, &request(src)).unwrap();
+        assert_eq!(list_checked(&roots).unwrap(), vec![ingested.entry.clone()]);
+        let expectation = test_expectation(Path::new(&ingested.entry.out));
+        let hit = find_verified_by_reference(&roots, "path:child-race", &expectation)
+            .unwrap()
+            .expect("retry must publish one verified cache hit");
+        assert_eq!(hit.entry, ingested.entry);
     }
 
     #[test]
@@ -1391,9 +1467,10 @@ mod tests {
         let out = roots.root.join("src-primary");
         let dev = roots.root.join("src-dev");
         fs::create_dir_all(&out).unwrap();
-        fs::create_dir_all(&dev).unwrap();
         fs::write(out.join("payload"), "primary").unwrap();
-        fs::write(dev.join("payload"), "development").unwrap();
+        fs::write(&dev, "development").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("payload", out.join("payload-link")).unwrap();
         let outputs = BTreeMap::from([("out".to_string(), out), ("dev".to_string(), dev)]);
         let ingested = ingest_tree(
             &roots,
@@ -1412,9 +1489,11 @@ mod tests {
         .unwrap();
         let dev_digest = ingested.entry.named_outputs.get("dev").unwrap();
         let installed = roots.hangar_dir().join("objects").join(dev_digest);
+        assert_eq!(fs::read_to_string(&installed).unwrap(), "development");
+        #[cfg(unix)]
         assert_eq!(
-            fs::read_to_string(installed.join("payload")).unwrap(),
-            "development"
+            fs::read_link(Path::new(&ingested.entry.out).join("payload-link")).unwrap(),
+            PathBuf::from("payload")
         );
         let actual = super::super::super::Envelope::try_output_hash_of(&installed.to_string_lossy())
             .unwrap();

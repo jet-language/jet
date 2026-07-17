@@ -38,6 +38,57 @@ fn hangar_ingest_path_law_reserved_is_e1299() {
 }
 
 #[test]
+fn hangar_ingest_missing_output_is_atomic_and_retryable() {
+    let root = Scratch::new("hangar-v2-missing-root");
+    let proj = Scratch::new("hangar-v2-missing-proj");
+    let source = root.path.join("late-output");
+    let ingest = || {
+        jetpack()
+            .args([
+                "hangar",
+                "ingest",
+                source.to_str().unwrap(),
+                "--name",
+                "late",
+                "--no-color",
+            ])
+            .current_dir(&proj.path)
+            .env("JETPACK_ROOT", &root.path)
+            .output()
+            .unwrap()
+    };
+
+    let failed = ingest();
+    assert_eq!(failed.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("error[E1315]"), "{stderr}");
+    assert!(stderr.contains("does not exist"), "{stderr}");
+    assert!(
+        !stderr.contains("ingested"),
+        "failure emitted a success receipt: {stderr}"
+    );
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    assert!(jetpack::Store::list_checked(&roots).unwrap().is_empty());
+    assert!(jetpack::Store::closure_graph(&roots).unwrap().records.is_empty());
+    assert!(!root.path.join("leases").exists());
+
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("payload"), "now-real").unwrap();
+    let retried = ingest();
+    assert!(
+        retried.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&retried.stderr)
+    );
+    assert!(String::from_utf8_lossy(&retried.stderr).contains("ingested"));
+    assert_eq!(jetpack::Store::list_checked(&roots).unwrap().len(), 1);
+}
+
+#[test]
 fn hangar_ingest_verify_and_dedupe_roundtrip() {
     let root = Scratch::new("hangar-v2-ingest-root");
     let proj = Scratch::new("hangar-v2-ingest-proj");

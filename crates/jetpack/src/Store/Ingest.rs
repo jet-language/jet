@@ -216,6 +216,32 @@ fn windows_ingest_contract() -> WindowsIngestContract {
 
 type StableMetaIdentity = (u64, u64, u64, u32);
 
+#[cfg(test)]
+thread_local! {
+    static AFTER_CHILD_COPY_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(&Path)>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(super) fn with_after_child_copy_hook<T>(
+    hook: impl FnMut(&Path) + 'static,
+    operation: impl FnOnce() -> T,
+) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            AFTER_CHILD_COPY_HOOK.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    AFTER_CHILD_COPY_HOOK.with(|slot| {
+        assert!(slot.borrow().is_none(), "after-child-copy hook already installed");
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
+    let _reset = Reset;
+    operation()
+}
+
 #[cfg(any(test, windows))]
 fn windows_stable_identity(
     volume: Option<u32>,
@@ -591,15 +617,33 @@ fn valid_output_name(name: &str) -> bool {
     component == path.as_os_str() && components.next().is_none()
 }
 
+fn source_metadata(path: &Path) -> Result<fs::Metadata, IngestError> {
+    fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            IngestError::Io(format!("output `{}` does not exist", path.display()))
+        } else {
+            IngestError::Io(format!(
+                "cannot inspect output `{}`: {error}",
+                path.display()
+            ))
+        }
+    })
+}
+
 fn reject_semantic_xattrs_tree(root: &Path) -> Result<(), IngestError> {
     fn walk(path: &Path) -> Result<(), IngestError> {
-        let meta = fs::symlink_metadata(path).map_err(|e| IngestError::Io(e.to_string()))?;
+        let meta = source_metadata(path)?;
         super::super::Envelope::check_xattrs(path, false).map_err(IngestError::Invalid)?;
         if meta.file_type().is_symlink() {
             return Ok(());
         }
         if meta.is_dir() {
-            for ent in fs::read_dir(path).map_err(|e| IngestError::Io(e.to_string()))? {
+            for ent in fs::read_dir(path).map_err(|error| {
+                IngestError::Io(format!(
+                    "cannot read output directory `{}`: {error}",
+                    path.display()
+                ))
+            })? {
                 let ent = ent.map_err(|e| IngestError::Io(e.to_string()))?;
                 walk(&ent.path())?;
             }
@@ -613,7 +657,7 @@ fn reject_semantic_xattrs_tree(root: &Path) -> Result<(), IngestError> {
 /// artifact kind opted in. Security/quarantine names stay excluded.
 fn copy_semantic_xattrs_tree(src_root: &Path, dst_root: &Path) -> Result<(), IngestError> {
     fn walk(src: &Path, dst: &Path) -> Result<(), IngestError> {
-        let meta = fs::symlink_metadata(src).map_err(|e| IngestError::Io(e.to_string()))?;
+        let meta = source_metadata(src)?;
         copy_semantic_xattrs_node(src, dst)?;
         if meta.file_type().is_symlink() {
             return Ok(());
@@ -852,8 +896,48 @@ fn set_xattr_value(_path: &Path, _name: &str, _value: &[u8]) -> Result<(), Inges
     ))
 }
 
+fn directory_snapshot(
+    src: &Path,
+) -> Result<Vec<(std::ffi::OsString, StableMetaIdentity)>, IngestError> {
+    let mut snapshot = Vec::new();
+    let mut path_names = Vec::new();
+    for ent in fs::read_dir(src).map_err(|error| {
+        IngestError::Io(format!(
+            "cannot read output directory `{}`: {error}",
+            src.display()
+        ))
+    })? {
+        let ent = ent.map_err(|error| {
+            IngestError::Io(format!(
+                "cannot read output directory `{}`: {error}",
+                src.display()
+            ))
+        })?;
+        let name = ent.file_name();
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt as _;
+            path_names.push(name.as_os_str().as_bytes().to_vec());
+        }
+        #[cfg(not(unix))]
+        path_names.push(name.to_string_lossy().as_bytes().to_vec());
+        let identity = stable_meta_identity(&source_metadata(&ent.path())?)?;
+        snapshot.push((name, identity));
+    }
+    for name in &path_names {
+        if let Err(error) = super::super::Envelope::validate_path_component(name) {
+            return Err(IngestError::PathLaw(error));
+        }
+    }
+    if let Err(error) = super::super::Envelope::reject_casefold_collisions(&path_names) {
+        return Err(IngestError::PathLaw(error));
+    }
+    snapshot.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    Ok(snapshot)
+}
+
 fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
-    let meta = fs::symlink_metadata(src).map_err(|e| IngestError::Io(e.to_string()))?;
+    let meta = source_metadata(src)?;
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt as _;
@@ -867,31 +951,29 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
     let before = stable_meta_identity(&meta)?;
     if meta.file_type().is_dir() {
         fs::create_dir_all(dst)?;
-        let mut names = Vec::new();
-        for ent in fs::read_dir(src).map_err(|e| IngestError::Io(e.to_string()))? {
-            let ent = ent.map_err(|e| IngestError::Io(e.to_string()))?;
-            let name = ent.file_name();
-            #[cfg(unix)]
-            {
-                use std::os::unix::ffi::OsStrExt as _;
-                let bytes = name.as_os_str().as_bytes().to_vec();
-                if let Err(err) = super::super::Envelope::validate_path_component(&bytes) {
-                    return Err(IngestError::PathLaw(err));
+        let children = directory_snapshot(src)?;
+        for (name, _) in &children {
+            let child = src.join(name);
+            copy_nofollow_tree(&child, &dst.join(name))?;
+            #[cfg(test)]
+            AFTER_CHILD_COPY_HOOK.with(|slot| {
+                if let Some(hook) = slot.borrow_mut().as_mut() {
+                    hook(&child);
                 }
-                names.push(bytes);
-            }
-            #[cfg(not(unix))]
-            {
-                let bytes = name.to_string_lossy().as_bytes().to_vec();
-                if let Err(err) = super::super::Envelope::validate_path_component(&bytes) {
-                    return Err(IngestError::PathLaw(err));
-                }
-                names.push(bytes);
-            }
-            copy_nofollow_tree(&ent.path(), &dst.join(&name))?;
+            });
         }
-        if let Err(err) = super::super::Envelope::reject_casefold_collisions(&names) {
-            return Err(IngestError::PathLaw(err));
+        let after_children = directory_snapshot(src).map_err(|error| {
+            IngestError::Mutated(format!(
+                "`{}` directory entries changed during ingest: {}",
+                src.display(),
+                error.what()
+            ))
+        })?;
+        if children != after_children {
+            return Err(IngestError::Mutated(format!(
+                "`{}` directory entries changed during ingest",
+                src.display()
+            )));
         }
     } else if meta.file_type().is_symlink() {
         let target = fs::read_link(src).map_err(|e| IngestError::Io(e.to_string()))?;
@@ -913,7 +995,16 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
             src.display()
         )));
     }
-    let after = fs::symlink_metadata(src).map_err(|e| IngestError::Io(e.to_string()))?;
+    let after = fs::symlink_metadata(src).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            IngestError::Mutated(format!("`{}` disappeared during ingest", src.display()))
+        } else {
+            IngestError::Io(format!(
+                "cannot re-inspect output `{}`: {error}",
+                src.display()
+            ))
+        }
+    })?;
     if before != stable_meta_identity(&after)? {
         return Err(IngestError::Mutated(format!(
             "`{}` changed during ingest",
