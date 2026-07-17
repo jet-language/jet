@@ -115,6 +115,44 @@ fn imported_soft_public_declared_types_warn_once_per_occurrence() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn local_soft_public_types_win_over_imported_name_collisions() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_soft_public_type_collision_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("library.jet"),
+        "pub struct _Thing { pub value: Int }\npub trait _Shape { fn size(self) -> Int }\n",
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    fs::write(
+        &main,
+        "use \"library\"\nstruct _Thing { value: Int }\ntrait _Shape { fn size(self) -> Int }\nfn keep<T: _Shape>(value: ^_Thing) -> _Thing { return value }\nfn run() {}\n",
+    )
+    .unwrap();
+
+    let diagnostics = jet::check_with_path(main.to_str().unwrap());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "L0601")
+            .count(),
+        0,
+        "{diagnostics:#?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Imported public adapters may carry core.data containers across a module
 /// boundary. Their signatures are ordinary TIR types; codegen must not fall out
 /// of the typed-IR seam merely because the row is dynamic or generic.

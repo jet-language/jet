@@ -69,12 +69,21 @@ impl<'a> Checker<'a> {
             let (owner, public_name) = if let Some((alias, leaf)) = name.rsplit_once('.') {
                 (self.imports.get(alias).copied(), leaf)
             } else {
-                let owner = self.modules.and_then(|modules| {
-                    self.imports.values().copied().find(|&idx| {
-                        modules[idx].registry.contains(name)
-                            || modules[idx].trait_reg.is_trait_name(name)
+                let locally_owned = self.registry.contains(name)
+                    || self.modules.is_some_and(|modules| {
+                        modules[self.module_idx].type_pub.contains_key(name)
+                            && modules[self.module_idx].trait_reg.is_trait_name(name)
+                    });
+                let owner = if locally_owned {
+                    Some(self.module_idx)
+                } else {
+                    self.modules.and_then(|modules| {
+                        self.imports.values().copied().find(|&idx| {
+                            modules[idx].registry.contains(name)
+                                || modules[idx].trait_reg.is_trait_name(name)
+                        })
                     })
-                });
+                };
                 (owner, name)
             };
             if Syntax::classify_identifier(public_name) != Syntax::IdentifierClass::SoftPublic {
