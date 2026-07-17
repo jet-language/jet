@@ -221,9 +221,10 @@ pub const ATTR_REDACT: &str = "Redact";
 /// opaque sema-only handle; erased in codegen (I3).
 pub const TXN_HANDLE_TYPE: &str = "Transaction";
 
-/// S14 / D-CASING1 follow-on (2026-06-21): the retired lowercase spellings of
-/// the three marker keywords, recognized only for teaching errors that point at
-/// the `@Test` / `@Pure` / `@Todo` marker forms.
+/// S14 / D-CASING1 follow-on (2026-06-21): retired lowercase spellings retained
+/// only for targeted diagnostics. `test` and `todo` teach their marker forms;
+/// both `pure` and the former `@Pure` marker are retired by D-SHAPE8=A, whose
+/// canonical explicit-purity spelling is `--[]->`.
 pub const FOREIGN_TEST: &str = "test";
 pub const FOREIGN_PURE: &str = "pure";
 pub const FOREIGN_TODO: &str = "todo";

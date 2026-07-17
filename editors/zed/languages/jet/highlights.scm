@@ -30,7 +30,7 @@
 (generic_type base: (type_identifier) @type)
 (capability_sigil) @operator
 
-; Applied rules (@Pure, @[Codable], @Caps(...), @Grant, ...)
+; Applied rules (@Test, @[Codable], @Caps(...), @Grant, ...)
 (attribute (marker_name) @attribute)
 (attribute_list (marker_name) @attribute)
 (lower_marker_name) @attribute
