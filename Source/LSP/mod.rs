@@ -128,6 +128,18 @@ mod tests {
     }
 
     #[test]
+    fn rename_uses_semantic_category_for_uncased_unicode_names() {
+        let src = "fn 日本語() {}\nfn run() { 日本語(); }\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (tokens, _) = crate::Lexer::lex(src);
+        assert!(compute_rename(&db, &tokens, "test.jet", 3, "new_name").is_ok());
+        let err = compute_rename(&db, &tokens, "test.jet", 3, "BadName").unwrap_err();
+        assert!(err.contains("bad_name"), "{err}");
+    }
+
+    #[test]
     fn rename_preserves_case_for_all_declaration_families() {
         let src = r#"UserId :: distinct Int
 alias Count = Int

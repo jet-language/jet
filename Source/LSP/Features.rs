@@ -283,12 +283,13 @@ pub(crate) fn compute_rename(
     // Some declaration families are expanded before SemIndex sees the checked
     // bundle (protocols, derives, state/unit sugar). Their already-validated
     // source spelling still determines the strict two-tier category exactly.
-    let source_case = if Syntax::name_has_case(name, Syntax::NameCase::Pascal) {
-        Some(("type-like name", Syntax::NameCase::Pascal))
-    } else if Syntax::name_has_case(name, Syntax::NameCase::Snake) {
-        Some(("value-like name", Syntax::NameCase::Snake))
-    } else {
-        None
+    let source_case = match (
+        Syntax::name_has_case(name, Syntax::NameCase::Pascal),
+        Syntax::name_has_case(name, Syntax::NameCase::Snake),
+    ) {
+        (true, false) => Some(("type-like name", Syntax::NameCase::Pascal)),
+        (false, true) => Some(("value-like name", Syntax::NameCase::Snake)),
+        _ => None,
     };
     if let Some((category, case)) = source_case.or(indexed_case) {
         if !Syntax::name_has_case(new_name, case) {
