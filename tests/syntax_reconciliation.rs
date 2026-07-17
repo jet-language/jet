@@ -585,6 +585,23 @@ fn card_511_census_matches_current_law() {
     }
 }
 
+#[test]
+fn module_internal_is_discovery_not_access_control() {
+    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs")
+        .expect("read syntax registry");
+    let config = fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs")
+        .expect("read module syntax registry");
+    let decisions = fs::read_to_string("docs/spec/syntax-decisions.md")
+        .expect("read syntax decisions");
+
+    assert!(syntax.contains("D-SHAPE-MODULEINTERNAL1=A"));
+    assert!(config.contains("D-SHAPE-MODULEINTERNAL1=A"));
+    assert!(config.contains("pub const MODULE_INTERNAL_PREFIX: &str = \"_\";"));
+    assert!(decisions.contains("`use project._name` remains allowed"));
+    assert!(decisions.contains("underscore changes discovery, not access"));
+    assert!(!decisions.contains("| D-SHAPE-MODULEINTERNAL1 |"));
+}
+
 fn scan_old_binding_codes(path: &Path, text: &str, failures: &mut Vec<String>) {
     for (idx, line) in text.lines().enumerate() {
         for code in OLD_BINDING_CODES {

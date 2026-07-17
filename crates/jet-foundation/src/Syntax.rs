@@ -35,6 +35,9 @@
 // D-SHAPE-INTERNAL1=A and D-SHAPE-DUNDER2=A add no token: the canonical
 // IdentifierClass prefix policy makes `_name` soft-public and reserves every
 // source-written `__name` for Jet and generated tooling.
+// D-SHAPE-MODULEINTERNAL1=A adds no token: MODULE_INTERNAL_PREFIX is the
+// automatic-discovery opt-out for `module _name`; explicit imports still use
+// ordinary resolution and access rules.
 // D-SHAPE-CASE1=C owns the identifier category table and its two enforced
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a

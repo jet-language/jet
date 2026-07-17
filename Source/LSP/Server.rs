@@ -1854,6 +1854,10 @@ fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, S
 }
 
 fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    // D-SHAPE-MODULEINTERNAL1=A is declaration-based, not filename-based.
+    // Keep raw source visible here; semantic module consumers apply
+    // ModuleDecl::is_auto_discovered, while an explicitly imported `_name`
+    // must remain navigable.
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

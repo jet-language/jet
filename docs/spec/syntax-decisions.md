@@ -764,9 +764,14 @@ default; `pub` exports. `@PubFile` flips a file to public-by-default with
 package/workspace only (other `pub(...)` forms E0411). Cross-file private
 access E0605/E0609.
 
-**U3 — Module declarations**: `module name { … }` is the single outermost
-construct; multiple per file; leading `_` disables a module. Modules never
-import each other — they contribute to the merged whole. Reserved
+**U3 / D-SHAPE-MODULEINTERNAL1=A — Module declarations and internal discovery**
+*(ratified 2026-07-15, card #602)*: `module name { … }` is the single outermost
+construct; multiple may live in one file. Automatic discovery skips a module
+whose declared name begins with one underscore. An explicit
+`use project._name` remains allowed under ordinary visibility rules: the
+underscore changes discovery, not access, and tools report it as skipped rather
+than disabled. Renaming `_name` to `name` opts it back into discovery. Modules
+never import each other — they contribute to the merged whole. Reserved
 namespaces currently live for Jetpack/jetos: `env` (`Env`), `system`
 (`System`), OCI/jetos `image` (`Image`), `workspace`. **D-JPK-MODBODY1**:
 role namespaces live in the declaration
@@ -4588,10 +4593,7 @@ implementation milestone is pending.
 
 #### Ready for one decision now
 
-
-| ID | Question | Needed by |
-| --- | -------- | --------- |
-| D-SHAPE-MODULEINTERNAL1 | how `module _name` participates in discovery | **Epoch 3** — Tower #602 |
+*(none)*
 
 Blocked follow-ups stay on Tower planning cards and remain outside the owner
 queue. They enter this table only after their blockers resolve and the ballot

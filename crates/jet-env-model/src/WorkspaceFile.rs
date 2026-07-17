@@ -85,9 +85,9 @@ fn declares_workspace_module(src: &str) -> bool {
     let Ok(program) = crate::Parser::parse(&toks) else {
         return false;
     };
-    program.items.iter().any(
-        |item| matches!(item, Item::Module(m) if m.name == Syntax::NS_WORKSPACE && !m.disabled),
-    )
+    program.items.iter().any(|item| {
+        matches!(item, Item::Module(m) if m.name == Syntax::NS_WORKSPACE && m.is_auto_discovered())
+    })
 }
 
 /// E1239: two or more files declare `module workspace` — the index must be
@@ -148,7 +148,7 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
         .iter()
         .find_map(|item| {
             if let Item::Module(m) = item {
-                if m.name == Syntax::NS_WORKSPACE && !m.disabled {
+                if m.name == Syntax::NS_WORKSPACE && m.is_auto_discovered() {
                     return Some(m);
                 }
             }
@@ -551,8 +551,9 @@ module workspace {
     }
 
     #[test]
-    fn disabled_workspace_module_is_skipped() {
-        // A disabled module doesn't count as the workspace declaration.
+    fn internal_workspace_module_is_skipped_by_discovery() {
+        // An internal module doesn't count as the discovered workspace
+        // declaration.
         let src = "module _workspace { members: [] }\n";
         let d = eval_err(src);
         assert_eq!(d.code, "E0995");

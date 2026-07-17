@@ -1930,9 +1930,11 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   subtraction; this is a parser rule (`expect_dashed_name`), not a lexer or
   expression-grammar change. Code identifiers (variables, fields, types,
   functions) stay plain `ident`. No leading, trailing, or doubled hyphen.
-- **Disable with a leading underscore:** `module _name { … }` parses with
-  `disabled = true` (the name begins with `_`); it is not discovered or merged
-  (U3, one-character reversible toggle).
+- **Internal with a leading underscore:** automatic discovery skips
+  `module _name { … }` based on the declared name, not its filename or scan
+  order. An explicit `use project._name` remains allowed under ordinary
+  visibility rules. The underscore changes discovery, not access; rename it to
+  `module name` to opt back in (D-SHAPE-MODULEINTERNAL1=A).
 - **Active reserved namespaces** are `env` → `Env` (dev environment),
   `system` → `System` (jetos host), and `image` → `Image` (OCI container image
   or jetos installer input).

@@ -425,7 +425,7 @@ fn generation_source_closure(config: &Path) -> std::io::Result<Vec<u8>> {
         let Item::Module(module) = item else {
             continue;
         };
-        if module.disabled {
+        if !module.is_auto_discovered() {
             continue;
         }
         for import in &module.imports {

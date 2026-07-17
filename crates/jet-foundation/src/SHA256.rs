@@ -188,6 +188,8 @@ fn collect_jet_files(
     root: &std::path::Path,
     out: &mut Vec<(String, Vec<u8>)>,
 ) {
+    // Internal modules remain hash inputs: D-SHAPE-MODULEINTERNAL1=A changes
+    // automatic membership, not explicit imports or source-tree identity.
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };

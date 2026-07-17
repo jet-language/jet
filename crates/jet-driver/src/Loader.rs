@@ -1473,6 +1473,17 @@ mod stale_manifest_name_tests {
     }
 
     #[test]
+    fn explicit_import_keeps_internal_module_available() {
+        let dir = tempdir("internal-module");
+        let entry = dir.join("main.jet");
+        fs::write(&entry, "use _bench\nfn run() {}\n").unwrap();
+        fs::write(dir.join("_bench.jet"), "pub fn fixture() {}\n").unwrap();
+
+        let bundle = load_entry(entry.to_str().unwrap()).unwrap();
+        assert!(bundle.modules.iter().any(|module| module.alias == "_bench"));
+    }
+
+    #[test]
     fn message_names_e1226_and_both_filenames() {
         let dir = tempdir("message");
         fs::write(dir.join("pack.jet"), "").unwrap();

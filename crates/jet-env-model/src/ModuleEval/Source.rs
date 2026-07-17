@@ -234,7 +234,7 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
     let mut out = Vec::new();
     for item in &root.items {
         let Item::Module(m) = item else { continue };
-        if m.disabled {
+        if !m.is_auto_discovered() {
             continue;
         }
         for imp in &m.imports {
@@ -325,7 +325,7 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
         let is_root = idx == 0;
         for item in &unit.items {
             let Item::Module(m) = item else { continue };
-            if m.disabled {
+            if !m.is_auto_discovered() {
                 continue;
             }
             let mut map = BTreeMap::new();

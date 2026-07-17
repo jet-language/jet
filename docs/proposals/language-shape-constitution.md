@@ -221,12 +221,9 @@ implementation and views; #532, #605, and #608 remain upstream gates.
 ## Internal names
 
 The useful part of Python's leading underscore is discoverability, not privacy.
-Jet is already private by default. The open decisions separately ask:
-
-- what `_name` tells a reader;
-- who may explicitly access it;
-- who may replace it;
-- how the current underscore module-disable feature is replaced.
+Jet is already private by default. D-SHAPE-INTERNAL1 makes `_name` soft-public,
+D-SHAPE-DUNDER2 reserves `__name` for Jet, and D-SHAPE-MODULEINTERNAL1 makes
+`module _name` opt out of automatic discovery while retaining explicit access.
 
 Hard access control remains a real access-control rule. A naming convention is
 not a security boundary.

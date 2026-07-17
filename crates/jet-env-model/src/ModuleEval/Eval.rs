@@ -59,7 +59,7 @@ pub fn evaluate_modules(
     let mut out = Vec::new();
     for item in items {
         let Item::Module(m) = item else { continue };
-        if m.disabled {
+        if !m.is_auto_discovered() {
             continue;
         }
         out.push(evaluate_module(m, src, base_dir, &funcs)?);

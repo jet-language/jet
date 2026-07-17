@@ -316,7 +316,7 @@ module dev {
         panic!("expected a module item, got {:?}", items[0]);
     };
     assert_eq!(m.name, "dev");
-    assert!(!m.disabled);
+    assert!(m.is_auto_discovered());
     assert_eq!(m.contributions.len(), 1);
     let Contribution {
         namespace, path, ..
@@ -391,7 +391,7 @@ module dev {
 }
 
 #[test]
-fn leading_underscore_disables_module() {
+fn leading_underscore_opts_module_out_of_auto_discovery() {
     let src = r#"
 module _gaming {
     system.gaming: System.{
@@ -404,7 +404,7 @@ module _gaming {
         panic!("expected a module item");
     };
     assert_eq!(m.name, "_gaming");
-    assert!(m.disabled);
+    assert!(!m.is_auto_discovered());
     assert_eq!(m.contributions[0].namespace, Namespace::System);
 }
 

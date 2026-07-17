@@ -227,6 +227,9 @@ fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
 }
 
 fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    // D-SHAPE-MODULEINTERNAL1=A cannot filter files: one file may declare
+    // both ordinary and internal modules, and explicit imports stay visible.
+    // Parsed module graphs use ModuleDecl::is_auto_discovered instead.
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };

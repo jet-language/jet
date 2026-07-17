@@ -144,7 +144,7 @@ module dev {
     }
 
     #[test]
-    fn disabled_module_is_skipped() {
+    fn internal_module_is_skipped_by_automatic_merge() {
         let src = r#"
 module _gaming {
     env.gaming: Env.{

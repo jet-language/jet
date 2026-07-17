@@ -89,9 +89,10 @@ pub const KW_MODULE: &str = "module";
 pub const GENMOD_OPEN: &str = "<"; // reuses OP_LT
 pub const GENMOD_CLOSE: &str = ">"; // reuses OP_GT
 
-/// U3 (ratified 2026-06-16): a leading underscore on a module name disables it
-/// (`module _name { … }` is not discovered or merged). One char, reversible.
-pub const MODULE_DISABLE_PREFIX: &str = "_";
+/// U3 / D-SHAPE-MODULEINTERNAL1=A (ratified 2026-07-15): a leading underscore
+/// keeps `module _name { … }` out of automatic discovery and merge. Explicit
+/// imports remain allowed under ordinary access rules; this is not privacy.
+pub const MODULE_INTERNAL_PREFIX: &str = "_";
 
 /// S84 (ratified 2026-06-16): *dashed names* — the kebab-case naming rule for
 /// package / module / system / image / env **names** (and `from: system.<name>`

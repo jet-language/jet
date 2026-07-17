@@ -209,13 +209,14 @@ pub struct CModule {
     pub span: Span,
 }
 
-/// U3 (unified-ecosystem §4): `module name { contributions… }`. Many modules
-/// may share a file; a leading-`_` name disables one (not discovered/merged).
+/// U3 / D-SHAPE-MODULEINTERNAL1=A: `module name { contributions… }`. Many
+/// modules may share a file; a leading-`_` name opts one out of automatic
+/// discovery/merge without making it inaccessible to an explicit import.
 #[derive(Debug, Clone)]
 pub struct ModuleDecl {
     pub name: String,
     pub name_span: Span,
-    /// True when `name` begins with `_` (U3 one-character disable).
+    /// True when `name` begins with `_` (automatic-discovery opt-out).
     pub disabled: bool,
     /// U8 (unified-ecosystem §2.2): named `sources:` declared inside the module
     /// body, siblings of the contributions. Merged by key across modules (U5).
@@ -229,6 +230,15 @@ pub struct ModuleDecl {
     pub members: Vec<Expr>,
     pub contributions: Vec<Contribution>,
     pub span: Span,
+}
+
+impl ModuleDecl {
+    /// D-SHAPE-MODULEINTERNAL1=A: one predicate for every automatic module
+    /// discovery, merge, graph, and index consumer. Explicit import resolution
+    /// intentionally does not call it.
+    pub fn is_auto_discovered(&self) -> bool {
+        !self.disabled
+    }
 }
 
 /// U8 (unified-ecosystem §2.2): one `name: provider@target` entry in a module's

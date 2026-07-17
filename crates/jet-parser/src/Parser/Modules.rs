@@ -1,8 +1,8 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    /// U3 (unified-ecosystem §4): `module name { … }`. Many modules may share
-    /// a file; a leading-`_` name disables one.
+    /// U3 / D-SHAPE-MODULEINTERNAL1=A: `module name { … }`. Many modules may
+    /// share a file; a leading-`_` name opts one out of automatic discovery.
     ///
     /// D-JPK-MODBODY1=A (ratified 2026-07-02): the canonical role-module form
     /// puts the namespace in the declaration name — `module env.dev { fields }`,
@@ -14,7 +14,7 @@ impl<'a> Parser<'a> {
                                       // S84: module names may be kebab-case (a module is the package the
                                       // payload manifest discovers by name).
         let (name, name_span) = self.expect_dashed_name("for the module name")?;
-        let disabled = name.starts_with('_');
+        let disabled = name.starts_with(Syntax::MODULE_INTERNAL_PREFIX);
         // D-JPK-MODBODY1=A: a dot after the name means a role declaration —
         // the name is a reserved namespace, the segment after the dot the role.
         if matches!(self.peek().kind, TokKind::Dot) {
@@ -85,9 +85,9 @@ impl<'a> Parser<'a> {
         ns_span: Span,
         disabled: bool,
     ) -> Result<ModuleDecl, Diagnostic> {
-        // A leading `_` disables the module (U3) — strip it for the namespace
-        // word: `module _env.dev { … }`.
-        let ns_word = ns_name.trim_start_matches('_');
+        // A leading `_` opts the module out of automatic discovery — strip it
+        // for the namespace word: `module _env.dev { … }`.
+        let ns_word = ns_name.trim_start_matches(Syntax::MODULE_INTERNAL_PREFIX);
         let namespace = match ns_word {
             _ if ns_word == Syntax::NS_ENV => Namespace::Env,
             _ if ns_word == Syntax::NS_SYSTEM => Namespace::System,

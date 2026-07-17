@@ -25,6 +25,9 @@ pub enum DiscoveryError {
 /// if no file declares the module, `DiscoveryError::Ambiguous` if more than
 /// one does.
 pub fn discover_module_in(root: &Path, name: &str) -> Result<PathBuf, DiscoveryError> {
+    // This is an explicit named lookup, so D-SHAPE-MODULEINTERNAL1=A does not
+    // filter `_name`; only callers enumerating modules automatically apply the
+    // ModuleDecl discovery predicate.
     let mut files = Vec::new();
     walk_jet_files(root, &mut files);
     let mut matches: Vec<PathBuf> = Vec::new();
@@ -168,6 +171,13 @@ mod tests {
         assert!(discover_module_in(&dir, "workspace").is_ok());
         assert!(discover_module_in(&dir, "dev").is_ok());
         assert!(discover_module_in(&dir, "laptop").is_ok());
+    }
+
+    #[test]
+    fn explicit_internal_module_lookup_remains_allowed() {
+        let dir = tempdir("explicit-internal");
+        std::fs::write(dir.join("arbitrary.jet"), "module _bench { }\n").unwrap();
+        assert_eq!(discover_module_in(&dir, "_bench").unwrap(), dir);
     }
 
     /// Only `pkg.jet` is reserved: discovery skips it even if it happens to
