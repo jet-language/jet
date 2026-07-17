@@ -66,13 +66,19 @@ fn snake(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
 fn func_names(f: &Func, category: &str, out: &mut Vec<Diagnostic>) {
     snake(&f.name, f.name_span, category, out);
     for p in &f.type_params { pascal(&p.name, p.name_span, "type parameter", out); }
-    for p in &f.params { if p.name != Syntax::KW_SELF { snake(&p.name, p.name_span, "parameter", out); } }
+    for p in &f.params {
+        if p.name != Syntax::KW_SELF { snake(&p.name, p.name_span, "parameter", out); }
+        if let Some(default) = &p.default { expr_names(default, out); }
+    }
     stmt_names(&f.body, out);
 }
 
 fn trait_method_names(m: &TraitMethodSig, out: &mut Vec<Diagnostic>) {
     snake(&m.name, m.name_span, "method", out);
-    for p in &m.params { if p.name != Syntax::KW_SELF { snake(&p.name, p.name_span, "parameter", out); } }
+    for p in &m.params {
+        if p.name != Syntax::KW_SELF { snake(&p.name, p.name_span, "parameter", out); }
+        if let Some(default) = &p.default { expr_names(default, out); }
+    }
     if let Some(body) = &m.default_body { stmt_names(body, out); }
 }
 
@@ -122,7 +128,14 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         Item::Const(c) => snake(&c.name, c.name_span, "constant", out),
         Item::Test(t) => { for p in &t.params { snake(&p.name, p.name_span, "parameter", out); } stmt_names(&t.body, out); }
         Item::Bench(b) => stmt_names(&b.body, out),
-        Item::Module(m) => snake(&m.name, m.name_span, "module", out),
+        Item::Module(m) => {
+            snake(&m.name, m.name_span, "module", out);
+            for source in &m.sources {
+                snake(&source.name, source.name_span, "config name", out);
+            }
+            for import in &m.imports { expr_names(import, out); }
+            for member in &m.members { expr_names(member, out); }
+        }
         Item::CodeModule(m) => {
             snake(&m.name, m.name_span, "module", out);
             if let Some(body) = &m.body { for item in body { item_names(item, traits, out); } }
@@ -267,13 +280,16 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
 }
 
 fn pattern_names(pattern: &Pattern, out: &mut Vec<Diagnostic>) {
-    let span = pattern.span();
     match pattern {
         Pattern::Variant { bindings, .. } => for binding in bindings {
-            if let Some(name) = binding.as_bind() { snake(name, span, "pattern binding", out); }
+            if let (Some(name), Some(span)) = (binding.as_bind(), binding.binding_span()) {
+                snake(name, span, "pattern binding", out);
+            }
         },
-        Pattern::Present { binding, .. } | Pattern::Ok { binding, .. }
-        | Pattern::Err { binding, .. } => snake(binding, span, "pattern binding", out),
+        Pattern::Present { binding, binding_span, .. }
+        | Pattern::Ok { binding, binding_span, .. }
+        | Pattern::Err { binding, binding_span, .. } =>
+            snake(binding, *binding_span, "pattern binding", out),
         Pattern::Or(patterns, _) => for pattern in patterns { pattern_names(pattern, out); },
         Pattern::Struct { fields, .. } => for field in fields {
             match field {

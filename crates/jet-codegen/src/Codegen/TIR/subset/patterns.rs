@@ -165,7 +165,7 @@ pub(crate) fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> bool {
             .all(|s| {
                 matches!(
                     s,
-                    PatSlot::Bind(_) | PatSlot::Wildcard | PatSlot::Range { .. }
+                    PatSlot::Bind { .. } | PatSlot::Wildcard | PatSlot::Range { .. }
                 )
             }),
         Pattern::Or(alts, _) => {
@@ -222,7 +222,7 @@ pub(crate) fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<
     match pattern {
         Pattern::Variant { bindings, .. } => {
             for slot in bindings {
-                if let PatSlot::Bind(name) = slot {
+                if let PatSlot::Bind { name, .. } = slot {
                     locals.insert(name.clone());
                 }
             }

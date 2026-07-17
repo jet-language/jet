@@ -1,5 +1,5 @@
 //! M9.5 differential battery (permanent CI). For each expression, the same
-//! code is evaluated twice — once as `comptime C = e;` (the sema
+//! code is evaluated twice — once as `comptime comptime_value = e;` (the sema
 //! tree-walking interpreter) and once as a runtime `r :: e` (generated
 //! Rust). The program prints both; the two lines MUST be byte-identical.
 //!
@@ -77,16 +77,16 @@ const MODULE_CASES: &[&str] = &[
     // it — `core.text` is the only ratified spelling), so every
     // `text.<method>(...)` call hit E0956. Fixed via `TextLite` (ported
     // verbatim from AOT's `jet_text_*` prelude fns).
-    "use core.text as text\ncomptime C = text.trim(\" hi \")\n\nfn run() {\n    r :: text.trim(\" hi \")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.text as text\ncomptime C = text.upper(\"abc\")\n\nfn run() {\n    r :: text.upper(\"abc\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.text as text\ncomptime C = text.words(\"hello world's foo\")[0]\n\nfn run() {\n    r :: text.words(\"hello world's foo\")[0]\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.text as text\ncomptime C = text.pad_start(\"7\", 3, \"0\")\n\nfn run() {\n    r :: text.pad_start(\"7\", 3, \"0\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\ncomptime comptime_value = text.trim(\" hi \")\n\nfn run() {\n    r :: text.trim(\" hi \")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\ncomptime comptime_value = text.upper(\"abc\")\n\nfn run() {\n    r :: text.upper(\"abc\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\ncomptime comptime_value = text.words(\"hello world's foo\")[0]\n\nfn run() {\n    r :: text.words(\"hello world's foo\")[0]\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\ncomptime comptime_value = text.pad_start(\"7\", 3, \"0\")\n\nfn run() {\n    r :: text.pad_start(\"7\", 3, \"0\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     // core.math: previously only sqrt/floor/ceil/round/abs/pow/min/max/clamp/
     // log2/log10 were dispatched; the rest (trig, checked/saturating/
     // wrapping, gcd/lcm) fell to E0956.
-    "use core.math as math\ncomptime C = math.sin(0.0)\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.math as math\ncomptime C = math.gcd(12, 18)\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.math as math\ncomptime C = math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\ncomptime comptime_value = math.sin(0.0)\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\ncomptime comptime_value = math.gcd(12, 18)\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\ncomptime comptime_value = math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 3: `core.url` (D-URL1=A), ported verbatim from AOT's
     // `jet_url_*` (`UrlMime.rs` + `MathRandomTime.rs`, see `UrlLite.rs`).
     // Only the plain-`String`-returning free functions go through this
@@ -95,10 +95,10 @@ const MODULE_CASES: &[&str] = &[
     // out-of-scope gap, so there's no printable way to compare their
     // contents byte-for-byte here; those are covered by
     // `tests/repl.rs::repl_core_url_dispatch` instead).
-    "use core.url as url\ncomptime C = url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.url as url\ncomptime C = url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.url as url\ncomptime C = url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.url as url\ncomptime C = url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.url as url\ncomptime comptime_value = url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.url as url\ncomptime comptime_value = url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.url as url\ncomptime comptime_value = url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.url as url\ncomptime comptime_value = url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 3: `core.data`'s fixed-signature stats surface, ported
     // verbatim from AOT's `jet_data_*` (`EncodingTraits.rs`, see
     // `DataLite.rs`). `describe`/`status`/`bar_text`/`bar_svg` return/take
@@ -108,15 +108,15 @@ const MODULE_CASES: &[&str] = &[
     // by every builtin struct type, not specific to `core.data` — see
     // `UrlLite.rs`'s note) — covered instead by
     // `tests/repl.rs::repl_core_data_dispatch`.
-    "use core.data as data\ncomptime C = data.sum([1.0, 2.0, 3.5])\n\nfn run() {\n    r :: data.sum([1.0, 2.0, 3.5])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.mean([1.0, 2.0, 3.0, 4.0])\n\nfn run() {\n    r :: data.mean([1.0, 2.0, 3.0, 4.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.median([5.0, 1.0, 3.0, 2.0])\n\nfn run() {\n    r :: data.median([5.0, 1.0, 3.0, 2.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n\nfn run() {\n    r :: data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.min([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime C = data.max([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.sum([1.0, 2.0, 3.5])\n\nfn run() {\n    r :: data.sum([1.0, 2.0, 3.5])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.mean([1.0, 2.0, 3.0, 4.0])\n\nfn run() {\n    r :: data.mean([1.0, 2.0, 3.0, 4.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.median([5.0, 1.0, 3.0, 2.0])\n\nfn run() {\n    r :: data.median([5.0, 1.0, 3.0, 2.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n\nfn run() {\n    r :: data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.min([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.max([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 4: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}` +
     // `core.encoding.json.{canonical,events}`, ported verbatim from AOT's
     // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
@@ -124,18 +124,18 @@ const MODULE_CASES: &[&str] = &[
     // (see `EncodingLite.rs`). Every case round-trips `parse`+`to_string` (or
     // `to_bytes`+`parse`) so both the parser and the renderer sides differ
     // against real generated Rust, not just one direction.
-    "use core.encoding.csv as csv\ncomptime C = csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.csv as csv\ncomptime C = csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n\nfn run() {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.csv as csv\ncomptime C = csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.toml as toml\ncomptime C = toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.toml as toml\ncomptime C = toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.yaml as yaml\ncomptime C = yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.xml as xml\ncomptime C = xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime C = hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\ncomptime C = json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.jsonl as jsonl\ncomptime C = jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\ncomptime C = json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\ncomptime C = json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\ncomptime comptime_value = csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\ncomptime comptime_value = csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n\nfn run() {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\ncomptime comptime_value = csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\ncomptime comptime_value = toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\ncomptime comptime_value = toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.yaml as yaml\ncomptime comptime_value = yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.xml as xml\ncomptime comptime_value = xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime comptime_value = hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\ncomptime comptime_value = json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.jsonl as jsonl\ncomptime comptime_value = jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\ncomptime comptime_value = json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\ncomptime comptime_value = json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
 ];
 
 #[test]
@@ -176,7 +176,7 @@ fn comptime_matches_runtime() {
 
 fn check_comptime_case(i: usize, expr: &str) {
     let src = format!(
-        "comptime C = {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
+        "comptime comptime_value = {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{comptime_value}}\")\n    print(\"{{r}}\")\n}}\n",
         e = expr
     );
     check_comptime_src(i, expr, &src);
@@ -249,9 +249,9 @@ fn framed_comptime_src(src: &str) -> String {
         lines.join("\n")
     );
     framed.push_str(&format!(
-        "\n\nfn __comptime_diff_frame(comptime_value: String, runtime_value: String) {{\n\
-    print(\"{{__comptime_diff_hex.encode(comptime_value.bytes())}}\")\n\
-    print(\"{{__comptime_diff_hex.encode(runtime_value.bytes())}}\")\n\
+        "\n\nfn __comptime_diff_frame(expected_text: String, actual_text: String) {{\n\
+    print(\"{{__comptime_diff_hex.encode(expected_text.bytes())}}\")\n\
+    print(\"{{__comptime_diff_hex.encode(actual_text.bytes())}}\")\n\
 }}\n"
     ));
     framed
@@ -366,7 +366,7 @@ fn xml_rich_whole_value_matches_comptime_and_runtime() {
         eprintln!("note: rustc not found; skipping rich XML comptime differential");
         return;
     }
-    let src = "use core.encoding.xml as xml\ncomptime C = xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.xml as xml\ncomptime comptime_value = xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2004, "rich lossless XML whole-value round-trip", src);
 }
 
@@ -376,7 +376,7 @@ fn xml_parse_options_match_comptime_and_runtime() {
         eprintln!("note: rustc not found; skipping XML options comptime differential");
         return;
     }
-    let src = "use core.encoding.xml as xml\ncomptime C = xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.xml as xml\ncomptime comptime_value = xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2005, "typed XML options", src);
 }
 
@@ -419,7 +419,7 @@ fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     // including normal-mode indefinite containers and preferred Float16,
     // is one R12 semantic path at comptime and AOT. This intentionally does
     // not exercise the retired untyped `decode(DataTree)` compatibility arm.
-    let src = "use core.encoding.cbor as cbor\ncomptime C = cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r: [Float] := cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.cbor as cbor\ncomptime comptime_value = cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r: [Float] := cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
 }
 
@@ -429,7 +429,7 @@ fn cbor_current_whole_encode_parse_matches_comptime_and_aot() {
         eprintln!("note: rustc not found; skipping current CBOR whole-value differential");
         return;
     }
-    let src = "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime C = hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\ncomptime P = json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n    print(\"{C}|{P}\")\n    print(\"{r}|{p}\")\n}\n";
+    let src = "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime encoded = hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\ncomptime parsed = json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n    print(\"{encoded}|{parsed}\")\n    print(\"{r}|{p}\")\n}\n";
     check_comptime_src(2001, "current CBOR to_bytes and parse", src);
 }
 
@@ -603,17 +603,17 @@ enum Light {
     Green
 }
 
-comptime P = Pair.{left: 7, right: "seven"}
-comptime L = Light.Green
+comptime pair_value = Pair.{left: 7, right: "seven"}
+comptime light_value = Light.Green
 
 fn run() {
     p :: Pair.{left: 7, right: "seven"}
     l :: Light.Green
-    print("{P.left}")
+    print("{pair_value.left}")
     print("{p.left}")
-    print("{P.right}")
+    print("{pair_value.right}")
     print("{p.right}")
-    print("{L == Light.Green}")
+    print("{light_value == Light.Green}")
     print("{l == Light.Green}")
 }
 "#,
@@ -628,15 +628,15 @@ fn run() {
 fn if_expr_comptime_matches_runtime() {
     let stdout = compile_and_run(
         r#"
-comptime C = if 3 > 2 { 10 } else { 20 }
-comptime D = if 1 > 2 { 10 } else { 20 }
+comptime true_value = if 3 > 2 { 10 } else { 20 }
+comptime false_value = if 1 > 2 { 10 } else { 20 }
 
 fn run() {
     c :: if 3 > 2 { 10 } else { 20 }
     d :: if 1 > 2 { 10 } else { 20 }
-    print("{C}")
+    print("{true_value}")
     print("{c}")
-    print("{D}")
+    print("{false_value}")
     print("{d}")
 }
 "#,
@@ -655,11 +655,11 @@ fn double(x: Int) -> Int {
     return x * 2
 }
 
-comptime C = double.[1, 2, 3]
+comptime doubled = double.[1, 2, 3]
 
 fn run() {
     c :: double.[1, 2, 3]
-    print("{C}")
+    print("{doubled}")
     print("{c}")
 }
 "#,

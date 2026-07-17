@@ -418,8 +418,13 @@ fn mapped_definition_name(name: &str, types: &HashMap<String, Type>) -> String {
     }
 }
 
-fn module_type_prefix(alias: &str) -> String {
-    crate::Syntax::canonical_name_case(alias, crate::Syntax::NameCase::Pascal)
+pub(super) fn module_type_prefix(alias: &str) -> String {
+    let (visibility, body) = alias.strip_prefix('_').map_or(("", alias), |body| ("_", body));
+    let encoded = body.split('_').map(|segment| {
+        let segment = crate::Syntax::canonical_name_case(segment, crate::Syntax::NameCase::Pascal);
+        format!("{}{segment}", segment.chars().count())
+    }).collect::<String>();
+    format!("{visibility}M{encoded}")
 }
 
 fn module_type_name(alias: &str, name: &str) -> String {
@@ -2288,6 +2293,13 @@ mod instance_collision_tests {
         let second = make(vec![2]);
         register_instance_fingerprint(&mut registry, &first, Span::new(1, 2));
         register_instance_fingerprint(&mut registry, &second, Span::new(3, 4));
+    }
+
+    #[test]
+    fn generated_nominal_names_encode_module_alias_boundaries() {
+        assert_ne!(module_type_name("foo", "BarBaz"), module_type_name("foo_bar", "Baz"));
+        assert_ne!(module_type_name("foo_bar", "Baz"), module_type_name("fo_obar", "Baz"));
+        assert_eq!(module_type_name("_cache", "Item"), "_M5CacheItem");
     }
 
     #[test]

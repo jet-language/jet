@@ -758,7 +758,7 @@ impl<'a> Fmt<'a> {
                             self.write(", ");
                         }
                         match slot {
-                            PatSlot::Bind(name) => self.write(name),
+                            PatSlot::Bind { name, .. } => self.write(name),
                             PatSlot::Wildcard => self.write("_"),
                             PatSlot::Range { lo, hi } => {
                                 self.write(&lo.to_string());

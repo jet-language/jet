@@ -518,9 +518,8 @@ pub(crate) fn check_bundle_opts(
     // declaration clone: generated Rust/TIR still sees the owner item once.
     let shared_instance_nominals: Vec<(usize, Item)> = bundle.modules.iter().enumerate().flat_map(|(owner, module)| {
         let prefixes: Vec<String> = module.items.iter().filter_map(|item| match item {
-            Item::CodeModule(cm) if cm.instance_identity.is_some() => Some(
-                crate::Syntax::canonical_name_case(&cm.name, crate::Syntax::NameCase::Pascal),
-            ),
+            Item::CodeModule(cm) if cm.instance_identity.is_some() =>
+                Some(GenericModules::module_type_prefix(&cm.name)),
             _ => None,
         }).collect();
         module.items.iter().filter_map(move |item| match item {

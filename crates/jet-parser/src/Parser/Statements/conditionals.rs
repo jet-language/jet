@@ -825,8 +825,9 @@ impl<'a> Parser<'a> {
                                             ));
                                         }
                                     } else {
-                                        let (b, _) = self.expect_ident("for a pattern binding")?;
-                                        crate::AST::PatSlot::Bind(b)
+                                        let (name, span) =
+                                            self.expect_ident("for a pattern binding")?;
+                                        crate::AST::PatSlot::Bind { name, span }
                                     };
                                     bindings.push(slot);
                                     if matches!(self.peek().kind, TokKind::RParen) {

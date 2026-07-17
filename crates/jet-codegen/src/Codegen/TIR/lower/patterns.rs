@@ -549,7 +549,7 @@ pub(crate) fn tir_add_pattern_bindings(
         } => {
             let tys = variant_payload_types(cx, variant);
             for (i, slot) in bindings.iter().enumerate() {
-                if let PatSlot::Bind(b) = slot {
+                if let PatSlot::Bind { name, .. } = slot {
                     // Payload types are scalar/Char (the enum is covered), so the
                     // binding is a by-value local; default to Int if unresolved
                     // (impossible for a covered enum — sema validated the access).
@@ -557,7 +557,7 @@ pub(crate) fn tir_add_pattern_bindings(
                         .as_ref()
                         .and_then(|ts| ts.get(i).cloned())
                         .unwrap_or(Type::Int);
-                    env.bind(b, mangle(b), Some(ty));
+                    env.bind(name, mangle(name), Some(ty));
                 }
             }
         }

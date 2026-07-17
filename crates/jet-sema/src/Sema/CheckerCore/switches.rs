@@ -24,9 +24,12 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
         bindings
             .first()
             .map(|slot| {
-                slot.as_bind()
-                    .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
-                    .to_string()
+                (
+                    slot.as_bind()
+                        .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
+                        .to_string(),
+                    slot.binding_span().unwrap_or(*span),
+                )
             })
     };
     let replacement = match (subject_ty, variant.as_str(), bindings.len()) {
@@ -34,19 +37,29 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
             Some(Pattern::Absent(*span))
         }
         (Type::Option(_), name, 1) if name == Syntax::LIT_VALUE => {
+            let (binding, binding_span) = binding().unwrap();
             Some(Pattern::Present {
-                binding: binding().unwrap(),
+                binding,
+                binding_span,
                 span: *span,
             })
         }
-        (Type::Result { .. }, name, 1) if name == Syntax::LIT_OK => Some(Pattern::Ok {
-            binding: binding().unwrap(),
-            span: *span,
-        }),
-        (Type::Result { .. }, name, 1) if name == Syntax::LIT_ERR => Some(Pattern::Err {
-            binding: binding().unwrap(),
-            span: *span,
-        }),
+        (Type::Result { .. }, name, 1) if name == Syntax::LIT_OK => {
+            let (binding, binding_span) = binding().unwrap();
+            Some(Pattern::Ok {
+                binding,
+                binding_span,
+                span: *span,
+            })
+        }
+        (Type::Result { .. }, name, 1) if name == Syntax::LIT_ERR => {
+            let (binding, binding_span) = binding().unwrap();
+            Some(Pattern::Err {
+                binding,
+                binding_span,
+                span: *span,
+            })
+        }
         _ => None,
     };
     if let Some(replacement) = replacement {

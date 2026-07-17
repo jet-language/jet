@@ -1367,38 +1367,61 @@ impl<'a> Interp<'a> {
             },
             Pattern::Variant {
                 variant, bindings, ..
-            } => match v {
-                CtValue::Enum {
-                    variant: vname,
-                    args,
-                    ..
-                } => {
-                    if vname != variant {
+            } => {
+                // Contextual result/option spellings are normalized by sema, but
+                // top-level comptime evaluation runs before function bodies are
+                // checked. Interpret the still-generic parser shape here too.
+                match (variant.as_str(), bindings.as_slice(), v) {
+                    (name, [slot], CtValue::ResOk(inner)) if name == crate::Syntax::LIT_OK => {
+                        return match_pattern_slot(slot, inner, pattern.span(), scope);
+                    }
+                    (name, [_], CtValue::ResErr(_)) if name == crate::Syntax::LIT_OK => {
                         return Ok(false);
                     }
-                    for (slot, (_, arg_val)) in bindings.iter().zip(args.iter()) {
-                        match slot {
-                            PatSlot::Wildcard => {}
-                            PatSlot::Bind(name) => {
-                                scope.insert(name.clone(), arg_val.clone());
-                            }
-                            PatSlot::Range { lo, hi } => {
-                                let n = as_int(arg_val, pattern.span())?;
-                                if n < *lo || n > *hi {
-                                    return Ok(false);
-                                }
+                    (name, [slot], CtValue::ResErr(inner)) if name == crate::Syntax::LIT_ERR => {
+                        return match_pattern_slot(slot, inner, pattern.span(), scope);
+                    }
+                    (name, [_], CtValue::ResOk(_)) if name == crate::Syntax::LIT_ERR => {
+                        return Ok(false);
+                    }
+                    (name, [slot], CtValue::Some(inner)) if name == crate::Syntax::LIT_VALUE => {
+                        return match_pattern_slot(slot, inner, pattern.span(), scope);
+                    }
+                    (name, [_], CtValue::None(_)) if name == crate::Syntax::LIT_VALUE => {
+                        return Ok(false);
+                    }
+                    (name, [], CtValue::None(_)) if name == crate::Syntax::LIT_NULL => {
+                        return Ok(true);
+                    }
+                    (name, [], CtValue::Some(_)) if name == crate::Syntax::LIT_NULL => {
+                        return Ok(false);
+                    }
+                    _ => {}
+                }
+                match v {
+                    CtValue::Enum {
+                        variant: vname,
+                        args,
+                        ..
+                    } => {
+                        if vname != variant {
+                            return Ok(false);
+                        }
+                        for (slot, (_, arg_val)) in bindings.iter().zip(args.iter()) {
+                            if !match_pattern_slot(slot, arg_val, pattern.span(), scope)? {
+                                return Ok(false);
                             }
                         }
+                        Ok(true)
                     }
-                    Ok(true)
+                    other => Err(unsupported(
+                        &format!(
+                            "matching an enum-variant pattern against a value that isn't an enum (got {})",
+                            other.jet_show()
+                        ),
+                        pattern.span(),
+                    )),
                 }
-                other => Err(unsupported(
-                    &format!(
-                        "matching an enum-variant pattern against a value that isn't an enum (got {})",
-                        other.jet_show()
-                    ),
-                    pattern.span(),
-                )),
             },
             Pattern::Range { lo, hi, .. } => match v {
                 CtValue::Int(n) => Ok(*n >= *lo && *n <= *hi),
@@ -1628,6 +1651,25 @@ impl<'a> Interp<'a> {
 }
 
 // --- value helpers --------------------------------------------------------
+
+fn match_pattern_slot(
+    slot: &PatSlot,
+    value: &CtValue,
+    pattern_span: Span,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<bool, Diagnostic> {
+    match slot {
+        PatSlot::Wildcard => Ok(true),
+        PatSlot::Bind { name, .. } => {
+            scope.insert(name.clone(), value.clone());
+            Ok(true)
+        }
+        PatSlot::Range { lo, hi } => {
+            let value = as_int(value, pattern_span)?;
+            Ok(value >= *lo && value <= *hi)
+        }
+    }
+}
 
 /// c139/HOF bare-fn-value: a top-level function name used as a value (bound
 /// to a variable, passed to a higher-order method, called through a stored

@@ -804,8 +804,8 @@ pub(crate) fn stmt_collect_captures(
                         }
                         Pattern::Variant { bindings, .. } => {
                             for slot in bindings {
-                                if let crate::AST::PatSlot::Bind(b) = slot {
-                                    arm_bound.insert(b.clone());
+                                if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                                    arm_bound.insert(name.clone());
                                 }
                             }
                         }
@@ -822,8 +822,8 @@ pub(crate) fn stmt_collect_captures(
                             if let Some(first) = alts.first() {
                                 if let Pattern::Variant { bindings, .. } = first {
                                     for slot in bindings {
-                                        if let crate::AST::PatSlot::Bind(b) = slot {
-                                            arm_bound.insert(b.clone());
+                                        if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                                            arm_bound.insert(name.clone());
                                         }
                                     }
                                 }

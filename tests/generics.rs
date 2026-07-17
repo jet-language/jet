@@ -60,6 +60,20 @@ fn run() {}
     jet::compile(body_items)
         .unwrap_or_else(|diags| panic!("generic-module body substitution failed: {diags:#?}"));
 
+    let distinct_generated_names = r#"
+module with_bar_baz<T> { pub struct BarBaz { value: T } }
+module with_baz<T> { pub struct Baz { value: T } }
+module foo = with_bar_baz<Int>
+module foo_bar = with_baz<Int>
+fn run() {
+    first :: M3FooBarBaz.{ value: 1 }
+    second :: M3Foo3BarBaz.{ value: 2 }
+    print(first.value + second.value)
+}
+"#;
+    jet::compile(distinct_generated_names)
+        .unwrap_or_else(|diags| panic!("generic-module type names collided: {diags:#?}"));
+
     let root = std::env::temp_dir().join(format!(
         "jet_generic_modules_complete_{}",
         std::process::id()

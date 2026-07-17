@@ -1508,7 +1508,7 @@ impl<'a> Checker<'a> {
                 if call.args.len() != 1 {
                     return None;
                 }
-                let Expr::Ident(binding, _) = &call.args[0].expr else {
+                let Expr::Ident(binding, binding_span) = &call.args[0].expr else {
                     return None;
                 };
                 if self.lookup(binding).is_some() {
@@ -1524,7 +1524,10 @@ impl<'a> Checker<'a> {
                 }
                 Some(Pattern::Variant {
                     variant: call.name.clone(),
-                    bindings: vec![crate::AST::PatSlot::Bind(binding.clone())],
+                    bindings: vec![crate::AST::PatSlot::Bind {
+                        name: binding.clone(),
+                        span: *binding_span,
+                    }],
                     span: call.name_span,
                 })
             }
@@ -1860,7 +1863,7 @@ impl<'a> Checker<'a> {
                     let mut result = HashMap::new();
                     for (slot, ty) in bindings.iter().zip(expected.iter()) {
                         match slot {
-                            crate::AST::PatSlot::Bind(name) => {
+                            crate::AST::PatSlot::Bind { name, .. } => {
                                 result.insert(name.clone(), ty.clone());
                             }
                             crate::AST::PatSlot::Wildcard => {}
@@ -1918,7 +1921,7 @@ impl<'a> Checker<'a> {
                     let mut result = HashMap::new();
                     for (slot, ty) in bindings.iter().zip(expected.iter()) {
                         match slot {
-                            crate::AST::PatSlot::Bind(name) => {
+                            crate::AST::PatSlot::Bind { name, .. } => {
                                 result.insert(name.clone(), ty.clone());
                             }
                             crate::AST::PatSlot::Wildcard => {}
@@ -2003,7 +2006,7 @@ impl<'a> Checker<'a> {
                 let mut result = HashMap::new();
                 for (slot, ty) in bindings.iter().zip(expected.iter()) {
                     match slot {
-                        crate::AST::PatSlot::Bind(name) => {
+                        crate::AST::PatSlot::Bind { name, .. } => {
                             result.insert(name.clone(), ty.clone());
                         }
                         crate::AST::PatSlot::Wildcard => {}

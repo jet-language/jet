@@ -454,10 +454,10 @@ pub(crate) fn if_cond_in_subset(
         {
             if is_json_variant(variant)
                 && bindings.len() == 1
-                && matches!(bindings[0], PatSlot::Bind(_))
+                && matches!(bindings[0], PatSlot::Bind { .. })
             {
-                if let PatSlot::Bind(b) = &bindings[0] {
-                    return Some(vec![b.clone()]);
+                if let PatSlot::Bind { name, .. } = &bindings[0] {
+                    return Some(vec![name.clone()]);
                 }
             }
             // D-TERM1 (ratified 2026-06-22): a `Key` variant if-let.
@@ -465,13 +465,13 @@ pub(crate) fn if_cond_in_subset(
             // Unit variants (`if k == Key.Enter`) → `if let JetKey::Enter = (k).clone()`.
             if is_key_variant(variant) {
                 if bindings.is_empty()
-                    || (bindings.len() == 1 && matches!(bindings[0], PatSlot::Bind(_)))
+                    || (bindings.len() == 1 && matches!(bindings[0], PatSlot::Bind { .. }))
                 {
                     let names: Vec<String> = bindings
                         .iter()
                         .filter_map(|s| {
-                            if let PatSlot::Bind(n) = s {
-                                Some(n.clone())
+                            if let PatSlot::Bind { name, .. } = s {
+                                Some(name.clone())
                             } else {
                                 None
                             }
@@ -489,12 +489,12 @@ pub(crate) fn if_cond_in_subset(
             // shape mirrors the JSON-variant if-let exactly).
             if !is_json_variant(variant)
                 && bindings.len() == 1
-                && matches!(bindings[0], PatSlot::Bind(_))
+                && matches!(bindings[0], PatSlot::Bind { .. })
             {
                 if let Some(owner) = cx.variant_owner.get(variant) {
                     if enum_is_covered(owner, cx) {
-                        if let PatSlot::Bind(b) = &bindings[0] {
-                            return Some(vec![b.clone()]);
+                        if let PatSlot::Bind { name, .. } = &bindings[0] {
+                            return Some(vec![name.clone()]);
                         }
                     }
                 }

@@ -108,9 +108,9 @@ module forward = equivalent
 module different_type = boxed<String, 3>
 module different_value = boxed<Int, 4>
 module different_template = other<Int, 3>
-fn accepts_first(value: FirstBox) -> FirstBox { return ~value }
-fn accepts_projection(value: EquivalentBox) -> FirstBox { return ~value }
-fn accepts_chain(value: ForwardBox) -> FirstBox { return ~value }
+fn accepts_first(value: M5FirstBox) -> M5FirstBox { return ~value }
+fn accepts_projection(value: M10EquivalentBox) -> M5FirstBox { return ~value }
+fn accepts_chain(value: M7ForwardBox) -> M5FirstBox { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -126,11 +126,11 @@ fn run() {}
     assert!(modules.contains(&"different_type"));
     assert!(modules.contains(&"different_value"));
     assert!(modules.contains(&"different_template"));
-    assert_eq!(items.iter().filter(|item| matches!(item, Item::Struct(def) if def.name == "FirstBox")).count(), 1);
+    assert_eq!(items.iter().filter(|item| matches!(item, Item::Struct(def) if def.name == "M5FirstBox")).count(), 1);
     for name in ["accepts_projection", "accepts_chain"] {
         let Item::Func(func) = items.iter().find(|item| matches!(item, Item::Func(func) if func.name == name)).unwrap() else { unreachable!() };
-        assert_eq!(func.params[0].ty, Type::Named("FirstBox".into()));
-        assert_eq!(func.return_type, Some(Type::Named("FirstBox".into())));
+        assert_eq!(func.params[0].ty, Type::Named("M5FirstBox".into()));
+        assert_eq!(func.return_type, Some(Type::Named("M5FirstBox".into())));
     }
 }
 
@@ -147,8 +147,8 @@ fn run() {}
         Item::Struct(def) => Some(def.name.as_str()),
         _ => None,
     }).collect();
-    assert!(names.contains(&"CacheItem"), "{names:?}");
-    assert!(names.contains(&"_CacheItem"), "{names:?}");
+    assert!(names.contains(&"M5CacheItem"), "{names:?}");
+    assert!(names.contains(&"_M5CacheItem"), "{names:?}");
 }
 
 #[test]
@@ -169,7 +169,7 @@ use templates.{boxed, other}
 module second = boxed<Int, 3>
 module different_arg = boxed<Int, 4>
 module different_template = other<Int, 3>
-fn accepts_projection(value: SecondBox) -> FirstBox { return ~value }
+fn accepts_projection(value: M6SecondBox) -> M5FirstBox { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check_modules(&[
@@ -178,7 +178,7 @@ fn run() {}
         ("second.jet", second, &[("templates", 0)]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-    assert_eq!(bundle.modules.iter().flat_map(|module| &module.items).filter(|item| matches!(item, Item::Struct(def) if def.name == "FirstBox")).count(), 1);
+    assert_eq!(bundle.modules.iter().flat_map(|module| &module.items).filter(|item| matches!(item, Item::Struct(def) if def.name == "M5FirstBox")).count(), 1);
     assert!(!bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "second")));
     assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "different_arg")));
     assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "different_template")));
@@ -250,13 +250,13 @@ fn run() {}
     let (bundle, diagnostics) = check(src);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
     let items = &bundle.modules[0].items;
-    assert!(items.iter().any(|item| matches!(item, Item::Trait(t) if t.name == "IntLawsReveal" && t.methods[0].return_type == Some(Type::Int))));
-    assert!(items.iter().any(|item| matches!(item, Item::Tag(t) if t.name == "IntLawsAudited")));
+    assert!(items.iter().any(|item| matches!(item, Item::Trait(t) if t.name == "M3Int4LawsReveal" && t.methods[0].return_type == Some(Type::Int))));
+    assert!(items.iter().any(|item| matches!(item, Item::Tag(t) if t.name == "M3Int4LawsAudited")));
     let Item::CodeModule(instance) = items.iter().find(|item| matches!(item, Item::CodeModule(m) if m.name == "int_laws")).unwrap() else { unreachable!() };
     let tagged = instance.body.as_ref().unwrap().iter().find_map(|item| match item { Item::Func(f) if f.name == "audited" => Some(&f.params[0].ty), _ => None }).unwrap();
-    assert!(matches!(tagged, Type::Tagged { marker, inner } if marker == "IntLawsAudited" && **inner == Type::Int), "{tagged:?}");
-    assert!(items.iter().any(|item| matches!(item, Item::Impl(i) if i.type_name == "IntLawsWrapped" && i.trait_name.as_deref() == Some("IntLawsReveal") && i.assoc_type_impls[0].2 == Type::Int)));
-    assert!(items.iter().any(|item| matches!(item, Item::ErrorConv(ec) if ec.from_ty == "IntLawsSourceErr" && ec.to_ty == "IntLawsTargetErr")));
+    assert!(matches!(tagged, Type::Tagged { marker, inner } if marker == "M3Int4LawsAudited" && **inner == Type::Int), "{tagged:?}");
+    assert!(items.iter().any(|item| matches!(item, Item::Impl(i) if i.type_name == "M3Int4LawsWrapped" && i.trait_name.as_deref() == Some("M3Int4LawsReveal") && i.assoc_type_impls[0].2 == Type::Int)));
+    assert!(items.iter().any(|item| matches!(item, Item::ErrorConv(ec) if ec.from_ty == "M3Int4LawsSourceErr" && ec.to_ty == "M3Int4LawsTargetErr")));
 }
 
 #[test]

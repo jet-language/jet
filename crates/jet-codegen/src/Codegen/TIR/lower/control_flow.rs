@@ -246,7 +246,7 @@ pub(crate) fn lower_if_cond(
     } = cond
     {
         if is_json_variant(variant) {
-            if let Some(PatSlot::Bind(name)) = bindings.first() {
+            if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                 let subj = lower_expr(subject, cx, env);
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());
@@ -294,7 +294,7 @@ pub(crate) fn lower_if_cond(
         // binding's type is the variant's first payload type from `variant_binding_types`
         // (the same total fact `add_pattern_bindings` reads on the AST path).
         if !is_json_variant(variant) {
-            if let Some(PatSlot::Bind(name)) = bindings.first() {
+            if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                 let subj = lower_expr(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
                 let ty = variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next());

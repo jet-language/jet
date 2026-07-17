@@ -8,7 +8,7 @@ pub enum PatSlot {
     /// D-PATW: `_` in payload position — ignore this field, bind nothing.
     Wildcard,
     /// Regular name binding: `Active(id)`.
-    Bind(String),
+    Bind { name: String, span: Span },
     /// D-PATR: `lo..hi` range in payload slot (inclusive). Field type must be Int or Char.
     Range { lo: i64, hi: i64 },
 }
@@ -16,8 +16,17 @@ pub enum PatSlot {
 impl PatSlot {
     /// Returns the binding name if this is a `Bind` slot, else `None`.
     pub fn as_bind(&self) -> Option<&str> {
-        if let PatSlot::Bind(s) = self {
-            Some(s)
+        if let PatSlot::Bind { name, .. } = self {
+            Some(name)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the exact source span of a binding name, if present.
+    pub fn binding_span(&self) -> Option<Span> {
+        if let PatSlot::Bind { span, .. } = self {
+            Some(*span)
         } else {
             None
         }
@@ -34,17 +43,20 @@ pub enum Pattern {
     },
     Present {
         binding: String,
+        binding_span: Span,
         span: Span,
     },
     Absent(Span),
     /// S34: `Ok(binding)` pattern on `T ? E`.
     Ok {
         binding: String,
+        binding_span: Span,
         span: Span,
     },
     /// S34: `Err(binding)` pattern on `T ? E`.
     Err {
         binding: String,
+        binding_span: Span,
         span: Span,
     },
     /// D-PATR (ratified 2026-06-19): range pattern at arm-head level (`0..59 -> "F"`).

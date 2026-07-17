@@ -243,6 +243,7 @@ impl<'a> Parser<'a> {
                     )?;
                     return Ok(Some(Pattern::Present {
                         binding,
+                        binding_span,
                         span: Span::new(start.start, binding_span.end),
                     }));
                 }
@@ -305,8 +306,8 @@ impl<'a> Parser<'a> {
                                     ));
                                 }
                             } else {
-                                let (b, _) = self.expect_ident("for a pattern binding")?;
-                                crate::AST::PatSlot::Bind(b)
+                                let (name, span) = self.expect_ident("for a pattern binding")?;
+                                crate::AST::PatSlot::Bind { name, span }
                             };
                             bindings.push(slot);
                             if matches!(self.peek().kind, TokKind::RParen) {
@@ -411,8 +412,8 @@ impl<'a> Parser<'a> {
                                         ));
                                     }
                                 } else {
-                                    let (b, _) = self.expect_ident("for a pattern binding")?;
-                                    crate::AST::PatSlot::Bind(b)
+                                    let (name, span) = self.expect_ident("for a pattern binding")?;
+                                    crate::AST::PatSlot::Bind { name, span }
                                 };
                                 bindings.push(slot);
                                 if matches!(self.peek().kind, TokKind::RParen) {

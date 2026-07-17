@@ -103,7 +103,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                     .iter()
                     .enumerate()
                     .map(|(i, s)| match s {
-                        PatSlot::Bind(n) => mangle(n),
+                        PatSlot::Bind { name, .. } => mangle(name),
                         PatSlot::Wildcard => "_".to_string(),
                         PatSlot::Range { .. } => format!("__jet_range_{}", i),
                     })
@@ -256,7 +256,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .iter()
                     .enumerate()
                     .map(|(i, s)| match s {
-                        PatSlot::Bind(n) => mangle(n),
+                        PatSlot::Bind { name, .. } => mangle(name),
                         PatSlot::Wildcard => "_".to_string(),
                         PatSlot::Range { .. } => format!("__jet_range_{}", i),
                     })
