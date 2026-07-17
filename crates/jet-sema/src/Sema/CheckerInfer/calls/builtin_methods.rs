@@ -153,6 +153,28 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
+            // D-SHAPE-DURATION1=A: all type-owned unit constructors share one
+            // numeric contract. Int stays exact; Float is checked at runtime for
+            // finiteness and range after unit scaling.
+            if matches!(recv_ty, Type::Named(n) if n == Syntax::DURATION_TYPE)
+                && Syntax::DURATION_CONSTRUCTORS.contains(&method)
+            {
+                for arg in args.iter_mut() {
+                    let got = self.infer(&mut arg.expr);
+                    if !matches!(got, Some(Type::Int | Type::Float)) {
+                        self.diags.push(Diagnostic::error(
+                            "E0108",
+                            format!(
+                                "argument to `Duration.{method}()` should be Int or Float"
+                            ),
+                            "runtime duration construction accepts a numeric value and checks the scaled result".to_string(),
+                            "pass an Int or Float value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                    }
+                }
+                return ret;
+            }
             let mut refined_ret = ret.clone();
             if let Some(expected) = Collections::builtin_method_arg_types(recv_ty, method) {
                 for (i, arg) in args.iter_mut().enumerate() {

@@ -47,11 +47,12 @@ fn run() {
     rng.shuffle(&deck)
     print("deck={deck}")
     // D-DET-CAPAPI: the widened clock — absolute `advance`, and a `Duration`-based
-    // `wait`. `time.ms`/`time.secs` mint a deterministic `Duration` (pure value).
+    // `wait`. Type-owned unit methods mint checked runtime durations.
     print("now={clock.now()}")
     print("advanced={clock.advance(5000)}")
-    span := time.secs(2)
-    print("span={span.millis()}ms waited={clock.wait(span)}")
+    span := Duration.seconds(2) ?? panic("duration")
+    span_ms := span.in(.Milliseconds) ?? panic("duration read")
+    print("span={span_ms}ms waited={clock.wait(span)}")
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.
     fixed := 0

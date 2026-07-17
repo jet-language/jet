@@ -631,6 +631,16 @@ pub(crate) fn collect_core_expr(
                     Some(*method_span),
                 );
             }
+            if recv_type.as_deref() == Some(crate::Syntax::DURATION_TYPE)
+                || matches!(receiver.as_ref(), Expr::Ident(n, _) if n == crate::Syntax::DURATION_TYPE)
+            {
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.time::__duration__",
+                    Some(*method_span),
+                );
+            }
             if recv_type.as_deref() == Some(crate::Syntax::SOLVER_TYPE) {
                 note_core_usage(
                     used,

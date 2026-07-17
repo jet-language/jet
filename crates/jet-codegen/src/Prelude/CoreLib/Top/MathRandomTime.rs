@@ -250,30 +250,38 @@ fn jet_solver_status(s: &jet_std::Solver) -> String {
         "failed".to_string()
     }
 }
-// D-DET-CAPAPI: `Duration` constructors + read. Pure value ops, ms-based.
-fn jet_std_duration_ms(n: i64) -> jet_std::Duration {
-    jet_std::Duration { ms: n }
+// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A: one checked unit
+// model for every runtime constructor and whole-unit read.
+fn jet_duration_from_int(
+    n: i64,
+    unit: jet_std::DurationUnit,
+) -> Result<jet_std::Duration, jet_std::RangeError> {
+    n.checked_mul(unit.milliseconds())
+        .map(|ms| jet_std::Duration { ms })
+        .ok_or_else(|| jet_std::RangeError {
+            reason: "duration is outside the supported range".to_string(),
+        })
 }
-fn jet_std_duration_secs(n: i64) -> jet_std::Duration {
-    jet_std::Duration {
-        ms: n.wrapping_mul(1000),
+fn jet_duration_from_float(
+    n: f64,
+    unit: jet_std::DurationUnit,
+) -> Result<jet_std::Duration, jet_std::RangeError> {
+    let ms = n * unit.milliseconds() as f64;
+    if !ms.is_finite() || ms < i64::MIN as f64 || ms >= 9_223_372_036_854_775_808.0 {
+        return Err(jet_std::RangeError {
+            reason: "duration must be finite and inside the supported range".to_string(),
+        });
     }
+    Ok(jet_std::Duration { ms: ms.trunc() as i64 })
 }
-fn jet_std_duration_minutes(n: i64) -> jet_std::Duration {
-    jet_std::Duration {
-        ms: n.wrapping_mul(60_000),
-    }
+fn jet_duration_in(
+    d: &jet_std::Duration,
+    unit: &jet_std::DurationUnit,
+) -> Result<i64, jet_std::RangeError> {
+    Ok(d.ms / unit.milliseconds())
 }
-fn jet_std_duration_hours(n: i64) -> jet_std::Duration {
-    jet_std::Duration {
-        ms: n.wrapping_mul(3_600_000),
-    }
-}
-fn jet_duration_millis(d: &jet_std::Duration) -> i64 {
+fn jet_duration_ms_value(d: &jet_std::Duration) -> i64 {
     d.ms
-}
-fn jet_duration_seconds(d: &jet_std::Duration) -> i64 {
-    d.ms.div_euclid(1000)
 }
 
 fn jet_time_instant_now() -> JetInstant {

@@ -203,7 +203,7 @@ fn run() {
 //
 // Additive to the minimal set: `rng.bool()` / `rng.pick(list)` / `rng.shuffle(&list)`,
 // the absolute `clock.advance(to_ms)`, the `Duration`-based `clock.wait(d)`, and
-// the `Duration` value (`time.ms`/`time.secs`, `duration.millis()`). All stay
+// checked `Duration` construction and whole-unit reading. All stay
 // pure-callable through the injected, seeded handles.
 
 /// The widened `Rng` draws (`bool`/`pick`/`shuffle`) compile inside a `@Pure fn`.
@@ -307,7 +307,7 @@ fn pure_fn_widened_clock_ok() {
 use core.time as time;
 fn drive_clock(clock: &Clock) --[]-> Int {
     base := clock.advance(5000)
-    span := time.secs(1)
+    span := Duration.seconds(1) ?? panic("duration")
     return base + clock.wait(span)
 }
 fn run() {
@@ -344,15 +344,14 @@ fn run() {
     );
 }
 
-/// `Duration` constructors (`time.ms`/`time.secs`) and `duration.millis()` are
-/// pure — usable inside a `@Pure fn` (they mint a value, carry no ambient effect).
+/// Checked `Duration` construction and whole-unit reading are pure.
 #[test]
 fn pure_fn_duration_ok() {
     let src = r#"
 use core.time as time;
 fn span_ms() --[]-> Int {
-    d := time.secs(3)
-    return d.millis()
+    d := Duration.seconds(3) ?? panic("duration")
+    return d.in(.Milliseconds) ?? panic("duration read")
 }
 fn run() { print("{span_ms()}") }
 "#;

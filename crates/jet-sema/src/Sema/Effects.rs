@@ -478,18 +478,13 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     // value, not a module call, so it never reaches `core_effect`. This lets a
     // `@Pure fn` take and use an injected `Clock`/`Rng` while ambient `time.now()`
     // / `random.int(…)` stay rejected (E3403).
-    // D-DET-CAPAPI: duration/civil constructors mint deterministic values — a
-    // deterministic value constructor, so (like `time.clock`) it carries no effect.
+    // Civil constructors mint deterministic values, so (like `time.clock`) they
+    // carry no effect.
     if matches!(
         (module, method),
         (
             "core.time",
             "clock"
-                | "ms"
-                | "secs"
-                | "seconds"
-                | "minutes"
-                | "hours"
                 | "local_time"
                 | "parse_time"
                 | "period"

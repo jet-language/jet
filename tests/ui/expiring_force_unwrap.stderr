@@ -1,7 +1,7 @@
 Error [E0511]: `Expiring.force` bypasses expiry checking
-  --> tests/ui/expiring_force_unwrap.jet:8:15
+  --> tests/ui/expiring_force_unwrap.jet:9:15
     |
-  8 |     _ :: item.force(clk)
+  9 |     _ :: item.force(clk)
     |               ^^^^^
  Why: TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly (D-TTLVAL1)
  Fix: use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead

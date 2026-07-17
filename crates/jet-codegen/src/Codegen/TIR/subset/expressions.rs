@@ -516,6 +516,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if type_name == "TextWidthControls" {
                 return matches!(variant.as_str(), "Zero" | "Reject");
             }
+            if type_name == crate::Syntax::DURATION_UNIT_TYPE {
+                return crate::Syntax::DURATION_UNITS.contains(&variant.as_str());
+            }
             if type_name == "NetShutdown" {
                 return matches!(variant.as_str(), "Read" | "Write" | "Both");
             }

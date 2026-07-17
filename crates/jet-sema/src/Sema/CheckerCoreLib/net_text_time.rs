@@ -316,10 +316,6 @@ pub fn civil_time_method_return(
             "elapsed_millis" if argc == 0 => Some(Some(Type::Int)),
             _ => None,
         },
-        Type::Named(n) if n == "Duration" => match method {
-            "millis" | "seconds" if argc == 0 => Some(Some(Type::Int)),
-            _ => None,
-        },
         Type::Named(n) if n == "Period" => match method {
             "to_string" if argc == 0 => Some(Some(Type::String)),
             _ => None,

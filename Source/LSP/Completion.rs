@@ -247,13 +247,17 @@ pub(crate) fn compute_completions(
 
     // Member completion: `expr.`
     if let Some(receiver_name) = context_is_member_access(src, offset) {
-        let owner = db.defs.iter().find(|def| def.name == receiver_name).and_then(|def| {
-            match &def.kind {
-                SymKind::Struct { .. } => Some(def.name.clone()),
-                SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => semantic_owner(ty),
-                _ => None,
-            }
-        });
+        let owner = if receiver_name == crate::Syntax::DURATION_TYPE {
+            Some(receiver_name.clone())
+        } else {
+            db.defs.iter().find(|def| def.name == receiver_name).and_then(|def| {
+                match &def.kind {
+                    SymKind::Struct { .. } => Some(def.name.clone()),
+                    SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => semantic_owner(ty),
+                    _ => None,
+                }
+            })
+        };
         if let Some(owner) = owner {
             let prefix = current_identifier_prefix(src, offset);
             for symbol in db

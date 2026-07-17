@@ -5,7 +5,7 @@ use core.vault as vault
 
 fn run() {
     clk := time.clock(1000)
-    ttl :: time.secs(5)
+    ttl :: Duration.seconds(5) ?? panic("duration")
     cache :: expiring.new("fresh", ttl, clk)
     if cache.get(clk) == Ok(v) {
         print("cache: {v}")
@@ -15,7 +15,8 @@ fn run() {
         print("cache expired: true")
     }
     secret_clk := time.clock(1000)
-    secret := vault.rotting_new("api-key-123", time.secs(2), secret_clk)
+    secret_ttl := Duration.seconds(2) ?? panic("duration")
+    secret := vault.rotting_new("api-key-123", secret_ttl, secret_clk)
     if secret.get(secret_clk) == Ok(s) {
         print("secret once: {s.len()}")
     }

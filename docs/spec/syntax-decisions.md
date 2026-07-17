@@ -2497,6 +2497,16 @@ type plus its arguments determine one receiver type. `Type.new(…)` always rema
 available. Elaboration reuses ordinary expected-type inference and the existing
 static-call path; there is no constructor registry or global search.
 
+**D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A — checked runtime
+durations** *(ratified by owner 2026-07-14, cards #558/#575)*: a runtime `Int`
+or `Float` becomes a duration only through the type-owned closed family
+`Duration.milliseconds/seconds/minutes/hours(value)?`. Scaling rejects overflow
+and non-finite floats; fractional milliseconds truncate toward zero. Whole-unit
+reads use only `duration.in(.Milliseconds/.Seconds/.Minutes/.Hours)?`, return
+`Int ? RangeError`, and truncate toward zero. The former `core.time` free
+constructors and per-unit readers leave the surface without aliases. Static
+unit literals remain unchanged.
+
 **D-PRELUDE-LAW1=A — ambient-surface registry** *(ratified by owner 2026-07-12, card #514)*: the no-prefix surface is one closed list — always ambient: `print`, `input`, `panic`, `require`; comptime-gated ambient: `embed_file`, `embed_bytes`, `find`, `fetch`. User shadowing wins; libraries never inject (D-PRELUDEX1). Any addition or removal is a ballot.
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.

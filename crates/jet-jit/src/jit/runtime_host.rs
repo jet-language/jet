@@ -424,6 +424,28 @@ extern "C" fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value as u64))
 }
 
+extern "C" fn jet_jit_duration_from_int(value: i64, scale: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match value.checked_mul(scale) {
+        Some(ms) => alloc_jit_result(rt, true, ms as u64),
+        None => alloc_jit_result(rt, false, 0),
+    })
+}
+
+extern "C" fn jet_jit_duration_from_float(value: f64, scale: i64) -> i64 {
+    let ms = value * scale as f64;
+    Concurrency::with_runtime_mut(|rt| {
+        if ms.is_finite() && ms >= i64::MIN as f64 && ms < 9_223_372_036_854_775_808.0 {
+            alloc_jit_result(rt, true, ms.trunc() as i64 as u64)
+        } else {
+            alloc_jit_result(rt, false, 0)
+        }
+    })
+}
+
+extern "C" fn jet_jit_duration_in(value: i64, scale: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, (value / scale) as u64))
+}
+
 extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
 }
@@ -528,6 +550,9 @@ pub(crate) struct HostFns {
     pub(crate) result_get_f64: FuncId,
     pub(crate) result_get_i8: FuncId,
     pub(crate) result_get_i32: FuncId,
+    pub(crate) duration_from_int: FuncId,
+    pub(crate) duration_from_float: FuncId,
+    pub(crate) duration_in: FuncId,
     pub(crate) perf_fidelity: FuncId,
     pub(crate) perf_default_fidelity: FuncId,
     pub(crate) perf_override_fidelity: FuncId,
@@ -614,6 +639,9 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_result_get_f64", jet_jit_result_get_f64 as *const u8);
     builder.symbol("jet_jit_result_get_i8", jet_jit_result_get_i8 as *const u8);
     builder.symbol("jet_jit_result_get_i32", jet_jit_result_get_i32 as *const u8);
+    builder.symbol("jet_jit_duration_from_int", jet_jit_duration_from_int as *const u8);
+    builder.symbol("jet_jit_duration_from_float", jet_jit_duration_from_float as *const u8);
+    builder.symbol("jet_jit_duration_in", jet_jit_duration_in as *const u8);
     builder.symbol("jet_jit_perf_fidelity", jet_jit_perf_fidelity as *const u8);
     builder.symbol(
         "jet_jit_perf_default_fidelity",
@@ -757,6 +785,14 @@ fn declare_host_fns(
     let mut sig_result_query_i32 = Signature::new(cc);
     sig_result_query_i32.params.push(AbiParam::new(types::I64));
     sig_result_query_i32.returns.push(AbiParam::new(types::I32));
+    let mut sig_duration_float = Signature::new(cc);
+    sig_duration_float.params.push(AbiParam::new(types::F64));
+    sig_duration_float.params.push(AbiParam::new(types::I64));
+    sig_duration_float.returns.push(AbiParam::new(types::I64));
+    let mut sig_duration_int = Signature::new(cc);
+    sig_duration_int.params.push(AbiParam::new(types::I64));
+    sig_duration_int.params.push(AbiParam::new(types::I64));
+    sig_duration_int.returns.push(AbiParam::new(types::I64));
     let mut sig_noarg_f64 = Signature::new(cc);
     sig_noarg_f64.returns.push(AbiParam::new(types::F64));
     let mut sig_perf_override = Signature::new(cc);
@@ -813,6 +849,9 @@ fn declare_host_fns(
         result_get_f64: import("jet_jit_result_get_f64", &sig_result_query_f64)?,
         result_get_i8: import("jet_jit_result_get_i8", &sig_result_query_i8)?,
         result_get_i32: import("jet_jit_result_get_i32", &sig_result_query_i32)?,
+        duration_from_int: import("jet_jit_duration_from_int", &sig_duration_int)?,
+        duration_from_float: import("jet_jit_duration_from_float", &sig_duration_float)?,
+        duration_in: import("jet_jit_duration_in", &sig_duration_int)?,
         perf_fidelity: import("jet_jit_perf_fidelity", &sig_noarg_f64)?,
         perf_default_fidelity: import("jet_jit_perf_default_fidelity", &sig_noarg_f64)?,
         perf_override_fidelity: import("jet_jit_perf_override_fidelity", &sig_perf_override)?,

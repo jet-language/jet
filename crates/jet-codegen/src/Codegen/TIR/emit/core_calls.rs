@@ -579,14 +579,6 @@ pub(crate) fn emit_tir_core_call(
         ),
         // D-DET1: deterministic injected Clock capability constructor.
         ("core.time", "clock") => format!("{}({})", helper("jet_std_clock_new"), arg(0)),
-        // D-DET-CAPAPI: `Duration` constructors — pure value, ms/secs → ms span.
-        ("core.time", "ms") => format!("{}({})", helper("jet_std_duration_ms"), arg(0)),
-        ("core.time", "secs") => format!("{}({})", helper("jet_std_duration_secs"), arg(0)),
-        ("core.time", "seconds") => format!("{}({})", helper("jet_std_duration_secs"), arg(0)),
-        ("core.time", "minutes") => {
-            format!("{}({})", helper("jet_std_duration_minutes"), arg(0))
-        }
-        ("core.time", "hours") => format!("{}({})", helper("jet_std_duration_hours"), arg(0)),
         ("core.game", "run") => {
             let replay = if args.len() >= 2
                 && matches!(args[1].ty, Type::Named(ref n) if n == "GameReplay")
@@ -1372,7 +1364,7 @@ pub(crate) fn emit_tir_core_call(
         }
         // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors.
         ("core.time.expiring", "new") => format!(
-            "{}jet_expiring_new({}, {}jet_duration_millis(&({})), {}jet_clock_now(&({})))",
+            "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
             helper(""),
             arg(0),
             helper(""),
@@ -1381,7 +1373,7 @@ pub(crate) fn emit_tir_core_call(
             arg(2)
         ),
         ("core.vault", "rotting_new") => format!(
-            "{}jet_rotting_new({}, {}jet_duration_millis(&({})), {}jet_clock_now(&({})))",
+            "{}jet_rotting_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
             helper(""),
             arg(0),
             helper(""),

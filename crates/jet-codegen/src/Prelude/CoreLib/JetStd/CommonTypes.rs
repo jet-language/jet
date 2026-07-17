@@ -414,12 +414,35 @@
         pub failures: i64,
     }
 
-    // D-DET-CAPAPI: a deterministic span of milliseconds. Minted by `time.ms(n)` /
-    // `time.secs(n)` (pure value constructors). The injected `Clock` advances by one
-    // with `clock.wait(d)`; read it back with `duration.millis()`. std-only (I6).
+    // D-SHAPE-DURATION1=A: a checked elapsed span stored canonically as whole
+    // milliseconds. Static unit literals keep their existing compile-time path.
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct Duration {
         pub ms: i64,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum DurationUnit {
+        Milliseconds,
+        Seconds,
+        Minutes,
+        Hours,
+    }
+
+    impl DurationUnit {
+        pub fn milliseconds(self) -> i64 {
+            match self {
+                Self::Milliseconds => 1,
+                Self::Seconds => 1_000,
+                Self::Minutes => 60_000,
+                Self::Hours => 3_600_000,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct RangeError {
+        pub reason: String,
     }
 
     // D-BIGINT1: arbitrary-precision integer (std-only limb arithmetic).
@@ -879,6 +902,11 @@
     impl super::JetShow for Utf8Error {
         fn jet_show(&self) -> String {
             self.message.clone()
+        }
+    }
+    impl super::JetShow for RangeError {
+        fn jet_show(&self) -> String {
+            self.reason.clone()
         }
     }
     impl super::JetShow for TextError {

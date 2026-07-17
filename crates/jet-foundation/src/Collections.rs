@@ -20,6 +20,9 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_DEQUE,
     Syntax::TYPE_BIGINT,
     Syntax::TYPE_DECIMAL,
+    Syntax::DURATION_TYPE,
+    Syntax::DURATION_UNIT_TYPE,
+    Syntax::DURATION_RANGE_ERROR_TYPE,
     // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
     // prevents a user type from being mistaken for the runtime solver handle.
     Syntax::SOLVER_TYPE,
@@ -105,7 +108,7 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => {
             solver_method_return(method, arg_count)
         }
-        // D-DET-CAPAPI: `Duration.millis()` reads the span as ms.
+        // D-SHAPE-DURATIONCONVERT1=A: checked whole-unit read.
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
             duration_method_return(method, arg_count)
         }
@@ -408,6 +411,17 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Char, "to_string", 0) => Some(Some(Type::String)),
         (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
             Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
+        }
+        (Type::Named(n), method, 1)
+            if n == crate::Syntax::DURATION_TYPE
+                && crate::Syntax::DURATION_CONSTRUCTORS.contains(&method) =>
+        {
+            Some(Some(Type::Result {
+                ok: Box::new(Type::Named(crate::Syntax::DURATION_TYPE.to_string())),
+                err: Box::new(Type::Named(
+                    crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
+                )),
+            }))
         }
         (Type::Named(n), "from_text", 1) if n == "Secret" => Some(Some(Type::Named("Secret".into()))),
         (Type::Named(n), "from_bytes", 1) if n == "Secret" => Some(Some(Type::Named("Secret".into()))),
@@ -712,10 +726,15 @@ fn solver_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
-/// D-DET-CAPAPI: methods on the deterministic `Duration` value.
+/// D-SHAPE-DURATIONCONVERT1=A: one checked whole-unit reader.
 fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("millis" | "seconds", 0) => Some(Some(Type::Int)),
+        (crate::Syntax::METHOD_DURATION_IN, 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named(
+                crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
+            )),
+        })),
         _ => None,
     }
 }
@@ -1087,7 +1106,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         }
         // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
         // `rng` draw advances the PRNG stream — these need an edit-access (`&`)
-        // receiver. `clock.now()` / `duration.millis()` are pure reads (no `&`).
+        // receiver. `clock.now()` / `duration.in(unit)` are pure reads (no `&`).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => {
             matches!(method, "tick" | "advance" | "wait")
         }
@@ -1122,6 +1141,14 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if n == "Secret" && method == "from_text" => Some(vec![Type::String]),
         Type::Named(n) if matches!(n.as_str(), "Secret" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey") && method == "from_bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
         Type::Named(n) if n == "PasswordHash" && method == "parse" => Some(vec![Type::String]),
+        Type::Named(n)
+            if n == crate::Syntax::DURATION_TYPE
+                && method == crate::Syntax::METHOD_DURATION_IN =>
+        {
+            Some(vec![Type::Named(
+                crate::Syntax::DURATION_UNIT_TYPE.to_string(),
+            )])
+        }
         Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => Some(vec![Type::String]),
         Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "generate" => Some(vec![]),
         Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash") => Some(vec![]),

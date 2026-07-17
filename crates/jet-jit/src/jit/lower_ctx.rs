@@ -2199,8 +2199,40 @@ impl LowerCtx<'_, '_> {
             THandleOp::GameAssetsSound => Err("jit handle method unsupported".to_string()),
             THandleOp::GameInputBind => Err("jit handle method unsupported".to_string()),
             THandleOp::GameInputPressed => Err("jit handle method unsupported".to_string()),
-            THandleOp::DurationMillis => Err("jit handle method unsupported".to_string()),
-            THandleOp::DurationSeconds => Err("jit handle method unsupported".to_string()),
+            THandleOp::DurationNew { unit, float } => {
+                let scale = match *unit {
+                    "Milliseconds" => 1,
+                    "Seconds" => 1_000,
+                    "Minutes" => 60_000,
+                    "Hours" => 3_600_000,
+                    _ => return Err("jit duration unit unsupported".to_string()),
+                };
+                let scale = self.b.ins().iconst(types::I64, scale);
+                let host_id = if *float {
+                    self.host.duration_from_float
+                } else {
+                    self.host.duration_from_int
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, scale]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DurationIn { unit: Some(unit) } => {
+                let scale = match *unit {
+                    "Milliseconds" => 1,
+                    "Seconds" => 1_000,
+                    "Minutes" => 60_000,
+                    "Hours" => 3_600_000,
+                    _ => return Err("jit duration unit unsupported".to_string()),
+                };
+                let scale = self.b.ins().iconst(types::I64, scale);
+                let host = self.module.declare_func_in_func(self.host.duration_in, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, scale]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DurationIn { unit: None } => {
+                Err("jit dynamic DurationUnit falls back to AOT".to_string())
+            }
             // D-BIGINT1: `BigInt` instance methods (`.add`/`.sub`/`.mul`/`.neg`/
             // `.to_string`) — reuses the same `rt.heap` handle host shims as the
             // `PreciseBuiltin` ctor/binop path above. `Decimal` stays unsupported

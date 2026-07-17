@@ -11,7 +11,8 @@ fn run() {
     print(addr.starts_with("127.0.0.1:"))
     serving :: tasks.spawn(() => server.serve() ?? panic("serve"))
     time.sleep(20)
-    report :: server.shutdown(time.ms(100)) ?? panic("shutdown")
+    grace :: Duration.milliseconds(100) ?? panic("duration")
+    report :: server.shutdown(grace) ?? panic("shutdown")
     print(report.cancelled)
     print(serving.join().completed)
 }

@@ -1217,6 +1217,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let root = &cx.root_prefix;
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             match op {
+                THandleOp::DurationNew { unit, float } => {
+                    let helper = if *float {
+                        "jet_duration_from_float"
+                    } else {
+                        "jet_duration_from_int"
+                    };
+                    format!(
+                        "{}{helper}({}, {}jet_std::DurationUnit::{unit})",
+                        root, recv, root
+                    )
+                }
                 THandleOp::FileReaderReadLine => {
                     format!("{}jet_std_file_reader_read_line(&mut ({}))", root, recv)
                 }
@@ -1383,11 +1394,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::GameInputPressed => {
                     format!("{}jet_game_input_pressed(&({}), &({}))", root, recv, a(0))
                 }
-                THandleOp::DurationMillis => {
-                    format!("{}jet_duration_millis(&({}))", root, recv)
-                }
-                THandleOp::DurationSeconds => {
-                    format!("{}jet_duration_seconds(&({}))", root, recv)
+                THandleOp::DurationIn { unit } => {
+                    let unit = unit.map_or_else(
+                        || a(0),
+                        |unit| format!("{}jet_std::DurationUnit::{unit}", root),
+                    );
+                    format!("{}jet_duration_in(&({}), &({}))", root, recv, unit)
                 }
                 THandleOp::PreciseMethod { type_name, method } => {
                     let prefix = if type_name == "BigInt" {

@@ -37,6 +37,11 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
   give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
   E0001. Unary minus is an operator, not part of the literal.
+- Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A) use
+  `Duration.milliseconds|seconds|minutes|hours(number)?`; non-finite and
+  out-of-range values fail with `RangeError`. `duration.in(.Unit)?` reads a
+  whole `Int` unit, truncating toward zero. Compile-time duration literals are
+  unchanged.
 - `true` and `false` are `Bool` literals.
 - Source has no visible statement separators. The lexer inserts internal
   terminators at line ends after statement-ending tokens (S6-R).

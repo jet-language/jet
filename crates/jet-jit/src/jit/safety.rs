@@ -116,7 +116,11 @@ pub(crate) fn jit_concurrency_type(ty: &Type) -> bool {
 
 pub(crate) fn jit_value_type(ty: &Type) -> bool {
     match ty {
-        Type::Named(n) if n == "Unit" => true,
+        Type::Named(n)
+            if matches!(n.as_str(), "Unit" | "Duration" | "DurationUnit" | "RangeError") =>
+        {
+            true
+        }
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
         Type::Result { ok, err } => {
             jit_result_payload_type(ok.as_ref()) && jit_result_payload_type(err.as_ref())

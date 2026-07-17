@@ -559,12 +559,28 @@ pub const CLOCK_TYPE: &str = "Clock";
 /// / `shuffle(&list)`, mirroring the ambient `random.*` set.
 pub const RNG_TYPE: &str = "Rng";
 
-/// D-DET-CAPAPI (ratified 2026-06-25): the deterministic `Duration` value type.
-/// A small std-only span of milliseconds, constructed via `time.ms(n)` /
-/// `time.secs(n)` (pure — no ambient effect, like `time.clock`). Read back with
-/// `duration.millis()`; the injected `Clock` advances by one via `clock.wait(d)`
-/// (relative), alongside the absolute `clock.advance(to_ms)`.
+/// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14):
+/// runtime numbers become checked durations through type-owned unit methods;
+/// whole-unit reads use one checked enum-taking method. Static unit literals
+/// remain unchanged.
 pub const DURATION_TYPE: &str = "Duration";
+pub const DURATION_UNIT_TYPE: &str = "DurationUnit";
+pub const DURATION_RANGE_ERROR_TYPE: &str = "RangeError";
+pub const DURATION_CONSTRUCTORS: &[&str] =
+    &["milliseconds", "seconds", "minutes", "hours"];
+pub const DURATION_UNITS: &[&str] =
+    &["Milliseconds", "Seconds", "Minutes", "Hours"];
+pub const METHOD_DURATION_IN: &str = "in";
+
+pub fn duration_unit_for_constructor(method: &str) -> Option<&'static str> {
+    match method {
+        "milliseconds" => Some("Milliseconds"),
+        "seconds" => Some("Seconds"),
+        "minutes" => Some("Minutes"),
+        "hours" => Some("Hours"),
+        _ => None,
+    }
+}
 
 /// D-BIGINT1 (ratified 2026-06-28): arbitrary-precision integer. Construct
 /// explicitly with `BigInt(100)` or `BigInt("…")`; fixed `Int` never promotes.

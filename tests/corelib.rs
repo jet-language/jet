@@ -4179,7 +4179,8 @@ use core.process as process
 use core.time as time
 
 fn run() {{
-    spec :: process.cmd(["{probe}"]).cwd("{work}").env_clear().env("JET_PROCESS_TEST", "ok").stdin(.Capture).stdout(.Capture).stderr(.Capture).timeout(time.seconds(2)).output_limit(10000)
+    timeout :: Duration.seconds(2) ?? panic("duration")
+    spec :: process.cmd(["{probe}"]).cwd("{work}").env_clear().env("JET_PROCESS_TEST", "ok").stdin(.Capture).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(10000)
     probe_child :: spec.spawn() ?? panic("spawn failed")
     probe_child.stdin.write("from-stdin\n") ?? panic("write failed")
     result :: probe_child.wait() ?? panic("wait failed")
@@ -4280,7 +4281,8 @@ fn run() {
     local :: time.zoned_local(Date.new(2024, 3, 10), time.local_time(1, 30, 0), zone)
     print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     civil :: local.add_period(time.period_days(1))
-    absolute :: local.add_duration(time.hours(24))
+    day :: Duration.hours(24) ?? panic("duration")
+    absolute :: local.add_duration(day)
     print(civil.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     print(local.to_datetime().format_rfc3339())

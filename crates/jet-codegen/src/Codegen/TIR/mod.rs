@@ -2173,6 +2173,11 @@ pub enum TBuiltinOp {
 /// total `recv_type` — emit only formats. Args are emitted plainly (raw `arg(i)`).
 /// `{root}` denotes `cx.root_prefix` (program-level, read at emit).
 pub enum THandleOp {
+    /// D-SHAPE-DURATION1=A: checked type-owned runtime constructor.
+    DurationNew {
+        unit: &'static str,
+        float: bool,
+    },
     /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
     FileReaderReadLine,
     /// FileWriter: `write_line(s)` → `{root}jet_std_file_writer_write_line(&mut (recv), &(a0))`.
@@ -2267,10 +2272,10 @@ pub enum THandleOp {
     GameAssetsSound,
     GameInputBind,
     GameInputPressed,
-    /// D-DET-CAPAPI Duration: `millis()` → `{root}jet_duration_millis(&(recv))` (span as ms).
-    DurationMillis,
-    /// D-TIME-CALENDAR1 Duration: `seconds()` → `{root}jet_duration_seconds(&(recv))`.
-    DurationSeconds,
+    /// D-SHAPE-DURATIONCONVERT1=A: checked whole-unit read.
+    DurationIn {
+        unit: Option<&'static str>,
+    },
     /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
     PreciseMethod {
         type_name: String,

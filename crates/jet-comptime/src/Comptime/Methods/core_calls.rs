@@ -1184,26 +1184,6 @@ pub(super) fn apply_core_call(
             }
         }
         // --- core.time pure constructors ---
-        ("core.time", "ms") => {
-            let n = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("time.ms expects an Int", span)),
-            };
-            Ok(CtValue::Struct {
-                type_name: crate::Syntax::DURATION_TYPE.to_string(),
-                fields: vec![("ms".to_string(), CtValue::Int(n))],
-            })
-        }
-        ("core.time", "secs") => {
-            let n = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("time.secs expects an Int", span)),
-            };
-            Ok(CtValue::Struct {
-                type_name: crate::Syntax::DURATION_TYPE.to_string(),
-                fields: vec![("ms".to_string(), CtValue::Int(n * 1000))],
-            })
-        }
         ("core.time", "clock") => {
             let seed = match one(0)? {
                 CtValue::Int(v) => *v,

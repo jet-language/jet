@@ -1061,6 +1061,46 @@ impl<'a> Interp<'a> {
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
         if let Expr::Ident(type_name, _) = receiver {
+            if type_name == crate::Syntax::DURATION_TYPE {
+                let Some(unit) = crate::Syntax::duration_unit_for_constructor(method) else {
+                    return Err(super::super::Diagnostics::unsupported(
+                        &format!("`{}.{}()`", type_name, method),
+                        span,
+                    ));
+                };
+                let scale = match unit {
+                    "Milliseconds" => 1,
+                    "Seconds" => 1_000,
+                    "Minutes" => 60_000,
+                    "Hours" => 3_600_000,
+                    _ => unreachable!("Syntax returned a closed duration unit"),
+                };
+                let value = self.eval(&args[0].expr, scope)?;
+                let ms = match value {
+                    CtValue::Int(n) => n.checked_mul(scale),
+                    CtValue::Float(n) => {
+                        let scaled = n * scale as f64;
+                        (scaled.is_finite()
+                            && scaled >= i64::MIN as f64
+                            && scaled < 9_223_372_036_854_775_808.0)
+                            .then_some(scaled.trunc() as i64)
+                    }
+                    _ => None,
+                };
+                return Ok(match ms {
+                    Some(ms) => CtValue::ResOk(Box::new(CtValue::Struct {
+                        type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                        fields: vec![("ms".to_string(), CtValue::Int(ms))],
+                    })),
+                    None => CtValue::ResErr(Box::new(CtValue::Struct {
+                        type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
+                        fields: vec![(
+                            "reason".to_string(),
+                            CtValue::Str("duration must be finite and inside the supported range".to_string()),
+                        )],
+                    })),
+                });
+            }
             // Only intercept known built-in type names; user struct names use normal path.
             let is_builtin_type = matches!(type_name.as_str(), "Int" | "Float" | "Bool" | "String");
             if is_builtin_type {

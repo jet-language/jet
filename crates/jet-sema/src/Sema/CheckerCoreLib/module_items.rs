@@ -114,17 +114,11 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-RANDSPLIT1=A: CSPRNG namespace — cryptographically secure random bytes.
         "core.crypto.random" => &["bytes"],
         // D-DET1: `clock` builds a deterministic injected Clock capability.
-        // D-DET-CAPAPI: `ms`/`secs` mint a deterministic `Duration` value.
         "core.time" => &[
             "now",
             "sleep",
             "start",
             "clock",
-            "ms",
-            "secs",
-            "seconds",
-            "minutes",
-            "hours",
             "instant",
             "now_utc",
             "from_unix_ms",

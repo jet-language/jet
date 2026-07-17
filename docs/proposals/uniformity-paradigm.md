@@ -181,7 +181,7 @@ name, opposite placement rule, no local cue. Cite manifest F2.
 ### Smaller classes (lower blast, same disease)
 
 - **I — duration spelled 3 ways:** `@Every(5min)`, `.timeout(2s)`,
-  `time.ms(n)` (core F13).
+  checked `Duration.milliseconds(n)?` (core F13).
 - **J — derive spelling history:** D-SHAPE2 collapses prefix derives into the
   one `@[…]` rule list; in-body `derive` remains the explicit body form.
 - **K — naming drift:** `constant_time_eq` vs `constant_time_equal` (arg-type

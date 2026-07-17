@@ -37,6 +37,7 @@ fn run() {
     blocked :: Client.get("http://{addr}/blocked") ?? panic("blocked")
     print(blocked.status())
     print(blocked.body())
-    server.shutdown(time.ms(100)) ?? panic("shutdown")
+    grace :: Duration.milliseconds(100) ?? panic("duration")
+    server.shutdown(grace) ?? panic("shutdown")
     serving.join()
 }

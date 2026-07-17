@@ -231,8 +231,10 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Rng" => Some("Rng"),
         // D-SOLVER-LIB1=A: explicit finite solver state.
         "Solver" => Some("Solver"),
-        // D-DET-CAPAPI: deterministic `Duration` value.
+        // D-SHAPE-DURATION1/D-SHAPE-DURATIONCONVERT1: checked duration values.
         "Duration" => Some("Duration"),
+        "DurationUnit" => Some("DurationUnit"),
+        "RangeError" => Some("RangeError"),
         "Instant" => Some("JetInstant"),
         "Date" | "LocalDate" => Some("JetDate"),
         "LocalTime" => Some("JetLocalTime"),

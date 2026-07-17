@@ -4,6 +4,7 @@ use core.time.expiring as expiring
 
 fn run() {
     clk :: time.clock(0)
-    item :: expiring.new("x", time.secs(1), clk)
+    ttl :: Duration.seconds(1) ?? panic("duration")
+    item :: expiring.new("x", ttl, clk)
     _ :: item.force(clk)
 }

@@ -711,6 +711,11 @@ fn language_symbols() -> Vec<SemanticSymbol> {
 }
 
 const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
+    ("Duration.milliseconds", "Duration.milliseconds(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in milliseconds.", None),
+    ("Duration.seconds", "Duration.seconds(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in seconds.", None),
+    ("Duration.minutes", "Duration.minutes(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in minutes.", None),
+    ("Duration.hours", "Duration.hours(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in hours.", None),
+    ("Duration.in", "Duration.in(unit: DurationUnit) -> Int ? RangeError", "Reads a checked whole duration unit.", Some("duration.in(.Milliseconds)?")),
     ("List.len", "List.len() -> Int", "Number of items.", Some("items.len()")),
     ("List.is_empty", "List.is_empty() -> Bool", "True when there are no items.", None),
     ("List.push", "List.push(item: T)", "Appends an item to the end.", None),

@@ -862,7 +862,7 @@ fn run() {
         .env("RUST_BACKTRACE", "1")
         .stdout(.Stream)
         .stderr(.Inherit)
-        .timeout(time.seconds(30))
+        .timeout(Duration.seconds(30)?)
 
     child :: spec.spawn() ?? return
     loop line in child.stdout.lines() {
@@ -896,7 +896,7 @@ drain live via `child.stdout.lines()`), `.Inherit` (pass through to the
 parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at
 `run()`/`wait()`). `stdin` defaults to closed (no `.stdin(...)` call — the
 child gets no stdin at all, never the parent's terminal by accident).
-`timeout` takes a `core.time` `Duration` (e.g. `time.seconds(30)`). A spec can
+`timeout` takes a `Duration` (e.g. `Duration.seconds(30)?`). A spec can
 `run()` to collect a `ProcessResult` or `spawn()` to return a `ProcessChild`.
 
 `ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`,
@@ -1263,13 +1263,13 @@ fn run() {
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
-| `ms(n)` / `secs(n)` / `seconds(n)` / `minutes(n)` / `hours(n)` | `Duration` | Absolute elapsed-time span |
+| `Duration.milliseconds/seconds/minutes/hours(n)` | `Duration ? RangeError` | Checked runtime elapsed-time span |
 | `period(years, months, days)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Calendar span for local-date arithmetic |
 
 `DateTime` is an unambiguous UTC instant. `LocalDate` and `LocalTime` are civil
 values without a zone. `ZonedDateTime` combines an instant with a `Zone` so
 formatting and calendar arithmetic use the right offset. `Duration` is elapsed
-time; `Period` is calendar time. Across DST, `z.add_duration(time.hours(24))`
+time; `Period` is calendar time. Across DST, `z.add_duration(Duration.hours(24)?)`
 adds 24 real hours, while `z.add_period(time.period_days(1))` keeps the same
 local clock time on the next calendar day.
 
@@ -1287,7 +1287,7 @@ Useful methods:
 | `DateTime` | `date()`, `time()`, `hour()`, `minute()`, `second()`, `to_timestamp()`, `to_unix_ms()`, `plus_duration(d)`, `truncate(unit)`, `round(unit)`, `in_zone(zone)`, `format_rfc3339()`, `format(pattern)`, `to_string()` |
 | `ZonedDateTime` | `date()`, `time()`, `offset_seconds()`, `to_datetime()`, `zone()`, `add_duration(d)`, `add_period(p)`, `format(pattern)`, `to_string()` |
 | `Instant` | `elapsed_millis()` |
-| `Duration` | `millis()`, `seconds()` |
+| `Duration` | `in(unit)` |
 | `Zone` | `name()` |
 
 Format patterns are literal text plus `yyyy`, `MM`, `dd`, `HH`, `mm`, `ss`,
@@ -1321,12 +1321,14 @@ fn run() {
 | `advance(to_ms)` | `Int` | Set the clock to the **absolute** instant `to_ms` and return it (needs `&Clock`; D-DET-CAPAPI) |
 | `wait(d)` | `Int` | Advance the clock by a `Duration` `d` and return the new value (needs `&Clock`; D-DET-CAPAPI) |
 
-A `Duration` is a deterministic span of milliseconds minted by `time.ms(n)` /
-`time.secs(n)` (pure value constructors). Read it back with `d.millis()`.
+A runtime `Duration` is built with checked type-owned unit methods such as
+`Duration.seconds(n)?`. Read a whole unit with `d.in(.Milliseconds)?`; the
+result truncates toward zero and reports `RangeError` on overflow. Static unit
+literals such as `5s` remain unchanged.
 
 | `Duration` method | Returns | What it does |
 |-------------------|---------|--------------|
-| `millis()` | `Int` | The span in milliseconds (read) |
+| `in(unit)` | `Int ? RangeError` | Whole milliseconds, seconds, minutes, or hours; truncates toward zero |
 
 **Expert escape — `assume_deterministic { … }`.** Inside a `fn … --[]->`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)

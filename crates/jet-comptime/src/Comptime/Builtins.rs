@@ -593,15 +593,29 @@ pub(super) fn apply_method(
                 fields: vec![("now".to_string(), CtValue::Int(now))],
             })
         }
-        (CtValue::Struct { type_name, fields }, "millis")
+        (CtValue::Struct { type_name, fields }, "in")
             if type_name == crate::Syntax::DURATION_TYPE =>
         {
-            Ok(fields
+            let ms = fields
                 .iter()
                 .find(|(n, _)| n == "ms")
-                .cloned()
-                .map(|(_, v)| v)
-                .unwrap_or(CtValue::Int(0)))
+                .and_then(|(_, value)| match value {
+                    CtValue::Int(value) => Some(*value),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            let scale = match args.first() {
+                Some(CtValue::Enum { type_name, variant, .. })
+                    if type_name == crate::Syntax::DURATION_UNIT_TYPE => match variant.as_str() {
+                        "Milliseconds" => 1,
+                        "Seconds" => 1_000,
+                        "Minutes" => 60_000,
+                        "Hours" => 3_600_000,
+                        _ => return Err(unsupported("this duration unit", span)),
+                    },
+                _ => return Err(unsupported("Duration.in expects a DurationUnit", span)),
+            };
+            Ok(CtValue::ResOk(Box::new(CtValue::Int(ms / scale))))
         }
         (CtValue::Struct { type_name, fields }, "int") if type_name == crate::Syntax::RNG_TYPE => {
             let mut state = fields

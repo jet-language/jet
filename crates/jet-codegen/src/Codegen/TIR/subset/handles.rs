@@ -78,6 +78,21 @@ pub(crate) fn solve_new_type<'a>(
     (solver_type == Syntax::SOLVER_TYPE).then_some(solver_type.as_str())
 }
 
+/// D-SHAPE-DURATION1=A: resolve a bare type-owned runtime constructor.
+pub(crate) fn duration_new_unit(
+    receiver: &Expr,
+    method: &str,
+    locals: &HashSet<String>,
+) -> Option<&'static str> {
+    let Expr::Ident(type_name, _) = receiver else {
+        return None;
+    };
+    if type_name != Syntax::DURATION_TYPE || locals.contains(type_name) {
+        return None;
+    }
+    Syntax::duration_unit_for_constructor(method)
+}
+
 pub(crate) fn game_static_type<'a>(
     receiver: &'a Expr,
     method: &str,
@@ -201,8 +216,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("GameAssets", "sound", 1) => THandleOp::GameAssetsSound,
         ("GameInputMap", "bind", 2) => THandleOp::GameInputBind,
         ("GameInputSnapshot", "pressed", 1) => THandleOp::GameInputPressed,
-        ("Duration", "millis", 0) => THandleOp::DurationMillis,
-        ("Duration", "seconds", 0) => THandleOp::DurationSeconds,
+        ("Duration", "in", 1) => THandleOp::DurationIn { unit: None },
         ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
             type_name: "BigInt".to_string(),
             method: method.to_string(),
@@ -440,7 +454,10 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             }
         })
         .or_else(|| {
-            if handle == crate::Syntax::TYPE_BIGINT || handle == crate::Syntax::TYPE_DECIMAL {
+            if handle == crate::Syntax::TYPE_BIGINT
+                || handle == crate::Syntax::TYPE_DECIMAL
+                || handle == crate::Syntax::DURATION_TYPE
+            {
                 crate::Collections::builtin_method_return(
                     &Type::Named(handle.to_string()),
                     method,

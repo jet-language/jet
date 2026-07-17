@@ -12,6 +12,7 @@ use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::builtin_result_ty;
 use crate::Codegen::TIR::call_return_type;
 use crate::Codegen::TIR::core_call_return_ty;
+use crate::Codegen::TIR::duration_new_unit;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::fn_field_call_ty;
 use crate::Codegen::TIR::game_static_type;
@@ -697,6 +698,28 @@ pub(crate) fn lower_method_call(
                 kind: TExprKind::DbValueLit {
                     variant: method.to_string(),
                     arg,
+                },
+            };
+        }
+    }
+    // D-SHAPE-DURATION1=A: a bare `Duration.unit(value)` is a type-owned
+    // checked constructor, not an instance/static user method.
+    {
+        let locals: HashSet<String> = env.locals.keys().cloned().collect();
+        if let Some(unit) = duration_new_unit(receiver, method, &locals) {
+            let value = lower_expr(&args[0].expr, cx, env);
+            let float = matches!(value.ty, Type::Float | Type::Float32);
+            return TExpr {
+                ty: Type::Result {
+                    ok: Box::new(Type::Named(Syntax::DURATION_TYPE.to_string())),
+                    err: Box::new(Type::Named(
+                        Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
+                    )),
+                },
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(value),
+                    op: THandleOp::DurationNew { unit, float },
+                    args: vec![],
                 },
             };
         }
@@ -2046,7 +2069,16 @@ pub(crate) fn lower_method_call(
                 };
             }
         }
-        if let Some(op) = handle_method_op(handle, method, args.len()) {
+        if let Some(mut op) = handle_method_op(handle, method, args.len()) {
+            if let THandleOp::DurationIn { unit } = &mut op {
+                *unit = args.first().and_then(|arg| match &arg.expr {
+                    Expr::EnumLit { variant, .. } => Syntax::DURATION_UNITS
+                        .iter()
+                        .copied()
+                        .find(|candidate| *candidate == variant),
+                    _ => None,
+                });
+            }
             let recv_t = lower_expr(receiver, cx, env);
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
             // c109 Phase 19: an arena `alloc(v)` returns a `&mut T` view whose VALUE type is
@@ -2054,7 +2086,7 @@ pub(crate) fn lower_method_call(
             // sentinel, resolved from the arg). The result `ty` is rarely load-bearing (an
             // `arena_view` binding emits no type annotation), but kept total per the design —
             // recovered from the LOWERED arg's total `ty`, never re-inferred (I3).
-            let ty = match op {
+            let ty = match &op {
                 THandleOp::AllocAlloc => targs
                     .first()
                     .map(|a| a.ty.clone())

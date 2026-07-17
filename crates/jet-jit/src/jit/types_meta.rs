@@ -27,6 +27,9 @@ pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
     if matches!(ty, Type::Named(n) if n == "Unit") {
         return None;
     }
+    if matches!(ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError")) {
+        return Some(types::I64);
+    }
     if jit_concurrency_type(ty) {
         return Some(types::I64);
     }

@@ -8,6 +8,7 @@ use crate::Codegen::is_key_variant;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::core_call_covered;
 use crate::Codegen::TIR::core_closure_call_in_subset;
+use crate::Codegen::TIR::duration_new_unit;
 use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::game_static_type;
@@ -319,6 +320,9 @@ pub(crate) fn method_call_in_subset(
     // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
     // receiver is a module-field sentinel, not a runtime value.
     if solve_new_type(receiver, method, cx, locals).is_some() {
+        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
+    if duration_new_unit(receiver, method, locals).is_some() {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if let Some(static_type) = game_static_type(receiver, method, cx, locals) {

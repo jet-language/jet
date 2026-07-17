@@ -463,13 +463,6 @@ pub fn core_fixed_sig(
             vec![(read, Type::Int)],
             Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())),
         )),
-        // D-DET-CAPAPI: `time.ms(n)` / `time.secs(n)` mint a deterministic `Duration`
-        // value (pure — no ambient effect, like `time.clock`). The clock advances by
-        // one with `clock.wait(d)`; read it back with `duration.millis()`.
-        ("core.time", "ms" | "secs" | "seconds" | "minutes" | "hours") => Some((
-            vec![(read, Type::Int)],
-            Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())),
-        )),
         ("core.game", "run") => Some((
             vec![(read, Type::Named("GameScene".to_string()))],
             Some(Type::String),

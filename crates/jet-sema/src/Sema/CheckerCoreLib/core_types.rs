@@ -135,7 +135,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
-        | "Clock" | "Rng" | "Duration"
+        | "Clock" | "Rng" | "Duration" | "DurationUnit" | "RangeError"
         | "GameScene" | "GameAssets" | "GameInputMap"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
@@ -683,6 +683,25 @@ pub(crate) fn core_text_width_variants(
         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
     }
     Some(m)
+}
+
+/// D-SHAPE-DURATIONCONVERT1=A: the closed unit list accepted by
+/// `duration.in(unit)`.
+pub(crate) fn core_duration_unit_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    if enum_name != Syntax::DURATION_UNIT_TYPE {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    Some(
+        Syntax::DURATION_UNITS
+            .iter()
+            .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
+            .collect(),
+    )
 }
 
 pub(crate) fn core_event_variants(
