@@ -564,6 +564,19 @@ impl TraitRegistry {
         }
     }
 
+    /// Whether a resolved type satisfies a trait bound. Keep structural types
+    /// on the same path as ordinary trait-object assignment and inference.
+    pub fn type_implements_trait(&self, ty: &Type, trait_name: &str) -> bool {
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. } => {
+                self.implements_trait(name, trait_name)
+            }
+            Type::TraitObject(bounds) => bounds.iter().any(|bound| bound == trait_name),
+            Type::Tagged { inner, .. } => self.type_implements_trait(inner, trait_name),
+            other => self.implements_trait(&other.name(), trait_name),
+        }
+    }
+
     pub fn infer_fn_subst(
         &self,
         sig: &FuncSig,
@@ -618,14 +631,8 @@ impl TraitRegistry {
                 return Err(p.name.clone());
             }
             for b in &p.bounds {
-                if let Type::Named(concrete) = subst.get(&p.name).unwrap() {
-                    if !self.implements_trait(concrete, b) {
-                        return Err(p.name.clone());
-                    }
-                } else if let Type::Apply { name, .. } = subst.get(&p.name).unwrap() {
-                    if !self.implements_trait(name, b) {
-                        return Err(p.name.clone());
-                    }
+                if !self.type_implements_trait(subst.get(&p.name).unwrap(), b) {
+                    return Err(p.name.clone());
                 }
             }
         }

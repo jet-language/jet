@@ -351,22 +351,12 @@ impl<'a> Checker<'a> {
                 {
                     return false;
                 }
-                (Type::TraitObject(trait_names), Type::Named(type_name)) => {
+                (Type::TraitObject(trait_names), got) => {
                     for trait_name in trait_names {
-                        if !self.trait_reg.implements_trait(type_name, trait_name) {
+                        if !self.trait_reg.type_implements_trait(got, trait_name) {
                             let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
                             self.diags
-                                .push(e0905(type_name, trait_name, span, needs_derive));
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                (Type::TraitObject(trait_names), Type::Apply { name, .. }) => {
-                    for trait_name in trait_names {
-                        if !self.trait_reg.implements_trait(name, trait_name) {
-                            let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
-                            self.diags.push(e0905(name, trait_name, span, needs_derive));
+                                .push(e0905(&got.name(), trait_name, span, needs_derive));
                             return true;
                         }
                     }

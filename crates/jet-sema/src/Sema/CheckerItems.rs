@@ -247,19 +247,16 @@ impl<'a> Checker<'a> {
                                 let Some(concrete) = subst.get(&param.name) else {
                                     continue;
                                 };
-                                let concrete_name = match concrete {
-                                    Type::Named(name) | Type::Apply { name, .. } => name,
-                                    _ => continue,
-                                };
                                 if let Some(bound) = param
                                     .bounds
                                     .iter()
                                     .find(|bound| {
-                                        !self.trait_reg.implements_trait(concrete_name, bound)
+                                        !self.trait_reg.type_implements_trait(concrete, bound)
                                     })
                                 {
+                                    let concrete_name = concrete.name();
                                     self.diags.push(crate::Generics::e0905(
-                                        concrete_name,
+                                        &concrete_name,
                                         bound,
                                         span,
                                         false,
