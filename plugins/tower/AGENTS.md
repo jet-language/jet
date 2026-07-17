@@ -114,8 +114,10 @@ from whoever met it (`E_CRITERIA_SELF`) — one agent cannot sign off its own
 work. Cards with no criteria are unaffected (legacy behavior). `--by owner`
 always bypasses both the checklist gate and the acceptance step below.
 
-Flag a card `needsAcceptance` when you want the owner's own verdict, not just
-a green checklist:
+Flag a card `needsAcceptance` only when an explicit owner verdict about UX, DX,
+visual presentation, copy, or taste is required—not for technical correctness.
+Agents own machine verification and the independent technical review; a card that
+needs owner acceptance must name the exact experience the owner should inspect:
 
 ```
 tower card update '#12' --needs-acceptance true --by owner

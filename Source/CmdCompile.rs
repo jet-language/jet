@@ -812,7 +812,7 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         eprintln!("error: `{}` already exists", name);
         exit(ExitCodes::USER_ERROR);
     }
-    // Create: <name>/pkg.jet, <name>/.jet/main.jet, <name>/.gitignore
+    // Create: <name>/pkg.jet, <name>/run.jet, <name>/.gitignore
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         eprintln!("error: couldn't create `{}`/.jet: {}", name, e);
@@ -823,9 +823,9 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         eprintln!("error: couldn't write {}: {}", jet::Syntax::PAYLOAD_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
-    let main_src = "fn run() {\n    print(\"hello, world\");\n}\n";
-    fs::write(jet_dir.join("main.jet"), main_src).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write .jet/main.jet: {}", e);
+    let run_src = "fn run() {\n    print(\"hello, world\");\n}\n";
+    fs::write(dir.join(jet::Syntax::DEFAULT_ENTRY_FILE), run_src).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", jet::Syntax::DEFAULT_ENTRY_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
     fs::write(
@@ -838,7 +838,7 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
     });
     println!("created {}/", name);
     println!("  {}", jet::Syntax::PAYLOAD_FILE);
-    println!("  .jet/main.jet");
+    println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
     println!("  .gitignore");
     println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
 }

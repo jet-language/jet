@@ -115,7 +115,7 @@ fn example_for(cmd: &str) -> Option<String> {
         "run" | "check" | "build" => {
             Some(format!("jet {} examples/features/basics/hello.jet", cmd))
         }
-        "dev" => Some("jet dev src/main.jet".to_string()),
+        "dev" => Some("jet dev run.jet".to_string()),
         "explain" => Some("jet explain E0102".to_string()),
         "new" => Some("jet new web-api".to_string()),
         _ => None,

@@ -231,7 +231,9 @@ pub(super) fn apply_project_create_package(
     let entry_rel = json_string_field(request, "entry")
         .map(|entry| clean_project_rel_path(&entry))
         .transpose()?
-        .unwrap_or_else(|| format!("{package_rel}/main.jet"));
+        .unwrap_or_else(|| {
+            format!("{package_rel}/{}", jet_driver::Syntax::DEFAULT_ENTRY_FILE)
+        });
     if !entry_rel.starts_with(&format!("{package_rel}/")) {
         return Err(project_edit_error(
             "bad_request",

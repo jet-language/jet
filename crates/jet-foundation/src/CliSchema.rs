@@ -119,18 +119,15 @@ pub struct CliSubcommandSchema {
 /// produces an empty record so external completion can still register the
 /// built-in `--help` surface without executing the program.
 pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
-    let items = &bundle.modules[bundle.entry].items;
-    entry_schema(items).unwrap_or(CliCommandSchema {
+    entry_schema_for_bundle(bundle).unwrap_or(CliCommandSchema {
         entry_type: String::new(),
         inputs: Vec::new(),
         commands: Vec::new(),
     })
 }
 
-/// Checked schema for a typed `fn run` in one entry module. Codegen, dossier,
-/// executable metadata, and completion all consume this projection.
-pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
-    let run_type = items.iter().find_map(|item| match item {
+fn run_entry_type(items: &[Item]) -> Option<&str> {
+    items.iter().find_map(|item| match item {
         Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
             match &function.params[0].ty {
                 Type::Named(name) => Some(name.as_str()),
@@ -138,8 +135,10 @@ pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
             }
         }
         _ => None,
-    })?;
-    let name = run_type;
+    })
+}
+
+pub fn schema_for_type(items: &[Item], name: &str) -> Option<CliCommandSchema> {
     if let Some(structure) = items.iter().find_map(|item| match item {
         Item::Struct(structure) if structure.name == name => command_schema(structure),
         _ => None,
@@ -160,6 +159,56 @@ pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
         Some(CliSubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
     }).collect();
     Some(CliCommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
+}
+
+/// Module containing the entry parameter's checked CLI type. Local types win;
+/// otherwise the type must be public in one directly imported file module.
+pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
+    let entry = &bundle.modules[bundle.entry];
+    let name = run_entry_type(&entry.items)?;
+    let (wanted_alias, leaf) = name
+        .split_once('.')
+        .map_or((None, name), |(alias, leaf)| (Some(alias), leaf));
+    if wanted_alias.is_none()
+        && entry.items.iter().any(|item| match item {
+            Item::Struct(structure) => structure.name == leaf,
+            Item::Enum(enumeration) => enumeration.name == leaf,
+            _ => false,
+        })
+    {
+        return Some(bundle.entry);
+    }
+    entry.imports.iter().filter_map(|import| {
+        if wanted_alias.is_some_and(|alias| import.import_alias() != alias) {
+            return None;
+        }
+        let target = bundle.import_targets.get(&(bundle.entry, import.span)).copied()?;
+        bundle.modules[target]
+            .items
+            .iter()
+            .any(|item| match item {
+                Item::Struct(structure) => structure.is_pub && structure.name == leaf,
+                Item::Enum(enumeration) => enumeration.is_pub && enumeration.name == leaf,
+                _ => false,
+            })
+            .then_some(target)
+    }).last()
+}
+
+/// Checked schema for a typed `fn run`, including a CLI type declared in a
+/// directly imported module. Codegen, dossier, metadata, and completion share it.
+pub fn entry_schema_for_bundle(bundle: &ProgramBundle) -> Option<CliCommandSchema> {
+    let entry_items = &bundle.modules[bundle.entry].items;
+    let name = run_entry_type(entry_items)?;
+    let leaf = name.rsplit('.').next().unwrap_or(name);
+    let module = entry_type_module(bundle)?;
+    schema_for_type(&bundle.modules[module].items, leaf)
+}
+
+/// Checked schema for a typed `fn run` in one module.
+pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
+    let name = run_entry_type(items)?;
+    schema_for_type(items, name.rsplit('.').next().unwrap_or(name))
 }
 
 /// Canonical, versioned JetCommandSchema record. The digest makes corruption

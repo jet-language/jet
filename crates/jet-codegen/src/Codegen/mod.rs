@@ -957,7 +957,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     }
     // S12/D-CLIFLAG1: Jet's only program entry is `fn run`; Rust still needs
     // `fn main`, so synthesize that wrapper for zero-arg and typed-CLI forms.
-    emit_cli_entry_if_needed(&cx, &prog.items, &mut out);
+    emit_cli_entry_if_needed(&cx, &prog.items, &prog.items, &mut out);
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     ))))
@@ -1694,7 +1694,10 @@ pub fn emit_bundle_dbg(
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
     // No-op when the entry file has no `run` (sema's E0101 already rejected it).
-    emit_cli_entry_if_needed(&cx, &entry.items, &mut out);
+    let cli_items = jet_foundation::CliSchema::entry_type_module(bundle)
+        .map(|module| bundle.modules[module].items.as_slice())
+        .unwrap_or(entry.items.as_slice());
+    emit_cli_entry_if_needed(&cx, &entry.items, cli_items, &mut out);
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     ))))

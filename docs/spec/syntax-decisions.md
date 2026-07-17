@@ -100,7 +100,7 @@ beside S17 (owner-chosen I8 exception).
 
 **S12 — Entry point**: `fn run()`; no `pub` required. May be fallible:
 `fn run() -> Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
-typed entry parameter opts into CLI parsing — `fn run(args: ServeArgs)`
+typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`@[Cli]`/`@[Doc("...")]` markers, bracket form matching `@[Codable]`); an
 `enum` param derives subcommands. There is no Jet `main` entry and no
@@ -115,8 +115,11 @@ a second parser.
 card #541)*: when present, the resolved parameter type of `fn run(args: T)` is
 the single source for shell input names, types, defaults, parsing, help,
 completion, validation, and audit facts. This adds no required ceremony:
-plain `fn run()` remains a fully valid entry and may read raw arguments through
-`core.args` when typed derivation is not wanted.
+plain `fn run()` is the canonical zero-ceremony entry and may read raw arguments
+through `core.args` when typed derivation is not wanted. Jet never requires an
+entry parameter; the author adds one only when external command input belongs in
+the function signature. The public CLI type may live in the entry file or one
+directly imported module.
 
 **S27 — Methods**: `self` receiver with capability sigils (`^self`,
 `&self`; bare `self` = read, D-MEM1). Call `value.method(args)`. Methods live in the
@@ -2933,7 +2936,8 @@ probe; `nixpkgs@…` never probed). No `via:` marker.
 **D-TGT1–4 — Targets**: packages declare `targets:` (no `kind:`); shipped:
 `library`, `executable`, `test`, `example`, `benchmark`; `plugin` reserved.
 Bare keyword or block (`executable { entry: "src/cli.jet" }`); bare
-`executable` searches `src/main.jet` then `<package>.jet`. **D-ILE1**:
+`executable` searches `run.jet`, `src/run.jet`, then `<package>.jet`; legacy
+`main.jet` locations remain compatibility fallbacks. **D-ILE1**:
 omitted targets infer from `fn run()` (executable else library; two entries
 E_DUPMAIN).
 

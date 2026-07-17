@@ -13,7 +13,7 @@
 //!
 //!   1. `<script_dir>/.jet/inline-deps/<name>/<version>/` — a committed (or
 //!      previously `jet fetch --lock`-populated) local copy. `.jet/` is the existing
-//!      managed-folder convention (`.jet/lock`, `.jet/main.jet`).
+//!      managed-folder convention (`.jet/lock`, `.jet/inline-deps`).
 //!   2. `JET_INLINE_DEPS_FIXTURES=<dir>` — an offline test/dev override with
 //!      the same `<name>/<version>/` shape, checked only when the env var is
 //!      set (mirrors Jetpack's own `JETPACK_FIXTURES` test convention).

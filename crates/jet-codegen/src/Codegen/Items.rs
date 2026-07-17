@@ -380,7 +380,7 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
 /// on a bad value, in the same "core.args runtime error" voice as
 /// `jet_args_parse`'s own messages — no new diagnostic code, I8); `String`
 /// and `Path` are infallible conversions.
-fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str) -> String {
+fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str, root_prefix: &str) -> String {
     match ty {
         Type::Int => format!(
             "match {var}.parse::<i64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
@@ -389,7 +389,7 @@ fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str) -> String {
             "match {var}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
         ),
         Type::String => format!("{var}.clone()"),
-        Type::Named(n) if n == "Path" => format!("jet_path_from(&{var})"),
+        Type::Named(n) if n == "Path" => format!("{root_prefix}jet_path_from(&{var})"),
         _ => unreachable!("is_cli_scalar gates this to Int/Float/String/Path"),
     }
 }
@@ -402,9 +402,10 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
         return;
     };
     let cn = user_type_rust(&s.name);
+    let root = &cx.root_prefix;
 
     let mut spec_body = String::new();
-    spec_body.push_str("    let __s = jet_args_spec();\n");
+    spec_body.push_str(&format!("    let __s = {root}jet_args_spec();\n"));
     let mut decode_lines = String::new();
 
     // CliSchema is the checked projection shared with `jet inspect dossier`.
@@ -422,10 +423,10 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
         match &input.shape {
             jet_foundation::CliSchema::CliInputShape::Flag => {
                 spec_body.push_str(&format!(
-                    "    let __s = jet_args_flag(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
+                    "    let __s = {root}jet_args_flag(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
                 ));
                 decode_lines.push_str(&format!(
-                    "    let {m}: bool = jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
+                    "    let {m}: bool = {root}jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
                 ));
             }
             jet_foundation::CliSchema::CliInputShape::Value {
@@ -436,12 +437,12 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 };
                 let metavar = input.metavar.as_deref().unwrap_or("VALUE");
                 spec_body.push_str(&format!(
-                    "    let __s = jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
+                    "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
                 ));
                 let rust = cx.rust_type(inner);
-                let conv = cli_scalar_from_string(inner, "__v", &flag);
+                let conv = cli_scalar_from_string(inner, "__v", &flag, root);
                 decode_lines.push_str(&format!(
-                    "    let {m}: Option<{rust}> = match jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => Some({conv}), None => None }};\n"
+                    "    let {m}: Option<{rust}> = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => Some({conv}), None => None }};\n"
                 ));
             }
             jet_foundation::CliSchema::CliInputShape::Value {
@@ -452,10 +453,10 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 let ty = &f.ty;
                 let metavar = input.metavar.as_deref().unwrap_or("VALUE");
                 spec_body.push_str(&format!(
-                    "    let __s = jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
+                    "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
                 ));
                 let rust = cx.rust_type(ty);
-                let conv = cli_scalar_from_string(ty, "__v", &flag);
+                let conv = cli_scalar_from_string(ty, "__v", &flag, root);
                 let absent = match default {
                     Some(jet_foundation::CliSchema::CliDefault::Value(value)) => {
                         value.serialize()
@@ -471,7 +472,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     ),
                 };
                 decode_lines.push_str(&format!(
-                    "    let {m}: {rust} = match jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => {conv}, None => {absent} }};\n"
+                    "    let {m}: {rust} = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => {conv}, None => {absent} }};\n"
                 ));
             }
         }
@@ -479,7 +480,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     spec_body.push_str("    __s\n");
 
     out.push_str(&format!(
-        "fn __jet_cli_spec_{name}() -> JetArgsSpec {{\n{spec_body}}}\n\n",
+        "pub(crate) fn __jet_cli_spec_{name}() -> {root}JetArgsSpec {{\n{spec_body}}}\n\n",
         name = s.name
     ));
 
@@ -490,7 +491,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
         .map(|f| mangle(&f.name))
         .collect();
     out.push_str(&format!(
-        "fn __jet_cli_decode_{name}(__spec: &JetArgsSpec, __parsed: &JetParsedArgs) -> Result<{cn}, String> {{\n{decode_lines}    Ok({cn} {{ {inits} }})\n}}\n\n",
+        "pub(crate) fn __jet_cli_decode_{name}(__spec: &{root}JetArgsSpec, __parsed: &{root}JetParsedArgs) -> Result<{cn}, String> {{\n{decode_lines}    Ok({cn} {{ {inits} }})\n}}\n\n",
         name = s.name,
         inits = inits.join(", ")
     ));
@@ -554,7 +555,12 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
 /// `__jet_cli_spec_*`/`__jet_cli_decode_*` functions `emit_struct_cli`
 /// produced, and the same `core.args` runtime surface a hand-written
 /// `.parse(io.args())` call would hit (I8: no second parser).
-pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String) {
+pub(crate) fn emit_cli_entry_if_needed(
+    cx: &Cx,
+    items: &[Item],
+    cli_items: &[Item],
+    out: &mut String,
+) {
     let Some(run_fn) = items.iter().find_map(|i| match i {
         Item::Func(f) if f.name == "run" => Some(f),
         _ => None,
@@ -575,8 +581,24 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
         return;
     }
     let param_ty = run_fn.params[0].ty.clone();
-    let Type::Named(name) = &param_ty else {
+    let Type::Named(type_name) = &param_ty else {
         return;
+    };
+    let name = type_name.rsplit('.').next().unwrap_or(type_name);
+    let local_type = !type_name.contains('.')
+        && items.iter().any(|item| match item {
+            Item::Struct(structure) => structure.name == name,
+            Item::Enum(enumeration) => enumeration.name == name,
+            _ => false,
+        });
+    let param_rust = cx.rust_type(&param_ty);
+    let helper_prefix = if local_type {
+        String::new()
+    } else {
+        param_rust
+            .rsplit_once("::")
+            .map(|(module, _)| format!("{module}::"))
+            .unwrap_or_default()
     };
     let conv = cx
         .sigs
@@ -593,13 +615,13 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
         }
     };
 
-    if let Some(s) = items.iter().find_map(|i| match i {
+    if let Some(s) = cli_items.iter().find_map(|i| match i {
         Item::Struct(s) if &s.name == name => Some(s),
         _ => None,
     }) {
         if s.derives.iter().any(|(t, _)| t == "Cli") {
             out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    let __spec = __jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match __jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ user_run({call_arg}); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ user_run({call_arg}); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 name = name,
                 call_arg = arg_expr("__args"),
             ));
@@ -607,13 +629,21 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
         return;
     }
 
-    if let Some(e) = items.iter().find_map(|i| match i {
+    if let Some(e) = cli_items.iter().find_map(|i| match i {
         Item::Enum(e) if &e.name == name => Some(e),
         _ => None,
     }) {
-        let schema = jet_foundation::CliSchema::entry_schema(items)
+        let schema = jet_foundation::CliSchema::schema_for_type(cli_items, name)
             .expect("sema-approved enum entry has one checked command schema");
-        emit_cli_subcommand_entry(cx, e, &schema, &arg_expr, out);
+        emit_cli_subcommand_entry(
+            cx,
+            e,
+            &schema,
+            &helper_prefix,
+            &param_rust,
+            &arg_expr,
+            out,
+        );
     }
 }
 
@@ -637,6 +667,8 @@ fn emit_cli_subcommand_entry(
     cx: &Cx,
     e: &EnumDef,
     schema: &jet_foundation::CliSchema::CliCommandSchema,
+    helper_prefix: &str,
+    enum_rust: &str,
     arg_expr: &dyn Fn(&str) -> String,
     out: &mut String,
 ) {
@@ -654,9 +686,9 @@ fn emit_cli_subcommand_entry(
             continue;
         };
         let tag = mangle_variant(&v.name);
-        let ctor = format!("user_{}::{}(__payload)", e.name, tag);
+        let ctor = format!("{enum_rust}::{tag}(__payload)");
         arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = __jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match __jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ user_run({call_arg}); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ user_run({call_arg}); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),
             payload = payload_name,
             call_arg = arg_expr(&ctor),

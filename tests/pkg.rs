@@ -2378,13 +2378,21 @@ fn cli_jet_new_creates_project_structure() {
         "jet new must create pkg.jet"
     );
     assert!(
-        proj.join(".jet/main.jet").is_file() || proj.join("main.jet").is_file(),
-        "jet new must create an entry point"
+        proj.join("run.jet").is_file(),
+        "jet new must create run.jet"
     );
     assert!(
         proj.join(".gitignore").is_file(),
         "jet new must create .gitignore"
     );
+
+    let run = jet_cmd(&["run"], &proj, &store);
+    assert!(
+        run.status.success(),
+        "new project must run without naming a file:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "hello, world\n");
 
     let _ = fs::remove_dir_all(&tmp);
 }

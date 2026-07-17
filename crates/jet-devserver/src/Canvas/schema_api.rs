@@ -595,7 +595,7 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
     let source = entry
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or("main.jet");
+        .unwrap_or(jet_driver::Syntax::DEFAULT_ENTRY_FILE);
     let (label, args, writes, requires_confirmation) = match action_id.as_str() {
         "canvas.command:run" => ("Run program", vec!["run", source], "none", false),
         "canvas.command:check" => ("Check project", vec!["check", source], "none", false),

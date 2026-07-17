@@ -852,8 +852,8 @@ mode (structural check).
   unchanged when nothing skips). A `.skip` later in the body skips only that
   region; the rest of the test still runs.
 
-**`jet new <name>`** creates `<name>/main.jet` (hello world) and
-`<name>/.gitignore` (`build/`). No manifest (M12; opt-in).
+**`jet new <name>`** creates `<name>/run.jet` with a zero-argument `fn run()`
+(hello world), plus `<name>/pkg.jet` and `<name>/.gitignore` (`build/`).
 
 Example: `examples/features/tooling/tests.jet`; scope members in
 `examples/features/tooling/test_members.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
@@ -2717,8 +2717,10 @@ machinery (D-MARKERMOVE1). `@[Doc("...")]` is a field-level marker giving
 that flag's `--help` line; a field with no `@[Doc(...)]` gets a generic
 "value for --name" line instead.
 
-**Entry semantics.** `run` is the only program entry name (S12). It is valid
-as either `fn run()` or `fn run(args: T)` where `T` is a CLI spec shape below.
+**Entry semantics.** `run` is the only program entry name (S12). Plain
+`fn run()` is the default and never requires arguments. `fn run(args: T)` is an
+explicit opt-in used only when the program wants external command input in its
+signature, where `T` is a CLI spec shape below.
 No variadic entry signature exists; raw argv access stays explicit inside
 `fn run()` via `core.args`/`core.io.args`. `main` has no entry meaning in Jet.
 Bad typed-entry shapes are diagnosed (E1308 below), not silently ignored.
@@ -2822,9 +2824,9 @@ including the reserved `--help`), E1307 (subcommand payload isn't
 `@[Cli]`), E1308 (`run`'s one parameter isn't a `@[Cli]` struct or an enum
 of `@[Cli]` payloads). See docs/spec/diagnostics.md.
 
-**Known limitation:** `@[Cli]`'s generated helper functions use unqualified
-`jet_std`/`user_*` paths, so the struct and its `fn run` must live in the entry
-file, not an imported module file.
+The public `@[Cli]` struct or subcommand enum may be declared in the entry file
+or in one directly imported module. Its generated parser/decode helpers remain
+internal projections over the same `ArgsSpec` engine.
 
 ## `jet inspect expand` — transparency command (D-EXPANDCLI1, card #183)
 

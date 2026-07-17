@@ -1292,6 +1292,213 @@ fn run(args: RunArgs) {
 }
 
 #[test]
+fn typed_cli_entry_accepts_an_imported_argument_type() {
+    let dir = isolated_cwd("shape_cli_imported_entry_type");
+    fs::write(
+        dir.join("args.jet"),
+        r#"@Cli
+pub struct RunArgs {
+    @[Doc("person to greet")] pub name: String
+    #[Default(2)] pub retries: Int
+    pub verbose: Bool
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        r#"use "args"
+
+fn run(args: RunArgs) {
+    print(args.name)
+    print(args.retries)
+    print(args.verbose)
+}
+"#,
+    )
+    .unwrap();
+
+    let run = Command::new(jet())
+        .args(["run", "run.jet", "--", "--name", "Ada", "--verbose"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "imported typed entry failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "Ada\n2\ntrue\n");
+
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier", "run.jet", "run", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        dossier.status.success(),
+        "imported typed command dossier failed: {}",
+        String::from_utf8_lossy(&dossier.stderr)
+    );
+    let dossier = String::from_utf8(dossier.stdout).unwrap();
+    for fact in [
+        "\"entry_type\":\"RunArgs\"",
+        "\"flag\":\"--name\"",
+        "\"default\":\"2\"",
+        "\"flag\":\"--verbose\"",
+    ] {
+        assert!(dossier.contains(fact), "imported CLI dossier omitted {fact}: {dossier}");
+    }
+}
+
+#[test]
+fn typed_cli_entry_accepts_an_imported_subcommand_type() {
+    let dir = isolated_cwd("shape_cli_imported_subcommand_type");
+    fs::write(
+        dir.join("commands.jet"),
+        r#"@Cli
+pub struct ServeArgs { pub port: Int }
+
+@Cli
+pub struct ImportArgs { pub file: String }
+
+pub enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        r#"use "commands"
+
+fn run(cmd: Cmd) {}
+"#,
+    )
+    .unwrap();
+
+    let run = Command::new(jet())
+        .args(["run", "run.jet", "--", "serve", "--port", "8080"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "imported subcommand entry failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier", "run.jet", "run", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(dossier.status.success());
+    let dossier = String::from_utf8(dossier.stdout).unwrap();
+    for fact in [
+        "\"entry_type\":\"Cmd\"",
+        "\"name\":\"serve\"",
+        "\"flag\":\"--port\"",
+        "\"name\":\"import\"",
+        "\"flag\":\"--file\"",
+    ] {
+        assert!(dossier.contains(fact), "imported subcommand dossier omitted {fact}: {dossier}");
+    }
+}
+
+#[test]
+fn colliding_imported_cli_type_resolution_stays_in_codegen_sync() {
+    let dir = isolated_cwd("shape_cli_ambiguous_imported_type");
+    fs::write(
+        dir.join("cli.jet"),
+        "@Cli\npub struct RunArgs { pub name: String }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("plain.jet"),
+        "pub struct RunArgs { pub name: String }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        "use \"plain\"\nuse \"cli\"\nfn run(args: RunArgs) {}\n",
+    )
+    .unwrap();
+
+    let build = Command::new(jet())
+        .args(["build", "run.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&build.stderr);
+    assert_ne!(build.status.code(), Some(101), "type ambiguity reached rustc: {stderr}");
+    if !build.status.success() {
+        assert!(stderr.contains("E1308"), "wrong frontend diagnostic: {stderr}");
+    }
+    assert!(!stderr.contains("internal compiler error"), "type ambiguity reached rustc: {stderr}");
+}
+
+#[test]
+fn local_cli_type_wins_over_same_named_import() {
+    let dir = isolated_cwd("shape_cli_local_type_precedence");
+    fs::write(
+        dir.join("other.jet"),
+        "pub struct RunArgs { pub name: String }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        r#"use "other"
+
+@Cli
+struct RunArgs { name: String }
+
+fn run(args: RunArgs) { print(args.name) }
+"#,
+    )
+    .unwrap();
+
+    let run = Command::new(jet())
+        .args(["run", "run.jet", "--", "--name", "Ada"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "local CLI type did not win: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "Ada\n");
+}
+
+#[test]
+fn bare_project_run_prefers_run_jet() {
+    let dir = isolated_cwd("run_jet_default_entry");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"entry-default\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    fs::write(dir.join("run.jet"), "fn run() { print(\"run.jet\") }\n").unwrap();
+    fs::write(
+        dir.join("src/main.jet"),
+        "fn run() { print(\"legacy main.jet\") }\n",
+    )
+    .unwrap();
+
+    let run = Command::new(jet())
+        .arg("run")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "bare run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "run.jet\n");
+}
+
+#[test]
 fn external_completion_metadata_errors_fail_closed() {
     let dir = isolated_cwd("shape_cli_metadata_error");
     fs::write(dir.join("not-a-program"), b"not an executable").unwrap();
@@ -3676,9 +3883,8 @@ fn plugin_missing_wasm_tools_is_e1259() {
 // ── D-ILE1 / D-CLI-BARE1: bare entry resolution (card #497 verifier bounce) ──
 //
 // `resolve_bare_entry` (Source/main.rs) delegated to a `find_project_entry`
-// that only ever checked `main.jet`/`.jet/main.jet`, never the ratified
-// D-ILE1 search order (`src/main.jet` then `<package>.jet`, the package name
-// from `pkg.jet`'s `payload.name`). The shipped
+// that only ever checked `main.jet`/`.jet/main.jet`, never the package-named
+// D-ILE1 fallback (`<package>.jet`, using `pkg.jet`'s `payload.name`). The shipped
 // `examples/features/packages/monorepo` fixture (members `hello.jet` /
 // `ranker.jet`, neither named `main.jet`) exposed it end to end: bare `jet
 // run` at the workspace root couldn't see either member as runnable, `-p
@@ -3720,7 +3926,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
     };
 
     // 1. Bare `jet run` at the workspace root: both members resolve via
-    //    D-ILE1 (`<package>.jet`, since neither has `src/main.jet`), so the
+    //    D-ILE1 (`<package>.jet`, since neither has `run.jet`/`src/run.jet`), so the
     //    result is the D-CLI-BARE1 ambiguity error naming both.
     let out = run(&root, &[]);
     let stderr = String::from_utf8_lossy(&out.stderr);

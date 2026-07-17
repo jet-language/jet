@@ -459,20 +459,35 @@ pub(super) fn find_jet_binary() -> String {
     Syntax::BINARY_NAME.to_string()
 }
 
-/// The project's entry file for the bare (no-file) `jetpack dev`: `.jet/main.jet`
-/// if present, else `main.jet` — the same convention `jet run`/`jet build` use
-/// for a bare project (`Source/main.rs`'s `find_project_entry`). Duplicated by
-/// hand rather than shared: jetpack and jet are separate binaries by design
-/// (D-JPK-DISPATCH1), so deleting either still leaves the other's own commands
-/// working.
+/// Project entry for bare `jetpack dev`, matching `jet`'s run-first convention.
+/// Kept local because jetpack and jet are separate binaries (D-JPK-DISPATCH1).
 pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
-    let dot_jet = project_dir
-        .join(Syntax::SOURCE_ROOT_DIR)
-        .join(format!("main.{}", Syntax::FILE_EXT));
-    if dot_jet.is_file() {
-        return dot_jet;
+    let default = project_dir.join(Syntax::DEFAULT_ENTRY_FILE);
+    if default.is_file() {
+        return default;
     }
-    project_dir.join(format!("main.{}", Syntax::FILE_EXT))
+    let src_default = project_dir.join("src").join(Syntax::DEFAULT_ENTRY_FILE);
+    if src_default.is_file() {
+        return src_default;
+    }
+    if let Some(Ok(manifest)) = crate::PackageManifest::PackManifest::load(project_dir) {
+        let named = project_dir.join(format!("{}.{}", manifest.package.name, Syntax::FILE_EXT));
+        if named.is_file() {
+            return named;
+        }
+    }
+    for legacy in [
+        project_dir.join("src").join(Syntax::LEGACY_ENTRY_FILE),
+        project_dir.join(Syntax::LEGACY_ENTRY_FILE),
+        project_dir
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(Syntax::LEGACY_ENTRY_FILE),
+    ] {
+        if legacy.is_file() {
+            return legacy;
+        }
+    }
+    default
 }
 
 /// Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's

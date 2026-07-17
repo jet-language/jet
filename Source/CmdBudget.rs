@@ -44,7 +44,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
     let entry = project_entry(&root);
     if !entry.is_file() {
-        return tool_failure(&options, "no project entry exists; add src/main.jet inside a project");
+        return tool_failure(&options, "no project entry exists; add run.jet inside a project");
     }
 
     let measured_start = timestamp_now();
@@ -647,7 +647,7 @@ fn trend_json(ids:&[String],samples:&[Vec<Rational>],percentile:Option<Percentil
 fn applicable(spec:&BudgetSpec,target:&str,profile:&str)->bool{fn one(axis:&BudgetAxis,current:&str)->bool{match axis{BudgetAxis::Current|BudgetAxis::All=>true,BudgetAxis::Only(values)=>values.iter().any(|v|v.eq_ignore_ascii_case(current)||v.contains(&title(current)))}}one(&spec.applicability.targets,target)&&one(&spec.applicability.profiles,profile)}
 fn axis(axis:&BudgetAxis,current:&str)->Vec<CanonicalJson>{match axis{BudgetAxis::Current=>vec![CanonicalJson::String(current.into())],BudgetAxis::All=>vec![CanonicalJson::String("all".into())],BudgetAxis::Only(v)=>v.iter().cloned().map(CanonicalJson::String).collect()}}
 fn title(s:&str)->String{let mut c=s.chars();c.next().map(|x|x.to_ascii_uppercase().to_string()+c.as_str()).unwrap_or_default()}
-fn project_entry(root:&Path)->PathBuf{let main=root.join("src/main.jet");if main.is_file(){return main}if let Some(Ok(manifest))=jet::PackageManifest::PackManifest::load(root){let named=root.join(format!("{}.jet",manifest.package.name));if named.is_file(){return named}}main}
+fn project_entry(root:&Path)->PathBuf{crate::find_project_entry(root)}
 fn package_name(root:&Path)->String{jet::PackageManifest::PackManifest::load(root).and_then(Result::ok).map(|m|m.package.name).unwrap_or_else(||"package".into())}
 trait BudgetSource {
     fn spec(&self) -> &BudgetSpec;

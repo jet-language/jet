@@ -24,6 +24,13 @@ pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 /// the old `[packages]` monorepo index to `workspace.jet`.
 pub const JETPACK_TOML: &str = "jetpack.toml";
 
+/// Owner ruling 2026-07-17: a project's zero-ceremony executable entry is
+/// `run.jet`, matching Jet's `fn run()` entry function.
+pub const DEFAULT_ENTRY_FILE: &str = "run.jet";
+
+/// Pre-ruling project entry name, accepted only as a compatibility fallback.
+pub const LEGACY_ENTRY_FILE: &str = "main.jet";
+
 /// D-JPK-FILES (ratified 2026-06-18): `[repo]` table in `jetpack.toml`.
 pub const JTOML_TABLE_REPO: &str = "repo";
 

@@ -73,7 +73,10 @@ everything as JSON; `tower status` is the human summary.
    done` (`E_CRITERIA`) while any item is unverified, and refuses a verifier
    who is also the builder (`E_CRITERIA_SELF`). Cards flagged
    `needsAcceptance` mint an owner accept/bounce ballot once the checklist is
-   clean; the card waits in `verify` for that ratification, not `done`.
+   clean; the card waits in `verify` for that ratification, not `done`. Do not
+   set it for technical correctness: agents own machine verification and the
+   independent review. Use it only for an explicit owner judgment of UX, DX,
+   visual presentation, copy, or taste, and name what the owner should inspect.
 5. Report through the board itself: a `--log` entry on each card you advanced
    and a question/ballot for anything newly blocked on the owner — those are
    what the owner sees (live SSE UI — web push removed).

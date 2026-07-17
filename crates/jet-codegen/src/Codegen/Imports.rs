@@ -55,6 +55,13 @@ pub(crate) fn foreign_type_map(
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
+    let is_local = |name: &str| {
+        module.items.iter().any(|item| match item {
+            Item::Struct(structure) => structure.name == name,
+            Item::Enum(enumeration) => enumeration.name == name,
+            _ => false,
+        })
+    };
     for imp in &module.imports {
         if imp.is_c_import() {
             continue;
@@ -63,10 +70,10 @@ pub(crate) fn foreign_type_map(
             let rust_mod = format!("user_{}", bundle.modules[target].alias);
             for item in &bundle.modules[target].items {
                 match item {
-                    Item::Struct(s) if s.is_pub => {
+                    Item::Struct(s) if s.is_pub && !is_local(&s.name) => {
                         map.insert(s.name.clone(), rust_mod.clone());
                     }
-                    Item::Enum(e) if e.is_pub => {
+                    Item::Enum(e) if e.is_pub && !is_local(&e.name) => {
                         map.insert(e.name.clone(), rust_mod.clone());
                     }
                     _ => {}

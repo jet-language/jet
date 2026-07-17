@@ -1862,7 +1862,7 @@ fn main() {
             // A plain directory of loose `.jet` files (no manifest) is a
             // test folder instead: pass it straight through so
             // `run_test_opts` walks it — recursively, D-TESTKIT1=A gap #2 —
-            // rather than erroring "no main.jet entry".
+            // rather than erroring "no project entry".
             let target_path = Path::new(target);
             let is_project_dir =
                 target_path.is_dir() && target_path.join(jet::Syntax::PAYLOAD_FILE).is_file();
@@ -2101,8 +2101,8 @@ fn manifest_default_target(file: &str) -> Option<String> {
 
 pub(crate) fn resolve_source_path(raw: &str) -> String {
     let path = Path::new(raw);
-    // A directory argument is a project root: resolve its entry
-    // (`.jet/main.jet` else `<dir>/main.jet`). `jet run <dir>` just works.
+    // A directory argument is a project root: resolve its canonical entry.
+    // `jet run <dir>` just works.
     if path.is_dir() {
         let entry = find_project_entry(path);
         if entry.is_file() {
@@ -2110,16 +2110,16 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
         }
         // No entry: if there's no manifest either, surface a clean error; with
         // a manifest but no entry, fall through so the file-not-found path
-        // names the missing `main.jet`.
+        // names the missing `run.jet`.
         if !path.join(jet::Syntax::PAYLOAD_FILE).is_file() {
             eprintln!(
-                "error: no `src/main.{ext}` entry in `{dir}`",
-                ext = jet::Syntax::FILE_EXT,
+                "error: no `{entry}` entry in `{dir}`",
+                entry = jet::Syntax::DEFAULT_ENTRY_FILE,
                 dir = raw,
             );
             eprintln!(
-                " fix: add a `src/main.{}` to that directory, or point at a `.jet` file directly",
-                jet::Syntax::FILE_EXT
+                " fix: add `{}` to that directory, or point at a `.jet` file directly",
+                jet::Syntax::DEFAULT_ENTRY_FILE
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -2135,18 +2135,18 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Find the entry `.jet` file for a project rooted at `root` (D-ILE1): bare
-/// `executable` resolution searches `src/main.jet` first, then `<package>.jet`
-/// — `<package>` is the `payload.name` field read from `root`'s `pkg.jet`, so
-/// e.g. package `hello` resolves to `hello.jet` at the project root. Falls
-/// back to the `src/main.jet` candidate path when neither exists, so callers
-/// can name it in a clean "missing entry" error.
+/// Find the entry `.jet` file for a project rooted at `root` (D-ILE1, owner
+/// amendment 2026-07-17). `run.jet` is the zero-ceremony default, followed by
+/// `src/run.jet` and `<package>.jet`. Old `main.jet` locations remain fallback
+/// inputs, never defaults. Missing-entry errors name `run.jet`.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
-    let src_main = root
-        .join("src")
-        .join(format!("main.{}", jet::Syntax::FILE_EXT));
-    if src_main.is_file() {
-        return src_main;
+    let default = root.join(jet::Syntax::DEFAULT_ENTRY_FILE);
+    if default.is_file() {
+        return default;
+    }
+    let src_default = root.join("src").join(jet::Syntax::DEFAULT_ENTRY_FILE);
+    if src_default.is_file() {
+        return src_default;
     }
     if let Some(Ok(manifest)) = jet::PackageManifest::PackManifest::load(root) {
         let named = root.join(format!(
@@ -2158,7 +2158,17 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
             return named;
         }
     }
-    src_main
+    for legacy in [
+        root.join("src").join(jet::Syntax::LEGACY_ENTRY_FILE),
+        root.join(jet::Syntax::LEGACY_ENTRY_FILE),
+        root.join(jet::Syntax::SOURCE_ROOT_DIR)
+            .join(jet::Syntax::LEGACY_ENTRY_FILE),
+    ] {
+        if legacy.is_file() {
+            return legacy;
+        }
+    }
+    default
 }
 
 /// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/

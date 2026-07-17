@@ -46,14 +46,14 @@ enum CliEntryShape {
     Invalid,
 }
 
-/// D-CLIFLAG1: classify `fn run`'s parameter type against the entry file's
-/// own struct/enum definitions. Only looks at the entry module (matching the
-/// rest of the entry-point machinery, which only ever inspects the entry
-/// file — same scope as the `main`/E0101 checks above).
+/// D-CLIFLAG1: classify `fn run`'s parameter type against its defining module.
+/// The entry signature stays in the entry file; its public `@[Cli]` type may
+/// live in one directly imported module.
 fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegistry) -> CliEntryShape {
     let Type::Named(name) = ty else {
         return CliEntryShape::Invalid;
     };
+    let name = name.rsplit('.').next().unwrap_or(name);
     if reg.implements_trait(name, "Cli") {
         return CliEntryShape::Struct;
     }
@@ -1575,7 +1575,13 @@ pub(crate) fn check_bundle_opts(
                 }
             } else if run_fn.params.len() == 1 {
                 let param = &run_fn.params[0];
-                match cli_entry_param_shape(entry_items, &param.ty, &entry.trait_reg) {
+                let cli_module = jet_foundation::CliSchema::entry_type_module(bundle)
+                    .unwrap_or(bundle.entry);
+                match cli_entry_param_shape(
+                    &bundle.modules[cli_module].items,
+                    &param.ty,
+                    &states[cli_module].trait_reg,
+                ) {
                     CliEntryShape::Struct | CliEntryShape::Enum => {}
                     CliEntryShape::EnumBadVariants(bad) => diags.extend(bad),
                     CliEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),

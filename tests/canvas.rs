@@ -2499,7 +2499,7 @@ fn canvas_project_transactions_create_package_from_workspace() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":true,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"files\":[{{\"path\":\"packages/tools/pkg.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/main.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
+        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":true,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"files\":[{{\"path\":\"packages/tools/pkg.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/run.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
         project_revision
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
@@ -2507,7 +2507,7 @@ fn canvas_project_transactions_create_package_from_workspace() {
     assert!(preview.contains("\"op\":\"create_package\""), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
     assert!(preview.contains("diff -- packages/tools/pkg.jet"), "{preview}");
-    assert!(preview.contains("diff -- packages/tools/main.jet"), "{preview}");
+    assert!(preview.contains("diff -- packages/tools/run.jet"), "{preview}");
     assert!(!dir.join("packages/tools/pkg.jet").exists());
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
@@ -2521,12 +2521,12 @@ fn canvas_project_transactions_create_package_from_workspace() {
         jetpack::PackageManifest::parse(&manifest).is_ok(),
         "{manifest}"
     );
-    let main = fs::read_to_string(dir.join("packages/tools/main.jet")).unwrap();
+    let main = fs::read_to_string(dir.join("packages/tools/run.jet")).unwrap();
     assert!(main.contains("print(\"tools\")"), "{main}");
     let after_project = jet::Canvas::project_json_for_entry(&entry);
     assert!(after_project.contains("\"name\":\"tools\""), "{after_project}");
     assert!(
-        after_project.contains("\"path\":\"packages/tools/main.jet\""),
+        after_project.contains("\"path\":\"packages/tools/run.jet\""),
         "{after_project}"
     );
 }
