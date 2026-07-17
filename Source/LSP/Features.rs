@@ -335,8 +335,6 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::KwUnsafe
         | TokKind::KwSelf
         | TokKind::KwNull
-        | TokKind::KwOk
-        | TokKind::KwErr
         | TokKind::KwIt
         | TokKind::KwModule => Some((st::KEYWORD, 0)),
 

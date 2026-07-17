@@ -166,6 +166,8 @@ int wmain(int argc,wchar_t**argv){
 #[cfg(test)]
 mod tests{
     #[test]
+    fn contextual_result_names_project_as_foreign_identifiers(){assert_eq!(super::project("Ok").unwrap(),"Ok");assert_eq!(super::project("Err").unwrap(),"Err");}
+    #[test]
     fn schema_generates_typed_stub_and_real_windows_automation(){let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n";let schema=super::parse_schema(metadata).unwrap();let jet=super::render_jet("office",&schema);assert!(jet.contains("pub fn open() -> Application ? ComError"));assert!(jet.contains("impl Application.Close"));assert!(jet.contains("fn close(^self)"));assert!(!jet.contains("pub fn close_Application"));assert!(jet.contains("pub fn Application_Workbooks(object: Application) -> Workbooks ? ComError"));assert!(jet.contains("pub fn Workbooks_Open_Book(object: Workbooks, path: String) -> Workbook ? ComError"));assert!(jet.contains("pub fn Range_Values(object: Range) -> DataTree ? ComError"));assert!(jet.contains("@Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_Application"));let c=super::render_c("office",&schema);assert!(c.contains("jet_com_office_Workbooks_Open_Book"));for needle in ["CoInitializeEx","CoCreateInstance","IDispatch_Invoke","SafeArrayGetElement","VariantChangeType","IDispatch_Release","GetCurrentThreadId"]{assert!(c.contains(needle),"missing {needle}")}}
     #[cfg(not(target_os="windows"))]
     #[test]

@@ -2735,8 +2735,6 @@ fn c44_lsp_keywords_derive_from_syntax() {
         Syntax::LIT_TRUE,
         Syntax::LIT_FALSE,
         Syntax::LIT_NULL,
-        Syntax::LIT_OK,
-        Syntax::LIT_ERR,
         Syntax::KW_DISTINCT,
         Syntax::KW_MODULE,
     ];
@@ -2764,11 +2762,13 @@ fn c44_lsp_keywords_derive_from_syntax() {
             word
         );
     }
-    // 3. LIT_VALUE is a literal, not a keyword — must NOT be in keyword list.
-    assert!(
-        !Syntax::JET_KEYWORD_LIST.contains(&Syntax::LIT_VALUE),
-        "LIT_VALUE ('value') must not appear in JET_KEYWORD_LIST"
-    );
+    // 3. Contextual variants are literals, not reserved words.
+    for literal in [Syntax::LIT_VALUE, Syntax::LIT_OK, Syntax::LIT_ERR] {
+        assert!(
+            !Syntax::JET_KEYWORD_LIST.contains(&literal),
+            "contextual literal {literal:?} must not appear in JET_KEYWORD_LIST"
+        );
+    }
     // 4. The list is non-empty and reasonable in size.
     assert!(
         Syntax::JET_KEYWORD_LIST.len() >= 20,

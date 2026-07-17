@@ -103,7 +103,7 @@
   "self"
 ] @keyword
 
-; literal: Err None Ok Val false true
+; literal: None Val false true
 [
   "false"
   "true"

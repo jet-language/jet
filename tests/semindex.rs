@@ -40,6 +40,7 @@ fn fact(
         examples: Vec::new(),
         provenance,
         span: None,
+        lexical_scope: None,
     }
 }
 
@@ -70,6 +71,21 @@ fn semantic_visibility_prefers_live_and_local_bindings() {
     let completions = index.complete_visible("ans", None);
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].identity, "session:binding:answer");
+}
+
+#[test]
+fn contextual_result_names_are_not_advertised_as_keywords() {
+    let path = temp_fixture("contextual_result_names.jet", "fn run() {}\n");
+    let symbols = open_symbols(&path).expect("semantic symbols");
+    for name in ["Ok", "Err"] {
+        assert!(
+            symbols.symbols().iter().all(|symbol| {
+                symbol.identity != format!("builtin:keyword:{name}")
+                    && !(symbol.name == name && symbol.kind == SemanticSymbolKind::Keyword)
+            }),
+            "{name} must stay a contextual identifier, not a keyword"
+        );
+    }
 }
 
 #[test]

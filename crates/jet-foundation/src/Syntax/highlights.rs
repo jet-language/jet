@@ -325,14 +325,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         text: LIT_VALUE,
         class: HighlightClass::Literal,
     },
-    HighlightToken {
-        text: LIT_OK,
-        class: HighlightClass::Literal,
-    },
-    HighlightToken {
-        text: LIT_ERR,
-        class: HighlightClass::Literal,
-    },
     // Built-in types.
     HighlightToken {
         text: TYPE_INT,
@@ -1052,8 +1044,8 @@ use super::{
     KW_DEFER, KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SANITIZER, KW_SELF,
     KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASKGROUP, KW_TEST, KW_TODO,
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,
-    KW_VIA, LIT_ERR, VALIDATE_CHECK_FN,
-    LIT_FALSE, LIT_NULL, LIT_OK, LIT_TRUE, LIT_VALUE, OP_AMP_EQ, OP_AND, OP_ARM_ARROW,
+    KW_VIA, VALIDATE_CHECK_FN,
+    LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, OP_AMP_EQ, OP_AND, OP_ARM_ARROW,
     OP_CARET_EQ, OP_EQ, OP_FALLBACK, OP_FAN_OUT, OP_GE, OP_GT, OP_LAMBDA_ARROW, OP_LE, OP_LT,
     OP_MINUS, OP_MINUS_EQ, OP_MINUS_MINUS, OP_NAMED_CTOR, OP_NE, OP_NOT, OP_OPTIONAL_CHAIN,
     OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_PLUS_PLUS,

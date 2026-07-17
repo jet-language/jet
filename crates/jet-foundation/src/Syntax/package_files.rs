@@ -430,12 +430,12 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // In-body struct validation (D-VALIDATE1, card #506)
     KW_VALIDATE_BLOCK,
     VALIDATE_CHECK_FN,
-    // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
+    // Reserved literals: boolean (S11), option (S32), synthetic (M4).
+    // Result `Ok`/`Err` and Optional `Val` are contextual identifiers, so their
+    // canonical LIT_* constants intentionally stay outside this keyword list.
     LIT_TRUE,
     LIT_FALSE,
     LIT_NULL,
-    LIT_OK,
-    LIT_ERR,
     KW_IT,
     // Binding sigils (SIGIL_BIND_IMMUT / SIGIL_BIND_MUT) are not words; omitted.
 ];
@@ -560,8 +560,8 @@ use super::{
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MODULE,
     KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RETURN, KW_SANITIZER,
     KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASK, KW_TASKGROUP, KW_TEST,
-    KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_ERR, LIT_FALSE,
-    LIT_NULL, LIT_OK, LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BIT_SET, TYPE_BOOL,
+    KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_FALSE,
+    LIT_NULL, LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BIT_SET, TYPE_BOOL,
     TYPE_BTREE_MAP, TYPE_BYTE_BUFFER, TYPE_CHAR, TYPE_DEQUE, TYPE_F32, TYPE_F64, TYPE_FLOAT,
     TYPE_HASH_MAP, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INT, TYPE_LRU,
     TYPE_PRIORITY_QUEUE, TYPE_SET, TYPE_SHARED, TYPE_SORTED_SET, TYPE_STRING, TYPE_U16,

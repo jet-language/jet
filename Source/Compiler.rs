@@ -375,8 +375,6 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwDerive => "keyword.derive",
         TokKind::KwSelf => "keyword.self",
         TokKind::KwNull => "literal.null",
-        TokKind::KwOk => "literal.ok",
-        TokKind::KwErr => "literal.err",
         TokKind::KwIt => "keyword.it",
         TokKind::KwConst => "keyword.const",
         TokKind::KwComptime => "keyword.comptime",
