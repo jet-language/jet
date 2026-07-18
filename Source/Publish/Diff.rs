@@ -1,6 +1,4 @@
 use crate::Diagnostics::Diagnostic;
-use std::collections::BTreeMap;
-
 use super::SemVer::BumpKind;
 use super::API::ApiItem;
 
@@ -21,46 +19,61 @@ pub struct BreakingChange {
 }
 
 pub fn diff_public_api(old: &[ApiItem], new: &[ApiItem]) -> Vec<BreakingChange> {
-    let old_set: BTreeMap<(&str, &str), &ApiItem> = old
-        .iter()
-        .map(|i| ((i.kind.as_str(), i.name.as_str()), i))
-        .collect();
-    let new_set: BTreeMap<(&str, &str), &ApiItem> = new
-        .iter()
-        .map(|i| ((i.kind.as_str(), i.name.as_str()), i))
-        .collect();
-
     let mut changes = Vec::new();
-
-    // Removed items.
-    for ((kind, name), old_item) in &old_set {
-        if !new_set.contains_key(&(*kind, *name)) {
+    let mut matched = vec![false; new.len()];
+    for old_item in old {
+        if let Some((index, _)) = new.iter().enumerate().find(|(index, item)| {
+            !matched[*index]
+                && item.kind == old_item.kind
+                && item.name == old_item.name
+                && item.signature == old_item.signature
+        }) {
+            matched[index] = true;
+            continue;
+        }
+        if let Some((index, new_item)) = new.iter().enumerate().find(|(index, item)| {
+            !matched[*index] && item.kind == old_item.kind && item.name == old_item.name
+        }) {
+            matched[index] = true;
+            changes.push(BreakingChange {
+                description: format!(
+                    "pub {} `{}` changed signature\n   | was: {}\n   | now: {}",
+                    old_item.kind, old_item.name, old_item.signature, new_item.signature
+                ),
+                item_name: old_item.name.clone(),
+            });
+        } else {
             changes.push(BreakingChange {
                 description: format!(
                     "pub {} `{}` was removed\n   | {}\n   | (removed)",
-                    kind, name, old_item.signature
+                    old_item.kind, old_item.name, old_item.signature
                 ),
-                item_name: name.to_string(),
+                item_name: old_item.name.clone(),
             });
         }
     }
 
-    // Changed signatures.
-    for ((kind, name), old_item) in &old_set {
-        if let Some(new_item) = new_set.get(&(*kind, *name)) {
-            if old_item.signature != new_item.signature {
-                changes.push(BreakingChange {
-                    description: format!(
-                        "pub {} `{}` changed signature\n   | was: {}\n   | now: {}",
-                        kind, name, old_item.signature, new_item.signature
-                    ),
-                    item_name: name.to_string(),
-                });
-            }
+    changes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn function(name: &str, signature: &str) -> ApiItem {
+        ApiItem {
+            kind: "fn".to_string(),
+            name: name.to_string(),
+            signature: signature.to_string(),
         }
     }
 
-    changes
+    #[test]
+    fn duplicate_legacy_names_match_as_signature_multisets() {
+        let old = vec![function("report", "fn report()"), function("report", "fn report(x: Int)")];
+        let new = vec![function("report", "fn report(x: Int)"), function("report", "fn report()")];
+        assert!(diff_public_api(&old, &new).is_empty());
+    }
 }
 
 /// E2601 — publishing would break SemVer.

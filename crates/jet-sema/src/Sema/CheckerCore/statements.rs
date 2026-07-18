@@ -1420,8 +1420,10 @@ impl<'a> Checker<'a> {
                     let moved = self.moved.clone();
                     let uninit = self.uninit.clone();
                     let fx_direct = self.fx_direct.clone();
+                    let fx_direct_spans = self.fx_direct_spans.clone();
                     let fx_edges = self.fx_edges.clone();
                     let fx_maximal = self.fx_maximal;
+                    let fx_maximal_span = self.fx_maximal_span;
                     let region_stack = self.region_stack.clone();
                     let fx_regions = self.fx_regions.clone();
                     let fx_callback_obligations = self.fx_callback_obligations.clone();
@@ -1443,8 +1445,10 @@ impl<'a> Checker<'a> {
                     self.moved = moved;
                     self.uninit = uninit;
                     self.fx_direct = fx_direct;
+                    self.fx_direct_spans = fx_direct_spans;
                     self.fx_edges = fx_edges;
                     self.fx_maximal = fx_maximal;
+                    self.fx_maximal_span = fx_maximal_span;
                     self.region_stack = region_stack;
                     self.fx_regions = fx_regions;
                     self.fx_callback_obligations = fx_callback_obligations;

@@ -24,6 +24,12 @@ pub(super) fn qualified_effect_facts(
                 locations.get(edge).and_then(|values| (values.len() == 1).then(|| values[0].clone())).unwrap_or_else(|| edge.clone())
             };
             summary.edges = summary.edges.iter().map(&resolve_edge).collect();
+            for region in &mut summary.regions {
+                region.edges = region.edges.iter().map(&resolve_edge).collect();
+            }
+            for obligation in &mut summary.callback_obligations {
+                obligation.edges = obligation.edges.iter().map(&resolve_edge).collect();
+            }
             for call in &mut summary.memory.calls {
                 call.callee = resolve_edge(&call.callee);
             }
@@ -48,6 +54,56 @@ pub(super) fn qualified_effect_facts(
     }
     (qualified, solved)
 }
+
+#[cfg(test)]
+mod effect_qualification_tests {
+    use super::*;
+
+    #[test]
+    fn nested_region_and_callback_edges_are_module_qualified() {
+        let root = EffectSummary {
+            regions: vec![RegionSummary {
+                caps: EffectSet::new(),
+                direct: EffectSet::new(),
+                edges: ["left.same".to_string()].into_iter().collect(),
+                maximal: false,
+                caps_span: Span::new(1, 2),
+                grant: false,
+            }],
+            callback_obligations: vec![CallbackObligation {
+                bound: EffectSet::new(),
+                direct: EffectSet::new(),
+                edges: ["right.same".to_string()].into_iter().collect(),
+                maximal: false,
+                span: Span::new(3, 4),
+            }],
+            ..Default::default()
+        };
+        let modules = vec![
+            ("main".to_string(), HashMap::from([("root".to_string(), root)])),
+            (
+                "left".to_string(),
+                HashMap::from([("same".to_string(), EffectSummary::default())]),
+            ),
+            (
+                "right".to_string(),
+                HashMap::from([("same".to_string(), EffectSummary::default())]),
+            ),
+        ];
+
+        let (summaries, _) = qualified_effect_facts(&modules);
+        let root = &summaries["main::root"];
+        assert_eq!(
+            root.regions[0].edges,
+            EffectSet::from(["left::same".to_string()])
+        );
+        assert_eq!(
+            root.callback_obligations[0].edges,
+            EffectSet::from(["right::same".to_string()])
+        );
+    }
+}
+
 /// D-TAINT1: run the taint pass over one item's function/method bodies in the
 /// bundle path, using `core_imports` to classify sink calls.
 pub(super) fn taint_check_item(
@@ -1440,6 +1496,11 @@ pub(crate) fn check_module_bodies(
                 if let Some(body) = &mut cm.body {
                     for inner in body.iter_mut() {
                         if let Item::Func(f) = inner {
+                            // Inline-module calls use their registered mangled
+                            // identity (`module__fn`). Preserve any top-level
+                            // same-name summary while the shared body checker
+                            // emits this function's local summary.
+                            let previous = summaries.remove(&f.name);
                             diags.extend(check_func_body_bundle(
                                 f,
                                 module_idx,
@@ -1458,6 +1519,12 @@ pub(crate) fn check_module_bodies(
                             no_prelude,
                             reference_anchors,
                             ));
+                            if let Some(summary) = summaries.remove(&f.name) {
+                                summaries.insert(format!("{}__{}", cm.name, f.name), summary);
+                            }
+                            if let Some(summary) = previous {
+                                summaries.insert(f.name.clone(), summary);
+                            }
                         }
                     }
                 }
@@ -1670,8 +1737,10 @@ pub(crate) fn check_func_body_bundle(
         loop_depth: 0,
         loop_labels: Vec::new(),
         fx_direct: std::collections::BTreeSet::new(),
+        fx_direct_spans: HashMap::new(),
         fx_edges: std::collections::BTreeSet::new(),
         fx_maximal: false,
+        fx_maximal_span: None,
         region_stack: Vec::new(),
         fx_regions: Vec::new(),
         fx_callback_obligations: Vec::new(),
@@ -1769,7 +1838,9 @@ pub(crate) fn check_func_body_bundle(
             let _ = signature.return_view_provenance.set(provenance);
         }
     }
-    // S60 (E2-M16): purity enforcement for `pure fn` bodies.
+    // Direct ambient/foreign operations keep their precise body diagnostic.
+    // User callees are checked after the whole-program effect fixpoint so an
+    // inferred-pure callee need not repeat `--[]->`.
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }
@@ -1787,20 +1858,10 @@ pub(crate) fn check_func_body_bundle(
     // into the whole-bundle accumulator for `jet inspect expand --facts refs`.
     // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
     embed_inputs_out.extend(std::mem::take(&mut ck.ct_embed_inputs));
-    // D-EFF1: record this function's effect summary for the whole-program fixpoint.
-    // D-PROP1=A: a declared positive effect is part of the function's contract —
-    // callers that prohibit that effect must see it transitively even if the body
-    // is currently empty. Seed `direct` with declared positives so solve() propagates them.
-    let mut direct = std::mem::take(&mut ck.fx_direct);
-    if let Some(declared_list) = &f.declared_effects {
-        for (name, _) in declared_list {
-            if !name.starts_with('!') {
-                if let Some(e) = parse_effect_name(name.as_str()) {
-                    direct.insert(e);
-                }
-            }
-        }
-    }
+    // D-EFFECT-OMIT1/D-EFF3: an explicit row is an upper bound, not an effect
+    // declaration. Static calls propagate the implementation's inferred body
+    // row; dynamic trait calls use the trait method bound separately.
+    let direct = std::mem::take(&mut ck.fx_direct);
     for event in &mut ck.fx_memory_events {
         event.source = st.module_path.clone();
         event.provenance = format!("{} in {}", effect_key(owner_type, &f.name), st.module_path);
@@ -1819,8 +1880,11 @@ pub(crate) fn check_func_body_bundle(
         effect_key(owner_type, &f.name),
         EffectSummary {
             direct,
+            direct_spans: std::mem::take(&mut ck.fx_direct_spans),
             edges: std::mem::take(&mut ck.fx_edges),
             maximal: ck.fx_maximal,
+            maximal_span: ck.fx_maximal_span,
+            unbounded_trait_dispatch: false,
             regions: std::mem::take(&mut ck.fx_regions),
             callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
             memory: super::MemoryFacts::MemorySummary {

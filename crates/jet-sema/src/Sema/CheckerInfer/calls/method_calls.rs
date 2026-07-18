@@ -1999,7 +1999,7 @@ impl<'a> Checker<'a> {
                         process_spec_method_return(method, args.len(), span, &mut self.diags)
                     {
                         if matches!(method, "run" | "spawn") {
-                            self.record_effect(Effect::Exec.name());
+                            self.record_effect(Effect::Exec.name(), span);
                         }
                         let stream_mode_ty = Type::Named("ProcessStreamMode".to_string());
                         match method {
@@ -2039,7 +2039,7 @@ impl<'a> Checker<'a> {
                         process_child_method_return(method, args.len(), span, &mut self.diags)
                     {
                         if method != "id" {
-                            self.record_effect(Effect::Exec.name());
+                            self.record_effect(Effect::Exec.name(), span);
                         }
                         for a in args.iter_mut() {
                             self.infer(&mut a.expr);
@@ -2053,7 +2053,7 @@ impl<'a> Checker<'a> {
                     if let Some(ret) =
                         process_stdin_method_return(method, args.len(), span, &mut self.diags)
                     {
-                        self.record_effect(Effect::Exec.name());
+                        self.record_effect(Effect::Exec.name(), span);
                         if method == "write" && args.len() == 1 {
                             self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                         } else {
@@ -2071,7 +2071,7 @@ impl<'a> Checker<'a> {
                     if let Some(ret) =
                         process_stream_method_return(method, args.len(), span, &mut self.diags)
                     {
-                        self.record_effect(Effect::Exec.name());
+                        self.record_effect(Effect::Exec.name(), span);
                         for a in args.iter_mut() {
                             self.infer(&mut a.expr);
                         }
@@ -2384,6 +2384,10 @@ impl<'a> Checker<'a> {
                                 span,
                                 "generic trait dispatch has no sealed target set",
                             );
+                            self.record_edge(
+                                crate::Sema::effect_key(Some(trait_name), method),
+                                span,
+                            );
                             if !bounds.iter().any(|b| b == trait_name) {
                                 self.diags.push(e0901(method, trait_name, span));
                             }
@@ -2653,6 +2657,10 @@ impl<'a> Checker<'a> {
                     self.record_open_memory_dispatch(
                         span,
                         "trait-object dispatch has no sealed target set",
+                    );
+                    self.record_edge(
+                        crate::Sema::effect_key(Some(trait_name), method),
+                        span,
                     );
                     *recv_type_out = Some(trait_name.clone());
                     let ret = msig.return_type.clone();

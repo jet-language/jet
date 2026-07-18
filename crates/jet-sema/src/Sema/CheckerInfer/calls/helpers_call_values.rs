@@ -48,7 +48,12 @@ impl<'a> Checker<'a> {
             span: Span,
         ) -> Option<Type> {
             let callee_ty = self.infer(callee)?;
-            let Type::Fn { params, ret, .. } = callee_ty.clone() else {
+            let Type::Fn {
+                params,
+                ret,
+                effect_bound,
+            } = callee_ty.clone()
+            else {
                 self.diags.push(Diagnostic::error(
                     "E0803",
                     format!("this is {}, not a function", callee_ty.show()),
@@ -61,6 +66,18 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
+            match effect_bound {
+                None => self.record_maximal(span),
+                Some(row) => {
+                    for (effect, _) in row {
+                        if crate::Sema::effect_row_var(&effect).is_none()
+                            && crate::Sema::parse_effect_name(&effect).is_some()
+                        {
+                            self.record_effect(&effect, span);
+                        }
+                    }
+                }
+            }
             if args.len() != params.len() {
                 self.diags.push(Diagnostic::error(
                     "E0104",

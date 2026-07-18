@@ -217,8 +217,8 @@ pub type EffectSet = BTreeSet<String>;
 
 /// D-SHAPE8 open-row entry (`..E`). The parser stores row variables beside
 /// concrete effects so every consumer can preserve the exact source spelling.
-/// #570 owns solving/substitution; until then an open row must never be
-/// mistaken for a closed effect root.
+/// A row variable is instantiated by the callback passed at each call site;
+/// it is never a concrete effect root of its own.
 pub fn effect_row_var(name: &str) -> Option<&str> {
     name.strip_prefix("..").filter(|name| !name.is_empty())
 }
@@ -285,8 +285,9 @@ impl<'a> super::Checker<'a> {
     /// D-EFF1: record an effect this function reaches directly — into the
     /// function's set and every open `@Caps(…)` region (which must account for
     /// effects reached inside it, E0741).
-    pub(crate) fn record_effect(&mut self, e: &str) {
+    pub(crate) fn record_effect(&mut self, e: &str, span: Span) {
         self.fx_direct.insert(e.to_string());
+        self.fx_direct_spans.entry(e.to_string()).or_insert(span);
         for r in &mut self.region_stack {
             r.direct.insert(e.to_string());
         }
@@ -327,6 +328,7 @@ impl<'a> super::Checker<'a> {
     /// maximal set on the function and every open `@Caps(…)` region.
     pub(crate) fn record_maximal(&mut self, span: Span) {
         self.fx_maximal = true;
+        self.fx_maximal_span.get_or_insert(span);
         self.record_open_memory_dispatch(span, "foreign or dynamically selected function body");
         for r in &mut self.region_stack {
             r.maximal = true;
@@ -388,9 +390,8 @@ impl<'a> super::Checker<'a> {
                 }
             }
         }
-        // `..E` may instantiate to the callback's remaining effects. #570 will
-        // substitute it precisely; treating this as a closed bound now would
-        // produce a false E0747.
+        // `..E` instantiates to the callback's remaining effects. Treating it
+        // as a closed bound would produce a false E0747.
         if open {
             return;
         }
@@ -581,10 +582,18 @@ pub fn builtin_effect(name: &str) -> Option<Effect> {
 #[derive(Debug, Clone, Default)]
 pub struct EffectSummary {
     pub direct: EffectSet,
+    /// Source witnesses for direct effects. Transitive provenance follows
+    /// `edges` and the source-spanned memory-call records below.
+    pub direct_spans: HashMap<String, Span>,
     /// Bare names of user functions called in the body (call-graph edges).
     pub edges: BTreeSet<String>,
     /// A foreign (`extern`) call was reached: the body's effects are maximal.
     pub maximal: bool,
+    /// Source witness for the open-world operation that forced `maximal`.
+    pub maximal_span: Option<Span>,
+    /// This synthetic node is a trait method with no declared dispatch bound.
+    /// Any caller that promises an effect ceiling receives E0743.
+    pub unbounded_trait_dispatch: bool,
     /// D-EFF1: `@Caps(…)` restriction regions found in this body (checked against
     /// their transitive inferred set in the post-pass — E0741).
     pub regions: Vec<RegionSummary>,
@@ -717,6 +726,172 @@ pub fn solve(summaries: &HashMap<String, EffectSummary>) -> HashMap<String, Effe
     sets
 }
 
+/// D-EFF3: a call through a trait value sees the trait method's declared
+/// dispatch bound, not any one implementation body. Seed those contract nodes
+/// into the same graph concrete methods use.
+pub(crate) fn seed_trait_dispatch_effects(
+    items: &[crate::AST::Item],
+    summaries: &mut HashMap<String, EffectSummary>,
+) {
+    use crate::AST::Item;
+
+    for item in items {
+        let Item::Trait(trait_def) = item else { continue };
+        for method in &trait_def.methods {
+            let mut summary = EffectSummary::default();
+            match &method.declared_effects {
+                Some(row) => {
+                    for (name, span) in row {
+                        let base = name.strip_prefix('!').unwrap_or(name);
+                        if effect_row_var(base).is_some() {
+                            summary.maximal = true;
+                            summary.maximal_span.get_or_insert(*span);
+                        } else if !name.starts_with('!') {
+                            if let Some(effect) = parse_effect_name(name) {
+                                summary.direct.insert(effect.clone());
+                                summary.direct_spans.entry(effect).or_insert(*span);
+                            }
+                        }
+                    }
+                }
+                None if !method.is_pure => {
+                    summary.maximal = true;
+                    summary.maximal_span = Some(method.name_span);
+                    summary.unbounded_trait_dispatch = true;
+                }
+                None => {}
+            }
+            summaries.insert(
+                super::effect_key(Some(&trait_def.name), &method.name),
+                summary,
+            );
+        }
+    }
+}
+
+/// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
+/// empty. Callees need not repeat `--[]->`; their solved row is the authority.
+pub fn check_inferred_purity(
+    items: &[crate::AST::Item],
+    module_alias: &str,
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    fn first_effectful_chain(
+        key: &str,
+        summaries: &HashMap<String, EffectSummary>,
+        solved: &HashMap<String, EffectSet>,
+        seen: &mut BTreeSet<String>,
+    ) -> Vec<String> {
+        if !seen.insert(key.to_string()) {
+            return Vec::new();
+        }
+        let Some(summary) = summaries.get(key) else { return Vec::new() };
+        for callee in &summary.edges {
+            if solved.get(callee).is_some_and(|row| !row.is_empty()) {
+                let mut chain = vec![callee.clone()];
+                chain.extend(first_effectful_chain(callee, summaries, solved, seen));
+                return chain;
+            }
+        }
+        Vec::new()
+    }
+
+    fn check_one(
+        f: &crate::AST::Func,
+        owner: Option<&str>,
+        identity: Option<&str>,
+        module_alias: &str,
+        summaries: &HashMap<String, EffectSummary>,
+        solved: &HashMap<String, EffectSet>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        if !f.is_pure {
+            return;
+        }
+        let identity = identity
+            .map(str::to_owned)
+            .unwrap_or_else(|| super::effect_key(owner, &f.name));
+        let key = format!("{module_alias}::{identity}");
+        if solved.get(&key).map_or(true, EffectSet::is_empty) {
+            return;
+        }
+        let chain = first_effectful_chain(&key, summaries, solved, &mut BTreeSet::new());
+        let Some(first) = chain.first() else {
+            // Direct ambient operations are diagnosed while checking the body,
+            // where their precise call span and API spelling are available.
+            return;
+        };
+        let summary = summaries.get(&key);
+        let span = summary
+            .and_then(|summary| summary.memory.calls.iter().find(|call| &call.callee == first))
+            .map(|call| call.span)
+            .unwrap_or(f.name_span);
+        let call_name = chain.last().expect("non-empty chain");
+        if summaries
+            .get(call_name)
+            .is_some_and(|summary| summary.unbounded_trait_dispatch)
+        {
+            // `check_effect_boundaries` emits E0743 once for the explicit
+            // ceiling. Do not stack a generic E3401 on the same call path.
+            return;
+        }
+        let path = if chain.len() > 1 {
+            std::iter::once(f.name.clone())
+                .chain(chain[..chain.len() - 1].iter().cloned())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        diags.push(crate::Sema::e3401(&f.name, call_name, &path, span));
+    }
+
+    use crate::AST::Item;
+    for item in items {
+        match item {
+            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, diags),
+            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, diags); },
+            Item::Struct(s) => {
+                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
+                for block in &s.trait_impls {
+                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
+                }
+            }
+            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, diags); },
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    for item in body {
+                        if let Item::Func(f) = item {
+                            let identity = format!("{}__{}", module.name, f.name);
+                            check_one(
+                                f,
+                                None,
+                                Some(&identity),
+                                module_alias,
+                                summaries,
+                                solved,
+                                diags,
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn e0743(trait_method: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0743",
+        format!("dynamic call `{trait_method}` has no effect bound"),
+        "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound".to_string(),
+        format!("declare an effect row on `{trait_method}`, such as `--[]->` for pure dispatch, or move this dynamic call outside the bounded function"),
+        Some(span),
+    )
+}
+
 /// D-EFF2 (`#(via f)` pass-through): seed each via-fn's effect summary with the
 /// declared bound of its callback parameter `f`, so its published effect set is a
 /// tight pass-through of `f` (the set that holds even when the callback value
@@ -755,16 +930,21 @@ pub fn apply_effect_via(
         };
         // The pass-through set: the param's declared bound, or maximal if unbounded.
         let mut via_set = EffectSet::new();
+        let mut via_spans = HashMap::new();
         let mut maximal = false;
         match effect_bound {
             Some(names) => {
                 for (n, ns) in names {
                     if effect_row_var(n).is_some() {
-                        maximal = true;
+                        // The caller contributes the concrete callback edge in
+                        // `attribute_fn_arg`; making the generic callee maximal
+                        // here would lose that substitution and invent every
+                        // effect for even a pure callback.
                         continue;
                     }
                     match parse_effect_name(n) {
                         Some(e) => {
+                            via_spans.entry(e.clone()).or_insert(*ns);
                             via_set.insert(e);
                         }
                         None => diags.push(unknown_effect(n, *ns)),
@@ -776,7 +956,11 @@ pub fn apply_effect_via(
         let key = super::effect_key(owner, &f.name);
         let entry = summaries.entry(key).or_default();
         entry.direct.extend(via_set);
+        entry.direct_spans.extend(via_spans);
         entry.maximal |= maximal;
+        if maximal {
+            entry.maximal_span.get_or_insert(*via_span);
+        }
     }
     for item in items {
         match item {
@@ -1468,6 +1652,7 @@ pub fn check_trait_obligations(
 /// `record_edge` already track, just excluding the `maximal` blanket.
 pub(crate) fn check_secret_grants(
     items: &[crate::AST::Item],
+    module_alias: &str,
     summaries: &HashMap<String, EffectSummary>,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -1492,10 +1677,11 @@ pub(crate) fn check_secret_grants(
     fn check_one(
         f: &crate::AST::Func,
         owner: Option<&str>,
+        module_alias: &str,
         reaches_secret: &std::collections::HashSet<String>,
         diags: &mut Vec<Diagnostic>,
     ) {
-        let key = super::effect_key(owner, &f.name);
+        let key = format!("{module_alias}::{}", super::effect_key(owner, &f.name));
         if !reaches_secret.contains(&key) {
             return;
         }
@@ -1516,25 +1702,25 @@ pub(crate) fn check_secret_grants(
     use crate::AST::Item;
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, &reaches_secret, diags),
+            Item::Func(f) => check_one(f, None, module_alias, &reaches_secret, diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    check_one(m, Some(&i.type_name), &reaches_secret, diags);
+                    check_one(m, Some(&i.type_name), module_alias, &reaches_secret, diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    check_one(m, Some(&s.name), &reaches_secret, diags);
+                    check_one(m, Some(&s.name), module_alias, &reaches_secret, diags);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        check_one(m, Some(&s.name), &reaches_secret, diags);
+                        check_one(m, Some(&s.name), module_alias, &reaches_secret, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    check_one(m, Some(&e.name), &reaches_secret, diags);
+                    check_one(m, Some(&e.name), module_alias, &reaches_secret, diags);
                 }
             }
             _ => {}

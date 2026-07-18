@@ -18,50 +18,119 @@ pub struct ApiItem {
 }
 
 /// Extract the public API surface from a parsed Jet source file.
-/// Only `pub` items at the top level are included.
+/// Includes `pub` items at file scope and inside inline code modules.
 pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
     use crate::Loader;
 
-    let bundle = match Loader::load_entry_with_overlay(file, None, true) {
+    let mut bundle = match Loader::load_entry_with_overlay(file, None, true) {
         Ok(b) => b,
         Err(_) => return vec![],
     };
+    let (_, facts) = crate::Sema::check_bundle_with_effect_facts(
+        &mut bundle,
+        crate::Sema::CompileMode::Check,
+    );
     let _ = src; // bundle already loaded
 
     let mut out = Vec::new();
     // Entry file items (the main module).
     let entry = &bundle.modules[bundle.entry];
-    for item in &entry.items {
-        if let Some(api) = public_api_of_item(item) {
-            out.push(api);
-        }
-    }
+    collect_public_api(&entry.items, &entry.alias, None, &facts.solved, &mut out);
     out.sort();
     out
 }
 
+fn collect_public_api(
+    items: &[crate::AST::Item],
+    module_alias: &str,
+    code_module: Option<&str>,
+    solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+    out: &mut Vec<ApiItem>,
+) {
+    for item in items {
+        if let Some(api) = public_api_of_item(item, module_alias, code_module, solved) {
+            out.push(api);
+        }
+        if let crate::AST::Item::Trait(trait_def) = item {
+            if trait_def.is_pub && !trait_def.is_package_pub {
+                out.extend(
+                    trait_def
+                        .methods
+                        .iter()
+                        .filter(|method| supported_public_name(&method.name))
+                        .map(|method| ApiItem {
+                            kind: "fn".to_string(),
+                            name: public_item_name(
+                                code_module,
+                                &format!("{}.{}", trait_def.name, method.name),
+                            ),
+                            signature: crate::Sema::ApiFreeze::qualify_api_signature(
+                                code_module,
+                                &crate::Sema::ApiFreeze::trait_method_signature(
+                                    &trait_def.name,
+                                    method,
+                                ),
+                            ),
+                        }),
+                );
+            }
+        }
+        if let crate::AST::Item::CodeModule(module) = item {
+            if let Some(body) = &module.body {
+                collect_public_api(body, module_alias, Some(&module.name), solved, out);
+            }
+        }
+    }
+}
+
+fn public_item_name(code_module: Option<&str>, name: &str) -> String {
+    code_module
+        .map(|module| format!("{module}.{name}"))
+        .unwrap_or_else(|| name.to_string())
+}
+
 /// Build an `ApiItem` for a single AST item, or `None` if it is private.
-fn public_api_of_item(item: &crate::AST::Item) -> Option<ApiItem> {
+fn public_api_of_item(
+    item: &crate::AST::Item,
+    module_alias: &str,
+    code_module: Option<&str>,
+    solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+) -> Option<ApiItem> {
     use crate::AST::Item;
     match item {
-        Item::Func(f) if supported_public_name(&f.name) && f.is_pub && !f.is_package_pub => Some(ApiItem {
-            kind: "fn".into(),
-            name: f.name.clone(),
-            signature: format_fn_sig(f),
-        }),
+        Item::Func(f) if supported_public_name(&f.name) && f.is_pub && !f.is_package_pub => {
+            let signature = format_fn_sig(
+                f,
+                solved.get(&format!(
+                    "{module_alias}::{}",
+                    code_module
+                        .map(|module| format!("{module}__{}", f.name))
+                        .unwrap_or_else(|| f.name.clone())
+                ))
+                .or_else(|| solved.get(&f.name)),
+            );
+            Some(ApiItem {
+                kind: "fn".into(),
+                name: public_item_name(code_module, &f.name),
+                signature: crate::Sema::ApiFreeze::qualify_api_signature(
+                    code_module,
+                    &signature,
+                ),
+            })
+        }
         Item::Struct(s) if supported_public_name(&s.name) && s.is_pub && !s.is_package_pub => Some(ApiItem {
             kind: "struct".into(),
-            name: s.name.clone(),
+            name: public_item_name(code_module, &s.name),
             signature: format_struct_sig(s),
         }),
         Item::Enum(e) if supported_public_name(&e.name) && e.is_pub && !e.is_package_pub => Some(ApiItem {
             kind: "enum".into(),
-            name: e.name.clone(),
+            name: public_item_name(code_module, &e.name),
             signature: format_enum_sig(e),
         }),
         Item::Trait(t) if supported_public_name(&t.name) && t.is_pub && !t.is_package_pub => Some(ApiItem {
             kind: "trait".into(),
-            name: t.name.clone(),
+            name: public_item_name(code_module, &t.name),
             signature: format_trait_sig(t),
         }),
         // ConstDef does not carry is_pub in v1 — consts are accessible by name
@@ -80,7 +149,7 @@ fn format_type(ty: &crate::AST::Type) -> String {
     ty.show()
 }
 
-fn format_fn_sig(f: &crate::AST::Func) -> String {
+fn format_fn_sig(f: &crate::AST::Func, inferred: Option<&crate::Sema::EffectSet>) -> String {
     let params: Vec<String> = f
         .params
         .iter()
@@ -93,9 +162,23 @@ fn format_fn_sig(f: &crate::AST::Func) -> String {
             format!("{}: {}{}", p.name, p.convention.sigil(), format_type(&p.ty))
         })
         .collect();
-    let ret = match &f.return_type {
-        Some(t) => format!(" -> {}", format_type(t)),
-        None => String::new(),
+    let ret = match inferred {
+        Some(row) => {
+            let row = crate::Sema::ApiFreeze::normalized_public_effect_row(f, row);
+            format!(
+                " --[{}]->{}",
+                row.iter().cloned().collect::<Vec<_>>().join(", "),
+                f.return_type
+                    .as_ref()
+                    .map(|t| format!(" {}", format_type(t)))
+                    .unwrap_or_default()
+            )
+        }
+        None => f
+            .return_type
+            .as_ref()
+            .map(|t| format!(" -> {}", format_type(t)))
+            .unwrap_or_default(),
     };
     format!("fn {}({}){}", f.name, params.join(", "), ret)
 }
@@ -116,6 +199,11 @@ fn format_enum_sig(e: &crate::AST::EnumDef) -> String {
 }
 
 fn format_trait_sig(t: &crate::AST::TraitDef) -> String {
-    let methods: Vec<String> = t.methods.iter().filter(|m| supported_public_name(&m.name)).map(|m| m.name.clone()).collect();
+    let methods: Vec<String> = t
+        .methods
+        .iter()
+        .filter(|method| supported_public_name(&method.name))
+        .map(|method| crate::Sema::ApiFreeze::trait_method_signature(&t.name, method))
+        .collect();
     format!("trait {} {{ {} }}", t.name, methods.join(", "))
 }

@@ -214,11 +214,8 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 
 #[test]
 fn semindex_schema_version() {
-    // Bumped 4 -> 5 by commit d80e2cba: SemIndex gained a top-level
-    // `instances` fact array (generic-module instantiation identity —
-    // fingerprint + full key, D-GENMOD-IDENTITY1) alongside the E0859
-    // fingerprint-collision guard in Sema/Bundle.rs.
-    assert_eq!(SCHEMA_VERSION, 9);
+    // D-EFFECT-OMIT1 added effect provenance and normalized inferred rows.
+    assert_eq!(SCHEMA_VERSION, 10);
 }
 
 #[test]
@@ -240,7 +237,7 @@ fn run() {
     let score = symbols
         .lookup_identity(&format!("fn:module:{}::score", path.display()))
         .expect("score identity");
-    assert_eq!(score.signature, "fn score(name: String) -> Int");
+    assert_eq!(score.signature, "fn score(name: String) --[]-> Int");
     assert_eq!(score.summary, "Scores one name.");
     assert_eq!(score.examples, vec!["score(\"Ada\")"]);
     assert!(matches!(score.provenance, SemanticProvenance::Source { .. }));
@@ -309,7 +306,9 @@ fn semantic_symbols_include_module_and_selected_imports() {
     let imported = symbols.lookup("imported_score");
     assert_eq!(imported.len(), 1);
     assert!(imported[0].identity.starts_with("import:"));
-    assert!(imported[0].signature.contains("score(name: String) -> Int"));
+    assert!(imported[0]
+        .signature
+        .contains("score(name: String) --[]-> Int"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -318,7 +317,7 @@ fn semindex_hello_json_shape() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
-    assert!(json.contains("\"schema_version\":9"));
+    assert!(json.contains("\"schema_version\":10"));
     assert!(json.contains("\"definition_facts\""));
     assert!(json.contains("\"definitions\""));
     assert!(json.contains("\"instances\""));
@@ -630,6 +629,82 @@ fn semindex_effects_and_calls() {
 }
 
 #[test]
+fn semindex_projects_omitted_inferred_effects() {
+    let path = temp_fixture(
+        "inferred_effect_signature.jet",
+        "fn announce() { print(\"hello\") }\nfn run() { announce() }\n",
+    );
+    let index = open(&path).expect("inferred effects index");
+    let announce = index.effect_of("announce").expect("announce effects");
+    assert_eq!(announce.inferred, vec!["Io"]);
+    assert!(announce.callees.is_empty(), "direct effect has no call edge");
+    assert_eq!(announce.provenance.len(), 1);
+    assert_eq!(announce.provenance[0].effect, "Io");
+    assert_eq!(announce.provenance[0].call_path, vec!["announce"]);
+    assert_eq!(announce.provenance[0].spans.len(), 1);
+    let run = index.effect_of("run").expect("run effects");
+    assert_eq!(
+        run.provenance[0].call_path,
+        vec!["run", "inferred_effect_signature::announce"]
+    );
+    assert_eq!(run.provenance[0].spans.len(), 2);
+}
+
+#[test]
+fn semindex_projects_inline_module_inferred_effects() {
+    let path = temp_fixture(
+        "inline_inferred_effect_signature.jet",
+        "module inner { pub fn announce() { print(\"hello\") } }\nfn run() { inner.announce() }\n",
+    );
+    let symbols = open_symbols(&path).expect("inline inferred effects index");
+    let announce = symbols.lookup("announce");
+    assert_eq!(announce.len(), 1);
+    assert!(announce[0].signature.contains("--[Io]->"), "{}", announce[0].signature);
+}
+
+#[test]
+fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
+    let path = temp_fixture(
+        "effect_provenance_origins.jet",
+        "trait Shape { fn area(self) --[Io]-> Int; }\nfn dynamic(shape: Shape) -> Int { return shape.area(); }\nfn apply(f: fn() -> Int) -> Int { return f(); }\nfn run() {}\n",
+    );
+    let index = open(&path).expect("effect provenance index");
+
+    let apply = index.effect_of("apply").expect("open callback effects");
+    assert!(apply.maximal);
+    assert_eq!(apply.provenance.len(), apply.inferred.len());
+    assert!(apply.provenance.iter().all(|origin| !origin.spans.is_empty()));
+
+    let dynamic = index.effect_of("dynamic").expect("trait dispatch effects");
+    let io = dynamic
+        .provenance
+        .iter()
+        .find(|origin| origin.effect == "Io")
+        .expect("Io provenance");
+    assert_eq!(io.call_path.len(), 2);
+    assert_eq!(io.spans.len(), 2);
+}
+
+#[test]
+fn semindex_via_contracts_have_provenance_without_invocation() {
+    let path = temp_fixture(
+        "effect_via_provenance.jet",
+        "fn bounded(act: fn() --[Io]->) --[via act]-> {}\nfn open(act: fn()) --[via act]-> {}\nfn run() {}\n",
+    );
+    let index = open(&path).expect("via provenance index");
+
+    let bounded = index.effect_of("bounded").expect("bounded via effects");
+    assert_eq!(bounded.inferred, vec!["Io"]);
+    assert_eq!(bounded.provenance.len(), 1);
+    assert_eq!(bounded.provenance[0].spans.len(), 1);
+
+    let open = index.effect_of("open").expect("unbounded via effects");
+    assert!(open.maximal);
+    assert_eq!(open.provenance.len(), open.inferred.len());
+    assert!(open.provenance.iter().all(|origin| !origin.spans.is_empty()));
+}
+
+#[test]
 fn semindex_preserves_via_effect_row_in_signatures() {
     let path = temp_fixture(
         "effect_via.jet",
@@ -802,7 +877,7 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"schema_version\":9"));
+    assert!(text.contains("\"schema_version\":10"));
 }
 
 #[test]

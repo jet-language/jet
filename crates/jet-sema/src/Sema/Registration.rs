@@ -593,17 +593,59 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
 pub(crate) fn check_effect_boundaries(
     items: &[Item],
     solved: &HashMap<String, EffectSet>,
+    summaries: &HashMap<String, EffectSummary>,
     diags: &mut Vec<Diagnostic>,
 ) {
+    fn unbounded_dispatch(
+        key: &str,
+        summaries: &HashMap<String, EffectSummary>,
+        seen: &mut HashSet<String>,
+    ) -> Option<(String, Span)> {
+        if !seen.insert(key.to_string()) {
+            return None;
+        }
+        let summary = summaries.get(key)?;
+        for callee in &summary.edges {
+            if summaries
+                .get(callee)
+                .is_some_and(|target| target.unbounded_trait_dispatch)
+            {
+                let span = summary
+                    .memory
+                    .calls
+                    .iter()
+                    .find(|call| call.callee == *callee)
+                    .map(|call| call.span)
+                    .unwrap_or_else(|| Span::new(0, 0));
+                return Some((callee.clone(), span));
+            }
+            if let Some(found) = unbounded_dispatch(callee, summaries, seen) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     fn check_one(
         f: &Func,
         owner: Option<&str>,
+        identity: Option<&str>,
         solved: &HashMap<String, EffectSet>,
+        summaries: &HashMap<String, EffectSummary>,
         diags: &mut Vec<Diagnostic>,
     ) {
         let Some(declared_list) = &f.declared_effects else {
             return;
         };
+        let key = identity
+            .map(str::to_owned)
+            .unwrap_or_else(|| effect_key(owner, &f.name));
+        if let Some((trait_method, span)) =
+            unbounded_dispatch(&key, summaries, &mut HashSet::new())
+        {
+            diags.push(e0743(&trait_method, span));
+            return;
+        }
         // Validate names and build the declared set; an unknown name is E0119.
         // A bad name leaves the declared set incomplete, so skip the subset
         // check to avoid a misleading E0740 piled on top of the real problem.
@@ -640,7 +682,7 @@ pub(crate) fn check_effect_boundaries(
             return;
         }
         let inferred = solved
-            .get(&effect_key(owner, &f.name))
+            .get(&key)
             .cloned()
             .unwrap_or_default();
         // E0740: only check positive bounds — prohibition-only annotations (`#(!Net)`)
@@ -676,25 +718,42 @@ pub(crate) fn check_effect_boundaries(
     }
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, solved, diags),
+            Item::Func(f) => check_one(f, None, None, solved, summaries, diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    check_one(m, Some(&i.type_name), solved, diags);
+                    check_one(m, Some(&i.type_name), None, solved, summaries, diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    check_one(m, Some(&s.name), solved, diags);
+                    check_one(m, Some(&s.name), None, solved, summaries, diags);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        check_one(m, Some(&s.name), solved, diags);
+                        check_one(m, Some(&s.name), None, solved, summaries, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    check_one(m, Some(&e.name), solved, diags);
+                    check_one(m, Some(&e.name), None, solved, summaries, diags);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    for item in body {
+                        if let Item::Func(f) = item {
+                            let identity = format!("{}__{}", module.name, f.name);
+                            check_one(
+                                f,
+                                None,
+                                Some(&identity),
+                                solved,
+                                summaries,
+                                diags,
+                            );
+                        }
+                    }
                 }
             }
             _ => {}

@@ -9,7 +9,7 @@
 //! Format (std-only, lockfile-style — no serde, I6):
 //!
 //! ```text
-//! api_version = 2
+//! api_version = 3
 //! package = mathkit
 //! published_version = 1.2.0
 //! fn scale(v: &Vec3, factor: Float)
@@ -26,10 +26,11 @@
 //! discipline as the D-MIGRATE1 `@PublishedSchema` snapshot).
 
 use crate::Syntax;
-use crate::AST::{Func, Item};
+use crate::AST::{Func, Item, TraitMethodSig};
+use crate::Sema::EffectSet;
 use std::path::{Path, PathBuf};
 
-pub const API_SNAPSHOT_VERSION: u32 = 2;
+pub const API_SNAPSHOT_VERSION: u32 = 3;
 
 /// One frozen public function in a package's capability API.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -132,14 +133,39 @@ fn fn_name_of(line: &str) -> Option<String> {
 /// with frozen D-CAP7 sigils and the return type. Shared with the SemVer
 /// `Publish::API` extractor (same surface; this one is exposed for the freeze).
 pub fn fn_signature(f: &Func) -> String {
+    fn_signature_with_effects(f, None)
+}
+
+/// Concrete inferred effects plus symbolic contract entries that cannot be
+/// closed until a call site (`..E`, `via f`) or that prohibit an effect.
+pub fn normalized_public_effect_row(f: &Func, inferred: &EffectSet) -> EffectSet {
+    let mut row = inferred.clone();
+    if let Some(declared) = &f.declared_effects {
+        row.extend(
+            declared
+                .iter()
+                .map(|(name, _)| name)
+                .filter(|name| crate::Sema::effect_row_var(name).is_some() || name.starts_with('!'))
+                .cloned(),
+        );
+    }
+    if let Some((param, _)) = &f.effect_via {
+        row.insert(format!("via {param}"));
+    }
+    row
+}
+
+/// Canonical public signature with the normalized inferred row. Source may
+/// omit the row, but published metadata may not: effect drift is API drift.
+pub fn fn_signature_with_effects(f: &Func, inferred: Option<&EffectSet>) -> String {
     let params: Vec<String> = f
         .params
         .iter()
         .map(|p| format!("{}: {}{}", p.name, p.convention.sigil(), p.ty.name()))
         .collect();
-    let ret = match &f.return_type {
-        Some(t) => format!(" -> {}", t.name()),
-        None => String::new(),
+    let ret = match inferred {
+        Some(row) => format!(" --[{}]->{}", normalized_public_effect_row(f, row).iter().cloned().collect::<Vec<_>>().join(", "), f.return_type.as_ref().map(|t| format!(" {}", t.name())).unwrap_or_default()),
+        None => f.return_type.as_ref().map(|t| format!(" -> {}", t.name())).unwrap_or_default(),
     };
     let provenance = f.return_view_provenance.as_ref().map_or_else(String::new, |map| {
         if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
@@ -154,13 +180,114 @@ pub fn fn_signature(f: &Func) -> String {
     format!("fn {}({}){}{}", f.name, params.join(", "), ret, provenance)
 }
 
+/// D-EFF3's public dynamic-dispatch contract. Unlike ordinary functions, a
+/// trait method publishes its declared bound because callers cannot inspect a
+/// concrete implementation through a trait value.
+pub fn trait_method_signature(owner: &str, method: &TraitMethodSig) -> String {
+    let params = method
+        .params
+        .iter()
+        .map(|param| {
+            format!(
+                "{}: {}{}",
+                param.name,
+                param.convention.sigil(),
+                param.ty.name()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let arrow = method.declared_effects.as_ref().map_or_else(
+        || {
+            method
+                .return_type
+                .as_ref()
+                .map(|_| " ->".to_string())
+                .unwrap_or_default()
+        },
+        |row| {
+            format!(
+                " --[{}]->",
+                row.iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        },
+    );
+    let result = method
+        .return_type
+        .as_ref()
+        .map(|ty| format!(" {}", ty.name()))
+        .unwrap_or_default();
+    format!("fn {owner}.{}({params}){arrow}{result}", method.name)
+}
+
+/// Compare a new effect-bearing signature to a pre-v3 snapshot without
+/// treating the metadata-format upgrade itself as an API break.
+pub fn signature_without_effect_row(signature: &str) -> String {
+    let Some(start) = signature.find(" --[") else {
+        return signature.to_string();
+    };
+    let Some(close) = signature[start + 4..].find("]->") else {
+        return signature.to_string();
+    };
+    let end = start + 4 + close + 3;
+    let suffix = &signature[end..];
+    let arrow = if suffix.starts_with(' ') { " ->" } else { "" };
+    format!("{}{}{}", &signature[..start], arrow, suffix)
+}
+
+/// Pre-v3 snapshots keyed inline-module functions only by their leaf name.
+pub fn legacy_api_name(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
+pub fn qualify_api_signature(namespace: Option<&str>, signature: &str) -> String {
+    let Some(namespace) = namespace else {
+        return signature.to_string();
+    };
+    signature
+        .strip_prefix("fn ")
+        .map(|rest| format!("fn {namespace}.{rest}"))
+        .unwrap_or_else(|| signature.to_string())
+}
+
+pub fn legacy_api_signature(signature: &str) -> String {
+    let signature = signature_without_effect_row(signature);
+    let Some(rest) = signature.strip_prefix("fn ") else {
+        return signature;
+    };
+    let Some(open) = rest.find('(') else {
+        return signature;
+    };
+    format!("fn {}{}", legacy_api_name(&rest[..open]), &rest[open..])
+}
+
+fn frozen_name(code_module: Option<&str>, name: &str) -> String {
+    code_module
+        .map(|module| format!("{module}.{name}"))
+        .unwrap_or_else(|| name.to_string())
+}
+
 /// Build a frozen-API snapshot from a list of items (a module's items, post
 /// capability resolution). Records every `pub fn` reachable on the public
 /// surface — top-level, and inside a `pub module { … }` block (the common
 /// library layout `module foo { pub fn … }`), recursively.
 pub fn snapshot_from_items(items: &[Item], package: &str, version: &str) -> ApiSnapshot {
+    snapshot_from_items_with_effects(items, package, version, None, None)
+}
+
+/// Build the public snapshot after sema has solved the bundle effect graph.
+pub fn snapshot_from_items_with_effects(
+    items: &[Item],
+    package: &str,
+    version: &str,
+    solved: Option<&std::collections::HashMap<String, EffectSet>>,
+    module_alias: Option<&str>,
+) -> ApiSnapshot {
     let mut funcs = Vec::new();
-    collect_pub_fns(items, &mut funcs);
+    collect_pub_fns(items, solved, module_alias, None, &mut funcs);
     funcs.sort();
     ApiSnapshot {
         api_version: API_SNAPSHOT_VERSION,
@@ -174,7 +301,13 @@ pub fn snapshot_from_items(items: &[Item], package: &str, version: &str) -> ApiS
 /// `module { … }` bodies. The package's own module block carries the library's
 /// surface (`module foo { pub fn … }`) and need not itself be marked `pub`; it is
 /// the `pub` on the *function* that puts it on the contract.
-fn collect_pub_fns(items: &[Item], out: &mut Vec<FrozenFn>) {
+fn collect_pub_fns(
+    items: &[Item],
+    solved: Option<&std::collections::HashMap<String, EffectSet>>,
+    module_alias: Option<&str>,
+    code_module: Option<&str>,
+    out: &mut Vec<FrozenFn>,
+) {
     for item in items {
         match item {
             Item::Func(f)
@@ -182,12 +315,44 @@ fn collect_pub_fns(items: &[Item], out: &mut Vec<FrozenFn>) {
                     && !f.is_package_pub
                     && crate::Syntax::classify_identifier(&f.name)
                         == crate::Syntax::IdentifierClass::Ordinary => out.push(FrozenFn {
-                name: f.name.clone(),
-                signature: fn_signature(f),
+                name: frozen_name(code_module, &f.name),
+                signature: qualify_api_signature(
+                    code_module,
+                    &fn_signature_with_effects(
+                        f,
+                        solved.and_then(|sets| {
+                            module_alias.and_then(|alias| {
+                                let name = code_module
+                                    .map(|module| format!("{module}__{}", f.name))
+                                    .unwrap_or_else(|| f.name.clone());
+                                sets.get(&format!("{alias}::{name}"))
+                            })
+                                .or_else(|| sets.get(&f.name))
+                        }),
+                    ),
+                ),
             }),
+            Item::Trait(trait_def) if trait_def.is_pub && !trait_def.is_package_pub => {
+                for method in &trait_def.methods {
+                    if crate::Syntax::classify_identifier(&method.name)
+                        == crate::Syntax::IdentifierClass::Ordinary
+                    {
+                        out.push(FrozenFn {
+                            name: frozen_name(
+                                code_module,
+                                &format!("{}.{}", trait_def.name, method.name),
+                            ),
+                            signature: qualify_api_signature(
+                                code_module,
+                                &trait_method_signature(&trait_def.name, method),
+                            ),
+                        });
+                    }
+                }
+            }
             Item::CodeModule(m) => {
                 if let Some(body) = &m.body {
-                    collect_pub_fns(body, out);
+                    collect_pub_fns(body, solved, module_alias, Some(&m.name), out);
                 }
             }
             _ => {}
@@ -342,6 +507,78 @@ mod tests {
             None,
         );
         assert_eq!(fn_signature(&f), "fn scale(v: &Vec3, factor: Float)");
+    }
+
+    #[test]
+    fn sig_carries_normalized_inferred_effects() {
+        let f = func("load", true, vec![], Some(Type::String));
+        let effects = EffectSet::from(["Fs.Read".to_string(), "Io".to_string()]);
+        assert_eq!(
+            fn_signature_with_effects(&f, Some(&effects)),
+            "fn load() --[Fs.Read, Io]-> String"
+        );
+        assert_eq!(
+            fn_signature_with_effects(&f, Some(&EffectSet::new())),
+            "fn load() --[]-> String"
+        );
+    }
+
+    #[test]
+    fn inline_module_snapshot_uses_mangled_effect_identity() {
+        let module = Item::CodeModule(crate::AST::CodeModule {
+            name: "files".to_string(),
+            name_span: zero(),
+            is_pub: false,
+            is_package_pub: false,
+            body: Some(vec![Item::Func(func(
+                "load",
+                true,
+                vec![],
+                Some(Type::String),
+            ))]),
+            web_target: None,
+            instance_identity: None,
+            span: zero(),
+        });
+        let solved = std::collections::HashMap::from([(
+            "main::files__load".to_string(),
+            EffectSet::from(["Fs.Read".to_string()]),
+        )]);
+        let snapshot = snapshot_from_items_with_effects(
+            &[module],
+            "files",
+            "1.0.0",
+            Some(&solved),
+            Some("main"),
+        );
+        assert_eq!(snapshot.funcs[0].name, "files.load");
+        assert_eq!(
+            snapshot.funcs[0].signature,
+            "fn files.load() --[Fs.Read]-> String"
+        );
+        let parsed = ApiSnapshot::parse(&snapshot.write()).expect("v3 snapshot round trip");
+        assert_eq!(parsed.funcs[0].name, "files.load");
+    }
+
+    #[test]
+    fn pre_v3_comparison_strips_only_effect_metadata() {
+        assert_eq!(
+            signature_without_effect_row("fn load(path: String) --[Fs.Read, Io]-> String"),
+            "fn load(path: String) -> String"
+        );
+        assert_eq!(
+            signature_without_effect_row("fn flush() --[]->"),
+            "fn flush()"
+        );
+        assert_eq!(
+            signature_without_effect_row("fn legacy() -> Int"),
+            "fn legacy() -> Int"
+        );
+        assert_eq!(legacy_api_name("files.load"), "load");
+        assert_eq!(
+            legacy_api_signature("fn files.load() --[Fs.Read]-> String"),
+            "fn load() -> String"
+        );
     }
 
     #[test]

@@ -1511,7 +1511,7 @@ fn lsp_signature_help_returns_active_parameter() {
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "fn add(a: Int, b: Int) -> Int".to_string(),
+                    "fn add(a: Int, b: Int) --[]-> Int".to_string(),
                     "\"activeParameter\":1".to_string(),
                     "b: Int".to_string(),
                 ]),
@@ -2428,8 +2428,8 @@ fn lsp_inlay_hints_include_scattered_method_breadcrumbs() {
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "+ fn size() -> Int".to_string(),
-                    "+ fn render() -> String".to_string(),
+                    "+ fn size() --[]-> Int".to_string(),
+                    "+ fn render() --[]-> String".to_string(),
                 ]),
             },
             TranscriptStep::Send {

@@ -996,12 +996,17 @@ pub(crate) struct Checker<'a> {
     /// builtins). Accumulated during the walk; rolled into the per-function
     /// `EffectSummary` after the body is checked.
     fx_direct: EffectSet,
+    /// First source span that introduced each direct effect, for inspect/LSP
+    /// provenance. Duplicate uses keep the earliest stable witness.
+    fx_direct_spans: HashMap<String, Span>,
     /// D-EFF1: user functions called in this body (call-graph edges for the
     /// whole-program transitive fixpoint).
     fx_edges: BTreeSet<String>,
     /// D-EFF1: a foreign (`extern`) call was reached — the body's effects are
     /// the maximal set (an un-inspectable body may do anything).
     fx_maximal: bool,
+    /// First source span that forced the row maximal.
+    fx_maximal_span: Option<Span>,
     /// D-EFF1: stack of active `@Caps(…)` regions, innermost last. Every effect
     /// or edge recorded while one is open is also added to it (and all enclosing
     /// regions) so the region's own effect set can be checked against its caps.

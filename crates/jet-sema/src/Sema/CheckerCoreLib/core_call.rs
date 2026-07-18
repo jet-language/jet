@@ -66,7 +66,7 @@ impl<'a> Checker<'a> {
                 // closed connection-method table infers `Db.Read`/`Db.Write` leaves
                 // (in `check_db_connection_method`, the method-call path — those
                 // methods never reach this module-call `core_effect`).
-                self.record_effect(e.name());
+                self.record_effect(e.name(), span);
                 // D-TXN2: an irreversible effect (Net/Fs/Exec — a network/file/
                 // subprocess effect) can't be rolled back, so it is rejected when it
                 // occurs directly inside a `@Transact { … }` block (E0746). The fix

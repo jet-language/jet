@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
             match method {
                 "query" => {
                     self.check_db_sql_params_args("query", args, span);
-                    self.record_effect(&db_read());
+                    self.record_effect(&db_read(), span);
                     Some(Some(result_ty(
                         Type::List(Box::new(db_row_ty())),
                         db_error_ty(),
@@ -72,7 +72,7 @@ impl<'a> Checker<'a> {
                 }
                 "query_one" => {
                     self.check_db_sql_params_args("query_one", args, span);
-                    self.record_effect(&db_read());
+                    self.record_effect(&db_read(), span);
                     Some(Some(result_ty(
                         Type::Option(Box::new(db_row_ty())),
                         db_error_ty(),
@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
                 }
                 "execute" => {
                     self.check_db_sql_params_args("execute", args, span);
-                    self.record_effect(&db_write());
+                    self.record_effect(&db_write(), span);
                     Some(Some(result_ty(Type::Int, db_error_ty())))
                 }
                 "begin" | "commit" | "rollback" | "close" => {
@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
                     // D-EFFDBREAD1=A: transaction-control and close calls neither
                     // read nor write rows themselves, so they keep the plain `Db`
                     // root (an ancestor of both leaves).
-                    self.record_effect(Effect::Db.name());
+                    self.record_effect(Effect::Db.name(), span);
                     Some(Some(Type::Bool))
                 }
                 _ => None,

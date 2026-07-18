@@ -43,12 +43,12 @@ impl<'a> Checker<'a> {
             match method {
                 "call" => {
                     self.check_plugin_call_args("call", &Type::Float, args, span);
-                    self.record_effect(Effect::Exec.name());
+                    self.record_effect(Effect::Exec.name(), span);
                     Some(Some(result_ty(Type::Float, Type::String)))
                 }
                 "call_int" => {
                     self.check_plugin_call_args("call_int", &Type::Int, args, span);
-                    self.record_effect(Effect::Exec.name());
+                    self.record_effect(Effect::Exec.name(), span);
                     Some(Some(result_ty(Type::Int, Type::String)))
                 }
                 _ => None,

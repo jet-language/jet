@@ -2671,6 +2671,130 @@ fn soft_public_names_are_not_semver_promises() {
 }
 
 #[test]
+fn inferred_public_effect_drift_is_breaking() {
+    use jet::Publish::{diff_public_api, extract_public_api};
+
+    let dir = tmp_dir("effect_api_drift");
+    let pure_path = dir.join("pure.jet");
+    let io_path = dir.join("io.jet");
+    let pure = "pub fn report() -> Int { return 1 }\n";
+    let io = "pub fn report() -> Int { print(\"report\"); return 1 }\n";
+    fs::write(&pure_path, pure).unwrap();
+    fs::write(&io_path, io).unwrap();
+
+    let pure_api = extract_public_api(pure, pure_path.to_str().unwrap());
+    let io_api = extract_public_api(io, io_path.to_str().unwrap());
+    assert!(pure_api[0].signature.contains("--[]->"));
+    assert!(io_api[0].signature.contains("--[Io]->"));
+    assert_eq!(diff_public_api(&pure_api, &io_api).len(), 1);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn inferred_inline_module_effects_are_published() {
+    use jet::Publish::{diff_public_api, extract_public_api};
+
+    let dir = tmp_dir("inline_module_effect_api");
+    let old_path = dir.join("old.jet");
+    let new_path = dir.join("new.jet");
+    let old = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() {} }\n";
+    let new = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() { print(\"bench\"); } }\n";
+    fs::write(&old_path, old).unwrap();
+    fs::write(&new_path, new).unwrap();
+
+    let old_api = extract_public_api(old, old_path.to_str().unwrap());
+    let new_api = extract_public_api(new, new_path.to_str().unwrap());
+    let report = old_api
+        .iter()
+        .find(|item| item.name == "files.report")
+        .expect("inline module function is public API");
+    assert!(report.signature.contains("--[Io]->"), "{}", report.signature);
+    assert!(old_api.iter().any(|item| item.name == "bench.report"));
+    assert_eq!(diff_public_api(&old_api, &new_api).len(), 1);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn v2_snapshot_upgrade_matches_duplicate_inline_leaves() {
+    use jet::Publish::{diff_public_api, extract_public_api, ApiItem};
+    use jet::Publish::ApiFreeze::{legacy_api_name, legacy_api_signature, ApiSnapshot};
+
+    let dir = tmp_dir("v2_inline_api_upgrade");
+    let path = dir.join("current.jet");
+    let source = "module bench { pub fn report() {} }\nmodule files { pub fn report(x: Int) {} }\n";
+    fs::write(&path, source).unwrap();
+    let mut current = extract_public_api(source, path.to_str().unwrap())
+        .into_iter()
+        .filter(|item| item.kind == "fn")
+        .collect::<Vec<_>>();
+    for item in &mut current {
+        item.name = legacy_api_name(&item.name).to_string();
+        item.signature = legacy_api_signature(&item.signature);
+    }
+
+    let previous = ApiSnapshot::parse(
+        "api_version = 2\npackage = demo\npublished_version = 1.0.0\nfn report()\nfn report(x: Int (a whole number))\n",
+    )
+    .expect("v2 snapshot");
+    let old = previous
+        .funcs
+        .iter()
+        .map(|function| ApiItem {
+            kind: "fn".to_string(),
+            name: function.name.clone(),
+            signature: function.signature.clone(),
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        diff_public_api(&old, &current).is_empty(),
+        "old={old:#?}\ncurrent={current:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn public_effect_metadata_preserves_symbolic_rows() {
+    use jet::Publish::extract_public_api;
+
+    let dir = tmp_dir("effect_api_open_row");
+    let path = dir.join("open.jet");
+    let source = "pub fn invoke<E>(act: fn() --[..E]-> Int) --[..E]-> Int { return act(); }\n";
+    fs::write(&path, source).unwrap();
+
+    let api = extract_public_api(source, path.to_str().unwrap());
+    assert!(api[0].signature.contains("--[..E]->"), "{}", api[0].signature);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn public_trait_effect_contract_drift_is_breaking() {
+    use jet::Publish::{diff_public_api, extract_public_api};
+
+    let dir = tmp_dir("trait_effect_api_drift");
+    let old_path = dir.join("old.jet");
+    let new_path = dir.join("new.jet");
+    let old = "pub trait Render { fn draw(self) --[Io]-> Int; }\n";
+    let new = "pub trait Render { fn draw(self) --[Gpu]-> Int; }\n";
+    fs::write(&old_path, old).unwrap();
+    fs::write(&new_path, new).unwrap();
+
+    let old_api = extract_public_api(old, old_path.to_str().unwrap());
+    let new_api = extract_public_api(new, new_path.to_str().unwrap());
+    assert!(old_api[0].signature.contains("--[Io]->"));
+    assert!(new_api[0].signature.contains("--[Gpu]->"));
+    assert!(
+        !diff_public_api(&old_api, &new_api).is_empty(),
+        "trait method effect drift must be breaking"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resolver_conflict_e2602() {
     // Two packages requiring incompatible versions of a shared dep → E2602.
     use jet::Publish::{check_conflicts, VersionConstraint, VersionReq};

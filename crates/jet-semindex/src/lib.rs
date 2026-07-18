@@ -14,8 +14,8 @@ pub use Build::{
     SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
-    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, InstanceApplicationFact, InstanceFact,
-    MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
+    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, EffectProvenance,
+    InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
     StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     ViewProjectionFact, ViewProvenanceFact, ViewSourceFact,
     SCHEMA_VERSION,
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 9);
+        assert_eq!(SCHEMA_VERSION, 10);
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":9"));
+        assert!(json.contains("\"schema_version\":10"));
         assert!(json.contains("\"definitions\""));
         assert!(json.contains("\"identity\""));
         assert!(json.contains("\"references\""));

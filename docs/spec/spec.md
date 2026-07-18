@@ -2397,6 +2397,10 @@ audio, editor, or file-backend dependencies.
 
 ### Declaring a boundary — effects inside the arrow
 
+A function may omit an effect row. Sema still infers its complete transitive
+row; ordinary `->` is only the return arrow and never claims purity. Public API
+metadata stores that normalized inferred row, so publishing rejects effect drift.
+
 A function may pin an **upper bound** on its effects by writing
 `--[E1, E2, …]->` between its parameter list and return type:
 

@@ -4,7 +4,7 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewSourceFact {
@@ -317,6 +317,16 @@ pub struct EffectFact {
     pub callees: Vec<String>,
     pub inferred: Vec<String>,
     pub maximal: bool,
+    /// One deterministic witness for each inferred effect: the expanded
+    /// function path plus source spans for call edges and the direct origin.
+    pub provenance: Vec<EffectProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectProvenance {
+    pub effect: String,
+    pub call_path: Vec<String>,
+    pub spans: Vec<SourceSpan>,
 }
 
 /// Versioned semantic index over one checked program bundle.

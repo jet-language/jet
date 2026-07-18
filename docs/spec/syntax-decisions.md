@@ -1379,8 +1379,8 @@ types (`fn(T) --[]-> U`, `fn(T) --[Net]-> U`; call-site check E0747) and
 the impl obligation (E0742) and the dispatch contract for trait objects.
 
 **D-EFFECT-OMIT1=A — inferred effects may stay unwritten** *(ratified
-2026-07-16, card #570)*: private and public ordinary functions may omit an
-effect bound; `->` is only the return arrow and never asserts purity — a
+2026-07-16; implemented 2026-07-17, card #570)*: private and public ordinary
+functions may omit an effect bound; `->` is only the return arrow and never asserts purity — a
 function is pure when its inferred row is empty, or when an explicit
 `--[]->` bounds it empty. Public API snapshots store the inferred normalized
 row and provenance, and semver rejects row changes; an explicit row is

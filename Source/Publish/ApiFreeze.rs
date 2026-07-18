@@ -4,8 +4,11 @@
 use std::path::Path;
 
 pub use crate::Sema::ApiFreeze::{
-    api_cache_dir, fn_signature, load_all_snapshots, load_snapshot, project_capability_digest,
-    save_snapshot, snapshot_from_items, ApiSnapshot, FrozenFn, API_SNAPSHOT_VERSION,
+    api_cache_dir, fn_signature, fn_signature_with_effects, legacy_api_name, legacy_api_signature,
+    load_all_snapshots, load_snapshot, normalized_public_effect_row, project_capability_digest,
+    qualify_api_signature, save_snapshot, snapshot_from_items,
+    signature_without_effect_row, snapshot_from_items_with_effects, trait_method_signature,
+    ApiSnapshot, FrozenFn, API_SNAPSHOT_VERSION,
 };
 
 /// Snapshot every publish's public-function surface to disk (pub-metadata
@@ -20,9 +23,25 @@ pub fn write_api_snapshot_for_entry(
     package: &str,
     version: &str,
 ) -> Option<usize> {
-    let bundle = crate::Loader::load_entry_with_overlay(entry_file, None, true).ok()?;
+    let mut bundle = crate::Loader::load_entry_with_overlay(entry_file, None, true).ok()?;
+    let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        &mut bundle,
+        crate::Sema::CompileMode::Check,
+    );
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+    {
+        return None;
+    }
     let entry = &bundle.modules[bundle.entry];
-    let snap = snapshot_from_items(&entry.items, package, version);
+    let snap = snapshot_from_items_with_effects(
+        &entry.items,
+        package,
+        version,
+        Some(&facts.solved),
+        Some(&entry.alias),
+    );
     let count = snap.funcs.len();
     save_snapshot(project_root, &snap).ok()?;
     Some(count)

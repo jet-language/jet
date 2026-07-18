@@ -1659,6 +1659,7 @@ pub(crate) fn check_bundle_opts(
             &mut global_addr_taken,
             &mut reference_anchors,
         ));
+        seed_trait_dispatch_effects(&module.items, &mut local_summaries);
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
         effect_summaries.extend(local_summaries.clone());
         module_effect_summaries.push((module.alias.clone(), local_summaries));
@@ -1685,24 +1686,77 @@ pub(crate) fn check_bundle_opts(
     for module in &bundle.modules {
         apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
     }
-    let solved = solve(&effect_summaries);
+    // File modules need qualified facts: bare top-level names overwrite one
+    // another, while D-EFFECT-OMIT1 requires one cross-package solver answer.
+    let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
+    // `public_summaries` also carries unique short aliases for tooling. Run
+    // diagnostics only over canonical module-qualified nodes so each source
+    // obligation is reported once.
+    let module_aliases = bundle
+        .modules
+        .iter()
+        .map(|module| format!("{}::", module.alias))
+        .collect::<Vec<_>>();
+    let validation_summaries = public_summaries
+        .iter()
+        .filter(|(key, _)| module_aliases.iter().any(|prefix| key.starts_with(prefix)))
+        .map(|(key, summary)| (key.clone(), summary.clone()))
+        .collect::<HashMap<_, _>>();
     for module in &bundle.modules {
-        check_effect_boundaries(&module.items, &solved, &mut diags);
-        check_replayable_effects(&module.items, &solved, &mut diags);
+        let prefix = format!("{}::", module.alias);
+        let local_solved = public_solved
+            .iter()
+            .filter_map(|(key, row)| key.strip_prefix(&prefix).map(|key| (key.to_string(), row.clone())))
+            .collect::<HashMap<_, _>>();
+        let local_summaries = validation_summaries
+            .iter()
+            .map(|(key, summary)| {
+                if let Some(key) = key.strip_prefix(&prefix) {
+                    let mut summary = summary.clone();
+                    summary.edges = summary
+                        .edges
+                        .iter()
+                        .map(|edge| edge.strip_prefix(&prefix).unwrap_or(edge).to_string())
+                        .collect();
+                    for call in &mut summary.memory.calls {
+                        call.callee = call
+                            .callee
+                            .strip_prefix(&prefix)
+                            .unwrap_or(&call.callee)
+                            .to_string();
+                    }
+                    (key.to_string(), summary)
+                } else {
+                    (key.clone(), summary.clone())
+                }
+            })
+            .collect::<HashMap<_, _>>();
+        check_effect_boundaries(
+            &module.items,
+            &local_solved,
+            &local_summaries,
+            &mut diags,
+        );
+        super::Effects::check_inferred_purity(
+            &module.items,
+            &module.alias,
+            &validation_summaries,
+            &public_solved,
+            &mut diags,
+        );
+        check_replayable_effects(&module.items, &local_solved, &mut diags);
+        check_secret_grants(
+            &module.items,
+            &module.alias,
+            &validation_summaries,
+            &mut diags,
+        );
     }
-    check_region_caps(&effect_summaries, &solved, &mut diags);
+    check_region_caps(&validation_summaries, &public_solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
-    check_callback_bounds(&effect_summaries, &solved, &mut diags);
-    // U13 (D-JPK-SECRETCRYPTO1): a `core.vault.get` reach requires `Secret` in
-    // the reaching function's own declared `#(…)` bound — E1264.
-    for module in &bundle.modules {
-        check_secret_grants(&module.items, &effect_summaries, &mut diags);
-    }
+    check_callback_bounds(&validation_summaries, &public_solved, &mut diags);
 
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
-    // File modules need qualified facts here: the bundle-local maps above use
-    // bare top-level names and therefore overwrite same-leaf functions.
-    let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
     // D-MEM-FACTS1: module `@Policy(no_alloc)` declarations are checked only
     // after the same qualified, dependency-complete graph reaches its fixpoint.
     // #657 feeds the other scope levels and the two remaining fact values into

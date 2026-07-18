@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
             // case the edge to that user function is recorded below).
             if !self.funcs.contains_key(&call.name) {
                 if let Some(e) = builtin_effect(&call.name) {
-                    self.record_effect(e.name());
+                    self.record_effect(e.name(), call.name_span);
                 }
             }
             if call.name == Syntax::FOREIGN_PRINTLN || call.name == Syntax::FOREIGN_EPRINTLN {
@@ -710,7 +710,7 @@ impl<'a> Checker<'a> {
             if sig.is_extern {
                 if let Some(effect) = &sig.foreign_effect_root {
                     self.record_open_memory_dispatch(call.name_span, "foreign function body");
-                    self.record_effect(effect);
+                    self.record_effect(effect, call.name_span);
                 } else {
                     self.record_maximal(call.name_span);
                 }

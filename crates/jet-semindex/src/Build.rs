@@ -587,11 +587,97 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
         for item in &module.items {
             collect_item(item, &mp, module, &mut ctx);
         }
+        apply_inferred_effect_rows(&mut db, module, facts);
     }
     add_breadcrumb_hints(&mut db);
     db.finalize_index(facts, bundle);
     db.symbols = build_semantic_symbol_index(&db, bundle);
     db
+}
+
+fn apply_inferred_effect_rows(
+    db: &mut SymbolDB,
+    module: &LoadedModule,
+    facts: &SemIndexEffectFacts,
+) {
+    let mut inline_keys = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(code_module) = item else { continue };
+        let Some(body) = &code_module.body else { continue };
+        for item in body {
+            if let Item::Func(function) = item {
+                inline_keys.insert(
+                    (function.name_span.start, function.name_span.end),
+                    format!("{}__{}", code_module.name, function.name),
+                );
+            }
+        }
+    }
+    let module_prefix = format!("{}::", module.alias);
+    for def in db
+        .defs
+        .iter_mut()
+        .filter(|def| def.module_path == module.display)
+    {
+        let SymKind::Function {
+            params,
+            ret,
+            effects,
+            effect_via,
+        } = &mut def.kind
+        else {
+            continue;
+        };
+        if effects.is_some() || effect_via.is_some() {
+            continue;
+        }
+        let local_key = if let Some(key) = inline_keys.get(&(def.def_span.start, def.def_span.end)) {
+            key.clone()
+        } else if def.identity.starts_with("method:") {
+            def.identity
+                .rsplit("::")
+                .next()
+                .and_then(|tail| tail.strip_suffix(&format!(".{}", def.name)))
+                .map(|owner| format!("{owner}::{}", def.name))
+                .unwrap_or_else(|| def.name.clone())
+        } else {
+            def.name.clone()
+        };
+        let Some(row) = facts.solved.get(&format!("{module_prefix}{local_key}")) else {
+            continue;
+        };
+        *effects = Some(
+            row.iter()
+                .cloned()
+                .map(|effect| (effect, def.def_span))
+                .collect(),
+        );
+        let signature = fn_signature(
+            &def.name,
+            params,
+            ret,
+            effects.as_ref(),
+            None,
+            db.view_provenance.get(&def.identity),
+        );
+        if let Some(hover) = db.hover.iter_mut().find(|hover| {
+            hover.module_path == def.module_path && hover.span == def.def_span
+        }) {
+            let tail = hover
+                .text
+                .split_once('\n')
+                .map(|(_, tail)| format!("\n{tail}"))
+                .unwrap_or_default();
+            hover.text = format!("{signature}{tail}");
+        }
+        for member in db
+            .members
+            .iter_mut()
+            .filter(|member| member.identity == def.identity)
+        {
+            member.signature = signature.clone();
+        }
+    }
 }
 
 fn build_definition_facts(

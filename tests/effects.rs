@@ -3,11 +3,109 @@
 
 mod common;
 
+use std::fs;
+
 fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(_) => Vec::new(),
         Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
     }
+}
+
+#[test]
+fn cross_module_same_name_effects_keep_qualified_rows() {
+    let root = common::unique_tmp("jet_effect_collision");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("left.jet"),
+        "fn helper() { print(\"left\"); }\npub fn same() { helper(); }\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("right.jet"),
+        "fn helper() {}\npub fn same() { helper(); }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.jet");
+    fs::write(
+        &entry,
+        "use \"./left\" as left\nuse \"./right\" as right\nfn clean() --[]-> { right.same(); }\nfn run() { clean(); left.same(); }\n",
+    )
+    .unwrap();
+
+    let (diagnostics, _, facts) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    assert!(facts.solved["left::same"].contains("Io"));
+    assert!(facts.solved["right::same"].is_empty());
+    assert!(!facts.solved.contains_key("same"));
+}
+
+#[test]
+fn dynamic_trait_calls_use_the_declared_dispatch_row() {
+    let source = r#"
+trait Shape { fn area(self) --[Io]-> Int; }
+fn clean(shape: Shape) --[]-> Int { return shape.area(); }
+fn run() {}
+"#;
+    let root = common::unique_tmp("jet_trait_dispatch_effect");
+    fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    fs::write(&entry, source).unwrap();
+    let (diagnostics, _, facts) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(
+        facts.summaries["clean"].edges.contains("main::Shape::area"),
+        "{:#?}",
+        facts.summaries["clean"].edges
+    );
+    assert!(facts.solved["Shape::area"].contains("Io"), "{:#?}", facts.solved);
+    assert!(facts.solved["clean"].contains("Io"), "{:#?}", facts.solved);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E3401"));
+}
+
+#[test]
+fn unbounded_dynamic_trait_call_under_ceiling_is_e0743() {
+    let source = r#"
+trait Shape { fn area(self) -> Int; }
+fn clean(shape: Shape) --[]-> Int { return shape.area(); }
+fn run() {}
+"#;
+    assert_eq!(
+        codes(source)
+            .into_iter()
+            .filter(|code| code == "E0743")
+            .collect::<Vec<_>>(),
+        vec!["E0743"]
+    );
+}
+
+#[test]
+fn inline_module_calls_flow_into_explicit_purity() {
+    let source = r#"
+module inner {
+    pub fn dirty() { print("dirty"); }
+}
+fn clean() --[]-> { inner.dirty(); }
+fn run() {}
+"#;
+    assert!(codes(source).iter().any(|code| code == "E3401"));
+}
+
+#[test]
+fn inline_module_functions_enforce_declared_effect_bounds() {
+    let source = r#"
+module inner {
+    pub fn bounded() --[Net]-> { print("dirty"); }
+}
+fn run() {}
+"#;
+    assert!(codes(source).iter().any(|code| code == "E0740"));
 }
 
 /// I3 / D-EFF1: effect annotations (`#(…)`, `@Pure`, trait-method bounds) are a
@@ -907,6 +1005,7 @@ fn invoke<E>(marker: E, act: fn() --[..E]-> Int) --[Log, ..E]-> Int {
     return act();
 }
 fn value() --[]-> Int { return 1; }
+fn pure_caller() --[]-> Int { return invoke(0, value); }
 fn run() { print("{invoke(0, value)}"); }
 "#;
     let rust = jet::compile(src).expect("generic open effect row compiles").rust;

@@ -207,11 +207,17 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 signature: f.signature.clone(),
             })
             .collect();
-        let current_fns: Vec<jet::Publish::ApiItem> = current_api
+        let mut current_fns: Vec<jet::Publish::ApiItem> = current_api
             .iter()
             .filter(|i| i.kind == "fn")
             .cloned()
             .collect();
+        if prev.api_version < jet::Publish::ApiFreeze::API_SNAPSHOT_VERSION {
+            for item in &mut current_fns {
+                item.name = jet::Publish::ApiFreeze::legacy_api_name(&item.name).to_string();
+                item.signature = jet::Publish::ApiFreeze::legacy_api_signature(&item.signature);
+            }
+        }
         let breaking = jet::Publish::diff_public_api(&old_api, &current_fns);
 
         let bump = match (

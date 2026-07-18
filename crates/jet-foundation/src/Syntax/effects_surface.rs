@@ -11,11 +11,13 @@ pub const KW_TODO: &str = "Todo";
 /// (FOREIGN_PURE) remains the older E0053 teaching form.
 pub const KW_PURE: &str = "Pure";
 
-/// D-SHAPE8=A (ratified 2026-07-14, owner-amended): an explicit function
+/// D-SHAPE8=A + D-EFFECT-OMIT1=A (ratified 2026-07-14/16): an explicit function
 /// effect row lives inside the return arrow: `--[Fs.Read, ..E]->`. The empty
 /// row `--[]->` is an explicit purity bound; an omitted row leaves ordinary
-/// `->` unchanged. These two fragments are the canonical punctuation used by
-/// the parser, formatter, editor grammars, and generated documentation.
+/// `->` unchanged while sema still infers its complete row. Public metadata and
+/// tooling project the normalized inferred row whether source spells it or not.
+/// These two fragments are the canonical punctuation used by the parser,
+/// formatter, editor grammars, and generated documentation.
 pub const EFFECT_ARROW_OPEN: &str = "--[";
 pub const EFFECT_ARROW_CLOSE: &str = "]->";
 

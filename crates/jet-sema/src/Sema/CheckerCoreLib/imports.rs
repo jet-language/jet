@@ -34,6 +34,7 @@ impl<'a> Checker<'a> {
                 return None;
             };
             self.record_current_function_reference(mangled, span);
+            self.record_edge(mangled.to_string(), span);
             if let Some(identity) = self.code_module_identities.get(alias).cloned() {
                 self.record_semantic_reference(alias_span, identity.clone());
                 let method = mangled.strip_prefix(&format!("{alias}__")).unwrap_or(mangled);

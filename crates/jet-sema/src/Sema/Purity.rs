@@ -389,10 +389,8 @@ fn check_pure_expr_with_path(
             if is_impure_builtin(name) {
                 return Some(e3401(pure_fn, name, path, c.name_span));
             }
-            if let Some(sig) = funcs.get(name.as_str()) {
-                if sig.is_extern || !sig.is_pure {
-                    return Some(e3401(pure_fn, name, path, c.name_span));
-                }
+            if funcs.get(name.as_str()).is_some_and(|sig| sig.is_extern) {
+                return Some(e3401(pure_fn, name, path, c.name_span));
             }
             // Recurse into args.
             for arg in &c.args {

@@ -180,13 +180,39 @@ fn json_effect(e: &EffectFact) -> String {
     let direct: Vec<String> = e.direct.iter().map(|s| json_str(s)).collect();
     let callees: Vec<String> = e.callees.iter().map(|s| json_str(s)).collect();
     let inferred: Vec<String> = e.inferred.iter().map(|s| json_str(s)).collect();
+    let provenance = e
+        .provenance
+        .iter()
+        .map(|origin| {
+            let path = origin
+                .call_path
+                .iter()
+                .map(|part| json_str(part))
+                .collect::<Vec<_>>()
+                .join(",");
+            let spans = origin
+                .spans
+                .iter()
+                .map(|span| json_span(*span))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"effect\":{},\"call_path\":[{}],\"spans\":[{}]}}",
+                json_str(&origin.effect),
+                path,
+                spans
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"function\":{},\"direct\":[{}],\"callees\":[{}],\"inferred\":[{}],\"maximal\":{}}}",
+        "{{\"function\":{},\"direct\":[{}],\"callees\":[{}],\"inferred\":[{}],\"maximal\":{},\"provenance\":[{}]}}",
         json_str(&e.function),
         direct.join(","),
         callees.join(","),
         inferred.join(","),
-        if e.maximal { "true" } else { "false" }
+        if e.maximal { "true" } else { "false" },
+        provenance
     )
 }
 
@@ -460,6 +486,60 @@ fn convert_view_provenance(
 }
 
 pub(crate) fn convert_effects(facts: &jet_sema::SemIndexEffectFacts) -> Vec<EffectFact> {
+    fn witness(
+        function: &str,
+        effect: &str,
+        facts: &jet_sema::SemIndexEffectFacts,
+        seen: &mut std::collections::BTreeSet<String>,
+    ) -> Option<(Vec<String>, Vec<SourceSpan>)> {
+        if !seen.insert(function.to_string()) {
+            return None;
+        }
+        let summary = facts.summaries.get(function)?;
+        if summary.direct.contains(effect) {
+            let spans = summary
+                .direct_spans
+                .get(effect)
+                .copied()
+                .map(SourceSpan::from)
+                .into_iter()
+                .collect();
+            return Some((vec![function.to_string()], spans));
+        }
+        if summary.maximal {
+            let spans = summary
+                .maximal_span
+                .map(SourceSpan::from)
+                .into_iter()
+                .collect();
+            return Some((vec![function.to_string()], spans));
+        }
+        for callee in &summary.edges {
+            if !facts
+                .solved
+                .get(callee)
+                .is_some_and(|row| row.contains(effect))
+            {
+                continue;
+            }
+            let mut branch_seen = seen.clone();
+            if let Some((mut path, mut spans)) = witness(callee, effect, facts, &mut branch_seen) {
+                let call_span = summary
+                    .memory
+                    .calls
+                    .iter()
+                    .find(|call| call.callee == *callee)
+                    .map(|call| SourceSpan::from(call.span));
+                path.insert(0, function.to_string());
+                if let Some(span) = call_span {
+                    spans.insert(0, span);
+                }
+                return Some((path, spans));
+            }
+        }
+        None
+    }
+
     let mut out = Vec::new();
     for (function, summary) in &facts.summaries {
         let direct: Vec<String> = summary.direct.iter().cloned().collect();
@@ -469,12 +549,29 @@ pub(crate) fn convert_effects(facts: &jet_sema::SemIndexEffectFacts) -> Vec<Effe
             .get(function)
             .map(|s| s.iter().cloned().collect())
             .unwrap_or_default();
+        let provenance = inferred
+            .iter()
+            .filter_map(|effect| {
+                witness(
+                    function,
+                    effect,
+                    facts,
+                    &mut std::collections::BTreeSet::new(),
+                )
+                .map(|(call_path, spans)| crate::Types::EffectProvenance {
+                    effect: effect.clone(),
+                    call_path,
+                    spans,
+                })
+            })
+            .collect();
         out.push(EffectFact {
             function: function.clone(),
             direct,
             callees,
             inferred,
             maximal: summary.maximal,
+            provenance,
         });
     }
     out.sort_by(|a, b| a.function.cmp(&b.function));
