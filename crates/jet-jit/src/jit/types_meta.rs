@@ -1,7 +1,9 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
-use jet_codegen::Codegen::TIR::{JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind};
+use jet_codegen::Codegen::TIR::{
+    JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind, TNumericOp,
+};
 use jet_foundation::AST::Type;
 use std::collections::HashMap;
 
@@ -13,6 +15,30 @@ use super::safety::{
 pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Type, String> {
     if let TExprKind::DistinctCtor { base, .. } = &init.kind {
         return clif_ty(base).ok_or_else(|| format!("jit distinct base unsupported: {base:?}"));
+    }
+    if let TExprKind::DistinctConvert {
+        arg,
+        op,
+        range,
+        fallible,
+        ..
+    } = &init.kind
+    {
+        if range.is_some() && *fallible {
+            return Ok(types::I64);
+        }
+        return match op {
+            TNumericOp::CastAs { dst_rust }
+                if matches!(dst_rust.as_str(), "f32" | "f64") =>
+            {
+                Ok(types::F64)
+            }
+            TNumericOp::CastAs { .. } => init_clif_ty(arg, meta),
+            TNumericOp::TryFrom { .. }
+            | TNumericOp::FloatToInt { .. }
+            | TNumericOp::FloatNarrow { .. } => Ok(types::I64),
+            _ => Err("jit distinct conversion operation unsupported".to_string()),
+        };
     }
     if let Some(t) = clif_ty(&init.ty) {
         return Ok(t);

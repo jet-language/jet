@@ -301,6 +301,10 @@ impl LowerCtx<'_, '_> {
             TStmt::Let { name, init, .. } => {
                 let val = self.lower_expr(init)?;
                 let ty = init_clif_ty(init, self.meta)?;
+                let val_ty = self.b.func.dfg.value_type(val);
+                if val_ty != ty {
+                    return Err(format!("jit let `{name}` lowering type mismatch"));
+                }
                 let var = self.fresh_var(ty);
                 self.b.def_var(var, val);
                 self.vars.insert(TIR::local_place(name), var);

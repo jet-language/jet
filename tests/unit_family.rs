@@ -71,7 +71,7 @@ fn multi_word_member_pascal_cases() {
     let src = r#"
 @UnitFamily(Speed) { m_per_s }
 fn run() {
-    v :: MPerS(3.0)
+    v :: MPerS.from_float(3.0)
     print("{(v.raw())}")
 }
 "#;
