@@ -6271,6 +6271,66 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn nested_pattern_subjects_clone_read_self_and_keep_take_self_by_value() {
+    fn method_body<'a>(rust: &'a str, name: &str) -> &'a str {
+        let tail = rust
+            .split_once(&format!("fn user_{name}"))
+            .map(|(_, tail)| tail)
+            .unwrap_or_else(|| panic!("missing generated method `{name}`"));
+        let next_method = tail.find("\n    fn user_");
+        let impl_end = tail.find("\n}\n");
+        let end = match (next_method, impl_end) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(end), None) | (None, Some(end)) => end,
+            (None, None) => tail.len(),
+        };
+        &tail[..end]
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_nested_pattern_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+struct Inner { note: String? }
+struct Envelope {
+    inner: Inner
+
+    fn borrowed(self) -> String {
+        if self.inner.note == Val(value) { return value }
+        return "none"
+    }
+
+    fn owned(^self) -> String {
+        if self.inner.note == Val(value) { return value }
+        return "none"
+    }
+}
+fn owned_local_nested_field_remains_reusable() {
+    local := Envelope.{ inner: Inner.{ note: Val("local") } }
+    if local.inner.note == Val(value) { print(value) }
+    if local.inner.note == Val(value) { print(value) }
+}
+fn run() {
+    borrowed := Envelope.{ inner: Inner.{ note: Val("borrowed") } }
+    print(borrowed.borrowed())
+    owned := Envelope.{ inner: Inner.{ note: Val("owned") } }
+    print(owned.owned())
+    owned_local_nested_field_remains_reusable()
+}
+"#;
+    let out = compile_temp("nested_pattern_borrow_provenance.jet", src);
+    let borrowed = method_body(&out.rust, "borrowed");
+    let owned = method_body(&out.rust, "owned");
+    assert!(borrowed.contains(".clone()"), "{borrowed}");
+    assert!(!owned.contains(".clone()"), "{owned}");
+
+    let (code, stdout, stderr) = build_and_run(&dir, "nested_pattern", src, &[], None);
+    assert_eq!(code, 0, "nested borrowed/take-self proof failed: {stderr}");
+    assert_eq!(stdout, "borrowed\nowned\nlocal\nlocal\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Derived objects keep declaration order across renamed fields and optional
 /// omission. Ordinary maps retain their independent key-ordering behavior.
 #[test]
@@ -6317,11 +6377,10 @@ fn generated_struct_codecs_preserve_flatten_rename_and_default() {
     let src = r#"
 use core.encoding.json as json
 
-@[Codable]
+@Codable
 struct Inner { x: Int  y: Bool }
 
-@[Codable]
-@[RenameAll(camel)]
+@[Codable, RenameAll(camel)]
 struct Outer {
     display_name: String
     @[Flatten] inner: Inner

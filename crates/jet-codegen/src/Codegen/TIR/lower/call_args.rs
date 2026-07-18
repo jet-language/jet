@@ -297,8 +297,16 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
         Expr::Char(_, _) => Some(Type::Char),
         Expr::TupleLit(_, _, Some(ty)) => Some(ty.clone()),
         Expr::MethodCall {
-            receiver, method, ..
+            receiver,
+            method,
+            resolved_ret,
+            ..
         } => {
+            if matches!(method.as_str(), "zip" | "map") {
+                if let Some(ty) = resolved_ret {
+                    return Some(ty.clone());
+                }
+            }
             if method == "chars" {
                 return Some(Type::List(Box::new(Type::Char)));
             }

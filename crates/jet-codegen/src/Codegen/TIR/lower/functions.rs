@@ -339,6 +339,9 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
                 "self".to_string()
             };
             env.bind(Syntax::KW_SELF, place, None);
+            if matches!(p.convention, AccessConvention::Read) {
+                env.mark_borrowed(Syntax::KW_SELF);
+            }
             self_conv = Some(p.convention);
             is_static = false;
             continue;
@@ -439,6 +442,9 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
                 place,
                 Some(Type::Named(type_name.to_string())),
             );
+            if matches!(p.convention, AccessConvention::Read) {
+                env.mark_borrowed(Syntax::KW_SELF);
+            }
             continue;
         }
         let rust_name = cx.mangle_name(&p.name);

@@ -213,6 +213,78 @@ pub(super) fn lower_binding_free_variant_pattern_test(
     }
 }
 
+fn pattern_subject_is_borrowed(subject: &Expr, env: &LowerEnv) -> bool {
+    match subject {
+        Expr::Ident(name, _) => env.is_borrowed(name),
+        Expr::Field(base, _, _) => pattern_subject_is_borrowed(base, env),
+        _ => false,
+    }
+}
+
+fn pattern_subject_is_owned_self(subject: &Expr, env: &LowerEnv) -> bool {
+    match subject {
+        Expr::Ident(name, _) => name == Syntax::KW_SELF && !env.is_borrowed(name),
+        Expr::Field(base, _, _) => pattern_subject_is_owned_self(base, env),
+        _ => false,
+    }
+}
+
+fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    // Sema protects ordinary owning-position field reads with an implicit `Copy`
+    // whose span is exactly the wrapped field span. A take-self method owns that
+    // field, so an if-let may move it. Preserve an explicitly written `~field`
+    // (its span starts at the sigil) and every borrowed-root copy.
+    let lowered_subject = match subject {
+        Expr::Copy(inner, copy_span)
+            if matches!(inner.as_ref(), Expr::Field(..))
+                && *copy_span == inner.span()
+                && pattern_subject_is_owned_self(inner, env) => inner.as_ref(),
+        _ => subject,
+    };
+    let subj = lower_expr(lowered_subject, cx, env);
+    if pattern_subject_is_borrowed(subject, env) {
+        let ty = subj.ty.clone();
+        TExpr {
+            ty,
+            kind: TExprKind::Clone(Box::new(subj)),
+        }
+    } else {
+        subj
+    }
+}
+
+#[cfg(test)]
+mod borrowed_pattern_tests {
+    use super::{pattern_subject_is_borrowed, Expr, LowerEnv, Span};
+
+    fn nested_self() -> Expr {
+        Expr::Field(
+            Box::new(Expr::Field(
+                Box::new(Expr::Ident("self".to_string(), Span::new(0, 0))),
+                "inner".to_string(),
+                Span::new(0, 0),
+            )),
+            "optional".to_string(),
+            Span::new(0, 0),
+        )
+    }
+
+    #[test]
+    fn nested_read_self_pattern_subject_retains_borrow_provenance() {
+        let mut env = LowerEnv::new("encode".to_string());
+        env.bind("self", "self".to_string(), None);
+        env.mark_borrowed("self");
+        assert!(pattern_subject_is_borrowed(&nested_self(), &env));
+    }
+
+    #[test]
+    fn nested_take_self_pattern_subject_stays_owned() {
+        let mut env = LowerEnv::new("consume".to_string());
+        env.bind("self", "self".to_string(), None);
+        assert!(!pattern_subject_is_borrowed(&nested_self(), &env));
+    }
+}
+
 pub(crate) fn lower_if_cond(
     cond: &Expr,
     cx: &Cx,
@@ -247,7 +319,7 @@ pub(crate) fn lower_if_cond(
     {
         if is_json_variant(variant) {
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
-                let subj = lower_expr(subject, cx, env);
+                let subj = lower_if_let_subject(subject, cx, env);
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());
                 let place = mangle(name);
@@ -295,7 +367,7 @@ pub(crate) fn lower_if_cond(
         // (the same total fact `add_pattern_bindings` reads on the AST path).
         if !is_json_variant(variant) {
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
-                let subj = lower_expr(subject, cx, env);
+                let subj = lower_if_let_subject(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
                 let ty = variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next());
                 let place = mangle(name);
@@ -309,7 +381,7 @@ pub(crate) fn lower_if_cond(
             // nothing, so the if-let introduces NO then-branch binding; the pattern
             // renders the slot as `_` (`emit_if_let_pattern`), byte-for-byte the AST.
             if let Some(PatSlot::Wildcard) = bindings.first() {
-                let subj = lower_expr(subject, cx, env);
+                let subj = lower_if_let_subject(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
                 return (TIfCond::IfLet { pat_str, subj }, None, Vec::new());
             }
@@ -323,7 +395,7 @@ pub(crate) fn lower_if_cond(
             pattern,
             Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
         ) {
-            let subj = lower_expr(subject, cx, env);
+            let subj = lower_if_let_subject(subject, cx, env);
             let pat_str = emit_if_let_pattern(cx, pattern);
             // The bound name + its inner type, off the subject's resolved Option/Result
             // (totality — never re-inferred). Mirrors `add_pattern_bindings`.

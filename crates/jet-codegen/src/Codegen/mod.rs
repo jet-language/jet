@@ -807,8 +807,14 @@ pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
 
 pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, out: &mut String) {
     let root = &cx.root_prefix;
-    let imports = |module: &str| cx.core_imports.values().any(|m| m == module);
-    if imports("core.files") {
+    let uses = |module: &str| {
+        cx.used_core.iter().any(|usage| {
+            usage.strip_prefix(module).is_some_and(|suffix| {
+                suffix.is_empty() || suffix.starts_with("::") || suffix.starts_with('.')
+            })
+        })
+    };
+    if uses("core.files") {
         for ty in [
             format!("{root}JetFileReader"),
             format!("{root}JetFileWriter"),
@@ -819,7 +825,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, out: &mut String) {
             ));
         }
     }
-    if imports("core.net") {
+    if uses("core.net") {
         for ty in [format!("{root}JetTcpStream"), format!("{root}JetUnixStream")] {
             out.push_str(&format!(
                 "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
@@ -829,8 +835,8 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, out: &mut String) {
             "impl user_Close for {root}JetTlsStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
         ));
     }
-    if imports(crate::Syntax::CORE_MEM_MODULE)
-        || imports(crate::Syntax::CORE_MEM_ALLOC_MODULE)
+    if uses(crate::Syntax::CORE_MEM_MODULE)
+        || uses(crate::Syntax::CORE_MEM_ALLOC_MODULE)
     {
         for ty in [
             format!("{root}jet_mem::JetArena"),
@@ -843,7 +849,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, out: &mut String) {
             ));
         }
     }
-    if imports("jet.db") {
+    if uses("jet.db") {
         if let Some(ffi) = &cx.ffi_crate {
             out.push_str(&format!(
                 "impl user_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"

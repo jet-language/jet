@@ -41,6 +41,7 @@ pub(crate) struct LowerEnv {
     /// another `&str` — the wrong Rust type for a `copy` result that needs to
     /// escape the view's scope).
     pub(super) string_view_locals: HashSet<String>,
+    pub(super) borrowed_locals: HashSet<String>,
     pub(super) resource_locals: HashSet<String>,
     pub(super) gc_locals: HashSet<String>,
     pub(super) gc_return: bool,
@@ -57,6 +58,7 @@ impl LowerEnv {
             fn_name,
             self_owner: None,
             string_view_locals: HashSet::new(),
+            borrowed_locals: HashSet::new(),
             resource_locals: HashSet::new(),
             gc_locals: HashSet::new(),
             gc_return: false,
@@ -73,6 +75,9 @@ impl LowerEnv {
     }
     pub(super) fn mark_resource(&mut self, name: &str) {
         self.resource_locals.insert(name.to_string());
+    }
+    pub(super) fn mark_borrowed(&mut self, name: &str) {
+        self.borrowed_locals.insert(name.to_string());
     }
     pub(super) fn is_resource(&self, name: &str) -> bool {
         self.resource_locals.contains(name)
@@ -115,7 +120,8 @@ impl LowerEnv {
     /// (`(*name)`) — a by-reference parameter slot. The match lowering clones such
     /// a subject so the `match` owns the value, mirroring `emit_pattern_match_switch`.
     pub(super) fn is_borrowed(&self, name: &str) -> bool {
-        matches!(self.locals.get(name), Some((place, _)) if place.starts_with("(*"))
+        self.borrowed_locals.contains(name)
+            || matches!(self.locals.get(name), Some((place, _)) if place.starts_with("(*"))
     }
     /// The bare Rust binding name (without the deref wrapper), e.g. `user_light`
     /// for a slot whose place is `(*user_light)`. Used by the match-subject clone,

@@ -334,7 +334,7 @@ fn run() {
 }
 
 #[test]
-fn built_in_resource_families_emit_one_nominal_close_impl_each() {
+fn built_in_resource_impls_follow_referenced_core_families() {
     let src = r#"
 use core.files as files
 use core.net as net
@@ -346,6 +346,11 @@ fn run() {
 }
 "#;
     let rust = compile(src).rust;
+    assert_eq!(
+        rust.matches("impl user_Close for JetDbConnection").count(),
+        1,
+        "the referenced database family needs its Close implementation"
+    );
     for ty in [
         "JetFileReader",
         "JetFileWriter",
@@ -353,7 +358,6 @@ fn run() {
         "JetTcpStream",
         "JetUnixStream",
         "JetTlsStream",
-        "JetDbConnection",
         "jet_mem::JetArena",
         "jet_mem::JetBump",
         "jet_mem::JetPool",
@@ -361,8 +365,8 @@ fn run() {
     ] {
         assert_eq!(
             rust.matches(&format!("impl user_Close for {ty}")).count(),
-            1,
-            "{ty} must use the sole Close protocol"
+            0,
+            "an import-only resource family must not emit an unused Close implementation"
         );
     }
 }
