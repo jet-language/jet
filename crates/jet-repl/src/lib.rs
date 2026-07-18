@@ -1612,7 +1612,11 @@ const PRELOAD_SRC: &str = "";
 /// Build a complete synthetic Jet source from accumulated declarations +
 /// a new check function, then run sema. `check_src` is the statement(s) text
 /// as produced by `classify` — it already ends in `;` (or `}`). Returns errors only.
-fn type_check_stmts(session: &Session, stmts: &[Stmt], step: usize) -> Vec<Diagnostic> {
+fn type_check_stmts(
+    session: &Session,
+    stmts: &[Stmt],
+    step: usize,
+) -> Result<Vec<Stmt>, Vec<Diagnostic>> {
     let base_src = format!(
         "{}{}{}",
         PRELOAD_SRC,
@@ -1627,6 +1631,7 @@ fn type_check_stmts(session: &Session, stmts: &[Stmt], step: usize) -> Vec<Diagn
         &base_src,
         &format!("__repl_check_{}__", step),
         body,
+        stmts.len(),
     )
 }
 
@@ -1635,20 +1640,21 @@ fn run_sema_with_body(
     base_src: &str,
     fn_name: &str,
     body: Vec<Stmt>,
-) -> Vec<Diagnostic> {
+    current_len: usize,
+) -> Result<Vec<Stmt>, Vec<Diagnostic>> {
     // Session declarations remain user source even though the final check
     // function is compiler-owned.
     let (_, base_lex_diags) = crate::Lexer::lex(base_src);
     if !base_lex_diags.is_empty() {
-        return base_lex_diags;
+        return Err(base_lex_diags);
     }
     let (toks, lex_diags) = crate::Lexer::lex_generated(src);
     if !lex_diags.is_empty() {
-        return lex_diags;
+        return Err(lex_diags);
     }
     let mut prog = match crate::Parser::parse(&toks) {
         Ok(p) => p,
-        Err(ds) => return ds,
+        Err(ds) => return Err(ds),
     };
     if let Some(Item::Func(f)) = prog
         .items
@@ -1657,25 +1663,86 @@ fn run_sema_with_body(
     {
         f.body = body;
     }
-    if prog.imports.is_empty() {
-        return check_program(src, prog)
-            .into_iter().filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error)).collect();
-    }
-    let tmp_path = std::env::temp_dir().join(unique_temp_name("check_ast"));
-    if std::fs::write(&tmp_path, base_src).is_err() { return Vec::new(); }
-    let path_str = tmp_path.to_string_lossy().to_string();
-    let diags = match crate::Loader::load_entry(&path_str) {
-        Ok(mut bundle) => {
+    let (diags, mut bundle) = if prog.imports.is_empty() {
+        let mut bundle = program_bundle(src, prog);
+        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
+        (diags, bundle)
+    } else {
+        let tmp_path = std::env::temp_dir().join(unique_temp_name("check_ast"));
+        if std::fs::write(&tmp_path, base_src).is_err() {
+            return Ok(current_stmts(&mut prog.items, fn_name, current_len));
+        }
+        let path_str = tmp_path.to_string_lossy().to_string();
+        let result = crate::Loader::load_entry(&path_str).map(|mut bundle| {
             let entry = bundle.entry;
             bundle.modules[entry].source = src.to_string();
             bundle.modules[entry].items = std::mem::take(&mut prog.items);
             bundle.modules[entry].block_spans = std::mem::take(&mut prog.block_spans);
-            crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
+            let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
+            (diags, bundle)
+        });
+        let _ = std::fs::remove_file(&tmp_path);
+        match result {
+            Ok(result) => result,
+            Err(ds) => return Err(ds),
         }
-        Err(ds) => ds,
     };
-    let _ = std::fs::remove_file(&tmp_path);
-    diags.into_iter().filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error)).collect()
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+        .collect();
+    if errors.is_empty() {
+        let entry = bundle.entry;
+        Ok(current_stmts(
+            &mut bundle.modules[entry].items,
+            fn_name,
+            current_len,
+        ))
+    } else {
+        Err(errors)
+    }
+}
+
+fn current_stmts(items: &mut [Item], fn_name: &str, current_len: usize) -> Vec<Stmt> {
+    let body = items
+        .iter_mut()
+        .find_map(|item| match item {
+            Item::Func(f) if f.name == fn_name => Some(&mut f.body),
+            _ => None,
+        })
+        .expect("REPL check function survives sema");
+    body.split_off(body.len() - current_len)
+}
+
+fn repl_executable_stmts(mut stmts: Vec<Stmt>) -> Vec<Stmt> {
+    for stmt in &mut stmts {
+        if let Stmt::Val(binding) = stmt {
+            if let Expr::Place(inner, crate::AST::PlaceAccess::Read, _) = &binding.init {
+                // The tree-walker owns CtValues, so a checked read window is
+                // represented by evaluating its already-validated place.
+                binding.init = (**inner).clone();
+            }
+        }
+    }
+    stmts
+}
+
+fn restore_move_diagnostic(d: Diagnostic, moved_names: &HashSet<String>) -> Diagnostic {
+    if d.code == "E0956" {
+        if let Some(name) = moved_names
+            .iter()
+            .find(|name| d.what.contains(&format!("the name `{name}`")))
+        {
+            return Diagnostic::error(
+                "E0121",
+                format!("`{name}` was given away earlier, so it can't be used here"),
+                "after a value moves somewhere else, the old name no longer holds it".to_string(),
+                format!("give away a copy instead (`~{name}`) where it moved"),
+                d.span,
+            );
+        }
+    }
+    d
 }
 
 /// Build a complete synthetic Jet source from accumulated declarations +
@@ -1745,9 +1812,9 @@ fn run_sema_bundle(src: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn check_program(src: &str, mut prog: crate::AST::Program) -> Vec<Diagnostic> {
+fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::ProgramBundle {
     let path = std::path::PathBuf::from("<repl>");
-    let mut bundle = crate::AST::ProgramBundle {
+    crate::AST::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::from("."),
         modules: vec![crate::AST::LoadedModule {
@@ -1778,7 +1845,11 @@ fn check_program(src: &str, mut prog: crate::AST::Program) -> Vec<Diagnostic> {
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OsTarget::host(),
-    };
+    }
+}
+
+fn check_program(src: &str, prog: crate::AST::Program) -> Vec<Diagnostic> {
+    let mut bundle = program_bundle(src, prog);
     crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
 }
 
@@ -2212,26 +2283,29 @@ pub(crate) fn execute_line(
         }
 
         InputKind::Stmts(stmts, suppress, _check_src) => {
-            let errors = type_check_stmts(session, &stmts, session.step);
-            if !errors.is_empty() {
-                if !quiet {
-                    render_diags(&step_src, trimmed, &errors, color);
+            let checked_stmts = match type_check_stmts(session, &stmts, session.step) {
+                Ok(stmts) => stmts,
+                Err(errors) => {
+                    if !quiet {
+                        render_diags(&step_src, trimmed, &errors, color);
+                    }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
+                    return false;
                 }
-                session.record_turn(
-                    trimmed,
-                    ReplTurnStatus::Error,
-                    errors
-                        .iter()
-                        .map(|d| format!("{}: {}", d.code, d.what))
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                );
-                return false;
-            }
+            };
 
             // D-REPL8=A: detect which session bindings are moved by this input.
             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
             let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+            let stmts = repl_executable_stmts(checked_stmts.clone());
 
             // Snapshot keys before execution to detect new bindings.
             let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
@@ -2274,6 +2348,9 @@ pub(crate) fn execute_line(
             };
             match result {
                 Ok(echo_val) => {
+                    for name in &newly_moved {
+                        trial_scope.remove(name);
+                    }
                     session.scope = trial_scope;
                     let mut summary = String::new();
                     // Track moves: bindings consumed in this input are gone.
@@ -2290,7 +2367,7 @@ pub(crate) fn execute_line(
                         .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
                         .cloned()
                         .collect();
-                    session.record_stmts(&stmts);
+                    session.record_stmts(&checked_stmts);
                     if !sink.stdout.is_empty() {
                         qprint!("{}", sink.stdout);
                         summary.push_str(&sink.stdout);
@@ -2350,6 +2427,7 @@ pub(crate) fn execute_line(
                     );
                 }
                 Err(crate::Comptime::ReplStepError::Diagnostic(d)) => {
+                    let d = restore_move_diagnostic(d, &session.moved_names);
                     let d = if d.code == "E2202" { e1801(REPL_FUEL_BUDGET) } else { d };
                     if !quiet {
                         render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
@@ -2927,28 +3005,31 @@ pub fn run_transcript_with_flags(
             }
 
             InputKind::Stmts(stmts, suppress, _check_src) => {
-                let errors = type_check_stmts(&session, &stmts, session.step);
-                if !errors.is_empty() {
-                    for d in &errors {
-                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                let checked_stmts = match type_check_stmts(&session, &stmts, session.step) {
+                    Ok(stmts) => stmts,
+                    Err(errors) => {
+                        for d in &errors {
+                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        }
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            errors
+                                .iter()
+                                .map(|d| format!("{}: {}", d.code, d.what))
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                        continue;
                     }
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    continue;
-                }
+                };
 
                 // D-REPL8=A: detect which session bindings are moved by this input.
                 let session_binding_names: HashSet<String> =
                     session.scope.keys().cloned().collect();
                 let newly_moved =
                     collect_moved_names(&stmts, &session_binding_names, &session.scope);
+                let stmts = repl_executable_stmts(checked_stmts.clone());
 
                 let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
 
@@ -2959,18 +3040,23 @@ pub fn run_transcript_with_flags(
                     .collect();
                 let mut sink = DevSink::new();
                 let mut authorizer = policy.authorizer(None);
+                let mut trial_scope = session.scope.clone();
                 match crate::Comptime::run_repl_step(
                     &stmts,
                     &funcs,
                     &base_dir,
                     &mut sink,
-                    &mut session.scope,
+                    &mut trial_scope,
                     REPL_FUEL_BUDGET,
                     suppress,
                     &session.core_imports,
                     &mut authorizer,
                 ) {
                     Ok(echo_val) => {
+                        for name in &newly_moved {
+                            trial_scope.remove(name);
+                        }
+                        session.scope = trial_scope;
                         let mut summary = String::new();
                         // Track moves for cross-input detection (D-REPL8=A).
                         session.moved_names.extend(newly_moved);
@@ -2986,7 +3072,7 @@ pub fn run_transcript_with_flags(
                             .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
                             .cloned()
                             .collect();
-                        session.record_stmts(&stmts);
+                        session.record_stmts(&checked_stmts);
                         if !sink.stdout.is_empty() {
                             out.push_str(&sink.stdout);
                             summary.push_str(&sink.stdout);
@@ -3018,6 +3104,7 @@ pub fn run_transcript_with_flags(
                         session.remember_success(trimmed);
                     }
                     Err(d) => {
+                        let d = restore_move_diagnostic(d, &session.moved_names);
                         let d = if d.code == "E2202" {
                             e1801(REPL_FUEL_BUDGET)
                         } else {

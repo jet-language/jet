@@ -679,6 +679,19 @@ fn repl_move_int_not_moved() {
     );
 }
 
+#[test]
+fn repl_failed_multi_statement_turn_rolls_back_scope_and_moves() {
+    let out = run_transcript(
+        &["s :: \"hello\"", "t :: s; 1 / 0", ":type t", "s"],
+        None,
+    );
+    assert!(out.contains("isn't defined"), "failed turn leaked `t`: {out}");
+    assert!(
+        out.contains("\"hello\" : String"),
+        "failed turn consumed `s`: {out}"
+    );
+}
+
 // ── D-REPL-FUEL=A: :run ──────────────────────────────────────────────────
 
 #[test]
@@ -1171,7 +1184,7 @@ fn repl_interrupt_signal_paths_cover_apple_and_bsd_unix() {
         "raw evaluation interrupt must not exclude Apple or BSD"
     );
 
-    let methods = include_str!("../crates/jet-comptime/src/Comptime/Methods.rs");
+    let methods = include_str!("../crates/jet-comptime/src/Comptime/Methods/repl_process.rs");
     let forwarding_path = methods
         .split("static REPL_CHILD_GROUP")
         .nth(1)
@@ -1728,7 +1741,7 @@ fn repl_raw_member_completion_menu_is_selectable() {
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "selectable completion PTY failed: {out}");
     assert!(out.contains("filter") && out.contains("filter_map"), "shared candidates missing: {out:?}");
-    assert!(out.contains("items.filter_map"), "Down+Enter did not select second completion: {out:?}");
+    assert!(out.contains("items.find"), "two Down keys did not select the third completion: {out:?}");
 }
 
 #[test]
