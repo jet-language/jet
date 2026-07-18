@@ -1122,9 +1122,11 @@ fn resolve_module_import(
     span: Span,
 ) -> Result<PathBuf, Diagnostic> {
     if let Some(local_name) = name.strip_prefix(Syntax::PROJECT_IMPORT_PREFIX) {
-        let report = crate::ProjectParts::scan(project_root);
+        let (report, scan_diagnostics) =
+            crate::ProjectParts::scan_with_diagnostics(project_root, &[]);
         let matches = report.named(local_name);
         return match matches.as_slice() {
+            [] if !scan_diagnostics.is_empty() => Err(scan_diagnostics[0].clone()),
             [] => Err(Diagnostic::error(
                 "E0603",
                 format!("can't find a project module named `{local_name}`"),
@@ -1133,20 +1135,12 @@ fn resolve_module_import(
                 Some(span),
             )),
             [part] => Ok(normalize_path(&part.path)),
-            _ => {
-                let list = matches
-                    .iter()
-                    .map(|part| relative_display(project_root, &part.path))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Err(Diagnostic::error(
-                    "E0606",
-                    format!("project module `{local_name}` is declared more than once"),
-                    "an explicit project import must resolve to one declaration".to_string(),
-                    format!("keep one `module {local_name}` declaration; found {list}"),
-                    Some(span),
-                ))
-            }
+            _ => Err(report
+                .conflicts
+                .iter()
+                .find(|conflict| conflict.name == local_name)
+                .expect("duplicate project parts have a conflict record")
+                .diagnostic(project_root, Some(span))),
         };
     }
     // M12.1: check package dep dirs first.
@@ -1511,8 +1505,33 @@ mod stale_manifest_name_tests {
         )
         .unwrap();
 
-        let bundle = load_entry(entry.to_str().unwrap()).unwrap();
+        let (diagnostics, bundle) = crate::Driver::check_file(entry.to_str().unwrap(), None, false);
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let bundle = bundle.unwrap();
         assert!(bundle.modules.iter().any(|module| module.path == dir.join("arbitrary.jet")));
+    }
+
+    #[test]
+    fn explicit_project_import_propagates_invalid_target_diagnostics() {
+        for (tag, broken, code) in [
+            ("lex", "module _bench { }\n§\n", "E0001"),
+            ("parse", "module _bench { }\nfn broken(\n", "E0003"),
+        ] {
+            let dir = tempdir(&format!("internal-module-{tag}"));
+            let entry = dir.join("main.jet");
+            fs::write(&entry, "use project._bench\nfn run() {}\n").unwrap();
+            fs::write(dir.join("broken.jet"), broken).unwrap();
+
+            let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                "{diagnostics:#?}"
+            );
+            assert!(!diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0603"
+                    && diagnostic.what.contains("can't find a project module")
+            }));
+        }
     }
 
     #[test]

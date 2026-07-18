@@ -184,6 +184,29 @@ pub fn generic<T>(table: ^Table<T>) -> Table<T> {
     assert_eq!(stdout, "ok\n");
 }
 
+#[test]
+fn explicit_internal_project_module_alias_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run_multi(
+        "tir_internal_project_alias",
+        "main.jet",
+        &[
+            (
+                "main.jet",
+                "use project._bench as bench\nfn run() { print(bench.fixture()) }\n",
+            ),
+            (
+                "arbitrary.jet",
+                "module _bench { }\npub fn fixture() -> Int { return 42 }\n",
+            ),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n");
+}
+
 /// c109 Phase 14: a qualified inline code-module call `math.double(5)` (D-MOD2).
 /// `main` routes through the TIR (`ModuleCall::InlineMangled` → `user_math__double`),
 /// as do the module's own functions. rustc accepting proves byte-parity.

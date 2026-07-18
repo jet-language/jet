@@ -727,15 +727,9 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
             );
         }
         for conflict in &report.conflicts {
-            eprintln!(
-                "error: project module `{}` is declared more than once: {}",
-                conflict.name,
-                conflict
-                    .paths
-                    .iter()
-                    .map(|path| relative(path))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+            eprint!(
+                "{}",
+                jet::render_diagnostics("", "", &[conflict.diagnostic(&root, None)])
             );
         }
     }

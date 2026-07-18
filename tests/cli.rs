@@ -198,9 +198,10 @@ fn project_parts_lists_skipped_explicit_and_conflicting_modules() {
         .output()
         .unwrap();
     assert_eq!(conflict.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&conflict.stderr).contains("declared more than once")
-    );
+    let stderr = String::from_utf8_lossy(&conflict.stderr);
+    assert!(stderr.contains("Error [E0606]:"), "{stderr}");
+    assert!(stderr.contains(" Why:"), "{stderr}");
+    assert!(stderr.contains(" Fix:"), "{stderr}");
 }
 
 #[test]

@@ -1837,7 +1837,13 @@ fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, S
                 .unwrap_or_else(|| std::path::Path::new(".")),
         )
     });
-    let project_parts = crate::ProjectParts::scan(std::path::Path::new(&root));
+    let overlays = server
+        .docs
+        .values()
+        .map(|doc| (std::path::PathBuf::from(&doc.path), doc.text.clone()))
+        .collect::<Vec<_>>();
+    let project_parts =
+        crate::ProjectParts::scan_with_overlays(std::path::Path::new(&root), &overlays);
     let mut files = Vec::new();
     collect_jet_files(std::path::Path::new(&root), &mut files);
     files.sort();
@@ -1894,12 +1900,16 @@ mod project_part_tests {
         std::fs::write(&entry, "fn run() {}\n").unwrap();
         std::fs::write(&internal, "module _bench { }\nfn hidden_probe() {}\n").unwrap();
 
-        let server = Server::new();
+        let mut server = Server::new();
         let entry = entry.to_string_lossy();
         let sources = workspace_sources(&server, Some(&entry));
         assert!(!sources.iter().any(|(path, _)| path.ends_with("bench.jet")));
 
-        std::fs::write(&*entry, "use project._bench;\nfn run() {}\n").unwrap();
+        let uri = path_to_uri(&entry);
+        server.docs.insert(
+            uri,
+            Document::new(entry.to_string(), "use project._bench;\nfn run() {}\n".to_string()),
+        );
         let sources = workspace_sources(&server, Some(&entry));
         assert!(sources.iter().any(|(path, _)| path.ends_with("bench.jet")));
     }

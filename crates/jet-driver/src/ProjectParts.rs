@@ -2,6 +2,7 @@
 //! explicit import resolution and user-facing tooling.
 
 use crate::AST::{ImportKind, Item};
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::{Lexer, Parser, Syntax};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -36,6 +37,29 @@ pub struct ProjectPartConflict {
     pub paths: Vec<PathBuf>,
 }
 
+impl ProjectPartConflict {
+    pub fn diagnostic(&self, root: &Path, span: Option<Span>) -> Diagnostic {
+        let paths = self
+            .paths
+            .iter()
+            .map(|path| {
+                path.strip_prefix(root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        Diagnostic::error(
+            "E0606",
+            format!("project module `{}` is declared more than once", self.name),
+            "a project module name must resolve to one declaration".to_string(),
+            format!("keep one `module {}` declaration; found {paths}", self.name),
+            span,
+        )
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectPartsReport {
     pub parts: Vec<ProjectPart>,
@@ -60,22 +84,64 @@ impl ProjectPartsReport {
 }
 
 pub fn scan(root: &Path) -> ProjectPartsReport {
+    scan_with_diagnostics(root, &[]).0
+}
+
+pub fn scan_with_overlays(root: &Path, overlays: &[(PathBuf, String)]) -> ProjectPartsReport {
+    scan_with_diagnostics(root, overlays).0
+}
+
+pub fn scan_with_diagnostics(
+    root: &Path,
+    overlays: &[(PathBuf, String)],
+) -> (ProjectPartsReport, Vec<Diagnostic>) {
     let mut files = Vec::new();
     collect_jet_files(root, &mut files);
+    files.extend(
+        overlays
+            .iter()
+            .map(|(path, _)| path)
+            .filter(|path| {
+                path.starts_with(root)
+                    && path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
+            })
+            .cloned(),
+    );
     files.sort();
+    files.dedup();
 
     let mut explicit = BTreeSet::new();
     let mut declarations: BTreeMap<String, Vec<(PathBuf, bool)>> = BTreeMap::new();
+    let mut diagnostics = Vec::new();
     for path in files {
-        let Ok(source) = std::fs::read_to_string(&path) else {
-            continue;
+        let source = if let Some((_, source)) = overlays.iter().rev().find(|(p, _)| p == &path) {
+            source.clone()
+        } else {
+            match std::fs::read_to_string(&path) {
+                Ok(source) => source,
+                Err(_) => {
+                    diagnostics.push(Diagnostic::error(
+                        "E0603",
+                        format!("can't read the file `{}`", path.display()),
+                        "an explicit project import needs a readable Jet source file".to_string(),
+                        "restore read access to the file, or remove the import".to_string(),
+                        None,
+                    ));
+                    continue;
+                }
+            }
         };
         let (tokens, lex_diags) = Lexer::lex(&source);
         if !lex_diags.is_empty() {
+            diagnostics.extend(lex_diags);
             continue;
         }
-        let Ok(program) = Parser::parse(&tokens) else {
-            continue;
+        let program = match Parser::parse(&tokens) {
+            Ok(program) => program,
+            Err(parse_diags) => {
+                diagnostics.extend(parse_diags);
+                continue;
+            }
         };
         for import in &program.imports {
             let ImportKind::Module(name, _) = &import.kind else {
@@ -124,7 +190,7 @@ pub fn scan(root: &Path) -> ProjectPartsReport {
             });
         }
     }
-    report
+    (report, diagnostics)
 }
 
 fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
