@@ -1881,10 +1881,12 @@ fn committed_example_builds_offline_end_to_end() {
     // first-party `mine:hello` realized through the `core` provider with no
     // nix. The whole thing runs fully offline. The store lives under a scratch
     // JETPACK_ROOT, so nothing is written back into the example dir.
+    let project = Scratch::new("example-e2e-project");
+    copy_dir_recursive(&example_dir(), &project.path);
     let root = Scratch::new("example-e2e");
     let output = jetpack()
         .args(["build", "--no-color", "--offline"])
-        .current_dir(example_dir())
+        .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
@@ -1952,15 +1954,17 @@ fn typed_module_example_builds_offline_end_to_end() {
     // into the same merge. All three realize from the committed fixtures, fully
     // offline. The store lives under a scratch JETPACK_ROOT, so nothing is
     // written back.
-    let typed_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed");
+    let project = Scratch::new("typed-e2e-project");
+    copy_dir_recursive(&source, &project.path);
     let root = Scratch::new("typed-e2e");
     let output = jetpack()
         .args(["build", "--no-color", "--offline"])
-        .current_dir(&typed_dir)
+        .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env(
             "JETPACK_FIXTURES",
-            realized_fixtures(&typed_dir.join("fixtures"), &root.path),
+            realized_fixtures(&project.join("fixtures"), &root.path),
         )
         .output()
         .unwrap();

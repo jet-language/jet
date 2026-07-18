@@ -21,29 +21,96 @@ struct CanvasTools {
 static CANVAS_TOOLS: OnceLock<Option<CanvasTools>> = OnceLock::new();
 
 #[test]
-fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
+fn full_verification_uses_clean_short_external_tmpdir() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let probe = |mode: &str, parent: Option<&Path>| {
+        let mut command = Command::new("bash");
+        command
+            .current_dir(&repo)
+            .arg("scripts/agent/verify-full.sh")
+            .arg(mode)
+            .env("JET_NIX_TMP_CLEANED", "1")
+            .env_remove("JET_VERIFY_TMPDIR");
+        if let Some(parent) = parent {
+            command.env("JET_VERIFY_TMPDIR", parent);
+        }
+        let output = command.output().expect("probe full-verification temp root");
+        let roots = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        assert_eq!(roots.len(), 4, "temp probe must report every exported temp root");
+        assert!(roots.iter().all(|path| path == &roots[0]));
+        assert!(
+            roots[0]
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("jet-verify."))
+        );
+        assert!(!roots[0].exists(), "verification temp root must be removed on exit");
+        (output.status, roots[0].clone())
+    };
+
+    let (status, root) = probe("--probe-temp-root", None);
+    assert!(status.success());
+    assert_eq!(root.parent(), Some(Path::new("/tmp")));
+
+    let override_parent = std::env::temp_dir().join(format!(
+        "jet-verify-parent-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    fs::create_dir_all(&override_parent).unwrap();
+    let (status, root) = probe("--probe-temp-root", Some(&override_parent));
+    assert!(status.success());
+    assert_eq!(root.parent(), Some(override_parent.as_path()));
+    let (status, root) = probe("--probe-temp-root-signal", Some(&override_parent));
+    assert_eq!(status.code(), Some(143));
+    assert_eq!(root.parent(), Some(override_parent.as_path()));
+    fs::remove_dir(override_parent).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let tools = std::env::temp_dir().join(format!(
+        "jet-canvas-preflight-tools-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    fs::create_dir_all(&tools).unwrap();
+    let chromium = tools.join("chromium");
+    let node = tools.join("node");
+    fs::write(&chromium, "#!/bin/sh\necho 'Chromium 1'\n").unwrap();
+    fs::write(&node, "#!/bin/sh\necho 'v1.0.0'\n").unwrap();
+    fs::set_permissions(&chromium, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&node, fs::Permissions::from_mode(0o755)).unwrap();
     for (missing, chromium, node) in [
-        ("chromium", "jet-test-missing-chromium", "node"),
-        ("node", "chromium", "jet-test-missing-node"),
+        ("chromium", tools.join("missing-chromium"), node),
+        ("node", chromium, tools.join("missing-node")),
     ] {
         let output = Command::new("bash")
             .current_dir(&repo)
             .arg("scripts/agent/verify-full.sh")
             .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
+            .env("JET_VERIFY_TEMP_PROBE_ONLY", "1")
             .env("JET_NIX_TMP_CLEANED", "1")
-            .env("JET_CANVAS_CHROMIUM", chromium)
-            .env("JET_CANVAS_NODE", node)
+            .env("JET_CANVAS_CHROMIUM", &chromium)
+            .env("JET_CANVAS_NODE", &node)
             .output()
             .expect("run strict Canvas prerequisite preflight");
         assert!(!output.status.success(), "missing {missing} must fail");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let expected = format!(
-            "error: Canvas interaction tests require Chromium and Node; missing: {missing}. Run full verification inside 'nix develop'."
+            "error: Canvas interaction tests require Chromium and Node; missing: {missing}. Run scripts/agent/jet-env full scripts/agent/verify-full.sh."
         );
         assert_eq!(stderr.matches(&expected).count(), 1, "{stderr}");
         assert!(!stderr.contains("ignored:"), "{stderr}");
     }
+    fs::remove_dir_all(tools).unwrap();
 
 }
 

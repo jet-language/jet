@@ -6,12 +6,46 @@ if [ "${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
   "$repo/scripts/agent/clean-nix-tmp.sh"
 fi
 export JET_NIX_TMP_CLEANED=1
-tmp="${JET_VERIFY_TMPDIR:-$repo/target/test-tmp}"
-mkdir -p "$tmp"
+probe_mode=""
+case "${1:-}" in
+  --probe-temp-root)
+    probe_mode="exit"
+    shift
+    ;;
+  --probe-temp-root-signal)
+    probe_mode="signal"
+    shift
+    ;;
+esac
+tmp_parent="${JET_VERIFY_TMPDIR:-/tmp}"
+mkdir -p -- "$tmp_parent"
+tmp="$(mktemp -d "$tmp_parent/jet-verify.XXXXXX")"
+cleanup() {
+  rm -rf -- "$tmp"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 export TMPDIR="$tmp"
+export TMP="$tmp"
+export TEMP="$tmp"
+export JET_VERIFY_TMPDIR="$tmp"
 export JET_TEST_JOBS="${JET_TEST_JOBS:-16}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$JET_TEST_JOBS}"
+
+case "$probe_mode" in
+  exit)
+    printf '%s\n' "$TMPDIR" "$TMP" "$TEMP" "$JET_VERIFY_TMPDIR"
+    exit 0
+    ;;
+  signal)
+    printf '%s\n' "$TMPDIR" "$TMP" "$TEMP" "$JET_VERIFY_TMPDIR"
+    kill -TERM "$$"
+    exit 143
+    ;;
+esac
 
 export JET_CANVAS_PREREQUISITES=strict
 
@@ -90,4 +124,4 @@ fi
 
 "$repo/scripts/agent/verify-nix-eval-stopline.sh"
 
-exec cargo test "$@"
+cargo test "$@"

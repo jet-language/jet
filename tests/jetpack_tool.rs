@@ -101,6 +101,42 @@ fn metadata_output_hash(metadata: &str) -> String {
         .unwrap()
 }
 
+#[test]
+fn command_helpers_use_stable_filesystem_root() {
+    let temp = std::env::temp_dir();
+    let root = temp.ancestors().last().unwrap();
+    assert!(root.has_root());
+    for command in [jetpack(), jet(), jetos()] {
+        assert_eq!(command.get_current_dir(), Some(root));
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stable_cwd_survives_abrupt_parent_and_detached_descendant() {
+    let proof = Scratch::new("stable-cwd-proof");
+    let marker = proof.join("cwd");
+    let status = neutral_command(Path::new("sh"))
+        .args([
+            "-c",
+            "setsid sh -c 'sleep 0.05; pwd > \"$1\"' sh \"$1\" </dev/null >/dev/null 2>&1 & kill -KILL $$",
+            "sh",
+            marker.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(!status.success());
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !marker.is_file() {
+        assert!(std::time::Instant::now() < deadline, "detached cwd proof timed out");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let temp = std::env::temp_dir();
+    let root = temp.ancestors().last().unwrap();
+    assert_eq!(fs::read_to_string(marker).unwrap().trim(), root.to_str().unwrap());
+}
+
 fn json_meta_field(metadata: &str, key: &str) -> String {
     let needle = format!("\"{key}\": \"");
     metadata

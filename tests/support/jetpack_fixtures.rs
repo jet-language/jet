@@ -16,17 +16,25 @@ use std::process::Command;
 use crate::common::{jetos_bin, jetpack_bin};
 
 pub fn jetpack() -> Command {
-    Command::new(jetpack_bin())
+    neutral_command(jetpack_bin())
 }
-
 
 pub fn jet() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jet"))
+    neutral_command(Path::new(env!("CARGO_BIN_EXE_jet")))
 }
 
-
 pub fn jetos() -> Command {
-    Command::new(jetos_bin())
+    neutral_command(jetos_bin())
+}
+
+/// Keep no-project commands outside the repository without creating a cwd
+/// whose deletion could strand a surviving child or descendant.
+pub fn neutral_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    let temp = std::env::temp_dir();
+    let root = temp.ancestors().last().expect("temp path has no root");
+    command.current_dir(root);
+    command
 }
 
 
