@@ -1122,18 +1122,24 @@ fn resolve_module_import(
     span: Span,
 ) -> Result<PathBuf, Diagnostic> {
     if let Some(local_name) = name.strip_prefix(Syntax::PROJECT_IMPORT_PREFIX) {
-        let (report, scan_diagnostics) =
+        let (report, scan_failures) =
             crate::ProjectParts::scan_with_diagnostics(project_root, &[]);
         let matches = report.named(local_name);
+        let scan_failure = scan_failures
+            .iter()
+            .find(|failure| failure.module_names.iter().any(|name| name == local_name));
         return match matches.as_slice() {
-            [] if !scan_diagnostics.is_empty() => Err(scan_diagnostics[0].clone()),
-            [] => Err(Diagnostic::error(
-                "E0603",
-                format!("can't find a project module named `{local_name}`"),
-                "project-local imports resolve declared module names, not filenames".to_string(),
-                format!("declare `module {local_name} {{ ... }}` under this project"),
-                Some(span),
-            )),
+            [] => match scan_failure {
+                Some(failure) => Err(failure.diagnostic(local_name, project_root, span)),
+                None => Err(Diagnostic::error(
+                    "E0603",
+                    format!("can't find a project module named `{local_name}`"),
+                    "project-local imports resolve declared module names, not filenames"
+                        .to_string(),
+                    format!("declare `module {local_name} {{ ... }}` under this project"),
+                    Some(span),
+                )),
+            },
             [part] => Ok(normalize_path(&part.path)),
             _ => Err(report
                 .conflicts
@@ -1513,9 +1519,9 @@ mod stale_manifest_name_tests {
 
     #[test]
     fn explicit_project_import_propagates_invalid_target_diagnostics() {
-        for (tag, broken, code) in [
-            ("lex", "module _bench { }\n§\n", "E0001"),
-            ("parse", "module _bench { }\nfn broken(\n", "E0003"),
+        for (tag, broken) in [
+            ("lex", "module _bench { }\n§\n"),
+            ("parse", "module _bench { }\nfn broken(\n"),
         ] {
             let dir = tempdir(&format!("internal-module-{tag}"));
             let entry = dir.join("main.jet");
@@ -1524,14 +1530,29 @@ mod stale_manifest_name_tests {
 
             let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
             assert!(
-                diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "E0603"
+                        && diagnostic.what.contains("project module `_bench`")
+                        && diagnostic.what.contains("broken.jet")
+                        && diagnostic.span.is_some()
+                }),
                 "{diagnostics:#?}"
             );
-            assert!(!diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "E0603"
-                    && diagnostic.what.contains("can't find a project module")
-            }));
         }
+    }
+
+    #[test]
+    fn unrelated_invalid_file_does_not_mask_missing_project_module() {
+        let dir = tempdir("internal-module-unrelated-invalid");
+        let entry = dir.join("main.jet");
+        fs::write(&entry, "use project._bench\nfn run() {}\n").unwrap();
+        fs::write(dir.join("broken.jet"), "module _other { }\n§\n").unwrap();
+
+        let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0603"
+                && diagnostic.what == "can't find a project module named `_bench`"
+        }));
     }
 
     #[test]

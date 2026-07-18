@@ -37,6 +37,31 @@ pub struct ProjectPartConflict {
     pub paths: Vec<PathBuf>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ProjectPartScanFailure {
+    pub path: PathBuf,
+    pub module_names: Vec<String>,
+    pub problem: Diagnostic,
+}
+
+impl ProjectPartScanFailure {
+    pub fn diagnostic(&self, name: &str, root: &Path, span: Span) -> Diagnostic {
+        let path = self
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&self.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        Diagnostic::error(
+            "E0603",
+            format!("can't load project module `{name}` from `{path}`"),
+            format!("`{path}` has a source error: {}", self.problem.what),
+            format!("fix `{path}` first, then import `project.{name}` again"),
+            Some(span),
+        )
+    }
+}
+
 impl ProjectPartConflict {
     pub fn diagnostic(&self, root: &Path, span: Option<Span>) -> Diagnostic {
         let paths = self
@@ -94,7 +119,7 @@ pub fn scan_with_overlays(root: &Path, overlays: &[(PathBuf, String)]) -> Projec
 pub fn scan_with_diagnostics(
     root: &Path,
     overlays: &[(PathBuf, String)],
-) -> (ProjectPartsReport, Vec<Diagnostic>) {
+) -> (ProjectPartsReport, Vec<ProjectPartScanFailure>) {
     let mut files = Vec::new();
     collect_jet_files(root, &mut files);
     files.extend(
@@ -112,7 +137,7 @@ pub fn scan_with_diagnostics(
 
     let mut explicit = BTreeSet::new();
     let mut declarations: BTreeMap<String, Vec<(PathBuf, bool)>> = BTreeMap::new();
-    let mut diagnostics = Vec::new();
+    let mut failures = Vec::new();
     for path in files {
         let source = if let Some((_, source)) = overlays.iter().rev().find(|(p, _)| p == &path) {
             source.clone()
@@ -120,26 +145,43 @@ pub fn scan_with_diagnostics(
             match std::fs::read_to_string(&path) {
                 Ok(source) => source,
                 Err(_) => {
-                    diagnostics.push(Diagnostic::error(
-                        "E0603",
-                        format!("can't read the file `{}`", path.display()),
-                        "an explicit project import needs a readable Jet source file".to_string(),
-                        "restore read access to the file, or remove the import".to_string(),
-                        None,
-                    ));
+                    failures.push(ProjectPartScanFailure {
+                        module_names: path
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .map(|stem| vec![stem.to_string()])
+                            .unwrap_or_default(),
+                        problem: Diagnostic::error(
+                            "E0603",
+                            format!("can't read the file `{}`", path.display()),
+                            "an explicit project import needs a readable Jet source file"
+                                .to_string(),
+                            "restore read access to the file, or remove the import".to_string(),
+                            None,
+                        ),
+                        path,
+                    });
                     continue;
                 }
             }
         };
         let (tokens, lex_diags) = Lexer::lex(&source);
         if !lex_diags.is_empty() {
-            diagnostics.extend(lex_diags);
+            failures.push(ProjectPartScanFailure {
+                path,
+                module_names: declared_module_names(&tokens),
+                problem: lex_diags[0].clone(),
+            });
             continue;
         }
         let program = match Parser::parse(&tokens) {
             Ok(program) => program,
             Err(parse_diags) => {
-                diagnostics.extend(parse_diags);
+                failures.push(ProjectPartScanFailure {
+                    path,
+                    module_names: declared_module_names(&tokens),
+                    problem: parse_diags[0].clone(),
+                });
                 continue;
             }
         };
@@ -190,7 +232,17 @@ pub fn scan_with_diagnostics(
             });
         }
     }
-    (report, diagnostics)
+    (report, failures)
+}
+
+fn declared_module_names(tokens: &[Lexer::Token]) -> Vec<String> {
+    tokens
+        .windows(2)
+        .filter_map(|pair| match (&pair[0].kind, &pair[1].kind) {
+            (Lexer::TokKind::KwModule, Lexer::TokKind::Ident(name)) => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
