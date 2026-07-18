@@ -40,6 +40,7 @@ pub(super) struct ProjectContext {
     pub(super) manifest_root: Option<PathBuf>,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) files: Vec<ProjectFileRec>,
+    pub(super) parts: jet_driver::ProjectParts::ProjectPartsReport,
     pub(super) project_revision: String,
 }
 
@@ -93,6 +94,7 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         manifest_root.as_deref(),
         workspace_root.as_deref(),
     );
+    let parts = jet_driver::ProjectParts::scan(&project_root);
     let project_revision = project_revision_from_files(&files);
     ProjectContext {
         entry_path: path.to_path_buf(),
@@ -100,6 +102,7 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         manifest_root,
         workspace_root,
         files,
+        parts,
         project_revision,
     }
 }
@@ -186,9 +189,7 @@ fn collect_project_files(
         }
     }
     if workspace_root.is_none() {
-        if let Some(root) = manifest_root {
-            collect_jet_files(root, &mut paths);
-        }
+        collect_jet_files(manifest_root.unwrap_or(project_root), &mut paths);
     }
     paths.sort();
     paths.dedup();
@@ -227,9 +228,8 @@ fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
 }
 
 fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    // D-SHAPE-MODULEINTERNAL1=A cannot filter files: one file may declare
-    // both ordinary and internal modules, and explicit imports stay visible.
-    // Parsed module graphs use ModuleDecl::is_auto_discovered instead.
+    // Watch every source so import edits immediately change project-part state.
+    // Semantic consumers filter with ProjectPartsReport::should_index.
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };

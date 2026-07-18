@@ -667,6 +667,85 @@ fn esc(s: &str) -> String {
     }).collect()
 }
 
+fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
+    let skipped_only = raw.iter().any(|arg| arg == "--skipped");
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let report = jet::ProjectParts::scan(&root);
+    let parts = report
+        .parts
+        .iter()
+        .filter(|part| !skipped_only || part.state == jet::ProjectParts::ProjectPartState::Skipped)
+        .collect::<Vec<_>>();
+    let relative = |path: &Path| {
+        path.strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    if mode.json {
+        let parts = parts
+            .iter()
+            .map(|part| {
+                format!(
+                    "{{\"name\":\"{}\",\"path\":\"{}\",\"state\":\"{}\"}}",
+                    esc(&part.name),
+                    esc(&relative(&part.path)),
+                    part.state.name()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let conflicts = report
+            .conflicts
+            .iter()
+            .map(|conflict| {
+                let paths = conflict
+                    .paths
+                    .iter()
+                    .map(|path| format!("\"{}\"", esc(&relative(path))))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(
+                    "{{\"name\":\"{}\",\"paths\":[{}]}}",
+                    esc(&conflict.name),
+                    paths
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"schema_version\":1,\"parts\":[{}],\"conflicts\":[{}]}}",
+            parts, conflicts
+        );
+    } else {
+        for part in parts {
+            println!(
+                "{:<9} {:<24} {}",
+                part.state.name(),
+                part.name,
+                relative(&part.path)
+            );
+        }
+        for conflict in &report.conflicts {
+            eprintln!(
+                "error: project module `{}` is declared more than once: {}",
+                conflict.name,
+                conflict
+                    .paths
+                    .iter()
+                    .map(|path| relative(path))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+    exit(if report.conflicts.is_empty() {
+        ExitCodes::OK
+    } else {
+        ExitCodes::USER_ERROR
+    });
+}
+
 /// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: E2101 teaching error
 /// for a word retired with **no** single `jet <group> <same-word>` rename (so
 /// the generic `moved_command` mechanism in `normalize_frequency_ring_argv`
@@ -1091,6 +1170,7 @@ fn main() {
         "budget" => {
             exit(CmdBudget::run(&raw));
         }
+        "parts" => run_project_parts(&raw, mode),
         "prove" => {
             let prove_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_prove(&prove_args, mode.json);

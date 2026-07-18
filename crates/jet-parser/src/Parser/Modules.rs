@@ -14,11 +14,11 @@ impl<'a> Parser<'a> {
                                       // S84: module names may be kebab-case (a module is the package the
                                       // payload manifest discovers by name).
         let (name, name_span) = self.expect_dashed_name("for the module name")?;
-        let disabled = name.starts_with(Syntax::MODULE_INTERNAL_PREFIX);
+        let auto_discovered = !name.starts_with(Syntax::MODULE_INTERNAL_PREFIX);
         // D-JPK-MODBODY1=A: a dot after the name means a role declaration —
         // the name is a reserved namespace, the segment after the dot the role.
         if matches!(self.peek().kind, TokKind::Dot) {
-            return self.role_module_decl(start, &name, name_span, disabled);
+            return self.role_module_decl(start, &name, name_span, auto_discovered);
         }
         self.expect(TokKind::LBrace, "to open the module body")?;
         let mut sources = Vec::new();
@@ -62,7 +62,7 @@ impl<'a> Parser<'a> {
         Ok(ModuleDecl {
             name,
             name_span,
-            disabled,
+            auto_discovered,
             sources,
             imports,
             members,
@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
         start: Span,
         ns_name: &str,
         ns_span: Span,
-        disabled: bool,
+        auto_discovered: bool,
     ) -> Result<ModuleDecl, Diagnostic> {
         // A leading `_` opts the module out of automatic discovery — strip it
         // for the namespace word: `module _env.dev { … }`.
@@ -316,7 +316,7 @@ impl<'a> Parser<'a> {
             // The declaration name is the full dotted role — `env.dev`.
             name: format!("{ns_name}.{path}"),
             name_span: Span::new(ns_span.start, path_span.end),
-            disabled,
+            auto_discovered,
             sources,
             imports,
             members: Vec::new(),

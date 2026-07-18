@@ -94,6 +94,10 @@ pub const GENMOD_CLOSE: &str = ">"; // reuses OP_GT
 /// imports remain allowed under ordinary access rules; this is not privacy.
 pub const MODULE_INTERNAL_PREFIX: &str = "_";
 
+/// D-SHAPE-MODULEINTERNAL1=A: project-local explicit module opt-in.
+pub const PROJECT_IMPORT_ROOT: &str = "project";
+pub const PROJECT_IMPORT_PREFIX: &str = "project.";
+
 /// S84 (ratified 2026-06-16): *dashed names* — the kebab-case naming rule for
 /// package / module / system / image / env **names** (and `from: system.<name>`
 /// references). The grammar is `ident (-ident)*`: a `-` joins two segments only

@@ -74,6 +74,7 @@ pub enum HandlerKey {
     Logs, Search, Info, Outdated,
     Hangar,
     GcReport,
+    ProjectParts,
     Push, Bridge, Services, Config,
     Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
 }
@@ -90,6 +91,7 @@ impl HandlerKey {
             Self::Logs => "logs", Self::Search => "search", Self::Info => "info", Self::Outdated => "outdated",
             Self::Hangar => "hangar",
             Self::GcReport => "gc",
+            Self::ProjectParts => "parts",
             Self::Push => "push", Self::Bridge => "bridge", Self::Services => "services", Self::Config => "config",
             Self::Toolchain => "toolchain",
             Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
@@ -153,6 +155,9 @@ const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
 const GC_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "report", summary: "report automatic GC promotions and ownership rewrites", handler: HandlerKey::GcReport },
 ];
+const PROJECT_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "parts", summary: "list automatically loaded, explicit, and skipped project modules", handler: HandlerKey::ProjectParts },
+];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "toolchain", summary: "show the project's pinned Jet toolchain", handler: HandlerKey::Toolchain },
     NestedCommandSpec { name: "upgrade", summary: "show how to download a newer release", handler: HandlerKey::Upgrade },
@@ -178,6 +183,7 @@ pub const COMMAND_GROUPS: &[CommandGroup] = &[
     CommandGroup { name: "inspect", summary: "semantic, build, schema, supply, discovery, and binding inspection", actions: INSPECT_ACTIONS, exhaustive: true },
     CommandGroup { name: "hangar", summary: "physical package-store integrity and lifecycle", actions: HANGAR_ACTIONS, exhaustive: true },
     CommandGroup { name: "gc", summary: "inspect explicit automatic-promotion traces", actions: GC_ACTIONS, exhaustive: false },
+    CommandGroup { name: "project", summary: "inspect project discovery and module membership", actions: PROJECT_ACTIONS, exhaustive: true },
     CommandGroup { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", actions: SELF_ACTIONS, exhaustive: true },
     CommandGroup { name: "os", summary: "deploy, bridge, services, and config live under the jetos front door", actions: OS_ACTIONS, exhaustive: false },
 ];
@@ -215,6 +221,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "registry", summary: "publishing, signing, yanking, and vendoring", headline: false },
     CommandSpec { name: "inspect", summary: "semantic, build, schema, supply, discovery, and binding inspection", headline: false },
     CommandSpec { name: "hangar", summary: "physical package-store integrity and lifecycle", headline: false },
+    CommandSpec { name: "project", summary: "inspect project discovery and module membership", headline: false },
     CommandSpec { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", headline: false },
     CommandSpec {
         name: "diff",
@@ -489,6 +496,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--check", help: "with fmt: exit 1 if any file would change (CI gate)" },
     FlagSpec { long: "--diff", help: "with fmt --check: also print unified diffs for each changed file" },
     FlagSpec { long: "--changed", help: "with fmt: format only VCS-changed .jet files (requires git)" },
+    FlagSpec { long: "--skipped", help: "with project parts: show modules omitted from automatic discovery" },
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: smallest binary (S15)" },
     // D-JPK-TASKRUN1 (card #476): run a `@Task fn` instead of `fn run`.
@@ -1092,6 +1100,7 @@ mod tests {
             ("hangar", "rollback", Hangar, "hangar", true), ("hangar", "generations", Hangar, "hangar", true),
             ("hangar", "du", Hangar, "hangar", true),
             ("gc", "report", GcReport, "gc", true),
+            ("project", "parts", ProjectParts, "parts", false),
             ("self", "toolchain", Toolchain, "toolchain", false),
             ("self", "upgrade", Upgrade, "upgrade", false), ("self", "doctor", Doctor, "doctor", false),
             ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),

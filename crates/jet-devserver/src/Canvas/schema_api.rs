@@ -186,7 +186,8 @@ pub fn project_path_for_source_id(entry: &Path, source_id: &str) -> Option<PathB
         .iter()
         .find(|f| f.kind == "source" && f.path.trim_start_matches("./") == wanted)
     {
-        return Some(ctx.project_root.join(&file.path));
+        let path = ctx.project_root.join(&file.path);
+        return ctx.parts.should_index(&path).then_some(path);
     }
     let candidate = ctx.project_root.join(&wanted);
     if candidate.is_file()
@@ -194,6 +195,7 @@ pub fn project_path_for_source_id(entry: &Path, source_id: &str) -> Option<PathB
         && project_source_roots(&ctx)
             .iter()
             .any(|root| canonical_path(&candidate).starts_with(canonical_path(root)))
+        && ctx.parts.should_index(&candidate)
     {
         return Some(candidate);
     }
@@ -256,10 +258,43 @@ pub fn project_json_for_entry(path: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
+    let parts_json = ctx
+        .parts
+        .parts
+        .iter()
+        .map(|part| {
+            format!(
+                "{{\"name\":{},\"path\":{},\"state\":{}}}",
+                json_str(&part.name),
+                json_str(&rel_path(&ctx.project_root, &part.path)),
+                json_str(part.state.name())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let part_conflicts_json = ctx
+        .parts
+        .conflicts
+        .iter()
+        .map(|conflict| {
+            let paths = conflict
+                .paths
+                .iter()
+                .map(|path| json_str(&rel_path(&ctx.project_root, path)))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"name\":{},\"paths\":[{}]}}",
+                json_str(&conflict.name),
+                paths
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let locks_json = lock_project_json(&ctx.project_root);
     let env_projection = env_project_json(&ctx.project_root);
     format!(
-        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
+        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"parts\":[{}],\"part_conflicts\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
         PROJECT_SCHEMA_VERSION,
         json_str(&ctx.project_root.display().to_string()),
         json_str(&ctx.project_revision),
@@ -277,6 +312,8 @@ pub fn project_json_for_entry(path: &Path) -> String {
         env_projection.envs,
         env_projection.services,
         files_json,
+        parts_json,
+        part_conflicts_json,
         locks_json,
         env_projection.diagnostics
     )

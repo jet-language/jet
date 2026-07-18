@@ -162,6 +162,13 @@ impl<'a> Parser<'a> {
                                 ));
                             }
                             TokKind::Ident(_) => {
+                                if first == Syntax::PROJECT_IMPORT_ROOT {
+                                    return self.import_decl_module_path(
+                                        start,
+                                        first,
+                                        first_span,
+                                    );
+                                }
                                 // Check if token after the item ident is `;` (no `as`, no more dots).
                                 // peek3() is 2 positions past current (dot + ident).
                                 let after_item = &self.peek3().kind;

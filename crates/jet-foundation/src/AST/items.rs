@@ -216,8 +216,8 @@ pub struct CModule {
 pub struct ModuleDecl {
     pub name: String,
     pub name_span: Span,
-    /// True when `name` begins with `_` (automatic-discovery opt-out).
-    pub disabled: bool,
+    /// False when `name` begins with `_` (automatic-discovery opt-out).
+    pub auto_discovered: bool,
     /// U8 (unified-ecosystem §2.2): named `sources:` declared inside the module
     /// body, siblings of the contributions. Merged by key across modules (U5).
     pub sources: Vec<SourceDecl>,
@@ -237,7 +237,7 @@ impl ModuleDecl {
     /// discovery, merge, graph, and index consumer. Explicit import resolution
     /// intentionally does not call it.
     pub fn is_auto_discovered(&self) -> bool {
-        !self.disabled
+        self.auto_discovered
     }
 }
 

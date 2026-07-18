@@ -1121,6 +1121,34 @@ fn resolve_module_import(
     pkg_resolution: &PkgResolution,
     span: Span,
 ) -> Result<PathBuf, Diagnostic> {
+    if let Some(local_name) = name.strip_prefix(Syntax::PROJECT_IMPORT_PREFIX) {
+        let report = crate::ProjectParts::scan(project_root);
+        let matches = report.named(local_name);
+        return match matches.as_slice() {
+            [] => Err(Diagnostic::error(
+                "E0603",
+                format!("can't find a project module named `{local_name}`"),
+                "project-local imports resolve declared module names, not filenames".to_string(),
+                format!("declare `module {local_name} {{ ... }}` under this project"),
+                Some(span),
+            )),
+            [part] => Ok(normalize_path(&part.path)),
+            _ => {
+                let list = matches
+                    .iter()
+                    .map(|part| relative_display(project_root, &part.path))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Err(Diagnostic::error(
+                    "E0606",
+                    format!("project module `{local_name}` is declared more than once"),
+                    "an explicit project import must resolve to one declaration".to_string(),
+                    format!("keep one `module {local_name}` declaration; found {list}"),
+                    Some(span),
+                ))
+            }
+        };
+    }
     // M12.1: check package dep dirs first.
     // `import words;` where "words" is a dep name → look in the dep's source root.
     let first_segment = name.split('.').next().unwrap_or(name);
@@ -1473,14 +1501,30 @@ mod stale_manifest_name_tests {
     }
 
     #[test]
-    fn explicit_import_keeps_internal_module_available() {
+    fn explicit_project_import_keeps_internal_module_available() {
         let dir = tempdir("internal-module");
         let entry = dir.join("main.jet");
-        fs::write(&entry, "use _bench\nfn run() {}\n").unwrap();
-        fs::write(dir.join("_bench.jet"), "pub fn fixture() {}\n").unwrap();
+        fs::write(&entry, "use project._bench as bench\nfn run() { bench.fixture() }\n").unwrap();
+        fs::write(
+            dir.join("arbitrary.jet"),
+            "module _bench { }\npub fn fixture() {}\n",
+        )
+        .unwrap();
 
         let bundle = load_entry(entry.to_str().unwrap()).unwrap();
-        assert!(bundle.modules.iter().any(|module| module.alias == "_bench"));
+        assert!(bundle.modules.iter().any(|module| module.path == dir.join("arbitrary.jet")));
+    }
+
+    #[test]
+    fn explicit_project_import_rejects_duplicate_internal_declarations() {
+        let dir = tempdir("internal-module-conflict");
+        let entry = dir.join("main.jet");
+        fs::write(&entry, "use project._bench as bench\nfn run() {}\n").unwrap();
+        fs::write(dir.join("a.jet"), "module _bench { }\n").unwrap();
+        fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
+
+        let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0606"));
     }
 
     #[test]

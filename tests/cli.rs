@@ -155,6 +155,55 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 }
 
 #[test]
+fn project_parts_lists_skipped_explicit_and_conflicting_modules() {
+    let dir = isolated_cwd("project_parts");
+    fs::write(dir.join("main.jet"), "module app { }\nfn run() {}\n").unwrap();
+    fs::write(dir.join("bench.jet"), "module _bench { }\n").unwrap();
+
+    let skipped = Command::new(jet())
+        .args(["project", "parts", "--skipped"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(skipped.status.code(), Some(0));
+    let stdout = String::from_utf8(skipped.stdout).unwrap();
+    assert!(stdout.contains("skipped") && stdout.contains("_bench"), "{stdout}");
+    assert!(!stdout.contains("app"), "{stdout}");
+
+    fs::write(
+        dir.join("main.jet"),
+        "use project._bench;\nmodule app { }\nfn run() {}\n",
+    )
+    .unwrap();
+    let explicit = Command::new(jet())
+        .args(["project", "parts", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(explicit.status.code(), Some(0));
+    let stdout = String::from_utf8(explicit.stdout).unwrap();
+    assert!(
+        stdout.contains("\"name\":\"_bench\"")
+            && stdout.contains("\"state\":\"explicit\""),
+        "{stdout}"
+    );
+
+    fs::write(dir.join("other.jet"), "module _bench { }\n").unwrap();
+    let conflict = Command::new(jet())
+        .args(["project", "parts"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(conflict.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&conflict.stderr).contains("declared more than once")
+    );
+}
+
+#[test]
 #[cfg(target_os = "linux")]
 fn isolated_cwd_child_holds_executable() {
     let Some(ready) = std::env::var_os("JET_CLI_EXECUTABLE_HOLDER_READY") else {

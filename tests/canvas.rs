@@ -1931,6 +1931,37 @@ fn canvas_project_json_reports_single_file_without_manifest() {
 }
 
 #[test]
+fn canvas_project_reports_and_filters_internal_parts() {
+    let dir = temp_dir("project_internal_parts");
+    let entry = dir.join("main.jet");
+    let internal = dir.join("bench.jet");
+    fs::write(&entry, "fn run() {}\n").unwrap();
+    fs::write(&internal, "module _bench { }\nfn hidden_probe() {}\n").unwrap();
+
+    let skipped = jet::Canvas::project_json_for_entry(&entry);
+    assert!(skipped.contains("\"name\":\"_bench\""), "{skipped}");
+    assert!(skipped.contains("\"state\":\"skipped\""), "{skipped}");
+    assert!(skipped.contains("\"path\":\"bench.jet\""), "{skipped}");
+    assert!(jet::Canvas::project_path_for_source_id(&entry, "bench.jet").is_none());
+
+    fs::write(
+        &internal,
+        "module _bench { }\nfn hidden_probe() {}\n// changed while skipped\n",
+    )
+    .unwrap();
+    let changed = jet::Canvas::project_json_for_entry(&entry);
+    assert_ne!(changed, skipped, "skipped sources must stay in the watch revision");
+
+    fs::write(&entry, "use project._bench;\nfn run() {}\n").unwrap();
+    let explicit = jet::Canvas::project_json_for_entry(&entry);
+    assert!(explicit.contains("\"state\":\"explicit\""), "{explicit}");
+    assert_eq!(
+        jet::Canvas::project_path_for_source_id(&entry, "bench.jet"),
+        Some(internal)
+    );
+}
+
+#[test]
 fn canvas_project_discovery_requires_declared_workspace_membership() {
     let dir = temp_dir("project_workspace_membership_boundary");
     let member = dir.join("packages/member");

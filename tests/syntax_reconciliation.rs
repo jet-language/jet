@@ -597,8 +597,12 @@ fn module_internal_is_discovery_not_access_control() {
     assert!(syntax.contains("D-SHAPE-MODULEINTERNAL1=A"));
     assert!(config.contains("D-SHAPE-MODULEINTERNAL1=A"));
     assert!(config.contains("pub const MODULE_INTERNAL_PREFIX: &str = \"_\";"));
+    assert!(config.contains("pub const PROJECT_IMPORT_PREFIX: &str = \"project.\";"));
     assert!(decisions.contains("`use project._name` remains allowed"));
     assert!(decisions.contains("underscore changes discovery, not access"));
+    assert!(!fs::read_to_string("crates/jet-foundation/src/AST/items.rs")
+        .expect("read module AST")
+        .contains("pub disabled: bool"));
     assert!(!decisions.contains("| D-SHAPE-MODULEINTERNAL1 |"));
 }
 

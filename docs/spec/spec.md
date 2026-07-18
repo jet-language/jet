@@ -1933,8 +1933,11 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
 - **Internal with a leading underscore:** automatic discovery skips
   `module _name { … }` based on the declared name, not its filename or scan
   order. An explicit `use project._name` remains allowed under ordinary
-  visibility rules. The underscore changes discovery, not access; rename it to
-  `module name` to opt back in (D-SHAPE-MODULEINTERNAL1=A).
+  visibility rules and resolves the declaration name regardless of filename.
+  The underscore changes discovery, not access; rename it to `module name` to
+  opt back in. `jet project parts --skipped` lists omitted declarations;
+  duplicate declared names are conflicts even when omitted
+  (D-SHAPE-MODULEINTERNAL1=A).
 - **Active reserved namespaces** are `env` → `Env` (dev environment),
   `system` → `System` (jetos host), and `image` → `Image` (OCI container image
   or jetos installer input).

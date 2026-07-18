@@ -93,6 +93,7 @@ pub mod BuildCache;
 pub mod BudgetProviders;
 pub mod BudgetStore;
 pub use jet_driver::BudgetView;
+pub use jet_driver::ProjectParts;
 pub use jet_devserver::Canvas;
 pub mod Compiler;
 pub mod Doctest;

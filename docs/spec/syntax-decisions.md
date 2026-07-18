@@ -770,8 +770,12 @@ construct; multiple may live in one file. Automatic discovery skips a module
 whose declared name begins with one underscore. An explicit
 `use project._name` remains allowed under ordinary visibility rules: the
 underscore changes discovery, not access, and tools report it as skipped rather
-than disabled. Renaming `_name` to `name` opts it back into discovery. Modules
-never import each other — they contribute to the merged whole. Reserved
+than disabled. `jet project parts` is the authoritative listing; `--skipped`
+shows only omitted declarations. LSP and Canvas omit closed skipped-only source
+files from semantic indexes, keep open files visible, and index an internal
+module after an exact `use project._name`. Duplicate declarations remain a
+conflict even while skipped. Renaming `_name` to `name` opts it back into
+discovery. Modules never import each other — they contribute to the merged whole. Reserved
 namespaces currently live for Jetpack/jetos: `env` (`Env`), `system`
 (`System`), OCI/jetos `image` (`Image`), `workspace`. **D-JPK-MODBODY1**:
 role namespaces live in the declaration

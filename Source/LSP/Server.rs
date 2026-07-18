@@ -1837,10 +1837,15 @@ fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, S
                 .unwrap_or_else(|| std::path::Path::new(".")),
         )
     });
+    let project_parts = crate::ProjectParts::scan(std::path::Path::new(&root));
     let mut files = Vec::new();
     collect_jet_files(std::path::Path::new(&root), &mut files);
     files.sort();
-    for path in files.into_iter().take(256) {
+    for path in files
+        .into_iter()
+        .filter(|path| project_parts.should_index(path))
+        .take(256)
+    {
         let display = path.to_string_lossy().to_string();
         if seen.contains(&display) {
             continue;
@@ -1854,10 +1859,6 @@ fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, S
 }
 
 fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    // D-SHAPE-MODULEINTERNAL1=A is declaration-based, not filename-based.
-    // Keep raw source visible here; semantic module consumers apply
-    // ModuleDecl::is_auto_discovered, while an explicitly imported `_name`
-    // must remain navigable.
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -1873,6 +1874,34 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         } else if path.extension().and_then(|s| s.to_str()) == Some("jet") {
             out.push(path);
         }
+    }
+}
+
+#[cfg(test)]
+mod project_part_tests {
+    use super::*;
+
+    #[test]
+    fn workspace_index_skips_internal_parts_until_explicit_import() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-project-parts-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.jet");
+        let internal = root.join("bench.jet");
+        std::fs::write(&entry, "fn run() {}\n").unwrap();
+        std::fs::write(&internal, "module _bench { }\nfn hidden_probe() {}\n").unwrap();
+
+        let server = Server::new();
+        let entry = entry.to_string_lossy();
+        let sources = workspace_sources(&server, Some(&entry));
+        assert!(!sources.iter().any(|(path, _)| path.ends_with("bench.jet")));
+
+        std::fs::write(&*entry, "use project._bench;\nfn run() {}\n").unwrap();
+        let sources = workspace_sources(&server, Some(&entry));
+        assert!(sources.iter().any(|(path, _)| path.ends_with("bench.jet")));
     }
 }
 
