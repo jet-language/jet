@@ -1901,6 +1901,7 @@ mod project_part_tests {
         std::fs::write(&internal, "module _bench { }\nfn hidden_probe() {}\n").unwrap();
 
         let mut server = Server::new();
+        server.workspace_roots.push(normalize_path_buf(&root));
         let entry = entry.to_string_lossy();
         let sources = workspace_sources(&server, Some(&entry));
         assert!(!sources.iter().any(|(path, _)| path.ends_with("bench.jet")));

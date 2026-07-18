@@ -328,7 +328,15 @@ pub(crate) fn compute_completions(
         Some(statement)
     };
 
-    for symbol in db.symbols.complete_visible_in("", None, Some(current_path)) {
+    for symbol in db.symbols.complete_visible_at(
+        "",
+        None,
+        jet_semindex::SemanticVisibilityAnchor {
+            module_path: current_path,
+            offset: Some(offset),
+            session_top_level: false,
+        },
+    ) {
         if symbol.kind == jet_semindex::SemanticSymbolKind::Keyword
             && !context_allows_keyword(src, offset, &symbol.name)
         {
