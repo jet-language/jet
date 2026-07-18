@@ -742,7 +742,8 @@ fn compile_bundle_path_build_inner(
         let mut migrations: std::collections::HashMap<String, Vec<&crate::AST::MigrationDecl>> =
             std::collections::HashMap::new();
         let computed_fields = std::collections::HashMap::new();
-        let distinct_ranges = std::collections::HashMap::new();
+        let mut distinct_ranges = std::collections::HashMap::new();
+        let mut distinct_bases = std::collections::HashMap::new();
         let mut function_name_counts = std::collections::HashMap::<String, usize>::new();
         let mut type_name_counts = std::collections::HashMap::<String, usize>::new();
         for module in &bundle.modules {
@@ -809,6 +810,22 @@ fn compile_bundle_path_build_inner(
                     crate::AST::Item::Migration(m) => {
                         migrations.entry(m.type_name.clone()).or_default().push(m);
                     }
+                    crate::AST::Item::Distinct(def) => {
+                        distinct_ranges.insert(
+                            def.name.clone(),
+                            def.range.map(|(lo, hi, _)| (lo, hi)),
+                        );
+                        distinct_bases.insert(def.name.clone(), def.base.clone());
+                    }
+                    crate::AST::Item::UnitFamily(family) => {
+                        for def in family.distinct_defs() {
+                            distinct_ranges.insert(
+                                def.name.clone(),
+                                def.range.map(|(lo, hi, _)| (lo, hi)),
+                            );
+                            distinct_bases.insert(def.name, def.base);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -822,6 +839,7 @@ fn compile_bundle_path_build_inner(
             enums,
             computed_fields,
             distinct_ranges,
+            distinct_bases,
             core_imports,
             migrations,
         };

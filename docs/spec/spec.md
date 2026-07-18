@@ -668,7 +668,7 @@ impl Circle {
       rename name -> display_name              // D-MIGRATE1: field renamed (same type)
       remove legacy_id                         // D-MIGRATE2D: field deleted
       add verified: Bool =  false               // D-MIGRATE2A: new field + default for old data
-      change price: Int -> Usd via { (c) => Usd(c) }   // D-MIGRATE2E: type change + converter
+      change price: Int -> Usd via { (c) => Usd.from_int(c) } // D-MIGRATE2E: type change + converter
   }
   ```
 

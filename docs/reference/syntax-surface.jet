@@ -639,7 +639,7 @@ struct Ticket { id: Int }
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
 @UnitFamily(Currency) { usd, eur }
 fn price() -> Usd {
-    return Usd(9.99)                            // literal; `.raw()` strips the unit
+    return Usd.from_float(9.99)                 // destination conversion; `.raw()` strips the unit
 }
 
 
@@ -733,5 +733,5 @@ migration UserRecord {
 // migration UserRecord {
 //     add verified: Bool =  false
 //     remove legacy_id
-//     change price: Int -> Usd via { (cents) => Usd(cents) }
+//     change price: Int -> Usd via { (cents) => Usd.from_int(cents) }
 // }

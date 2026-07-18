@@ -5,19 +5,3 @@ Error [E0129]: `StrongId` can't be built on `UserId` — `UserId` is itself a di
     |                      ^^^^^^
  Why: `distinct`-over-`distinct` chaining is not allowed in v1; `UserId` is already a distinct type
  Fix: use `UserId` directly, or build on the shared base type
-
-Error [E0119]: there's no type called `StrongId`
-  --> tests/ui/distinct_over_distinct.jet:5:4
-    |
-  5 | x: StrongId :: StrongId(UserId(1))
-    |    ^^^^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
-
-Error [E0102]: nothing named `StrongId` exists here
-  --> tests/ui/distinct_over_distinct.jet:5:16
-    |
-  5 | x: StrongId :: StrongId(UserId(1))
-    |                ^^^^^^^^
- Why: only functions that have been defined (or built in, like `print` / `input`) can be called
- Fix: define it first (fn StrongId() { ... }), or call one that exists

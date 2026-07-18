@@ -146,7 +146,7 @@ fn pick(xs: [Int#3], i: Index3) -> Int {
 
 fn run() {
     xs: [Int#3] :: [1, 2, 3]
-    print(pick(xs, Index3(2)))
+    print(pick(xs, Index3.from_int(2)))
 }
 "#
             .to_string(),

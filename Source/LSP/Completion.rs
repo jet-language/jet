@@ -247,12 +247,14 @@ pub(crate) fn compute_completions(
 
     // Member completion: `expr.`
     if let Some(receiver_name) = context_is_member_access(src, offset) {
-        let owner = if receiver_name == crate::Syntax::DURATION_TYPE {
+        let owner = if receiver_name == crate::Syntax::DURATION_TYPE
+            || crate::AST::numeric_type_from_name(&receiver_name).is_some()
+        {
             Some(receiver_name.clone())
         } else {
             db.defs.iter().find(|def| def.name == receiver_name).and_then(|def| {
                 match &def.kind {
-                    SymKind::Struct { .. } => Some(def.name.clone()),
+                    SymKind::Struct { .. } | SymKind::Type => Some(def.name.clone()),
                     SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => semantic_owner(ty),
                     _ => None,
                 }
@@ -260,9 +262,15 @@ pub(crate) fn compute_completions(
         };
         if let Some(owner) = owner {
             let prefix = current_identifier_prefix(src, offset);
-            for symbol in db
-                .symbols
-                .complete_visible_in(&prefix, Some(&owner), Some(current_path))
+            for symbol in db.symbols.complete_visible_at(
+                &prefix,
+                Some(&owner),
+                jet_semindex::SemanticVisibilityAnchor {
+                    module_path: current_path,
+                    offset: Some(offset),
+                    session_top_level: false,
+                },
+            )
             {
                 if seen.insert(symbol.identity.clone()) {
                     items.push(CompletionItem {

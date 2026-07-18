@@ -1400,9 +1400,10 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         d.name, d.name
     ));
     // .raw() method: unwrap to the base type.
+    let raw_value = if base_is_copy { "self.0" } else { "self.0.clone()" };
     out.push_str(&format!(
-        "impl user_{} {{\n    pub fn raw(&self) -> {} {{ self.0 }}\n}}\n\n",
-        d.name, base_rust
+        "impl user_{} {{\n    pub fn raw(&self) -> {} {{ {} }}\n}}\n\n",
+        d.name, base_rust, raw_value
     ));
     if let Some((lo, hi, _)) = d.range {
         out.push_str(&format!(

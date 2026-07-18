@@ -28,6 +28,8 @@ pub(crate) struct Cx {
     /// result type, and `is_numeric` is informational (the arithmetic operator is
     /// chosen by `ast_operand_is_integer`, which returns `None` for a distinct).
     pub(crate) distinct_types: HashMap<String, (Type, bool)>,
+    /// D-RANGETYPE1: range-constrained distinct type name -> inclusive bounds.
+    pub(crate) distinct_ranges: HashMap<String, (i64, i64)>,
     /// D-TYPEALIAS1: transparent generic alias name -> (params, target).
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
@@ -1630,6 +1632,7 @@ pub(crate) fn build_cx_items(
         consts: HashMap::new(),
         type_names: HashSet::new(),
         distinct_types: HashMap::new(),
+        distinct_ranges: HashMap::new(),
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
@@ -1899,6 +1902,9 @@ pub(crate) fn build_cx_items(
                 cx.type_names.insert(d.name.clone());
                 cx.distinct_types
                     .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
+                if let Some((lo, hi, _)) = d.range {
+                    cx.distinct_ranges.insert(d.name.clone(), (lo, hi));
+                }
             }
             // D-QUAL3: each unit-family member registers as a `@Numeric` distinct
             // type erasing to `Float`.

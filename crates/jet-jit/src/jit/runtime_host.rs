@@ -330,6 +330,136 @@ extern "C" fn jet_jit_str_replace(id: i64, from_id: i64, to_id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_parse_i64(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        match text.trim().parse::<i64>() {
+            Ok(value) => alloc_jit_result(rt, true, value as u64),
+            Err(_) => {
+                let error = rt
+                    .heap
+                    .alloc_string(format!("cannot parse `{text}` as an integer"));
+                alloc_jit_result(rt, false, error as u64)
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_parse_f64(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        match text.trim().parse::<f64>() {
+            Ok(value) => alloc_jit_result(rt, true, value.to_bits()),
+            Err(_) => {
+                let error = rt
+                    .heap
+                    .alloc_string(format!("cannot parse `{text}` as a float"));
+                alloc_jit_result(rt, false, error as u64)
+            }
+        }
+    })
+}
+
+fn numeric_int_bounds(kind: i64) -> (i128, i128) {
+    match kind {
+        0 => (i8::MIN as i128, i8::MAX as i128),
+        1 => (i16::MIN as i128, i16::MAX as i128),
+        2 => (i32::MIN as i128, i32::MAX as i128),
+        3 => (i64::MIN as i128, i64::MAX as i128),
+        4 => (u8::MIN as i128, u8::MAX as i128),
+        5 => (u16::MIN as i128, u16::MAX as i128),
+        6 => (u32::MIN as i128, u32::MAX as i128),
+        _ => (u64::MIN as i128, u64::MAX as i128),
+    }
+}
+
+extern "C" fn jet_jit_numeric_try_i64(value: i64, source_unsigned: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let value = if source_unsigned != 0 {
+            value as u64 as i128
+        } else {
+            value as i128
+        };
+        let (lo, hi) = numeric_int_bounds(kind);
+        if value >= lo && value <= hi {
+            alloc_jit_result(rt, true, value as u64)
+        } else {
+            let error = rt.heap.alloc_string("value doesn't fit in destination type");
+            alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+extern "C" fn jet_jit_numeric_float_to_int(value: f64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let (lo, hi) = numeric_int_bounds(kind);
+        let upper = hi as f64 + 1.0;
+        if value.is_finite() && value >= lo as f64 && value < upper {
+            alloc_jit_result(rt, true, value.trunc() as i128 as u64)
+        } else {
+            let error = rt.heap.alloc_string("value doesn't fit in destination type");
+            alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+extern "C" fn jet_jit_numeric_float_narrow(value: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
+            alloc_jit_result(rt, true, ((value as f32) as f64).to_bits())
+        } else {
+            let error = rt.heap.alloc_string("value doesn't fit in F32");
+            alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+extern "C" fn jet_jit_distinct_range(value: i64, lo: i64, hi: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if value >= lo && value <= hi {
+            alloc_jit_result(rt, true, value as u64)
+        } else {
+            let error = rt.heap.alloc_string("value is outside the distinct type's range");
+            alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+extern "C" fn jet_jit_distinct_range_result(handle: i64, lo: i64, hi: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(result) = jit_result(rt, handle) else {
+            return 0;
+        };
+        if !result.ok {
+            return handle;
+        }
+        let value = result.bits as i64;
+        if value >= lo && value <= hi {
+            handle
+        } else {
+            let error = rt.heap.alloc_string("value is outside the distinct type's range");
+            alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+extern "C" fn jet_jit_numeric_predicate(value: f64, op: i64) -> i8 {
+    match op {
+        0 => i8::from(value.is_nan()),
+        1 => i8::from(value.is_infinite()),
+        _ => i8::from(value.is_finite()),
+    }
+}
+
+extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64) -> i64 {
+    match op {
+        0 => value.count_ones() as i64,
+        1 => value.count_zeros() as i64,
+        2 => value.leading_zeros() as i64,
+        _ => value.trailing_zeros() as i64,
+    }
+}
+
 extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(n as usize))
 }
@@ -530,6 +660,15 @@ pub(crate) struct HostFns {
     pub(crate) str_to_upper: FuncId,
     pub(crate) str_to_lower: FuncId,
     pub(crate) str_replace: FuncId,
+    pub(crate) parse_i64: FuncId,
+    pub(crate) parse_f64: FuncId,
+    pub(crate) numeric_try_i64: FuncId,
+    pub(crate) numeric_float_to_int: FuncId,
+    pub(crate) numeric_float_narrow: FuncId,
+    pub(crate) distinct_range: FuncId,
+    pub(crate) distinct_range_result: FuncId,
+    pub(crate) numeric_predicate: FuncId,
+    pub(crate) numeric_bit_count: FuncId,
     pub(crate) struct_new: FuncId,
     pub(crate) struct_get_i64: FuncId,
     pub(crate) struct_get_f64: FuncId,
@@ -589,6 +728,15 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
     builder.symbol("jet_jit_str_to_lower", jet_jit_str_to_lower as *const u8);
     builder.symbol("jet_jit_str_replace", jet_jit_str_replace as *const u8);
+    builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
+    builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
+    builder.symbol("jet_jit_numeric_try_i64", jet_jit_numeric_try_i64 as *const u8);
+    builder.symbol("jet_jit_numeric_float_to_int", jet_jit_numeric_float_to_int as *const u8);
+    builder.symbol("jet_jit_numeric_float_narrow", jet_jit_numeric_float_narrow as *const u8);
+    builder.symbol("jet_jit_distinct_range", jet_jit_distinct_range as *const u8);
+    builder.symbol("jet_jit_distinct_range_result", jet_jit_distinct_range_result as *const u8);
+    builder.symbol("jet_jit_numeric_predicate", jet_jit_numeric_predicate as *const u8);
+    builder.symbol("jet_jit_numeric_bit_count", jet_jit_numeric_bit_count as *const u8);
     builder.symbol("jet_jit_struct_new", jet_jit_struct_new as *const u8);
     builder.symbol(
         "jet_jit_struct_get_i64",
@@ -718,6 +866,26 @@ fn declare_host_fns(
     sig_str_replace.params.push(AbiParam::new(types::I64));
     sig_str_replace.params.push(AbiParam::new(types::I64));
     sig_str_replace.returns.push(AbiParam::new(types::I64));
+    let mut sig_f64_i64 = Signature::new(cc);
+    sig_f64_i64.params.push(AbiParam::new(types::F64));
+    sig_f64_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_f64_i64_i8 = Signature::new(cc);
+    sig_f64_i64_i8.params.push(AbiParam::new(types::F64));
+    sig_f64_i64_i8.params.push(AbiParam::new(types::I64));
+    sig_f64_i64_i8.returns.push(AbiParam::new(types::I8));
+    let mut sig_i64_i64_i64 = Signature::new(cc);
+    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_i64_i64_i64_i64 = Signature::new(cc);
+    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_f64_i64_i64 = Signature::new(cc);
+    sig_f64_i64_i64.params.push(AbiParam::new(types::F64));
+    sig_f64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_f64_i64_i64.returns.push(AbiParam::new(types::I64));
     let mut sig_str_begin = Signature::new(cc);
     sig_str_begin.returns.push(AbiParam::new(types::I64));
     let mut sig_struct_new = Signature::new(cc);
@@ -829,6 +997,15 @@ fn declare_host_fns(
         str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,
         str_to_lower: import("jet_jit_str_to_lower", &sig_str_unary_i64)?,
         str_replace: import("jet_jit_str_replace", &sig_str_replace)?,
+        parse_i64: import("jet_jit_parse_i64", &sig_str_unary_i64)?,
+        parse_f64: import("jet_jit_parse_f64", &sig_str_unary_i64)?,
+        numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
+        numeric_float_to_int: import("jet_jit_numeric_float_to_int", &sig_f64_i64_i64)?,
+        numeric_float_narrow: import("jet_jit_numeric_float_narrow", &sig_f64_i64)?,
+        distinct_range: import("jet_jit_distinct_range", &sig_i64_i64_i64_i64)?,
+        distinct_range_result: import("jet_jit_distinct_range_result", &sig_i64_i64_i64_i64)?,
+        numeric_predicate: import("jet_jit_numeric_predicate", &sig_f64_i64_i8)?,
+        numeric_bit_count: import("jet_jit_numeric_bit_count", &sig_i64_i64_i64)?,
         struct_new: import("jet_jit_struct_new", &sig_struct_new)?,
         struct_get_i64: import("jet_jit_struct_get_i64", &sig_struct_get_i64)?,
         struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get_f64)?,

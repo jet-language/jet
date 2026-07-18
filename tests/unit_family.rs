@@ -3,7 +3,7 @@
 //! Each member mints one `@Numeric` distinct type erasing to `Float`
 //! (`usd` → `Usd`), so signatures read in plain English and the compiler keeps
 //! the units from mixing. This is pure sugar over the D-DIST1/D-DIST3 distinct
-//! machinery: construct with `Usd(value)`, same-unit arithmetic stays in the
+//! machinery: convert with `Usd.from_float(value)`, same-unit arithmetic stays in the
 //! unit, `.raw()` strips it, and cross-unit mixing is E0127 (the distinct
 //! same-type arithmetic rule). The family erases in codegen (I3).
 
@@ -25,7 +25,7 @@ fn codes_of(src: &str) -> Vec<String> {
 #[test]
 fn same_unit_arithmetic_compiles() {
     let src = format!(
-        "{}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn run() {{ t :: add(Usd(1.0), Usd(2.0)); print(\"{{(t.raw())}}\") }}\n",
+        "{}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn run() {{ t :: add(Usd.from_float(1.0), Usd.from_float(2.0)); print(\"{{(t.raw())}}\") }}\n",
         FAMILY
     );
     let codes = codes_of(&src);
@@ -37,7 +37,7 @@ fn same_unit_arithmetic_compiles() {
 #[test]
 fn cross_unit_mix_is_e0127() {
     let src = format!(
-        "{}\nfn run() {{ bad :: Usd(1.0) + Eur(2.0); print(\"{{(bad.raw())}}\") }}\n",
+        "{}\nfn run() {{ bad :: Usd.from_float(1.0) + Eur.from_float(2.0); print(\"{{(bad.raw())}}\") }}\n",
         FAMILY
     );
     let codes = codes_of(&src);
@@ -81,7 +81,7 @@ fn run() {
 #[test]
 fn family_erases_in_codegen() {
     let src = format!(
-        "{}\nfn run() {{ t :: Usd(1.0); print(\"{{(t.raw())}}\") }}\n",
+        "{}\nfn run() {{ t :: Usd.from_float(1.0); print(\"{{(t.raw())}}\") }}\n",
         FAMILY
     );
     let out = jet::compile(&src).expect("should compile");

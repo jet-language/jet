@@ -10,15 +10,18 @@ use super::safety::{
     jit_optional_scalar_type, jit_result_payload_type, jit_struct_type, jit_tuple_type,
 };
 
-pub(crate) fn init_clif_ty(init: &TExpr) -> Result<types::Type, String> {
+pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Type, String> {
     if let Some(t) = clif_ty(&init.ty) {
         return Ok(t);
     }
     if matches!(&init.ty, Type::List(_)) {
         return Ok(types::I64);
     }
-    if matches!(&init.ty, Type::Named(_)) {
-        return Ok(types::I64);
+    if let Type::Named(name) = &init.ty {
+        return Ok(meta
+            .distinct_base(name)
+            .and_then(clif_ty)
+            .unwrap_or(types::I64));
     }
     Err(format!("jit let type unsupported: {:?}", init.ty))
 }
@@ -27,7 +30,7 @@ pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
     if matches!(ty, Type::Named(n) if n == "Unit") {
         return None;
     }
-    if matches!(ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError")) {
+    if matches!(ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError" | "ParseError")) {
         return Some(types::I64);
     }
     if jit_concurrency_type(ty) {
@@ -50,8 +53,8 @@ pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
         return Some(types::I64);
     }
     match ty {
-        Type::Int | Type::String => Some(types::I64),
-        Type::Float => Some(types::F64),
+        Type::Int | Type::IntN { .. } | Type::String => Some(types::I64),
+        Type::Float | Type::Float32 => Some(types::F64),
         Type::Bool => Some(types::I8),
         Type::Char => Some(types::I32),
         _ => None,
@@ -99,6 +102,7 @@ pub(crate) struct JitMeta<'a> {
     enum_variants: &'a HashMap<String, Vec<String>>,
     int_constants: &'a HashMap<String, i64>,
     has_generic_instances: bool,
+    distinct_bases: &'a HashMap<String, Type>,
 }
 
 impl<'a> JitMeta<'a> {
@@ -109,6 +113,7 @@ impl<'a> JitMeta<'a> {
             enum_variants: &program.enum_variants,
             int_constants: &program.int_constants,
             has_generic_instances: !program.instance_provenance.is_empty(),
+            distinct_bases: &program.distinct_bases,
         }
     }
 
@@ -116,6 +121,9 @@ impl<'a> JitMeta<'a> {
         self.int_constants.get(rust_name.strip_prefix("user_").unwrap_or(rust_name)).copied()
     }
     pub(crate) fn has_generic_instances(&self) -> bool { self.has_generic_instances }
+    pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {
+        self.distinct_bases.get(name)
+    }
 
     pub(crate) fn struct_field_index(&self, type_name: &str, field_rust: &str) -> Option<usize> {
         self.struct_fields

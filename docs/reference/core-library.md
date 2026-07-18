@@ -2359,7 +2359,8 @@ shift count past the type's width traps (no leaked Rust panic).
 |--------|---------|-----------|
 | `Int.from_u8(n)` / `U32.from_u8(n)` / … (widening) | `T` | infallible |
 | `U8.from_int(n)` / `I16.from_int(n)` / … (narrowing) | `T ? String` | fallible (`?`/`??`) |
-| `F32.from_float(n)` / `Float.from_i32(n)` | `F32` / `Float` | infallible |
+| `F32.from_float(n)` | `F32 ? String` | fallible (finite F32 range) |
+| `Float.from_i32(n)` | `Float` | infallible |
 
 ---
 

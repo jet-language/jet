@@ -6,6 +6,7 @@ use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
     self, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, THandleOp,
     TIfCond, TJitSpawnLambda, TModuleCallForm, TOrFallback, TStmt, TStrPart,
+    TNumericOp,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, Type, UnOp};
 use std::collections::HashMap;
@@ -16,6 +17,20 @@ use super::safety::{
     jit_list_iter_elem_type, jit_value_type, record_type_key, user_type_name,
 };
 use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
+
+fn numeric_int_kind(rust: &str) -> Option<i64> {
+    Some(match rust {
+        "i8" => 0,
+        "i16" => 1,
+        "i32" => 2,
+        "i64" => 3,
+        "u8" => 4,
+        "u16" => 5,
+        "u32" => 6,
+        "u64" => 7,
+        _ => return None,
+    })
+}
 use super::JitRuntime;
 
 #[derive(Clone)]
@@ -151,7 +166,11 @@ impl LowerCtx<'_, '_> {
         if matches!(ty, Type::Named(n) if n == "Unit" || n == "Void") {
             return Ok(self.b.ins().iconst(types::I8, 0));
         }
-        let host_id = match clif_ty(ty) {
+        let erased = match ty {
+            Type::Named(name) => self.meta.distinct_base(name).unwrap_or(ty),
+            _ => ty,
+        };
+        let host_id = match clif_ty(erased) {
             Some(clif) if clif == types::F64 => self.host.result_get_f64,
             Some(clif) if clif == types::I8 => self.host.result_get_i8,
             Some(clif) if clif == types::I32 => self.host.result_get_i32,
@@ -281,7 +300,7 @@ impl LowerCtx<'_, '_> {
         match stmt {
             TStmt::Let { name, init, .. } => {
                 let val = self.lower_expr(init)?;
-                let ty = init_clif_ty(init)?;
+                let ty = init_clif_ty(init, self.meta)?;
                 let var = self.fresh_var(ty);
                 self.b.def_var(var, val);
                 self.vars.insert(TIR::local_place(name), var);
@@ -1211,7 +1230,11 @@ impl LowerCtx<'_, '_> {
     pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
         match &expr.kind {
             TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
-            TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(*v)),
+            TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(if expr.ty == Type::Float32 {
+                (*v as f32) as f64
+            } else {
+                *v
+            })),
             TExprKind::BoolLit(v) => Ok(self.b.ins().iconst(types::I8, if *v { 1 } else { 0 })),
             TExprKind::CharLit(v) => Ok(self.b.ins().iconst(types::I32, *v as i64)),
             TExprKind::StrLit(parts) => self.lower_string_lit(parts),
@@ -1728,7 +1751,7 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::FnFieldCall { .. } => Err("jit fn-field call unsupported".to_string()),
             TExprKind::Todo { .. } => Err("jit todo expression unsupported".to_string()),
-            TExprKind::DistinctRaw(_) => Err("jit distinct raw unsupported".to_string()),
+            TExprKind::DistinctRaw(inner) => self.lower_expr(inner),
             TExprKind::Ok(inner) => self.result_new(true, inner),
             TExprKind::Err(inner) => self.result_new(false, inner),
             TExprKind::Try { inner, convert, .. } => self.lower_try(inner, convert),
@@ -1740,7 +1763,38 @@ impl LowerCtx<'_, '_> {
             TExprKind::FanOut { .. } => Err("jit fan-out expression unsupported".to_string()),
             TExprKind::OptionLift2 { .. } => Err("jit Option.lift2 unsupported".to_string()),
             TExprKind::ClosureMethod { .. } => Err("jit closure method unsupported".to_string()),
-            TExprKind::NumericMethod { .. } => Err("jit numeric method unsupported".to_string()),
+            TExprKind::NumericMethod { recv, op } => self.lower_numeric_method(recv, op),
+            TExprKind::DistinctConvert {
+                arg,
+                op,
+                range,
+                fallible,
+                ..
+            } => {
+                let converted = self.lower_numeric_method(arg, op)?;
+                let Some((lo, hi)) = range else {
+                    return Ok(converted);
+                };
+                if !*fallible {
+                    return Ok(converted);
+                }
+                let lo = self.b.ins().iconst(types::I64, *lo);
+                let hi = self.b.ins().iconst(types::I64, *hi);
+                let fallible = matches!(
+                    op,
+                    TNumericOp::TryFrom { .. }
+                        | TNumericOp::FloatToInt { .. }
+                        | TNumericOp::FloatNarrow { .. }
+                );
+                let host = if fallible {
+                    self.host.distinct_range_result
+                } else {
+                    self.host.distinct_range
+                };
+                let host = self.module.declare_func_in_func(host, self.b.func);
+                let call = self.b.ins().call(host, &[converted, lo, hi]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TExprKind::OverflowOpt { .. } => {
                 Err("jit overflow opt-out expression unsupported".to_string())
             }
@@ -1909,7 +1963,14 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Split => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Lines => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
-                Err("jit builtin method unsupported".to_string())
+                let host = if matches!(op, TBuiltinOp::ParseInt) {
+                    self.host.parse_i64
+                } else {
+                    self.host.parse_f64
+                };
+                let host_ref = self.module.declare_func_in_func(host, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::StartsWith => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::EndsWith => Err("jit builtin method unsupported".to_string()),
@@ -1975,6 +2036,100 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::TryCollect => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewNew { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewMutNew { .. } => Err("jit builtin method unsupported".to_string()),
+        }
+    }
+
+    fn lower_numeric_method(&mut self, recv: &TExpr, op: &TNumericOp) -> Result<Value, String> {
+        let value = self.lower_expr(recv)?;
+        match op {
+            TNumericOp::Predicate(name) => {
+                let op = match name.as_str() {
+                    "is_nan" => 0,
+                    "is_infinite" => 1,
+                    "is_finite" => 2,
+                    _ => return Err(format!("jit numeric predicate unsupported: {name}")),
+                };
+                let op = self.b.ins().iconst(types::I64, op);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.numeric_predicate, self.b.func);
+                let call = self.b.ins().call(host, &[value, op]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TNumericOp::BitCount(name) => {
+                let op = match name.as_str() {
+                    "count_ones" => 0,
+                    "count_zeros" => 1,
+                    "leading_zeros" => 2,
+                    "trailing_zeros" => 3,
+                    _ => return Err(format!("jit numeric bit query unsupported: {name}")),
+                };
+                let op = self.b.ins().iconst(types::I64, op);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.numeric_bit_count, self.b.func);
+                let call = self.b.ins().call(host, &[value, op]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TNumericOp::ToShow => {
+                let begin = self
+                    .module
+                    .declare_func_in_func(self.host.str_begin, self.b.func);
+                let call = self.b.ins().call(begin, &[]);
+                let text = self.b.inst_results(call)[0];
+                let push = match clif_ty(&recv.ty) {
+                    Some(ty) if ty == types::I64 => self.host.str_push_i64,
+                    Some(ty) if ty == types::F64 => self.host.str_push_f64,
+                    _ => return Err("jit numeric display type unsupported".to_string()),
+                };
+                let push = self.module.declare_func_in_func(push, self.b.func);
+                self.b.ins().call(push, &[text, value]);
+                Ok(text)
+            }
+            TNumericOp::CastAs { dst_rust } => {
+                let dst_float = matches!(dst_rust.as_str(), "f32" | "f64");
+                if !dst_float {
+                    return Ok(value);
+                }
+                let mut converted = if recv.ty.is_integer() {
+                    if matches!(recv.ty, Type::IntN { signed: false, .. }) {
+                        self.b.ins().fcvt_from_uint(types::F64, value)
+                    } else {
+                        self.b.ins().fcvt_from_sint(types::F64, value)
+                    }
+                } else {
+                    value
+                };
+                if dst_rust == "f32" {
+                    let narrowed = self.b.ins().fdemote(types::F32, converted);
+                    converted = self.b.ins().fpromote(types::F64, narrowed);
+                }
+                Ok(converted)
+            }
+            TNumericOp::TryFrom { dst_rust, .. } => {
+                let kind = numeric_int_kind(dst_rust)
+                    .ok_or_else(|| format!("jit integer destination unsupported: {dst_rust}"))?;
+                let unsigned = i64::from(matches!(recv.ty, Type::IntN { signed: false, .. }));
+                let unsigned = self.b.ins().iconst(types::I64, unsigned);
+                let kind = self.b.ins().iconst(types::I64, kind);
+                let host = self.module.declare_func_in_func(self.host.numeric_try_i64, self.b.func);
+                let call = self.b.ins().call(host, &[value, unsigned, kind]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TNumericOp::FloatToInt { dst_rust, .. } => {
+                let kind = numeric_int_kind(dst_rust)
+                    .ok_or_else(|| format!("jit integer destination unsupported: {dst_rust}"))?;
+                let kind = self.b.ins().iconst(types::I64, kind);
+                let host = self.module.declare_func_in_func(self.host.numeric_float_to_int, self.b.func);
+                let call = self.b.ins().call(host, &[value, kind]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TNumericOp::FloatNarrow { .. } => {
+                let host = self.module.declare_func_in_func(self.host.numeric_float_narrow, self.b.func);
+                let call = self.b.ins().call(host, &[value]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TNumericOp::Origin => Err("jit numeric origin unsupported".to_string()),
         }
     }
 

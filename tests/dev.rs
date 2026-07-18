@@ -2175,6 +2175,71 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn resident_jit_numeric_methods_and_parse_are_native() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    Int.parse("41").drop("native parse proof")
+    n :: 41
+    print(Float.from_int(n))
+    print(n.count_ones())
+    print(1.0.is_finite())
+    print(n.to_string())
+}
+"#;
+    assert_eq!(
+        run_cranelift_without_fallback(src, "numeric_parse"),
+        ProgramOutput::ran("41.0\n3\ntrue\n41\n".into(), "".into(), 0)
+    );
+}
+
+#[test]
+fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+@Numeric UserId :: distinct Int
+@Numeric Severity :: distinct Int(0..10)
+@UnitFamily(Currency) { usd }
+
+fn run() {
+    print(I64.from_u8(255))
+    byte_ok: I32 :: 100
+    byte_bad: I32 :: 100000
+    U8.from_i32(byte_ok).drop("checked conversion success proof")
+    U8.from_i32(byte_bad).drop("checked conversion error proof")
+    float_ok: Float :: 42.9
+    float_bad: Float :: 300.0
+    U8.from_float(float_ok).drop("checked float conversion success proof")
+    U8.from_float(float_bad).drop("checked float conversion error proof")
+    narrow_ok: Float :: 2.5
+    narrow_bad: Float :: 1e100
+    F32.from_float(narrow_ok).drop("checked F32 conversion success proof")
+    F32.from_float(narrow_bad).drop("checked F32 conversion error proof")
+    user_source :: U64.from_u8(8)
+    UserId.from_u64(user_source).drop("checked distinct conversion proof")
+    print(UserId.from_u8(8).raw())
+    print(Severity.from_u8(8).raw())
+    severity_source :: 7
+    Severity.from_int(severity_source).drop("checked range conversion proof")
+    print(Severity.from_int(7).raw())
+    print(Usd.from_int(5).raw())
+}
+"#;
+    assert_eq!(
+        run_cranelift_without_fallback(src, "checked_numeric_distinct_matrix"),
+        ProgramOutput::ran(
+            "255\n8\n8\n7\n5.0\n".into(),
+            "".into(),
+            0,
+        )
+    );
+}
+
+#[test]
 fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"

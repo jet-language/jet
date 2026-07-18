@@ -286,6 +286,9 @@ fn to_real(x: Int) -> Float {
 fn truncate(x: Float) -> U8 {
     return U8.from_float(x) ?? 255
 }
+fn narrow_float(x: Float) -> F32 ? String {
+    return F32.from_float(x)
+}
 fn run() {
     print(widen(255))
     print(narrow(100))
@@ -293,12 +296,14 @@ fn run() {
     print(to_real(3))
     print(truncate(42.9))
     print(truncate(300.0))
+    print(narrow_float(2.0) ?? F32.from_int(0))
+    print(narrow_float(1e100) ?? F32.from_int(-1))
 }
 ";
     let (code, stdout) = build_and_run("tir_numeric_conv", src);
     assert_eq!(code, 0);
     // Widening, checked integer narrowing, int→float, and checked float→integer.
-    assert_eq!(stdout, "255\n100\n255\n3.0\n42\n255\n");
+    assert_eq!(stdout, "255\n100\n255\n3.0\n42\n255\n2.0\n-1.0\n");
 }
 
 /// c109 Phase 12: numeric predicates (`is_nan`/`is_finite`), bit-population queries

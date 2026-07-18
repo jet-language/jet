@@ -269,6 +269,65 @@ fn run() {}
             item.label == "len" && item.detail.as_deref() == Some(len.signature.as_str())
         }));
     }
+
+    #[test]
+    fn completion_catalogs_numeric_destination_methods() {
+        let src = "fn run() {\n    value :: F32.from_float(1.0) ?? F32.from_int(0)\n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.find("F32.from_f").unwrap() + "F32.from_f".len();
+        let items = compute_completions(&db, src, offset, "test.jet", None, None);
+        assert!(items.iter().any(|item| {
+            item.label == "from_float"
+                && item.detail.as_deref()
+                    == Some("F32.from_float(value: Float) -> F32 ? String")
+        }));
+    }
+
+    #[test]
+    fn completion_catalogs_source_distinct_and_unit_members() {
+        let src = r#"
+@Numeric Token :: distinct Int(0..10)
+@UnitFamily(Reward) { credit }
+
+fn run() {
+    token :: Token.from_u8(1)
+    money :: Credit.from_int(1)
+}
+"#;
+        let (diagnostics, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(
+            &bundle.unwrap_or_else(|| panic!("bundle diagnostics: {diagnostics:#?}")),
+            &facts,
+        );
+
+        let token_site = src.find("Token.from_u8").unwrap();
+        let token_items = compute_completions(
+            &db,
+            src,
+            token_site + "Token.from_u".len(),
+            "test.jet",
+            None,
+            None,
+        );
+        assert!(token_items.iter().any(|item| {
+            item.label == "from_u8"
+                && item.detail.as_deref()
+                    == Some("Token.from_u8(value: U8) -> Token ? String")
+        }));
+        for (unit_site, _) in src.match_indices("Credit.from_int") {
+            let unit_items = compute_completions(
+                &db,
+                src,
+                unit_site + "Credit.from_i".len(),
+                "test.jet",
+                None,
+                None,
+            );
+            assert_eq!(unit_items.iter().filter(|item| item.label == "from_int").count(), 1);
+        }
+    }
+
     #[test]
     fn completion_excludes_locals_from_other_functions() {
         let src = "fn first() {\n    hidden :: 1\n}\nfn second() {\n    \n}\n";

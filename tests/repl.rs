@@ -1698,6 +1698,18 @@ fn shared_semantic_symbol_has_complete_identity_and_docs() {
     assert_eq!(symbol.provenance, "builtin");
 }
 
+#[test]
+fn shared_semantic_symbols_catalog_numeric_conversions_and_parse() {
+    let parse = jet::SemanticSymbols::lookup("Int.parse").expect("Int.parse symbol");
+    assert_eq!(parse.signature, "Int.parse(text: String) -> Int ? ParseError");
+    let narrow = jet::SemanticSymbols::lookup("F32.from_float")
+        .expect("F32.from_float symbol");
+    assert_eq!(narrow.module, "core.numeric");
+    assert!(narrow.signature.ends_with("-> F32 ? String"));
+    assert!(jet::SemanticSymbols::lookup("I64.from_f32").is_some());
+    assert!(jet::SemanticSymbols::lookup("F64.from_u32").is_some());
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn repl_raw_member_completion_menu_is_selectable() {

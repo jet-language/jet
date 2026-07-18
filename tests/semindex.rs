@@ -89,6 +89,65 @@ fn contextual_result_names_are_not_advertised_as_keywords() {
 }
 
 #[test]
+fn numeric_destination_conversions_and_parse_are_cataloged() {
+    let symbols = SemanticSymbolIndex::language();
+    assert!(symbols.lookup_qualified("Int.parse").is_some());
+    assert!(symbols.lookup_qualified("Float.parse").is_some());
+    let narrow = symbols
+        .lookup_qualified("F32.from_float")
+        .expect("F32 narrowing catalog entry");
+    assert!(
+        narrow.signature.ends_with("-> F32 ? String"),
+        "{}",
+        narrow.signature
+    );
+    assert!(symbols.lookup_qualified("U8.from_u64").is_some());
+    assert!(symbols.lookup_qualified("Float.from_i8").is_some());
+    assert!(symbols.lookup_qualified("I64.from_f32").is_some());
+    assert!(symbols.lookup_qualified("F64.from_u32").is_some());
+}
+
+#[test]
+fn source_distinct_and_unit_conversion_members_are_cataloged() {
+    let src = r#"
+@Numeric UserId :: distinct Int
+@UnitFamily(Currency) { usd }
+
+fn run() {}
+"#;
+    let path = temp_fixture(
+        "source_numeric_members.jet",
+        src,
+    );
+    let symbols = open_symbols(&path).expect("source semantic symbols");
+
+    let user = symbols
+        .lookup_qualified("UserId.from_u8")
+        .expect("source distinct conversion member");
+    assert_eq!(user.owner.as_deref(), Some("UserId"));
+    assert_eq!(user.signature, "UserId.from_u8(value: U8) -> UserId");
+
+    let unit = symbols
+        .lookup_qualified("Usd.from_int")
+        .expect("unit-family conversion member");
+    assert_eq!(unit.owner.as_deref(), Some("Usd"));
+
+    let user_offset = src.find("@Numeric UserId").unwrap();
+    assert!(symbols
+        .complete_visible_at(
+            "from_u",
+            Some("UserId"),
+            jet_semindex::SemanticVisibilityAnchor {
+                module_path: path.to_string_lossy().as_ref(),
+                offset: Some(user_offset),
+                session_top_level: false,
+            },
+        )
+        .iter()
+        .any(|symbol| symbol.qualified_name == "UserId.from_u8"));
+}
+
+#[test]
 fn semantic_visibility_orders_items_imports_and_builtins() {
     let builtin = fact(
         "builtin:keyword:answer", "answer", "answer", SemanticSymbolKind::Keyword,

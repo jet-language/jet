@@ -236,6 +236,7 @@ fn distinct_types() {
     let src = "\
 UserId :: distinct Int;
 @Numeric Meters :: distinct Float;
+@UnitFamily(Currency) { usd }
 
 fn greet(id: UserId) -> String {
     return \"user {(id.raw())}\"
@@ -250,11 +251,65 @@ fn run() {
     x :: UserId.from_int(7)
     y :: UserId.from_int(7)
     print(\"{(x == y)}\")
+    from_byte :: UserId.from_u8(8)
+    from_float :: UserId.from_float(9.9) ?? UserId.from_int(0)
+    print(\"{(from_byte.raw())} {(from_float.raw())}\")
+    meters :: Meters.from_int(3)
+    dollars :: Usd.from_int(5)
+    print(\"{(meters.raw())} {(dollars.raw())}\")
 }
 ";
     let (code, stdout) = build_and_run("tir_distinct", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "user 42\n4.5 m\ntrue\n");
+    assert_eq!(stdout, "user 42\n4.5 m\ntrue\n8 9\n3.0 5.0\n");
+}
+
+#[test]
+fn distinct_and_unit_numeric_source_matrix() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+UserId :: distinct Int;
+Label :: distinct String;
+@UnitFamily(Currency) { usd }
+
+fn checked_user(value: U64) -> UserId ? String { return UserId.from_u64(value) }
+fn pass_user(value: UserId ? String) -> UserId ? String { return ~value }
+
+fn run() {
+    fallback :: UserId.from_int(0)
+    print(UserId.from_i8(-8).raw())
+    print(UserId.from_i16(-16).raw())
+    print(UserId.from_i32(-32).raw())
+    print(UserId.from_int(-64).raw())
+    print(UserId.from_u8(8).raw())
+    print(UserId.from_u16(16).raw())
+    print(UserId.from_u32(32).raw())
+    print((pass_user(checked_user(64)) ?? fallback).raw())
+    print((UserId.from_f32(3.75) ?? fallback).raw())
+    print((UserId.from_float(4.75) ?? fallback).raw())
+    print(Usd.from_i8(-8).raw())
+    print(Usd.from_i16(-16).raw())
+    print(Usd.from_i32(-32).raw())
+    print(Usd.from_int(-64).raw())
+    print(Usd.from_u8(8).raw())
+    print(Usd.from_u16(16).raw())
+    print(Usd.from_u32(32).raw())
+    print(Usd.from_u64(64).raw())
+    print(Usd.from_f32(3.75).raw())
+    print(Usd.from_float(4.75).raw())
+    label :: Label.from_string(\"converted\")
+    print(label.raw())
+}
+";
+    let (code, stdout) = build_and_run("tir_distinct_source_matrix", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "-8\n-16\n-32\n-64\n8\n16\n32\n64\n3\n4\n\
+-8.0\n-16.0\n-32.0\n-64.0\n8.0\n16.0\n32.0\n64.0\n3.75\n4.75\nconverted\n"
+    );
 }
 
 /// D-RANGETYPE1/D-SHAPE-CONVERT1: range-constrained distinct conversions are
@@ -272,16 +327,40 @@ fn checked(raw: Int) -> Severity ? String {
     return Ok(Severity.from_int(raw)?)
 }
 
+fn pass_checked(value: Severity ? String) -> Severity ? String { return ~value }
+fn direct() -> Severity { return Severity.from_u8(8) }
+
 fn run() {
-    a :: checked(4) ?? Severity(0)
-    b :: Severity(6)
+    a :: pass_checked(checked(4)) ?? panic(\"range\")
+    b :: checked(6) ?? panic(\"range\")
     widened: Int :: a + b
     print(\"{widened}\")
+    print(direct().raw())
 }
 ";
     let (code, stdout) = build_and_run("tir_range_type_checked", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "10\n");
+    assert_eq!(stdout, "10\n8\n");
+}
+
+#[test]
+fn range_type_literal_proofs_cover_every_numeric_source_family() {
+    let src = r#"
+@Numeric Severity :: distinct Int(0..10)
+
+fn run() {
+    signed :: Severity.from_i8(11)
+    unsigned :: Severity.from_u8(12)
+    narrow_float :: Severity.from_f32(13.0)
+    float :: Severity.from_float(14.0)
+}
+"#;
+    let diagnostics = jet::compile(src).expect_err("all four literals exceed Severity's range");
+    let range_errors = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0135")
+        .count();
+    assert_eq!(range_errors, 4, "diagnostics: {diagnostics:#?}");
 }
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated

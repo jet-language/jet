@@ -448,8 +448,8 @@ impl<'a> Checker<'a> {
                 // conversion as its base (`UserId.from_int`, `Meter.from_float`).
                 if self.registry.is_distinct(type_name) {
                     if let Some(base) = self.registry.distinct_base(type_name).cloned() {
-                        let expected = Syntax::numeric_conversion_method(&base.name());
-                        if expected == Some(method) {
+                        let base_method = Syntax::conversion_method_for_source(&base.name());
+                        if !base.is_numeric() && method == base_method {
                             if args.len() != 1 {
                                 self.diags.push(Diagnostic::error(
                                     "E0104",
@@ -475,8 +475,94 @@ impl<'a> Checker<'a> {
                                     Some(args[0].expr.span()),
                                 ));
                             }
+                            let ret = Type::Named(type_name.clone());
+                            *resolved_ret_out = Some(ret.clone());
+                            return Some(ret);
+                        }
+                        if let Some(source) = base
+                            .is_numeric()
+                            .then_some(method)
+                            .and_then(Syntax::numeric_conversion_source)
+                            .and_then(crate::AST::numeric_type_from_name)
+                        {
+                            if args.len() != 1 {
+                                self.diags.push(Diagnostic::error(
+                                    "E0104",
+                                    format!("`{type_name}.{method}` takes one value, got {}", args.len()),
+                                    "a distinct conversion wraps exactly one value of its base type".to_string(),
+                                    format!("write `{type_name}.{method}(value)`"),
+                                    Some(span),
+                                ));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                                return None;
+                            }
+                            let old = self.expected_type.replace(source.clone());
+                            let got = self.infer(&mut args[0].expr);
+                            self.expected_type = old;
+                            if got.as_ref().is_some_and(|got| got != &source) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0108",
+                                    format!("argument to `{type_name}.{method}` should be {}, not {}", source.name(), got.as_ref().unwrap().name()),
+                                    "the source name fixes the conversion input type".to_string(),
+                                    format!("pass a {} value", source.name()),
+                                    Some(args[0].expr.span()),
+                                ));
+                            }
                             let target = Type::Named(type_name.clone());
-                            let ret = if self.registry.distinct_range(type_name).is_some() {
+                            let base_conversion = Collections::numeric_conversion_return(
+                                &base,
+                                method,
+                                1,
+                            )
+                            .flatten()
+                            .expect("numeric distinct conversion has a numeric base");
+                            let converted_literal = match (&args[0].expr, &source, &base) {
+                                (Expr::Int(n, literal_span, _, _), source, base)
+                                    if source.is_integer() && base.is_integer() => {
+                                    let fits_base = match base {
+                                        Type::Int => true,
+                                        Type::IntN { signed, bits } => {
+                                            let (lo, hi) = crate::AST::int_range(*signed, *bits);
+                                            i128::from(*n) >= lo && i128::from(*n) <= hi
+                                        }
+                                        _ => false,
+                                    };
+                                    fits_base.then_some((*n, *literal_span))
+                                }
+                                (Expr::Float(n, literal_span, _), source, base)
+                                    if source.is_float() && base.is_integer() && n.is_finite() => {
+                                    let truncated = n.trunc();
+                                    let (lo, upper_exclusive) = match base {
+                                        Type::Int => (i64::MIN as f64, -(i64::MIN as f64)),
+                                        Type::IntN { signed, bits } => {
+                                            let (lo, hi) = crate::AST::int_range(*signed, *bits);
+                                            (lo as f64, hi as f64 + 1.0)
+                                        }
+                                        _ => unreachable!(),
+                                    };
+                                    (truncated >= lo && truncated < upper_exclusive)
+                                        .then_some((truncated as i64, *literal_span))
+                                }
+                                _ => None,
+                            };
+                            let literal_in_range = self.registry.distinct_range(type_name).and_then(|(lo, hi)| {
+                                converted_literal.map(|(n, literal_span)| {
+                                    if n < lo || n > hi {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0135",
+                                            format!("`{n}` is outside `{type_name}`'s range {lo}..{hi}"),
+                                            format!("a range type only holds values inside its bounds; `{n}` can never be a `{type_name}`"),
+                                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+                                            Some(literal_span),
+                                        ));
+                                    }
+                                })
+                            }).is_some();
+                            let ret = if matches!(base_conversion, Type::Result { .. })
+                                || (!literal_in_range
+                                    && self.registry.distinct_range(type_name).is_some()) {
                                 Type::Result {
                                     ok: Box::new(target),
                                     err: Box::new(Type::String),

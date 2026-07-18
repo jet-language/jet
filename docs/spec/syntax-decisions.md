@@ -415,8 +415,8 @@ bundles re-expose curated slices, stackable — `@Numeric` (`+ - * /`, ordering,
 same-type only; E0138), `@Comparable`, `@Printable`, `@CodableAsBase`.
 `Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
 types**: `distinct Int(0..10)` is an `Int` provably within bounds; literal
-construction checks at compile time (E0135 out of bounds), runtime construction
-is fallible (`Severity(raw)?`, else E0136); an empty/reversed range is E0137;
+conversion checks at compile time (E0135 out of bounds), runtime conversion
+is fallible (`Severity.from_int(raw)?`, else E0136); an empty/reversed range is E0137;
 arithmetic widens to the base type.
 
 **D-FIELDPOL1 — Computed fields** *(ratified 2026-07-03, card #181)*: a struct

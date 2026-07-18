@@ -1,6 +1,6 @@
 // 69 — Distinct types (D-DIST1, D-DIST3).
-// `Name :: distinct Base` creates a named type that never implicitly
-// coerces to/from its base. Construct with `Name(expr)`, unwrap with `.raw()`.
+// `Name :: distinct Base` creates a named type that never implicitly coerces
+// to/from its base. Convert with `Name.from_kind(expr)`, unwrap with `.raw()`.
 // `@Numeric` enables same-type arithmetic.
 UserId :: distinct Int;
 
@@ -11,15 +11,15 @@ fn greet(id: UserId) {
 }
 
 fn run() {
-    uid :: UserId(42)
+    uid :: UserId.from_int(42)
     greet(uid)
-    a :: Meters(3.0)
-    b :: Meters(1.5)
+    a :: Meters.from_float(3.0)
+    b :: Meters.from_float(1.5)
     c :: a + b
     print("{(c.raw())} m")
     // equality on same distinct type works
-    x :: UserId(7)
-    y :: UserId(7)
+    x :: UserId.from_int(7)
+    y :: UserId.from_int(7)
     print("{(x == y)}")
 }
 // --- expected output --------------------------------------------------

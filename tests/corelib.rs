@@ -2293,7 +2293,7 @@ fn pick(xs: [String#4], i: Index4) -> String {
 
 fn run() {
     words: [String#4] :: ["zero", "one", "two", "three"]
-    print(pick(words, Index4(2)))
+    print(pick(words, Index4.from_int(2)))
 }
 "#;
     let out = compile_temp("refinement_index.jet", src);

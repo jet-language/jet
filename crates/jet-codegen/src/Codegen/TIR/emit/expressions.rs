@@ -40,6 +40,40 @@ pub(crate) fn emit_tir_enum_arg(a: &TEnumArg, cx: &Cx) -> String {
     s
 }
 
+fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
+    match op {
+        TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
+        TNumericOp::BitCount(m) => format!("(({recv}).{m}() as i64)"),
+        TNumericOp::ToShow => format!("({recv}).jet_show()"),
+        TNumericOp::Origin => format!("{}jet_float_origin(&({recv}))", cx.root_prefix),
+        TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
+        TNumericOp::TryFrom {
+            dst_rust,
+            dst_spelling,
+        } => format!(
+            "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
+             \"value doesn't fit in {dst_spelling}\".to_string())"
+        ),
+        TNumericOp::FloatToInt {
+            dst_rust,
+            dst_spelling,
+            lower,
+            upper_exclusive,
+        } => format!(
+            "{{ let __jet_value = ({recv}); if __jet_value.is_finite() && \
+             __jet_value >= ({lower} as _) && __jet_value < ({upper_exclusive} as _) {{ \
+             Ok(__jet_value.trunc() as {dst_rust}) }} else {{ Err(\
+             \"value doesn't fit in {dst_spelling}\".to_string()) }} }}"
+        ),
+        TNumericOp::FloatNarrow { dst_spelling } => format!(
+            "{{ let __jet_value = ({recv}); if __jet_value.is_finite() && \
+             __jet_value >= -(f32::MAX as f64) && __jet_value <= f32::MAX as f64 {{ \
+             Ok(__jet_value as f32) }} else {{ Err(\
+             \"value doesn't fit in {dst_spelling}\".to_string()) }} }}"
+        ),
+    }
+}
+
 pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
     match &e.kind {
         // D-SG9: width suffix is read straight off the literal — no re-inference.
@@ -127,6 +161,29 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 cx.mangle_name(name),
                 emit_tir_expr(arg, cx)
             )
+        }
+        TExprKind::DistinctConvert {
+            name,
+            arg,
+            op,
+            range,
+            fallible,
+        } => {
+            let converted = emit_numeric_op(&emit_tir_expr(arg, cx), op, cx);
+            let conversion_fallible = matches!(
+                op,
+                TNumericOp::TryFrom { .. }
+                    | TNumericOp::FloatToInt { .. }
+                    | TNumericOp::FloatNarrow { .. }
+            );
+            let name = cx.mangle_name(name);
+            match (conversion_fallible, range.is_some(), *fallible) {
+                (true, true, true) => format!("({converted}).and_then({name}::try_new)"),
+                (true, false, true) => format!("({converted}).map({name})"),
+                (false, true, true) => format!("{name}::try_new({converted})"),
+                (false, _, false) => format!("{name}({converted})"),
+                _ => unreachable!("sema/TIR distinct conversion fallibility drift"),
+            }
         }
         // D-SIMD2 / D-LINALG1: a math constructor / static method → the prelude free
         // function `{root}jet_math_<T>_<func>(args)`. Args are plain values (floats or
@@ -509,31 +566,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // + `numeric_conversion` (Source/Codegen/Expression.rs) byte-for-byte.
         TExprKind::NumericMethod { recv, op } => {
             let recv = emit_tir_expr(recv, cx);
-            match op {
-                TNumericOp::Predicate(m) => format!("({}).{}()", recv, m),
-                TNumericOp::BitCount(m) => format!("(({}).{}() as i64)", recv, m),
-                TNumericOp::ToShow => format!("({}).jet_show()", recv),
-                TNumericOp::Origin => format!("{}jet_float_origin(&({}))", cx.root_prefix, recv),
-                TNumericOp::CastAs { dst_rust } => format!("(({}) as {})", recv, dst_rust),
-                TNumericOp::TryFrom {
-                    dst_rust,
-                    dst_spelling,
-                } => format!(
-                    "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
-                     \"value doesn't fit in {dst_spelling}\".to_string())"
-                ),
-                TNumericOp::FloatToInt {
-                    dst_rust,
-                    dst_spelling,
-                    lower,
-                    upper_exclusive,
-                } => format!(
-                    "{{ let __jet_value = ({recv}); if __jet_value.is_finite() && \
-                     __jet_value >= {lower} && __jet_value < {upper_exclusive} {{ \
-                     Ok(__jet_value.trunc() as {dst_rust}) }} else {{ Err(\
-                     \"value doesn't fit in {dst_spelling}\".to_string()) }} }}"
-                ),
-            }
+            emit_numeric_op(&recv, op, cx)
         }
         // c109 Phase 28: an overflow opt-out builtin. `prefix`/`op` were resolved at
         // lowering; reproduce `emit_call`'s `(ls).{name}_{suffix}(rs)` byte-for-byte.

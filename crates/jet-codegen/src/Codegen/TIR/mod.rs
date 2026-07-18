@@ -87,6 +87,7 @@ pub struct JitProgram {
     /// M5: mangled variant names per enum type (discriminant order).
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
     pub int_constants: std::collections::HashMap<String, i64>,
+    pub distinct_bases: std::collections::HashMap<String, Type>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -373,6 +374,20 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             fields.iter().map(|(_, ty)| ty.clone()).collect(),
         );
     }
+    let mut distinct_bases = std::collections::HashMap::new();
+    for item in &module.items {
+        match item {
+            Item::Distinct(def) => {
+                distinct_bases.insert(def.name.clone(), def.base.clone());
+            }
+            Item::UnitFamily(family) => {
+                for def in family.distinct_defs() {
+                    distinct_bases.insert(def.name, def.base);
+                }
+            }
+            _ => {}
+        }
+    }
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -382,6 +397,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         struct_field_types,
         enum_variants,
         int_constants,
+        distinct_bases,
     })
 }
 
@@ -1096,6 +1112,18 @@ pub enum TExprKind {
         name: String,
         arg: Box<TExpr>,
     },
+    /// D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion. `op`
+    /// converts the named source into the distinct base; emit then wraps the
+    /// value, composing a fallible numeric conversion and/or range check.
+    DistinctConvert {
+        name: String,
+        arg: Box<TExpr>,
+        op: TNumericOp,
+        range: Option<(i64, i64)>,
+        /// Sema's authoritative return contract. A literal may discharge a
+        /// distinct range check, but never a conversion declared fallible.
+        fallible: bool,
+    },
     /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
     /// `Vec3(x,y,z)` / `Mat3(…)`, or a static method `F32x4.splat(x)` /
     /// `Vec3.from_array(a)`. Emits the prelude free function `{root}jet_math_<T>_<fn>(…)`
@@ -1781,6 +1809,11 @@ pub enum TNumericOp {
         dst_spelling: String,
         lower: String,
         upper_exclusive: String,
+    },
+    /// Checked f64/Float to f32/F32 narrowing. Values outside F32's finite
+    /// range fail instead of becoming infinity.
+    FloatNarrow {
+        dst_spelling: String,
     },
     /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
     /// arm of `emit_builtin_method`, which fires for any receiver type).

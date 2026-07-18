@@ -235,6 +235,8 @@ pub(super) struct Interp<'a> {
     /// for an unranged type, a proven-in-range literal folds to a direct
     /// value, anything else is the fallible `Result`-wrapped form.
     pub(super) distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
+    /// Numeric base type for each distinct/unit target.
+    pub(super) distinct_bases: &'a HashMap<String, Type>,
     /// Card #392 pass 5: `TypeName -> migration { }` blocks declared for that
     /// `@PublishedSchema` type, source order (the migration chain, oldest step
     /// first — mirrors `Codegen/Items.rs::migration_blocks`'s per-type list).

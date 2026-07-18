@@ -1726,7 +1726,7 @@ fn fmt_preserves_range_constraint() {
 Severity :: distinct Int(0..10);
 
 fn run() {
-    sev :: Severity(3)
+    sev :: Severity.from_int(3)
     print(\"{sev.raw()}\")
 }
 ";
@@ -1843,7 +1843,7 @@ fn fmt_preserves_capbundle_markers() {
 @Printable @CodableAsBase CustomerId :: distinct Int;
 
 fn run() {
-    a :: Usd(100)
+    a :: Usd.from_int(100)
     print(a.raw())
 }
 ";

@@ -1387,11 +1387,11 @@ fn consume(ch: Receiver<Int>) -> Int {
 
     #[test]
     fn covers_distinct_value_type_and_ctor() {
-        // c109 Phase 23: a distinct param type + `.raw()` + the `Name(x)` constructor are
+        // c109 Phase 23: a distinct param type + `.raw()` + the destination-owned conversion are
         // covered. The build_cx-only helper registers the distinct in `distinct_types`.
         let src = "UserId :: distinct Int;\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
         assert!(covers(src, "greet"));
-        let src2 = "UserId :: distinct Int;\nfn mk() -> UserId {\n return UserId(42)\n}\n";
+        let src2 = "UserId :: distinct Int;\nfn mk() -> UserId {\n return UserId.from_int(42)\n}\n";
         assert!(covers(src2, "mk"));
     }
 

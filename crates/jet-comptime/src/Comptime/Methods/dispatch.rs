@@ -1062,8 +1062,51 @@ impl<'a> Interp<'a> {
         // existing distinct constructor with destination-owned spelling.
         if let Expr::Ident(type_name, _) = receiver {
             if let Some(range) = self.distinct_ranges.get(type_name).copied() {
+                if let Some(base) = self.distinct_bases.get(type_name) {
+                    if !base.is_numeric()
+                        && crate::Syntax::conversion_method_for_source(&base.name()) == method
+                        && args.len() == 1
+                    {
+                        return self.eval(&args[0].expr, scope);
+                    }
+                }
                 if crate::Syntax::numeric_conversion_source(method).is_some() && args.len() == 1 {
-                    return self.eval_distinct_ctor(type_name, range, args, span, scope);
+                    let base = self
+                        .distinct_bases
+                        .get(type_name)
+                        .ok_or_else(|| unsupported("a distinct conversion without its base type", span))?;
+                    let value = self.eval(&args[0].expr, scope)?;
+                    let converted = super::super::Builtins::apply_static_type_method(
+                        &base.name(),
+                        method,
+                        vec![value],
+                        span,
+                    )
+                    .ok_or_else(|| unsupported("this distinct numeric conversion", span))??;
+                    let check_range = |value: CtValue| -> Result<CtValue, Diagnostic> {
+                        let Some((lo, hi)) = range else {
+                            return Ok(value);
+                        };
+                        let n = as_int(&value, args[0].expr.span())?;
+                        Ok(if (lo..=hi).contains(&n) {
+                            CtValue::ResOk(Box::new(CtValue::Int(n)))
+                        } else {
+                            CtValue::ResErr(Box::new(CtValue::Str(format!(
+                                "{} out of range {}..{}",
+                                n, lo, hi
+                            ))))
+                        })
+                    };
+                    if let (Some((lo, hi)), Some(n)) = (range, literal_int(&args[0].expr)) {
+                        if (lo..=hi).contains(&n) {
+                            return Ok(CtValue::Int(n));
+                        }
+                    }
+                    return match converted {
+                        CtValue::ResOk(value) if range.is_some() => check_range(*value),
+                        CtValue::ResErr(error) if range.is_some() => Ok(CtValue::ResErr(error)),
+                        value => check_range(value),
+                    };
                 }
             }
         }

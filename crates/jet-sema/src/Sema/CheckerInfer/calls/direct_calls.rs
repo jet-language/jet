@@ -640,93 +640,24 @@ impl<'a> Checker<'a> {
                 return Some(Some(Type::Named(call.name.clone())));
             }
     
-            // D-DIST3 (ratified 2026-06-20): `DistinctType(expr)` — construct a distinct value.
+            // D-SHAPE-CONVERT1=A: `Type(value)` is not a conversion alias.
+            // Distinct and unit values use the same destination-owned spelling
+            // as every other explicit conversion.
             if self.funcs.get(&call.name).is_none() {
                 if let Some(base_ty) = self.registry.distinct_base(&call.name).cloned() {
-                    if call.args.len() != 1 {
-                        self.diags.push(Diagnostic::error(
-                            "E0103",
-                            format!(
-                                "`{}` takes exactly one argument, got {}",
-                                call.name,
-                                call.args.len()
-                            ),
-                            format!(
-                                "`{}` is a distinct type; construct it with `{}(value)`",
-                                call.name, call.name
-                            ),
-                            format!(
-                                "write `{}(expr)` with a single value of type `{}`",
-                                call.name,
-                                base_ty.name()
-                            ),
-                            Some(call.name_span),
-                        ));
-                        for a in call.args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
+                    let method = Syntax::conversion_method_for_source(&base_ty.name());
+                    self.diags.push(Diagnostic::error(
+                        "E0128",
+                        format!("`{}(value)` is not a distinct conversion", call.name),
+                        "explicit conversions are owned by the destination type and name their source"
+                            .to_string(),
+                        format!("write `{}.{method}(value)`", call.name),
+                        Some(call.name_span),
+                    ));
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
                     }
-                    let old_expected = self.expected_type.replace(base_ty.clone());
-                    let arg_ty = self.infer(&mut call.args[0].expr);
-                    self.expected_type = old_expected;
-                    if let Some(at) = arg_ty {
-                        if at != base_ty {
-                            self.diags.push(Diagnostic::error(
-                                "E0128",
-                                format!(
-                                    "a `{}` can't be used where a `{}` is expected",
-                                    at.name(), call.name
-                                ),
-                                format!(
-                                    "`{}` and `{}` are different types — even though `{}` is built on `{}`, one is never accepted in place of the other",
-                                    call.name, at.name(), call.name, base_ty.name()
-                                ),
-                                format!("construct a `{}`: `{}({})`", call.name, call.name, "expr"),
-                                Some(call.args[0].expr.span()),
-                            ));
-                            return None;
-                        }
-                    }
-                    // D-RANGETYPE1: `Severity :: distinct Int(0..10)` — a literal
-                    // argument is checked NOW (E0135); a runtime value needs the
-                    // fallible `?` form (E0136 otherwise). "Parse, don't
-                    // validate" as a type.
-                    if let Some((lo, hi)) = self.registry.distinct_range(&call.name) {
-                        match &call.args[0].expr {
-                            Expr::Int(n, span, _, _) => {
-                                if *n < lo || *n > hi {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0135",
-                                        format!("`{}` is outside `{}`'s range {}..{}", n, call.name, lo, hi),
-                                        format!(
-                                            "a range type only holds values inside its bounds; `{}` can never be a `{}`",
-                                            n, call.name
-                                        ),
-                                        format!("use a value in `{}..{}`, or widen the type's range", lo, hi),
-                                        Some(*span),
-                                    ));
-                                }
-                            }
-                            _ => {
-                                if call.range_checked {
-                                    return Some(Some(Type::Result {
-                                        ok: Box::new(Type::Named(call.name.clone())),
-                                        err: Box::new(Type::String),
-                                    }));
-                                } else {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0136",
-                                        format!("making a `{}` from a runtime value can fail", call.name),
-                                        "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
-                                        format!("write `{}(raw)?` and handle the failure", call.name),
-                                        Some(call.args[0].expr.span()),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    return Some(Some(Type::Named(call.name.clone())));
+                    return None;
                 }
             }
     

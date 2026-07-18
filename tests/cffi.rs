@@ -798,7 +798,7 @@ fn run() {
     print(c436.add_f32(1.5, 2.25))
     p :: c436.make_point(3, 4)
     print(c436.point_sum(p))
-    print(c436.scale_meters(Meters(21)).raw())
+    print(c436.scale_meters(Meters.from_int(21)).raw())
 }
 "#,
     )

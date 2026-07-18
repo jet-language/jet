@@ -1,18 +1,18 @@
 // D-RANGETYPE1: `distinct Int(0..10)` is an `Int` that provably holds 0..10
-// (inclusive, S22). A literal construction is checked at compile time; a
-// runtime value needs the fallible `?` form. "Parse, don't validate" as a
-// type.
+// (inclusive, S22). Destination-owned conversion checks literals at compile
+// time and returns a fallible result for runtime values. "Parse, don't
+// validate" as a type.
 @Numeric Severity :: distinct Int(0..10);
 
 fn checked(raw: Int) -> Severity ? String {
-    return Ok(Severity(raw)?)
+    return Severity.from_int(raw)
 }
 
 fn run() {
     // Checked at compile time — always in range.
-    sev :: Severity(7)
+    sev :: Severity.from_int(7)
     print("{sev.raw()}")
-    from_runtime :: checked(3) ?? Severity(0)
+    from_runtime :: checked(3) ?? Severity.from_int(0)
     print("{from_runtime.raw()}")
     widened: Int :: sev + from_runtime
     print("{widened}")

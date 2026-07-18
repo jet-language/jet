@@ -68,6 +68,14 @@ pub fn numeric_conversion_method(source: &str) -> Option<&'static str> {
         .find_map(|(method, name)| (*name == source).then_some(*method))
 }
 
+/// Canonical D-SHAPE-CONVERT1 method generated from a source type name.
+/// Numeric defaults use their bounded aliases; nominal types use snake case.
+pub fn conversion_method_for_source(source: &str) -> String {
+    numeric_conversion_method(source)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("from_{}", canonical_name_case(source, NameCase::Snake)))
+}
+
 /// Migration-only lookup for source-owned numeric spellings retired by
 /// D-SHAPE-CONVERT1=A. These are diagnostics, not accepted surface.
 pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {

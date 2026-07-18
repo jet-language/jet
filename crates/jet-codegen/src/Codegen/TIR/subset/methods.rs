@@ -1028,7 +1028,16 @@ pub(crate) fn static_method_call_in_subset(
         return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
     }
     if let Some((base, _)) = cx.distinct_types.get(type_name) {
-        if Syntax::numeric_conversion_method(&base.name()) == Some(method) && args.len() == 1 {
+        if base.is_numeric()
+            && Syntax::numeric_conversion_source(method).is_some()
+            && args.len() == 1
+        {
+            return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+        }
+        if !base.is_numeric()
+            && Syntax::conversion_method_for_source(&base.name()) == method
+            && args.len() == 1
+        {
             return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
         }
     }

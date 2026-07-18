@@ -240,6 +240,9 @@ fn walk_items_for_interp<'a>(
                 info.distinct_ranges
                     .entry(d.name.clone())
                     .or_insert(d.range.map(|(lo, hi, _)| (lo, hi)));
+                info.distinct_bases
+                    .entry(d.name.clone())
+                    .or_insert_with(|| d.base.clone());
             }
             // Card #392 pass 5: `migration TypeName { … }` blocks, for
             // `decode_traced<T>`'s runtime chain-walker (`Interp::migrations`).
@@ -251,6 +254,9 @@ fn walk_items_for_interp<'a>(
                     info.distinct_ranges
                         .entry(d.name.clone())
                         .or_insert(d.range.map(|(lo, hi, _)| (lo, hi)));
+                    info.distinct_bases
+                        .entry(d.name.clone())
+                        .or_insert(d.base);
                 }
             }
             Item::CodeModule(cm) => {

@@ -565,7 +565,7 @@ fn run() {
     dirty :: @Tainted "x"
     safe := clean(dirty)
     words: [String#4] :: ["a", "b", "c", "d"]
-    print(pick(words, Index4(1)))
+    print(pick(words, Index4.from_int(1)))
     print(absish(3))
     print(add(1, 2))
     print(safe)

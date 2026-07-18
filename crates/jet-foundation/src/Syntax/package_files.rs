@@ -202,7 +202,8 @@ pub const KW_REMOVE: &str = "remove"; // D-MIGRATE2
 pub const KW_CHANGE: &str = "change"; // D-MIGRATE2
 
 /// D-MIGRATE2E (ratified): the `via { expr }` clause that supplies the inline
-/// converter for a `change` op (`change price: Int -> Usd via { (c) => Usd(c) }`).
+/// converter for a `change` op
+/// (`change price: Int -> Usd via { (c) => Usd.from_int(c) }`).
 ///
 /// D-EFF2 (ratified 2026-06-22): also the pass-through marker in a `#(via f)`
 /// signature annotation — a function whose published effect set IS whatever the

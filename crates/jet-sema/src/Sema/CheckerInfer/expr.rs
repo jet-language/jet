@@ -335,7 +335,7 @@ impl<'a> Checker<'a> {
             // D-UNITLIT1: `500ms` — resolve the suffix against an in-scope
             // `@UnitFamily` member (PascalCased to its minted `@Numeric
             // distinct Float` type name) and rewrite this node in place to an
-            // ordinary constructor call — sugar over the existing
+            // ordinary destination-owned conversion — sugar over the existing
             // distinct-type path, so every downstream check (cross-unit
             // E0127, arithmetic, `.raw()`) is the SAME machinery a
             // hand-written `Ms(500.0)` already goes through.
@@ -363,9 +363,13 @@ impl<'a> Checker<'a> {
                 }
                 let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
                 let call_span = *span;
-                *e = Expr::Call(Call {
-                    name: type_name,
-                    name_span: *suffix_span,
+                *e = Expr::MethodCall {
+                    receiver: Box::new(Expr::Ident(type_name, *suffix_span)),
+                    method: Syntax::numeric_conversion_method("Float")
+                        .expect("Float has a canonical conversion method")
+                        .to_string(),
+                    method_span: *suffix_span,
+                    type_args: Vec::new(),
                     args: vec![CallArg {
                         convention: AccessConvention::Read,
                         expr: Expr::Float(value, call_span, false),
@@ -374,8 +378,9 @@ impl<'a> Checker<'a> {
                         label: None,
                         spread: false,
                     }],
-                    range_checked: false,
-                });
+                    recv_type: None,
+                    resolved_ret: None,
+                };
                 self.infer(e)
             }
             Expr::Bool(_, _) => Some(Type::Bool),

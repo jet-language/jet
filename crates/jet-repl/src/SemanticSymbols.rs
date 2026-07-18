@@ -1,5 +1,9 @@
 //! Shared builtin semantic-symbol catalog for REPL, LSP, and `jet ?`.
 
+use std::sync::OnceLock;
+
+use jet_semindex::SemanticSymbolIndex;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Symbol {
     pub identity: &'static str,
@@ -80,10 +84,40 @@ pub const SYMBOLS: &[Symbol] = &[
     member!("String", "repeat", "String.repeat(n: Int) -> String", "Concatenates n copies of the string."),
 ];
 
+fn numeric_symbols() -> &'static [Symbol] {
+    static SYMBOLS: OnceLock<Vec<Symbol>> = OnceLock::new();
+    SYMBOLS.get_or_init(|| {
+        SemanticSymbolIndex::language()
+            .symbols()
+            .iter()
+            .filter(|symbol| symbol.module_path == "core.numeric")
+            .map(|symbol| {
+                let identity = Box::leak(symbol.qualified_name.clone().into_boxed_str());
+                Symbol {
+                    identity,
+                    module: "core.numeric",
+                    owner: symbol.owner.clone().map(|s| Box::leak(s.into_boxed_str()) as &'static str),
+                    member: Box::leak(symbol.name.clone().into_boxed_str()),
+                    signature: Box::leak(symbol.signature.clone().into_boxed_str()),
+                    summary: Box::leak(symbol.summary.clone().into_boxed_str()),
+                    example: identity,
+                    provenance: "builtin",
+                }
+            })
+            .collect()
+    })
+}
+
 pub fn lookup(identity: &str) -> Option<&'static Symbol> {
-    SYMBOLS.iter().find(|symbol| symbol.identity == identity)
+    SYMBOLS
+        .iter()
+        .chain(numeric_symbols().iter())
+        .find(|symbol| symbol.identity == identity)
 }
 
 pub fn members<'a>(owner: &'a str, prefix: &'a str) -> impl Iterator<Item = &'static Symbol> + 'a {
-    SYMBOLS.iter().filter(move |symbol| symbol.owner == Some(owner) && symbol.member.starts_with(prefix))
+    SYMBOLS
+        .iter()
+        .chain(numeric_symbols().iter())
+        .filter(move |symbol| symbol.owner == Some(owner) && symbol.member.starts_with(prefix))
 }

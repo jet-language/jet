@@ -365,6 +365,11 @@ pub(crate) fn resolve_numeric_conversion_op(
 ) -> Option<TNumericOp> {
     let (dst_rust, dst_int) = numeric_rust_type_tir(target_name)?;
     let Some((dsigned, dbits)) = dst_int else {
+        if dst_rust == "f32" && matches!(source_name, "Float" | "F64") {
+            return Some(TNumericOp::FloatNarrow {
+                dst_spelling: target_name.to_string(),
+            });
+        }
         return Some(TNumericOp::CastAs {
             dst_rust: dst_rust.to_string(),
         });

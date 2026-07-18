@@ -200,7 +200,7 @@ renumbered, and no new `W` code may be allocated.
 | E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
 | E0127 | sema  | arithmetic on a distinct type without `@Numeric`, between noncommensurable distinct types, or an inexact/explicit-only cross-unit mix (D-DIST3, D-QUAL3, D-QUANTITY-CONVERT1) |
-| E0128 | sema  | implicit coercion between a distinct type and its base (D-DIST3) |
+| E0128 | sema  | implicit coercion between a distinct type and its base, including retired `Type(value)` conversion aliases (D-DIST3, D-SHAPE-CONVERT1) |
 | E0129 | sema  | distinct-over-distinct: base type is itself a distinct type (D-DIST1) |
 | E0130 | sema  | `Int` and `BigInt` mixed without explicit construction (D-BIGINT1) |
 | E0131 | sema  | `Float` and `Decimal` mixed (D-DECIMAL1) |

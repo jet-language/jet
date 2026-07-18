@@ -2,6 +2,7 @@ use jet_codegen::Codegen::TIR::{
     self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
     TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TModuleCallForm, TOrFallback,
     TStmt, TStrPart,
+    TNumericOp,
 };
 use jet_foundation::AST::{BinOp, Type, UnOp};
 use std::collections::HashSet;
@@ -117,11 +118,20 @@ pub(crate) fn jit_concurrency_type(ty: &Type) -> bool {
 pub(crate) fn jit_value_type(ty: &Type) -> bool {
     match ty {
         Type::Named(n)
-            if matches!(n.as_str(), "Unit" | "Duration" | "DurationUnit" | "RangeError") =>
+            if matches!(
+                n.as_str(),
+                "Unit" | "Duration" | "DurationUnit" | "RangeError" | "ParseError"
+            ) =>
         {
             true
         }
-        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+        Type::Int
+        | Type::IntN { .. }
+        | Type::Float
+        | Type::Float32
+        | Type::Bool
+        | Type::String
+        | Type::Char => true,
         Type::Result { ok, err } => {
             jit_result_payload_type(ok.as_ref()) && jit_result_payload_type(err.as_ref())
         }
@@ -218,6 +228,26 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
         TExprKind::BuiltinMethod { recv, op, args } => {
             resident_safe_builtin_op(op, recv, args, callees)
+        }
+        TExprKind::NumericMethod { recv, op } => {
+            resident_safe_expr(recv, callees)
+                && match op {
+                    TNumericOp::Predicate(name) => matches!(&recv.ty, Type::Float)
+                        && matches!(name.as_str(), "is_nan" | "is_infinite" | "is_finite"),
+                    TNumericOp::BitCount(name) => matches!(&recv.ty, Type::Int)
+                        && matches!(name.as_str(), "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"),
+                    TNumericOp::ToShow => matches!(&recv.ty, Type::Int | Type::Float),
+                    TNumericOp::CastAs { dst_rust } => {
+                        recv.ty.is_numeric()
+                            && matches!(dst_rust.as_str(), "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32" | "f64")
+                    }
+                    TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
+                    TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
+                    TNumericOp::Origin => false,
+                }
+        }
+        TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {
+            resident_safe_expr(arg, callees)
         }
         TExprKind::StructLit { fields, .. } => {
             jit_struct_type(&expr.ty)
@@ -403,6 +433,9 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
+            matches!(&recv.ty, Type::String) && args.is_empty()
         }
         TBuiltinOp::Slice { .. } => {
             jit_list_int_type(&recv.ty)

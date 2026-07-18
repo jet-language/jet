@@ -2213,17 +2213,34 @@ pub(crate) fn lower_method_call(
                 };
             }
         }
+        if let (Some((base, _)), Some(source), Some(arg)) = (
+            cx.distinct_types.get(&type_name),
+            Syntax::numeric_conversion_source(method),
+            args.first(),
+        ) {
+            if args.len() == 1 {
+                let op = resolve_numeric_conversion_op(&base.name(), source)
+                    .expect("sema admitted a numeric distinct conversion");
+                let range = cx.distinct_ranges.get(&type_name).copied();
+                return TExpr {
+                    ty: resolved_ret
+                        .cloned()
+                        .unwrap_or_else(|| Type::Named(type_name.clone())),
+                    kind: TExprKind::DistinctConvert {
+                        name: type_name,
+                        arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                        op,
+                        range,
+                        fallible: matches!(resolved_ret, Some(Type::Result { .. })),
+                    },
+                };
+            }
+        }
         if let (Some((base, _)), Some(arg)) = (cx.distinct_types.get(&type_name), args.first()) {
-            if args.len() == 1 && Syntax::numeric_conversion_method(&base.name()) == Some(method) {
-                if matches!(resolved_ret, Some(Type::Result { .. })) {
-                    return TExpr {
-                        ty: resolved_ret.cloned().unwrap(),
-                        kind: TExprKind::RangeCheckedCtor {
-                            name: type_name,
-                            arg: Box::new(lower_expr(&arg.expr, cx, env)),
-                        },
-                    };
-                }
+            if args.len() == 1
+                && !base.is_numeric()
+                && Syntax::conversion_method_for_source(&base.name()) == method
+            {
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
                     kind: TExprKind::Call {

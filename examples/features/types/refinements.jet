@@ -4,17 +4,17 @@
 Index4 :: distinct Int
 
 fn pick(xs: [String#4], i: Index4) -> String {
-    return xs[i]
+    return ~xs[i]
 }
 
 fn checked(raw: Int) -> Index4 ? String {
-    return Ok(Index4(raw)?)
+    return Ok(Index4.from_int(raw)?)
 }
 
 fn run() {
-    idx :: Index4(2)
+    idx :: Index4.from_int(2)
     words: [String#4] :: ["zero", "one", "two", "three"]
     print(pick(words, idx))
-    from_runtime :: checked(3) ?? Index4(0)
+    from_runtime :: checked(3) ?? Index4.from_int(0)
     print(pick(words, from_runtime))
 }

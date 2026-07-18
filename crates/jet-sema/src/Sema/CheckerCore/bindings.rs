@@ -299,8 +299,35 @@ impl<'a> Checker<'a> {
             }
             let saved_fixed_constructor = self.allow_fixed_constructor;
             self.allow_fixed_constructor = direct_fixed_constructor(&b.init);
-            let it = self.infer(&mut b.init);
+            let mut it = self.infer(&mut b.init);
             self.allow_fixed_constructor = saved_fixed_constructor;
+            if let (
+                Some(Type::Result { ok, .. }),
+                Expr::MethodCall {
+                    receiver,
+                    method,
+                    args,
+                    ..
+                },
+            ) = (&it, &b.init)
+            {
+                if let Type::Named(type_name) = ok.as_ref() {
+                    if self.registry.distinct_range(type_name).is_some()
+                        && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == type_name)
+                        && Syntax::numeric_conversion_source(method).is_some()
+                        && args.len() == 1
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0136",
+                            format!("making a `{type_name}` from a runtime value can fail"),
+                            "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
+                            format!("write `{type_name}.{method}(raw)?` and handle the failure"),
+                            Some(args[0].expr.span()),
+                        ));
+                        it = Some(Type::Named(type_name.clone()));
+                    }
+                }
+            }
             if b.is_comptime {
                 self.in_comptime = false;
             }

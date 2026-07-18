@@ -22,7 +22,7 @@ pub use Types::{
 };
 pub use Symbols::{
     build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
-    SemanticSymbolKind,
+    SemanticSymbolKind, SemanticVisibilityAnchor,
 };
 
 use jet_foundation::Diagnostics::Diagnostic;

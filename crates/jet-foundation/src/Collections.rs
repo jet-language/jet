@@ -334,7 +334,7 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
 }
 
 /// D-SHAPE-CONVERT1=A: `Target.from_source(value)` numeric conversions.
-fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+pub fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     if nargs != 1 || !target.is_numeric() {
         return None;
     }
@@ -349,6 +349,12 @@ fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> Optio
             ok: Box::new(target.clone()),
             err: Box::new(Type::String),
         },
+        (None, None) if matches!(source, Type::Float) && matches!(target, Type::Float32) => {
+            Type::Result {
+                ok: Box::new(target.clone()),
+                err: Box::new(Type::String),
+            }
+        }
         _ => target.clone(),
     }))
 }

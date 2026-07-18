@@ -116,6 +116,22 @@ pub(super) fn apply_static_type_method(
             Type::IntN { signed, bits } => Some((*signed, *bits)),
             _ => None,
         };
+        if matches!(source, Type::Float) && matches!(target, Type::Float32) {
+            let CtValue::Float(n) = value else {
+                return Some(Err(unsupported(
+                    "numeric conversion with the wrong source type",
+                    span,
+                )));
+            };
+            let fits = n.is_finite() && n >= -(f32::MAX as f64) && n <= f32::MAX as f64;
+            return Some(Ok(if fits {
+                CtValue::ResOk(Box::new(CtValue::Float((n as f32) as f64)))
+            } else {
+                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "value doesn't fit in {type_name}"
+                ))))
+            }));
+        }
         if let (CtValue::Float(n), Some((signed, bits))) = (&value, int_kind(&target)) {
             let (lo, hi) = crate::AST::int_range(signed, bits);
             let in_range = n.is_finite() && *n >= lo as f64 && *n < (hi + 1) as f64;

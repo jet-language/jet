@@ -36,7 +36,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{EnumDef, Expr, Func, StructDef};
+use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
@@ -173,6 +173,7 @@ pub fn run_build_entry(
         structs: &program.structs,
         computed_fields: &program.computed_fields,
         distinct_ranges: &program.distinct_ranges,
+        distinct_bases: &program.distinct_bases,
         migrations: &program.migrations,
     };
     let mut frame = HashMap::new();
@@ -238,6 +239,11 @@ static EMPTY_DISTINCT: std::sync::OnceLock<HashMap<String, Option<(i64, i64)>>> 
     std::sync::OnceLock::new();
 fn empty_distinct() -> &'static HashMap<String, Option<(i64, i64)>> {
     EMPTY_DISTINCT.get_or_init(HashMap::new)
+}
+static EMPTY_DISTINCT_BASES: std::sync::OnceLock<HashMap<String, Type>> =
+    std::sync::OnceLock::new();
+fn empty_distinct_bases() -> &'static HashMap<String, Type> {
+    EMPTY_DISTINCT_BASES.get_or_init(HashMap::new)
 }
 static EMPTY_MIGRATIONS: std::sync::OnceLock<
     HashMap<String, Vec<&'static crate::AST::MigrationDecl>>,
@@ -332,6 +338,7 @@ pub fn evaluate_with_imports_opts(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = globals.clone();
@@ -402,6 +409,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         structs,
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = globals.clone();
@@ -432,6 +440,7 @@ pub struct ProgramInfo<'a> {
     pub enums: HashMap<String, &'a EnumDef>,
     pub computed_fields: HashMap<(String, String), &'a Expr>,
     pub distinct_ranges: HashMap<String, Option<(i64, i64)>>,
+    pub distinct_bases: HashMap<String, Type>,
     pub core_imports: HashMap<String, String>,
     /// Card #392 pass 5: `TypeName -> migration { }` blocks (source order) for
     /// `decode_traced<T>`'s runtime chain-walker (see `Interp::migrations`).
@@ -447,6 +456,7 @@ impl<'a> ProgramInfo<'a> {
             enums: HashMap::new(),
             computed_fields: HashMap::new(),
             distinct_ranges: HashMap::new(),
+            distinct_bases: HashMap::new(),
             core_imports: HashMap::new(),
             migrations: HashMap::new(),
         }
@@ -482,6 +492,7 @@ pub fn run_main(
         structs: &program.structs,
         computed_fields: &program.computed_fields,
         distinct_ranges: &program.distinct_ranges,
+        distinct_bases: &program.distinct_bases,
         migrations: &program.migrations,
     };
     let mut scope = HashMap::new();
@@ -531,6 +542,7 @@ pub fn run_main_debug(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = HashMap::new();
@@ -570,6 +582,7 @@ pub fn run_main_value(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = HashMap::new();
@@ -612,6 +625,7 @@ pub fn run_main_with_fuel(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = HashMap::new();
@@ -652,6 +666,7 @@ pub fn run_repl_main_with_fuel(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = HashMap::new();
@@ -756,6 +771,7 @@ fn run_repl_step_inner(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     // Split: run all statements except the last; then handle the last specially
@@ -834,6 +850,7 @@ pub fn run_block_with_imports(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = globals.clone();
@@ -966,6 +983,7 @@ pub fn evaluate_derive_body(
         structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
     };
     let mut scope = HashMap::new();

@@ -660,6 +660,33 @@ fn run() { left.same(); right.same() }
 }
 
 #[test]
+fn programmable_build_executes_destination_owned_distinct_conversion() {
+    let root = project("distinct-conversion");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+@Numeric BuildCode :: distinct U8
+
+fn build(b: BuildContext) -> BuildPlan ? {
+    code :: BuildCode.from_int(7)?
+    expected :: U8.from_int(7)?
+    if code.raw() == expected {
+        b.error(b.program.functions()[0].span, "DISTINCT", "converted", "executed", "ok")
+    }
+    return b.plan()
+}
+
+fn run() {}
+"#,
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
+        .expect_err("build-time distinct conversion should reach the marker diagnostic");
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "DISTINCT"), "{errors:#?}");
+}
+
+#[test]
 fn typed_toolchain_and_probe_flow_into_executed_action() {
     let root = project("toolchain-probe");
     let entry = root.join("main.jet");
