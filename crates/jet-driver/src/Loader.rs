@@ -157,6 +157,11 @@ fn load_entry_with_overlays_mode(
         .parent()
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
+    let manifest_root = find_manifest_root(&entry_dir);
+    let validates_project_parts = manifest_root.is_some()
+        || entry_abs.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+            matches!(name, Syntax::DEFAULT_ENTRY_FILE | Syntax::LEGACY_ENTRY_FILE)
+        });
     let mut layer_ceiling = None;
     // U11 (D-JPK-SCRIPTDEP1=A): L0203 lints for inline `use pkg#version;`
     // deps found in the manifest-less branch below, merged into
@@ -164,7 +169,7 @@ fn load_entry_with_overlays_mode(
     let mut inline_dep_lints: Vec<Diagnostic> = Vec::new();
     let organization_policy = load_organization_unsafe_policy()?;
     let (project_root, pkg_dep_dirs, pkg_resolution, package_policy) = if let Some(manifest_dir) =
-        find_manifest_root(&entry_dir)
+        manifest_root
     {
         // Found a pkg.jet — validate it and collect dep source paths.
         let pack_path = manifest_dir.join(Syntax::PAYLOAD_FILE);
@@ -331,7 +336,7 @@ fn load_entry_with_overlays_mode(
     // Explicit project imports report the same conflict at their source span
     // while loading. Any conflict left here still invalidates discovery,
     // including duplicate declarations whose internal names stay skipped.
-    if !project_parts.conflicts.is_empty() {
+    if validates_project_parts && !project_parts.conflicts.is_empty() {
         return Err(project_parts
             .conflicts
             .iter()
@@ -1634,6 +1639,17 @@ mod stale_manifest_name_tests {
                 && diagnostic.span.is_none()
                 && diagnostic.fix.contains("a.jet, b.jet")
         }));
+    }
+
+    #[test]
+    fn single_file_mode_ignores_unrelated_sibling_module_conflicts() {
+        let dir = tempdir("single-file-unrelated-conflict");
+        let entry = dir.join("fixture.jet");
+        fs::write(&entry, "fn run() {}\n").unwrap();
+        fs::write(dir.join("a.jet"), "module _bench { }\n").unwrap();
+        fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
+
+        load_entry(entry.to_str().unwrap()).expect("single-file mode ignores siblings");
     }
 
     #[test]
