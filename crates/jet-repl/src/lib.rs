@@ -1395,7 +1395,11 @@ pub(crate) fn raw_input_is_complete(text: &str) -> bool {
     fn probe(prefix: &str, input: &str, suffix: &str) -> bool {
         let cutoff = prefix.len() + input.len();
         let source = format!("{prefix}{input}{suffix}");
-        let (tokens, lex_diags) = crate::Lexer::lex(&source);
+        let (tokens, lex_diags) = if prefix.is_empty() {
+            crate::Lexer::lex(&source)
+        } else {
+            crate::Lexer::lex_generated(&source)
+        };
         if !lex_diags.is_empty() {
             // E0002 at the user's current end is an unfinished lexical
             // construct (quote/comment/interpolation). If the error ends
@@ -1509,6 +1513,13 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         return Ok(InputKind::Item(src));
     }
 
+    // Wrappers below use Jet's reserved namespace. Validate user text before
+    // entering that lane so a source-written `__name` still owns E0067.
+    let (_, user_lex_diags) = crate::Lexer::lex(trimmed);
+    if !user_lex_diags.is_empty() {
+        return Err(user_lex_diags);
+    }
+
     // For everything (statements AND bare expressions), try wrapping as:
     //   fn __repl__() { __repl_echo__ :: <input> }
     // first. If it parses, the last statement is a Val with the magic name.
@@ -1546,7 +1557,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     if try_stmt_first {
         // Try plain statement form; if it succeeds, return it.
         // The check_src is the full statement content (with `;` for sema).
-        let (toks, lex_diags) = crate::Lexer::lex(&plain_src);
+        let (toks, lex_diags) = crate::Lexer::lex_generated(&plain_src);
         if lex_diags.is_empty() {
             if let Ok(prog) = crate::Parser::parse(&toks) {
                 if let Some(Item::Func(f)) = prog.items.into_iter().next() {
@@ -1560,7 +1571,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
 
     // Try echo-sentinel form.
     {
-        let (toks, lex_diags) = crate::Lexer::lex(&echo_src);
+        let (toks, lex_diags) = crate::Lexer::lex_generated(&echo_src);
         if lex_diags.is_empty() {
             if let Ok(prog) = crate::Parser::parse(&toks) {
                 if let Some(Item::Func(f)) = prog.items.into_iter().next() {
@@ -1575,7 +1586,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     }
 
     // Fallback: plain statement form (returns parse error if any).
-    let (toks, lex_diags) = crate::Lexer::lex(&plain_src);
+    let (toks, lex_diags) = crate::Lexer::lex_generated(&plain_src);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
@@ -1602,20 +1613,36 @@ const PRELOAD_SRC: &str = "";
 /// a new check function, then run sema. `check_src` is the statement(s) text
 /// as produced by `classify` — it already ends in `;` (or `}`). Returns errors only.
 fn type_check_stmts(session: &Session, stmts: &[Stmt], step: usize) -> Vec<Diagnostic> {
-    let prog_src = format!(
-        "{}{}{}\nfn __repl_check_{}__() {{}}\n",
+    let base_src = format!(
+        "{}{}{}",
         PRELOAD_SRC,
         session.import_src(),
         session.accumulated_src(),
-        step,
     );
+    let prog_src = format!("{base_src}\nfn __repl_check_{step}__() {{}}\n");
     let mut body = session.sema_stmts.clone();
     body.extend_from_slice(stmts);
-    run_sema_with_body(&prog_src, &format!("__repl_check_{}__", step), body)
+    run_sema_with_body(
+        &prog_src,
+        &base_src,
+        &format!("__repl_check_{}__", step),
+        body,
+    )
 }
 
-fn run_sema_with_body(src: &str, fn_name: &str, body: Vec<Stmt>) -> Vec<Diagnostic> {
-    let (toks, lex_diags) = crate::Lexer::lex(src);
+fn run_sema_with_body(
+    src: &str,
+    base_src: &str,
+    fn_name: &str,
+    body: Vec<Stmt>,
+) -> Vec<Diagnostic> {
+    // Session declarations remain user source even though the final check
+    // function is compiler-owned.
+    let (_, base_lex_diags) = crate::Lexer::lex(base_src);
+    if !base_lex_diags.is_empty() {
+        return base_lex_diags;
+    }
+    let (toks, lex_diags) = crate::Lexer::lex_generated(src);
     if !lex_diags.is_empty() {
         return lex_diags;
     }
@@ -1623,22 +1650,26 @@ fn run_sema_with_body(src: &str, fn_name: &str, body: Vec<Stmt>) -> Vec<Diagnost
         Ok(p) => p,
         Err(ds) => return ds,
     };
+    if let Some(Item::Func(f)) = prog
+        .items
+        .iter_mut()
+        .find(|item| matches!(item, Item::Func(f) if f.name == fn_name))
+    {
+        f.body = body;
+    }
     if prog.imports.is_empty() {
-        if let Some(Item::Func(f)) = prog.items.iter_mut().find(|item| matches!(item, Item::Func(f) if f.name == fn_name)) {
-            f.body = body;
-        }
         return check_program(src, prog)
             .into_iter().filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error)).collect();
     }
     let tmp_path = std::env::temp_dir().join(unique_temp_name("check_ast"));
-    if std::fs::write(&tmp_path, src).is_err() { return Vec::new(); }
+    if std::fs::write(&tmp_path, base_src).is_err() { return Vec::new(); }
     let path_str = tmp_path.to_string_lossy().to_string();
     let diags = match crate::Loader::load_entry(&path_str) {
         Ok(mut bundle) => {
             let entry = bundle.entry;
-            if let Some(Item::Func(f)) = bundle.modules[entry].items.iter_mut().find(|item| matches!(item, Item::Func(f) if f.name == fn_name)) {
-                f.body = body;
-            }
+            bundle.modules[entry].source = src.to_string();
+            bundle.modules[entry].items = std::mem::take(&mut prog.items);
+            bundle.modules[entry].block_spans = std::mem::take(&mut prog.block_spans);
             crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
         }
         Err(ds) => ds,

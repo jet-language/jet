@@ -900,6 +900,7 @@ mod display_tests {
             examples: Vec::new(),
             provenance: jet_semindex::SemanticProvenance::Session,
             span: None,
+            lexical_scope: None,
         }];
         let menu = completion_menu(&candidates, 0, false);
         assert!(menu.contains("> alpha"));

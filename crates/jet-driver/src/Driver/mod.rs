@@ -1679,13 +1679,37 @@ pub fn compile_src(
     compile_src_with_options(src, file, mode, CompileSrcOptions::default())
 }
 
+/// Compile source wholly synthesized by the compiler or one of its tools.
+/// Callers embedding user text must validate that text with `Lexer::lex` first.
+pub fn compile_generated_src(
+    src: &str,
+    file: &str,
+    mode: crate::Sema::CompileMode,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_src_with_options_and_policy(src, file, mode, CompileSrcOptions::default(), true)
+}
+
 pub fn compile_src_with_options(
     src: &str,
     file: &str,
     mode: crate::Sema::CompileMode,
     options: CompileSrcOptions,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    let (toks, lex_diags) = crate::Lexer::lex(src);
+    compile_src_with_options_and_policy(src, file, mode, options, false)
+}
+
+fn compile_src_with_options_and_policy(
+    src: &str,
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    options: CompileSrcOptions,
+    generated: bool,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    let (toks, lex_diags) = if generated {
+        crate::Lexer::lex_generated(src)
+    } else {
+        crate::Lexer::lex(src)
+    };
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }

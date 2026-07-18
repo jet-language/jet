@@ -186,8 +186,14 @@ fn check_comptime_case(i: usize, expr: &str) {
 /// `check_comptime_module_case` (card #392's `use core.X as a; a.f(...)`
 /// cases, which need a full program — a bare `use` isn't an expression).
 fn check_comptime_src(i: usize, label: &str, src: &str) {
+    let (_, user_diags) = jet::Lexer::lex(src);
+    assert!(user_diags.is_empty(), "invalid differential fixture: {user_diags:?}");
     let src = framed_comptime_src(src);
-    let compiled = match jet::compile(&src) {
+    let compiled = match jet::Driver::compile_generated_src(
+        &src,
+        "comptime_diff.jet",
+        jet::Sema::CompileMode::Run,
+    ) {
         Ok(c) => c,
         Err(diags) => panic!(
             "case {} `{}` failed the front end:\n{}",

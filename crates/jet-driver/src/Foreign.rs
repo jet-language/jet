@@ -433,7 +433,7 @@ fn materialize_namespace(
             Err(_) => String::new(),
         };
         if !source.is_empty() {
-            let (tokens, lex_diags) = crate::Lexer::lex(&source);
+            let (tokens, lex_diags) = crate::Lexer::lex_generated(&source);
             if !lex_diags.is_empty() {
                 return Err(lex_diags);
             }

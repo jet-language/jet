@@ -420,6 +420,15 @@ fn repl_arithmetic_echo() {
 }
 
 #[test]
+fn repl_rejects_user_dunder() {
+    let out = run_transcript(&["__user :: 1"], None);
+    assert!(
+        out.contains("E0067") && out.contains("reserved for Jet"),
+        "got: {out:?}"
+    );
+}
+
+#[test]
 fn repl_val_binding_then_expr() {
     let inputs = &["x :: 10", "x * 2"];
     let out = run_transcript(inputs, None);

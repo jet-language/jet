@@ -127,6 +127,14 @@ fn ui_snapshots() {
         // allow-impure flag so E3411/E3412 snapshots can exercise the gate.
         let allow_impure = src.lines().any(|l| l.trim() == "// @allow_impure");
         let repl_deny = src.lines().any(|l| l.trim() == "// @repl_deny");
+        // Compiler/tool-generated Jet may use the reserved `__name` lane.
+        // Ordinary fixtures never take this path.
+        let generated_source = src.lines().any(|l| l.trim() == "// @generated_source")
+            && path.parent() == Some(dir.as_path())
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("generated_cffi_"));
         // D-PLUGIN1=B (c81): files marked `// @plugin_target` compile via
         // `jet build --target=plugin`'s front end so plugin-only diagnostics
         // (E1257-E1260) can exercise the gate.
@@ -195,6 +203,15 @@ fn ui_snapshots() {
             let output = child.wait_with_output().expect("finish REPL diagnostic fixture");
             assert!(output.status.success(), "REPL diagnostic fixture failed to exit");
             String::from_utf8(output.stderr).expect("REPL diagnostic stderr is UTF-8")
+        } else if generated_source {
+            match jet::Driver::compile_generated_src(
+                &src,
+                &file_arg,
+                jet::Sema::CompileMode::Check,
+            ) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
         } else if all_diags {
             let diags = jet::check_with_path(&file_arg);
             if diags.is_empty() {
