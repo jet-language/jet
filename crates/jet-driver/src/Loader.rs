@@ -304,6 +304,12 @@ fn load_entry_with_overlays_mode(
     let mut path_to_idx: HashMap<PathBuf, usize> = HashMap::new();
     let mut stack: Vec<PathBuf> = Vec::new();
     let mut parse_teaching = inline_dep_lints;
+    let project_part_overlays = overlays
+        .iter()
+        .map(|(path, source)| (normalize_path(path), (*source).to_string()))
+        .collect::<Vec<_>>();
+    let (project_parts, project_part_failures) =
+        crate::ProjectParts::scan_with_diagnostics(&project_root, &project_part_overlays);
 
     load_file(
         &entry_abs,
@@ -318,7 +324,20 @@ fn load_entry_with_overlays_mode(
         overlays,
         for_check,
         &mut parse_teaching,
+        &project_parts,
+        &project_part_failures,
     )?;
+
+    // Explicit project imports report the same conflict at their source span
+    // while loading. Any conflict left here still invalidates discovery,
+    // including duplicate declarations whose internal names stay skipped.
+    if !project_parts.conflicts.is_empty() {
+        return Err(project_parts
+            .conflicts
+            .iter()
+            .map(|conflict| conflict.diagnostic(&project_root, None))
+            .collect());
+    }
 
     if load_adjacent_unqualified {
         let aliases: Vec<(String, crate::Diagnostics::Span)> = modules[0]
@@ -357,6 +376,8 @@ fn load_entry_with_overlays_mode(
                     overlays,
                     for_check,
                     &mut parse_teaching,
+                    &project_parts,
+                    &project_part_failures,
                 )?;
                 // Supply the real adjacent module edge to sema. The user's
                 // source remains untouched; this is the structural workspace
@@ -421,6 +442,8 @@ fn load_entry_with_overlays_mode(
                 &project_root,
                 &pkg_dep_dirs,
                 &pkg_resolution,
+                &project_parts,
+                &project_part_failures,
             ) {
                 let norm = normalize_path(&target_path);
                 if let Some(&target_idx) = path_to_idx.get(&norm) {
@@ -669,6 +692,8 @@ fn load_file(
     overlays: &[(&Path, &str)],
     for_check: bool,
     parse_teaching: &mut Vec<Diagnostic>,
+    project_parts: &crate::ProjectParts::ProjectPartsReport,
+    project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
 ) -> Result<(), Vec<Diagnostic>> {
     let norm = normalize_path(path);
     if stack.contains(&norm) {
@@ -785,7 +810,15 @@ fn load_file(
         if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
             continue;
         }
-        let target = match resolve_import(imp, path, project_root, pkg_dep_dirs, pkg_resolution) {
+        let target = match resolve_import(
+            imp,
+            path,
+            project_root,
+            pkg_dep_dirs,
+            pkg_resolution,
+            project_parts,
+            project_part_failures,
+        ) {
             Ok(p) => p,
             Err(d) => {
                 stack.pop();
@@ -806,6 +839,8 @@ fn load_file(
             overlays,
             for_check,
             parse_teaching,
+            project_parts,
+            project_part_failures,
         ) {
             stack.pop();
             return Err(diags);
@@ -860,6 +895,8 @@ fn load_file(
             overlays,
             for_check,
             parse_teaching,
+            project_parts,
+            project_part_failures,
         ) {
             stack.pop();
             return Err(diags);
@@ -933,13 +970,23 @@ fn resolve_import(
     project_root: &Path,
     pkg_dep_dirs: &HashMap<String, PathBuf>,
     pkg_resolution: &PkgResolution,
+    project_parts: &crate::ProjectParts::ProjectPartsReport,
+    project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
 ) -> Result<PathBuf, Diagnostic> {
     match &imp.kind {
         ImportKind::File(path_str, span) => {
             resolve_file_import(importing, path_str, project_root, *span)
         }
         ImportKind::Module(name, span) => {
-            resolve_module_import(name, project_root, pkg_dep_dirs, pkg_resolution, *span)
+            resolve_module_import(
+                name,
+                project_root,
+                pkg_dep_dirs,
+                pkg_resolution,
+                *span,
+                project_parts,
+                project_part_failures,
+            )
         }
         ImportKind::Unqualified { .. } => {
             // Unqualified imports don't map to a new file — the module is
@@ -1120,12 +1167,12 @@ fn resolve_module_import(
     pkg_dep_dirs: &HashMap<String, PathBuf>,
     pkg_resolution: &PkgResolution,
     span: Span,
+    project_parts: &crate::ProjectParts::ProjectPartsReport,
+    project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
 ) -> Result<PathBuf, Diagnostic> {
     if let Some(local_name) = name.strip_prefix(Syntax::PROJECT_IMPORT_PREFIX) {
-        let (report, scan_failures) =
-            crate::ProjectParts::scan_with_diagnostics(project_root, &[]);
-        let matches = report.named(local_name);
-        let scan_failure = scan_failures
+        let matches = project_parts.named(local_name);
+        let scan_failure = project_part_failures
             .iter()
             .find(|failure| failure.module_names.iter().any(|name| name == local_name));
         return match matches.as_slice() {
@@ -1141,7 +1188,7 @@ fn resolve_module_import(
                 )),
             },
             [part] => Ok(normalize_path(&part.path)),
-            _ => Err(report
+            _ => Err(project_parts
                 .conflicts
                 .iter()
                 .find(|conflict| conflict.name == local_name)
@@ -1339,12 +1386,16 @@ pub fn resolve_import_target(
     // (realized library staging dirs) the loader used, so a `use <pkg>`
     // re-resolves to the exact file already pulled into the bundle.
     let (pkg_dep_dirs, pkg_resolution) = project_resolution(&bundle.project_root);
+    let (project_parts, project_part_failures) =
+        crate::ProjectParts::scan_with_diagnostics(&bundle.project_root, &[]);
     let target_path = match resolve_import(
         imp,
         &importing.path,
         &bundle.project_root,
         &pkg_dep_dirs,
         &pkg_resolution,
+        &project_parts,
+        &project_part_failures,
     ) {
         Ok(p) => normalize_path(&p),
         Err(d) => return Err(d),
@@ -1564,7 +1615,42 @@ mod stale_manifest_name_tests {
         fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
 
         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0606"));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0606" && diagnostic.span.is_some()));
+    }
+
+    #[test]
+    fn duplicate_internal_declarations_fail_without_an_explicit_import() {
+        let dir = tempdir("internal-module-unimported-conflict");
+        let entry = dir.join("main.jet");
+        fs::write(&entry, "fn run() {}\n").unwrap();
+        fs::write(dir.join("a.jet"), "module _bench { }\n").unwrap();
+        fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
+
+        let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0606"
+                && diagnostic.span.is_none()
+                && diagnostic.fix.contains("a.jet, b.jet")
+        }));
+    }
+
+    #[test]
+    fn explicit_project_import_uses_overlay_declarations() {
+        let dir = tempdir("internal-module-overlay");
+        let entry = dir.join("main.jet");
+        let part = dir.join("part.jet");
+        fs::write(&entry, "use project._bench\nfn run() {}\n").unwrap();
+        fs::write(&part, "module _other { }\n").unwrap();
+
+        let bundle = load_entry_with_overlay(
+            entry.to_str().unwrap(),
+            Some((&part, "module _bench { }\n")),
+            false,
+        )
+        .unwrap();
+        assert!(bundle.modules.iter().any(|module| module.path == part));
     }
 
     #[test]
