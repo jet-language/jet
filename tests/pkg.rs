@@ -2659,13 +2659,21 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     let current_path = dir.join("current.jet");
     fs::write(&current_path, current).unwrap();
     let current_api = extract_public_api(current, current_path.to_str().unwrap());
-    let bundle = jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true)
+    let mut bundle = jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true)
         .unwrap();
-    let frozen = jet::Publish::ApiFreeze::snapshot_from_items(
-        &bundle.modules[bundle.entry].items,
+    let (_, facts) = jet::Sema::check_bundle_with_effect_facts(
+        &mut bundle,
+        jet::Sema::CompileMode::Check,
+    );
+    let entry = &bundle.modules[bundle.entry];
+    let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
+        &entry.items,
         "physics",
         "1.0.0",
+        Some(&facts.solved),
+        Some(&entry.alias),
     );
+    assert_eq!(frozen.api_version, jet::Publish::ApiFreeze::API_SNAPSHOT_VERSION);
     let frozen_api: Vec<ApiItem> = frozen
         .funcs
         .iter()
@@ -2731,8 +2739,12 @@ fn inferred_inline_module_effects_are_published() {
     use jet::Publish::{diff_public_api, extract_public_api};
 
     let dir = tmp_dir("inline_module_effect_api");
-    let old_path = dir.join("old.jet");
-    let new_path = dir.join("new.jet");
+    let old_dir = dir.join("old");
+    let new_dir = dir.join("new");
+    fs::create_dir_all(&old_dir).unwrap();
+    fs::create_dir_all(&new_dir).unwrap();
+    let old_path = old_dir.join("main.jet");
+    let new_path = new_dir.join("main.jet");
     let old = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() {} }\n";
     let new = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() { print(\"bench\"); } }\n";
     fs::write(&old_path, old).unwrap();
@@ -2773,7 +2785,7 @@ fn v2_snapshot_upgrade_matches_duplicate_inline_leaves() {
         "api_version = 2\npackage = demo\npublished_version = 1.0.0\nfn report()\nfn report(x: Int (a whole number))\n",
     )
     .expect("v2 snapshot");
-    let old = previous
+    let mut old = previous
         .funcs
         .iter()
         .map(|function| ApiItem {
@@ -2782,6 +2794,10 @@ fn v2_snapshot_upgrade_matches_duplicate_inline_leaves() {
             signature: function.signature.clone(),
         })
         .collect::<Vec<_>>();
+    for item in &mut old {
+        item.name = legacy_api_name(&item.name).to_string();
+        item.signature = legacy_api_signature(&item.signature);
+    }
     assert!(
         diff_public_api(&old, &current).is_empty(),
         "old={old:#?}\ncurrent={current:#?}"
@@ -2824,6 +2840,52 @@ fn public_trait_effect_contract_drift_is_breaking() {
     assert!(
         !diff_public_api(&old_api, &new_api).is_empty(),
         "trait method effect drift must be breaking"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn physical_unit_trait_methods_use_canonical_dimensions() {
+    use jet::Publish::extract_public_api;
+
+    let dir = tmp_dir("physical_unit_trait_api");
+    let path = dir.join("current.jet");
+    let source = "@UnitFamily(Length) { meter }\npub trait Measure { fn scale(value: Meter) -> Meter; }\n";
+    fs::write(&path, source).unwrap();
+
+    let api = extract_public_api(source, path.to_str().unwrap());
+    let method = api
+        .iter()
+        .find(|item| item.name == "Measure.scale")
+        .expect("public trait method");
+    assert_eq!(
+        method.signature,
+        "fn Measure.scale(value: Meter{family=Length; base=Float; dimension=L1T0}) -> Meter{family=Length; base=Float; dimension=L1T0}"
+    );
+
+    let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
+        .expect("trait source bundle");
+    let (_, facts) = jet::Sema::check_bundle_with_effect_facts(
+        &mut bundle,
+        jet::Sema::CompileMode::Check,
+    );
+    let entry = &bundle.modules[bundle.entry];
+    let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
+        &entry.items,
+        "physics",
+        "1.0.0",
+        Some(&facts.solved),
+        Some(&entry.alias),
+    );
+    assert_eq!(
+        frozen
+            .funcs
+            .iter()
+            .find(|item| item.name == "Measure.scale")
+            .expect("frozen public trait method")
+            .signature,
+        method.signature
     );
 
     let _ = fs::remove_dir_all(&dir);

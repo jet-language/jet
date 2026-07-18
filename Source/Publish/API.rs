@@ -79,6 +79,7 @@ fn collect_public_api(
                                 &crate::Sema::ApiFreeze::trait_method_signature(
                                     &trait_def.name,
                                     method,
+                                    dimensions,
                                 ),
                             ),
                         }),
@@ -150,7 +151,7 @@ fn public_api_of_item(
         Item::Trait(t) if supported_public_name(&t.name) && t.is_pub && !t.is_package_pub => Some(ApiItem {
             kind: "trait".into(),
             name: public_item_name(code_module, &t.name),
-            signature: format_trait_sig(t),
+            signature: format_trait_sig(t, dimensions),
         }),
         // ConstDef does not carry is_pub in v1 — consts are accessible by name
         // and the pub distinction is enforced at use sites by sema. Skip from
@@ -229,12 +230,17 @@ fn format_enum_sig(e: &crate::AST::EnumDef) -> String {
     format!("enum {} {{ {} }}", e.name, variants.join(", "))
 }
 
-fn format_trait_sig(t: &crate::AST::TraitDef) -> String {
+fn format_trait_sig(
+    t: &crate::AST::TraitDef,
+    dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+) -> String {
     let methods: Vec<String> = t
         .methods
         .iter()
         .filter(|method| supported_public_name(&method.name))
-        .map(|method| crate::Sema::ApiFreeze::trait_method_signature(&t.name, method))
+        .map(|method| {
+            crate::Sema::ApiFreeze::trait_method_signature(&t.name, method, dimensions)
+        })
         .collect();
     format!("trait {} {{ {} }}", t.name, methods.join(", "))
 }

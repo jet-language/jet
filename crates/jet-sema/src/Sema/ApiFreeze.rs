@@ -260,7 +260,11 @@ pub fn canonical_fn_signature_with_effects(
 /// D-EFF3's public dynamic-dispatch contract. Unlike ordinary functions, a
 /// trait method publishes its declared bound because callers cannot inspect a
 /// concrete implementation through a trait value.
-pub fn trait_method_signature(owner: &str, method: &TraitMethodSig) -> String {
+pub fn trait_method_signature(
+    owner: &str,
+    method: &TraitMethodSig,
+    dimensions: &ApiUnitDimensions,
+) -> String {
     let params = method
         .params
         .iter()
@@ -269,7 +273,7 @@ pub fn trait_method_signature(owner: &str, method: &TraitMethodSig) -> String {
                 "{}: {}{}",
                 param.name,
                 param.convention.sigil(),
-                param.ty.name()
+                canonical_api_type_name(&param.ty, dimensions)
             )
         })
         .collect::<Vec<_>>()
@@ -295,7 +299,7 @@ pub fn trait_method_signature(owner: &str, method: &TraitMethodSig) -> String {
     let result = method
         .return_type
         .as_ref()
-        .map(|ty| format!(" {}", ty.name()))
+        .map(|ty| format!(" {}", canonical_api_type_name(ty, dimensions)))
         .unwrap_or_default();
     format!("fn {owner}.{}({params}){arrow}{result}", method.name)
 }
@@ -331,7 +335,18 @@ pub fn qualify_api_signature(namespace: Option<&str>, signature: &str) -> String
 }
 
 pub fn legacy_api_signature(signature: &str) -> String {
-    let signature = signature_without_effect_row(signature);
+    let signature = [
+        ("Int (a whole number)", "Int"),
+        ("Float (a decimal number)", "Float"),
+        ("Bool (true or false)", "Bool"),
+        ("String (text)", "String"),
+        ("Char (one character)", "Char"),
+        ("F32 (a 32-bit decimal number)", "F32"),
+    ]
+    .into_iter()
+    .fold(signature_without_effect_row(signature), |signature, (old, new)| {
+        signature.replace(old, new)
+    });
     let Some(rest) = signature.strip_prefix("fn ") else {
         return signature;
     };
@@ -347,10 +362,8 @@ fn frozen_name(code_module: Option<&str>, name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
-/// Build a frozen-API snapshot from a list of items (a module's items, post
-/// capability resolution). Records every `pub fn` reachable on the public
-/// surface — top-level, and inside a `pub module { … }` block (the common
-/// library layout `module foo { pub fn … }`), recursively.
+/// Build a pre-v3 compatibility snapshot from AST items without solved effect
+/// facts. Current publish metadata must use [`snapshot_from_items_with_effects`].
 pub fn snapshot_from_items(items: &[Item], package: &str, version: &str) -> ApiSnapshot {
     snapshot_from_items_with_effects(items, package, version, None, None)
 }
@@ -376,7 +389,14 @@ pub fn snapshot_from_items_with_effects(
     );
     funcs.sort();
     ApiSnapshot {
-        api_version: API_SNAPSHOT_VERSION,
+        // Effect rows became mandatory in v3. AST-only callers have no solved
+        // effect graph, so they may create compatibility fixtures but cannot
+        // claim current-format metadata.
+        api_version: if solved.is_some() {
+            API_SNAPSHOT_VERSION
+        } else {
+            API_SNAPSHOT_VERSION - 1
+        },
         package: package.to_string(),
         published_version: version.to_string(),
         funcs,
@@ -418,6 +438,7 @@ fn collect_pub_fns(
     dimensions: &HashMap<String, (String, Dimension)>,
     out: &mut Vec<FrozenFn>,
 ) {
+    let empty_effects = EffectSet::new();
     for item in items {
         match item {
             Item::Func(f)
@@ -430,7 +451,7 @@ fn collect_pub_fns(
                     code_module,
                     &canonical_fn_signature_with_effects(
                         f,
-                        solved.and_then(|sets| {
+                        solved.map(|sets| {
                             module_alias.and_then(|alias| {
                                 let name = code_module
                                     .map(|module| format!("{module}__{}", f.name))
@@ -438,6 +459,7 @@ fn collect_pub_fns(
                                 sets.get(&format!("{alias}::{name}"))
                             })
                                 .or_else(|| sets.get(&f.name))
+                                .unwrap_or(&empty_effects)
                         }),
                         dimensions,
                     ),
@@ -455,7 +477,7 @@ fn collect_pub_fns(
                             ),
                             signature: qualify_api_signature(
                                 code_module,
-                                &trait_method_signature(&trait_def.name, method),
+                                &trait_method_signature(&trait_def.name, method, dimensions),
                             ),
                         });
                     }
@@ -670,6 +692,7 @@ mod tests {
             Some("main"),
         );
         assert_eq!(snapshot.funcs[0].name, "files.load");
+        assert_eq!(snapshot.api_version, API_SNAPSHOT_VERSION);
         assert_eq!(
             snapshot.funcs[0].signature,
             "fn files.load() --[Fs.Read]-> String"
@@ -679,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn pre_v3_comparison_strips_only_effect_metadata() {
+    fn pre_v3_comparison_normalizes_added_metadata_and_type_glosses() {
         assert_eq!(
             signature_without_effect_row("fn load(path: String) --[Fs.Read, Io]-> String"),
             "fn load(path: String) -> String"
@@ -696,6 +719,10 @@ mod tests {
         assert_eq!(
             legacy_api_signature("fn files.load() --[Fs.Read]-> String"),
             "fn load() -> String"
+        );
+        assert_eq!(
+            legacy_api_signature("fn report(x: Int (a whole number))"),
+            "fn report(x: Int)"
         );
     }
 
@@ -740,6 +767,7 @@ mod tests {
             api.funcs[0].signature,
             "fn distance() -> Meter{family=Length; base=Float; dimension=L1T0}"
         );
+        assert_eq!(api.api_version, API_SNAPSHOT_VERSION - 1);
     }
 
     #[test]

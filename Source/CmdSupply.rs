@@ -198,7 +198,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // diff the current surface against it. A breaking change under a non-major
     // bump is refused unless `--force`.
     if let Some(prev) = jet::Publish::ApiFreeze::load_snapshot(&root, name) {
-        let old_api: Vec<jet::Publish::ApiItem> = prev
+        let mut old_api: Vec<jet::Publish::ApiItem> = prev
             .funcs
             .iter()
             .map(|f| jet::Publish::ApiItem {
@@ -213,6 +213,10 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             .cloned()
             .collect();
         if prev.api_version < jet::Publish::ApiFreeze::API_SNAPSHOT_VERSION {
+            for item in &mut old_api {
+                item.name = jet::Publish::ApiFreeze::legacy_api_name(&item.name).to_string();
+                item.signature = jet::Publish::ApiFreeze::legacy_api_signature(&item.signature);
+            }
             for item in &mut current_fns {
                 item.name = jet::Publish::ApiFreeze::legacy_api_name(&item.name).to_string();
                 item.signature = jet::Publish::ApiFreeze::legacy_api_signature(&item.signature);
