@@ -666,14 +666,19 @@ fn semindex_projects_inline_module_inferred_effects() {
 fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
     let path = temp_fixture(
         "effect_provenance_origins.jet",
-        "trait Shape { fn area(self) --[Io]-> Int; }\nfn dynamic(shape: Shape) -> Int { return shape.area(); }\nfn apply(f: fn() -> Int) -> Int { return f(); }\nfn run() {}\n",
+        "trait Shape { fn area(self) --[Io]-> Int; }\nfn dynamic(shape: Shape) -> Int { return shape.area(); }\nfn apply(f: fn() -> Int) -> Int { return f(); }\nfn stored(f: ^fn() -> Int) -> Int { g :: f; return g(); }\nfn run() {}\n",
     );
     let index = open(&path).expect("effect provenance index");
 
     let apply = index.effect_of("apply").expect("open callback effects");
-    assert!(apply.maximal);
-    assert_eq!(apply.provenance.len(), apply.inferred.len());
-    assert!(apply.provenance.iter().all(|origin| !origin.spans.is_empty()));
+    assert!(!apply.maximal);
+    assert!(apply.inferred.is_empty());
+    assert!(apply.provenance.is_empty());
+
+    let stored = index.effect_of("stored").expect("stored callback effects");
+    assert!(stored.maximal);
+    assert_eq!(stored.provenance.len(), stored.inferred.len());
+    assert!(stored.provenance.iter().all(|origin| !origin.spans.is_empty()));
 
     let dynamic = index.effect_of("dynamic").expect("trait dispatch effects");
     let io = dynamic

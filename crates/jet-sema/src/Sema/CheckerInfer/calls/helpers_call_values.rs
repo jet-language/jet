@@ -67,7 +67,16 @@ impl<'a> Checker<'a> {
                 return None;
             };
             match effect_bound {
-                None => self.record_maximal(span),
+                None
+                    if !matches!(
+                        callee.as_ref(),
+                        Expr::Ident(name, _)
+                            if self.lookup(name).is_some_and(|info| info.param_conv.is_some())
+                    ) =>
+                {
+                    self.record_maximal(span);
+                }
+                None => {}
                 Some(row) => {
                     for (effect, _) in row {
                         if crate::Sema::effect_row_var(&effect).is_none()
