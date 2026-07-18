@@ -11,9 +11,52 @@ use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
 use crate::Sema::Registration::already_defined;
 use crate::Sema::{type_is_copy, Checker, LocalInfo};
 use crate::Syntax;
+use crate::Generics::substitute_type;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
 impl<'a> Checker<'a> {
+        fn compound_owner_field_type(&self, owner: &Type, field: &str) -> Option<Type> {
+            let (owner_name, subst) = match owner {
+                Type::Named(name) => (name.as_str(), HashMap::new()),
+                Type::Apply { name, args } => {
+                    let params = self.trait_reg.struct_params.get(name)?;
+                    let subst = params
+                        .iter()
+                        .zip(args)
+                        .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                        .collect();
+                    (name.as_str(), subst)
+                }
+                Type::Tagged { inner, .. } => return self.compound_owner_field_type(inner, field),
+                _ => return None,
+            };
+            self.registry
+                .struct_fields(owner_name)?
+                .iter()
+                .find(|(name, _, _, _)| name == field)
+                .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+        }
+
+        fn compound_field_type(&self, base: &Expr, field: &str) -> Option<Type> {
+            let owner = match base {
+                Expr::Ident(name, _) => self.lookup(name)?.ty.clone(),
+                Expr::Field(parent, parent_field, _) => {
+                    self.compound_field_type(parent, parent_field)?
+                }
+                _ => return None,
+            };
+            self.compound_owner_field_type(&owner, field)
+        }
+
+        fn compound_type_implements(&self, ty: &Type, trait_name: &str) -> bool {
+            self.trait_reg.type_implements_trait(ty, trait_name)
+                || matches!(ty, Type::Named(name)
+                    if self.type_param_scope.iter().any(|param| {
+                        param.name == *name && param.bounds.iter().any(|bound| bound == trait_name)
+                    }))
+        }
+
         /// Check two alternative branches with independent move states, then
         /// keep the union (a value moved in either branch counts as gone).
         pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
@@ -25,6 +68,93 @@ impl<'a> Checker<'a> {
                 self.fx_memory_unbounded_control.push(*span);
                 for region in &mut self.memory_policy_stack {
                     region.unbounded_control.push(*span);
+                }
+            }
+            if let Stmt::Assign {
+                target: LValue::Field { base, field, span },
+                op: Some(op),
+                value,
+                ..
+            } = stmt
+            {
+                let trait_name = match op {
+                    crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
+                    crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
+                    crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
+                    crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
+                    _ => None,
+                };
+                let nested_hook = !matches!(base.as_ref(), Expr::Ident(..))
+                    && trait_name.is_some_and(|trait_name| {
+                        self.compound_field_type(base, field)
+                            .is_some_and(|ty| self.compound_type_implements(&ty, trait_name))
+                    });
+                if nested_hook {
+                    self.diags.push(Diagnostic::error(
+                        "E0362",
+                        "compound assignment can't target a nested operator field".to_string(),
+                        "the current operator-place lowering supports one named owner and one field"
+                            .to_string(),
+                        "bind the inner value, update it, then assign the whole inner value back"
+                            .to_string(),
+                        Some(*span),
+                    ));
+                    self.infer(value);
+                    return;
+                }
+            }
+            // D-OPDEF1=A: compound arithmetic is the same hook as its binary
+            // form. Rewrite before checking so TIR/JIT see one MethodCall spine.
+            let compound = match &*stmt {
+                Stmt::Assign {
+                    target: LValue::Local { name, name_span },
+                    op: Some(op),
+                    ..
+                } => {
+                    self.lookup(name).and_then(|info| {
+                        let trait_name = match op {
+                            crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
+                            crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
+                            crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
+                            crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
+                            _ => None,
+                        }?;
+                        self.compound_type_implements(&info.ty, trait_name)
+                            .then_some((Expr::Ident(name.clone(), *name_span), *name_span, *op))
+                    })
+                }
+                Stmt::Assign {
+                    target: LValue::Field { base, field, span },
+                    op: Some(op),
+                    ..
+                } => (|| {
+                    let Expr::Ident(base_name, _) = base.as_ref() else {
+                        return None;
+                    };
+                    let owner_ty = self.lookup(base_name).map(|info| info.ty.clone())?;
+                    let field_ty = self.compound_owner_field_type(&owner_ty, field)?;
+                    let trait_name = match op {
+                        crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
+                        crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
+                        crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
+                        crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
+                        _ => None,
+                    }?;
+                    self.compound_type_implements(&field_ty, trait_name)
+                        .then_some((Expr::Field(base.clone(), field.clone(), *span), *span, *op))
+                })(),
+                _ => None,
+            };
+            if let Some((left, span, binary_op)) = compound {
+                if let Stmt::Assign { op, value, .. } = stmt {
+                    let rhs = std::mem::replace(value, Expr::Absent(span));
+                    *value = Expr::Binary(
+                        binary_op,
+                        Box::new(left),
+                        Box::new(rhs),
+                        span,
+                    );
+                    *op = None;
                 }
             }
             match stmt {

@@ -764,6 +764,16 @@ pub(crate) fn check_effect_boundaries(
     // trait, the (trait, type, method) list from every trait impl, then enforce
     // each impl's inferred effects ⊆ the trait's bound (E0742).
     let mut trait_bounds: HashMap<(String, String), EffectSet> = HashMap::new();
+    for (trait_name, method) in [
+        (Syntax::TRAIT_ADD, "add"),
+        (Syntax::TRAIT_SUB, "sub"),
+        (Syntax::TRAIT_MUL, "mul"),
+        (Syntax::TRAIT_DIV, "div"),
+        (Syntax::TRAIT_EQUATABLE, "equal"),
+        (Syntax::TRAIT_COMPARABLE, "compare"),
+    ] {
+        trait_bounds.insert((trait_name.to_string(), method.to_string()), EffectSet::new());
+    }
     let mut impls: Vec<(String, String, String, Span)> = Vec::new();
     for item in items {
         if let Item::Trait(t) = item {

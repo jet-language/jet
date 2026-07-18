@@ -10,6 +10,7 @@ use crate::Codegen::TIR::JitSpawnCapture;
 use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower::lambda_block_tail;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::TExpr;
@@ -44,7 +45,18 @@ pub(crate) fn lower_lambda_expecting(
     env: &LowerEnv,
     expected_params: Option<&[Type]>,
 ) -> TLambda {
-    lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None)
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None, false)
+}
+
+/// Lower a callback for a native helper whose Rust contract consumes each
+/// payload as `Fn(T)`, rather than applying Jet's ordinary read convention.
+pub(crate) fn lower_lambda_expecting_value(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: &[Type],
+) -> TLambda {
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, Some(expected_params), None, true)
 }
 
 /// Runtime helpers such as `Shared.read` and collection adapters already lend
@@ -57,7 +69,14 @@ pub(crate) fn lower_lambda_expecting_host_borrow(
     expected_params: &[Type],
     write: bool,
 ) -> TLambda {
-    lower_lambda_expecting_with_host_borrow(lam, cx, env, Some(expected_params), Some(write))
+    lower_lambda_expecting_with_host_borrow(
+        lam,
+        cx,
+        env,
+        Some(expected_params),
+        Some(write),
+        false,
+    )
 }
 
 fn lower_lambda_expecting_with_host_borrow(
@@ -66,6 +85,7 @@ fn lower_lambda_expecting_with_host_borrow(
     env: &LowerEnv,
     expected_params: Option<&[Type]>,
     host_borrow: Option<bool>,
+    by_value: bool,
 ) -> TLambda {
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
@@ -96,7 +116,9 @@ fn lower_lambda_expecting_with_host_borrow(
         let ty =
             p.ty.clone()
                 .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
-        let place = if host_borrow.is_some() || ty.as_ref().is_some_and(|t| !t.is_scalar()) {
+        let place = if host_borrow.is_some()
+            || (!by_value && ty.as_ref().is_some_and(|t| !t.is_scalar()))
+        {
             format!("(*{})", mangle(&p.name))
         } else {
             mangle(&p.name)
@@ -115,13 +137,14 @@ fn lower_lambda_expecting_with_host_borrow(
             let ty =
                 p.ty.clone()
                     .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned())
-                    .map(|t| match host_borrow {
-                        Some(write) => format!(
+                    .map(|t| match (by_value, host_borrow) {
+                        (true, _) => format!(": {}", cx.rust_type(&t)),
+                        (false, Some(write)) => format!(
                             ": {}{}",
                             if write { "&mut " } else { "&" },
                             cx.rust_type(&t)
                         ),
-                        None => format!(
+                        (false, None) => format!(
                             ": {}",
                             rust_param_type(cx, AccessConvention::Read, &t)
                         ),
@@ -142,7 +165,9 @@ fn lower_lambda_expecting_with_host_borrow(
     let prev_in_stm = cx.in_stm_transact.replace(false);
     let (body, executable) = match &lam.body {
         LambdaBody::Expr(e) => {
-            let lowered = lower_expr(e, cx, &mut lam_env);
+            // An expression-bodied lambda returns an owned value, just like an
+            // explicit `return`; clone a borrowed non-scalar parameter here.
+            let lowered = lower_owned_expr(e, cx, &mut lam_env);
             (emit_tir_expr(&lowered, cx), TLambdaBody::Expr(Box::new(lowered)))
         }
         LambdaBody::Block(stmts) => {
@@ -375,6 +400,27 @@ pub(crate) fn render_lambda_str_expecting(
     expected_params: Option<&[Type]>,
 ) -> String {
     let tl = lower_lambda_expecting(lam, cx, env, expected_params);
+    let move_kw = if tl.is_move { "move " } else { "" };
+    let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
+    let wrapped = if tl.boxed {
+        format!("Box::new({})", closure)
+    } else {
+        closure
+    };
+    if tl.prep.is_empty() {
+        wrapped
+    } else {
+        format!("{{ {} {} }}", tl.prep, wrapped)
+    }
+}
+
+pub(crate) fn render_lambda_str_expecting_value(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: &[Type],
+) -> String {
+    let tl = lower_lambda_expecting_value(lam, cx, env, expected_params);
     let move_kw = if tl.is_move { "move " } else { "" };
     let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
     let wrapped = if tl.boxed {

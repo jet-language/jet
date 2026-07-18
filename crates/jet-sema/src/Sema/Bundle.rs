@@ -25,6 +25,20 @@ use Validation::{
     apply_helper_layer_inference, qualified_effect_facts, taint_check_item,
 };
 
+fn builtin_type_registry() -> TypeRegistry {
+    let zero = Span::new(0, 0);
+    let variants = ["Less", "Equal", "Greater"].into_iter().map(|name| {
+        (name.to_string(), (zero, VariantPayload::Unit))
+    }).collect::<HashMap<_, _>>();
+    let mut types = HashMap::new();
+    types.insert(Syntax::TYPE_ORDERING.to_string(), TypeDef::Enum {
+        variants, variant_order: vec!["Less".to_string(), "Equal".to_string(), "Greater".to_string()],
+        groups: HashMap::new(), methods: HashMap::new(), single_use: false,
+        must_use: false, c_layout_tag: None,
+    });
+    TypeRegistry { types, unit_dimensions: HashMap::new(), computed_fields: HashMap::new() }
+}
+
 fn is_fallible_void_entry_return(ty: &Type) -> bool {
     matches!(
         ty,
@@ -496,11 +510,7 @@ pub(crate) fn check_bundle_opts(
             method_pkg_pub: HashMap::new(),
             field_pub: HashMap::new(),
             field_pkg_pub: HashMap::new(),
-            registry: TypeRegistry {
-                types: HashMap::new(),
-                unit_dimensions: HashMap::new(),
-                computed_fields: HashMap::new(),
-            },
+            registry: builtin_type_registry(),
             consts: HashMap::new(),
             imports: HashMap::new(),
             core_imports: HashMap::new(),
@@ -1069,6 +1079,7 @@ pub(crate) fn check_bundle_opts(
         st.trait_reg.register_synthetic_rollback();
         st.trait_reg.register_synthetic_display_debug();
         st.trait_reg.register_synthetic_close();
+        st.trait_reg.register_synthetic_operators();
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_items(&module.items, &mut diags);

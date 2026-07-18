@@ -203,7 +203,10 @@ pub(crate) fn lower_one_call_arg(
     // non-scalar is `&(…)`; a `Mutate` is `&mut (…)`.
     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
     let (borrow, mut_borrow) = match &conv {
-        Some((AccessConvention::Read, t)) if !t.is_scalar() => {
+        Some((AccessConvention::Read, t))
+            if !t.is_scalar()
+                && !(a.flags.c_callback_symbol && matches!(t, Type::Fn { .. })) =>
+        {
             (true, false)
         }
         Some((AccessConvention::Write, _)) => (false, true),

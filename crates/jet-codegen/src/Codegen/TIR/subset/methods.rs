@@ -55,7 +55,10 @@ pub(crate) fn method_call_in_subset(
     // in `recv_type`. Rust emits the real trait-bound call.
     if recv_type.as_ref().is_some_and(|name| {
         cx.current_type_params.borrow().contains(name.as_str())
-    }) && matches!(method, "read" | "write" | "write_all") {
+    }) && matches!(
+        method,
+        "read" | "write" | "write_all" | "add" | "sub" | "mul" | "div" | "equal" | "compare"
+    ) {
         return args.iter().all(|arg| {
             arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals)
         }) && expr_in_subset(receiver, cx, locals);

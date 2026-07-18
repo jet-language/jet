@@ -314,10 +314,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
         }
-        TExprKind::CompareChain { operands, ops } => {
+        TExprKind::CompareChain { operands, ops, hooks } => {
             operands.len() == ops.len() + 1
-                && operands.iter().all(|e| {
-                    matches!(&e.ty, Type::Int | Type::Float) && resident_safe_expr(e, callees)
+                && hooks.len() == ops.len()
+                && operands.iter().all(|e| resident_safe_expr(e, callees))
+                && ops.iter().enumerate().all(|(i, _)| {
+                    hooks[i]
+                        || matches!(&operands[i].ty, Type::Int | Type::Float)
                 })
                 && ops
                     .iter()
@@ -484,8 +487,17 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(init, callees))
         }
         TStmt::Assign {
-            value, clone_value, ..
-        } => !clone_value && resident_safe_expr(value, callees),
+            place,
+            op,
+            value,
+            clone_value,
+        } => {
+            let local = place
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+            let field = op.is_none() && simple_record_field_place(place);
+            !clone_value && (local || field) && resident_safe_expr(value, callees)
+        }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
         TStmt::ExprStmt(e) => resident_safe_expr(e, callees),
         TStmt::If {
@@ -589,6 +601,16 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         }
         _ => false,
     }
+}
+
+fn simple_record_field_place(place: &str) -> bool {
+    let Some((base, field)) = place.strip_prefix('(').and_then(|p| p.split_once(").")) else {
+        return false;
+    };
+    base.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        && field
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 pub(crate) fn resident_safe_func(tir: &TFunc, callees: &HashSet<String>) -> bool {

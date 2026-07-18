@@ -220,19 +220,38 @@ impl<'a> Parser<'a> {
             // D-IMPLDOT1=A: trait impl is `impl Type.Trait { … }`. D-PROTO1/D-PROTO2 add
             // inherent impl on protocol handles `impl Payment.Client { … }` / `.Server`.
             let (type_name, type_span, mut trait_name, mut trait_span) = {
-                let (first, span) = self.expect_ident("after `impl`")?;
-                if matches!(self.peek().kind, TokKind::Dot) {
+                let (first, first_span) = self.expect_ident("after `impl`")?;
+                let mut parts = vec![(first, first_span)];
+                while matches!(self.peek().kind, TokKind::Dot) {
                     self.bump();
-                    let (second, second_span) = self.expect_ident("after `.` in `impl`")?;
-                    if matches!(self.peek().kind, TokKind::LBrace)
-                        && (second == "Client" || second == "Server")
-                    {
-                        (format!("{first}.{second}"), span, None, None)
-                    } else {
-                        (first, span, Some(second), Some(second_span))
-                    }
+                    parts.push(self.expect_ident("after `.` in `impl`")?);
+                }
+                let is_error_conversion = matches!(self.peek().kind, TokKind::Arrow);
+                let is_protocol_impl = parts.len() == 2
+                    && matches!(parts[1].0.as_str(), "Client" | "Server")
+                    && matches!(self.peek().kind, TokKind::LBrace);
+                if parts.len() == 1 || is_error_conversion || is_protocol_impl {
+                    let end = parts.last().unwrap().1.end;
+                    let name = parts
+                        .iter()
+                        .map(|(part, _)| part.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    (name, Span::new(first_span.start, end), None, None)
                 } else {
-                    (first, span, None, None)
+                    let (last, last_span) = parts.pop().unwrap();
+                    let owner_end = parts.last().unwrap().1.end;
+                    let owner = parts
+                        .iter()
+                        .map(|(part, _)| part.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    (
+                        owner,
+                        Span::new(first_span.start, owner_end),
+                        Some(last),
+                        Some(last_span),
+                    )
                 }
             };
             // Detect `impl Source -> Target { body }` — D-ERR-CONV.

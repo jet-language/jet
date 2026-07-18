@@ -2742,6 +2742,19 @@ fn resident_jit_safe_chained_comparison() {
 }
 
 #[test]
+fn resident_jit_safe_user_operator_traits() {
+    let file = "examples/features/operators/user_defined.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags.into_iter().filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)).collect();
+    assert!(errors.is_empty(), "user operator example must type-check: {errors:#?}");
+    assert!(jet_jit::resident_jit_safe_bundle(&bundle), "user operators should stay JIT-covered: {}", jet_jit::resident_jit_safe_bundle_detail(&bundle));
+    let src = fs::read_to_string(file).expect("operator example");
+    let output = run_cranelift_without_fallback(&src, "user_operator_traits");
+    assert_eq!(output, ProgramOutput::ran("4,6 4,6 true true false\n".into(), "".into(), 0));
+}
+
+#[test]
 fn resident_jit_safe_string_method_chain() {
     let file = "examples/features/basics/method_chain.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");

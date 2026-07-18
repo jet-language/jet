@@ -1215,14 +1215,6 @@ pub(crate) fn check_module_bodies(
                 // parameters to the ordinary body checker while preserving the
                 // parsed method signature for codegen.
                 for block in &mut s.trait_impls {
-                    if matches!(
-                        block.trait_name.as_str(),
-                        crate::Generics::COMPARABLE | crate::Generics::EQUATABLE
-                    ) {
-                        // E0903 already rejected this built-in impl. Its body is
-                        // not a valid checking context, so don't emit cascades.
-                        continue;
-                    }
                     for m in &mut block.methods {
                         let own_params = std::mem::take(&mut m.type_params);
                         m.type_params = if own_params.is_empty() {
@@ -1286,12 +1278,6 @@ pub(crate) fn check_module_bodies(
                     m.type_params = own_params;
                 }
                 for block in &mut e.trait_impls {
-                    if matches!(
-                        block.trait_name.as_str(),
-                        crate::Generics::COMPARABLE | crate::Generics::EQUATABLE
-                    ) {
-                        continue;
-                    }
                     for m in &mut block.methods {
                         let own_params = std::mem::take(&mut m.type_params);
                         m.type_params = if own_params.is_empty() { e.type_params.clone() } else { own_params.clone() };
@@ -1307,12 +1293,9 @@ pub(crate) fn check_module_bodies(
             }
             Item::Impl(i) => {
                 if i.trait_name.as_deref().is_some_and(|trait_name| {
-                    matches!(
-                        trait_name,
-                        crate::Generics::COMPARABLE | crate::Generics::EQUATABLE
-                    ) || (i.is_generated_serde
+                    i.is_generated_serde
                         && invalid_serde_impls
-                            .contains(&(i.type_name.clone(), trait_name.to_string())))
+                            .contains(&(i.type_name.clone(), trait_name.to_string()))
                 }) {
                     continue;
                 }

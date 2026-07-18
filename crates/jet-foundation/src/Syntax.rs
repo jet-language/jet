@@ -44,6 +44,8 @@
 // destination-owned `Target.from_source(value)` static method. Text remains
 // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are
 // not part of the language surface.
+// D-OPDEF1=A adds no punctuation: `impl Type.Add`/`.Sub`/`.Mul`/`.Div`,
+// `.Equatable`, and `.Comparable` reuse ordinary trait-impl dot syntax.
 
 /// Compiler-owned numeric source names for D-SHAPE-CONVERT1=A.
 pub const NUMERIC_CONVERSION_SOURCES: &[(&str, &str)] = &[

@@ -1,0 +1,47 @@
+// D-OPDEF1=A: existing symbols dispatch through ordinary trait hooks.
+struct Vec2 { x: Int y: Int }
+struct Holder { value: Vec2 }
+struct Probe { value: Int }
+
+impl Vec2.Add {
+    fn add(self, rhs: Vec2) -> Vec2 {
+        return Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+impl Vec2.Equatable {
+    fn equal(self, rhs: Vec2) -> Bool {
+        return self.x == rhs.x && self.y == rhs.y
+    }
+}
+
+impl Vec2.Comparable {
+    fn compare(self, rhs: Vec2) -> Ordering {
+        if self.x < rhs.x { return Ordering.Less }
+        if self.x > rhs.x { return Ordering.Greater }
+        return Ordering.Equal
+    }
+}
+
+impl Probe.Comparable {
+    fn compare(self, rhs: Probe) -> Ordering {
+        if rhs.value == 99 {
+            zero :: rhs.value - 99
+            _boom :: 1 / zero
+        }
+        if self.value < rhs.value { return Ordering.Less }
+        if self.value > rhs.value { return Ordering.Greater }
+        return Ordering.Equal
+    }
+}
+
+fn run() {
+    a :: Vec2.{ x: 1, y: 2 }
+    b :: Vec2.{ x: 3, y: 4 }
+    c :: a + b
+    holder := Holder.{ value: Vec2.{ x: 1, y: 2 } }
+    holder.value += Vec2.{ x: 3, y: 4 }
+    chain :: Vec2.{ x: 1, y: 0 } < Vec2.{ x: 2, y: 0 } < Vec2.{ x: 3, y: 0 }
+    short :: Probe.{ value: 2 } < Probe.{ value: 1 } < Probe.{ value: 99 }
+    print("{c.x},{c.y} {holder.value.x},{holder.value.y} {(Vec2.{ x: 1, y: 2 } != Vec2.{ x: 3, y: 4 })} {chain} {short}")
+}

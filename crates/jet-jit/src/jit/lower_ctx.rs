@@ -354,6 +354,47 @@ impl LowerCtx<'_, '_> {
             TStmt::Assign {
                 place, op, value, ..
             } => {
+                if op.is_none() {
+                    if let Some((base, field)) = simple_record_field_place(place)
+                    {
+                        if let (Some(var), Some(base_ty)) = (
+                            self.vars.get(base).copied(),
+                            self.var_tys.get(base).cloned(),
+                        ) {
+                            let type_name = record_type_key(&base_ty)
+                                .ok_or_else(|| format!("jit field assign recv type: {base_ty:?}"))?;
+                            let index = self
+                                .meta
+                                .struct_field_index(&type_name, field)
+                                .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
+                            let field_ty = self
+                                .meta
+                                .struct_field_type(&type_name, field)
+                                .unwrap_or_else(|| value.ty.clone());
+                            let host_id = match &field_ty {
+                                Type::Int => self.host.struct_set_i64,
+                                Type::Float => self.host.struct_set_f64,
+                                Type::Bool => self.host.struct_set_bool,
+                                Type::Char => self.host.struct_set_char,
+                                Type::String => self.host.struct_set_str,
+                                other if clif_ty(other) == Some(types::I64) => {
+                                    self.host.struct_set_i64
+                                }
+                                other => {
+                                    return Err(format!(
+                                        "jit field assignment type unsupported: {other:?}"
+                                    ));
+                                }
+                            };
+                            let handle = self.b.use_var(var);
+                            let index = self.b.ins().iconst(types::I64, index as i64);
+                            let value = self.lower_expr(value)?;
+                            let setter = self.module.declare_func_in_func(host_id, self.b.func);
+                            self.b.ins().call(setter, &[handle, index, value]);
+                            return Ok(());
+                        }
+                    }
+                }
                 let var = self
                     .vars
                     .get(place)
@@ -1288,7 +1329,9 @@ impl LowerCtx<'_, '_> {
                 }
                 self.lower_binary(*op, *overflow, *line, lhs, rhs)
             }
-            TExprKind::CompareChain { operands, ops } => self.lower_compare_chain(operands, ops),
+            TExprKind::CompareChain { operands, ops, hooks } => {
+                self.lower_compare_chain(operands, ops, hooks)
+            }
             TExprKind::Call { name, args } => {
                 let func_id = self
                     .func_ids
@@ -1620,6 +1663,7 @@ impl LowerCtx<'_, '_> {
                 recv,
                 method_rust,
                 args,
+                ..
             } => {
                 let key = Self::method_key(&recv.ty, method_rust)
                     .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
@@ -2153,7 +2197,13 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
         }
-        Err("jit clone unsupported".to_string())
+        let source = match &inner.kind {
+            TExprKind::Local(place) => format!("local {place}"),
+            TExprKind::Field { field_rust, .. } => format!("field {field_rust}"),
+            TExprKind::MethodCall { method_rust, .. } => format!("method {method_rust}"),
+            _ => "other expression".to_string(),
+        };
+        Err(format!("jit clone unsupported type: {:?}, {source}", inner.ty))
     }
 
     fn lower_spawn(&mut self) -> Result<Value, String> {
@@ -2612,49 +2662,89 @@ impl LowerCtx<'_, '_> {
     /// `BinOp`/`Type` combinations, not a `TIR` enum, so the `_` fallback here
     /// is a genuine unsupported-combination gap (e.g. no chained String
     /// comparison), not a hidden `TIR` variant.
-    fn lower_compare_chain(&mut self, operands: &[TExpr], ops: &[BinOp]) -> Result<Value, String> {
-        if operands.len() != ops.len() + 1 {
+    fn lower_compare_chain(
+        &mut self,
+        operands: &[TExpr],
+        ops: &[BinOp],
+        hooks: &[bool],
+    ) -> Result<Value, String> {
+        if operands.len() != ops.len() + 1 || hooks.len() != ops.len() {
             return Err("jit compare chain arity mismatch".to_string());
         }
         let vals: Result<Vec<_>, _> = operands.iter().map(|e| self.lower_expr(e)).collect();
         let vals = vals?;
-        let mut acc = self.b.ins().iconst(types::I8, 1);
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I8);
         for (i, op) in ops.iter().enumerate() {
-            let lhs_ty = self.expr_arith_type(&operands[i]);
-            let rhs_ty = self.expr_arith_type(&operands[i + 1]);
-            if lhs_ty != rhs_ty {
-                return Err("jit compare chain mixed operand types".to_string());
-            }
-            let cmp = match (&lhs_ty, op) {
-                (Type::Int, BinOp::Lt) => {
-                    self.bool_from_icmp(IntCC::SignedLessThan, vals[i], vals[i + 1])
+            let cmp = if hooks[i] {
+                let key = Self::method_key(&operands[i].ty, "compare")
+                    .ok_or_else(|| format!("jit compare hook on {:?}", operands[i].ty))?;
+                let func_id = self
+                    .func_ids
+                    .get(&key)
+                    .copied()
+                    .ok_or_else(|| format!("jit missing method `{key}`"))?;
+                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                let call = self.b.ins().call(func_ref, &[vals[i], vals[i + 1]]);
+                let ordering = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                let (condition, discriminant) = match op {
+                    BinOp::Lt => (IntCC::Equal, 0),
+                    BinOp::Le => (IntCC::NotEqual, 2),
+                    BinOp::Gt => (IntCC::Equal, 2),
+                    BinOp::Ge => (IntCC::NotEqual, 0),
+                    _ => return Err("jit compare chain operator unsupported".to_string()),
+                };
+                let discriminant = self.b.ins().iconst(types::I64, discriminant);
+                self.bool_from_icmp(condition, ordering, discriminant)
+            } else {
+                let lhs_ty = self.expr_arith_type(&operands[i]);
+                let rhs_ty = self.expr_arith_type(&operands[i + 1]);
+                if lhs_ty != rhs_ty {
+                    return Err("jit compare chain mixed operand types".to_string());
                 }
-                (Type::Int, BinOp::Gt) => {
-                    self.bool_from_icmp(IntCC::SignedGreaterThan, vals[i], vals[i + 1])
+                match (&lhs_ty, op) {
+                    (Type::Int, BinOp::Lt) => {
+                        self.bool_from_icmp(IntCC::SignedLessThan, vals[i], vals[i + 1])
+                    }
+                    (Type::Int, BinOp::Gt) => {
+                        self.bool_from_icmp(IntCC::SignedGreaterThan, vals[i], vals[i + 1])
+                    }
+                    (Type::Int, BinOp::Le) => {
+                        self.bool_from_icmp(IntCC::SignedLessThanOrEqual, vals[i], vals[i + 1])
+                    }
+                    (Type::Int, BinOp::Ge) => {
+                        self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, vals[i], vals[i + 1])
+                    }
+                    (Type::Float, BinOp::Lt) => {
+                        self.bool_from_fcmp(FloatCC::LessThan, vals[i], vals[i + 1])
+                    }
+                    (Type::Float, BinOp::Gt) => {
+                        self.bool_from_fcmp(FloatCC::GreaterThan, vals[i], vals[i + 1])
+                    }
+                    (Type::Float, BinOp::Le) => {
+                        self.bool_from_fcmp(FloatCC::LessThanOrEqual, vals[i], vals[i + 1])
+                    }
+                    (Type::Float, BinOp::Ge) => {
+                        self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, vals[i], vals[i + 1])
+                    }
+                    _ => return Err("jit compare chain operator unsupported".to_string()),
                 }
-                (Type::Int, BinOp::Le) => {
-                    self.bool_from_icmp(IntCC::SignedLessThanOrEqual, vals[i], vals[i + 1])
-                }
-                (Type::Int, BinOp::Ge) => {
-                    self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, vals[i], vals[i + 1])
-                }
-                (Type::Float, BinOp::Lt) => {
-                    self.bool_from_fcmp(FloatCC::LessThan, vals[i], vals[i + 1])
-                }
-                (Type::Float, BinOp::Gt) => {
-                    self.bool_from_fcmp(FloatCC::GreaterThan, vals[i], vals[i + 1])
-                }
-                (Type::Float, BinOp::Le) => {
-                    self.bool_from_fcmp(FloatCC::LessThanOrEqual, vals[i], vals[i + 1])
-                }
-                (Type::Float, BinOp::Ge) => {
-                    self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, vals[i], vals[i + 1])
-                }
-                _ => return Err("jit compare chain operator unsupported".to_string()),
             };
-            acc = self.b.ins().band(acc, cmp);
+            if i + 1 == ops.len() {
+                self.b.ins().jump(merge, &[cmp]);
+            } else {
+                let next = self.b.create_block();
+                let zero = self.b.ins().iconst(types::I8, 0);
+                let failed = self.b.ins().icmp(IntCC::Equal, cmp, zero);
+                self.b.ins().brif(failed, merge, &[zero], next, &[]);
+                self.b.switch_to_block(next);
+                self.b.seal_block(next);
+            }
         }
-        Ok(acc)
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
     }
 
     fn lower_incdec(
@@ -2887,4 +2977,13 @@ impl LowerCtx<'_, '_> {
         self.b.ins().call(host_ref, &[arg]);
         Ok(())
     }
+}
+
+fn simple_record_field_place(place: &str) -> Option<(&str, &str)> {
+    let (base, field) = place.strip_prefix('(')?.split_once(").")?;
+    (base.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        && field
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_'))
+    .then_some((base, field))
 }

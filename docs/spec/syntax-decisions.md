@@ -4612,3 +4612,11 @@ amendment chain, ballot narrative, and superseded spelling — lives in the git
 history of this file (`git log -p docs/spec/syntax-decisions.md`, up to
 commit bfe18d43 and its ancestors). New ratifications append their law to the
 topical sections above; they do not restart a log here.
+**D-OPDEF1 — User-defined operators**: option A. Existing arithmetic and
+comparison symbols may dispatch through ordinary hook traits: `Add.add`,
+`Sub.sub`, `Mul.mul`, `Div.div`, `Equatable.equal`, and
+`Comparable.compare -> Ordering`. Implementations use canonical
+`impl Type.Trait { ... }` syntax, keep the same operand type, and cannot add
+symbols, precedence, overload sets, or side-effect meanings. `+=` reuses `Add`.
+Beginner `@Numeric`/`@Comparable` and auto equality remain front doors to the
+same capabilities; built-in numeric, lane, and linalg behavior is unchanged.

@@ -1,0 +1,20 @@
+struct Vec2 { x: Int y: Int }
+struct Inner { value: Vec2 }
+struct Outer { inner: Inner }
+struct GenericInner<T> { value: T }
+struct GenericOuter<T> { inner: GenericInner<T> }
+
+impl Vec2.Add {
+    fn add(self, rhs: Vec2) -> Vec2 {
+        return Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+fn run() {
+    outer := Outer.{ inner: Inner.{ value: Vec2.{ x: 1, y: 2 } } }
+    outer.inner.value += Vec2.{ x: 3, y: 4 }
+}
+
+fn update_generic<T: Add>(outer: &GenericOuter<T>, delta: T) {
+    outer.inner.value += delta
+}

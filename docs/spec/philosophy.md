@@ -122,7 +122,7 @@ never the user's problem (invariant I2).
 
 ## Non-goals for v1
 
-Async/await; user-defined macros; inheritance; operator overloading;
+Async/await; user-defined macros; inheritance;
 lifetime syntax; multiple string types; null (absence will be `Option` in
 M3+); global mutable state; a self-hosted compiler; `no_std` / sub-std
 binary sizes; a required project structure or package manifest.

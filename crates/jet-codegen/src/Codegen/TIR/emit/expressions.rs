@@ -269,8 +269,23 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             recv,
             method_rust,
             args,
+            operator_line,
         } => {
             let arg_str = emit_tir_call_args(args, cx);
+            if let Some(line) = operator_line {
+                let trait_name = match method_rust.as_str() {
+                    "add" => "Add",
+                    "sub" => "Sub",
+                    "mul" => "Mul",
+                    "div" => "Div",
+                    _ => unreachable!("operator_line is only set for arithmetic hooks"),
+                };
+                return format!(
+                    "user_{trait_name}::__jet_{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
+                    emit_tir_expr(recv, cx),
+                    cx.file,
+                );
+            }
             format!("({}).{}({})", emit_tir_expr(recv, cx), method_rust, arg_str)
         }
         // c109 Phase 27: a call through a fn-typed struct field. Mirrors the AST
@@ -636,7 +651,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // middle operands), then ANDs the adjacent-pair comparisons over
         // those temps: `{ let __jcc0 = (e0); let __jcc1 = (e1); …
         // (__jcc0 op0 __jcc1) && (__jcc1 op1 __jcc2) && … }`.
-        TExprKind::CompareChain { operands, ops } => {
+        TExprKind::CompareChain {
+            operands,
+            ops,
+            hooks,
+        } => {
             let mut block = String::from("{ ");
             for (i, operand) in operands.iter().enumerate() {
                 let os = emit_tir_expr(operand, cx);
@@ -645,7 +664,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let pairs: Vec<String> = ops
                 .iter()
                 .enumerate()
-                .map(|(i, op)| format!("(__jcc{} {} __jcc{})", i, op.spell(), i + 1))
+                .map(|(i, op)| {
+                    if hooks.get(i).copied().unwrap_or(false) {
+                        let (cmp, variant) = match op {
+                            BinOp::Lt => ("==", "Less"),
+                            BinOp::Le => ("!=", "Greater"),
+                            BinOp::Gt => ("==", "Greater"),
+                            BinOp::Ge => ("!=", "Less"),
+                            _ => unreachable!(),
+                        };
+                        format!(
+                            "(user_Comparable::compare(&__jcc{}, &__jcc{}) {} user_Ordering::user_{})",
+                            i,
+                            i + 1,
+                            cmp,
+                            variant
+                        )
+                    } else {
+                        format!("(__jcc{} {} __jcc{})", i, op.spell(), i + 1)
+                    }
+                })
                 .collect();
             block.push_str(&format!("({}) }}", pairs.join(" && ")));
             block

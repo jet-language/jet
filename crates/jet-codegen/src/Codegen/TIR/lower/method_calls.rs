@@ -45,6 +45,7 @@ use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::lower_lambda_expecting_host_borrow;
+use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lower::lower_cursor_take_pattern;
 use crate::Codegen::TIR::lower::lower_reader_take_pattern;
 use crate::Codegen::TIR::lower_method_args;
@@ -229,11 +230,16 @@ pub(crate) fn lower_method_call(
     }
     if recv_type.as_ref().is_some_and(|name| {
         cx.current_type_params.borrow().contains(name.as_str())
-    }) && matches!(method, "read" | "write" | "write_all") {
-        let arg_ty = if method == "read" {
-            Type::Int
-        } else {
-            Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))
+    }) && matches!(
+        method,
+        "read" | "write" | "write_all" | "add" | "sub" | "mul" | "div" | "equal" | "compare"
+    ) {
+        let arg_ty = match method {
+            "read" => Type::Int,
+            "write" | "write_all" => {
+                Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))
+            }
+            _ => Type::Named(recv_type.clone().unwrap_or_default()),
         };
         let recv = lower_expr(receiver, cx, env);
         let targs = args.iter().map(|arg| {
@@ -245,6 +251,8 @@ pub(crate) fn lower_method_call(
                 recv: Box::new(recv),
                 method_rust: method.to_string(),
                 args: targs,
+                operator_line: matches!(method, "add" | "sub" | "mul" | "div")
+                    .then(|| crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32),
             },
         };
     }
@@ -1250,7 +1258,7 @@ pub(crate) fn lower_method_call(
                 if handler_idx {
                     if let Expr::Lambda(lam) = &a.expr {
                         let params = expected_payload.clone().into_iter().collect::<Vec<_>>();
-                        let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+                        let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
                         return TExpr {
                             ty: Type::Fn {
                                 params,
@@ -1296,7 +1304,7 @@ pub(crate) fn lower_method_call(
                 ) {
                     if let Expr::Lambda(lam) = &a.expr {
                         let params = vec![Type::Named("WatchEvent".to_string())];
-                        let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+                        let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
                         return TExpr {
                             ty: Type::Fn {
                                 params,
@@ -1564,7 +1572,34 @@ pub(crate) fn lower_method_call(
             },
             _ => unit_type(),
         };
-        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        let targs: Vec<TExpr> = args
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                if kind == "HttpMux"
+                    && matches!(
+                        method,
+                        "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+                    )
+                    && i == 1
+                {
+                    if let Expr::Lambda(lam) = &a.expr {
+                        let params = vec![Type::Named("HttpSrvReq".to_string())];
+                        return TExpr {
+                            ty: Type::Fn {
+                                params: params.clone(),
+                                ret: Some(Box::new(Type::Named("HttpSrvResp".to_string()))),
+                                effect_bound: None,
+                            },
+                            kind: TExprKind::Lambda(Box::new(lower_lambda_expecting_value(
+                                lam, cx, env, &params,
+                            ))),
+                        };
+                    }
+                }
+                lower_expr(&a.expr, cx, env)
+            })
+            .collect();
         let op = if kind.starts_with("HttpServer")
             || kind == "HttpMux"
             || kind == "HttpHandler"
@@ -2080,7 +2115,28 @@ pub(crate) fn lower_method_call(
                 });
             }
             let recv_t = lower_expr(receiver, cx, env);
-            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            let targs: Vec<TExpr> = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    if handle == "Regex" && method == "replace_all_with" && i == 1 {
+                        if let Expr::Lambda(lam) = &a.expr {
+                            let params = vec![Type::Named("RegexMatch".to_string())];
+                            return TExpr {
+                                ty: Type::Fn {
+                                    params: params.clone(),
+                                    ret: Some(Box::new(Type::String)),
+                                    effect_bound: None,
+                                },
+                                kind: TExprKind::Lambda(Box::new(
+                                    lower_lambda_expecting_value(lam, cx, env, &params),
+                                )),
+                            };
+                        }
+                    }
+                    lower_expr(&a.expr, cx, env)
+                })
+                .collect();
             // c109 Phase 19: an arena `alloc(v)` returns a `&mut T` view whose VALUE type is
             // the arg's type (sema's `alloc_method_return` returns a `__alloc_infer__`
             // sentinel, resolved from the arg). The result `ty` is rarely load-bearing (an
@@ -2681,6 +2737,7 @@ pub(crate) fn lower_method_call(
                     recv: Box::new(recv),
                     method_rust: method.to_string(),
                     args: targs,
+                    operator_line: None,
                 },
             };
         }
@@ -2732,6 +2789,7 @@ pub(crate) fn lower_method_call(
             recv: Box::new(recv),
             method_rust,
             args: targs,
+            operator_line: None,
         },
     }
 }

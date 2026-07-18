@@ -1749,6 +1749,18 @@ pub(crate) fn build_cx_items(
     for name in Syntax::IO_OPERATION_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_OPERATION.to_string()); }
     cx.cloneable.insert(Syntax::TYPE_IO_ERROR.to_string());
     cx.cloneable.insert(Syntax::TYPE_IO_OPERATION.to_string());
+    cx.enum_variants.insert(
+        Syntax::TYPE_ORDERING.to_string(),
+        ["Less", "Equal", "Greater"]
+            .into_iter()
+            .map(|name| (name.to_string(), VariantPayload::Unit))
+            .collect(),
+    );
+    for name in ["Less", "Equal", "Greater"] {
+        cx.variant_owner
+            .insert(name.to_string(), Syntax::TYPE_ORDERING.to_string());
+    }
+    cx.cloneable.insert(Syntax::TYPE_ORDERING.to_string());
 
     for item in items {
         match item {
@@ -2059,6 +2071,13 @@ pub(crate) fn build_cx_items(
                     cx.cloneable.insert(e.name.clone());
                 }
                 if type_is_comparable_enum(e, &cx.type_names) {
+                    cx.comparable.insert(e.name.clone());
+                }
+                if e.derives
+                    .iter()
+                    .any(|(trait_name, _)| trait_name == Generics::COMPARABLE)
+                {
+                    cx.partial_ord.insert(e.name.clone());
                     cx.comparable.insert(e.name.clone());
                 }
                 for m in &e.methods {

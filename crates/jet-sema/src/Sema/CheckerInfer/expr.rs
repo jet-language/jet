@@ -813,16 +813,20 @@ impl<'a> Checker<'a> {
             }
             Expr::Binary(op, lhs, rhs, span) => {
                 let (op, span) = (*op, *span);
-                self.infer_binary(op, lhs, rhs, span)
+                let mut replacement = None;
+                let ty = self.infer_binary(op, lhs, rhs, span, &mut replacement);
+                if let Some(replacement) = replacement { *e = replacement; }
+                ty
             }
             Expr::CompareChain {
                 operands,
                 ops,
+                hooks,
                 span,
             } => {
                 let span = *span;
                 let ops = ops.clone();
-                self.infer_compare_chain(operands, &ops, span)
+                self.infer_compare_chain(operands, &ops, hooks, span)
             }
             Expr::Deref(inner, span) => {
                 // D-CAP9: postfix `p.*` dereferences a raw pointer — a raw

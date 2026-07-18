@@ -8,7 +8,7 @@ use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::render_lambda_str;
-use crate::Codegen::TIR::render_lambda_str_expecting;
+use crate::Codegen::TIR::render_lambda_str_expecting_value;
 use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
@@ -67,7 +67,12 @@ pub(crate) fn lower_core_closure_call(
         ("jet.http", "serve") => {
             let lam = lam_at(1)?;
             let addr = lower_expr(&args[0].expr, cx, env);
-            let closure = render_lambda_str(lam, cx, env);
+            let closure = render_lambda_str_expecting_value(
+                lam,
+                cx,
+                env,
+                &[Type::Named("HttpSrvReq".to_string())],
+            );
             TCoreClosureKind::Serve {
                 addr: Box::new(addr),
                 closure,
@@ -85,7 +90,7 @@ pub(crate) fn lower_core_closure_call(
                 _ => Type::Int,
             };
             let rows_s = emit_tir_expr(&rows, cx);
-            let pred = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
+            let pred = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
             let helper = if method == "filter" {
                 "jet_data_filter"
             } else {
@@ -104,7 +109,7 @@ pub(crate) fn lower_core_closure_call(
                 _ => Type::Int,
             };
             let rows_s = emit_tir_expr(&rows, cx);
-            let key = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty]));
+            let key = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty]);
             let code = format!(
                 "{}jet_data_group_count(&({}), {})",
                 cx.root_prefix, rows_s, key
@@ -121,8 +126,8 @@ pub(crate) fn lower_core_closure_call(
                 _ => Type::Int,
             };
             let rows_s = emit_tir_expr(&rows, cx);
-            let key = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
-            let value = render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[row_ty]));
+            let key = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
+            let value = render_lambda_str_expecting_value(lam_at(2)?, cx, env, &[row_ty]);
             let helper = if method == "group_sum" {
                 "jet_data_group_sum"
             } else {
@@ -150,8 +155,8 @@ pub(crate) fn lower_core_closure_call(
             };
             let left_s = emit_tir_expr(&left, cx);
             let right_s = emit_tir_expr(&right, cx);
-            let left_key = render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[left_ty.clone()]));
-            let right_key = render_lambda_str_expecting(lam_at(3)?, cx, env, Some(&[right_ty.clone()]));
+            let left_key = render_lambda_str_expecting_value(lam_at(2)?, cx, env, &[left_ty.clone()]);
+            let right_key = render_lambda_str_expecting_value(lam_at(3)?, cx, env, &[right_ty.clone()]);
             let helper = if method == "inner_join" {
                 "jet_data_inner_join"
             } else {
@@ -181,11 +186,9 @@ pub(crate) fn lower_core_closure_call(
                 _ => Type::Int,
             };
             let rows_s = emit_tir_expr(&rows, cx);
-            let row_key =
-                render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
-            let col_key =
-                render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[row_ty.clone()]));
-            let value = render_lambda_str_expecting(lam_at(3)?, cx, env, Some(&[row_ty]));
+            let row_key = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
+            let col_key = render_lambda_str_expecting_value(lam_at(2)?, cx, env, &[row_ty.clone()]);
+            let value = render_lambda_str_expecting_value(lam_at(3)?, cx, env, &[row_ty]);
             let code = format!(
                 "{}jet_data_pivot_sum(&({}), {}, {}, {})",
                 cx.root_prefix, rows_s, row_key, col_key, value
@@ -204,7 +207,7 @@ pub(crate) fn lower_core_closure_call(
                 _ => Type::Int,
             };
             let frame_s = emit_tir_expr(&frame, cx);
-            let closure = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
+            let closure = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
             let helper = if method == "lazy_filter" {
                 "jet_data_lazy_filter"
             } else {

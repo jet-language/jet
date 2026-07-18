@@ -324,8 +324,8 @@ module.exports = grammar({
       ),
 
     // ── Impl block (S27) ───────────────────────────────────────────────────
-    // `impl Type { … }`, `impl Type: Trait { … }`, delegation
-    // `impl Type: Trait using field` (S62), and error-conversion
+    // `impl Type { … }`, `impl Type.Trait { … }`, delegation
+    // `impl Type.Trait using field` (S62), and error-conversion
     // `impl FromErr -> ToErr { … }` (D-ERR-CONV).
     impl_block: ($) =>
       choice(
@@ -343,7 +343,7 @@ module.exports = grammar({
           field("type", choice($.type_identifier, $.generic_type)),
           optional(
             seq(
-              ":",
+              ".",
               field("trait", $.type_identifier),
               optional(seq("using", $.identifier)),
             ),

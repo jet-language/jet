@@ -4,10 +4,68 @@
 
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::COMPARABLE;
+use crate::Generics::{substitute_type, COMPARABLE};
 use crate::AST::{BinOp, Dimension, Expr, Pattern, Type};
+use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
+    fn operator_expr_type(&self, expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+            Expr::Field(base, field, _) => {
+                let mut owner = self.operator_expr_type(base)?;
+                while let Type::Tagged { inner, .. } = owner {
+                    owner = *inner;
+                }
+                let (name, subst) = match owner {
+                    Type::Named(name) => (name, HashMap::new()),
+                    Type::Apply { name, args } => {
+                        let params = self.trait_reg.struct_params.get(&name)?;
+                        let subst = params
+                            .iter()
+                            .zip(args)
+                            .map(|(param, arg)| (param.name.clone(), arg))
+                            .collect();
+                        (name, subst)
+                    }
+                    _ => return None,
+                };
+                self.registry
+                    .struct_fields(&name)?
+                    .iter()
+                    .find(|(candidate, _, _, _)| candidate == field)
+                    .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+            }
+            _ => None,
+        }
+    }
+
+    fn operator_operand_needs_borrow(&self, expr: &Expr, op: BinOp) -> bool {
+        if !matches!(expr, Expr::Field(..) | Expr::Index { .. }) {
+            return false;
+        }
+        let trait_name = match op {
+            BinOp::Add => crate::Syntax::TRAIT_ADD,
+            BinOp::Sub => crate::Syntax::TRAIT_SUB,
+            BinOp::Mul => crate::Syntax::TRAIT_MUL,
+            BinOp::Div => crate::Syntax::TRAIT_DIV,
+            BinOp::Eq | BinOp::Ne => crate::Syntax::TRAIT_EQUATABLE,
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => crate::Syntax::TRAIT_COMPARABLE,
+            _ => return false,
+        };
+        self.operator_expr_type(expr)
+            .is_some_and(|ty| match &ty {
+                Type::Named(name) => {
+                    !self.registry.is_distinct(name)
+                        && (self.trait_reg
+                            .trait_impls
+                            .contains(&(name.clone(), trait_name.to_string()))
+                            || self.type_param_has_bound(&ty, trait_name))
+                }
+                _ => false,
+            })
+    }
+
     /// Binary operators and type checking.
     pub(crate) fn infer_binary(
         &mut self,
@@ -15,6 +73,7 @@ impl<'a> Checker<'a> {
         lhs: &mut Box<Expr>,
         rhs: &mut Box<Expr>,
         span: Span,
+        replacement: &mut Option<Expr>,
     ) -> Option<Type> {
         if matches!(op, BinOp::And | BinOp::Or) {
             let lt = self.infer(lhs);
@@ -56,6 +115,9 @@ impl<'a> Checker<'a> {
             return Some(Type::Bool);
         }
 
+        // Only a synthetic read/read hook borrows a non-Copy field operand.
+        // Ordinary expressions retain the canonical owning-read clone rule.
+        self.borrow_ctx = self.operator_operand_needs_borrow(lhs, op);
         let lt = self.infer(lhs);
 
         // S31: pattern-shaped `==` before RHS name lookup.
@@ -85,8 +147,110 @@ impl<'a> Checker<'a> {
             }
         }
 
+        self.borrow_ctx = self.operator_operand_needs_borrow(rhs, op);
         let rt = self.infer(rhs);
         let (lt, rt) = (lt?, rt?);
+
+        // D-OPDEF1=A: user operators are ordinary trait-method calls after sema
+        // proves one exact impl and the fixed same-type law.
+        if lt == rt {
+            if let Type::Named(type_name) = &lt {
+                let hook = match op {
+                    BinOp::Add => Some((crate::Syntax::TRAIT_ADD, "add", lt.clone())),
+                    BinOp::Sub => Some((crate::Syntax::TRAIT_SUB, "sub", lt.clone())),
+                    BinOp::Mul => Some((crate::Syntax::TRAIT_MUL, "mul", lt.clone())),
+                    BinOp::Div => Some((crate::Syntax::TRAIT_DIV, "div", lt.clone())),
+                    BinOp::Eq | BinOp::Ne => {
+                        Some((crate::Syntax::TRAIT_EQUATABLE, "equal", Type::Bool))
+                    }
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Some((
+                        crate::Syntax::TRAIT_COMPARABLE,
+                        "compare",
+                        Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
+                    )),
+                    _ => None,
+                };
+                if let Some((trait_name, method, ret)) = hook {
+                    if !self.registry.is_distinct(type_name)
+                        && (self
+                            .trait_reg
+                            .trait_impls
+                            .contains(&(type_name.clone(), trait_name.to_string()))
+                            || self.type_param_has_bound(&lt, trait_name))
+                    {
+                        if self.fn_name == method
+                            && self
+                                .lookup(crate::Syntax::KW_SELF)
+                                .is_some_and(|info| info.ty == lt)
+                        {
+                            self.diags.push(Diagnostic::error(
+                                "E0361",
+                                format!("`{}` calls itself through `{}`", method, op.spell()),
+                                concat!(
+                                    "the operator symbol dispatches back to this same hook, ",
+                                    "so evaluation would recurse forever"
+                                )
+                                .to_string(),
+                                concat!(
+                                    "combine the value's fields or call a different named helper ",
+                                    "inside the hook"
+                                )
+                                .to_string(),
+                                Some(span),
+                            ));
+                            return None;
+                        }
+                        let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                        let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                        let call = Expr::MethodCall {
+                            receiver: left,
+                            method: method.to_string(),
+                            method_span: span,
+                            type_args: Vec::new(),
+                            args: vec![crate::AST::CallArg {
+                                convention: crate::AST::AccessConvention::Read,
+                                expr: *right,
+                                span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            }],
+                            recv_type: Some(type_name.clone()),
+                            resolved_ret: Some(ret),
+                        };
+                        *replacement = Some(match op {
+                            BinOp::Ne => Expr::Unary(crate::AST::UnOp::Not, Box::new(call), span),
+                            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                                let (cmp, variant) = match op {
+                                    BinOp::Lt => (BinOp::Eq, "Less"),
+                                    BinOp::Le => (BinOp::Ne, "Greater"),
+                                    BinOp::Gt => (BinOp::Eq, "Greater"),
+                                    BinOp::Ge => (BinOp::Ne, "Less"),
+                                    _ => unreachable!(),
+                                };
+                                Expr::Binary(
+                                    cmp,
+                                    Box::new(call),
+                                    Box::new(Expr::EnumLit {
+                                        type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+                                        variant: variant.to_string(),
+                                        args: Vec::new(),
+                                        span,
+                                    }),
+                                    span,
+                                )
+                            }
+                            _ => call,
+                        });
+                        return Some(if op.is_comparison() {
+                            Type::Bool
+                        } else {
+                            lt
+                        });
+                    }
+                }
+            }
+        }
 
         // D-SHAPE-QUANTITY1=A: physical dimensions are compiler-known and
         // normalized before the ordinary nominal/numeric operator rules.
@@ -378,6 +542,40 @@ impl<'a> Checker<'a> {
                 // keeps that width; widths never mix implicitly.
                 if lt == rt && lt.is_numeric() {
                     Some(lt)
+                } else if let Type::Named(type_name) = &lt {
+                    if self.registry.contains(type_name) {
+                        let trait_name = match op {
+                            BinOp::Add => crate::Syntax::TRAIT_ADD,
+                            BinOp::Sub => crate::Syntax::TRAIT_SUB,
+                            BinOp::Mul => crate::Syntax::TRAIT_MUL,
+                            BinOp::Div => crate::Syntax::TRAIT_DIV,
+                            _ => unreachable!(),
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E0360",
+                            format!(
+                                "no `{}` operator is defined for `{}`",
+                                op.spell(),
+                                type_name
+                            ),
+                            format!(
+                                concat!(
+                                    "user arithmetic dispatches only through one ",
+                                    "`impl {}.{}` hook"
+                                ),
+                                type_name,
+                                trait_name
+                            ),
+                            format!(
+                                "implement `{type_name}.{trait_name}`, or call a named method"
+                            ),
+                            Some(span),
+                        ));
+                        None
+                    } else {
+                        self.op_mismatch(op, &lt, &rt, span);
+                        None
+                    }
                 } else if lt == Type::String && op == BinOp::Add {
                     self.diags.push(Diagnostic::error(
                         "E0109",
@@ -541,18 +739,60 @@ impl<'a> Checker<'a> {
         &mut self,
         operands: &mut [Expr],
         ops: &[BinOp],
+        hooks: &mut Vec<bool>,
         span: Span,
     ) -> Option<Type> {
-        let types: Vec<Option<Type>> = operands.iter_mut().map(|e| self.infer(e)).collect();
+        let types: Vec<Option<Type>> = operands
+            .iter_mut()
+            .map(|e| {
+                self.borrow_ctx = self.operator_operand_needs_borrow(e, BinOp::Lt);
+                self.infer(e)
+            })
+            .collect();
+        hooks.clear();
         let mut ok = true;
         for (i, op) in ops.iter().enumerate() {
             match (&types[i], &types[i + 1]) {
                 (Some(lt), Some(rt)) => {
+                    let uses_hook = lt == rt
+                        && match lt {
+                            Type::Named(type_name) => {
+                                !self.registry.is_distinct(type_name)
+                                    && (self.trait_reg.trait_impls.contains(&(
+                                        type_name.clone(),
+                                        crate::Syntax::TRAIT_COMPARABLE.to_string(),
+                                    )) || self.type_param_has_bound(
+                                        lt,
+                                        crate::Syntax::TRAIT_COMPARABLE,
+                                    ))
+                            }
+                            _ => false,
+                        };
+                    hooks.push(uses_hook);
+                    if uses_hook
+                        && self.fn_name == "compare"
+                        && self
+                            .lookup(crate::Syntax::KW_SELF)
+                            .is_some_and(|info| info.ty == *lt)
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0361",
+                            format!("`compare` calls itself through `{}`", op.spell()),
+                            "the operator symbol dispatches back to this same hook, so evaluation would recurse forever".to_string(),
+                            "compare the value's fields or call a different named helper inside the hook".to_string(),
+                            Some(span),
+                        ));
+                        ok = false;
+                        continue;
+                    }
                     if self.check_relational(*op, lt, rt, span).is_none() {
                         ok = false;
                     }
                 }
-                _ => ok = false,
+                _ => {
+                    hooks.push(false);
+                    ok = false;
+                }
             }
         }
         if ok {

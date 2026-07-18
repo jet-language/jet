@@ -2,7 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
-    self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type,
+    self, e0902, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type,
     unify_types, BUILTIN_TRAITS, COMPARABLE, DEBUG, DECODE, DISPLAY, ENCODE, EQUATABLE, PRINTABLE,
     CLOSE, RENDERABLE, SERIALIZE,
 };
@@ -19,6 +19,10 @@ pub struct TraitRegistry {
     pub traits: HashMap<String, TraitInfo>,
     pub trait_impls: HashSet<(String, String)>,
     pub struct_params: HashMap<String, Vec<TypeParam>>,
+    /// Generic struct parameters mentioned by stored fields. Structural
+    /// Equatable/Comparable bridges constrain only these; phantom parameters
+    /// do not participate in equality or ordering.
+    pub structural_params: HashMap<String, Vec<usize>>,
     pub enum_params: HashMap<String, Vec<TypeParam>>,
     pub fn_params: HashMap<String, Vec<TypeParam>>,
     pub derives: HashMap<String, HashSet<String>>,
@@ -124,6 +128,7 @@ impl TraitRegistry {
                 // mechanism). `@Numeric` arithmetic is a separate, older gate
                 // (D-DIST3/E0127) left untouched — see CheckerInfer/binary.rs.
                 Item::Distinct(d) => {
+                    self.auto_equatable.insert(d.name.clone());
                     if d.is_printable {
                         self.trait_impls
                             .insert((d.name.clone(), DISPLAY.to_string()));
@@ -133,6 +138,17 @@ impl TraitRegistry {
                             .entry(d.name.clone())
                             .or_default()
                             .insert(COMPARABLE.to_string());
+                    }
+                    if d.is_numeric && d.range.is_none() {
+                        for trait_name in [
+                            Syntax::TRAIT_ADD,
+                            Syntax::TRAIT_SUB,
+                            Syntax::TRAIT_MUL,
+                            Syntax::TRAIT_DIV,
+                        ] {
+                            self.trait_impls
+                                .insert((d.name.clone(), trait_name.to_string()));
+                        }
                     }
                     if d.is_codable_as_base {
                         self.derives
@@ -176,8 +192,189 @@ impl TraitRegistry {
                 }
             }
         }
+        self.reject_partial_comparable_derives(items, diags);
         self.compute_auto_derives(items);
         self.collect_iter_index_metadata(items);
+    }
+
+    fn reject_partial_comparable_derives(&self, items: &[Item], diags: &mut Vec<Diagnostic>) {
+        for item in items {
+            let (types, span) = match item {
+                Item::Struct(s) => {
+                    let Some((_, span)) = s.derives.iter().find(|(name, _)| name == COMPARABLE)
+                    else {
+                        continue;
+                    };
+                    (
+                        s.fields
+                            .iter()
+                            .filter(|field| field.computed.is_none())
+                            .map(|field| &field.ty)
+                            .collect::<Vec<_>>(),
+                        *span,
+                    )
+                }
+                Item::Enum(e) => {
+                    let Some((_, span)) = e.derives.iter().find(|(name, _)| name == COMPARABLE)
+                    else {
+                        continue;
+                    };
+                    let types = e
+                        .variants
+                        .iter()
+                        .flat_map(|variant| match &variant.payload {
+                            crate::AST::VariantPayload::Unit => Vec::new(),
+                            crate::AST::VariantPayload::Single(ty, _) => vec![ty],
+                            crate::AST::VariantPayload::Named(fields) => {
+                                fields.iter().map(|field| &field.ty).collect()
+                            }
+                        })
+                        .collect();
+                    (types, *span)
+                }
+                Item::Distinct(d) if d.is_comparable => {
+                    let span = d.comparable_span.unwrap_or(d.name_span);
+                    (vec![&d.base], span)
+                }
+                _ => continue,
+            };
+            if let Some(offender) = types.iter().find_map(|ty| {
+                self.partial_comparable_offender(ty, items, &mut HashSet::new())
+            }) {
+                diags.push(Generics::e0905(&offender, COMPARABLE, span, false));
+            }
+        }
+    }
+
+    fn partial_comparable_offender(
+        &self,
+        ty: &Type,
+        items: &[Item],
+        visiting: &mut HashSet<String>,
+    ) -> Option<String> {
+        match ty {
+            Type::Int | Type::IntN { .. } | Type::Bool | Type::String | Type::Char => None,
+            Type::Float | Type::Float32 => Some(ty.name()),
+            Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
+                self.partial_comparable_offender(inner, items, visiting)
+            }
+            Type::Result { ok, err } => self
+                .partial_comparable_offender(ok, items, visiting)
+                .or_else(|| self.partial_comparable_offender(err, items, visiting)),
+            Type::Tuple(fields) => fields.iter().find_map(|(_, field)| {
+                self.partial_comparable_offender(field, items, visiting)
+            }),
+            Type::Tagged { inner, .. } => {
+                self.partial_comparable_offender(inner, items, visiting)
+            }
+            Type::Named(name) => {
+                if name == Syntax::TYPE_FLOAT || name == "F32" {
+                    return Some(name.clone());
+                }
+                let explicit = self
+                    .trait_impls
+                    .contains(&(name.clone(), COMPARABLE.to_string()));
+                if explicit {
+                    return None;
+                }
+                if !visiting.insert(name.clone()) {
+                    return None;
+                }
+                let result = match items.iter().find(|item| match item {
+                    Item::Struct(s) => s.name == *name,
+                    Item::Enum(e) => e.name == *name,
+                    Item::Distinct(d) => d.name == *name,
+                    Item::TypeAlias(alias) => alias.name == *name,
+                    _ => false,
+                }) {
+                    Some(Item::Struct(s)) => {
+                        if !s.derives.iter().any(|(derive, _)| derive == COMPARABLE) {
+                            Some(name.clone())
+                        } else {
+                            s.fields
+                                .iter()
+                                .filter(|field| field.computed.is_none())
+                                .find_map(|field| {
+                                    self.partial_comparable_offender(&field.ty, items, visiting)
+                                })
+                        }
+                    }
+                    Some(Item::Enum(e)) => {
+                        if !e.derives.iter().any(|(derive, _)| derive == COMPARABLE) {
+                            Some(name.clone())
+                        } else {
+                            e.variants.iter().find_map(|variant| match &variant.payload {
+                                crate::AST::VariantPayload::Unit => None,
+                                crate::AST::VariantPayload::Single(field, _) => {
+                                    self.partial_comparable_offender(field, items, visiting)
+                                }
+                                crate::AST::VariantPayload::Named(fields) => fields.iter().find_map(
+                                    |field| self.partial_comparable_offender(&field.ty, items, visiting),
+                                ),
+                            })
+                        }
+                    }
+                    Some(Item::Distinct(d)) => {
+                        if d.is_comparable {
+                            self.partial_comparable_offender(&d.base, items, visiting)
+                        } else {
+                            Some(name.clone())
+                        }
+                    }
+                    Some(Item::TypeAlias(alias)) => {
+                        self.partial_comparable_offender(&alias.target, items, visiting)
+                    }
+                    _ => None,
+                };
+                visiting.remove(name);
+                result
+            }
+            Type::Apply { name, args } => {
+                if self
+                    .trait_impls
+                    .contains(&(name.clone(), COMPARABLE.to_string()))
+                {
+                    return None;
+                }
+                if !self.implements_trait(name, COMPARABLE) {
+                    return Some(name.clone());
+                }
+                let Some(params) = self
+                    .struct_params
+                    .get(name)
+                    .or_else(|| self.enum_params.get(name))
+                else {
+                    return self.partial_comparable_offender(
+                        &Type::Named(name.clone()),
+                        items,
+                        visiting,
+                    );
+                };
+                let subst: HashMap<String, Type> = params
+                    .iter()
+                    .zip(args)
+                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                    .collect();
+                if let Some(Item::Struct(s)) = items
+                    .iter()
+                    .find(|item| matches!(item, Item::Struct(s) if s.name == *name))
+                {
+                    return s
+                        .fields
+                        .iter()
+                        .filter(|field| field.computed.is_none())
+                        .find_map(|field| {
+                            self.partial_comparable_offender(
+                                &substitute_type(&field.ty, &subst),
+                                items,
+                                visiting,
+                            )
+                        });
+                }
+                self.partial_comparable_offender(&Type::Named(name.clone()), items, visiting)
+            }
+            other => Some(other.name()),
+        }
     }
 
     fn collect_iter_index_metadata(&mut self, items: &[Item]) {
@@ -289,6 +486,16 @@ impl TraitRegistry {
         if !s.type_params.is_empty() {
             self.struct_params
                 .insert(s.name.clone(), s.type_params.clone());
+            let stored_types: Vec<&Type> = s
+                .fields
+                .iter()
+                .filter(|field| field.computed.is_none())
+                .map(|field| &field.ty)
+                .collect();
+            self.structural_params.insert(
+                s.name.clone(),
+                wire_param_indices(&s.type_params, &stored_types),
+            );
             // D-SERDE9/10: record which params reach the wire (a non-`@[Skip]`
             // field type mentions them) for use-site codability checks.
             let wire_types: Vec<&Type> = s
@@ -369,12 +576,6 @@ impl TraitRegistry {
             diags.push(Generics::e0731(trait_name, "an `impl` block", span));
             return;
         }
-        if Generics::is_builtin_trait(trait_name)
-            && (trait_name == COMPARABLE || trait_name == EQUATABLE)
-        {
-            diags.push(e0903(trait_name, span));
-            return;
-        }
         let key = (type_name.to_string(), trait_name.to_string());
         if !self.trait_impls.insert(key) {
             diags.push(e0908(type_name, trait_name, span));
@@ -383,6 +584,19 @@ impl TraitRegistry {
         let local_type = !type_name.contains('.') && self.local_types.contains(type_name);
         let local_trait = !trait_name.contains('.')
             && (self.local_traits.contains(trait_name) || Generics::is_builtin_trait(trait_name));
+        let operator_trait = matches!(
+            trait_name,
+            Syntax::TRAIT_ADD
+                | Syntax::TRAIT_SUB
+                | Syntax::TRAIT_MUL
+                | Syntax::TRAIT_DIV
+                | Syntax::TRAIT_EQUATABLE
+                | Syntax::TRAIT_COMPARABLE
+        );
+        if operator_trait && !local_type {
+            diags.push(e0902(span));
+            return;
+        }
         if !local_type && !local_trait {
             diags.push(e0902(span));
             return;
@@ -394,6 +608,55 @@ impl TraitRegistry {
         // bridge would emit Rust rustc rejects (I2/I4).
         if trait_name == ENCODE || trait_name == DECODE {
             self.check_serde_impl_methods(type_name, trait_name, methods, span, diags);
+            return;
+        }
+        if operator_trait {
+            let expected_method = match trait_name {
+                Syntax::TRAIT_ADD => "add",
+                Syntax::TRAIT_SUB => "sub",
+                Syntax::TRAIT_MUL => "mul",
+                Syntax::TRAIT_DIV => "div",
+                Syntax::TRAIT_EQUATABLE => "equal",
+                _ => "compare",
+            };
+            let Some(method) = methods.iter().find(|method| method.name == expected_method) else {
+                diags.push(e0906(trait_name, &[expected_method.to_string()], span));
+                for extra in methods {
+                    diags.push(e0907(trait_name, expected_method, extra.name_span));
+                }
+                return;
+            };
+            let self_ok = method.params.first().is_some_and(|param| {
+                param.name == Syntax::KW_SELF
+                    && param.convention == AccessConvention::Read
+                    && !param.variadic
+                    && param.default.is_none()
+            });
+            let rhs_ok = method.params.get(1).is_some_and(|param| {
+                param.convention == AccessConvention::Read
+                    && param.ty == Type::Named(type_name.to_string())
+                    && !param.variadic
+                    && param.default.is_none()
+            });
+            let ret_ok = match trait_name {
+                Syntax::TRAIT_EQUATABLE => method.return_type == Some(Type::Bool),
+                Syntax::TRAIT_COMPARABLE => {
+                    method.return_type
+                        == Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))
+                }
+                _ => method.return_type == Some(Type::Named(type_name.to_string())),
+            };
+            if methods.len() != 1
+                || !self_ok
+                || !rhs_ok
+                || !ret_ok
+                || !method.type_params.is_empty()
+            {
+                diags.push(e0907(trait_name, expected_method, method.name_span));
+            }
+            for extra in methods.iter().filter(|candidate| !std::ptr::eq(*candidate, method)) {
+                diags.push(e0907(trait_name, expected_method, extra.name_span));
+            }
             return;
         }
         if let Some(trait_info) = self.traits.get(trait_name) {
@@ -525,6 +788,14 @@ impl TraitRegistry {
         ) && Generics::is_builtin_trait(trait_name)
             && trait_name != CLOSE
         {
+            if trait_name == Syntax::TRAIT_COMPARABLE && type_name == Syntax::TYPE_FLOAT {
+                return false;
+            }
+            if matches!(trait_name, Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL | Syntax::TRAIT_DIV)
+                && !matches!(type_name, Syntax::TYPE_INT | Syntax::TYPE_FLOAT)
+            {
+                return false;
+            }
             return true;
         }
         if self
@@ -568,11 +839,47 @@ impl TraitRegistry {
     /// on the same path as ordinary trait-object assignment and inference.
     pub fn type_implements_trait(&self, ty: &Type, trait_name: &str) -> bool {
         match ty {
-            Type::IntN { .. } | Type::Float32 => {
+            Type::IntN { .. } => {
                 Generics::is_builtin_trait(trait_name) && trait_name != CLOSE
             }
-            Type::Named(name) | Type::Apply { name, .. } => {
-                self.implements_trait(name, trait_name)
+            Type::Float32 => {
+                Generics::is_builtin_trait(trait_name)
+                    && !matches!(trait_name, CLOSE | COMPARABLE)
+            }
+            Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
+                if matches!(trait_name, EQUATABLE | COMPARABLE) =>
+            {
+                self.type_implements_trait(inner, trait_name)
+            }
+            Type::Result { ok, err } if matches!(trait_name, EQUATABLE | COMPARABLE) => {
+                self.type_implements_trait(ok, trait_name)
+                    && self.type_implements_trait(err, trait_name)
+            }
+            Type::Tuple(fields) if matches!(trait_name, EQUATABLE | COMPARABLE) => fields
+                .iter()
+                .all(|(_, field)| self.type_implements_trait(field, trait_name)),
+            Type::Named(name) => self.implements_trait(name, trait_name),
+            Type::Apply { name, args } => {
+                if !self.implements_trait(name, trait_name) {
+                    return false;
+                }
+                let Some(params) = self.struct_params.get(name) else {
+                    return true;
+                };
+                params.len() == args.len()
+                    && params.iter().zip(args).enumerate().all(|(index, (param, arg))| {
+                        param
+                            .bounds
+                            .iter()
+                            .all(|bound| self.type_implements_trait(arg, bound))
+                            && (!matches!(trait_name, EQUATABLE | COMPARABLE)
+                                || self.structural_params.get(name).is_some_and(|used| {
+                                    !used.contains(&index)
+                                        || self.type_implements_trait(arg, trait_name)
+                                })
+                                || (!self.structural_params.contains_key(name)
+                                    && self.type_implements_trait(arg, trait_name)))
+                    })
             }
             Type::TraitObject(bounds) => bounds.iter().any(|bound| bound == trait_name),
             Type::Tagged { inner, .. } => self.type_implements_trait(inner, trait_name),
@@ -596,6 +903,23 @@ impl TraitRegistry {
         )
     }
 
+    pub fn infer_fn_subst_without_bounds(
+        &self,
+        sig: &FuncSig,
+        arg_types: &[Type],
+        type_params: &[TypeParam],
+        expected_ret: Option<&Type>,
+    ) -> Result<HashMap<String, Type>, String> {
+        self.infer_subst_inner(
+            &sig.params,
+            sig.return_type.as_ref(),
+            arg_types,
+            type_params,
+            expected_ret,
+            false,
+        )
+    }
+
     /// Ordinary one-way generic inference shared by functions and static
     /// constructors. Callers persist the resulting concrete arguments.
     pub fn infer_subst(
@@ -605,6 +929,25 @@ impl TraitRegistry {
         arg_types: &[Type],
         type_params: &[TypeParam],
         expected_ret: Option<&Type>,
+    ) -> Result<HashMap<String, Type>, String> {
+        self.infer_subst_inner(
+            params,
+            return_type,
+            arg_types,
+            type_params,
+            expected_ret,
+            true,
+        )
+    }
+
+    fn infer_subst_inner(
+        &self,
+        params: &[(AccessConvention, Type)],
+        return_type: Option<&Type>,
+        arg_types: &[Type],
+        type_params: &[TypeParam],
+        expected_ret: Option<&Type>,
+        check_bounds: bool,
     ) -> Result<HashMap<String, Type>, String> {
         if type_params.is_empty() {
             return Ok(HashMap::new());
@@ -633,9 +976,11 @@ impl TraitRegistry {
             if !subst.contains_key(&p.name) {
                 return Err(p.name.clone());
             }
-            for b in &p.bounds {
-                if !self.type_implements_trait(subst.get(&p.name).unwrap(), b) {
-                    return Err(p.name.clone());
+            if check_bounds {
+                for b in &p.bounds {
+                    if !self.type_implements_trait(subst.get(&p.name).unwrap(), b) {
+                        return Err(p.name.clone());
+                    }
                 }
             }
         }
@@ -814,6 +1159,24 @@ impl TraitRegistry {
         ] {
             self.trait_impls
                 .insert((ty.to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
+        }
+    }
+
+    /// D-OPDEF1=A: operator symbols are sugar over ordinary hook traits.
+    pub fn register_synthetic_operators(&mut self) {
+        for (trait_name, method, ret) in [
+            (Syntax::TRAIT_ADD, "add", Type::Named(String::new())),
+            (Syntax::TRAIT_SUB, "sub", Type::Named(String::new())),
+            (Syntax::TRAIT_MUL, "mul", Type::Named(String::new())),
+            (Syntax::TRAIT_DIV, "div", Type::Named(String::new())),
+            (Syntax::TRAIT_EQUATABLE, "equal", Type::Bool),
+            (
+                Syntax::TRAIT_COMPARABLE,
+                "compare",
+                Type::Named(Syntax::TYPE_ORDERING.to_string()),
+            ),
+        ] {
+            self.register_synthetic_binary_trait(trait_name, method, ret);
         }
     }
 
@@ -1156,6 +1519,27 @@ impl TraitRegistry {
             },
         );
     }
+
+    fn register_synthetic_binary_trait(&mut self, trait_name: &str, method: &str, ret: Type) {
+        if self.traits.contains_key(trait_name) { return; }
+        let dummy = Span { start: 0, end: 0 };
+        let param = |name: &str| crate::AST::Param {
+            name: name.to_string(), name_span: dummy, ty: Type::Named(String::new()),
+            ty_span: dummy, convention: AccessConvention::Read, default: None,
+            variadic: false, variadic_bound_list: None,
+        };
+        let sig = TraitMethodSig {
+            name: method.to_string(), name_span: dummy,
+            params: vec![param(Syntax::KW_SELF), param("rhs")],
+            return_type: Some(ret), span: dummy, default_body: None, is_pure: false,
+            declared_effects: None, return_view_provenance: Default::default(),
+        };
+        self.local_traits.insert(trait_name.to_string());
+        self.traits.insert(trait_name.to_string(), TraitInfo {
+            methods: [(method.to_string(), sig)].into_iter().collect(),
+            assoc_types: Vec::new(), span: dummy,
+        });
+    }
 }
 
 fn struct_auto_derive_ok(s: &StructDef) -> bool {
@@ -1401,5 +1785,7 @@ mod tests {
             assert!(traits.type_implements_trait(&ty, PRINTABLE));
             assert!(!traits.type_implements_trait(&ty, "UserTrait"));
         }
+        assert!(!traits.type_implements_trait(&Type::Float32, COMPARABLE));
+        assert!(!traits.implements_trait("Float", COMPARABLE));
     }
 }

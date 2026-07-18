@@ -28,9 +28,14 @@ pub const RENDERABLE: &str = "Renderable";
 pub const IO_READER: &str = "Reader";
 pub const IO_WRITER: &str = "Writer";
 pub const CLOSE: &str = "Close";
+pub const ADD: &str = "Add";
+pub const SUB: &str = "Sub";
+pub const MUL: &str = "Mul";
+pub const DIV: &str = "Div";
 
 pub const BUILTIN_TRAITS: &[&str] = &[
     PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, CLOSE,
+    ADD, SUB, MUL, DIV,
 ];
 
 pub fn is_builtin_trait(name: &str) -> bool {
@@ -43,8 +48,8 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         PRINTABLE => Some("JetShow"),
         DISPLAY => Some("user_Display"),
         DEBUG => Some("JetDebug"),
-        EQUATABLE => Some("PartialEq"),
-        COMPARABLE => Some("PartialOrd"),
+        EQUATABLE => Some("user_Equatable"),
+        COMPARABLE => Some("user_Comparable"),
         SERIALIZE => Some("user_Serialize"),
         ENCODE => Some("user_Encode"),
         DECODE => Some("user_Decode"),
@@ -52,6 +57,10 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         IO_READER => Some("JetIoReader"),
         IO_WRITER => Some("JetIoWriter"),
         CLOSE => Some("user_Close"),
+        ADD => Some("user_Add"),
+        SUB => Some("user_Sub"),
+        MUL => Some("user_Mul"),
+        DIV => Some("user_Div"),
         _ => None,
     }
 }
@@ -267,7 +276,9 @@ pub fn rust_type_param_list(
             if let Some(ex) = extra_bounds.get(&p.name) {
                 for b in ex {
                     let rb = match b.as_str() {
-                        "Clone" | "JetShow" | "JetDebug" => b.clone(),
+                        "Clone" | "JetShow" | "JetDebug" | "PartialEq" | "PartialOrd" => {
+                            b.clone()
+                        }
                         _ if matches!(b.as_str(), IO_READER | IO_WRITER) => {
                             rust_trait_bound(b).unwrap_or("").to_string()
                         }
@@ -300,7 +311,9 @@ pub fn e0904(span: Span, param: &str) -> Diagnostic {
 }
 
 pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) -> Diagnostic {
-    let fix = if needs_derive && (trait_name == COMPARABLE || trait_name == SERIALIZE) {
+    let fix = if trait_name == COMPARABLE && type_name == crate::Syntax::TYPE_FLOAT {
+        "use explicit Float comparisons or sort by a total key that handles NaN".to_string()
+    } else if needs_derive && (trait_name == COMPARABLE || trait_name == SERIALIZE) {
         format!(
             "add `derive {trait_name};` inside the `{type_name}` body, or write a different approach"
         )
@@ -493,18 +506,6 @@ pub fn e0902(span: Span) -> Diagnostic {
         "at least one of the trait or the type must be defined in this program (orphan rule)"
             .to_string(),
         "define the trait or type in this file, or move the impl".to_string(),
-        Some(span),
-    )
-}
-
-pub fn e0903(trait_name: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0903",
-        format!("hand-written `{trait_name}` isn't available yet"),
-        format!(
-            "built-in `{trait_name}` uses `derive {trait_name};` for now — custom impls arrive later"
-        ),
-        format!("add `derive {trait_name};` inside the type body instead"),
         Some(span),
     )
 }

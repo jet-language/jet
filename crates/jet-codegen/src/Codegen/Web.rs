@@ -1106,7 +1106,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             else { format!("{key}({args})") }
         }
         E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs, file_prefix)?),
-        E::MethodCall { recv, method_rust, args } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(method_rust), tir_call_args(args, funcs, file_prefix)?),
+        E::MethodCall { recv, method_rust, args, .. } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(method_rust), tir_call_args(args, funcs, file_prefix)?),
         E::CoreCall { module, method, args } => tir_core_call(module, method, args, funcs, file_prefix)?,
         E::HandleMethod { recv, op: TIR::THandleOp::UiBackendMethod { method }, args } => {
             let recv = tir_js_expr(recv, funcs, file_prefix)?;

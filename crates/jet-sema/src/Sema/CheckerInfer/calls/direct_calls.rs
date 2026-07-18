@@ -965,13 +965,30 @@ impl<'a> Checker<'a> {
                 }
                 let arg_types: Vec<Type> = pre_inferred.iter().filter_map(|t| t.clone()).collect();
                 if arg_types.len() == call.args.len() {
-                    match self.trait_reg.infer_fn_subst(
+                    match self.trait_reg.infer_fn_subst_without_bounds(
                         &sig,
                         &arg_types,
                         &fn_type_params,
                         self.expected_type.as_ref(),
                     ) {
-                        Ok(s) => generic_subst = s,
+                        Ok(s) => {
+                            if let Some((ty, bound)) = fn_type_params.iter().find_map(|param| {
+                                let ty = s.get(&param.name)?;
+                                param
+                                    .bounds
+                                    .iter()
+                                    .find(|bound| !self.trait_reg.type_implements_trait(ty, bound))
+                                    .map(|bound| (ty, bound))
+                            }) {
+                                self.diags.push(e0905(
+                                    &ty.name(),
+                                    bound,
+                                    call.name_span,
+                                    false,
+                                ));
+                            }
+                            generic_subst = s;
+                        }
                         Err(p) => self.diags.push(e0904(call.name_span, &p)),
                     }
                 }

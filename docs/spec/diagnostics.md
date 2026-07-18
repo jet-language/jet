@@ -308,6 +308,9 @@ renumbered, and no new `W` code may be allocated.
 | E0356 | sema  | inferred `.new(...)` has no expected receiver type (D-SHAPE3a) |
 | E0357 | sema  | an identifier violates Jet's machine-enforced casing category (D-SHAPE-CASE1) |
 | E0359 | sema  | physical quantity dimensions are incompatible for the requested operator (D-SHAPE-QUANTITY1) |
+| E0360 | sema  | a nominal type uses arithmetic without the required operator hook (D-OPDEF1) |
+| E0361 | sema  | an operator hook directly dispatches back to itself through its symbol (D-OPDEF1) |
+| E0362 | sema  | a hooked compound assignment targets a nested field place not yet lowerable as one write (D-OPDEF1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -481,7 +484,7 @@ renumbered, and no new `W` code may be allocated.
 | E0859 | compiler | D-GENMOD-IDENTITY1=A: distinct generic-module full keys produced one fingerprint (ICE 101) |
 | E0901 | sema  | method needs a generic bound |
 | E0902 | sema  | orphan `impl` (neither type nor trait local) |
-| E0903 | sema  | hand-written built-in trait impl staged |
+| — | retired by D-OPDEF1 | former E0903 operator-impl staging diagnostic |
 | E0904 | sema  | can't infer a type argument |
 | E0905 | sema  | type doesn't implement required trait |
 | E0906 | sema  | trait impl missing methods |
@@ -1163,6 +1166,14 @@ already-freed arena), these track the views themselves.
 | E0356 | `.new(...)` needs one known receiver type here. | The inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry. | Add a type annotation or write the full `Type.new(...)` form. |
 | E0357 | `{category}` `{name}` must use its category's canonical casing. | Jet has one enforced two-tier law: type-like names are PascalCase and value-like names are snake_case. | Rename it to the spelling shown by the diagnostic. |
 | E0359 | Physical quantity dimensions do not match. | Addition, subtraction, and comparison require compatible dimensions; multiplication and division derive a normalized dimension. | Use matching dimensions, or use `*` or `/` to derive a new dimension. |
+
+## Operator-hook diagnostics (D-OPDEF1)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0360 | No `{symbol}` operator is defined for `{type}`. | User arithmetic dispatches only through the matching fixed operator trait hook; the compiler does not guess a method or fall through to rustc. | Implement the named `Type.Trait` hook, or call a named method instead. |
+| E0361 | `{hook}` calls itself through `{symbol}`. | The symbol inside its own hook dispatches directly back to that hook, so evaluation would recurse forever. | Combine the value's fields directly, or call a different named helper inside the hook. |
+| E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

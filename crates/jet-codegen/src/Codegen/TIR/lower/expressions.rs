@@ -534,13 +534,19 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // (the shared-middle-operand single-evaluation guarantee is emit's
         // job: it binds each operand to a temp in a Rust block before ANDing
         // the pairwise comparisons). Always `Bool`; relational ops never trap.
-        Expr::CompareChain { operands, ops, .. } => {
+        Expr::CompareChain {
+            operands,
+            ops,
+            hooks,
+            ..
+        } => {
             let toperands: Vec<TExpr> = operands.iter().map(|e| lower_expr(e, cx, env)).collect();
             TExpr {
                 ty: Type::Bool,
                 kind: TExprKind::CompareChain {
                     operands: toperands,
                     ops: ops.clone(),
+                    hooks: hooks.clone(),
                 },
             }
         }

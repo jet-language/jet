@@ -1623,6 +1623,7 @@ fn expand_alias(
         nested_traits.register_synthetic_rollback();
         nested_traits.register_synthetic_display_debug();
         nested_traits.register_synthetic_close();
+        nested_traits.register_synthetic_operators();
         nested_traits.register_synthetic_iter_index();
         nested_traits.register_synthetic_io();
         for def in &nested_defs { nested_traits.register_items(&def.body, &mut Vec::new()); }
@@ -1867,6 +1868,7 @@ pub(crate) fn expand_generic_module_aliases(
             traits.register_synthetic_rollback();
             traits.register_synthetic_display_debug();
             traits.register_synthetic_close();
+            traits.register_synthetic_operators();
             traits.register_synthetic_iter_index();
             traits.register_synthetic_io();
             traits.register_items(&module.items, &mut Vec::new());
@@ -1976,6 +1978,7 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_synthetic_rollback();
         traits.register_synthetic_display_debug();
         traits.register_synthetic_close();
+        traits.register_synthetic_operators();
         traits.register_synthetic_iter_index();
         traits.register_synthetic_io();
         traits.register_items(&module.items,&mut Vec::new());

@@ -234,6 +234,7 @@ impl<'a> Parser<'a> {
                 return Ok(Expr::Binary(ops[0], Box::new(lhs), Box::new(rhs), span));
             }
             Ok(Expr::CompareChain {
+                hooks: vec![false; ops.len()],
                 operands,
                 ops,
                 span,

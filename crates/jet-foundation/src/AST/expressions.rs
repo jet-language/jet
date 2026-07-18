@@ -238,6 +238,9 @@ pub enum Expr {
     CompareChain {
         operands: Vec<Expr>,
         ops: Vec<BinOp>,
+        /// D-OPDEF1: pairwise comparisons that dispatch through `Comparable.compare`.
+        /// Sema fills this parallel to `ops`; parser-created entries are false.
+        hooks: Vec<bool>,
         span: Span,
     },
     /// D-UNITLIT1: a numeric literal with a unit suffix — `500ms`, `12.50usd`.

@@ -4,7 +4,7 @@ use crate::AST::{
     ConstAttr, DistinctDef, EnumDef, Expr, Field, Func, ImplDef, Item, Marker, RustConstKind,
     StrPart, StructDef, TraitImplBlock, Type, VariantPayload,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// D-FIELDPOL1: the Rust expression that reads field `f` off `self` — a
 /// getter call `(self).user_field()` for a computed field (it's not a struct
@@ -42,6 +42,32 @@ fn add_view_lifetime_arg(args: String) -> String {
     } else {
         args
     }
+}
+
+fn structural_trait_bounds(
+    s: &StructDef,
+    trait_name: &str,
+    native_bound: &str,
+    required: &HashMap<String, Vec<String>>,
+) -> HashMap<String, Vec<String>> {
+    let names: HashSet<&str> = s.type_params.iter().map(|param| param.name.as_str()).collect();
+    let mut used = HashSet::new();
+    for field in s.fields.iter().filter(|field| field.computed.is_none()) {
+        Generics::collect_type_param_mentions(&field.ty, &names, &mut used);
+    }
+    let mut extra: HashMap<String, Vec<String>> = used
+        .into_iter()
+        .map(|name| {
+            (
+                name,
+                vec![trait_name.to_string(), native_bound.to_string()],
+            )
+        })
+        .collect();
+    for (name, bounds) in required {
+        extra.entry(name.clone()).or_default().extend(bounds.clone());
+    }
+    extra
 }
 
 pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
@@ -119,6 +145,64 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
+    if cx.comparable.contains(&s.name)
+        && !cx
+            .trait_methods
+            .contains(&(s.name.clone(), "equal".to_string()))
+    {
+        let type_rust = user_type_rust(&s.name);
+        if s.type_params.is_empty() {
+            let (impl_params, type_args) = if has_view_field {
+                ("<'__jet_view>", "<'__jet_view>")
+            } else {
+                ("", "")
+            };
+            out.push_str(&format!(
+                "impl{impl_params} user_Equatable for {type_rust}{type_args} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n"
+            ));
+        } else {
+            let extra =
+                structural_trait_bounds(s, Generics::EQUATABLE, "PartialEq", &clone_extra);
+            let mut params = Generics::rust_type_param_list(&s.type_params, &extra);
+            let mut args = Generics::type_param_rust_list(&s.type_params);
+            if has_view_field {
+                params = add_view_lifetime_generic(params);
+                args = add_view_lifetime_arg(args);
+            }
+            out.push_str(&format!(
+                "impl{params} user_Equatable for {type_rust}{args} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n"
+            ));
+        }
+    }
+    if cx.partial_ord.contains(&s.name)
+        && !cx
+            .trait_methods
+            .contains(&(s.name.clone(), "compare".to_string()))
+    {
+        let type_rust = user_type_rust(&s.name);
+        if s.type_params.is_empty() {
+            let (impl_params, type_args) = if has_view_field {
+                ("<'__jet_view>", "<'__jet_view>")
+            } else {
+                ("", "")
+            };
+            out.push_str(&format!(
+                "impl{impl_params} user_Comparable for {type_rust}{type_args} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n"
+            ));
+        } else {
+            let extra =
+                structural_trait_bounds(s, Generics::COMPARABLE, "PartialOrd", &clone_extra);
+            let mut params = Generics::rust_type_param_list(&s.type_params, &extra);
+            let mut args = Generics::type_param_rust_list(&s.type_params);
+            if has_view_field {
+                params = add_view_lifetime_generic(params);
+                args = add_view_lifetime_arg(args);
+            }
+            out.push_str(&format!(
+                "impl{params} user_Comparable for {type_rust}{args} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n"
+            ));
+        }
+    }
     if !s.type_params.is_empty() {
         let jetshow_extra = Generics::rust_extra_jetshow_bounds(&s.type_params);
         let mut impl_bounds = jetshow_extra.clone();
@@ -687,6 +771,9 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         derives.push("Eq");
         derives.push("Hash");
     }
+    if cx.partial_ord.contains(&e.name) {
+        derives.push("PartialOrd");
+    }
     if let Some(tag) = e.c_layout_tag() {
         let repr = match tag {
             crate::AST::CEnumTag::CInt => "C",
@@ -730,6 +817,26 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         }
     }
     out.push_str("}\n\n");
+    if cx.comparable.contains(&e.name)
+        && !cx
+            .trait_methods
+            .contains(&(e.name.clone(), "equal".to_string()))
+    {
+        out.push_str(&format!(
+            "impl user_Equatable for user_{0} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n",
+            e.name
+        ));
+    }
+    if cx.partial_ord.contains(&e.name)
+        && !cx
+            .trait_methods
+            .contains(&(e.name.clone(), "compare".to_string()))
+    {
+        out.push_str(&format!(
+            "impl user_Comparable for user_{0} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n",
+            e.name
+        ));
+    }
     out.push_str(&format!(
         "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
         e.name
@@ -1375,7 +1482,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     if base_is_copy {
         derives.push("Copy");
     }
-    if d.is_numeric {
+    if d.is_numeric || d.is_comparable {
         // PartialOrd needed for ordered comparisons; also useful for @Numeric types.
         derives.push("PartialOrd");
     }
@@ -1385,6 +1492,16 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         d.name,
         base_rust
     ));
+    out.push_str(&format!(
+        "impl user_Equatable for user_{0} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n",
+        d.name
+    ));
+    if d.is_numeric || d.is_comparable {
+        out.push_str(&format!(
+            "impl user_Comparable for user_{0} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n",
+            d.name
+        ));
+    }
     // JetShow: display the base value wrapped in the type name.
     out.push_str(&format!(
         "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{\n        format!(\"{}({{}})\", (self.0).jet_show())\n    }}\n}}\n\n",
@@ -1417,6 +1534,15 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     // @Numeric: implement Add, Sub, Mul, Div (same-type arithmetic).
     if d.is_numeric {
         for (trait_name, op) in &[("Add", "+"), ("Sub", "-"), ("Mul", "*"), ("Div", "/")] {
+            if d.range.is_none() {
+                out.push_str(&format!(
+                    "impl user_{trait_name} for user_{n} {{ fn {method}(&self, rhs: &Self) -> Self {{ user_{n}(self.0 {op} rhs.0) }} }}\n\n",
+                    trait_name = trait_name,
+                    n = d.name,
+                    method = trait_name.to_lowercase(),
+                    op = op
+                ));
+            }
             if d.range.is_some() {
                 out.push_str(&format!(
                     "impl std::ops::{}<user_{n}> for user_{n} {{\n    type Output = {base};\n    fn {lc}(self, rhs: user_{n}) -> {base} {{ self.0 {op} rhs.0 }}\n}}\n\n",

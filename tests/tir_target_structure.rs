@@ -19,6 +19,7 @@ fn tir_integration_target_stays_split_by_feature_family() {
         "tir_io_and_ownership",
         "tir_language_features",
         "tir_modules_and_enums",
+        "tir_operators_and_runtime",
         "tir_patterns_and_fields",
         "tir_unsafe_and_runtime",
     ] {

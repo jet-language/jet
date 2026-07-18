@@ -150,6 +150,14 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => None,
         })
         .collect();
+    let operator_traits = [
+        crate::Syntax::TRAIT_ADD,
+        crate::Syntax::TRAIT_SUB,
+        crate::Syntax::TRAIT_MUL,
+        crate::Syntax::TRAIT_DIV,
+        crate::Syntax::TRAIT_EQUATABLE,
+        crate::Syntax::TRAIT_COMPARABLE,
+    ];
     cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
         match item {
@@ -179,7 +187,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             Item::Impl(imp)
                 if instance_modules
                     .iter()
-                    .any(|module_name| imp.type_name.starts_with(&format!("{module_name}__"))) =>
+                    .any(|module_name| imp.type_name.starts_with(&format!("{module_name}__")))
+                    || imp
+                        .trait_name
+                        .as_deref()
+                        .is_some_and(|trait_name| operator_traits.contains(&trait_name)) =>
             {
                 for method in &imp.methods {
                     let mut lowered = if let Some(trait_name) = &imp.trait_name {
@@ -265,6 +277,13 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let mut struct_fields = std::collections::HashMap::new();
     let mut struct_field_types = std::collections::HashMap::new();
     let mut enum_variants = std::collections::HashMap::new();
+    enum_variants.insert(
+        crate::Syntax::TYPE_ORDERING.to_string(),
+        ["user_Less", "user_Equal", "user_Greater"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    );
     let mut int_constants = std::collections::HashMap::new();
     for item in &module.items {
         match item {
@@ -1201,6 +1220,7 @@ pub enum TExprKind {
     CompareChain {
         operands: Vec<TExpr>,
         ops: Vec<BinOp>,
+        hooks: Vec<bool>,
     },
     /// D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 1): `>=`/`<=`/`==` between layout
     /// values (`HVar`/`VVar`/`LengthVar`) produce a `Constraint`, which Rust's
@@ -1451,6 +1471,10 @@ pub enum TExprKind {
         recv: Box<TExpr>,
         method_rust: String,
         args: Vec<TCallArg>,
+        /// Hidden source bridge for generic arithmetic trait dispatch. User
+        /// methods keep their two-argument surface; primitive impls receive
+        /// the Jet operator line through the synthetic trait's default helper.
+        operator_line: Option<u32>,
     },
     /// c109 Phase 27: a CALL THROUGH a fn-typed struct field — `w.step(4)` where `step`
     /// is a `fn(...)` FIELD (not a user method). Emits `(({recv}).{field_rust})({args})`,

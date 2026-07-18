@@ -729,6 +729,70 @@ pub(crate) fn emit_synthetic_display_trait(out: &mut String) {
     out.push_str("}\n\n");
 }
 
+pub(crate) fn emit_synthetic_operator_traits(out: &mut String) {
+    out.push_str("#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n");
+    out.push_str("pub enum user_Ordering { user_Less, user_Equal, user_Greater }\n\n");
+    for (name, method, ret) in [
+        ("Add", "add", "Self"),
+        ("Sub", "sub", "Self"),
+        ("Mul", "mul", "Self"),
+        ("Div", "div", "Self"),
+        ("Equatable", "equal", "bool"),
+        ("Comparable", "compare", "user_Ordering"),
+    ] {
+        if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
+            out.push_str(&format!(
+                "pub trait user_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "pub trait user_{name}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
+            ));
+        }
+    }
+    for ty in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"] {
+        for (trait_name, method, checked) in [
+            ("Add", "add", "jet_add"),
+            ("Sub", "sub", "jet_sub"),
+            ("Mul", "mul", "jet_mul"),
+            ("Div", "div", "jet_div"),
+        ] {
+            out.push_str(&format!(
+                "impl user_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
+            ));
+        }
+    }
+    for ty in ["f32", "f64"] {
+        for (trait_name, method, op) in [
+            ("Add", "add", "+"),
+            ("Sub", "sub", "-"),
+            ("Mul", "mul", "*"),
+            ("Div", "div", "/"),
+        ] {
+            out.push_str(&format!(
+                "impl user_{trait_name} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
+            ));
+        }
+    }
+    for ty in [
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
+        "bool", "char", "String",
+    ] {
+        out.push_str(&format!(
+            "impl user_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
+        ));
+    }
+    for ty in [
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char",
+        "String",
+    ] {
+        out.push_str(&format!(
+            "impl user_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n"
+        ));
+    }
+    out.push('\n');
+}
+
 /// D-SHAPE-RESOURCE2=A: the one nominal consuming, infallible cleanup trait.
 pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
     out.push_str("pub trait user_Close {\n");
@@ -930,6 +994,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
 
     emit_synthetic_display_trait(&mut out);
+    emit_synthetic_operator_traits(&mut out);
     emit_synthetic_close_trait(&mut out);
     emit_synthetic_close_builtin_impls(&cx, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
@@ -1282,6 +1347,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
 
     emit_synthetic_display_trait(&mut out);
+    emit_synthetic_operator_traits(&mut out);
     emit_synthetic_close_trait(&mut out);
     emit_synthetic_close_builtin_impls(&cx, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
