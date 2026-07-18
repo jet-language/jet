@@ -319,6 +319,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
         E::Unary { operand, .. } | E::Clone(operand) | E::MaterializeView(operand) | E::DistinctRaw(operand) | E::Print(operand) => web_expr_supported(operand),
+        E::DistinctCtor { arg, .. } => web_expr_supported(arg),
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
@@ -1083,6 +1084,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
         E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs, file_prefix)?),
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
+        E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
         E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field_rust)),
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
         E::Call { name, args } => {

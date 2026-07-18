@@ -368,7 +368,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     left.multiply(right)
                 } else {
                     left.divide(right)
-                };
+                }
+                .expect("sema checked physical dimension exponent bounds");
                 let ty = if dimension == crate::AST::Dimension::SCALAR {
                     Type::Float
                 } else {
@@ -951,6 +952,20 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::RangeCheckedCtor {
                             name: call.name.clone(),
                             arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                        },
+                    };
+                }
+            }
+            if !env.locals.contains_key(&call.name) {
+                if let (Some((base, _)), Some(arg)) =
+                    (cx.distinct_types.get(&call.name), call.args.first())
+                {
+                    return TExpr {
+                        ty: Type::Named(call.name.clone()),
+                        kind: TExprKind::DistinctCtor {
+                            name: call.name.clone(),
+                            arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                            base: base.clone(),
                         },
                     };
                 }

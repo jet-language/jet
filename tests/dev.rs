@@ -2240,6 +2240,24 @@ fn run() {
 }
 
 #[test]
+fn physical_quantities_run_in_resident_jit_without_fallback() {
+    if skip_if_cranelift_host_unsupported() { return; }
+    let out = run_cranelift_without_fallback(r#"
+@UnitFamily(Length) { meter }
+@UnitFamily(Time) { second }
+fn run() {
+    distance :: 12meter
+    elapsed :: 3second
+    speed :: distance / elapsed
+    recovered :: speed * elapsed
+    ratio :: recovered / distance
+    print(ratio)
+}
+"#, "physical_quantity");
+    assert_eq!(out.stdout, "1.0\n");
+}
+
+#[test]
 fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"

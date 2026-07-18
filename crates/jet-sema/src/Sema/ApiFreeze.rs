@@ -26,8 +26,9 @@
 //! discipline as the D-MIGRATE1 `@PublishedSchema` snapshot).
 
 use crate::Syntax;
-use crate::AST::{Func, Item, TraitMethodSig};
+use crate::AST::{Dimension, Func, Item, TraitMethodSig, Type};
 use crate::Sema::EffectSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub const API_SNAPSHOT_VERSION: u32 = 3;
@@ -133,7 +134,7 @@ fn fn_name_of(line: &str) -> Option<String> {
 /// with frozen D-CAP7 sigils and the return type. Shared with the SemVer
 /// `Publish::API` extractor (same surface; this one is exposed for the freeze).
 pub fn fn_signature(f: &Func) -> String {
-    fn_signature_with_effects(f, None)
+    canonical_fn_signature(f, &HashMap::new())
 }
 
 /// Concrete inferred effects plus symbolic contract entries that cannot be
@@ -158,14 +159,90 @@ pub fn normalized_public_effect_row(f: &Func, inferred: &EffectSet) -> EffectSet
 /// Canonical public signature with the normalized inferred row. Source may
 /// omit the row, but published metadata may not: effect drift is API drift.
 pub fn fn_signature_with_effects(f: &Func, inferred: Option<&EffectSet>) -> String {
+    canonical_fn_signature_with_effects(f, inferred, &HashMap::new())
+}
+
+pub type ApiUnitDimensions = HashMap<String, (String, Dimension)>;
+
+pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> String {
+    match ty {
+        Type::Named(name) => dimensions.get(name).map_or_else(
+            || ty.name(),
+            |(family, dimension)| {
+                format!("{name}{{family={family}; base=Float; dimension={}}}", dimension.identity())
+            },
+        ),
+        Type::List(inner) => format!("[{}]", canonical_api_type_name(inner, dimensions)),
+        Type::Map { key, value, .. } => format!(
+            "[{}: {}]",
+            canonical_api_type_name(key, dimensions),
+            canonical_api_type_name(value, dimensions)
+        ),
+        Type::Shared(inner) => format!("Shared<{}>", canonical_api_type_name(inner, dimensions)),
+        Type::Option(inner) => format!("{}?", canonical_api_type_name(inner, dimensions)),
+        Type::Result { ok, err } => format!(
+            "{} ? {}",
+            canonical_api_type_name(ok, dimensions),
+            canonical_api_type_name(err, dimensions)
+        ),
+        Type::Fn { params, ret, effect_bound } => {
+            let params = params.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ");
+            let effects = effect_bound.as_ref().map(|row| row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
+            match (effects, ret) {
+                (Some(row), Some(ret)) => format!("fn({params}) --[{row}]-> {}", canonical_api_type_name(ret, dimensions)),
+                (Some(row), None) => format!("fn({params}) --[{row}]->"),
+                (None, Some(ret)) => format!("fn({params}) -> {}", canonical_api_type_name(ret, dimensions)),
+                (None, None) => format!("fn({params})"),
+            }
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
+            format!("*{}", canonical_api_type_name(&args[0], dimensions))
+        }
+        Type::Apply { .. } if ty.quantity_parts().is_some() => ty.name(),
+        Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ")),
+        Type::Tuple(fields) => format!("({})", fields.iter().map(|(name, ty)| format!("{name}: {}", canonical_api_type_name(ty, dimensions))).collect::<Vec<_>>().join(", ")),
+        Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", canonical_api_type_name(elem, dimensions), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
+        Type::Tagged { marker, inner } if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER => canonical_api_type_name(inner, dimensions),
+        Type::Tagged { marker, inner } => format!("#{marker} {}", canonical_api_type_name(inner, dimensions)),
+        _ => ty.name(),
+    }
+}
+
+pub fn canonical_fn_signature(
+    f: &Func,
+    dimensions: &ApiUnitDimensions,
+) -> String {
+    canonical_fn_signature_with_effects(f, None, dimensions)
+}
+
+pub fn canonical_fn_signature_with_effects(
+    f: &Func,
+    inferred: Option<&EffectSet>,
+    dimensions: &ApiUnitDimensions,
+) -> String {
     let params: Vec<String> = f
         .params
         .iter()
-        .map(|p| format!("{}: {}{}", p.name, p.convention.sigil(), p.ty.name()))
+        .map(|p| format!("{}: {}{}", p.name, p.convention.sigil(), canonical_api_type_name(&p.ty, dimensions)))
         .collect();
     let ret = match inferred {
-        Some(row) => format!(" --[{}]->{}", normalized_public_effect_row(f, row).iter().cloned().collect::<Vec<_>>().join(", "), f.return_type.as_ref().map(|t| format!(" {}", t.name())).unwrap_or_default()),
-        None => f.return_type.as_ref().map(|t| format!(" -> {}", t.name())).unwrap_or_default(),
+        Some(row) => format!(
+            " --[{}]->{}",
+            normalized_public_effect_row(f, row)
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+            f.return_type
+                .as_ref()
+                .map(|t| format!(" {}", canonical_api_type_name(t, dimensions)))
+                .unwrap_or_default()
+        ),
+        None => f
+            .return_type
+            .as_ref()
+            .map(|t| format!(" -> {}", canonical_api_type_name(t, dimensions)))
+            .unwrap_or_default(),
     };
     let provenance = f.return_view_provenance.as_ref().map_or_else(String::new, |map| {
         if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
@@ -287,7 +364,16 @@ pub fn snapshot_from_items_with_effects(
     module_alias: Option<&str>,
 ) -> ApiSnapshot {
     let mut funcs = Vec::new();
-    collect_pub_fns(items, solved, module_alias, None, &mut funcs);
+    let mut dimensions = HashMap::new();
+    collect_api_unit_dimensions(items, &mut dimensions);
+    collect_pub_fns(
+        items,
+        solved,
+        module_alias,
+        None,
+        &dimensions,
+        &mut funcs,
+    );
     funcs.sort();
     ApiSnapshot {
         api_version: API_SNAPSHOT_VERSION,
@@ -301,11 +387,35 @@ pub fn snapshot_from_items_with_effects(
 /// `module { … }` bodies. The package's own module block carries the library's
 /// surface (`module foo { pub fn … }`) and need not itself be marked `pub`; it is
 /// the `pub` on the *function* that puts it on the contract.
+pub fn collect_api_unit_dimensions(
+    items: &[Item],
+    out: &mut HashMap<String, (String, Dimension)>,
+) {
+    for item in items {
+        match item {
+            Item::UnitFamily(family) => {
+                if let Some(dimension) = Dimension::for_family(&family.family) {
+                    for member in family.distinct_defs() {
+                        out.insert(member.name, (family.family.clone(), dimension));
+                    }
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_api_unit_dimensions(body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn collect_pub_fns(
     items: &[Item],
     solved: Option<&std::collections::HashMap<String, EffectSet>>,
     module_alias: Option<&str>,
     code_module: Option<&str>,
+    dimensions: &HashMap<String, (String, Dimension)>,
     out: &mut Vec<FrozenFn>,
 ) {
     for item in items {
@@ -318,7 +428,7 @@ fn collect_pub_fns(
                 name: frozen_name(code_module, &f.name),
                 signature: qualify_api_signature(
                     code_module,
-                    &fn_signature_with_effects(
+                    &canonical_fn_signature_with_effects(
                         f,
                         solved.and_then(|sets| {
                             module_alias.and_then(|alias| {
@@ -329,6 +439,7 @@ fn collect_pub_fns(
                             })
                                 .or_else(|| sets.get(&f.name))
                         }),
+                        dimensions,
                     ),
                 ),
             }),
@@ -352,7 +463,14 @@ fn collect_pub_fns(
             }
             Item::CodeModule(m) => {
                 if let Some(body) = &m.body {
-                    collect_pub_fns(body, solved, module_alias, Some(&m.name), out);
+                    collect_pub_fns(
+                        body,
+                        solved,
+                        module_alias,
+                        Some(&m.name),
+                        dimensions,
+                        out,
+                    );
                 }
             }
             _ => {}
@@ -430,7 +548,7 @@ pub fn project_capability_digest(project_root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::Diagnostics::Span;
-    use crate::AST::{AccessConvention, Func, Param, Type};
+    use crate::AST::{AccessConvention, Func, Param, Type, UnitFamilyDef};
 
     fn zero() -> Span {
         Span::new(0, 0)
@@ -597,6 +715,30 @@ mod tests {
         assert_eq!(
             fn_signature(&f),
             "fn pace(value: Quantity<Speed, Float; L1T-1>) -> Quantity<Speed, Float; L1T-1>"
+        );
+    }
+
+    #[test]
+    fn checked_source_unit_signature_carries_dimension_identity() {
+        let family = UnitFamilyDef {
+            is_pub: true,
+            is_package_pub: false,
+            family: "Length".into(),
+            family_span: zero(),
+            members: vec![("meter".into(), zero())],
+            span: zero(),
+        };
+        let api = snapshot_from_items(
+            &[
+                Item::UnitFamily(family),
+                Item::Func(func("distance", true, vec![], Some(Type::Named("Meter".into())))),
+            ],
+            "physics",
+            "1.0.0",
+        );
+        assert_eq!(
+            api.funcs[0].signature,
+            "fn distance() -> Meter{family=Length; base=Float; dimension=L1T0}"
         );
     }
 

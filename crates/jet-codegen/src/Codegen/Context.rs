@@ -826,7 +826,11 @@ impl Cx {
             {
                 name.clone()
             }
-            Type::Named(name) if name == "Unit" || name == "Void" => "()".to_string(),
+            Type::Named(name)
+                if (name == "Unit" || name == "Void") && !self.type_names.contains(name) =>
+            {
+                "()".to_string()
+            }
             Type::Named(name) if name == "Error" => "String".to_string(),
             Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError") => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
@@ -1100,6 +1104,11 @@ impl Cx {
             Type::Named(name) if self.trait_names.contains(name) => {
                 format!("Box<dyn {}>", Generics::user_trait_rust(name))
             }
+            Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
+                let rust_mod = &self.foreign_types[name.as_str()];
+                let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+                format!("{}{}::{}", self.root_prefix, rust_mod, user_type_rust(leaf))
+            }
             Type::Named(name) if name.contains('.') => {
                 let (alias, leaf) = name.split_once('.').unwrap();
                 match self.import_mods.get(alias) {
@@ -1111,10 +1120,6 @@ impl Cx {
                     ),
                     None => user_type_rust(name),
                 }
-            }
-            Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
-                let rust_mod = &self.foreign_types[name.as_str()];
-                format!("{}{}::user_{name}", self.root_prefix, rust_mod)
             }
             Type::Named(n) if n == "Expired" => "JetExpired".to_string(),
             Type::Named(name) => user_type_rust(name),
@@ -1515,9 +1520,8 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-    // Dimensions are canonical across package/module boundaries. Imported
-    // signatures may carry a unit type declared in another module, so every
-    // lowering context receives the same closed member-to-dimension facts.
+    // Keep imported nominal identities qualified: two modules may deliberately
+    // mint the same member leaf for different dimensions.
     let imported = bundle.modules[module_idx]
         .imports
         .iter()
@@ -1533,7 +1537,12 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
             if let Item::UnitFamily(family) = item {
                 if let Some(dimension) = crate::AST::Dimension::for_family(&family.family) {
                     for member in family.distinct_defs() {
-                        cx.unit_dimensions.insert(member.name, dimension);
+                        let name = if target == module_idx {
+                            member.name
+                        } else {
+                            format!("{}.{}", module.alias, member.name)
+                        };
+                        cx.unit_dimensions.insert(name, dimension);
                     }
                 }
             }

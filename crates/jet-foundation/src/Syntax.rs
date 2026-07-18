@@ -101,7 +101,7 @@ pub const TYPE_QUANTITY: &str = "\0Quantity";
 /// Canonical `(Length, Time)` exponent vectors for the first physical
 /// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is
 /// deliberately absent: D-QUAL3 currency units remain nominal quantities.
-pub const PHYSICAL_DIMENSIONS: &[(&str, [i8; 2])] = &[
+pub const PHYSICAL_DIMENSIONS: &[(&str, [i32; 2])] = &[
     ("Length", [1, 0]),
     ("Time", [0, 1]),
     ("Speed", [1, -1]),

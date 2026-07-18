@@ -116,6 +116,9 @@ pub(crate) fn jit_concurrency_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_value_type(ty: &Type) -> bool {
+    if let Some((base, _)) = ty.quantity_parts() {
+        return jit_value_type(base);
+    }
     match ty {
         Type::Named(n)
             if matches!(
@@ -276,6 +279,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             matches!(convert, TIR::TTryConvert::None) && resident_safe_expr(inner, callees)
         }
         TExprKind::Absent => true,
+        TExprKind::DistinctCtor { arg, base, .. } => {
+            jit_value_type(base) && resident_safe_expr(arg, callees)
+        }
         _ if !jit_value_type(&expr.ty) => false,
         TExprKind::IntLit(_, _)
         | TExprKind::FloatLit(_)

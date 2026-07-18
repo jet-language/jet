@@ -2651,6 +2651,41 @@ pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
 }
 
 #[test]
+fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
+    use jet::Publish::{diff_public_api, extract_public_api, ApiItem};
+
+    let dir = tmp_dir("physical_unit_api_freeze");
+    let current = "@UnitFamily(Length) { meter }\npub fn distance() -> Meter { return 1meter }\n";
+    let current_path = dir.join("current.jet");
+    fs::write(&current_path, current).unwrap();
+    let current_api = extract_public_api(current, current_path.to_str().unwrap());
+    let bundle = jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true)
+        .unwrap();
+    let frozen = jet::Publish::ApiFreeze::snapshot_from_items(
+        &bundle.modules[bundle.entry].items,
+        "physics",
+        "1.0.0",
+    );
+    let frozen_api: Vec<ApiItem> = frozen
+        .funcs
+        .iter()
+        .map(|function| ApiItem {
+            kind: "fn".into(),
+            name: function.name.clone(),
+            signature: function.signature.clone(),
+        })
+        .collect();
+    assert!(diff_public_api(&frozen_api, &current_api).is_empty());
+
+    let changed = "@UnitFamily(Time) { meter }\npub fn distance() -> Meter { return 1meter }\n";
+    let changed_path = dir.join("changed.jet");
+    fs::write(&changed_path, changed).unwrap();
+    let changed_api = extract_public_api(changed, changed_path.to_str().unwrap());
+    assert_eq!(diff_public_api(&current_api, &changed_api).len(), 1);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn soft_public_names_are_not_semver_promises() {
     use jet::Publish::{diff_public_api, extract_public_api};
 

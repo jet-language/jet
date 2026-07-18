@@ -1,7 +1,7 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
-use jet_codegen::Codegen::TIR::{JitProgram, SerdeCodec, TExpr, TFunc, TFuncKind};
+use jet_codegen::Codegen::TIR::{JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind};
 use jet_foundation::AST::Type;
 use std::collections::HashMap;
 
@@ -11,6 +11,9 @@ use super::safety::{
 };
 
 pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Type, String> {
+    if let TExprKind::DistinctCtor { base, .. } = &init.kind {
+        return clif_ty(base).ok_or_else(|| format!("jit distinct base unsupported: {base:?}"));
+    }
     if let Some(t) = clif_ty(&init.ty) {
         return Ok(t);
     }
@@ -27,6 +30,9 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
 }
 
 pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
+    if let Some((base, _)) = ty.quantity_parts() {
+        return clif_ty(base);
+    }
     if matches!(ty, Type::Named(n) if n == "Unit") {
         return None;
     }

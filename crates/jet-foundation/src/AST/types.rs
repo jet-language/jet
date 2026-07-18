@@ -5,7 +5,7 @@ use crate::Diagnostics::Span;
 /// front-end/TIR type facts. The initial closed table has Length and Time as
 /// bases, which is sufficient to derive Speed, Area, and arbitrary products.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Dimension([i8; 2]);
+pub struct Dimension([i32; 2]);
 
 impl Dimension {
     pub const SCALAR: Self = Self([0, 0]);
@@ -16,16 +16,25 @@ impl Dimension {
             .find_map(|(family, exponents)| (*family == name).then_some(Self(*exponents)))
     }
 
-    pub fn multiply(self, rhs: Self) -> Self {
-        Self([self.0[0] + rhs.0[0], self.0[1] + rhs.0[1]])
+    pub fn multiply(self, rhs: Self) -> Option<Self> {
+        Some(Self([
+            self.0[0].checked_add(rhs.0[0])?,
+            self.0[1].checked_add(rhs.0[1])?,
+        ]))
     }
 
-    pub fn divide(self, rhs: Self) -> Self {
-        Self([self.0[0] - rhs.0[0], self.0[1] - rhs.0[1]])
+    pub fn divide(self, rhs: Self) -> Option<Self> {
+        Some(Self([
+            self.0[0].checked_sub(rhs.0[0])?,
+            self.0[1].checked_sub(rhs.0[1])?,
+        ]))
     }
 
-    pub fn pow(self, exponent: i8) -> Self {
-        Self([self.0[0] * exponent, self.0[1] * exponent])
+    pub fn pow(self, exponent: i32) -> Option<Self> {
+        Some(Self([
+            self.0[0].checked_mul(exponent)?,
+            self.0[1].checked_mul(exponent)?,
+        ]))
     }
 
     pub fn family_name(self) -> Option<&'static str> {
@@ -328,6 +337,49 @@ fn effect_names(row: &[(String, Span)]) -> String {
 }
 
 impl Type {
+    /// Recursively rewrite nominal leaves while preserving every container and
+    /// callback shape. Import resolution uses this to attach module identity to
+    /// unit-family members in signatures.
+    pub fn map_named_types(&self, map: &impl Fn(&str) -> Option<String>) -> Type {
+        match self {
+            Type::Named(name) => map(name).map_or_else(|| self.clone(), Type::Named),
+            Type::List(inner) => Type::List(Box::new(inner.map_named_types(map))),
+            Type::Map { key, key_span, value } => Type::Map {
+                key: Box::new(key.map_named_types(map)),
+                key_span: *key_span,
+                value: Box::new(value.map_named_types(map)),
+            },
+            Type::Shared(inner) => Type::Shared(Box::new(inner.map_named_types(map))),
+            Type::Option(inner) => Type::Option(Box::new(inner.map_named_types(map))),
+            Type::Result { ok, err } => Type::Result {
+                ok: Box::new(ok.map_named_types(map)),
+                err: Box::new(err.map_named_types(map)),
+            },
+            Type::Fn { params, ret, effect_bound } => Type::Fn {
+                params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
+                ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
+                effect_bound: effect_bound.clone(),
+            },
+            Type::Apply { name, args } => Type::Apply {
+                name: name.clone(),
+                args: args.iter().map(|ty| ty.map_named_types(map)).collect(),
+            },
+            Type::Tuple(fields) => Type::Tuple(
+                fields.iter().map(|(name, ty)| (name.clone(), Box::new(ty.map_named_types(map)))).collect(),
+            ),
+            Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+                elem: Box::new(elem.map_named_types(map)),
+                len: *len,
+                len_symbol: len_symbol.clone(),
+            },
+            Type::Tagged { marker, inner } => Type::Tagged {
+                marker: marker.clone(),
+                inner: Box::new(inner.map_named_types(map)),
+            },
+            other => other.clone(),
+        }
+    }
+
     pub fn quantity(base: Type, dimension: Dimension) -> Type {
         Type::Apply {
             name: crate::Syntax::TYPE_QUANTITY.to_string(),
@@ -573,15 +625,44 @@ mod tests {
     fn physical_dimensions_normalize_and_serialize_stably() {
         let length = Dimension::for_family("Length").unwrap();
         let time = Dimension::for_family("Time").unwrap();
-        let speed = length.divide(time);
+        let speed = length.divide(time).unwrap();
         assert_eq!(speed.family_name(), Some("Speed"));
-        assert_eq!(length.multiply(length).family_name(), Some("Area"));
-        assert_eq!(length.pow(2).family_name(), Some("Area"));
-        assert_eq!(speed.multiply(time), length);
+        assert_eq!(length.multiply(length).unwrap().family_name(), Some("Area"));
+        assert_eq!(length.pow(2).unwrap().family_name(), Some("Area"));
+        assert_eq!(speed.multiply(time), Some(length));
         assert_eq!(Dimension::from_identity(&speed.identity()), Some(speed));
+        let max = Dimension::from_identity("L2147483647T0").unwrap();
+        assert_eq!(max.multiply(length), None);
         assert_eq!(
             Type::quantity(Type::Float, speed).name(),
             "Quantity<Speed, Float; L1T-1>"
         );
+    }
+
+    #[test]
+    fn imported_unit_identity_maps_through_containers_and_callbacks() {
+        let unit = Type::Named("Unit".into());
+        let nested = Type::Fn {
+            params: vec![
+                Type::List(Box::new(unit.clone())),
+                Type::Map {
+                    key: Box::new(unit.clone()),
+                    key_span: None,
+                    value: Box::new(Type::Option(Box::new(unit.clone()))),
+                },
+                Type::Tuple(vec![("value".into(), Box::new(unit.clone()))]),
+                Type::Apply { name: "Box".into(), args: vec![unit.clone()] },
+            ],
+            ret: Some(Box::new(Type::Result {
+                ok: Box::new(unit),
+                err: Box::new(Type::String),
+            })),
+            effect_bound: None,
+        };
+        let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));
+        let time = nested.map_named_types(&|name| (name == "Unit").then(|| "time.Unit".into()));
+        assert_ne!(length, time);
+        assert!(length.name().contains("length.Unit"));
+        assert!(time.name().contains("time.Unit"));
     }
 }

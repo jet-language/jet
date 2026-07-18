@@ -1688,6 +1688,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::RangeCheckedCtor { .. } => {
                 Err("jit range-checked ctor unsupported".to_string())
             }
+            TExprKind::DistinctCtor { arg, .. } => self.lower_expr(arg),
             TExprKind::MathBuiltin { .. } => Err("jit math builtin unsupported".to_string()),
             // D-BIGINT1: `BigInt(...)` ctor + `+`/`-`/`*` binop, lowered from
             // `TIR/lower/expressions.rs`. `BigInt` values are opaque i64 handles
@@ -2703,7 +2704,9 @@ impl LowerCtx<'_, '_> {
                 return Type::Int;
             }
         }
-        expr.ty.clone()
+        expr.ty
+            .quantity_parts()
+            .map_or_else(|| expr.ty.clone(), |(base, _)| base.clone())
     }
 
     /// `TExprKind::Binary` (`op != And/Or`, those short-circuit separately in
@@ -2859,7 +2862,11 @@ impl LowerCtx<'_, '_> {
             }
             _ => {
                 let val = self.lower_expr(inner)?;
-                let host_id = match &inner.ty {
+                let print_ty = inner
+                    .ty
+                    .quantity_parts()
+                    .map_or(&inner.ty, |(base, _)| base);
+                let host_id = match print_ty {
                     Type::Int => self.host.print_i64,
                     Type::String => self.host.print_str,
                     Type::Float => self.host.print_f64,

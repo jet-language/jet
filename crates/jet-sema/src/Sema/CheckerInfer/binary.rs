@@ -129,6 +129,10 @@ impl<'a> Checker<'a> {
                     } else {
                         ldim.divide(rdim)
                     };
+                    let Some(result) = result else {
+                        self.dimension_overflow(op, span);
+                        return None;
+                    };
                     return if result == Dimension::SCALAR {
                         Some(Type::Float)
                     } else {
@@ -139,11 +143,14 @@ impl<'a> Checker<'a> {
                     if lt == rt {
                         return Some(Type::Bool);
                     }
-                    if let (Some(ldim), Some(rdim)) = (ldim, rdim) {
-                        if ldim != rdim {
-                            self.dimension_mismatch(op, ldim, rdim, span);
-                            return None;
-                        }
+                    if ldim != rdim {
+                        self.dimension_mismatch(
+                            op,
+                            ldim.unwrap_or(Dimension::SCALAR),
+                            rdim.unwrap_or(Dimension::SCALAR),
+                            span,
+                        );
+                        return None;
                     }
                 }
                 _ => {}
@@ -580,16 +587,20 @@ impl<'a> Checker<'a> {
         if let Some(dimension) = self.registry.unit_dimension(name) {
             return Some(dimension);
         }
+        if let Some((module, leaf)) = name.split_once('.') {
+            return self.modules.and_then(|modules| {
+                modules
+                    .iter()
+                    .find(|candidate| candidate.module_alias == module)
+                    .and_then(|candidate| candidate.registry.unit_dimension(leaf))
+            });
+        }
         // A local nominal shadows imported names; do not borrow an unrelated
         // module's dimension merely because its member has the same spelling.
         if self.registry.contains(name) {
             return None;
         }
-        self.modules.and_then(|modules| {
-            self.imports
-                .values()
-                .find_map(|index| modules.get(*index)?.registry.unit_dimension(name))
-        })
+        None
     }
 
     fn quantity_base_is_compatible(&self, left: &Type, right: &Type) -> bool {
@@ -622,6 +633,17 @@ impl<'a> Checker<'a> {
             ),
             "physical quantities must have compatible dimensions before they can be added, subtracted, or compared".to_string(),
             "use matching dimensions, or use `*` or `/` to derive a new dimension".to_string(),
+            Some(span),
+        ));
+    }
+
+    fn dimension_overflow(&mut self, op: BinOp, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E0359",
+            format!("`{}` makes the physical dimension too large", op.spell()),
+            "physical dimension exponents are checked compiler facts and cannot overflow"
+                .to_string(),
+            "simplify the repeated physical multiplication or division".to_string(),
             Some(span),
         ));
     }

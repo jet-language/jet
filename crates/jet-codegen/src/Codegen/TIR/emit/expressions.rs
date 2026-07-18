@@ -155,6 +155,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
         }
+        TExprKind::DistinctCtor { name, arg, .. } => {
+            format!("{}({})", cx.mangle_name(name), emit_tir_expr(arg, cx))
+        }
         TExprKind::RangeCheckedCtor { name, arg } => {
             format!(
                 "{}::try_new({})",

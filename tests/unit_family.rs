@@ -9,6 +9,9 @@
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 const FAMILY: &str = r#"
 @UnitFamily(Currency) { usd, eur }
 "#;
@@ -141,6 +144,84 @@ fn run() { bad :: 1meter + 1second }
 "#;
     let codes = codes_of(src);
     assert_eq!(codes, vec!["E0359"], "expected one dimension mismatch, got {codes:?}");
+}
+
+#[test]
+fn physical_value_cannot_compare_with_scalar() {
+    let src = r#"
+@UnitFamily(Length) { meter }
+fn run() { bad :: 1meter < 1.0 }
+"#;
+    assert_eq!(codes_of(src), vec!["E0359"]);
+}
+
+#[test]
+fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
+    let mut src = String::from("@UnitFamily(Length) { meter }\nfn run() {\n    q0 :: 1meter\n");
+    for exponent in 1..=31 {
+        src.push_str(&format!(
+            "    q{exponent} :: q{} * q{}\n",
+            exponent - 1,
+            exponent - 1
+        ));
+    }
+    src.push_str("}\n");
+    let result = std::panic::catch_unwind(|| jet::compile(&src));
+    let diagnostics = result
+        .expect("checked dimension overflow must not panic")
+        .expect_err("2^31 Length exponent must be rejected in sema");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0359"));
+}
+
+#[test]
+fn imported_same_leaf_units_keep_distinct_dimensions() {
+    let length = r#"
+@UnitFamily(Length) { unit }
+pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+"#;
+    let time = r#"
+@UnitFamily(Time) { unit }
+pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+"#;
+    let runtime_length = "@UnitFamily(Length) { unit }\npub fn one() -> Unit { return 1unit }\n";
+    let runtime_time = "@UnitFamily(Time) { unit }\npub fn one() -> Unit { return 1unit }\n";
+    let good = r#"
+use "length" as length
+use "time" as time
+fn run() {
+    distance :: length.one() + length.one()
+    elapsed :: time.one() + time.one()
+    print("ok")
+}
+"#;
+    if tir_support::have_rustc() {
+        let (code, stdout) = tir_support::build_and_run_multi(
+            "quantity_composite_same_leaf",
+            "main.jet",
+            &[("length.jet", runtime_length), ("time.jet", runtime_time), ("main.jet", good)],
+        );
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "ok\n");
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_quantity_collision_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("length.jet"), length).unwrap();
+    std::fs::write(dir.join("time.jet"), time).unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(&entry, r#"
+use "length" as length
+use "time" as time
+fn run() { bad :: length.first(length.sample()) + time.first(time.sample()) }
+"#).unwrap();
+    let src = std::fs::read_to_string(&entry).unwrap();
+    let result = jet::compile_with_path(&src, entry.to_str().unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+    let codes: Vec<_> = result.unwrap_err().into_iter().map(|d| d.code.to_string()).collect();
+    assert_eq!(codes, vec!["E0359"]);
 }
 
 #[test]

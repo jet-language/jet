@@ -1105,6 +1105,13 @@ pub enum TExprKind {
         name: String,
         args: Vec<TCallArg>,
     },
+    /// Transparent constructor for an unchecked distinct value. Resident JIT
+    /// lowers this to the base scalar; AOT emits the nominal tuple constructor.
+    DistinctCtor {
+        name: String,
+        arg: Box<TExpr>,
+        base: Type,
+    },
     /// D-RANGETYPE1: checked constructor for `distinct Int(lo..hi)` under
     /// postfix `?`. Emits `user_T::try_new(arg)` returning `Result<user_T,
     /// String>`; the enclosing `Try` node handles propagation.

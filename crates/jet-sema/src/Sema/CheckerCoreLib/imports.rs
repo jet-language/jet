@@ -177,8 +177,13 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                let qualify_unit = |ty: Type| ty.map_named_types(&|name| {
+                    target.registry.unit_dimension(name).map(|_| {
+                        format!("{}.{}", target.module_alias, name)
+                    })
+                });
                 let effective_params: Vec<(AccessConvention, Type)> = sig.params.iter().map(|(conv, ty)| {
-                    (*conv, self.trait_reg.instantiate_type(ty, &subst))
+                    (*conv, qualify_unit(self.trait_reg.instantiate_type(ty, &subst)))
                 }).collect();
                 let target_alias = target.module_alias.clone();
                 self.record_edge(format!("{target_alias}.{name}"), span);
@@ -300,9 +305,9 @@ impl<'a> Checker<'a> {
                     }
                     self.check_write_arg_change(arg);
                 }
-                return sig.return_type.as_ref().map(|ty| self.resolve_type(
+                return sig.return_type.as_ref().map(|ty| qualify_unit(self.resolve_type(
                     self.trait_reg.instantiate_type(ty, &subst)
-                ));
+                )));
             }
             if target.registry.contains(name) {
                 let is_pub = self.type_is_pub_in(mod_idx, name);

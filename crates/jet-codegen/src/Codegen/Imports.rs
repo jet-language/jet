@@ -9,6 +9,16 @@ use std::collections::HashMap;
 fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
     bundle.import_targets.get(&(module_idx, imp.span)).copied()
 }
+
+fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
+    ty.map_named_types(&|name| {
+        bundle.modules[target]
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::UnitFamily(family) if family.distinct_defs().iter().any(|member| member.name == name)))
+            .then(|| format!("{}.{}", bundle.modules[target].alias, name))
+    })
+}
 /// After `cx.foreign_types` is populated, add the foreign type names to
 /// `cx.type_names` and re-run the cloneable/comparable checks for any local
 /// structs or enums that reference those foreign types as fields.
@@ -75,6 +85,14 @@ pub(crate) fn foreign_type_map(
                     }
                     Item::Enum(e) if e.is_pub && !is_local(&e.name) => {
                         map.insert(e.name.clone(), rust_mod.clone());
+                    }
+                    Item::UnitFamily(family) if family.is_pub => {
+                        for member in family.distinct_defs() {
+                            map.insert(
+                                format!("{}.{}", bundle.modules[target].alias, member.name),
+                                rust_mod.clone(),
+                            );
+                        }
                     }
                     _ => {}
                 }
@@ -316,7 +334,7 @@ pub(crate) fn import_sig_map(
                         (alias.clone(), f.name.clone()),
                         f.params
                             .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
+                            .map(|p| (p.convention, qualify_unit_type(bundle, target, &p.ty)))
                             .collect(),
                     );
                 }
@@ -340,7 +358,7 @@ pub(crate) fn import_sig_map(
     // through the re-export would pass by value where a borrow is expected.
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
-        if let Some(real) = bundle.modules.iter().find(|m| m.alias == stem) {
+        if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
                     if f.is_pub && f.name == real_fn {
@@ -348,7 +366,7 @@ pub(crate) fn import_sig_map(
                             (alias.clone(), item.clone()),
                             f.params
                                 .iter()
-                                .map(|p| (p.convention, p.ty.clone()))
+                                .map(|p| (p.convention, qualify_unit_type(bundle, real_idx, &p.ty)))
                                 .collect(),
                         );
                     }
@@ -385,7 +403,11 @@ pub(crate) fn import_ret_map(
         for item in &bundle.modules[target].items {
             match item {
                 Item::Func(f) if f.is_pub => {
-                    map.insert((alias.clone(), f.name.clone()), f.return_type.clone());
+                    let ret = f
+                        .return_type
+                        .as_ref()
+                        .map(|ty| qualify_unit_type(bundle, target, ty));
+                    map.insert((alias.clone(), f.name.clone()), ret);
                 }
                 Item::CModule(cm) => {
                     for ef in &cm.functions {
@@ -398,11 +420,16 @@ pub(crate) fn import_ret_map(
     }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
-        if let Some(real) = bundle.modules.iter().find(|m| m.alias == stem) {
+        if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
                     if f.is_pub && f.name == real_fn {
-                        map.insert((alias.clone(), item.clone()), f.return_type.clone());
+                        map.insert(
+                            (alias.clone(), item.clone()),
+                            f.return_type
+                                .as_ref()
+                                .map(|ty| qualify_unit_type(bundle, real_idx, ty)),
+                        );
                     }
                 }
             }

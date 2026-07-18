@@ -35,7 +35,16 @@ pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
     let mut out = Vec::new();
     // Entry file items (the main module).
     let entry = &bundle.modules[bundle.entry];
-    collect_public_api(&entry.items, &entry.alias, None, &facts.solved, &mut out);
+    let mut dimensions = crate::Sema::ApiFreeze::ApiUnitDimensions::new();
+    crate::Sema::ApiFreeze::collect_api_unit_dimensions(&entry.items, &mut dimensions);
+    collect_public_api(
+        &entry.items,
+        &entry.alias,
+        None,
+        &facts.solved,
+        &dimensions,
+        &mut out,
+    );
     out.sort();
     out
 }
@@ -45,10 +54,11 @@ fn collect_public_api(
     module_alias: &str,
     code_module: Option<&str>,
     solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+    dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
     out: &mut Vec<ApiItem>,
 ) {
     for item in items {
-        if let Some(api) = public_api_of_item(item, module_alias, code_module, solved) {
+        if let Some(api) = public_api_of_item(item, module_alias, code_module, solved, dimensions) {
             out.push(api);
         }
         if let crate::AST::Item::Trait(trait_def) = item {
@@ -77,7 +87,14 @@ fn collect_public_api(
         }
         if let crate::AST::Item::CodeModule(module) = item {
             if let Some(body) = &module.body {
-                collect_public_api(body, module_alias, Some(&module.name), solved, out);
+                collect_public_api(
+                    body,
+                    module_alias,
+                    Some(&module.name),
+                    solved,
+                    dimensions,
+                    out,
+                );
             }
         }
     }
@@ -95,6 +112,7 @@ fn public_api_of_item(
     module_alias: &str,
     code_module: Option<&str>,
     solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+    dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
 ) -> Option<ApiItem> {
     use crate::AST::Item;
     match item {
@@ -108,6 +126,7 @@ fn public_api_of_item(
                         .unwrap_or_else(|| f.name.clone())
                 ))
                 .or_else(|| solved.get(&f.name)),
+                dimensions,
             );
             Some(ApiItem {
                 kind: "fn".into(),
@@ -121,7 +140,7 @@ fn public_api_of_item(
         Item::Struct(s) if supported_public_name(&s.name) && s.is_pub && !s.is_package_pub => Some(ApiItem {
             kind: "struct".into(),
             name: public_item_name(code_module, &s.name),
-            signature: format_struct_sig(s),
+            signature: format_struct_sig(s, dimensions),
         }),
         Item::Enum(e) if supported_public_name(&e.name) && e.is_pub && !e.is_package_pub => Some(ApiItem {
             kind: "enum".into(),
@@ -145,11 +164,18 @@ fn supported_public_name(name: &str) -> bool {
     crate::Syntax::classify_identifier(name) == crate::Syntax::IdentifierClass::Ordinary
 }
 
-fn format_type(ty: &crate::AST::Type) -> String {
-    ty.show()
+fn format_type(
+    ty: &crate::AST::Type,
+    dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+) -> String {
+    crate::Sema::ApiFreeze::canonical_api_type_name(ty, dimensions)
 }
 
-fn format_fn_sig(f: &crate::AST::Func, inferred: Option<&crate::Sema::EffectSet>) -> String {
+fn format_fn_sig(
+    f: &crate::AST::Func,
+    inferred: Option<&crate::Sema::EffectSet>,
+    dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+) -> String {
     let params: Vec<String> = f
         .params
         .iter()
@@ -159,7 +185,12 @@ fn format_fn_sig(f: &crate::AST::Func, inferred: Option<&crate::Sema::EffectSet>
             // (D-CAP8) has resolved every `Infer` to a concrete convention, so
             // the published surface carries the sigil the caller must honor.
             // Plain read is the unmarked default and emits no sigil.
-            format!("{}: {}{}", p.name, p.convention.sigil(), format_type(&p.ty))
+            format!(
+                "{}: {}{}",
+                p.name,
+                p.convention.sigil(),
+                format_type(&p.ty, dimensions)
+            )
         })
         .collect();
     let ret = match inferred {
@@ -170,25 +201,25 @@ fn format_fn_sig(f: &crate::AST::Func, inferred: Option<&crate::Sema::EffectSet>
                 row.iter().cloned().collect::<Vec<_>>().join(", "),
                 f.return_type
                     .as_ref()
-                    .map(|t| format!(" {}", format_type(t)))
+                    .map(|t| format!(" {}", format_type(t, dimensions)))
                     .unwrap_or_default()
             )
         }
         None => f
             .return_type
             .as_ref()
-            .map(|t| format!(" -> {}", format_type(t)))
+            .map(|t| format!(" -> {}", format_type(t, dimensions)))
             .unwrap_or_default(),
     };
     format!("fn {}({}){}", f.name, params.join(", "), ret)
 }
 
-fn format_struct_sig(s: &crate::AST::StructDef) -> String {
+fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions) -> String {
     let fields: Vec<String> = s
         .fields
         .iter()
         .filter(|f| supported_public_name(&f.name))
-        .map(|f| format!("{}: {}", f.name, format_type(&f.ty)))
+        .map(|f| format!("{}: {}", f.name, crate::Sema::ApiFreeze::canonical_api_type_name(&f.ty, dimensions)))
         .collect();
     format!("struct {} {{ {} }}", s.name, fields.join("; "))
 }
