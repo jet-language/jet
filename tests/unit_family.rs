@@ -185,14 +185,12 @@ pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0
 pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
 pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
 "#;
-    let runtime_length = "@UnitFamily(Length) { unit }\npub fn one() -> Unit { return 1unit }\n";
-    let runtime_time = "@UnitFamily(Time) { unit }\npub fn one() -> Unit { return 1unit }\n";
     let good = r#"
 use "length" as length
 use "time" as time
 fn run() {
-    distance :: length.one() + length.one()
-    elapsed :: time.one() + time.one()
+    distance :: length.first(length.sample()) + length.first(length.sample())
+    elapsed :: time.first(time.sample()) + time.first(time.sample())
     print("ok")
 }
 "#;
@@ -200,7 +198,7 @@ fn run() {
         let (code, stdout) = tir_support::build_and_run_multi(
             "quantity_composite_same_leaf",
             "main.jet",
-            &[("length.jet", runtime_length), ("time.jet", runtime_time), ("main.jet", good)],
+            &[("length.jet", length), ("time.jet", time), ("main.jet", good)],
         );
         assert_eq!(code, 0);
         assert_eq!(stdout, "ok\n");

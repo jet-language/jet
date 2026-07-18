@@ -498,7 +498,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 5: `ty` is a list `[E]` or map `[K: V]` the subset can lower. The
 /// element/key/value types must themselves be covered *value* types — scalar,
-/// Char, String, a covered struct/enum, or a nested covered collection — so the
+/// Char, String, a covered distinct/struct/enum, or a nested covered collection — so the
 /// literal/index/iteration lowerings reproduce the AST path without any clone/box
 /// decision the subset can't make from total facts. A `FixedList` (`[E#N]`, D-FIXARR1) is
 /// covered exactly like a `List`: indexing reads the element type off the base, and a fan-out
@@ -517,7 +517,7 @@ pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
 }
 
 /// A list/map element, key, or value type the subset can lower: a scalar, Char,
-/// String, a covered struct/enum, or a nested covered collection. Anything else
+/// String, a covered distinct/struct/enum, or a nested covered collection. Anything else
 /// (option, trait object, fn, tuple, generic var, foreign type) excludes the
 /// owning collection.
 pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
@@ -528,6 +528,7 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // via `cx.rust_type` (`Vec<T>`), so a `[T]` list param/return/local is covered.
         // c148: pass cx so multi-char params are recognized.
         || is_type_var_param_ty(ty, cx)
+        || is_covered_distinct_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
