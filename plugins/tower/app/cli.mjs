@@ -21,7 +21,10 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
-      const key = a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      const raw = a.slice(2);
+      const eq = raw.indexOf('=');
+      const key = (eq < 0 ? raw : raw.slice(0, eq)).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      if (eq >= 0) { flags[key] = raw.slice(eq + 1); continue; }
       const next = argv[i + 1];
       if (next === undefined || next.startsWith('--')) flags[key] = true;
       else { flags[key] = next; i++; }
@@ -41,6 +44,25 @@ const out = (flags, human, data) => {
   else if (typeof human === 'string') console.log(human);
   else console.log(JSON.stringify(human, null, 2));
 };
+
+// One zero-dependency vocabulary shared by Tower's two human dashboard
+// surfaces. JSON never passes through Theme, so machine output stays clean.
+function Theme(flags) {
+  const choice = typeof flags.color === 'string' ? flags.color : 'auto';
+  const color = !flags.json && (choice === 'always' || (choice !== 'never'
+    && !Object.hasOwn(process.env, 'NO_COLOR')
+    && (Object.hasOwn(process.env, 'FORCE_COLOR') || !!process.stdout.isTTY)));
+  const paint = (sgr, text) => color ? `\x1b[${sgr}m${text}\x1b[0m` : text;
+  return {
+    accent: (text) => paint('1;96', text),
+    dim: (text) => paint('2', text),
+    success: (text) => paint('32', text),
+    warn: (text) => paint('33', text),
+    error: (text) => paint('31', text),
+    invert: (text) => paint('7', text),
+    border: (text) => paint('90', text),
+  };
+}
 
 const cardLine = (c) => `#${String(c.num).padEnd(4)} ${(c.priority || '').padEnd(3)} ${c.lane.lane.padEnd(9)} ${c.title.slice(0, 60)}${c.assignee ? `  [${c.assignee}]` : ''}`;
 
@@ -74,20 +96,26 @@ function cmdInit({ flags }) {
 function cmdStatus(store, { flags }) {
   const s = store.project();
   if (flags.json) return out(flags, null, { meta: s.meta, counts: s.counts });
-  const bar = (n) => '█'.repeat(Math.min(12, n)) + '░'.repeat(Math.max(0, 12 - n));
-  console.log(`\n  TOWER · ${s.meta.project} · ${store.config.terms.epoch.toLowerCase()} ${s.meta.currentEpoch || '—'} · rev ${s.meta.rev}\n`);
+  const t = Theme(flags);
+  const bar = (n) => t.success('█'.repeat(Math.min(12, n))) + t.border('░'.repeat(Math.max(0, 12 - n)));
+  const phase = (id, text) => ({ done: t.success, verify: t.warn, deciding: t.error }[id] || t.accent)(text);
+  console.log(`\n  ${t.invert('TOWER')} ${t.border('·')} ${t.accent(s.meta.project)} ${t.border('·')} ${t.dim(`${store.config.terms.epoch.toLowerCase()} ${s.meta.currentEpoch || '—'} · rev ${s.meta.rev}`)}\n`);
   for (const ph of db.PHASES) {
     const n = s.counts.byPhase[ph.id];
-    if (n) console.log(`  ${ph.label.padEnd(9)} ${bar(n)} ${n}`);
+    if (n) console.log(`  ${phase(ph.id, ph.label.padEnd(9))} ${bar(n)} ${t.dim(String(n))}`);
   }
-  console.log(`\n  BLOCKED ON OWNER  ${s.counts.decide} decisions`);
-  console.log(`  AGENT-READY       ${s.counts.agentReady}  (plan / implement / build / verify)`);
-  console.log(`  open questions    ${s.counts.openQuestions}   sidequests ${s.counts.sidequests}   ideas ${s.counts.ideas}\n`);
+  console.log(`\n  ${t.error('BLOCKED ON OWNER')}  ${t.warn(String(s.counts.decide))} decisions`);
+  console.log(`  ${t.success('AGENT-READY')}       ${t.success(String(s.counts.agentReady))}  ${t.dim('(plan / implement / build / verify)')}`);
+  console.log(`  ${t.dim('open questions')}    ${t.warn(String(s.counts.openQuestions))}   ${t.dim(`sidequests ${s.counts.sidequests}   ideas ${s.counts.ideas}`)}\n`);
   const show = (label, lane) => {
     const cs = s.cards.filter(c => c.lane.lane === lane);
     if (!cs.length) return;
-    console.log(`  ${label}:`);
-    for (const c of cs.slice(0, 12)) console.log(`   · ${cardLine(c)}`);
+    console.log(`  ${t.accent(label)}${t.border(':')}`);
+    for (const c of cs.slice(0, 12)) {
+      const priority = c.priority ? `${t.warn(c.priority.padEnd(3))} ` : '    ';
+      const laneText = (lane === 'decide' ? t.error : lane === 'verify' ? t.warn : t.success)(lane.padEnd(9));
+      console.log(`   ${t.border('·')} #${String(c.num).padEnd(4)} ${priority}${laneText} ${c.title.slice(0, 60)}${c.assignee ? `  ${t.dim(`[${c.assignee}]`)}` : ''}`);
+    }
   };
   show('OWNER — decide', 'decide');
   show('AGENT — plan', 'plan'); show('AGENT — implement', 'implement');
@@ -420,62 +448,67 @@ function cmdBrief(store, { pos, flags }) {
   }
   const packet = db.buildBrief(s, card.id);
   if (flags.json) return out(flags, null, packet);
-  console.log(renderBrief(packet));
+  console.log(renderBrief(packet, Theme(flags)));
 }
 
 // Compact, one-screen-target human render — sections omitted when empty.
-function renderBrief(p) {
+function renderBrief(p, t) {
   const c = p.card;
   const L = [];
-  L.push(`#${c.num} ${c.title}`);
-  L.push(`  ${c.phase}${c.priority ? ` · ${c.priority}` : ''}${c.track ? ` · ${c.track}` : ''}${c.workOrder != null ? ` · workOrder ${c.workOrder}` : ''}${c.assignee ? ` · claimed by ${c.assignee}` : ''}`);
-  if (c.epoch) L.push(`  epoch ${c.epoch.id}${c.epoch.name ? ` — ${c.epoch.name}` : ''}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`);
-  if (c.milestone) L.push(`  milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''}${c.milestone.criteria ? `  criteria: ${c.milestone.criteria}` : ''}`);
-  if (c.body) { L.push('', 'BODY', c.body); }
-  if (c.plan) { L.push('', 'PLAN', c.plan); }
+  const heading = (text) => t.accent(text);
+  L.push(`${t.invert(`#${c.num}`)} ${t.accent(c.title)}`);
+  L.push(`  ${t.warn(c.phase)}${c.priority ? ` ${t.border('·')} ${t.warn(c.priority)}` : ''}${c.track ? ` ${t.border('·')} ${t.dim(c.track)}` : ''}${c.workOrder != null ? ` ${t.border('·')} ${t.dim(`workOrder ${c.workOrder}`)}` : ''}${c.assignee ? ` ${t.border('·')} ${t.dim(`claimed by ${c.assignee}`)}` : ''}`);
+  if (c.epoch) L.push(`  ${t.dim(`epoch ${c.epoch.id}${c.epoch.name ? ` — ${c.epoch.name}` : ''}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`)}`);
+  if (c.milestone) L.push(`  ${t.dim(`milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''}${c.milestone.criteria ? `  criteria: ${c.milestone.criteria}` : ''}`)}`);
+  if (c.body) { L.push('', heading('BODY'), c.body); }
+  if (c.plan) { L.push('', heading('PLAN'), c.plan); }
   if (p.blockers.length) {
-    L.push('', 'BLOCKED BY');
-    for (const b of p.blockers) L.push(`  ${b.done ? '✓' : '✗'} ${b.id} (${b.kind}) ${b.title || ''}${b.kind === 'card' ? ` [${b.phase}]` : b.kind === 'decision' ? ` [${b.status}]` : ''}`);
+    L.push('', heading('BLOCKED BY'));
+    for (const b of p.blockers) L.push(`  ${(b.done ? t.success : t.error)(b.done ? '✓' : '✗')} ${b.id} ${t.dim(`(${b.kind})`)} ${b.title || ''}${b.kind === 'card' ? ` ${t.dim(`[${b.phase}]`)}` : b.kind === 'decision' ? ` ${t.dim(`[${b.status}]`)}` : ''}`);
   }
   const items = p.criteria.items;
   if (items.length) {
-    L.push('', `CRITERIA${p.criteria.needsAcceptance ? '  (needsAcceptance — owner ballot on close)' : ''}`);
-    for (const it of items) L.push(`  #${it.n} [${it.status}] ${it.text}${it.metBy ? `  met:${it.metBy}` : ''}${it.verifiedBy ? `  verified:${it.verifiedBy}` : ''}${it.evidence ? `  — ${it.evidence}` : ''}`);
+    L.push('', heading(`CRITERIA${p.criteria.needsAcceptance ? '  (needsAcceptance — owner ballot on close)' : ''}`));
+    for (const it of items) {
+      const state = (it.status === 'verified' ? t.success : it.status === 'met' ? t.warn : t.dim)(`[${it.status}]`);
+      L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
+    }
   } else if (p.criteria.needsAcceptance) {
-    L.push('', 'CRITERIA  (none — needsAcceptance: owner ballot on close)');
+    L.push('', heading('CRITERIA  (none — needsAcceptance: owner ballot on close)'));
   }
   if (p.decisions.length) {
-    L.push('', 'DECISIONS');
+    L.push('', heading('DECISIONS'));
     for (const d of p.decisions) {
-      L.push(`  ${d.id} [${d.status}${d.draft ? ' draft' : ''}] ${d.title}`);
+      const decisionState = (d.status === 'ratified' ? t.success : t.warn)(`[${d.status}${d.draft ? ' draft' : ''}]`);
+      L.push(`  ${d.id} ${decisionState} ${d.title}`);
       if (d.gist) L.push(`    ${d.gist}`);
       if (d.status === 'ratified') {
-        L.push(`    → ${d.outcome}${d.comment ? `  — ${d.comment}` : ''}`);
+        L.push(`    ${t.success('→')} ${d.outcome}${d.comment ? `  ${t.border('—')} ${d.comment}` : ''}`);
       } else {
-        if (d.lesson) L.push(`    learn first: ${d.lesson}`);
-        if (d.story) L.push(`    story: ${d.story}`);
-        if (d.inWild) L.push(`    in the wild: ${d.inWild}`);
-        if (d.rec) L.push(`    rec: ${d.rec}`);
-        if (d.recommendation?.why) L.push(`    why: ${d.recommendation.why}`);
-        for (const rejected of d.recommendation?.whyNot || []) L.push(`    why not ${rejected.key}: ${rejected.reason}`);
-        if (d.recommendation?.tradeoff) L.push(`    accepted tradeoff: ${d.recommendation.tradeoff}`);
-        if (d.hybrid?.synthesis) L.push(`    hybrid result ${d.hybrid.result}: ${d.hybrid.synthesis}`);
-        for (const item of d.hybrid?.harvest || []) L.push(`    harvest ${item.key}: ${item.aspect} — ${item.use}`);
+        if (d.lesson) L.push(`    ${t.dim('learn first:')} ${d.lesson}`);
+        if (d.story) L.push(`    ${t.dim('story:')} ${d.story}`);
+        if (d.inWild) L.push(`    ${t.dim('in the wild:')} ${d.inWild}`);
+        if (d.rec) L.push(`    ${t.warn('rec:')} ${d.rec}`);
+        if (d.recommendation?.why) L.push(`    ${t.dim('why:')} ${d.recommendation.why}`);
+        for (const rejected of d.recommendation?.whyNot || []) L.push(`    ${t.dim(`why not ${rejected.key}:`)} ${rejected.reason}`);
+        if (d.recommendation?.tradeoff) L.push(`    ${t.dim('accepted tradeoff:')} ${d.recommendation.tradeoff}`);
+        if (d.hybrid?.synthesis) L.push(`    ${t.dim(`hybrid result ${d.hybrid.result}:`)} ${d.hybrid.synthesis}`);
+        for (const item of d.hybrid?.harvest || []) L.push(`    ${t.dim(`harvest ${item.key}:`)} ${item.aspect} ${t.border('—')} ${item.use}`);
         for (const o of d.options || []) L.push(`    [${o.key}] ${o.name}${o.detail ? ` — ${o.detail}` : ''}${o.technical ? `\n      technical: ${String(o.technical).split('\n').join('\n      ')}` : ''}${o.code ? `\n      ${String(o.code).split('\n').join('\n      ')}` : ''}`);
       }
     }
   }
   if (p.questions.length) {
-    L.push('', 'OPEN QUESTIONS');
-    for (const q of p.questions) L.push(`  ${q.id} [${q.by}] ${q.text}`);
+    L.push('', heading('OPEN QUESTIONS'));
+    for (const q of p.questions) L.push(`  ${t.warn(q.id)} ${t.dim(`[${q.by}]`)} ${q.text}`);
   }
-  if (p.refs.length) L.push('', 'REFS', `  ${p.refs.join(', ')}`);
+  if (p.refs.length) L.push('', heading('REFS'), `  ${p.refs.join(t.border(', '))}`);
   if (p.log.length) {
-    L.push('', 'RECENT LOG');
-    for (const l of p.log) L.push(`  ${l.at}  ${l.by ? `[${l.by}] ` : ''}${l.text}`);
+    L.push('', heading('RECENT LOG'));
+    for (const l of p.log) L.push(`  ${t.dim(`${l.at}  ${l.by ? `[${l.by}] ` : ''}`)}${l.text}`);
   }
-  L.push('', 'RULES');
-  for (const r of p.rules) L.push(`  · ${r}`);
+  L.push('', heading('RULES'));
+  for (const r of p.rules) L.push(`  ${t.border('·')} ${r}`);
   return L.join('\n');
 }
 
