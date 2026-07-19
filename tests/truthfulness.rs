@@ -420,14 +420,13 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     let root = root();
     let decisions_doc = fs::read_to_string(root.join("docs/spec/syntax-decisions.md"))
         .expect("docs/spec/syntax-decisions.md missing");
-    let ratified_doc = section_between_pub(&decisions_doc);
     let tower = fs::read_to_string(root.join(".tower/tower.json"))
         .expect(".tower/tower.json missing");
 
     for (crate_name, ids) in EXEMPTIONS {
         for id in *ids {
             assert!(
-                ratified_decision_exists(ratified_doc, &tower, id),
+                ratified_decision_exists(&decisions_doc, &tower, id),
                 "I6 exemption for `{crate_name}` cites {id}, which is not ratified in \
                  docs/spec/syntax-decisions.md or Tower — revoke the exemption or get \
                  {id} ratified"
@@ -519,20 +518,24 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     for (name, manifest) in &crate_manifests {
         let text = fs::read_to_string(manifest).unwrap_or_else(|_| panic!("{} missing", manifest.display()));
         let exemption = EXEMPTIONS.iter().find(|(n, _)| n == name);
-        for (line, context) in dependency_lines_with_context(&text) {
-            if line.contains(" path = ") || line.contains("{ path =") {
+        for (line, context, has_path) in dependency_lines_with_context(&text) {
+            if has_path {
                 continue;
             }
             match exemption {
-                Some((_, ids)) if ids.iter().any(|id| context.contains(id)) => continue,
+                Some((_, ids))
+                    if ids
+                        .iter()
+                        .any(|id| exact_decision_token(&context, id)) => continue,
                 Some((_, ids)) => offenders.push(format!(
-                    "{name}: {line} — external dep must cite one of {ids:?} in a comment \
-                     directly above the dependency line"
+                    "{name}: {} — external dep must cite one of {ids:?} in a comment \
+                     directly above the dependency line",
+                    line
                 )),
                 None => offenders.push(format!(
-                    "{name}: {line} — not an exempted crate; I6 forbids external \
+                    "{name}: {} — not an exempted crate; I6 forbids external \
                      dependencies in compiler seam crates (add to EXEMPTIONS with a \
-                     ratified decision ID if this is intentional)"
+                     ratified decision ID if this is intentional)", line
                 )),
             }
         }
@@ -554,7 +557,7 @@ fn section_between_pub(docs: &str) -> &str {
 }
 
 fn ratified_decision_exists(ratified_doc: &str, tower: &str, authority: &str) -> bool {
-    if ratified_doc.contains(authority) {
+    if exact_decision_token(section_between_pub(ratified_doc), authority) {
         return true;
     }
     let (id, outcome) = authority
@@ -572,49 +575,151 @@ fn ratified_decision_exists(ratified_doc: &str, tower: &str, authority: &str) ->
         })
 }
 
-/// Like `dependency_lines`, but also returns any `#`-comment lines
-/// immediately preceding each dependency line (joined), so exemption
-/// decision IDs cited above a dep can be matched to it.
-fn dependency_lines_with_context(text: &str) -> Vec<(String, String)> {
+fn exact_decision_token(text: &str, authority: &str) -> bool {
+    text.match_indices(authority).any(|(start, _)| {
+        let before = text[..start].chars().next_back();
+        let after = text[start + authority.len()..].chars().next();
+        before.is_none_or(|ch| !decision_id_char(ch))
+            && after.is_none_or(|ch| !decision_id_char(ch))
+    })
+}
+
+fn decision_id_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')
+}
+
+#[test]
+fn ratified_decision_lookup_requires_exact_id_and_ratified_status() {
+    let docs = "## Proposed\n**D-PENDING=A**: not law. See D-LIVE and D-CITED.\n\
+                ## Ratified\n**D-LIVE=A**: law.\n\
+                ## Declined\n**D-NOPE=A**: declined.\n";
+    assert!(ratified_decision_exists(docs, "", "D-LIVE"));
+    assert!(!ratified_decision_exists(docs, "", "D-LIV"));
+    assert!(!ratified_decision_exists(docs, "", "D-CITED"));
+    assert!(!ratified_decision_exists(docs, "", "D-PENDING=A"));
+    assert!(!ratified_decision_exists(docs, "", "D-NOPE=A"));
+}
+
+/// Finds both ordinary Cargo dependency entries and valid dependency subtables.
+fn dependency_lines_with_context(text: &str) -> Vec<(String, String, bool)> {
     let mut out = Vec::new();
-    let mut in_deps = false;
-    // A comment block covers every dependency line until a blank line or a
-    // new comment block resets it — same "no blank line breaks coverage"
-    // convention as the I7 keyword/decision-comment check in tests/decisions.rs.
-    let mut current_context = String::new();
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('[') {
-            in_deps = is_dependency_table(line);
-            current_context.clear();
+    for section in text.split("\n[") {
+        let section = section.strip_prefix('[').unwrap_or(section);
+        let Some((header, body)) = section.split_once("]\n") else {
             continue;
+        };
+        match dependency_table(header) {
+            None => continue,
+            Some(DependencyTable::Entries) => {
+                let mut context = String::new();
+                for line in body.lines().map(str::trim) {
+                    if line.is_empty() {
+                        context.clear();
+                        continue;
+                    }
+                    if line.starts_with('#') {
+                        context.push_str(line);
+                        context.push('\n');
+                        continue;
+                    }
+                    let Some((_, value)) = line.split_once('=') else {
+                        continue;
+                    };
+                    out.push((
+                        line.to_string(),
+                        std::mem::take(&mut context),
+                        inline_table_has_key(value.trim(), "path"),
+                    ));
+                }
+            }
+            Some(DependencyTable::Detail(name)) => {
+                let mut context = String::new();
+                let mut fields = Vec::new();
+                for line in body.lines().map(str::trim) {
+                    if fields.is_empty() && line.starts_with('#') {
+                        context.push_str(line);
+                        context.push('\n');
+                    } else if !line.is_empty() && !line.starts_with('#') {
+                        fields.push(line);
+                    }
+                }
+                if !fields.is_empty() {
+                    out.push((
+                        format!("{name}: {}", fields.join(", ")),
+                        context,
+                        fields.iter().any(|field| {
+                            field
+                                .split_once('=')
+                                .is_some_and(|(key, _)| key.trim() == "path")
+                        }),
+                    ));
+                }
+            }
         }
-        if !in_deps {
-            continue;
-        }
-        if line.is_empty() {
-            current_context.clear();
-            continue;
-        }
-        if line.starts_with('#') {
-            current_context.push_str(line);
-            current_context.push('\n');
-            continue;
-        }
-        out.push((line.to_string(), std::mem::take(&mut current_context)));
     }
     out
 }
 
-fn is_dependency_table(line: &str) -> bool {
-    let Some(table) = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) else {
+enum DependencyTable<'a> {
+    Entries,
+    Detail(&'a str),
+}
+
+fn dependency_table(line: &str) -> Option<DependencyTable<'_>> {
+    for base in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        if line == base || (line.starts_with("target.") && line.ends_with(&format!(".{base}"))) {
+            return Some(DependencyTable::Entries);
+        }
+        if let Some(name) = line.strip_prefix(&format!("{base}.")) {
+            return (!name.is_empty()).then_some(DependencyTable::Detail(name));
+        }
+        let marker = format!(".{base}.");
+        if line.starts_with("target.") {
+            if let Some((_, name)) = line.rsplit_once(&marker) {
+                return (!name.is_empty()).then_some(DependencyTable::Detail(name));
+            }
+        }
+    }
+    None
+}
+
+fn inline_table_has_key(value: &str, wanted: &str) -> bool {
+    let Some(body) = value.strip_prefix('{').and_then(|value| value.strip_suffix('}')) else {
         return false;
     };
-    matches!(table, "dependencies" | "dev-dependencies" | "build-dependencies")
-        || (table.starts_with("target.")
-            && [".dependencies", ".dev-dependencies", ".build-dependencies"]
-                .iter()
-                .any(|suffix| table.ends_with(suffix)))
+    let mut start = 0;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut depth = 0usize;
+    for (index, ch) in body.char_indices().chain(std::iter::once((body.len(), ','))) {
+        if let Some(delimiter) = quote {
+            if delimiter == '"' && ch == '\\' && !escaped {
+                escaped = true;
+                continue;
+            }
+            if ch == delimiter && !escaped {
+                quote = None;
+            }
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            '[' | '{' => depth += 1,
+            ']' | '}' if depth > 0 => depth -= 1,
+            ',' if depth == 0 => {
+                if body[start..index]
+                    .split_once('=')
+                    .is_some_and(|(key, _)| key.trim() == wanted)
+                {
+                    return true;
+                }
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 #[test]
@@ -629,17 +734,47 @@ fn dependency_scanner_covers_target_tables_and_one_dependency_per_comment() {
                     [target.x86_64-unknown-linux-gnu.build-dependencies]\n\
                     # D-THREE=C\n\
                     fourth = \"4\"\n\
+                    [dependencies.local]\n\
+                    # D-FOUR=D\n\
+                    path = \"../local\"\n\
+                    version = \"1\"\n\
+                    [dev-dependencies.remote]\n\
+                    # D-FIVE=E\n\
+                    git = \"https://example.test/repo\"\n\
+                    [target.'cfg(unix)'.dependencies.target_remote]\n\
+                    version = \"2\"\n\
                     [package.metadata.dependencies]\n\
                     ignored = \"5\"\n";
     assert_eq!(
         dependency_lines_with_context(manifest),
         vec![
-            ("first = \"1\"".to_string(), "# D-ONE=A\n".to_string()),
-            ("second = \"2\"".to_string(), String::new()),
-            ("third = \"3\"".to_string(), "# D-TWO=B\n".to_string()),
-            ("fourth = \"4\"".to_string(), "# D-THREE=C\n".to_string()),
+            ("first = \"1\"".into(), "# D-ONE=A\n".into(), false),
+            ("second = \"2\"".into(), String::new(), false),
+            ("third = \"3\"".into(), "# D-TWO=B\n".into(), false),
+            ("fourth = \"4\"".into(), "# D-THREE=C\n".into(), false),
+            (
+                "local: path = \"../local\", version = \"1\"".into(),
+                "# D-FOUR=D\n".into(),
+                true,
+            ),
+            (
+                "remote: git = \"https://example.test/repo\"".into(),
+                "# D-FIVE=E\n".into(),
+                false,
+            ),
+            ("target_remote: version = \"2\"".into(), String::new(), false),
         ]
     );
+}
+
+#[test]
+fn dependency_scanner_does_not_confuse_values_with_path_keys() {
+    let manifest = "[dependencies]\n\
+                    remote = { version = \"1\", package = \"not path = metadata\" }\n\
+                    local = { version = \"1\", path = \"../local\" }\n";
+    let dependencies = dependency_lines_with_context(manifest);
+    assert!(!dependencies[0].2, "{dependencies:#?}");
+    assert!(dependencies[1].2, "{dependencies:#?}");
 }
 
 // ---------------------------------------------------------------------------
