@@ -1,10 +1,9 @@
 //! Card #392: AOT-vs-comptime builtin parity matrix.
 //!
-//! Enumerates every `("core.<module>", "<method>")` pair AOT's sema accepts
-//! (`crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs::core_fixed_sig` +
-//! its `is_polymorphic_core_special` sibling table) and diffs it against
-//! every pair the comptime/REPL tier-0 interpreter dispatches
-//! (`crates/jet-comptime/src/Comptime/Methods.rs::apply_core_call`).
+//! Builds one deterministic inventory from AOT's fixed Core signatures,
+//! bespoke `infer_core_call` arms, direct/static builtins, and value-method
+//! registry. Comptime coverage comes from the real split interpreter source
+//! tree. Every discovered entry receives exactly one classification.
 //!
 //! A pair present in AOT but absent from comptime means `use core.x as a;
 //! a.f(...)` type-checks and compiles for `jet build`, but hits E0956 in
@@ -14,11 +13,11 @@
 //! `KNOWN_OPEN_GAPS` below with a one-line reason) or this test fails.
 //!
 //! Effectful modules (`core.files`/`core.env`/`core.io`/`core.exec`/
-//! `core.net`/`core.tls`/`core.process`) are exempt: comptime handles them as a whole
-//! via the `is_tier2` wildcard (E3410 `@Impure` gate), not per-method, so a
-//! per-name diff would just be noise — those modules are filtered out below.
+//! `core.net`/`core.tls`/`core.process`) are explicit effect boundaries:
+//! comptime handles them as a whole via the `is_tier2` wildcard (E3410
+//! `@Impure` gate), not per-method.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
 /// Modules comptime gates wholesale behind `@Impure` (Methods.rs `is_tier2`)
@@ -216,10 +215,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.web.storage.local", "get"),
     ("core.web.storage.local", "remove"),
     ("core.web.storage.local", "set"),
-    // paren-balance-parser artifact (see the `core.encoding.json` note
-    // above): `("core.web.storage.local" | "core.web.storage.session",
-    // "get")`-style module alternation.
-    ("core.web.storage.local", "core.web.storage.session"),
     // core.tasks / core.watcher / core.web.devserver: async runtime primitives
     // (channels, timers, file/port watchers, a live dev-server handle) — all
     // inherently tied to the running process's event loop; may never make
@@ -247,6 +242,32 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.testing", "golden"),
     ("core.testing", "snap"),
     ("core.testing", "temp_dir"),
+    // D-DATA-SURFACE1: sema accepts this bespoke generic call, but the
+    // comptime data pipeline has no implementation yet.
+    ("core.data", "pivot_sum"),
+    // Pure constructors/formatters and generic helpers accepted by sema but
+    // not yet implemented by the comptime interpreter.
+    ("core.email", "address"),
+    ("core.email", "attachment"),
+    ("core.email", "envelope"),
+    ("core.email", "message"),
+    ("core.email", "serialize"),
+    ("core.encoding.csv", "to_string_pretty"),
+    ("core.encoding.toml", "to_string_pretty"),
+    ("core.encoding.yaml", "to_string_pretty"),
+    ("core.encoding.xml", "canonical"),
+    ("core.reactive.loadable", "failed"),
+    ("core.reactive.loadable", "idle"),
+    ("core.reactive.loadable", "loaded"),
+    ("core.reactive.loadable", "loading"),
+    ("core.science.measurement", "from"),
+    ("core.sketch.cms", "new"),
+    ("core.sketch.hll", "new"),
+    ("core.sketch.reservoir", "new"),
+    ("core.sketch.tdigest", "new"),
+    ("core.time.date", "new"),
+    ("core.time.date", "parse"),
+    ("core.time.datetime", "from_timestamp"),
     // core.url: PORTED (card #392 pass 3) — see `UrlLite.rs` + `Methods.rs`'s
     // `("core.url", ...)` arms, ported verbatim from `JetUrl`/`jet_url_*`
     // (`UrlMime.rs` + `MathRandomTime.rs`).
@@ -263,60 +284,111 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.uuid", "v7"),
 ];
 
-/// Find every `(` whose next non-whitespace content is `"core.`, balance
-/// parens to find its matching `)`, and pull (module, method) pairs from the
-/// quoted strings inside — first quote is the module, every other quote in
-/// the same tuple is a method name (covers `"a" | "b" | "c"` alternates).
-/// Paren-balancing (not scanning to the next `=>`) is what makes this work
-/// uniformly over both a `match` arm and a `matches!(..., p1 | p2 | ...)`
-/// pattern list, which has no `=>` at all.
-fn extract_pairs(text: &str) -> BTreeSet<(String, String)> {
-    let mut out = BTreeSet::new();
+fn tuple_ranges(text: &str) -> Vec<(usize, usize)> {
     let bytes = text.as_bytes();
-    let n = bytes.len();
+    let mut ranges = Vec::new();
     let mut i = 0usize;
-    while i < n {
-        if bytes[i] == b'(' {
-            let mut j = i + 1;
-            while j < n && (bytes[j] as char).is_whitespace() {
-                j += 1;
-            }
-            if text[j..].starts_with("\"core.") {
-                let mut depth = 0i32;
-                let mut k = i;
-                let mut end = None;
-                while k < n {
-                    match bytes[k] {
-                        b'(' => depth += 1,
-                        b')' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                end = Some(k + 1);
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    k += 1;
-                }
-                if let Some(end) = end {
-                    let header = &text[i..end];
-                    let quoted = extract_quoted(header);
-                    if let Some((module, names)) = quoted.split_first() {
-                        for name in names {
-                            if name != "_" {
-                                out.insert((module.clone(), name.clone()));
-                            }
-                        }
-                    }
-                    i = end;
-                    continue;
+    let mut starts = Vec::new();
+    while i < bytes.len() {
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' { i += 1; }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i += 2;
+            let mut comments = 1usize;
+            while i < bytes.len() && comments > 0 {
+                if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                    comments += 1;
+                    i += 2;
+                } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                    comments -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
                 }
             }
+            continue;
+        }
+        if bytes[i] == b'"' {
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' { i += 2; }
+                else if bytes[i] == b'"' { i += 1; break; }
+                else { i += 1; }
+            }
+            continue;
+        }
+        if bytes[i] == b'\'' {
+            let end = if bytes.get(i + 1) == Some(&b'\\') { i + 3 } else { i + 2 };
+            if bytes.get(end) == Some(&b'\'') {
+                i = end + 1;
+                continue;
+            }
+        }
+        match bytes[i] {
+            b'(' => starts.push(i),
+            b')' => {
+                if let Some(start) = starts.pop() { ranges.push((start, i + 1)); }
+            }
+            _ => {}
         }
         i += 1;
     }
+    ranges.sort_unstable();
+    ranges
+}
+
+/// Pull Core module/method tuples from Rust code, ignoring tuples that occur
+/// only in comments or string contents.
+fn extract_pairs(text: &str) -> BTreeSet<(String, String)> {
+    let mut out = BTreeSet::new();
+    for (start, end) in tuple_ranges(text) {
+        let fields = split_top_level(&text[start + 1..end - 1], ',');
+        if fields.len() >= 2 {
+            let modules = extract_quoted(fields[0]);
+            let names = extract_quoted(fields[1]);
+            for module in modules.iter().filter(|module| module.starts_with("core.")) {
+                for name in names.iter().filter(|name| *name != "_") {
+                    out.insert((module.clone(), name.clone()));
+                }
+            }
+        }
+    }
     out
+}
+
+fn split_top_level(text: &str, separator: char) -> Vec<&str> {
+    let mut fields = Vec::new();
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut start = 0usize;
+    for (i, ch) in text.char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ if ch == separator && depth == 0 => {
+                fields.push(&text[start..i]);
+                start = i + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    fields.push(&text[start..]);
+    fields
 }
 
 fn extract_quoted(s: &str) -> Vec<String> {
@@ -343,77 +415,669 @@ fn read(rel: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {}", path, e))
 }
 
-#[test]
-fn auth_aot_builtins_have_explicit_native_gaps() {
-    let sigs = read("crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs");
-    let aot = extract_pairs(&sigs);
-    let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
-    for method in ["verify_jwt", "verify_paseto"] {
-        assert!(aot.contains(&("core.auth".to_string(), method.to_string())));
-        assert!(gaps.contains(&("core.auth", method)));
+fn read_rust_tree(rel: &str) -> String {
+    fn visit(path: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        if path.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                visit(&entry.unwrap().path(), files);
+            }
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            files.push(path.to_path_buf());
+        }
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+    let mut files = Vec::new();
+    visit(&root, &mut files);
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| fs::read_to_string(path).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn source_between<'a>(text: &'a str, start: &str, end: Option<&str>) -> &'a str {
+    let start = text.find(start).unwrap_or_else(|| panic!("missing source marker {start}"));
+    let rest = &text[start..];
+    match end {
+        Some(end) => &rest[..rest.find(end).unwrap_or_else(|| panic!("missing source marker {end}"))],
+        None => rest,
     }
 }
 
-#[test]
-fn comptime_covers_every_aot_core_builtin_or_lists_the_gap() {
-    let sigs = read("crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs");
-    let methods = read("crates/jet-comptime/src/Comptime/Methods.rs");
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum Surface {
+    Fixed,
+    DirectStatic,
+    Value,
+    Bespoke,
+}
 
-    let aot = extract_pairs(&sigs);
-    let ct = extract_pairs(&methods);
-    let known_gaps: BTreeSet<(String, String)> = KNOWN_OPEN_GAPS
-        .iter()
-        .map(|(m, n)| (m.to_string(), n.to_string()))
-        .collect();
+impl Surface {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::DirectStatic => "direct_static",
+            Self::Value => "value",
+            Self::Bespoke => "bespoke",
+        }
+    }
+}
 
-    assert!(
-        aot.len() > 50,
-        "sanity check: extracted only {} AOT (module, method) pairs from fixed_sigs.rs — \
-         the paren-balance parser probably broke against a source reformat",
-        aot.len()
-    );
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum Class {
+    Covered,
+    PurePending,
+    Boundary,
+}
 
-    let mut newly_missing: Vec<&(String, String)> = aot
-        .iter()
-        .filter(|(m, _)| !EFFECT_GATED_MODULES.contains(&m.as_str()))
-        .filter(|pair| !ct.contains(*pair))
-        .filter(|pair| !known_gaps.contains(*pair))
-        .collect();
-    newly_missing.sort();
+impl Class {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Covered => "covered",
+            Self::PurePending => "pure_pending",
+            Self::Boundary => "boundary",
+        }
+    }
+}
 
-    assert!(
-        newly_missing.is_empty(),
-        "{} AOT builtin(s) have no comptime dispatch and aren't in KNOWN_OPEN_GAPS \
-         (a silent AOT-only builtin — `jet dev`/REPL/`comptime` would hit E0956):\n{}",
-        newly_missing.len(),
-        newly_missing
-            .iter()
-            .map(|(m, n)| format!("  ({:?}, {:?})", m, n))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct Entry {
+    surface: Surface,
+    owner: String,
+    method: String,
+}
 
-    // The other direction: a `KNOWN_OPEN_GAPS` entry that comptime already
-    // handles (or that AOT no longer has) is stale bookkeeping — keep the
-    // allowlist honest so it stays a real to-do list, not a growing pile of
-    // outdated exemptions.
-    let mut stale_gaps: Vec<&(&str, &str)> = KNOWN_OPEN_GAPS
-        .iter()
-        .filter(|(m, n)| {
-            let pair = (m.to_string(), n.to_string());
-            !aot.contains(&pair) || ct.contains(&pair)
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Classified {
+    entry: Entry,
+    class: Class,
+    reason: &'static str,
+}
+
+fn string_constant_values(text: &str, prefix: &str) -> BTreeMap<String, String> {
+    let mut values = BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("pub const ") else {
+            continue;
+        };
+        let Some((name, value)) = rest.split_once(": &str = ") else {
+            continue;
+        };
+        if !name.starts_with(prefix) {
+            continue;
+        }
+        let Some(start) = value.find('"') else {
+            continue;
+        };
+        let Some(end) = value[start + 1..].find('"') else {
+            continue;
+        };
+        let value = &value[start + 1..start + 1 + end];
+        values.insert(name.to_string(), value.to_string());
+    }
+    values
+}
+
+fn constant_refs(text: &str, prefix: &str) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    let needle = format!("Syntax::{prefix}");
+    let mut rest = text;
+    while let Some(at) = rest.find(&needle) {
+        let after = &rest[at + "Syntax::".len()..];
+        let len = after
+            .bytes()
+            .take_while(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
+            .count();
+        refs.insert(after[..len].to_string());
+        rest = &after[len..];
+    }
+    refs
+}
+
+fn builtin_constant_refs(text: &str) -> BTreeSet<String> {
+    constant_refs(text, "BUILTIN_")
+}
+
+fn equality_constant_refs(text: &str, subject: &str) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    let needle = format!("{subject} == ");
+    let mut rest = text;
+    while let Some(at) = rest.find(&needle) {
+        let after = rest[at + needle.len()..].trim_start();
+        let after = after.strip_prefix("crate::").unwrap_or(after);
+        if let Some(after) = after.strip_prefix("Syntax::") {
+            let len = after
+                .bytes()
+                .take_while(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
+                .count();
+            refs.insert(after[..len].to_string());
+        }
+        rest = &rest[at + needle.len()..];
+    }
+    refs
+}
+
+fn method_candidates(text: &str) -> BTreeSet<String> {
+    extract_quoted(text)
+        .into_iter()
+        .filter(|name| {
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
         })
-        .collect();
-    stale_gaps.sort();
-    assert!(
-        stale_gaps.is_empty(),
-        "KNOWN_OPEN_GAPS has {} stale entr(y/ies) — either comptime now handles it \
-         (remove the line) or AOT no longer has it (remove the line):\n{}",
-        stale_gaps.len(),
-        stale_gaps
-            .iter()
-            .map(|(m, n)| format!("  ({:?}, {:?})", m, n))
-            .collect::<Vec<_>>()
-            .join("\n")
+        .collect()
+}
+
+fn named(name: &str) -> jet::AST::Type {
+    jet::AST::Type::Named(name.to_string())
+}
+
+fn apply(name: &str, args: Vec<jet::AST::Type>) -> jet::AST::Type {
+    jet::AST::Type::Apply {
+        name: name.to_string(),
+        args,
+    }
+}
+
+fn builtin_receivers(collections: &str, syntax: &str) -> Vec<(String, jet::AST::Type)> {
+    use jet::AST::Type;
+    let mut out = vec![
+        ("List".into(), Type::List(Box::new(Type::Int))),
+        ("FixedList".into(), Type::FixedList { elem: Box::new(Type::Int), len: 4, len_symbol: None }),
+        ("Map".into(), Type::Map { key: Box::new(Type::String), key_span: None, value: Box::new(Type::Int) }),
+        ("String".into(), Type::String),
+        ("Int".into(), Type::Int),
+        ("Float".into(), Type::Float),
+        ("F32".into(), Type::Float32),
+        ("Bool".into(), Type::Bool),
+        ("Char".into(), Type::Char),
+        ("Option".into(), Type::Option(Box::new(Type::Int))),
+        ("Shared".into(), Type::Shared(Box::new(Type::Int))),
+    ];
+    let values = string_constant_values(syntax, "");
+    let mut named_receivers = extract_quoted(collections).into_iter().collect::<BTreeSet<_>>();
+    named_receivers.extend(
+        constant_refs(collections, "")
+            .into_iter()
+            .filter_map(|constant| values.get(&constant).cloned()),
     );
+    for owner in named_receivers {
+        out.push((owner.clone(), named(&owner)));
+        out.push((owner.clone(), apply(&owner, vec![Type::Int])));
+        out.push((owner.clone(), apply(&owner, vec![Type::String, Type::Int])));
+    }
+    for (method, source) in jet::Syntax::NUMERIC_CONVERSION_SOURCES {
+        let _ = method;
+        if let Some(ty) = jet::AST::numeric_type_from_name(source) {
+            let owner = ty.name();
+            if !out.iter().any(|(existing, _)| existing == &owner) {
+                out.push((owner, ty));
+            }
+        }
+    }
+    out
+}
+
+fn aot_collection_methods() -> BTreeSet<Entry> {
+    let source = read("crates/jet-foundation/src/Collections.rs");
+    let syntax = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let mut candidates = method_candidates(&source);
+    let values = string_constant_values(&syntax, "");
+    candidates.extend(
+        constant_refs(&source, "")
+            .into_iter()
+            .filter_map(|constant| values.get(&constant).cloned()),
+    );
+    candidates.extend(
+        jet::Syntax::NUMERIC_CONVERSION_SOURCES
+            .iter()
+            .map(|(method, _)| (*method).to_string()),
+    );
+    let mut entries = BTreeSet::new();
+    for (owner, ty) in builtin_receivers(&source, &syntax) {
+        for method in &candidates {
+            for arity in 0..=8 {
+                if jet::Collections::builtin_method_return(&ty, method, arity, false).is_some() {
+                    entries.insert(Entry { surface: Surface::Value, owner: owner.clone(), method: method.clone() });
+                }
+                if jet::Collections::builtin_method_return(&ty, method, arity, true).is_some() {
+                    entries.insert(Entry { surface: Surface::DirectStatic, owner: owner.clone(), method: method.clone() });
+                }
+            }
+        }
+    }
+    entries
+}
+
+fn ct_value_methods(text: &str) -> BTreeSet<(String, String)> {
+    let variants = [
+        ("List", "List"),
+        ("Bytes", "List"),
+        ("Map", "Map"),
+        ("Str", "String"),
+        ("Int", "Int"),
+        ("Float", "Float"),
+        ("Bool", "Bool"),
+        ("Char", "Char"),
+        ("BigInt", "BigInt"),
+        ("Some", "Option"),
+        ("None", "Option"),
+    ];
+    let syntax = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let values = string_constant_values(&syntax, "");
+    let mut out = BTreeSet::new();
+    for (start, end) in tuple_ranges(text) {
+        let fields = split_top_level(&text[start + 1..end - 1], ',');
+        if fields.len() >= 2 {
+            let methods = extract_quoted(fields[1]);
+            for (variant, owner) in variants {
+                if fields[0].contains(&format!("CtValue::{variant}")) {
+                    for method in &methods {
+                        out.insert((owner.to_string(), method.clone()));
+                    }
+                }
+            }
+            if fields[0].contains("CtValue::Struct") {
+                let rest = &text[end..];
+                let guard = &rest[..rest.find("=>").unwrap_or(0)];
+                let mut owners = string_equalities(guard, "type_name");
+                owners.extend(
+                    equality_constant_refs(guard, "type_name")
+                        .into_iter()
+                        .filter_map(|constant| values.get(&constant).cloned()),
+                );
+                if guard.contains("type_name.as_str()") {
+                    owners.extend(
+                        extract_quoted(guard)
+                            .into_iter()
+                            .filter(|owner| owner.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())),
+                    );
+                }
+                let mut methods = extract_quoted(fields[1]);
+                if fields[1].trim() == "method" {
+                    methods.extend(
+                        extract_quoted(guard)
+                            .into_iter()
+                            .filter(|method| method.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_')),
+                    );
+                }
+                for owner in owners {
+                    for method in &methods {
+                        out.insert((owner.clone(), method.clone()));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn ct_static_methods(text: &str) -> BTreeSet<(String, String)> {
+    let mut out = BTreeSet::new();
+    for (owner, method) in extract_any_string_pairs(text) {
+        if owner.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()) {
+            out.insert((owner, method));
+        }
+    }
+    let collections = read("crates/jet-foundation/src/Collections.rs");
+    let syntax = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let receivers = builtin_receivers(&collections, &syntax);
+    for (method, _) in jet::Syntax::NUMERIC_CONVERSION_SOURCES {
+        for (owner, ty) in &receivers {
+            if ty.is_numeric() {
+                out.insert((owner.clone(), (*method).to_string()));
+            }
+        }
+    }
+    out
+}
+
+fn string_equalities(text: &str, subject: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let needle = format!("{subject} == \"");
+    let mut rest = text;
+    while let Some(at) = rest.find(&needle) {
+        let value = &rest[at + needle.len()..];
+        if let Some(end) = value.find('"') {
+            names.insert(value[..end].to_string());
+            rest = &value[end + 1..];
+        } else {
+            break;
+        }
+    }
+    names
+}
+
+fn direct_dispatch_names(text: &str) -> BTreeSet<String> {
+    string_equalities(text, "name")
+}
+
+fn extract_any_string_pairs(text: &str) -> BTreeSet<(String, String)> {
+    let mut out = BTreeSet::new();
+    for (start, end) in tuple_ranges(text) {
+        let fields = split_top_level(&text[start + 1..end - 1], ',');
+        if fields.len() >= 2 {
+            for owner in extract_quoted(fields[0]) {
+                for method in extract_quoted(fields[1]) {
+                    out.insert((owner.clone(), method));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
+    if EFFECT_GATED_MODULES.contains(&module) {
+        return Some("named comptime effect gate");
+    }
+    if matches!(module, "core.os" | "core.raylib" | "core.ui" | "core.term" | "core.web" | "core.web.storage.local" | "core.web.storage.session" | "core.tasks" | "core.watcher" | "core.web.devserver" | "core.uuid") {
+        return Some("named ambient/native boundary");
+    }
+    if matches!(module, "core.event" | "core.http.client" | "core.http.server" | "core.mem" | "core.scope") {
+        return Some("named runtime/native boundary");
+    }
+    if (module.starts_with("core.encoding.") && matches!(method, "reader" | "writer"))
+        || (module == "core.email" && matches!(method, "smtp" | "smtp_from_env"))
+    {
+        return Some("named I/O handle boundary");
+    }
+    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "utc" | "local_time" | "zoned" | "zoned_local" | "zone" | "instant" | "sleep" | "start") {
+        return Some("named clock boundary");
+    }
+    if matches!(module, "core.auth" | "core.crypto.expert" | "core.crypto.random") {
+        return Some("named native/security boundary");
+    }
+    if (module == "core.time.date" && method == "today")
+        || (module == "core.time.datetime" && method == "now")
+        || (module == "core.time.expiring" && method == "new")
+    {
+        return Some("named clock boundary");
+    }
+    None
+}
+
+fn value_boundary(owner: &str) -> Option<&'static str> {
+    matches!(owner, "Task" | "Receiver" | "Sender" | "Event" | "AsyncEvent" | "DispatchReport" | "Hook" | "Subscription" | "EventScope" | "EventTrace" | "WatchHandle" | "WatchSet" | "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash")
+        .then_some("named runtime/native handle boundary")
+}
+
+fn discover_inventory() -> BTreeSet<Entry> {
+    let fixed_src = read("crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs");
+    let bespoke_src = read("crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs");
+    let fixed = extract_pairs(&fixed_src);
+    let core_all = extract_pairs(&bespoke_src);
+    let mut entries = BTreeSet::new();
+    for (module, method) in &fixed {
+        entries.insert(Entry { surface: Surface::Fixed, owner: module.clone(), method: method.clone() });
+    }
+    for (module, method) in core_all.difference(&fixed) {
+        entries.insert(Entry { surface: Surface::Bespoke, owner: module.clone(), method: method.clone() });
+    }
+
+    let syntax_src = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let values = string_constant_values(&syntax_src, "");
+    let direct_src = read("crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs");
+    let mut direct_aot = builtin_constant_refs(&direct_src);
+    direct_aot.extend(
+        equality_constant_refs(&direct_src, "call.name")
+            .into_iter()
+            .filter(|constant| constant.starts_with("TYPE_") || constant == "RESOURCE_CLOSE"),
+    );
+    for constant in direct_aot {
+        let spelling = values.get(&constant).cloned().unwrap_or_else(|| constant.clone());
+        entries.insert(Entry { surface: Surface::DirectStatic, owner: "direct".into(), method: spelling });
+    }
+    let math_src = read("crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs");
+    let math_types = math_src
+        .split("pub fn math_scalar_ty")
+        .next()
+        .map(extract_quoted)
+        .unwrap_or_default();
+    for name in math_types
+        .into_iter()
+        .filter(|name| name.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()))
+    {
+        entries.insert(Entry { surface: Surface::DirectStatic, owner: "direct".into(), method: name });
+    }
+    entries.extend(aot_collection_methods());
+    entries
+}
+
+fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, Vec<String>> {
+    let core_dispatch_src = read_rust_tree("crates/jet-comptime/src/Comptime");
+    let builtin_dispatch_src = read("crates/jet-comptime/src/Comptime/Builtins.rs");
+    let dispatch_src = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    let ct_core = extract_pairs(&core_dispatch_src);
+    let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
+    let syntax_src = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let values = string_constant_values(&syntax_src, "");
+    let mut direct_ct = builtin_constant_refs(&dispatch_src);
+    direct_ct.extend(equality_constant_refs(&dispatch_src, "name"));
+    let mut direct_names = direct_dispatch_names(&dispatch_src);
+    direct_names.extend(
+        direct_ct
+            .iter()
+            .filter_map(|constant| values.get(constant).cloned()),
+    );
+    let ct_values = ct_value_methods(source_between(
+        &builtin_dispatch_src,
+        "pub(super) fn apply_method(",
+        None,
+    ));
+    let ct_statics = ct_static_methods(source_between(
+        &builtin_dispatch_src,
+        "pub(super) fn apply_static_type_method(",
+        Some("pub(super) fn apply_mutating("),
+    ));
+    let mut errors = Vec::new();
+    for &(module, method) in KNOWN_OPEN_GAPS {
+        let pair_is_discovered = discovered.iter().any(|entry| {
+            matches!(entry.surface, Surface::Fixed | Surface::Bespoke)
+                && entry.owner == module
+                && entry.method == method
+        });
+        if !pair_is_discovered {
+            errors.push(format!("stale pure_pending gap: {module}.{method} is no longer discovered"));
+        } else if ct_core.contains(&(module.to_string(), method.to_string())) {
+            errors.push(format!("stale pure_pending gap: {module}.{method} is now comptime-covered"));
+        }
+    }
+    let mut out = Vec::new();
+    for entry in discovered.iter().cloned() {
+        let classified = match entry.surface {
+            Surface::Fixed | Surface::Bespoke => {
+                let pair = (entry.owner.clone(), entry.method.clone());
+                if ct_core.contains(&pair) {
+                    Some((Class::Covered, "comptime core dispatch"))
+                } else if let Some(reason) = core_boundary(&entry.owner, &entry.method) {
+                    Some((Class::Boundary, reason))
+                } else if gaps.contains(&(entry.owner.as_str(), entry.method.as_str())) {
+                    Some((Class::PurePending, "explicit pure port backlog"))
+                } else {
+                    None
+                }
+            }
+            Surface::DirectStatic if entry.owner == "direct" => {
+                if matches!(entry.method.as_str(), "print" | "input") {
+                    Some((Class::Boundary, "named interactive I/O boundary"))
+                } else if entry.method == "close" {
+                    Some((Class::Boundary, "named runtime resource boundary"))
+                } else if direct_names.contains(&entry.method) {
+                    Some((Class::Covered, "comptime direct dispatch"))
+                } else if matches!(
+                    entry.method.as_str(),
+                    "consume" | "expect" | "checked" | "saturating" | "wrapping" | "Decimal"
+                        | "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+                ) {
+                    Some((Class::PurePending, "direct builtin port pending"))
+                } else {
+                    None
+                }
+            }
+            Surface::DirectStatic => {
+                if ct_statics.contains(&(entry.owner.clone(), entry.method.clone())) {
+                    Some((Class::Covered, "comptime static dispatch"))
+                } else if let Some(reason) = value_boundary(&entry.owner) {
+                    Some((Class::Boundary, reason))
+                } else {
+                    Some((Class::PurePending, "static method port pending"))
+                }
+            }
+            Surface::Value => {
+                let owner = if entry.owner == "FixedList" { "List" } else { &entry.owner };
+                if ct_values.contains(&(owner.to_string(), entry.method.clone())) {
+                    Some((Class::Covered, "comptime value dispatch"))
+                } else if let Some(reason) = value_boundary(&entry.owner) {
+                    Some((Class::Boundary, reason))
+                } else {
+                    Some((Class::PurePending, "value method port pending"))
+                }
+            }
+        };
+        match classified {
+            Some((class, reason)) => out.push(Classified { entry, class, reason }),
+            None => errors.push(format!("unclassified {} {}.{}", entry.surface.name(), entry.owner, entry.method)),
+        }
+    }
+    if errors.is_empty() { Ok(out) } else { Err(errors) }
+}
+
+fn render_inventory(records: &[Classified]) -> String {
+    let mut lines = records
+        .iter()
+        .map(|record| format!("{} | {} | {}.{} | {}", record.class.name(), record.entry.surface.name(), record.entry.owner, record.entry.method, record.reason))
+        .collect::<Vec<_>>();
+    lines.sort();
+    lines.join("\n") + "\n"
+}
+
+fn stable_hash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
+fn validate_records(discovered: &BTreeSet<Entry>, records: &[Classified]) -> Result<(), Vec<String>> {
+    let mut seen = BTreeSet::new();
+    let mut errors = Vec::new();
+    for record in records {
+        if !seen.insert(record.entry.clone()) {
+            errors.push(format!(
+                "duplicate classification: {} {}.{}",
+                record.entry.surface.name(), record.entry.owner, record.entry.method
+            ));
+        }
+        if !discovered.contains(&record.entry) {
+            errors.push(format!(
+                "stale {} classification: {} {}.{}",
+                record.class.name(), record.entry.surface.name(), record.entry.owner, record.entry.method
+            ));
+        }
+    }
+    for entry in discovered.difference(&seen) {
+        errors.push(format!(
+            "unclassified: {} {}.{}",
+            entry.surface.name(), entry.owner, entry.method
+        ));
+    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+
+fn record<'a>(records: &'a [Classified], surface: Surface, owner: &str, method: &str) -> &'a Classified {
+    records
+        .iter()
+        .find(|record| {
+            record.entry.surface == surface
+                && record.entry.owner == owner
+                && record.entry.method == method
+        })
+        .unwrap_or_else(|| panic!("missing {} {owner}.{method}", surface.name()))
+}
+
+#[test]
+fn canonical_builtin_inventory_is_complete_and_stable() {
+    let discovered = discover_inventory();
+    let records = classify_inventory(&discovered).unwrap_or_else(|errors| panic!("{}", errors.join("\n")));
+    validate_records(&discovered, &records).unwrap();
+
+    let fixed = records.iter().filter(|record| record.entry.surface == Surface::Fixed).count();
+    let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
+    let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
+    let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
+    assert!(fixed > 50, "fixed-signature inventory unexpectedly small: {fixed}");
+    assert!(direct_static > 10, "direct/static inventory unexpectedly small: {direct_static}");
+    assert!(value > 50, "value-method inventory unexpectedly small: {value}");
+    assert!(bespoke >= 3, "bespoke inventory lost data joins/pivot: {bespoke}");
+
+    assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "Int", "parse").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Value, "String", "trim").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Duration", "in").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Rng", "int").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Rng", "float").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Task", "detach").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Bespoke, "core.data", "inner_join").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Bespoke, "core.data", "left_join").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Bespoke, "core.data", "pivot_sum").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
+
+    let rendered = render_inventory(&records);
+    let mut reversed = records.clone();
+    reversed.reverse();
+    assert_eq!(render_inventory(&reversed), rendered, "inventory rendering must be order-stable");
+    let covered = records.iter().filter(|record| record.class == Class::Covered).count();
+    let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
+    let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
+    eprintln!(
+        "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
+        records.len()
+    );
+    assert_eq!(
+        stable_hash(&rendered),
+        10086141017481800420,
+        "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
+    );
+}
+
+#[test]
+fn inventory_validator_rejects_duplicate_stale_and_unclassified_entries() {
+    let live = Entry { surface: Surface::Value, owner: "String".into(), method: "trim".into() };
+    let stale_covered = Entry { surface: Surface::Fixed, owner: "core.fake".into(), method: "covered".into() };
+    let stale_pending = Entry { surface: Surface::Fixed, owner: "core.fake".into(), method: "pending".into() };
+    let stale_boundary = Entry { surface: Surface::Fixed, owner: "core.fake".into(), method: "boundary".into() };
+    let discovered = [live.clone()].into_iter().collect::<BTreeSet<_>>();
+    let duplicate = Classified { entry: live.clone(), class: Class::Covered, reason: "proof" };
+    let records = vec![
+        duplicate.clone(),
+        duplicate,
+        Classified { entry: stale_covered, class: Class::Covered, reason: "old" },
+        Classified { entry: stale_pending, class: Class::PurePending, reason: "old" },
+        Classified { entry: stale_boundary, class: Class::Boundary, reason: "old" },
+    ];
+    let errors = validate_records(&discovered, &records).unwrap_err().join("\n");
+    assert!(errors.contains("duplicate classification: value String.trim"), "{errors}");
+    assert!(errors.contains("stale covered classification: fixed core.fake.covered"), "{errors}");
+    assert!(errors.contains("stale pure_pending classification: fixed core.fake.pending"), "{errors}");
+    assert!(errors.contains("stale boundary classification: fixed core.fake.boundary"), "{errors}");
+
+    let errors = validate_records(&discovered, &[]).unwrap_err().join("\n");
+    assert!(errors.contains("unclassified: value String.trim"), "{errors}");
+
+    let direct = direct_dispatch_names(
+        "if name == \"require\" { dispatch(); } fn helper() { let name = \"require_eq\"; }",
+    );
+    assert!(direct.contains("require"));
+    assert!(!direct.contains("require_eq"), "helper-only string must not prove dispatch coverage");
+
+    let fake_core = "// (\"core.fake\", \"comment\")\nlet text = \"(\\\"core.fake\\\", \\\"string\\\")\";";
+    assert!(extract_pairs(fake_core).is_empty(), "comment/string tuples must not prove dispatch coverage");
 }
