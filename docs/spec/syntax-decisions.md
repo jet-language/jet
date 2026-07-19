@@ -4324,9 +4324,10 @@ man pages, and completions advertise only canonical grouped spellings.
 **D-JPK-TASKRUN1=A — tasks are `@Task fn`**: a task is an ordinary Jet
 function marked `@Task`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-task dependency is a plain
-function call, no separate DAG syntax. Invoked `jetpack run <name>`. `run`,
-`dev`, `build`, `test` remain reserved lifecycle verb names a task cannot
-reuse.
+function call, no separate DAG syntax. Invoked canonically with `jet run
+--task <name> <entry>`; `jetpack run <name>` is the Jetpack engine bridge.
+`run`, `dev`, `build`, `test` remain reserved lifecycle verb names a task
+cannot reuse.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `@Every(…)` is a directive marker on a `@Task fn`
@@ -4346,8 +4347,8 @@ dev`'s watch loop runs due tasks on their own schedule (UTC for
 job per this same law).
 
 *Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `@Task fn
-run|dev|build|test` (E0928); `jetpack run <name>` discovers `@Task fn`s in
-the project entry and dispatches via `jet run --task <name> <entry>`
+run|dev|build|test` (E0928); `jet run --task <name> <entry>` dispatches an
+`@Task fn`, and the Jetpack engine bridges `jetpack run <name>` to that path
 (D-JPK-DISPATCH1); unknown names list declared tasks (E1294). Typed task
 args reuse D-CLIFLAG1 once the task is the entry. Entry dispatch injects a
 synthetic `fn run { task(…) }` wrapper so the selected `@Task fn` keeps its

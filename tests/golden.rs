@@ -203,7 +203,7 @@ fn examples_compile_and_run() {
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `@Task` entry
     // paths — leaf `greet` stays callable while sibling `seed` calls it.
-    if entry.stem == "jetpack/task_runner" {
+    if entry.stem == "devloop/task_runner" {
         check_task_runner_tasks(entry, env);
         return;
     }
@@ -536,7 +536,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// I5 for `examples/features/jetpack/task_runner.jet`: compile+run both
+/// I5 for `examples/features/devloop/task_runner.jet`: compile+run both
 /// `@Task` entries via `compile_with_entry` (same path as `jet run --task`).
 fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
     let src = fs::read_to_string(&entry.path).unwrap();
@@ -564,13 +564,13 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
         let rs = dir.join(format!(
             "jet_golden_{}_{}_{}.rs",
             std::process::id(),
-            "jetpack_task_runner",
+            "devloop_task_runner",
             task
         ));
         let bin = dir.join(format!(
             "jet_golden_{}_{}_{}",
             std::process::id(),
-            "jetpack_task_runner",
+            "devloop_task_runner",
             task
         ));
         fs::write(&rs, &compiled.rust).unwrap();
@@ -596,10 +596,10 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
         let out_path = env
             .ex_dir
             .join("expected")
-            .join(format!("jetpack/{expected_name}.out"));
+            .join(format!("devloop/{expected_name}.out"));
         assert!(
             out_path.is_file(),
-            "missing examples/features/expected/jetpack/{expected_name}.out"
+            "missing examples/features/expected/devloop/{expected_name}.out"
         );
         let actual = String::from_utf8_lossy(&run.stdout);
         if env.update_expected {
@@ -610,8 +610,8 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
                 panic!(
                     "output mismatch for task_runner --task={task}:\n{}",
                     unified_diff(
-                        &format!("examples/features/expected/jetpack/{expected_name}.out"),
-                        &format!("examples/features/jetpack/task_runner --task={task} stdout"),
+                        &format!("examples/features/expected/devloop/{expected_name}.out"),
+                        &format!("examples/features/devloop/task_runner --task={task} stdout"),
                         &expected,
                         &actual,
                     )

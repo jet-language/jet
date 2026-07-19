@@ -976,6 +976,40 @@ fn hidden_generic_constructor_default_dev_matches_aot() {
     assert_eq!(stats.manifested, 0);
 }
 
+fn check_task_runner_interpreter(root: &PathBuf, file: &str) {
+    let mut bundle = jet::Loader::load_entry(file).expect("task_runner loads");
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "task_runner front end: {errors:?}");
+    for (task, expected_name) in [
+        ("greet", "task_runner.greet"),
+        ("seed", "task_runner.seed"),
+    ] {
+        let expected = fs::read_to_string(
+            root.join(format!("examples/features/expected/devloop/{expected_name}.out")),
+        )
+        .unwrap_or_else(|_| panic!("missing expected/devloop/{expected_name}.out"));
+        match run_named_task(&bundle, task, false) {
+            RunOutcome::Ran { stdout, .. } => assert_eq!(
+                stdout, expected,
+                "interpreter --task={task} differs from golden"
+            ),
+            RunOutcome::Problems(diags) => panic!(
+                "interpreter --task={task} did not run: {:?}",
+                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+            ),
+        }
+    }
+}
+
+#[test]
+fn task_runner_named_tasks_match_expected_golden() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    check_task_runner_interpreter(&root, &example_path("devloop/task_runner"));
+}
+
 /// Every example that runs in the interpreter and has a checked-in
 /// `expected/*.out` golden (the executable spec, I5) must match it byte for
 /// byte — a cheap check that needs no rustc. Examples that hit a boundary, or
@@ -992,30 +1026,9 @@ fn interpreter_matches_expected_golden() {
         // AOT `--task` battery on the interpreter tier via `run_named_task`,
         // proving the same TIR dispatches each task identically. The bare
         // `fn run()` output is not a golden.
-        if stem == "jetpack/task_runner" {
-            let mut bundle = jet::Loader::load_entry(&file).expect("task_runner loads");
-            let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-                .into_iter()
-                .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-                .collect();
-            assert!(errors.is_empty(), "task_runner front end: {errors:?}");
-            for (task, expected_name) in [("greet", "task_runner.greet"), ("seed", "task_runner.seed")] {
-                let expected = fs::read_to_string(
-                    root.join(format!("examples/features/expected/jetpack/{expected_name}.out")),
-                )
-                .unwrap_or_else(|_| panic!("missing expected/jetpack/{expected_name}.out"));
-                match run_named_task(&bundle, task, false) {
-                    RunOutcome::Ran { stdout, .. } => assert_eq!(
-                        stdout, expected,
-                        "interpreter --task={task} differs from golden"
-                    ),
-                    RunOutcome::Problems(diags) => panic!(
-                        "interpreter --task={task} did not run: {:?}",
-                        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-                    ),
-                }
-                checked += 1;
-            }
+        if stem == "devloop/task_runner" {
+            check_task_runner_interpreter(&root, &file);
+            checked += 2;
             continue;
         }
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
