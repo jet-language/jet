@@ -30,7 +30,7 @@ pub fn net_method_return(
         // D-ROUTE1=A: HttpRouter registration methods.
         ("HttpRouter", "get" | "post" | "put" | "delete") => Some(Some(unit.clone())),
         // TcpListener methods.
-        ("TcpListener", "accept") => Some(Some(result_ty(
+        ("TcpListener", "accept") if n_args <= 1 => Some(Some(result_ty(
             Type::Named("TcpStream".to_string()),
             err.clone(),
         ))),
@@ -41,15 +41,27 @@ pub fn net_method_return(
             Type::List(Box::new(u8_ty())),
             Type::Named("NetError".to_string()),
         ))),
+        ("TcpStream", "read") if n_args == 2 => Some(Some(result_ty(
+            Type::List(Box::new(u8_ty())),
+            Type::Named("NetError".to_string()),
+        ))),
         ("TcpStream", "read_text") if n_args == 1 => Some(Some(result_ty(
             str_ty.clone(),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "write") if n_args == 1 => Some(Some(result_ty(
+        ("TcpStream", "read_text") if n_args == 2 => Some(Some(result_ty(
+            str_ty.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("TcpStream", "write") if n_args == 1 || n_args == 2 => Some(Some(result_ty(
             Type::Int,
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "write_all" | "write_text" | "shutdown") if n_args == 1 => Some(Some(result_ty(
+        ("TcpStream", "write_all" | "write_text") if n_args == 1 || n_args == 2 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("TcpStream", "shutdown") if n_args == 1 => Some(Some(result_ty(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),

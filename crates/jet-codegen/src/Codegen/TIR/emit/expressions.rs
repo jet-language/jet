@@ -1539,7 +1539,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         )
                     }
                 }
-                THandleOp::TcpListenerAccept => format!("{}jet_net_tcp_accept(&({}))", root, recv),
+                THandleOp::TcpListenerAccept => if args.is_empty() {
+                    format!("{}jet_net_tcp_accept(&({}))", root, recv)
+                } else {
+                    format!("{}jet_net_tcp_accept_deadline(&({}), {})", root, recv, a(0))
+                },
                 THandleOp::TcpListenerLocalAddr => {
                     format!("{}jet_net_listener_local_addr(&({}))", root, recv)
                 }
@@ -1557,19 +1561,39 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_net_tcp_close(&mut ({}))", root, recv)
                 }
                 THandleOp::TcpStreamReadBytes => {
-                    format!("{}jet_net_tcp_read_bytes(&mut ({}), {})", root, recv, a(0))
+                    if args.len() == 1 {
+                        format!("{}jet_net_tcp_read_bytes(&mut ({}), {})", root, recv, a(0))
+                    } else {
+                        format!("{}jet_net_tcp_read_bytes_deadline(&mut ({}), {}, {})", root, recv, a(0), a(1))
+                    }
                 }
                 THandleOp::TcpStreamReadText => {
-                    format!("{}jet_net_tcp_read_text(&mut ({}), {})", root, recv, a(0))
+                    if args.len() == 1 {
+                        format!("{}jet_net_tcp_read_text(&mut ({}), {})", root, recv, a(0))
+                    } else {
+                        format!("{}jet_net_tcp_read_text_deadline(&mut ({}), {}, {})", root, recv, a(0), a(1))
+                    }
                 }
                 THandleOp::TcpStreamWriteBytes => {
-                    format!("{}jet_net_tcp_write_bytes(&mut ({}), &({}))", root, recv, a(0))
+                    if args.len() == 1 {
+                        format!("{}jet_net_tcp_write_bytes(&mut ({}), &({}))", root, recv, a(0))
+                    } else {
+                        format!("{}jet_net_tcp_write_bytes_deadline(&mut ({}), &({}), {})", root, recv, a(0), a(1))
+                    }
                 }
                 THandleOp::TcpStreamWriteAllBytes => {
-                    format!("{}jet_net_tcp_write_all_bytes(&mut ({}), &({}))", root, recv, a(0))
+                    if args.len() == 1 {
+                        format!("{}jet_net_tcp_write_all_bytes(&mut ({}), &({}))", root, recv, a(0))
+                    } else {
+                        format!("{}jet_net_tcp_write_all_bytes_deadline(&mut ({}), &({}), {})", root, recv, a(0), a(1))
+                    }
                 }
                 THandleOp::TcpStreamWriteText => {
-                    format!("{}jet_net_tcp_write_text(&mut ({}), &({}))", root, recv, a(0))
+                    if args.len() == 1 {
+                        format!("{}jet_net_tcp_write_text(&mut ({}), &({}))", root, recv, a(0))
+                    } else {
+                        format!("{}jet_net_tcp_write_text_deadline(&mut ({}), &({}), {})", root, recv, a(0), a(1))
+                    }
                 }
                 THandleOp::TcpStreamShutdown => {
                     format!("{}jet_net_tcp_shutdown(&mut ({}), {})", root, recv, a(0))

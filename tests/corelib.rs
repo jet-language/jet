@@ -3528,6 +3528,48 @@ fn run() {
 }
 
 #[test]
+fn core_net_tcp_per_call_deadlines_bound_accept_read_and_write() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_per_call_deadlines_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_per_call_deadlines",
+        r#"
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    if listener.accept(0) == {
+        Ok(_) -> panic("expired accept succeeded")
+        Err(error) -> print(net.error_operation(error))
+    }
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client := net.tcp_connect(address) ?? panic("connect")
+    server := listener.accept() ?? panic("accept")
+    if server.read(1, 0) == {
+        Ok(_) -> panic("expired read succeeded")
+        Err(error) -> print(net.error_operation(error))
+    }
+    byte: [U8] :: [1]
+    if client.write(byte, 0) == {
+        Ok(_) -> panic("expired write succeeded")
+        Err(error) -> print(net.error_operation(error))
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "tcp accept\ntcp read\ntcp write\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn core_net_tcp_implements_nominal_io_reader_writer() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_net_io_contract_{}",

@@ -2397,8 +2397,9 @@ Beginner calls accept strings; expert calls accept typed
 | `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener ? NetError` / `TcpStream ? NetError` | Typed entrypoints |
 | `tcp_connect_timeout(addr, ms)` | `TcpStream ? NetError` | Typed dial with timeout |
 | `tcp_connect_happy(host, port, ms)` | `TcpStream ? NetError` | Dual-stack dial with staggered IPv6/IPv4 racing under one cancellation/deadline budget |
-| `stream.read(limit)` / `stream.write(bytes)` / `stream.write_all(bytes)` | `[U8] ? NetError` / `Int ? NetError` / `() ? NetError` | Canonical byte stream operations |
-| `stream.read_text(limit)` / `stream.write_text(text)` | `String ? NetError` / `() ? NetError` | Checked UTF-8 projections over the same byte stream |
+| `listener.accept(deadline_ms?)` | `TcpStream ? NetError` | Accept with an optional per-call deadline |
+| `stream.read(limit, deadline_ms?)` / `stream.write(bytes, deadline_ms?)` / `stream.write_all(bytes, deadline_ms?)` | `[U8] ? NetError` / `Int ? NetError` / `() ? NetError` | Canonical byte operations with optional per-call deadlines |
+| `stream.read_text(limit, deadline_ms?)` / `stream.write_text(text, deadline_ms?)` | `String ? NetError` / `() ? NetError` | Checked UTF-8 projections with optional per-call deadlines |
 | `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `() ? NetError` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
 | `stream.ready(.Read/.Write/.ReadWrite, deadline_ms)` | `NetReady ? NetError` | Same-handle readiness; earliest ambient or explicit deadline wins |
 | `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr ? NetError` | Typed stream addresses |

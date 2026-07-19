@@ -1036,6 +1036,14 @@ fn jet_net_tcp_accept(listener: &JetTcpListener) -> Result<JetTcpStream, JetNetE
     }
 }
 
+fn jet_net_tcp_accept_deadline(listener: &JetTcpListener, deadline_ms: i64) -> Result<JetTcpStream, JetNetError> {
+    jet_net_timeout(deadline_ms).map_err(|message| {
+        JetNetError::InvalidInput(jet_net_detail("tcp accept", None, None, message, None))
+    })?;
+    let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+    jet_net_tcp_accept(listener)
+}
+
 fn jet_net_tcp_connect(addr: &String) -> Result<JetTcpStream, JetNetError> {
     let address = addr.clone();
     let worker_address = address.clone();
@@ -1085,6 +1093,14 @@ fn jet_net_tcp_read_bytes(stream: &mut JetTcpStream, limit: i64) -> Result<Vec<u
     }
 }
 
+fn jet_net_tcp_read_bytes_deadline(stream: &mut JetTcpStream, limit: i64, deadline_ms: i64) -> Result<Vec<u8>, JetNetError> {
+    jet_net_timeout(deadline_ms).map_err(|message| {
+        JetNetError::InvalidInput(jet_net_detail("tcp read", None, None, message, None))
+    })?;
+    let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+    jet_net_tcp_read_bytes(stream, limit)
+}
+
 fn jet_net_tcp_read_text(stream: &mut JetTcpStream, limit: i64) -> Result<String, JetNetError> {
     let bytes = jet_net_tcp_read_bytes(stream, limit)?;
     String::from_utf8(bytes).map_err(|error| {
@@ -1096,6 +1112,13 @@ fn jet_net_tcp_read_text(stream: &mut JetTcpStream, limit: i64) -> Result<String
             None,
         ))
     })
+}
+
+fn jet_net_tcp_read_text_deadline(stream: &mut JetTcpStream, limit: i64, deadline_ms: i64) -> Result<String, JetNetError> {
+    let bytes = jet_net_tcp_read_bytes_deadline(stream, limit, deadline_ms)?;
+    String::from_utf8(bytes).map_err(|error| JetNetError::InvalidInput(jet_net_detail(
+        "tcp read text", None, None, format!("tcp read text failed: {}", error), None,
+    )))
 }
 
 fn jet_net_tcp_write_bytes_with_current_deadline(
@@ -1123,6 +1146,14 @@ fn jet_net_tcp_write_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<
     jet_net_tcp_write_bytes_with_current_deadline(stream, data)
 }
 
+fn jet_net_tcp_write_bytes_deadline(stream: &mut JetTcpStream, data: &Vec<u8>, deadline_ms: i64) -> Result<i64, JetNetError> {
+    jet_net_timeout(deadline_ms).map_err(|message| {
+        JetNetError::InvalidInput(jet_net_detail("tcp write", None, None, message, None))
+    })?;
+    let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+    jet_net_tcp_write_bytes(stream, data)
+}
+
 fn jet_net_tcp_write_all_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<(), JetNetError> {
     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     let mut offset = 0usize;
@@ -1142,8 +1173,20 @@ fn jet_net_tcp_write_all_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Res
     Ok(())
 }
 
+fn jet_net_tcp_write_all_bytes_deadline(stream: &mut JetTcpStream, data: &Vec<u8>, deadline_ms: i64) -> Result<(), JetNetError> {
+    jet_net_timeout(deadline_ms).map_err(|message| {
+        JetNetError::InvalidInput(jet_net_detail("tcp write all", None, None, message, None))
+    })?;
+    let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+    jet_net_tcp_write_all_bytes(stream, data)
+}
+
 fn jet_net_tcp_write_text(stream: &mut JetTcpStream, text: &String) -> Result<(), JetNetError> {
     jet_net_tcp_write_all_bytes(stream, &text.as_bytes().to_vec())
+}
+
+fn jet_net_tcp_write_text_deadline(stream: &mut JetTcpStream, text: &String, deadline_ms: i64) -> Result<(), JetNetError> {
+    jet_net_tcp_write_all_bytes_deadline(stream, &text.as_bytes().to_vec(), deadline_ms)
 }
 
 fn jet_net_tcp_shutdown(stream: &mut JetTcpStream, how: JetNetShutdown) -> Result<(), JetNetError> {
