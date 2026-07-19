@@ -126,7 +126,7 @@ pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
     })
 }
 
-fn run_entry_type(items: &[Item]) -> Option<&str> {
+fn selected_entry_type(items: &[Item]) -> Option<&str> {
     items.iter().find_map(|item| match item {
         Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
             match &function.params[0].ty {
@@ -135,6 +135,42 @@ fn run_entry_type(items: &[Item]) -> Option<&str> {
             }
         }
         _ => None,
+    }).or_else(|| items.iter().find_map(|item| {
+        let Item::Const(value) = item else { return None };
+        let output = value.resolved_output.as_ref()?;
+        if output.kind != crate::AST::OutputKind::Executable || output.params.len() != 1 {
+            return None;
+        }
+        match &output.params[0].1 {
+            Type::Named(name) => Some(name.as_str()),
+            _ => None,
+        }
+    }))
+}
+
+fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
+    let entry = &bundle.modules[bundle.entry];
+    if let Some(name) = entry.items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
+            match &function.params[0].ty {
+                Type::Named(name) => Some(name.as_str()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }) {
+        return Some((bundle.entry, name));
+    }
+    entry.items.iter().find_map(|item| {
+        let Item::Const(value) = item else { return None };
+        let output = value.resolved_output.as_ref()?;
+        if output.kind != crate::AST::OutputKind::Executable || output.params.len() != 1 {
+            return None;
+        }
+        match &output.params[0].1 {
+            Type::Named(name) => Some((output.module, name.as_str())),
+            _ => None,
+        }
     })
 }
 
@@ -164,8 +200,8 @@ pub fn schema_for_type(items: &[Item], name: &str) -> Option<CliCommandSchema> {
 /// Module containing the entry parameter's checked CLI type. Local types win;
 /// otherwise the type must be public in one directly imported file module.
 pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
-    let entry = &bundle.modules[bundle.entry];
-    let name = run_entry_type(&entry.items)?;
+    let (source, name) = selected_entry_type_source(bundle)?;
+    let entry = &bundle.modules[source];
     let (wanted_alias, leaf) = name
         .split_once('.')
         .map_or((None, name), |(alias, leaf)| (Some(alias), leaf));
@@ -176,13 +212,13 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
             _ => false,
         })
     {
-        return Some(bundle.entry);
+        return Some(source);
     }
     entry.imports.iter().filter_map(|import| {
         if wanted_alias.is_some_and(|alias| import.import_alias() != alias) {
             return None;
         }
-        let target = bundle.import_targets.get(&(bundle.entry, import.span)).copied()?;
+        let target = bundle.import_targets.get(&(source, import.span)).copied()?;
         bundle.modules[target]
             .items
             .iter()
@@ -198,8 +234,7 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
 /// Checked schema for a typed `fn run`, including a CLI type declared in a
 /// directly imported module. Codegen, dossier, metadata, and completion share it.
 pub fn entry_schema_for_bundle(bundle: &ProgramBundle) -> Option<CliCommandSchema> {
-    let entry_items = &bundle.modules[bundle.entry].items;
-    let name = run_entry_type(entry_items)?;
+    let (_, name) = selected_entry_type_source(bundle)?;
     let leaf = name.rsplit('.').next().unwrap_or(name);
     let module = entry_type_module(bundle)?;
     schema_for_type(&bundle.modules[module].items, leaf)
@@ -207,7 +242,7 @@ pub fn entry_schema_for_bundle(bundle: &ProgramBundle) -> Option<CliCommandSchem
 
 /// Checked schema for a typed `fn run` in one module.
 pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
-    let name = run_entry_type(items)?;
+    let name = selected_entry_type(items)?;
     schema_for_type(items, name.rsplit('.').next().unwrap_or(name))
 }
 

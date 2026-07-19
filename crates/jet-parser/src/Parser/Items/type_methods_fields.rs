@@ -260,6 +260,34 @@ impl<'a> Parser<'a> {
                 ty: None,
                 is_persist,
                 persist_span,
+                resolved_output: None,
+            })
+        }
+
+        /// D-SHAPE-OUTPUT-CALLABLE1: an Output is an ordinary typed immutable
+        /// top-level value; no wrapper declaration or string symbol path.
+        pub(in crate::Parser) fn output_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            let start = self.peek().span.start;
+            let (name, name_span) = self.expect_ident("for the Output name")?;
+            self.expect(TokKind::Colon, "after the Output name")?;
+            let (ty, _) = self.type_()?;
+            self.expect(TokKind::ColonColon, "after `Output`")?;
+            let value = self.expr()?;
+            self.expect(TokKind::Semi, "after an Output value")?;
+            Ok(ConstDef {
+                span: Span::new(start, self.prev_end()),
+                name,
+                name_span,
+                value,
+                meta: None,
+                attrs: Vec::new(),
+                rust_kind: crate::AST::RustConstKind::Const,
+                is_comptime: false,
+                ct: None,
+                ty: Some(ty),
+                is_persist: false,
+                persist_span: None,
+                resolved_output: None,
             })
         }
     
@@ -293,6 +321,7 @@ impl<'a> Parser<'a> {
                 ty: None,
                 is_persist: false,
                 persist_span: None,
+                resolved_output: None,
             })
         }
     

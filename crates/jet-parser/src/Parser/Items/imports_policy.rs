@@ -642,6 +642,13 @@ impl<'a> Parser<'a> {
                     },
                     TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                     TokKind::KwFn => self.func().map(Item::Func),
+                    TokKind::Ident(_)
+                        if matches!(self.peek2().kind, TokKind::Colon)
+                            && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::TYPE_OUTPUT)
+                            && matches!(self.peek4().kind, TokKind::ColonColon) =>
+                    {
+                        self.output_def().map(Item::Const)
+                    }
                     TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) => self.func().map(Item::Func),
                     TokKind::At if self.at_meta_attr() => {
                         if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {

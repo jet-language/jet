@@ -412,6 +412,13 @@ pub(crate) fn register_const(
     if c.is_comptime {
         return;
     }
+    // D-SHAPE-OUTPUT-CALLABLE1: typed Outputs are sema-only package graph
+    // values. Bundle resolution below checks their closed shape and callable;
+    // they are not runtime numeric constants.
+    if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) {
+        consts.insert(c.name.clone(), Type::Named(Syntax::TYPE_OUTPUT.to_string()));
+        return;
+    }
     let ty = match &c.value {
         Expr::Int(_, _, _, _) => Some(Type::Int),
         Expr::Float(_, _, _) => Some(Type::Float),

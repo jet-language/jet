@@ -183,6 +183,14 @@ pub const TYPE_SYSTEM: &str = "System";
 pub const TYPE_IMAGE: &str = "Image";
 /// D-JPK-FLEET1: the type name of a `fleet.<name>` contribution record.
 pub const TYPE_FLEET: &str = "Fleet";
+/// D-ECO-OUTPUT-KINDS1 / D-SHAPE-OUTPUT-CALLABLE1: closed package result sum.
+pub const TYPE_OUTPUT: &str = "Output";
+pub const OUTPUT_KINDS: &[&str] = &[
+    "Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle",
+    "System", "Fleet",
+];
+pub const OUTPUT_FIELD_NAME: &str = "name";
+pub const OUTPUT_FIELD_ENTRY: &str = "entry";
 /// D-JOS-VMTEST1: the type name of a `vmtest.<name>` contribution record.
 pub const TYPE_VMTEST: &str = "VmTest";
 

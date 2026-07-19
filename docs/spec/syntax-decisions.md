@@ -4686,3 +4686,10 @@ D-LOOP-CONTINUE2=A, D-LOOP-CONTROLWORD1=B**: loop-only `in`, loop-only `step`,
 and source `continue` retired. Semicolon clauses now name every multi-part loop
 header; controller-specific advancement is the third clause; `next` enters that
 edge before retesting. Implemented end to end on card #681.
+
+**2026-07-19 — D-SHAPE-OUTPUT-CALLABLE1=A,
+D-ECO-OUTPUT-CALLCONTRACT1=A**: typed runnable Outputs now parse and format as
+closed Output values, sema resolves `entry:` through ordinary function
+resolution and exact role contracts, and the resolved callable identity feeds
+AOT, dev/JIT, semantic navigation, effects, inspection, and Canvas. E1321 owns
+stale, mismatched, and ambiguous links. Implemented end to end on card #544.

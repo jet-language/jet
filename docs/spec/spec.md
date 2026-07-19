@@ -2837,13 +2837,44 @@ machinery (D-MARKERMOVE1). `@[Doc("...")]` is a field-level marker giving
 that flag's `--help` line; a field with no `@[Doc(...)]` gets a generic
 "value for --name" line instead.
 
-**Entry semantics.** `run` is the only program entry name (S12). Plain
+**Entry semantics.** `run` is the only reserved program entry name (S12). Plain
 `fn run()` is the default and never requires arguments. `fn run(args: T)` is an
 explicit opt-in used only when the program wants external command input in its
-signature, where `T` is a CLI spec shape below.
+signature, where `T` is a CLI spec shape below. A Package may instead declare a
+typed Executable `Output` whose checked `entry:` function has the same CLI
+contract; this does not reserve another function name.
 No variadic entry signature exists; raw argv access stays explicit inside
 `fn run()` via `core.args`/`core.io.args`. `main` has no entry meaning in Jet.
 Bad typed-entry shapes are diagnosed (E1308 below), not silently ignored.
+
+### Checked Output callable references (D-SHAPE-OUTPUT-CALLABLE1)
+
+A runnable Package `Output` links to ordinary Jet code with a function
+reference. The reference uses normal scope, import, visibility, rename, and
+editor-navigation rules; it is never a string lookup and `.jet/lock` cannot
+rescue a stale source reference.
+
+```jet
+cli: Output :: .Executable.{ name: "todo", entry: launch };
+api: Output :: .Service.{ name: "todo-api", entry: serve };
+release: Output :: .Check.{ name: "release", entry: verify_release };
+
+fn launch() {}
+fn serve() -> Void ? {}
+fn verify_release() -> Void ? {}
+```
+
+`Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
+`Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
+has fixed text `name:`. Executable, Service, and Check also require `entry:`.
+An Executable takes zero or one `@[Cli]`-derived parameter; Service and Check
+take none. All three return `Void` or `Void ?`. Sema resolves and validates the
+callable before TIR or Rust emission, and publishes its definition and solved
+effect row to semantic tooling.
+
+For a singular run, explicit selection is handled by the command layer. With
+no explicit address, legacy `fn run` wins; otherwise a sole compatible
+Executable is selected. Multiple candidates produce E1321 with a sorted list.
 
 **Pinned field-mapping rule** — every `@[Cli]` struct field maps to exactly
 one flag, by this rule (checked top to bottom, first match wins):

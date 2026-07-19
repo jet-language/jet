@@ -2,7 +2,7 @@ use super::*;
 use crate::AST::{
     AccessConvention, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn, ExternRustBlock, Field,
     Func, ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, StructDef,
-    StructLayout, TraitImplBlock, TypeParam, Variant, VariantPayload,
+    StructLayout, TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
 };
 
 enum EnumFmtEntry<'b> {
@@ -1030,6 +1030,15 @@ impl<'a> Fmt<'a> {
             self.write(&c.name);
             self.write(" = ");
             self.fmt_expr(&c.value, Prec::OrFallback);
+            return;
+        }
+        if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) {
+            self.write(&c.name);
+            self.write(": ");
+            self.write(Syntax::TYPE_OUTPUT);
+            self.write(" :: ");
+            self.fmt_expr(&c.value, Prec::OrFallback);
+            self.write(";");
             return;
         }
         // D-PERSIST1: `@Persist` precedes the const's other attrs.

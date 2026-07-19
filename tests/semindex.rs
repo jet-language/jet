@@ -233,7 +233,45 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 #[test]
 fn semindex_schema_version() {
     // D-EFFECT-OMIT1 added effect provenance and normalized inferred rows.
-    assert_eq!(SCHEMA_VERSION, 10);
+    assert_eq!(SCHEMA_VERSION, 11);
+}
+
+#[test]
+fn semindex_reconstructs_checked_output_callable() {
+    let path = fixture("tooling/output_callable.jet");
+    let index = open(&path).expect("Output example indexes");
+    let output = index.outputs().first().expect("resolved Output fact");
+    assert_eq!(output.binding, "app");
+    assert_eq!(output.kind, "Executable");
+    assert_eq!(output.name, "checked-output");
+    assert_eq!(output.entry.name, "launch");
+    assert!(output.entry.identity.ends_with("::launch"));
+    assert_ne!(output.entry.definition_span, output.entry.reference_span);
+    let json = index.to_json();
+    for field in [
+        "\"outputs\":[{",
+        "\"entry\":{\"identity\"",
+        "\"effects\":[\"Io\"]",
+    ] {
+        assert!(json.contains(field), "semindex JSON missing {field}: {json}");
+    }
+}
+
+#[test]
+fn jet_inspect_semindex_reports_checked_output() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "inspect",
+            "semindex",
+            fixture("tooling/output_callable.jet").to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("jet inspect semindex");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let json = String::from_utf8_lossy(&output.stdout);
+    assert!(json.contains("\"outputs\":[{\"binding\":\"app\""), "{json}");
+    assert!(json.contains("\"identity\":\"output_callable::launch\""), "{json}");
 }
 
 #[test]
@@ -335,7 +373,7 @@ fn semindex_hello_json_shape() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
-    assert!(json.contains("\"schema_version\":10"));
+    assert!(json.contains("\"schema_version\":11"));
     assert!(json.contains("\"definition_facts\""));
     assert!(json.contains("\"definitions\""));
     assert!(json.contains("\"instances\""));
@@ -944,7 +982,7 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"schema_version\":10"));
+    assert!(text.contains("\"schema_version\":11"));
 }
 
 #[test]

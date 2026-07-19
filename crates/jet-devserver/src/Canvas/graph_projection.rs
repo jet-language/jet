@@ -47,9 +47,9 @@ pub(super) fn project_checked(
         );
     }
     let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
-    let blueprint = canvas_blueprint_facts_json(src, bundle, runtime_events);
+    let blueprint = canvas_blueprint_facts_json(src, bundle, &index, runtime_events);
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\"],\"blueprint\":{}}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(&path.display().to_string()),
         json_str(&source_revision(src)),
@@ -156,6 +156,7 @@ fn function_is_fallible(f: &AST::Func) -> bool {
 fn canvas_blueprint_facts_json(
     src: &str,
     bundle: &AST::ProgramBundle,
+    index: &SemIndex,
     runtime_events: Option<&str>,
 ) -> String {
     let mut interfaces = Vec::new();
@@ -168,11 +169,24 @@ fn canvas_blueprint_facts_json(
         &mut interfaces,
     );
     let task_flows = task_flow_facts(src).join(",");
+    let outputs = index.outputs().iter().map(output_fact_json).collect::<Vec<_>>().join(",");
     format!(
-        "{{\"runtime_events\":{},\"interfaces\":[{}],\"task_flows\":[{}],\"source_truth\":\"ordinary_jet_source\"}}",
+        "{{\"runtime_events\":{},\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"source_truth\":\"ordinary_jet_source\"}}",
         runtime_events.unwrap_or("null"),
         interfaces.join(","),
-        task_flows
+        task_flows,
+        outputs,
+    )
+}
+
+fn output_fact_json(output: &jet_semindex::OutputFact) -> String {
+    let effects = output.entry.effects.iter().map(|effect| json_str(effect)).collect::<Vec<_>>().join(",");
+    format!(
+        "{{\"binding\":{},\"kind\":{},\"name\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"effects\":[{}]}},\"fact_source\":\"semindex_resolved_output\"}}",
+        json_str(&output.binding), json_str(&output.kind), json_str(&output.name),
+        json_str(&output.entry.identity), json_str(&output.entry.name),
+        json_str(&output.entry.module_path), span_json(output.entry.definition_span),
+        span_json(output.entry.reference_span), effects,
     )
 }
 

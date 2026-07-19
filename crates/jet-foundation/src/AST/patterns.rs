@@ -318,6 +318,79 @@ pub struct ConstDef {
     /// (identity = module path + binding name). Inert in release builds.
     pub is_persist: bool,
     pub persist_span: Option<Span>,
+    /// D-SHAPE-OUTPUT-CALLABLE1: sema-owned checked output link. `None` for
+    /// ordinary constants and for an Output rejected before resolution.
+    pub resolved_output: Option<ResolvedOutput>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputKind {
+    Library,
+    Executable,
+    Service,
+    Check,
+    Environment,
+    Image,
+    Bundle,
+    System,
+    Fleet,
+}
+
+impl OutputKind {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "Library" => Self::Library,
+            "Executable" => Self::Executable,
+            "Service" => Self::Service,
+            "Check" => Self::Check,
+            "Environment" => Self::Environment,
+            "Image" => Self::Image,
+            "Bundle" => Self::Bundle,
+            "System" => Self::System,
+            "Fleet" => Self::Fleet,
+            _ => return None,
+        })
+    }
+
+    pub fn is_runnable(self) -> bool {
+        matches!(self, Self::Executable | Self::Service | Self::Check)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Library => "Library",
+            Self::Executable => "Executable",
+            Self::Service => "Service",
+            Self::Check => "Check",
+            Self::Environment => "Environment",
+            Self::Image => "Image",
+            Self::Bundle => "Bundle",
+            Self::System => "System",
+            Self::Fleet => "Fleet",
+        }
+    }
+}
+
+/// Checked identity carried into codegen, dev, and tooling. Names are display
+/// facts only; `module` + `definition` are the semantic link.
+#[derive(Debug, Clone)]
+pub struct ResolvedOutput {
+    pub kind: OutputKind,
+    pub output_name: String,
+    pub module: usize,
+    pub source_path: String,
+    pub source_name: String,
+    /// Sema-resolved name used by TIR/dev function tables (`module__name` for
+    /// an inline module, otherwise the source name).
+    pub semantic_name: String,
+    /// Fully rendered Rust callable path. Sema freezes it so Rust emission
+    /// never performs a second lookup or guesses from the Output expression.
+    pub lowered_name: String,
+    pub params: Vec<(super::AccessConvention, Type)>,
+    pub return_type: Option<Type>,
+    pub reference: Span,
+    pub definition: Span,
+    pub effects: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

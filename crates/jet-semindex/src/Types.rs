@@ -4,7 +4,7 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewSourceFact {
@@ -329,6 +329,30 @@ pub struct EffectProvenance {
     pub spans: Vec<SourceSpan>,
 }
 
+/// D-SHAPE-OUTPUT-CALLABLE1: one sema-resolved runnable Output. This is a
+/// projection of the compiler fact, not a second package/output resolver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputFact {
+    pub binding: String,
+    pub kind: String,
+    pub name: String,
+    pub module_path: String,
+    pub span: SourceSpan,
+    pub entry: OutputEntryFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputEntryFact {
+    pub identity: String,
+    pub name: String,
+    pub module_path: String,
+    pub definition_span: SourceSpan,
+    pub reference_span: SourceSpan,
+    pub params: Vec<String>,
+    pub return_type: Option<String>,
+    pub effects: Vec<String>,
+}
+
 /// Versioned semantic index over one checked program bundle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemIndex {
@@ -345,6 +369,7 @@ pub struct SemIndex {
     /// callers of `SemIndex::new` are unaffected.
     bypasses: Vec<BypassFact>,
     instances: Vec<InstanceFact>,
+    outputs: Vec<OutputFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,6 +400,7 @@ impl SemIndex {
             definition_facts,
             bypasses: Vec::new(),
             instances: Vec::new(),
+            outputs: Vec::new(),
         }
     }
 
@@ -387,6 +413,8 @@ impl SemIndex {
 
     pub(crate) fn set_instances(&mut self, instances: Vec<InstanceFact>) { self.instances = instances; }
     pub fn instances(&self) -> &[InstanceFact] { &self.instances }
+    pub(crate) fn set_outputs(&mut self, outputs: Vec<OutputFact>) { self.outputs = outputs; }
+    pub fn outputs(&self) -> &[OutputFact] { &self.outputs }
 
     pub fn bypasses(&self) -> &[BypassFact] {
         &self.bypasses

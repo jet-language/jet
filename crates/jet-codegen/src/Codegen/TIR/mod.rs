@@ -73,6 +73,9 @@ pub enum TJitSpawnBody {
 pub struct JitProgram {
     /// Display path of the entry module (for overflow trap messages).
     pub source_file: String,
+    /// Sema-selected callable name. The JIT compiles this exact function and
+    /// never assumes the source spelling `run`.
+    pub entry: String,
     /// #91: canonical generic-instance fingerprints consumed by JIT caches,
     /// diagnostics, and parity tooling.
     pub instance_provenance: Vec<InstanceProvenance>,
@@ -115,10 +118,11 @@ pub fn instance_provenance(bundle: &ProgramBundle) -> Vec<InstanceProvenance> {
 /// outside the existing `tir_covers` gate.
 pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
     lower_jit_program(bundle).map(|p| {
+        let entry = p.entry;
         p.funcs
             .into_iter()
-            .find(|f| f.name == "run")
-            .expect("lower_jit_program always includes run")
+            .find(|f| f.name == entry)
+            .expect("lower_jit_program always includes its selected entry")
     })
 }
 
@@ -141,7 +145,26 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
     let mut funcs = Vec::new();
-    let mut have_run = false;
+    let entry_name = module
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
+                Some("run".to_string())
+            }
+            _ => None,
+        })
+        .or_else(|| {
+            module.items.iter().find_map(|item| {
+                let Item::Const(value) = item else { return None };
+                value.resolved_output.as_ref().and_then(|output| {
+                    (output.kind == crate::AST::OutputKind::Executable
+                        && output.module == bundle.entry
+                        && output.params.is_empty())
+                    .then(|| output.semantic_name.clone())
+                })
+            })
+        })?;
     cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
         match item {
@@ -150,9 +173,6 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     continue;
                 }
                 let lowered = lower_func(f, &cx);
-                if f.name == "run" && f.params.is_empty() {
-                    have_run = true;
-                }
                 funcs.push(lowered);
             }
             Item::Struct(s) => {
@@ -245,7 +265,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
-    if !have_run {
+    if !funcs.iter().any(|function| function.name == entry_name) {
         return None;
     }
     let spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
@@ -385,6 +405,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
+        entry: entry_name,
         funcs,
         spawn_lambdas,
         struct_fields,
@@ -410,27 +431,48 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         &extern_funcs,
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
-    let mut saw_run = false;
-    let mut run_tir = false;
+    let selected = module
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
+                Some("run".to_string())
+            }
+            _ => None,
+        })
+        .or_else(|| module.items.iter().find_map(|item| match item {
+            Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
+                (output.kind == crate::AST::OutputKind::Executable
+                    && output.module == bundle.entry
+                    && output.params.is_empty())
+                .then(|| output.semantic_name.clone())
+            }),
+            _ => None,
+        }));
+    let Some(selected) = selected else {
+        return "no zero-parameter runnable entry".to_string();
+    };
+    let mut saw_entry = false;
+    let mut entry_tir = false;
     for item in &module.items {
         let Item::Func(f) = item else {
             continue;
         };
-        if f.name == "run" && f.params.is_empty() {
-            saw_run = true;
-            run_tir = tir_covers(f, &cx);
+        if f.name == selected {
+            saw_entry = true;
+            entry_tir = tir_covers(f, &cx);
         }
     }
-    if !saw_run {
-        return "no plain run".to_string();
+    if !saw_entry {
+        return "selected entry is not a top-level function".to_string();
     }
-    if !run_tir {
+    if !entry_tir {
         let mut locals: std::collections::HashSet<String> = std::collections::HashSet::new();
         for item in &module.items {
             let Item::Func(f) = item else {
                 continue;
             };
-            if f.name != "run" {
+            if f.name != selected {
                 continue;
             }
             for (i, stmt) in f.body.iter().enumerate() {
@@ -438,15 +480,15 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
                 if !subset::stmt_in_subset(stmt, &cx, &mut probe) {
                     if let crate::AST::Stmt::Val(b) = stmt {
                         if !subset::expr_in_subset(&b.init, &cx, &locals) {
-                            return format!("run stmt {i} init outside tir_covers");
+                            return format!("entry stmt {i} init outside tir_covers");
                         }
                     }
-                    return format!("run stmt {i} outside tir_covers");
+                    return format!("entry stmt {i} outside tir_covers");
                 }
                 let _ = subset::stmt_in_subset(stmt, &cx, &mut locals);
             }
         }
-        return "run outside tir_covers".to_string();
+        return "entry outside tir_covers".to_string();
     }
     "unknown".to_string()
 }

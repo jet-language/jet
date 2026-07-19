@@ -616,26 +616,55 @@ pub(crate) fn emit_cli_entry_if_needed(
     cli_items: &[Item],
     out: &mut String,
 ) {
-    let Some(run_fn) = items.iter().find_map(|i| match i {
+    let run_fn = items.iter().find_map(|i| match i {
         Item::Func(f) if f.name == "run" => Some(f),
         _ => None,
-    }) else {
+    });
+    let output = items.iter().find_map(|item| match item {
+        Item::Const(value) => value.resolved_output.as_ref().filter(|output| {
+            output.kind == crate::AST::OutputKind::Executable
+        }),
+        _ => None,
+    });
+    let (callable, params, fallible) = if let Some(run_fn) = run_fn {
+        let params = cx.sigs.get("run").cloned().unwrap_or_else(|| {
+            run_fn
+                .params
+                .iter()
+                .map(|param| (param.convention, param.ty.clone()))
+                .collect()
+        });
+        (
+            "user_run".to_string(),
+            params,
+            is_fallible_void_entry_return(run_fn),
+        )
+    } else if let Some(output) = output {
+        (
+            output.lowered_name.clone(),
+            output.params.clone(),
+            output
+                .return_type
+                .as_ref()
+                .is_some_and(is_fallible_void_type),
+        )
+    } else {
         return;
     };
-    if run_fn.params.is_empty() {
-        if is_fallible_void_entry_return(run_fn) {
-            out.push_str(
-                "fn main() {\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    if let Err(__jet_err) = jet_runtime_boundary(|| user_run()) {\n        eprintln!(\"{}\", __jet_err);\n        std::process::exit(1);\n    }\n}\n\n",
-            );
+    if params.is_empty() {
+        if fallible {
+            out.push_str(&format!(
+                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    if let Err(__jet_err) = jet_runtime_boundary(|| {callable}()) {{\n        eprintln!(\"{{}}\", __jet_err);\n        std::process::exit(1);\n    }}\n}}\n\n",
+            ));
         } else {
-            out.push_str("fn main() {\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| user_run());\n}\n\n");
+            out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| {callable}());\n}}\n\n"));
         }
         return;
     }
-    if run_fn.params.len() != 1 {
+    if params.len() != 1 {
         return;
     }
-    let param_ty = run_fn.params[0].ty.clone();
+    let (conv, param_ty) = params[0].clone();
     let Type::Named(type_name) = &param_ty else {
         return;
     };
@@ -655,12 +684,6 @@ pub(crate) fn emit_cli_entry_if_needed(
             .map(|(module, _)| format!("{module}::"))
             .unwrap_or_default()
     };
-    let conv = cx
-        .sigs
-        .get("run")
-        .and_then(|params| params.first())
-        .map(|(c, _)| *c)
-        .unwrap_or(run_fn.params[0].convention);
     let by_ref = rust_param_type(cx, conv, &param_ty).starts_with('&');
     let arg_expr = |value: &str| -> String {
         if by_ref {
@@ -676,8 +699,9 @@ pub(crate) fn emit_cli_entry_if_needed(
     }) {
         if s.derives.iter().any(|(t, _)| t == "Cli") {
             out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ jet_runtime_boundary(|| user_run({call_arg})); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ jet_runtime_boundary(|| {callable}({call_arg})); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 name = name,
+                callable = callable,
                 call_arg = arg_expr("__args"),
             ));
         }
@@ -696,6 +720,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             &schema,
             &helper_prefix,
             &param_rust,
+            &callable,
             &arg_expr,
             out,
         );
@@ -703,9 +728,13 @@ pub(crate) fn emit_cli_entry_if_needed(
 }
 
 fn is_fallible_void_entry_return(f: &Func) -> bool {
+    f.return_type.as_ref().is_some_and(is_fallible_void_type)
+}
+
+fn is_fallible_void_type(ty: &Type) -> bool {
     matches!(
-        &f.return_type,
-        Some(Type::Result { ok, err })
+        ty,
+        Type::Result { ok, err }
             if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID)
                 && matches!(err.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_ERROR)
     )
@@ -724,6 +753,7 @@ fn emit_cli_subcommand_entry(
     schema: &jet_foundation::CliSchema::CliCommandSchema,
     helper_prefix: &str,
     enum_rust: &str,
+    callable: &str,
     arg_expr: &dyn Fn(&str) -> String,
     out: &mut String,
 ) {
@@ -743,9 +773,10 @@ fn emit_cli_subcommand_entry(
         let tag = mangle_variant(&v.name);
         let ctor = format!("{enum_rust}::{tag}(__payload)");
         arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ jet_runtime_boundary(|| user_run({call_arg})); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ jet_runtime_boundary(|| {callable}({call_arg})); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),
             payload = payload_name,
+            callable = callable,
             call_arg = arg_expr(&ctor),
         ));
     }
@@ -1591,7 +1622,9 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
 pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
     // S57 (M9.5): comptime values are inlined at use sites (registered into
     // `cx.consts`), so there is no top-level item to emit.
-    if c.is_comptime {
+    if c.is_comptime
+        || matches!(&c.ty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_OUTPUT)
+    {
         return;
     }
     let (val, ty) = match &c.value {

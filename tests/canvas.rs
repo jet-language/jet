@@ -3530,3 +3530,21 @@ fn canvas_blueprint_parity_matrix_is_classified() {
         );
     }
 }
+#[test]
+fn canvas_reconstructs_checked_output_callable_from_semindex() {
+    let path = write_fixture(
+        "output_callable",
+        "app: Output :: .Executable.{ name: \"demo\", entry: launch };\n\nfn launch() { print(\"ok\") }\n",
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("Output Canvas graph");
+    for field in [
+        "\"outputs\":[{",
+        "\"binding\":\"app\"",
+        "\"kind\":\"Executable\"",
+        "\"identity\":\"main::launch\"",
+        "\"fact_source\":\"semindex_resolved_output\"",
+        "\"effects\":[\"Io\"]",
+    ] {
+        assert!(graph.contains(field), "Canvas Output fact missing {field}: {graph}");
+    }
+}

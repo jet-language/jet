@@ -106,6 +106,283 @@ fn no_run_error() -> Diagnostic {
     )
 }
 
+fn output_error(what: String, why: String, fix: String, span: Span) -> Diagnostic {
+    Diagnostic::error("E1321", what, why, fix, Some(span))
+}
+
+fn output_string(expr: &Expr) -> Option<String> {
+    let Expr::Str(parts, _) = expr else { return None };
+    match parts.as_slice() {
+        [StrPart::Lit(value)] => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn output_fields<'a>(args: &'a [EnumLitArg], span: Span, diags: &mut Vec<Diagnostic>) -> Option<HashMap<&'a str, &'a Expr>> {
+    let mut fields = HashMap::new();
+    for arg in args {
+        let EnumLitArg::Named { label, expr } = arg else {
+            diags.push(output_error(
+                "an Output payload uses named fields".to_string(),
+                "Output facts need stable field names for checking and inspection".to_string(),
+                "write `.Executable.{ name: \"app\", entry: run }`".to_string(),
+                span,
+            ));
+            return None;
+        };
+        if fields.insert(label.as_str(), expr).is_some() {
+            diags.push(output_error(
+                format!("Output field `{label}` is written twice"),
+                "one Output field has one checked value".to_string(),
+                format!("remove one `{label}:` field"),
+                expr.span(),
+            ));
+            return None;
+        }
+    }
+    Some(fields)
+}
+
+fn resolve_output_callable(
+    module_idx: usize,
+    kind: crate::AST::OutputKind,
+    output_name: String,
+    entry: &Expr,
+    bundle: &ProgramBundle,
+    states: &[ModuleState],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<crate::AST::ResolvedOutput> {
+    let (target, source_name, lowered_name) = match entry {
+        Expr::Ident(name, span) => {
+            let state = &states[module_idx];
+            if state.funcs.contains_key(name) {
+                (module_idx, name.clone(), name.clone())
+            } else if let Some(mangled) = state.unqualified.get(name) {
+                (module_idx, name.clone(), mangled.clone())
+            } else if let Some((real, target)) = state.unqualified_file.get(name) {
+                (*target, real.clone(), real.clone())
+            } else {
+                diags.push(output_error(
+                    format!("Output entry `{name}` does not resolve to a function"),
+                    "an Output entry is an ordinary checked function reference, not a text lookup".to_string(),
+                    format!("define `fn {name}(...)`, import it, or update `entry:`"),
+                    *span,
+                ));
+                return None;
+            }
+        }
+        Expr::Field(base, member, span) => {
+            let Expr::Ident(alias, alias_span) = base.as_ref() else {
+                diags.push(output_error(
+                    "Output entry has no resolvable module owner".to_string(),
+                    "qualified function references use one imported or inline module alias".to_string(),
+                    "write `entry: module_name.function`".to_string(),
+                    *span,
+                ));
+                return None;
+            };
+            let state = &states[module_idx];
+            if let Some(canonical) = state.code_modules.get(alias) {
+                let lowered = format!("{canonical}__{member}");
+                if !state.funcs.contains_key(&lowered) {
+                    diags.push(output_error(
+                        format!("module `{alias}` has no function `{member}`"),
+                        "Output entries use ordinary module member resolution".to_string(),
+                        "update `entry:` to a function that exists".to_string(),
+                        *span,
+                    ));
+                    return None;
+                }
+                (module_idx, member.clone(), lowered)
+            } else if let Some(target) = state.imports.get(alias).copied() {
+                let target_state = &states[target];
+                if !target_state.funcs.contains_key(member) {
+                    diags.push(output_error(
+                        format!("module `{alias}` has no function `{member}`"),
+                        "Output entries use ordinary module member resolution".to_string(),
+                        "update `entry:` to a function that exists".to_string(),
+                        *span,
+                    ));
+                    return None;
+                }
+                let same_package = target_state.package_scope == state.package_scope;
+                let visible = target_state.func_pub.get(member).copied().unwrap_or(false)
+                    || (same_package && target_state.func_pkg_pub.get(member).copied().unwrap_or(false));
+                if !visible {
+                    diags.push(output_error(
+                        format!("function `{alias}.{member}` is private"),
+                        "an Output can only invoke code visible from its declaring module".to_string(),
+                        format!("make `fn {member}` public to this package, or keep the Output beside it"),
+                        *span,
+                    ));
+                    return None;
+                }
+                (target, member.clone(), member.clone())
+            } else {
+                diags.push(output_error(
+                    format!("no module named `{alias}` is in scope"),
+                    "qualified Output entries use ordinary imported module aliases".to_string(),
+                    format!("import the module before `entry: {alias}.{member}`"),
+                    *alias_span,
+                ));
+                return None;
+            }
+        }
+        _ => {
+            diags.push(output_error(
+                "Output entry is not a function reference".to_string(),
+                "text names, calls, and runtime reflection are not Output links".to_string(),
+                "write a bare or qualified function reference, such as `entry: run`".to_string(),
+                entry.span(),
+            ));
+            return None;
+        }
+    };
+    let semantic_name = lowered_name;
+    let signature = states[target]
+        .funcs
+        .get(&semantic_name)
+        .or_else(|| states[target].funcs.get(&source_name))?;
+    if signature.is_extern || signature.is_unsafe {
+        diags.push(output_error(
+            format!("Output entry `{source_name}` is not an ordinary safe Jet function"),
+            "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary".to_string(),
+            "wrap the boundary in an ordinary safe Jet function and reference that function".to_string(),
+            entry.span(),
+        ));
+        return None;
+    }
+    let mut contract_diags = Vec::new();
+    let params_ok = match kind {
+        crate::AST::OutputKind::Executable if signature.params.len() == 1 => {
+            let param_ty = &signature.params[0].1;
+            match cli_entry_param_shape(
+                &bundle.modules[target].items,
+                param_ty,
+                &states[target].trait_reg,
+            ) {
+                CliEntryShape::Struct | CliEntryShape::Enum => true,
+                CliEntryShape::EnumBadVariants(bad) => {
+                    contract_diags.extend(bad);
+                    false
+                }
+                CliEntryShape::Invalid => false,
+            }
+        }
+        crate::AST::OutputKind::Executable => signature.params.is_empty(),
+        crate::AST::OutputKind::Service | crate::AST::OutputKind::Check => signature.params.is_empty(),
+        _ => false,
+    };
+    let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
+        matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID) || is_fallible_void_entry_return(ty)
+    });
+    if !params_ok || !return_ok {
+        diags.extend(contract_diags);
+        let contract = if kind == crate::AST::OutputKind::Executable {
+            "an Executable takes zero or one typed CLI parameter and returns `Void` or `Void ?`"
+        } else {
+            "a Service or Check takes no parameters and returns `Void` or `Void ?`"
+        };
+        diags.push(output_error(
+            format!("Output entry `{source_name}` has the wrong callable contract"),
+            contract.to_string(),
+            format!("change `fn {source_name}` to match the {kind:?} contract"),
+            entry.span(),
+        ));
+        return None;
+    }
+    let module_alias = &bundle.modules[target].alias;
+    let rust_path = if target == bundle.entry {
+        format!("user_{semantic_name}")
+    } else {
+        format!("user_{module_alias}::user_{source_name}")
+    };
+    Some(crate::AST::ResolvedOutput {
+        kind,
+        output_name,
+        module: target,
+        source_path: bundle.modules[target].display.clone(),
+        source_name: source_name.clone(),
+        semantic_name: semantic_name.clone(),
+        lowered_name: rust_path,
+        params: signature.params.clone(),
+        return_type: signature.return_type.clone(),
+        reference: entry.span(),
+        definition: states[target].func_spans.get(&semantic_name)
+            .or_else(|| states[target].func_spans.get(&source_name)).copied().unwrap_or(entry.span()),
+        effects: Vec::new(),
+    })
+}
+
+fn resolve_outputs(bundle: &mut ProgramBundle, states: &[ModuleState], mode: CompileMode, diags: &mut Vec<Diagnostic>) {
+    let mut resolved = Vec::new();
+    let mut executable_names = Vec::new();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for (item_idx, item) in module.items.iter().enumerate() {
+            let Item::Const(value) = item else { continue };
+            if !matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) { continue; }
+            let Expr::EnumLit { variant, args, span, .. } = &value.value else {
+                diags.push(output_error("Output needs one closed kind".to_string(), "Output is the closed sum of the nine ratified kinds".to_string(), "write `.Executable.{ ... }`, `.Service.{ ... }`, or another Output kind".to_string(), value.value.span()));
+                continue;
+            };
+            let Some(kind) = crate::AST::OutputKind::from_name(variant) else {
+                diags.push(output_error(format!("`{variant}` is not an Output kind"), "Output has exactly nine ratified kinds".to_string(), format!("use one of: {}", Syntax::OUTPUT_KINDS.join(", ")), *span));
+                continue;
+            };
+            let Some(fields) = output_fields(args, *span, diags) else { continue };
+            let Some(name_expr) = fields.get(Syntax::OUTPUT_FIELD_NAME) else {
+                diags.push(output_error("Output is missing `name:`".to_string(), "every Output has one stable user-facing name".to_string(), "add `name: \"...\"`".to_string(), *span));
+                continue;
+            };
+            let Some(output_name) = output_string(name_expr) else {
+                diags.push(output_error("Output `name:` must be fixed text".to_string(), "graph identity cannot depend on runtime interpolation".to_string(), "write a plain string literal".to_string(), name_expr.span()));
+                continue;
+            };
+            if !kind.is_runnable() {
+                if let Some(entry) = fields.get(Syntax::OUTPUT_FIELD_ENTRY) {
+                    diags.push(output_error(format!("{kind:?} Output is not runnable"), "only Executable, Service, and Check link to functions".to_string(), "remove `entry:` from this Output".to_string(), entry.span()));
+                }
+                continue;
+            }
+            if let Some((field, value)) = args.iter().find_map(|arg| match arg {
+                EnumLitArg::Named { label, expr }
+                    if label != Syntax::OUTPUT_FIELD_NAME
+                        && label != Syntax::OUTPUT_FIELD_ENTRY =>
+                {
+                    Some((label, expr))
+                }
+                _ => None,
+            }) {
+                diags.push(output_error(
+                    format!("`{field}:` is not a runnable Output field"),
+                    "Executable, Service, and Check Outputs contain only their stable name and checked entry reference".to_string(),
+                    format!("remove `{field}:` from this Output"),
+                    value.span(),
+                ));
+                continue;
+            }
+            let Some(entry) = fields.get(Syntax::OUTPUT_FIELD_ENTRY) else {
+                diags.push(output_error(format!("{kind:?} Output is missing `entry:`"), "every runnable Output links to one checked function".to_string(), "add `entry: function_name`".to_string(), *span));
+                continue;
+            };
+            if let Some(fact) = resolve_output_callable(module_idx, kind, output_name, entry, bundle, states, diags) {
+                if kind == crate::AST::OutputKind::Executable { executable_names.push(fact.output_name.clone()); }
+                resolved.push((module_idx, item_idx, fact));
+            }
+        }
+    }
+    for (module, item, fact) in resolved {
+        if let Item::Const(value) = &mut bundle.modules[module].items[item] { value.resolved_output = Some(fact); }
+    }
+    if mode == CompileMode::Run
+        && !bundle.modules[bundle.entry].items.iter().any(|item| matches!(item, Item::Func(function) if function.name == "run"))
+        && executable_names.len() > 1
+    {
+        executable_names.sort();
+        diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output".to_string(), format!("choose an explicit Output or set the checked default; candidates: {}", executable_names.join(", ")), None));
+    }
+}
+
 fn package_scope_for(path: &Path, project_root: &Path) -> PathBuf {
     let norm_path = normalize_sem_path(path);
     let norm_root = normalize_sem_path(project_root);
@@ -1487,6 +1764,10 @@ pub(crate) fn check_bundle_opts(
         }
     }
 
+    // D-SHAPE-OUTPUT-CALLABLE1: freeze every runnable Output to the ordinary
+    // function it resolves to before entry selection or lowering can inspect it.
+    resolve_outputs(bundle, &states, mode, &mut diags);
+
     // Parity with the single-file path: `@static` and address-taken consts
     // must lower to Rust `static` in bundle mode too.
     for module in bundle.modules.iter_mut() {
@@ -1621,7 +1902,19 @@ pub(crate) fn check_bundle_opts(
             } else {
                 diags.push(e1308(Some(run_fn.name_span)));
             }
-        } else {
+        } else if !entry_items.iter().any(|item| {
+            matches!(
+                item,
+                Item::Const(value)
+                    if matches!(
+                        (&value.ty, &value.value),
+                        (
+                            Some(Type::Named(ty)),
+                            Expr::EnumLit { variant, .. }
+                        ) if ty == Syntax::TYPE_OUTPUT && variant == "Executable"
+                    )
+            )
+        }) {
             diags.push(no_run_error());
         }
     }
@@ -1709,6 +2002,29 @@ pub(crate) fn check_bundle_opts(
     // File modules need qualified facts: bare top-level names overwrite one
     // another, while D-EFFECT-OMIT1 requires one cross-package solver answer.
     let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
+    // The Output carries the same solved effect row used by diagnostics and
+    // semantic-index consumers. Tooling never re-walks the callable body.
+    for module in &mut bundle.modules {
+        let display = module.display.clone();
+        for item in &mut module.items {
+            let Item::Const(value) = item else { continue };
+            let Some(output) = &mut value.resolved_output else { continue };
+            let alias = &states[output.module].module_alias;
+            output.effects = public_solved
+                .get(&format!("{alias}::{}", output.semantic_name))
+                .map(|effects| effects.iter().cloned().collect())
+                .unwrap_or_default();
+            reference_anchors.insert(
+                (display.clone(), output.reference.start, output.reference.end),
+                super::Effects::DefinitionAnchorFact {
+                    module_path: output.source_path.clone(),
+                    kind: "function".to_string(),
+                    def_span: output.definition,
+                    semantic_identity: Some(format!("{alias}::{}", output.semantic_name)),
+                },
+            );
+        }
+    }
     // `public_summaries` also carries unique short aliases for tooling. Run
     // diagnostics only over canonical module-qualified nodes so each source
     // obligation is reported once.

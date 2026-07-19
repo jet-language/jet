@@ -8,7 +8,7 @@ use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind};
+use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind};
 use crate::Symbols::{build_semantic_symbol_index, SemanticSymbolIndex};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
@@ -208,6 +208,30 @@ impl SymbolDB {
                 }).collect(),
             })
         })).collect());
+        self.index.set_outputs(bundle.modules.iter().flat_map(|module| {
+            module.items.iter().filter_map(|item| {
+                let Item::Const(value) = item else { return None };
+                let output = value.resolved_output.as_ref()?;
+                let target = &bundle.modules[output.module];
+                Some(OutputFact {
+                    binding: value.name.clone(),
+                    kind: output.kind.as_str().to_string(),
+                    name: output.output_name.clone(),
+                    module_path: module.display.clone(),
+                    span: value.span.into(),
+                    entry: OutputEntryFact {
+                        identity: format!("{}::{}", target.alias, output.semantic_name),
+                        name: output.source_name.clone(),
+                        module_path: output.source_path.clone(),
+                        definition_span: output.definition.into(),
+                        reference_span: output.reference.into(),
+                        params: output.params.iter().map(|(_, ty)| ty.name()).collect(),
+                        return_type: output.return_type.as_ref().map(AST::Type::name),
+                        effects: output.effects.clone(),
+                    },
+                })
+            })
+        }).collect());
     }
 
     /// Hover text for the symbol at `offset` in `path`.

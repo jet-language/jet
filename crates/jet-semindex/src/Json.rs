@@ -4,7 +4,7 @@ use jet_foundation::JSON::json_escape;
 
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
-    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex,
+    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
     SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
     ViewProvenanceFact, ViewSourceFact,
 };
@@ -15,6 +15,20 @@ fn json_instance(value: &InstanceFact) -> String {
     let members = value.exported_members.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
     format!("{{\"name\":{},\"module_path\":{},\"fingerprint\":{},\"full_key\":{},\"template_definition_id\":{},\"template_span\":{},\"arguments\":[{}],\"applications\":[{}],\"exported_members\":[{}]}}",
         json_str(&value.name), json_str(&value.module_path), json_str(&value.fingerprint), json_str(&value.full_key_hex), json_str(&value.template_definition_id), json_span(value.template_span), arguments, applications, members)
+}
+
+fn json_output(value: &OutputFact) -> String {
+    let params = value.entry.params.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
+    let effects = value.entry.effects.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
+    let return_type = value.entry.return_type.as_ref().map_or_else(|| "null".to_string(), |value| json_str(value));
+    format!(
+        "{{\"binding\":{},\"kind\":{},\"name\":{},\"module_path\":{},\"span\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"effects\":[{}]}}}}",
+        json_str(&value.binding), json_str(&value.kind), json_str(&value.name),
+        json_str(&value.module_path), json_span(value.span),
+        json_str(&value.entry.identity), json_str(&value.entry.name),
+        json_str(&value.entry.module_path), json_span(value.entry.definition_span),
+        json_span(value.entry.reference_span), params, return_type, effects,
+    )
 }
 
 fn json_definition_fact(f: &DefinitionFact) -> String {
@@ -263,12 +277,14 @@ impl SemIndex {
         let members: Vec<String> = self.members().iter().map(json_member).collect();
         let definition_facts: Vec<String> = self.definition_facts().iter().map(json_definition_fact).collect();
         let instances: Vec<String> = self.instances().iter().map(json_instance).collect();
+        let outputs: Vec<String> = self.outputs().iter().map(json_output).collect();
         format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
             instances.join(","),
+            outputs.join(","),
             refs.join(","),
             calls.join(","),
             effects.join(","),

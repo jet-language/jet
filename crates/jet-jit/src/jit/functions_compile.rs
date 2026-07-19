@@ -302,7 +302,7 @@ pub(crate) fn compile_program(
 
     module.finalize_definitions().map_err(|e| e.to_string())?;
     Ok(func_ids
-        .get("run")
+        .get(&program.entry)
         .copied()
-        .ok_or_else(|| "jit program missing run".to_string())?)
+        .ok_or_else(|| format!("jit program missing selected entry `{}`", program.entry))?)
 }

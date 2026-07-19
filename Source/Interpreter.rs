@@ -43,8 +43,8 @@ pub enum DevMode {
 /// inside a helper does not make a program resident.
 pub fn detect_dev_mode(bundle: &ProgramBundle) -> DevMode {
     let funcs = collect_funcs(bundle);
-    if let Some(run) = funcs.get("run") {
-        for stmt in &run.body {
+    if let Some(entry) = selected_entry(bundle, &funcs) {
+        for stmt in &entry.body {
             if stmt_is_resident(stmt) {
                 return DevMode::Resident;
             }
@@ -85,6 +85,44 @@ fn collect_funcs(bundle: &ProgramBundle) -> HashMap<String, &Func> {
         }
     }
     funcs
+}
+
+/// The legacy `run` spelling wins. Otherwise sema's sole checked Executable
+/// fact names the exact function; dev never re-resolves the Output expression.
+fn selected_entry<'a>(
+    bundle: &'a ProgramBundle,
+    funcs: &'a HashMap<String, &'a Func>,
+) -> Option<&'a Func> {
+    if let Some(run) = funcs.get("run") {
+        return Some(*run);
+    }
+    let output = bundle
+        .modules
+        .get(bundle.entry)?
+        .items
+        .iter()
+        .find_map(|item| {
+            let Item::Const(value) = item else {
+                return None;
+            };
+            value
+                .resolved_output
+                .as_ref()
+                .filter(|output| output.kind == crate::AST::OutputKind::Executable)
+        })?;
+    let module = bundle.modules.get(output.module)?;
+    function_at(&module.items, output.definition)
+}
+
+fn function_at(items: &[Item], definition: crate::Diagnostics::Span) -> Option<&Func> {
+    items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name_span == definition => Some(function),
+        Item::CodeModule(module) => module
+            .body
+            .as_deref()
+            .and_then(|items| function_at(items, definition)),
+        _ => None,
+    })
 }
 
 /// c139 JIT/interpreter-parity: extend `collect_funcs` with everything else
@@ -287,8 +325,8 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         }
     }
     let (funcs, program) = collect_funcs_and_info(bundle);
-    let main = match funcs.get("run") {
-        Some(f) => *f,
+    let main = match selected_entry(bundle, &funcs) {
+        Some(f) => f,
         None => {
             return RunOutcome::Problems(vec![Diagnostic::error(
                 "E2201",
