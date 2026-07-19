@@ -55,6 +55,14 @@ extern "C" fn jet_jit_bigint_mul(a: i64, b: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_bigint_eq(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .bigint_eq(a, b)
+            .expect("jit bigint eq: bad handle") as i8
+    })
+}
+
 extern "C" fn jet_jit_bigint_neg(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.bigint_neg(a).expect("jit bigint neg: bad handle"))
 }
@@ -75,6 +83,7 @@ pub(crate) struct NumericHostFns {
     pub bigint_add: cranelift_module::FuncId,
     pub bigint_sub: cranelift_module::FuncId,
     pub bigint_mul: cranelift_module::FuncId,
+    pub bigint_eq: cranelift_module::FuncId,
     pub bigint_neg: cranelift_module::FuncId,
     pub bigint_to_string: cranelift_module::FuncId,
 }
@@ -85,6 +94,7 @@ pub(crate) fn register_numeric_symbols(builder: &mut cranelift_jit::JITBuilder) 
     builder.symbol("jet_jit_bigint_add", jet_jit_bigint_add as *const u8);
     builder.symbol("jet_jit_bigint_sub", jet_jit_bigint_sub as *const u8);
     builder.symbol("jet_jit_bigint_mul", jet_jit_bigint_mul as *const u8);
+    builder.symbol("jet_jit_bigint_eq", jet_jit_bigint_eq as *const u8);
     builder.symbol("jet_jit_bigint_neg", jet_jit_bigint_neg as *const u8);
     builder.symbol(
         "jet_jit_bigint_to_string",
@@ -106,6 +116,10 @@ pub(crate) fn declare_numeric_host_fns(
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.returns.push(AbiParam::new(types::I64));
+    let mut sig_compare = Signature::new(cc);
+    sig_compare.params.push(AbiParam::new(types::I64));
+    sig_compare.params.push(AbiParam::new(types::I64));
+    sig_compare.returns.push(AbiParam::new(types::I8));
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -119,6 +133,7 @@ pub(crate) fn declare_numeric_host_fns(
         bigint_add: import("jet_jit_bigint_add", &sig_binary)?,
         bigint_sub: import("jet_jit_bigint_sub", &sig_binary)?,
         bigint_mul: import("jet_jit_bigint_mul", &sig_binary)?,
+        bigint_eq: import("jet_jit_bigint_eq", &sig_compare)?,
         bigint_neg: import("jet_jit_bigint_neg", &sig_unary)?,
         bigint_to_string: import("jet_jit_bigint_to_string", &sig_unary)?,
     })

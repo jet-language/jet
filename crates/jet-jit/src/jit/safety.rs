@@ -252,6 +252,18 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {
             resident_safe_expr(arg, callees)
         }
+        TExprKind::PreciseBuiltin {
+            type_name,
+            func,
+            args,
+        } => {
+            type_name == "BigInt"
+                && matches!(
+                    (func.as_str(), args.len()),
+                    ("from_int" | "from_str", 1) | ("add" | "sub" | "mul", 2)
+                )
+                && args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
         TExprKind::StructLit { fields, .. } => {
             jit_struct_type(&expr.ty)
                 && fields
@@ -904,6 +916,14 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::SolverRequire => args.len() == 1 && recv.ty == Type::Named("Solver".into()) && args[0].ty == Type::Bool,
         THandleOp::SolverFailureCount | THandleOp::SolverStatus => {
             args.is_empty() && recv.ty == Type::Named("Solver".into())
+        }
+        THandleOp::PreciseMethod { type_name, method } => {
+            type_name == "BigInt"
+                && recv.ty == Type::Named("BigInt".into())
+                && matches!(
+                    (method.as_str(), args.len()),
+                    ("add" | "sub" | "mul", 1) | ("neg" | "to_string", 0)
+                )
         }
         _ => false,
     }

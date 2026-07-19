@@ -2228,6 +2228,51 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn bigint_equality_matches_aot_in_resident_and_default_dev() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    left :: BigInt("-999999999999999999999999999999")
+    same :: BigInt("-999999999999999999999999999999")
+    other :: BigInt("999999999999999999999999999999")
+    print(left == same)
+    print(left != same)
+    print(left != other)
+}
+"#;
+    let resident = run_cranelift_without_fallback(src, "bigint_value_equality");
+
+    let dir = std::env::temp_dir().join(format!("jet_bigint_equality_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("bigint_value_equality.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev failed BigInt equality: {diags:?}"),
+    };
+    let aot = compiled_binary_output(
+        &dir,
+        "bigint_value_equality",
+        0,
+        "bigint_value_equality",
+        &shown,
+    );
+    let expected = ProgramOutput::ran("true\nfalse\ntrue\n".to_string(), String::new(), 0);
+    assert_eq!(resident, expected);
+    assert_eq!(default, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
     let counted = "fn run() {\n    loop i := 0; i < 4; i += 1 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
     if !skip_if_cranelift_host_unsupported() {

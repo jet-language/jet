@@ -2925,6 +2925,19 @@ impl LowerCtx<'_, '_> {
             (Type::Float, BinOp::Ge) => self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, l, r),
             (Type::Bool, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Bool, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
+            (Type::Named(name), BinOp::Eq | BinOp::Ne) if name == "BigInt" => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.num.bigint_eq, self.b.func);
+                let call = self.b.ins().call(host_ref, &[l, r]);
+                let eq = self.b.inst_results(call)[0];
+                if matches!(op, BinOp::Eq) {
+                    eq
+                } else {
+                    let one = self.b.ins().iconst(types::I8, 1);
+                    self.b.ins().isub(one, eq)
+                }
+            }
             (Type::Named(_) | Type::Apply { .. }, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Named(_) | Type::Apply { .. }, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
             (Type::String, BinOp::Eq) => {

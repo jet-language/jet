@@ -356,6 +356,10 @@ impl JetArena {
         }
     }
 
+    pub fn bigint_eq(&self, a: i64, b: i64) -> Option<bool> {
+        Some(self.get_bigint(a)? == self.get_bigint(b)?)
+    }
+
     pub fn bigint_add(&mut self, a: i64, b: i64) -> Option<i64> {
         let result = self.get_bigint(a)?.add(self.get_bigint(b)?);
         let id = self.values.len() as i64;

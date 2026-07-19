@@ -2263,6 +2263,29 @@ fn repl_bigint_sub_and_neg() {
     assert!(out.contains("\"-3\" : String"), "got: {out:?}");
 }
 
+#[test]
+fn repl_bigint_equality_is_numeric_not_identity() {
+    let inputs = &[
+        "left :: BigInt(\"-999999999999999999999999999999\")",
+        "same :: BigInt(\"-999999999999999999999999999999\")",
+        "other :: BigInt(\"999999999999999999999999999999\")",
+        "left == same",
+        "left != same",
+        "left != other",
+    ];
+    let out = run_transcript(inputs, None);
+    let bools = out
+        .lines()
+        .filter(|line| line.ends_with(" : Bool"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        bools,
+        ["true : Bool", "false : Bool", "true : Bool"],
+        "got: {out:?}"
+    );
+    assert!(!out.contains("E0956"), "got: {out:?}");
+}
+
 // ── card #392: `core.random` widened ambient draws now dispatch at comptime ──
 // (`bool`/`float_range`/`normal`/`exponential`/`bytes`/`pick`/`weighted_pick`/
 // `sample`/`shuffle`/`split` — same SplitMix64 stream as AOT's `jet_std_random_*`
