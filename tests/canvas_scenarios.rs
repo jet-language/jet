@@ -153,6 +153,42 @@ fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
     );
 }
 
+#[test]
+fn cdp_driver_owns_parallel_browsers_under_long_tmpdir() {
+    let Some(tools) = canvas_tools() else {
+        eprintln!("ignored: CDP lifecycle regression needs dev-shell Chromium and Node");
+        return;
+    };
+    let _permits = (0..MAX_CANVAS_BROWSERS)
+        .map(|_| CanvasBrowserPermit::acquire())
+        .collect::<Vec<_>>();
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let long_tmp = std::env::temp_dir().join(format!(
+        "canvas-driver-lifecycle-{}-{}",
+        "x".repeat(120),
+        std::process::id()
+    ));
+    fs::create_dir_all(&long_tmp).expect("create long Canvas driver temp root");
+    let output = Command::new(&tools.node)
+        .current_dir(&repo)
+        .env("CHROMIUM", &tools.chromium)
+        .env("TMPDIR", &long_tmp)
+        .arg("scripts/canvas-test/driver-lifecycle.mjs")
+        .arg(MAX_CANVAS_BROWSERS.to_string())
+        .output()
+        .expect("run Canvas CDP lifecycle regression");
+    fs::remove_dir_all(&long_tmp).expect("remove long Canvas driver temp root");
+    assert!(
+        output.status.success(),
+        "parallel CDP lifecycle failed\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("PASS 4 isolated Chromium lifecycles")
+    );
+}
+
 struct CanvasBrowserPermit;
 
 impl CanvasBrowserPermit {

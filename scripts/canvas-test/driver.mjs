@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -9,8 +9,11 @@ export class CdpDriver {
   constructor(options = {}) {
     this.chrome = options.chrome || process.env.CHROMIUM || "chromium";
     this.headless = options.headless !== false;
-    this.userDataDir = options.userDataDir || join(tmpdir(), `jet-canvas-chrome-${process.pid}-${Date.now()}`);
+    this.chromeTempRoot = options.chromeTempRoot || (process.platform === "win32" ? tmpdir() : "/tmp");
+    this.userDataDir = options.userDataDir || null;
     this.child = null;
+    this.exited = null;
+    this.failure = null;
     this.nextId = 1;
     this.pending = new Map();
     this.sessions = new Map();
@@ -20,6 +23,7 @@ export class CdpDriver {
   }
 
   async launch() {
+    this.userDataDir ||= await mkdtemp(join(this.chromeTempRoot, "jet-cdp-"));
     await mkdir(this.userDataDir, { recursive: true });
     const args = [
       this.headless ? "--headless=new" : "",
@@ -33,6 +37,7 @@ export class CdpDriver {
     ].filter(Boolean);
     this.child = spawn(this.chrome, args, {
       stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
+      env: { ...process.env, TMPDIR: this.chromeTempRoot },
     });
     this.child.stderr.setEncoding("utf8");
     this.child.stderr.on("data", (chunk) => {
@@ -40,46 +45,73 @@ export class CdpDriver {
     });
     this.child.stdio[4].setEncoding("utf8");
     this.child.stdio[4].on("data", (chunk) => this.#read(chunk));
-    this.child.on("exit", (code, signal) => {
-      const err = new Error(`chromium exited (${code ?? signal})\n${this.stderr}`);
-      for (const { reject } of this.pending.values()) reject(err);
-      this.pending.clear();
-    });
-    await this.send("Browser.getVersion");
-    const target = await this.send("Target.createTarget", { url: "about:blank" });
-    const attach = await this.send("Target.attachToTarget", {
-      targetId: target.targetId,
-      flatten: true,
-    });
-    this.pageSession = attach.sessionId;
-    await this.send("Page.enable", {}, this.pageSession);
-    await this.send("Runtime.enable", {}, this.pageSession);
-    await this.send("DOM.enable", {}, this.pageSession);
-    return this;
+    for (const pipe of [this.child.stdio[3], this.child.stdio[4]]) {
+      pipe.on("error", (error) => this.#fail(new Error(`chromium CDP pipe failed: ${error.message}\n${this.stderr}`)));
+    }
+    this.child.on("error", (error) => this.#fail(new Error(`could not start chromium: ${error.message}`)));
+    this.exited = new Promise((resolve) => this.child.on("close", (code, signal) => {
+      this.#fail(new Error(`chromium exited (${code ?? signal})\n${this.stderr}`));
+      resolve({ code, signal });
+    }));
+    try {
+      await this.send("Browser.getVersion");
+      const target = await this.send("Target.createTarget", { url: "about:blank" });
+      const attach = await this.send("Target.attachToTarget", {
+        targetId: target.targetId,
+        flatten: true,
+      });
+      this.pageSession = attach.sessionId;
+      await this.send("Page.enable", {}, this.pageSession);
+      await this.send("Runtime.enable", {}, this.pageSession);
+      await this.send("DOM.enable", {}, this.pageSession);
+      return this;
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
   }
 
   async close() {
     try {
-      if (this.child && !this.child.killed) {
-        await this.send("Browser.close").catch(() => {});
-      }
+      if (this.child && this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL");
+      if (this.exited) await this.exited;
     } finally {
-      if (this.child && !this.child.killed) this.child.kill("SIGKILL");
-      await rm(this.userDataDir, { recursive: true, force: true }).catch(() => {});
+      if (this.userDataDir) await rm(this.userDataDir, { recursive: true, force: true });
     }
   }
 
   send(method, params = {}, sessionId = undefined) {
+    if (this.failure) return Promise.reject(this.failure);
+    if (!this.child) return Promise.reject(new Error("chromium is not running"));
     const id = this.nextId++;
     const message = JSON.stringify({ id, method, params, sessionId });
-    this.child.stdio[3].write(message + MESSAGE_DELIMITER);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`CDP timeout: ${method}`));
       }, 15000);
       this.pending.set(id, { resolve, reject, timer, method });
+      this.child.stdio[3].write(message + MESSAGE_DELIMITER, (error) => {
+        if (!error || !this.pending.has(id)) return;
+        this.#fail(new Error(`CDP write failed: ${method}: ${error.message}`));
+      });
     });
+  }
+
+  #fail(error) {
+    this.failure ||= error;
+    for (const { reject, timer } of this.pending.values()) {
+      clearTimeout(timer);
+      reject(this.failure);
+    }
+    this.pending.clear();
+    for (const listeners of this.sessions.values()) {
+      for (const { reject, timer } of listeners) {
+        clearTimeout(timer);
+        reject(this.failure);
+      }
+    }
+    this.sessions.clear();
   }
 
   async navigate(url) {
@@ -153,13 +185,14 @@ export class CdpDriver {
 
   waitForEvent(method, sessionId = undefined, timeoutMs = 15000) {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`CDP event timeout: ${method}`)), timeoutMs);
       const key = sessionId ? `${sessionId}:${method}` : method;
+      const timer = setTimeout(() => {
+        const listeners = this.sessions.get(key) || [];
+        this.sessions.set(key, listeners.filter((listener) => listener.resolve !== resolve));
+        reject(new Error(`CDP event timeout: ${method}`));
+      }, timeoutMs);
       const listeners = this.sessions.get(key) || [];
-      listeners.push((event) => {
-        clearTimeout(timer);
-        resolve(event.params || {});
-      });
+      listeners.push({ resolve, reject, timer });
       this.sessions.set(key, listeners);
     });
   }
@@ -184,9 +217,11 @@ export class CdpDriver {
         const key = msg.sessionId ? `${msg.sessionId}:${msg.method}` : msg.method;
         const listeners = this.sessions.get(key) || [];
         this.sessions.delete(key);
-        for (const listener of listeners) listener(msg);
+        for (const listener of listeners) {
+          clearTimeout(listener.timer);
+          listener.resolve(msg.params || {});
+        }
       }
     }
   }
 }
-
