@@ -702,7 +702,7 @@ pub(crate) fn method_call_in_subset(
             return expr_in_subset(receiver, cx, locals)
                 && args
                     .iter()
-                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    .all(|a| expr_in_subset(&a.expr, cx, locals));
         }
         // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — not in
         // `handle_method_op` (its `THandleOp` carries the pattern parts, so

@@ -1542,7 +1542,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::TcpListenerAccept => if args.is_empty() {
                     format!("{}jet_net_tcp_accept(&({}))", root, recv)
                 } else {
-                    format!("{}jet_net_tcp_accept_deadline(&({}), {})", root, recv, a(0))
+                    format!("{}jet_net_tcp_accept_deadline(&({}), &({}))", root, recv, a(0))
                 },
                 THandleOp::TcpListenerLocalAddr => {
                     format!("{}jet_net_listener_local_addr(&({}))", root, recv)
@@ -1564,42 +1564,42 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     if args.len() == 1 {
                         format!("{}jet_net_tcp_read_bytes(&mut ({}), {})", root, recv, a(0))
                     } else {
-                        format!("{}jet_net_tcp_read_bytes_deadline(&mut ({}), {}, {})", root, recv, a(0), a(1))
+                        format!("{}jet_net_tcp_read_bytes_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1))
                     }
                 }
                 THandleOp::TcpStreamReadText => {
                     if args.len() == 1 {
                         format!("{}jet_net_tcp_read_text(&mut ({}), {})", root, recv, a(0))
                     } else {
-                        format!("{}jet_net_tcp_read_text_deadline(&mut ({}), {}, {})", root, recv, a(0), a(1))
+                        format!("{}jet_net_tcp_read_text_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1))
                     }
                 }
                 THandleOp::TcpStreamWriteBytes => {
                     if args.len() == 1 {
                         format!("{}jet_net_tcp_write_bytes(&mut ({}), &({}))", root, recv, a(0))
                     } else {
-                        format!("{}jet_net_tcp_write_bytes_deadline(&mut ({}), &({}), {})", root, recv, a(0), a(1))
+                        format!("{}jet_net_tcp_write_bytes_deadline(&mut ({}), &({}), &({}))", root, recv, a(0), a(1))
                     }
                 }
                 THandleOp::TcpStreamWriteAllBytes => {
                     if args.len() == 1 {
                         format!("{}jet_net_tcp_write_all_bytes(&mut ({}), &({}))", root, recv, a(0))
                     } else {
-                        format!("{}jet_net_tcp_write_all_bytes_deadline(&mut ({}), &({}), {})", root, recv, a(0), a(1))
+                        format!("{}jet_net_tcp_write_all_bytes_deadline(&mut ({}), &({}), &({}))", root, recv, a(0), a(1))
                     }
                 }
                 THandleOp::TcpStreamWriteText => {
                     if args.len() == 1 {
                         format!("{}jet_net_tcp_write_text(&mut ({}), &({}))", root, recv, a(0))
                     } else {
-                        format!("{}jet_net_tcp_write_text_deadline(&mut ({}), &({}), {})", root, recv, a(0), a(1))
+                        format!("{}jet_net_tcp_write_text_deadline(&mut ({}), &({}), &({}))", root, recv, a(0), a(1))
                     }
                 }
                 THandleOp::TcpStreamShutdown => {
                     format!("{}jet_net_tcp_shutdown(&mut ({}), {})", root, recv, a(0))
                 }
                 THandleOp::TcpStreamReady => format!(
-                    "{}jet_net_tcp_ready(&mut ({}), {}, {})", root, recv, a(0), a(1)
+                    "{}jet_net_tcp_ready_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1)
                 ),
                 // c109 Phase 19: arena allocator methods (byte-for-byte the AST arms).
                 THandleOp::AllocAlloc => {

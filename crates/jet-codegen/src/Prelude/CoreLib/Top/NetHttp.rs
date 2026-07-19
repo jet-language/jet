@@ -1036,7 +1036,8 @@ fn jet_net_tcp_accept(listener: &JetTcpListener) -> Result<JetTcpStream, JetNetE
     }
 }
 
-fn jet_net_tcp_accept_deadline(listener: &JetTcpListener, deadline_ms: i64) -> Result<JetTcpStream, JetNetError> {
+fn jet_net_tcp_accept_deadline(listener: &JetTcpListener, deadline: &jet_std::Duration) -> Result<JetTcpStream, JetNetError> {
+    let deadline_ms = deadline.ms;
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp accept", None, None, message, None))
     })?;
@@ -1093,7 +1094,8 @@ fn jet_net_tcp_read_bytes(stream: &mut JetTcpStream, limit: i64) -> Result<Vec<u
     }
 }
 
-fn jet_net_tcp_read_bytes_deadline(stream: &mut JetTcpStream, limit: i64, deadline_ms: i64) -> Result<Vec<u8>, JetNetError> {
+fn jet_net_tcp_read_bytes_deadline(stream: &mut JetTcpStream, limit: i64, deadline: &jet_std::Duration) -> Result<Vec<u8>, JetNetError> {
+    let deadline_ms = deadline.ms;
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp read", None, None, message, None))
     })?;
@@ -1114,8 +1116,8 @@ fn jet_net_tcp_read_text(stream: &mut JetTcpStream, limit: i64) -> Result<String
     })
 }
 
-fn jet_net_tcp_read_text_deadline(stream: &mut JetTcpStream, limit: i64, deadline_ms: i64) -> Result<String, JetNetError> {
-    let bytes = jet_net_tcp_read_bytes_deadline(stream, limit, deadline_ms)?;
+fn jet_net_tcp_read_text_deadline(stream: &mut JetTcpStream, limit: i64, deadline: &jet_std::Duration) -> Result<String, JetNetError> {
+    let bytes = jet_net_tcp_read_bytes_deadline(stream, limit, deadline)?;
     String::from_utf8(bytes).map_err(|error| JetNetError::InvalidInput(jet_net_detail(
         "tcp read text", None, None, format!("tcp read text failed: {}", error), None,
     )))
@@ -1146,7 +1148,8 @@ fn jet_net_tcp_write_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<
     jet_net_tcp_write_bytes_with_current_deadline(stream, data)
 }
 
-fn jet_net_tcp_write_bytes_deadline(stream: &mut JetTcpStream, data: &Vec<u8>, deadline_ms: i64) -> Result<i64, JetNetError> {
+fn jet_net_tcp_write_bytes_deadline(stream: &mut JetTcpStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<i64, JetNetError> {
+    let deadline_ms = deadline.ms;
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp write", None, None, message, None))
     })?;
@@ -1173,7 +1176,8 @@ fn jet_net_tcp_write_all_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Res
     Ok(())
 }
 
-fn jet_net_tcp_write_all_bytes_deadline(stream: &mut JetTcpStream, data: &Vec<u8>, deadline_ms: i64) -> Result<(), JetNetError> {
+fn jet_net_tcp_write_all_bytes_deadline(stream: &mut JetTcpStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<(), JetNetError> {
+    let deadline_ms = deadline.ms;
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp write all", None, None, message, None))
     })?;
@@ -1185,8 +1189,8 @@ fn jet_net_tcp_write_text(stream: &mut JetTcpStream, text: &String) -> Result<()
     jet_net_tcp_write_all_bytes(stream, &text.as_bytes().to_vec())
 }
 
-fn jet_net_tcp_write_text_deadline(stream: &mut JetTcpStream, text: &String, deadline_ms: i64) -> Result<(), JetNetError> {
-    jet_net_tcp_write_all_bytes_deadline(stream, &text.as_bytes().to_vec(), deadline_ms)
+fn jet_net_tcp_write_text_deadline(stream: &mut JetTcpStream, text: &String, deadline: &jet_std::Duration) -> Result<(), JetNetError> {
+    jet_net_tcp_write_all_bytes_deadline(stream, &text.as_bytes().to_vec(), deadline)
 }
 
 fn jet_net_tcp_shutdown(stream: &mut JetTcpStream, how: JetNetShutdown) -> Result<(), JetNetError> {
@@ -1269,6 +1273,14 @@ fn jet_net_tcp_ready(
             "tcp ready",
         )?;
     }
+}
+
+fn jet_net_tcp_ready_deadline(
+    stream: &mut JetTcpStream,
+    interest: JetNetReadyInterest,
+    deadline: &jet_std::Duration,
+) -> Result<JetNetReady, JetNetError> {
+    jet_net_tcp_ready(stream, interest, deadline.ms)
 }
 
 fn jet_net_ready_readable(ready: &JetNetReady) -> bool {

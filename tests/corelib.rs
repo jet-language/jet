@@ -3438,10 +3438,11 @@ fn run() {
     ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
     ready_client :: net.tcp_connect(ready_address) ?? panic("ready connect")
     ready_server := net.tcp_accept(ready_listener) ?? panic("ready accept")
+    interest: NetReadyInterest :: .Read
     (wait_tx, wait_rx) :: tasks.channel<Int>()
     ready_wait :: tasks.spawn(take(ready_server, wait_tx) () => {
         wait_tx.send(1)
-        if net.tcp_ready(&ready_server, .Read, 1000) == {
+        if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
             Ok(_) -> print("ready unexpectedly succeeded")
             Err(error) -> print(net.error_message(error))
         }
@@ -3543,19 +3544,20 @@ use core.net as net
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    if listener.accept(0) == {
+    expired :: Duration.milliseconds(0) ?? panic("duration")
+    if listener.accept(deadline: expired) == {
         Ok(_) -> panic("expired accept succeeded")
         Err(error) -> print(net.error_operation(error))
     }
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
     server := listener.accept() ?? panic("accept")
-    if server.read(1, 0) == {
+    if server.read(1, deadline: expired) == {
         Ok(_) -> panic("expired read succeeded")
         Err(error) -> print(net.error_operation(error))
     }
     byte: [U8] :: [1]
-    if client.write(byte, 0) == {
+    if client.write(byte, deadline: expired) == {
         Ok(_) -> panic("expired write succeeded")
         Err(error) -> print(net.error_operation(error))
     }
