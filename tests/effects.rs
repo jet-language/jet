@@ -70,6 +70,62 @@ fn run() {}
 }
 
 #[test]
+fn strided_source_loop_projects_exact_arena_audit_multiplicity() {
+    let check = |tag: &str, source: &str| {
+        let root = common::unique_tmp(tag);
+        fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.jet");
+        fs::write(&entry, source).unwrap();
+        let (diagnostics, _, facts) =
+            jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+        (diagnostics, facts)
+    };
+    let source = |stride: &str| {
+        format!(
+            r#"use core.mem as mem
+
+fn reserve() {{
+    arena :: mem.Arena.new(capacity: 4)
+    close(^arena)
+}}
+
+@Policy(arena_bounded(12)) fn run() {{
+    loop item; [1, 2, 3, 4, 5]; {stride} {{
+        print(item)
+        reserve()
+    }}
+}}
+"#
+        )
+    };
+
+    let (diagnostics, facts) = check("jet_stride_arena_exact", &source("2"));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
+        "five items at stride two execute three 4-byte calls:\n{diagnostics:#?}"
+    );
+    assert!(matches!(
+        facts.memory_projections.values().next(),
+        Some(jet::Sema::MemoryProjection::Proven)
+    ));
+    assert!(facts.solved["run"].contains("Io"));
+
+    let dynamic = source("stride").replace(
+        "@Policy(arena_bounded(12)) fn run() {",
+        "@Policy(arena_bounded(12)) fn run() {\n    stride := 2",
+    );
+    let (diagnostics, facts) = check("jet_stride_arena_dynamic", &dynamic);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
+    assert!(matches!(
+        facts.memory_projections.values().next(),
+        Some(jet::Sema::MemoryProjection::OpenWorld { reason, .. })
+            if reason.contains("loop iteration count")
+    ));
+}
+
+#[test]
 fn unbounded_dynamic_trait_call_under_ceiling_is_e0743() {
     let source = r#"
 trait Shape { fn area(self) -> Int; }

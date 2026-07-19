@@ -576,22 +576,28 @@ fn local_comptime_is_literal_data() {
         r#"
 fn build() -> [Int] {
     xs: [Int] := []
-    loop i; 1..3 {
+    loop i; 1..5; 2 {
+        if i == 3 { next }
         xs.push(i * 10)
+    }
+    loop cursor := 0; cursor < 3; cursor += 1 {
+        if cursor == 1 { next }
+        xs.push(cursor)
     }
     return xs
 }
 
 fn run() {
     comptime xs = build()
+    runtime :: build()
     print("{xs}")
-    print("{xs[1]}")
+    print("{runtime}")
 }
 "#,
     );
     assert_eq!(
         stdout.lines().collect::<Vec<_>>(),
-        vec!["[10, 20, 30]", "20"]
+        vec!["[10, 50, 0, 2]", "[10, 50, 0, 2]"]
     );
 }
 

@@ -231,6 +231,77 @@ fn next_steps_over() {
     );
 }
 
+#[test]
+fn loop_next_edges_are_step_visible_and_line_mapped() {
+    let src = "\
+fn run() {
+    hits := 0
+    loop i := 0; i < 3; i += 1 {
+        if i == 1 {
+            next
+        }
+        hits += i
+    }
+    outer_hits := 0
+    inner_hits := 0
+    outer@ loop i := 0; i < 3; i += 1 {
+        loop j := 0; j < 3; j += 1 {
+            if j == 1 {
+                next outer@
+            }
+            inner_hits += 1
+        }
+        outer_hits += 1
+    }
+    print(\"{hits},{inner_hits},{outer_hits}\")
+}
+";
+    let file = fixture("loop_next_edges", src);
+
+    let plain = jet::Debug::run_session(
+        &file,
+        &["break 5", "c", "n", "p i", "n", "p i", "c"],
+    );
+    let next_stop = plain.find("5 |             next        <- here").expect("plain next stop");
+    let step_stop = plain[next_stop..]
+        .find("3 |     loop i := 0; i < 3; i += 1 {        <- here")
+        .map(|offset| next_stop + offset)
+        .expect("plain next must stop on the loop afterthought");
+    assert!(
+        !plain[next_stop..step_stop].contains("7 |         hits += i        <- here"),
+        "plain next leaked into the skipped body before its afterthought:\n{plain}"
+    );
+    assert!(plain.contains("i = 2"), "afterthought did not advance i:\n{plain}");
+    assert!(plain.contains("2,3,0"), "wrong loop result:\n{plain}");
+
+    let labeled = jet::Debug::run_session(
+        &file,
+        &["break 14", "c", "n", "p i", "n", "p i", "c"],
+    );
+    let next_stop = labeled
+        .find("14 |                 next outer@        <- here")
+        .expect("labeled next stop");
+    let outer_step = labeled[next_stop..]
+        .find("11 |     outer@ loop i := 0; i < 3; i += 1 {        <- here")
+        .map(|offset| next_stop + offset)
+        .expect("labeled next must target the outer afterthought");
+    assert!(
+        !labeled[next_stop..outer_step].contains("12 |         loop j := 0; j < 3; j += 1 {        <- here"),
+        "labeled next stepped through the inner loop edge first:\n{labeled}"
+    );
+    assert!(labeled.contains("i = 1"), "outer afterthought did not advance i:\n{labeled}");
+    assert!(labeled.contains("2,3,0"), "wrong labeled loop result:\n{labeled}");
+
+    let generated = jet::compile_for_debug(&file).expect("loop next fixture compiles for debug");
+    for line in [5, 14] {
+        assert!(
+            generated.rust.contains(&format!("// jet:line {line}\n")),
+            "missing line marker for loop next on Jet line {line}:\n{}",
+            generated.rust
+        );
+    }
+}
+
 // ============================================================================
 // Section: native lldb-backed backend (was tests/debug_native.rs)
 // ============================================================================
