@@ -191,7 +191,7 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     ),
     (
         "effect-capability-directives",
-        &["#(Fs)", "#(via f)", "@Caps", "@Grant"],
+        &["--[Fs]->", "--[via f]->", "@Caps", "@Grant"],
     ),
     (
         "unsafe-impure-gates",
