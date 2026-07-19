@@ -315,7 +315,7 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
         } => {
             expr_references_ident(&init.init, name)
                 || expr_references_ident(cond, name)
-                || stmt_references_ident(step, name)
+                || step.as_ref().is_some_and(|step| stmt_references_ident(step, name))
                 || body.iter().any(|s| stmt_references_ident(s, name))
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,

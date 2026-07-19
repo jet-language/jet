@@ -258,7 +258,7 @@
     for (const span of spans) {
       if (span.start < start || span.end > end) return null;
     }
-    if (!/^\s*(if|loop|return|break|continue|[A-Za-z_][A-Za-z0-9_]*(\s*[:=]|::|\())/m.test(snippet)) return null;
+    if (!/^\s*(if|loop|return|break|next|[A-Za-z_][A-Za-z0-9_]*(\s*[:=]|::|\())/m.test(snippet)) return null;
     return { text: snippet.endsWith("\n") ? snippet : snippet + "\n", title: nodes.map((n) => n.title || n.kind).join(", ") };
   }
 

@@ -199,7 +199,9 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
             } => {
                 collect_stmt_ops(std::slice::from_ref(init.as_ref()), out);
                 collect_expr_ops(cond, out);
-                collect_stmt_ops(std::slice::from_ref(step.as_ref()), out);
+                if let Some(step) = step {
+                    collect_stmt_ops(std::slice::from_ref(step.as_ref()), out);
+                }
                 collect_stmt_ops(body, out);
             }
             TStmt::Range {

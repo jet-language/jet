@@ -35,6 +35,15 @@ extern "C" fn jet_jit_list_len(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).expect("jit list len: bad handle"))
 }
 
+extern "C" fn jet_jit_loop_stride_check(stride: i64) -> i64 {
+    if stride <= 0 {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("E0123: a source loop stride must be positive");
+        });
+    }
+    stride
+}
+
 extern "C" fn jet_jit_list_get(list: i64, idx: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_int(list, idx) {
         Some(value) => value,
@@ -150,6 +159,7 @@ pub(crate) struct CollectionsHostFns {
     pub list_clone: cranelift_module::FuncId,
     pub list_slice: cranelift_module::FuncId,
     pub list_join_str: cranelift_module::FuncId,
+    pub loop_stride_check: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -166,6 +176,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_clone", jet_jit_list_clone as *const u8);
     builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
     builder.symbol("jet_jit_list_join_str", jet_jit_list_join_str as *const u8);
+    builder.symbol("jet_jit_loop_stride_check", jet_jit_loop_stride_check as *const u8);
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -224,5 +235,6 @@ pub(crate) fn declare_collections_host_fns(
         list_clone: import("jet_jit_list_clone", &sig_len)?,
         list_slice: import("jet_jit_list_slice", &sig_slice)?,
         list_join_str: import("jet_jit_list_join_str", &sig_join)?,
+        loop_stride_check: import("jet_jit_loop_stride_check", &sig_len)?,
     })
 }

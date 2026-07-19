@@ -841,7 +841,7 @@ pub enum TStmt {
         label: Option<String>,
         init: Box<TStmt>,
         cond: TExpr,
-        step: Box<TStmt>,
+        step: Option<Box<TStmt>>,
         body: Vec<TStmt>,
     },
     /// `loop i; start..end [step k]` — a numeric range loop (`ForKind::Range`).

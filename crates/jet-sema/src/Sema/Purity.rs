@@ -199,7 +199,7 @@ pub(crate) fn check_pure_stmt(
                     return Some(d);
                 }
             }
-            check_pure_stmt(step, pure_fn, funcs)
+            step.as_ref().and_then(|step| check_pure_stmt(step, pure_fn, funcs))
         }
         Stmt::Loop { body, .. } => {
             for st in body {
@@ -631,7 +631,7 @@ fn check_pure_stmt_with_path(
                     return Some(d);
                 }
             }
-            rec_s!(step)
+            step.as_ref().and_then(|step| rec_s!(step))
         }
         Stmt::Loop { body, .. } => {
             for st in body {
@@ -1183,7 +1183,9 @@ fn walk_stmt_for_calls(
                 }
             }
             if diags.is_empty() {
-                walk_stmt_for_calls(step, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                if let Some(step) = step {
+                    walk_stmt_for_calls(step, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                }
             }
         }
         Stmt::Loop { body, .. }

@@ -105,7 +105,7 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: Os, diags: &mut Vec<Diagnostic>
             }
         }
         Stmt::CountedLoop { body, step, .. } => {
-            desugar_child_blocks(step, active, diags);
+            if let Some(step) = step { desugar_child_blocks(step, active, diags); }
             desugar_stmts(body, active, diags);
         }
         Stmt::Loop { body, .. }

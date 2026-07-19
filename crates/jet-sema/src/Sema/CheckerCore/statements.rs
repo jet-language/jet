@@ -1331,25 +1331,15 @@ impl<'a> Checker<'a> {
                                     self.declare_loop_var(var.clone(), *var_span, inner);
                                 }
                                 Some(Type::Map { key, value, .. }) => {
-                                    if var2.is_none() {
-                                        self.diags.push(Diagnostic::error(
-                                            "E0003",
-                                            "a map needs two loop names: `for key, value in map`"
-                                                .to_string(),
-                                            "maps carry a key and a value on each step".to_string(),
-                                            format!(
-                                                "write `for key, value in {}`",
-                                                if let Expr::Ident(n, _) = &*collection {
-                                                    n.clone()
-                                                } else {
-                                                    "the_map".to_string()
-                                                }
-                                            ),
-                                            Some(collection.span()),
-                                        ));
-                                    } else if let Some((v2, v2s)) = var2.as_ref() {
+                                    if let Some((v2, v2s)) = var2.as_ref() {
                                         self.declare_loop_var(var.clone(), *var_span, key);
                                         self.declare_loop_var(v2.clone(), *v2s, value);
+                                    } else {
+                                        let entry = Type::Tuple(vec![
+                                            ("key".to_string(), Box::new((**key).clone())),
+                                            ("value".to_string(), Box::new((**value).clone())),
+                                        ]);
+                                        self.declare_loop_var(var.clone(), *var_span, &entry);
                                     }
                                 }
                                 // E2-M7: `loop line; handle.lines()` — streaming line iterator.
@@ -1491,14 +1481,18 @@ impl<'a> Checker<'a> {
                     if let Some((n, _)) = label {
                         self.loop_labels.push(n.clone());
                     }
+                    self.push_scope();
                     self.check_binding(init);
                     self.require_bool(cond, "a counted loop condition");
                     self.loop_depth += 1;
                     let saved_u = self.uninit.clone();
                     self.check_block(body, true);
-                    self.check_stmt(step.as_mut());
+                    if let Some(step) = step {
+                        self.check_stmt(step.as_mut());
+                    }
                     self.uninit = saved_u;
                     self.loop_depth -= 1;
+                    self.pop_scope();
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
@@ -2066,8 +2060,14 @@ fn statically_bounded_for_iterations(kind: &ForKind) -> Option<u64> {
             let iterations = ((*end as i128 - *start as i128) / step) + 1;
             u64::try_from(iterations).ok()
         }
-        ForKind::In { collection: Expr::ListLit(items, _), .. } => {
-            u64::try_from(items.len()).ok()
+        ForKind::In { collection: Expr::ListLit(items, _), step } => {
+            let len = u64::try_from(items.len()).ok()?;
+            let stride = match step {
+                Some(Expr::Int(stride, _, _, _)) if *stride > 0 => *stride as u64,
+                None => 1,
+                _ => return None,
+            };
+            Some(len.div_ceil(stride))
         }
         ForKind::In { .. } => None,
     }

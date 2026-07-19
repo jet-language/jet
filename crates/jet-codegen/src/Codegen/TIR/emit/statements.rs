@@ -7,6 +7,7 @@ use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TStmt;
+use crate::AST::Type;
 
 #[derive(Clone)]
 enum ActiveCleanup {
@@ -623,7 +624,9 @@ fn emit_tir_stmt(
             let mut counted_deferred = active_deferred_closes.clone();
             emit_tir_stmt(init, cx, out, indent + 1, &mut counted_deferred);
             let inner_pad = "    ".repeat(indent + 1);
-            out.push_str(&format!("{}let mut _jet_loop_first = true;\n", inner_pad));
+            if step.is_some() {
+                out.push_str(&format!("{}let mut _jet_loop_first = true;\n", inner_pad));
+            }
             out.push_str(&format!(
                 "{}{}loop {{\n",
                 inner_pad,
@@ -634,9 +637,11 @@ fn emit_tir_stmt(
             // re-enter at the top. Skip the afterthought only on the first entry;
             // thereafter run it before retesting. Break/return/failure/panic leave
             // the loop and therefore never execute it.
-            out.push_str(&format!("{}if _jet_loop_first {{ _jet_loop_first = false; }} else {{\n", body_pad));
-            emit_tir_stmt(step, cx, out, indent + 3, &mut counted_deferred);
-            out.push_str(&format!("{}}}\n", body_pad));
+            if let Some(step) = step {
+                out.push_str(&format!("{}if _jet_loop_first {{ _jet_loop_first = false; }} else {{\n", body_pad));
+                emit_tir_stmt(step, cx, out, indent + 3, &mut counted_deferred);
+                out.push_str(&format!("{}}}\n", body_pad));
+            }
             out.push_str(&format!(
                 "{}if !({}) {{ break; }}\n",
                 body_pad,
@@ -848,7 +853,7 @@ fn emit_tir_stmt(
             var,
             var2,
             collection_str,
-            collection: _,
+            collection,
             step,
             method_kind,
             columnar,
@@ -980,6 +985,29 @@ fn emit_tir_stmt(
                         ));
                     }
                     None => {
+                        if let Type::Map { key, value, .. } = &collection.ty {
+                            let fields = vec![
+                                ("key".to_string(), (**key).clone()),
+                                ("value".to_string(), (**value).clone()),
+                            ];
+                            let tuple = crate::Codegen::Tuples::tuple_struct_name(&fields);
+                            out.push_str(&format!(
+                                "{}{}for (_jet_k, _jet_v) in ({}).iter(){} {{\n",
+                                pad, lbl, collection_str, stride_suffix
+                            ));
+                            out.push_str(&format!(
+                                "{}    let {} = {} {{ {}: _jet_k.clone(), {}: _jet_v.clone() }};\n",
+                                pad,
+                                mangle(var),
+                                tuple,
+                                mangle("key"),
+                                mangle("value")
+                            ));
+                            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
+                            out.push_str(&format!("{}}}\n", pad));
+                            if stride_wrapper { out.push_str(&format!("{}}}\n", pad)); }
+                            return;
+                        }
                         // D-SOA1: a columnar list iterates `iter_aos()` (owned S, no
                         // `.cloned()`); a plain list iterates `iter().cloned()`.
                         // D-STREAMYIELD1: a `Stream<T>` (`Receiver<T>`) iterates BY

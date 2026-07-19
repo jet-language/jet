@@ -83,6 +83,21 @@ fn loop_step(flow: Flow, label: Option<&str>) -> LoopStep {
     }
 }
 
+fn restore_binding(
+    scope: &mut HashMap<String, CtValue>,
+    name: &str,
+    previous: Option<CtValue>,
+) {
+    match previous {
+        Some(value) => {
+            scope.insert(name.to_string(), value);
+        }
+        None => {
+            scope.remove(name);
+        }
+    }
+}
+
 /// Where a [`Interp`] running in whole-program "dev" mode sends program
 /// output. In pure comptime mode this is `None` and `print`/`eprint` never
 /// reach the evaluator (the purity check rejects them as E0951 first).
@@ -519,22 +534,28 @@ impl<'a> Interp<'a> {
             } => {
                 let label = label.as_ref().map(|(n, _)| n.as_str());
                 let v = self.eval(&init.init, scope)?;
-                scope.insert(init.name.clone(), v);
-                loop {
-                    self.burn(*span)?;
-                    let c = self.eval(cond, scope)?;
-                    if !as_bool(&c, cond.span())? {
-                        break;
+                let previous = scope.insert(init.name.clone(), v);
+                let result = (|| {
+                    loop {
+                        self.burn(*span)?;
+                        let c = self.eval(cond, scope)?;
+                        if !as_bool(&c, cond.span())? {
+                            break;
+                        }
+                        match loop_step(self.exec_block(body, scope)?, label) {
+                            LoopStep::Break => break,
+                            LoopStep::Continue => {}
+                            LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                            LoopStep::Bubble(f) => return Ok(f),
+                        }
+                        if let Some(step) = step {
+                            self.exec_stmt(step, scope)?;
+                        }
                     }
-                    match loop_step(self.exec_block(body, scope)?, label) {
-                        LoopStep::Break => break,
-                        LoopStep::Continue => {}
-                        LoopStep::Return(v) => return Ok(Flow::Return(v)),
-                        LoopStep::Bubble(f) => return Ok(f),
-                    }
-                    self.exec_stmt(step, scope)?;
-                }
-                Ok(Flow::Normal)
+                    Ok(Flow::Normal)
+                })();
+                restore_binding(scope, &init.name, previous);
+                result
             }
             Stmt::Unsafe { span, .. } => Err(unsupported("an `@Unsafe` block", *span)),
             Stmt::Reactive { span, .. } => Err(unsupported("a `@Reactive` block", *span)),
@@ -693,19 +714,27 @@ impl<'a> Interp<'a> {
                     }
                     None => 1,
                 };
-                let mut i = a;
-                while i <= b {
-                    self.burn(span)?;
-                    scope.insert(var.to_string(), CtValue::Int(i));
-                    match loop_step(self.exec_block(body, scope)?, label) {
-                        LoopStep::Break => break,
-                        LoopStep::Continue => {}
-                        LoopStep::Return(v) => return Ok(Flow::Return(v)),
-                        LoopStep::Bubble(f) => return Ok(f),
+                let previous = scope.get(var).cloned();
+                let result = (|| {
+                    let mut i = a;
+                    while i <= b {
+                        self.burn(span)?;
+                        scope.insert(var.to_string(), CtValue::Int(i));
+                        match loop_step(self.exec_block(body, scope)?, label) {
+                            LoopStep::Break => break,
+                            LoopStep::Continue => {}
+                            LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                            LoopStep::Bubble(f) => return Ok(f),
+                        }
+                        let Some(next) = i.checked_add(stride) else {
+                            break;
+                        };
+                        i = next;
                     }
-                    i += stride;
-                }
-                Ok(Flow::Normal)
+                    Ok(Flow::Normal)
+                })();
+                restore_binding(scope, var, previous);
+                result
             }
             crate::AST::ForKind::In { collection, step } => {
                 let c = self.eval(collection, scope)?;
@@ -725,7 +754,9 @@ impl<'a> Interp<'a> {
                     }
                     None => 1,
                 };
-                match c {
+                let previous = scope.get(var).cloned();
+                let previous2 = var2.and_then(|(name, _)| scope.get(name).cloned());
+                let result = (|| match c {
                     CtValue::List(items) => {
                         for item in items.into_iter().step_by(stride) {
                             self.burn(span)?;
@@ -759,7 +790,16 @@ impl<'a> Interp<'a> {
                                 scope.insert(var.to_string(), k.to_value());
                                 scope.insert(v2name.clone(), v);
                             } else {
-                                scope.insert(var.to_string(), k.to_value());
+                                scope.insert(
+                                    var.to_string(),
+                                    CtValue::Struct {
+                                        type_name: "MapEntry".to_string(),
+                                        fields: vec![
+                                            ("key".to_string(), k.to_value()),
+                                            ("value".to_string(), v),
+                                        ],
+                                    },
+                                );
                             }
                             match loop_step(self.exec_block(body, scope)?, label) {
                                 LoopStep::Break => break,
@@ -785,7 +825,12 @@ impl<'a> Interp<'a> {
                         Ok(Flow::Normal)
                     }
                     _ => Err(unsupported("looping over this value", span)),
+                })();
+                restore_binding(scope, var, previous);
+                if let Some((name, _)) = var2 {
+                    restore_binding(scope, name, previous2);
                 }
+                result
             }
         }
     }

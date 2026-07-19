@@ -80,12 +80,11 @@ pub enum Stmt {
         /// D-LABEL1: optional `@name` loop label (`@outer loop { }`).
         label: Option<(String, Span)>,
     },
-    /// D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — three-part counted loop.
-    /// Lowers to: `{ init; loop cond { body; step } }` in codegen.
+    /// D-LOOP-HEADER2=A: `loop name[: Type] := init; cond [; afterthought] { body }`.
     CountedLoop {
         init: Binding,
         cond: Expr,
-        step: Box<Stmt>,
+        step: Option<Box<Stmt>>,
         body: Vec<Stmt>,
         span: Span,
         label: Option<(String, Span)>,

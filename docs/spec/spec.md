@@ -829,7 +829,8 @@ sema and rustc are not run.
 Style (zero configuration): 4-space indent, `{` on the same line as its
 header, one statement per line, at most one blank line between top-level
 items, spaces around binary operators, no space before `;`/`,`/call `(`,
-trailing `;` on statements (S6). **Line width is not enforced in v1.**
+trailing `;` on statements (S6). General line width is not enforced in v1;
+long multi-clause loop headers wrap only after their canonical semicolons.
 
 `//` and `/* … */` comments are preserved and re-attached by source span. Real
 parse errors still block fmt.

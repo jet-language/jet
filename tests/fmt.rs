@@ -1569,12 +1569,53 @@ fn fmt_unified_loop_headers_and_next_stability() {
         "fn run() { loop x in [1] {} }\n",
         "fn run() { loop i; 0..2 step 1 {} }\n",
         "fn run() { loop { continue } }\n",
+        "fn run() { loop i :: 0; true {} }\n",
+        "fn run() { loop [i] := [0]; true {} }\n",
+        "fn run() { loop i := 0 true {} }\n",
+        "fn run() { loop i := 0; true; i += 1; i += 2 {} }\n",
     ] {
         assert!(
             jet::format_source(retired).is_err(),
             "retired loop spelling must take the ordinary parse-error path: {retired}"
         );
     }
+}
+
+#[test]
+fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
+    let src = r#"fn run() {
+    loop item; // source clause
+        [1000000000000000000, 2000000000000000000, 3000000000000000000, 4000000000000000000]; // stride clause
+        2 {
+        next
+    }
+    loop cursor: Int := 1000000000000000000; cursor < 9000000000000000000; cursor += 1000000000000000000 {
+        print(cursor)
+    }
+    loop ready := true; ready {
+        break
+    }
+}
+"#;
+    let once = jet::format_source(src).expect("long unified loop headers should format");
+    for token in [
+        "loop item;",
+        "// source clause",
+        "];",
+        "// stride clause",
+        "loop cursor: Int := 1000000000000000000;",
+        "cursor < 9000000000000000000;",
+        "cursor += 1000000000000000000",
+        "loop ready := true; ready {",
+    ] {
+        assert!(once.contains(token), "fmt dropped loop token `{token}`:\n{once}");
+    }
+    assert!(
+        once.contains("loop cursor: Int := 1000000000000000000;\n"),
+        "long state header must wrap after a semicolon:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("formatted long loop headers must reparse");
+    assert_eq!(once, twice, "long loop header formatting must be byte-stable");
 }
 
 #[test]

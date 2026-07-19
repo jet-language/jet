@@ -358,7 +358,7 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(&init.init);
                 self.check_expr(cond);
                 self.check_block(body);
-                self.check_stmt(step);
+                if let Some(step) = step { self.check_stmt(step); }
             }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }

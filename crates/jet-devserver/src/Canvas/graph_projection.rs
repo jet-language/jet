@@ -769,12 +769,25 @@ fn project_stmt(
                 vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
             );
             add_inline(g, &node_id, ordinal, "init", src, init.name_span);
-            add_inline(g, &node_id, ordinal, "cond", src, cond.span());
-            project_stmt(g, index, src, step, ordinal * 100 + 21, x + 230, y + 70);
+            let init_pin = add_pin(g, &node_id, "initializer", "input", "Value", "", false);
+            connect_expr_to_input(g, index, src, &init.init, ordinal * 10, "initializer", &node_id, &init_pin, x - 220, y);
+            let cond_pin = add_pin(g, &node_id, "condition", "input", "Bool", "", false);
+            connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", &node_id, &cond_pin, x - 220, y + 30);
+            if let Some(step) = step {
+                let afterthought = match step.as_ref() {
+                    Stmt::Assign { value, .. } | Stmt::Expr(value) => Some(value),
+                    _ => None,
+                };
+                if let Some(afterthought) = afterthought {
+                    let pin = add_pin(g, &node_id, "afterthought", "input", "Value", "", false);
+                    connect_expr_to_input(g, index, src, afterthought, ordinal * 10 + 2, "afterthought", &node_id, &pin, x - 220, y + 60);
+                }
+            }
             project_stmt_block(g, index, src, body, ordinal * 100 + 30, x + 230, y + 200);
         }
         Stmt::For {
             var,
+            var2,
             kind,
             body,
             span,
@@ -800,6 +813,31 @@ fn project_stmt(
             let output = add_pin(g, &node_id, var, "output", iter_ty, "", false);
             g.local_pins.insert(var.clone(), output);
             g.local_types.insert(var.clone(), iter_ty.to_string());
+            if let Some((var2, _)) = var2 {
+                let output = add_pin(g, &node_id, var2, "output", iter_ty, "", false);
+                g.local_pins.insert(var2.clone(), output);
+                g.local_types.insert(var2.clone(), iter_ty.to_string());
+            }
+            match kind {
+                AST::ForKind::Range { start, end, step } => {
+                    let start_pin = add_pin(g, &node_id, "range_start", "input", "Int", "", false);
+                    connect_expr_to_input(g, index, src, start, ordinal * 10, "range_start", &node_id, &start_pin, x - 220, y);
+                    let end_pin = add_pin(g, &node_id, "range_end", "input", "Int", "", false);
+                    connect_expr_to_input(g, index, src, end, ordinal * 10 + 1, "range_end", &node_id, &end_pin, x - 220, y + 30);
+                    if let Some(step) = step {
+                        let stride_pin = add_pin(g, &node_id, "stride", "input", "Int", "", false);
+                        connect_expr_to_input(g, index, src, step, ordinal * 10 + 2, "stride", &node_id, &stride_pin, x - 220, y + 60);
+                    }
+                }
+                AST::ForKind::In { collection, step } => {
+                    let source_pin = add_pin(g, &node_id, "source", "input", "Iterable", "", false);
+                    connect_expr_to_input(g, index, src, collection, ordinal * 10, "source", &node_id, &source_pin, x - 220, y);
+                    if let Some(step) = step {
+                        let stride_pin = add_pin(g, &node_id, "stride", "input", "Int", "", false);
+                        connect_expr_to_input(g, index, src, step, ordinal * 10 + 1, "stride", &node_id, &stride_pin, x - 220, y + 30);
+                    }
+                }
+            }
             project_stmt_block(g, index, src, body, ordinal * 100 + 40, x + 230, y + 70);
         }
         Stmt::Switch {

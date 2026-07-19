@@ -336,7 +336,9 @@ fn substitute_stmts(
                 }
                 substitute_expr(&mut init.init, types, values);
                 substitute_expr(cond, types, values);
-                substitute_stmts(std::slice::from_mut(step), types, values);
+                if let Some(step) = step {
+                    substitute_stmts(std::slice::from_mut(step), types, values);
+                }
                 substitute_stmts(body, types, values);
             }
             Stmt::Loop { body, .. }

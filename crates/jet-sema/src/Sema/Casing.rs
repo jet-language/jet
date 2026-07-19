@@ -248,7 +248,7 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
                 binding_name(init, out);
                 expr_names(&init.init, out);
                 expr_names(cond, out);
-                stmt_names(std::slice::from_ref(step), out);
+                if let Some(step) = step { stmt_names(std::slice::from_ref(step), out); }
                 if let Some((name, span)) = label { snake(name, *span, "loop label", out); }
                 stmt_names(body, out);
             }

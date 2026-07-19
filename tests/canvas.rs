@@ -3033,7 +3033,7 @@ fn canvas_projects_nested_control_and_assignment_forms() {
         "\"kind\":\"flow\"",
         "\"kind\":\"function\"",
         "\"title\":\"if ==\"",
-        "\"title\":\"continue\"",
+        "\"title\":\"next\"",
         "\"source\":\"i < limit\"",
         "\"source\":\"i == 2\"",
         "\"source\":\"total\"",
@@ -3047,6 +3047,59 @@ fn canvas_projects_nested_control_and_assignment_forms() {
         !graph.contains("\"kind\":\"source\""),
         "supported control/assignment forms must not project as opaque source nodes: {graph}"
     );
+}
+
+#[test]
+fn canvas_projects_and_edits_every_unified_loop_clause() {
+    let path = write_fixture(
+        "unified_loop_canvas",
+        r#"fn run() {
+    total := 0
+    loop item; [1, 2, 3]; 2 {
+        total += item
+    }
+    loop i; 0..3; 2 {
+        total += i
+    }
+    counts: [String: Int] := ["one": 1]
+    loop entry; counts {
+        total += entry.value
+    }
+    loop key, value; counts {
+        total += value
+    }
+    loop cursor := 0; cursor < 1; cursor += 1 {
+        total += cursor
+    }
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("unified loop graph");
+    for field in [
+        "\"role\":\"source\"",
+        "\"role\":\"stride\"",
+        "\"role\":\"range_start\"",
+        "\"role\":\"range_end\"",
+        "\"role\":\"initializer\"",
+        "\"role\":\"condition\"",
+        "\"role\":\"afterthought\"",
+        "\"name\":\"entry\"",
+        "\"name\":\"key\"",
+        "\"name\":\"value\"",
+    ] {
+        assert!(graph.contains(field), "unified loop graph missing {field}: {graph}");
+    }
+
+    let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+    let before = fs::read_to_string(&path).unwrap();
+    let append = format!(
+        "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"4\"}}",
+        jet::Canvas::source_revision(&before), list_start, list_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &append)
+        .expect("edit list source nested in loop header");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("loop item; [1, 2, 3, 4]; 2"), "{after}");
 }
 
 #[test]

@@ -2224,7 +2224,11 @@ fn run() {
     borrowed.read()
     text := "view .view stays string content"
     // view and .view stay comment content
+    next()
+    cursor.next()
+    loop { next }
 }
+fn next() -> Int { return 1 }
 "#;
     let uri = "file:///tmp/lsp_semantic_highlight_stage4.jet";
 
@@ -2274,6 +2278,7 @@ fn run() {
         "expected semantic token response, got: {response}"
     );
 
+    const TOKEN_KEYWORD: u32 = 0;
     const TOKEN_OWNERSHIP: u32 = 12;
     const TOKEN_DECORATOR: u32 = 13;
     const TOKEN_TYPE: u32 = 1;
@@ -2305,6 +2310,21 @@ fn run() {
             "paused retired spelling `{ordinary}` should emit an ordinary variable token: {tokens:?}"
         );
     }
+
+    assert!(
+        tokens
+            .iter()
+            .any(|token| token.text == "next" && token.token_type == TOKEN_KEYWORD),
+        "standalone loop `next` should be a contextual keyword token: {tokens:?}"
+    );
+    assert!(
+        tokens
+            .iter()
+            .filter(|token| token.text == "next" && token.token_type == TOKEN_VARIABLE)
+            .count()
+            >= 2,
+        "`fn next` and `.next` must remain ordinary identifiers: {tokens:?}"
+    );
 
     for retired in ["val", "mut", "take", "view"] {
         assert!(

@@ -1337,7 +1337,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         } => expr_handle_escape(&init.init, handle)
             .or_else(|| expr_handle_escape(cond, handle))
             .or_else(|| block(body))
-            .or_else(|| stmt_handle_escape(step, handle)),
+            .or_else(|| step.as_ref().and_then(|step| stmt_handle_escape(step, handle))),
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }

@@ -209,7 +209,7 @@ impl<'a> InlineAlwaysScan<'a> {
             } => {
                 self.scan_binding(init);
                 self.scan_expr(cond);
-                self.scan_stmt(step);
+                if let Some(step) = step { self.scan_stmt(step); }
                 self.scan_stmts(body);
             }
             Stmt::Unsafe { body, .. }

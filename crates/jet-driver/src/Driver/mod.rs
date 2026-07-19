@@ -267,13 +267,15 @@ fn collect_mmio_stmts(
                     ptrs.insert(init.name.clone(), fact);
                 }
                 collect_mmio_expr(cond, core_aliases, ptrs, unsafe_reason, out);
-                collect_mmio_stmts(
-                    std::slice::from_ref(step),
-                    core_aliases,
-                    ptrs,
-                    unsafe_reason,
-                    out,
-                );
+                if let Some(step) = step {
+                    collect_mmio_stmts(
+                        std::slice::from_ref(step),
+                        core_aliases,
+                        ptrs,
+                        unsafe_reason,
+                        out,
+                    );
+                }
                 collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
             }
             crate::AST::Stmt::Return(None, _)

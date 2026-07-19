@@ -115,21 +115,39 @@ impl<'a> Fmt<'a> {
                     self.write(", ");
                     self.write(v2);
                 }
-                self.write("; ");
+                let clause_width = match kind {
+                    ForKind::Range { start, end, step } => {
+                        start.span().end - start.span().start
+                            + end.span().end - end.span().start
+                            + step.as_ref().map_or(0, |step| step.span().end - step.span().start + 2)
+                            + 5
+                    }
+                    ForKind::In { collection, step } => {
+                        collection.span().end - collection.span().start
+                            + step.as_ref().map_or(0, |step| step.span().end - step.span().start + 2)
+                            + 3
+                    }
+                };
+                let wrap = self.col + clause_width > MAX_WIDTH;
+                let first_clause_start = match kind {
+                    ForKind::Range { start, .. } => start.span().start,
+                    ForKind::In { collection, .. } => collection.span().start,
+                };
+                self.loop_clause_separator(first_clause_start, wrap);
                 match kind {
                     ForKind::Range { start, end, step } => {
                         self.fmt_expr(start, Prec::OrFallback);
                         self.write("..");
                         self.fmt_expr(end, Prec::OrFallback);
                         if let Some(step) = step {
-                            self.write("; ");
+                            self.loop_clause_separator(step.span().start, wrap);
                             self.fmt_expr(step, Prec::OrFallback);
                         }
                     }
                     ForKind::In { collection, step } => {
                         self.fmt_expr(collection, Prec::OrFallback);
                         if let Some(step) = step {
-                            self.write("; ");
+                            self.loop_clause_separator(step.span().start, wrap);
                             self.fmt_expr(step, Prec::OrFallback);
                         }
                     }
@@ -171,11 +189,18 @@ impl<'a> Fmt<'a> {
                     self.write(&format!("{}@ ", n));
                 }
                 self.write("loop ");
+                let header_width = init.init.span().end.saturating_sub(init.name_span.start)
+                    + cond.span().end.saturating_sub(cond.span().start)
+                    + step.as_ref().map_or(0, |step| stmt_end(step).saturating_sub(stmt_start(step)) + 2)
+                    + 5;
+                let wrap = self.col + header_width > MAX_WIDTH;
                 self.fmt_binding(init);
-                self.write("; ");
+                self.loop_clause_separator(cond.span().start, wrap);
                 self.fmt_cond(cond);
-                self.write("; ");
-                self.fmt_stmt(step);
+                if let Some(step) = step {
+                    self.loop_clause_separator(step.span().start, wrap);
+                    self.fmt_stmt(step);
+                }
                 self.write(" {");
                 self.fmt_body(body);
             }

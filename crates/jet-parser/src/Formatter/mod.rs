@@ -453,6 +453,36 @@ fn if_end(i: &IfStmt) -> usize {
 }
 
 impl<'a> Fmt<'a> {
+    fn write_loop_continuation_indent(&mut self) {
+        self.indent += 1;
+        self.write_indent();
+        self.indent -= 1;
+    }
+
+    fn loop_clause_separator(&mut self, next_start: usize, wrap: bool) {
+        self.write(";");
+        let mut broke = false;
+        while self.comment_i < self.comments.len()
+            && self.comments[self.comment_i].span.start < next_start
+        {
+            let text = self.comments[self.comment_i].text.clone();
+            self.write("  ");
+            self.write(&text);
+            self.comment_i += 1;
+            if text.starts_with("//") {
+                self.newline();
+                self.write_loop_continuation_indent();
+                broke = true;
+            }
+        }
+        if wrap && !broke {
+            self.newline();
+            self.write_loop_continuation_indent();
+        } else if !broke {
+            self.write(" ");
+        }
+    }
+
     fn blank_line_between_items(&mut self) {
         if !self.pending_blank {
             self.newline();

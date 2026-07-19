@@ -35,6 +35,11 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(Str
             collect_tuple_shapes_from_type(inner, out);
         }
         Type::Map { key, value, .. } => {
+            let fields = vec![
+                ("key".to_string(), (**key).clone()),
+                ("value".to_string(), (**value).clone()),
+            ];
+            out.insert(tuple_struct_name(&fields), fields);
             collect_tuple_shapes_from_type(key, out);
             collect_tuple_shapes_from_type(value, out);
         }

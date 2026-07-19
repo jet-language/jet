@@ -1621,9 +1621,9 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
                     }
                 }
                 AST::ForKind::In { collection, step } => {
-                    structural_slot(ctx, "collection", StructuralSlotKind::Scalar, |ctx| collect_expr(collection, mp, ctx));
+                    structural_slot(ctx, "source", StructuralSlotKind::Scalar, |ctx| collect_expr(collection, mp, ctx));
                     if let Some(step) = step {
-                        structural_slot(ctx, "source_stride", StructuralSlotKind::Scalar, |ctx| collect_expr(step, mp, ctx));
+                        structural_slot(ctx, "stride", StructuralSlotKind::Scalar, |ctx| collect_expr(step, mp, ctx));
                     }
                 }
             }
@@ -1671,7 +1671,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             }
         }
         AST::Stmt::CountedLoop {
-            cond, body, init, ..
+            cond, body, init, step, ..
         } => {
             ctx.db.defs.push(SymDef {
                 identity: scoped_local_identity(ctx, "local", &init.name),
@@ -1683,8 +1683,11 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
                     ty: None,
                 },
             });
-            structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| collect_expr(&init.init, mp, ctx));
+            structural_slot(ctx, "init", StructuralSlotKind::Scalar, |ctx| collect_expr(&init.init, mp, ctx));
             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+            if let Some(step) = step {
+                structural_slot(ctx, "afterthought", StructuralSlotKind::Scalar, |ctx| collect_stmt(step, mp, module, ctx));
+            }
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         // D-LINTPOLICY1=A: an `@Unsafe("reason") { … }` audited region is a

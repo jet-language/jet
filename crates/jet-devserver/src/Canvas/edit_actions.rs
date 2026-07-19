@@ -1668,9 +1668,27 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
             find_multi_input_in_expr(cond, node_span, out);
             find_multi_input_target(body, node_span, out);
         }
-        Stmt::For { body, .. }
-        | Stmt::Loop { body, .. }
-        | Stmt::CountedLoop { body, .. }
+        Stmt::For { kind, body, .. } => {
+            match kind {
+                AST::ForKind::Range { start, end, step } => {
+                    find_multi_input_in_expr(start, node_span, out);
+                    find_multi_input_in_expr(end, node_span, out);
+                    if let Some(step) = step { find_multi_input_in_expr(step, node_span, out); }
+                }
+                AST::ForKind::In { collection, step } => {
+                    find_multi_input_in_expr(collection, node_span, out);
+                    if let Some(step) = step { find_multi_input_in_expr(step, node_span, out); }
+                }
+            }
+            find_multi_input_target(body, node_span, out);
+        }
+        Stmt::CountedLoop { init, cond, step, body, .. } => {
+            find_multi_input_in_expr(&init.init, node_span, out);
+            find_multi_input_in_expr(cond, node_span, out);
+            if let Some(step) = step { find_multi_input_in_stmt(step, node_span, out); }
+            find_multi_input_target(body, node_span, out);
+        }
+        Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
@@ -1894,6 +1912,26 @@ fn find_multi_input_element_in_stmt(
             if let Some(AST::ElseBranch::Else(body)) = &ifs.else_branch {
                 find_multi_input_element(body, node_span, element_span, found);
             }
+        }
+        Stmt::For { kind, body, .. } => {
+            match kind {
+                AST::ForKind::Range { start, end, step } => {
+                    find_multi_input_element_in_expr(start, node_span, element_span, found);
+                    find_multi_input_element_in_expr(end, node_span, element_span, found);
+                    if let Some(step) = step { find_multi_input_element_in_expr(step, node_span, element_span, found); }
+                }
+                AST::ForKind::In { collection, step } => {
+                    find_multi_input_element_in_expr(collection, node_span, element_span, found);
+                    if let Some(step) = step { find_multi_input_element_in_expr(step, node_span, element_span, found); }
+                }
+            }
+            find_multi_input_element(body, node_span, element_span, found);
+        }
+        Stmt::CountedLoop { init, cond, step, body, .. } => {
+            find_multi_input_element_in_expr(&init.init, node_span, element_span, found);
+            find_multi_input_element_in_expr(cond, node_span, element_span, found);
+            if let Some(step) = step { find_multi_input_element_in_stmt(step, node_span, element_span, found); }
+            find_multi_input_element(body, node_span, element_span, found);
         }
         _ => {}
     }

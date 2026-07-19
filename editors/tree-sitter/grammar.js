@@ -12,7 +12,7 @@
 // wasm via editors/zed/install.sh (FORCE=1).
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "defer", "else", "if", "loop", "next", "return"];
+const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "defer", "else", "if", "loop", "return"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Pure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "const", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
@@ -376,7 +376,7 @@ module.exports = grammar({
     // A method signature with no body: `fn greet(self) -> String;`, optionally
     // marked (`fn area(self) --[]-> Int`).
     trait_method_sig: ($) =>
-      seq(
+      prec.right(seq(
         repeat($._marker),
         "fn",
         field("name", $.identifier),
@@ -386,7 +386,7 @@ module.exports = grammar({
           seq($.effect_arrow, optional(field("return_type", $._type))),
           seq("->", field("return_type", $._type)),
         )),
-      ),
+      )),
 
     // ── Const definition ───────────────────────────────────────────────────
     const_def: ($) =>
@@ -519,13 +519,13 @@ module.exports = grammar({
 
     // `fn(T) --[]-> U` or `fn(T) --[Io]-> U` callback type (D-EFF2).
     fn_type: ($) =>
-      seq(
+      prec.right(seq(
         "fn",
         "(",
         commaSep($._type),
         ")",
         optional(choice(seq($.effect_arrow, optional($._type)), seq("->", $._type))),
-      ),
+      )),
 
     paren_type: ($) => seq("(", $._type, ")"),
 
@@ -539,7 +539,7 @@ module.exports = grammar({
         $.defer_close_stmt,
         $.return_stmt,
         $.break_stmt,
-        $.continue_stmt,
+        $.next_stmt,
         $.loop_stmt,
         $.comptime_stmt,
         $.comptime_if_stmt,
@@ -615,9 +615,9 @@ module.exports = grammar({
     dispatch_else: ($) => seq("else", "->", choice($.block, seq($._expr))),
 
     break_stmt: ($) => prec.right(seq("break", optional($.loop_label))),
-    continue_stmt: ($) => prec.right(seq("continue", optional($.loop_label))),
+    next_stmt: ($) => prec.right(seq("next", optional($.loop_label))),
 
-    // `loop { }`, `loop cond { }`, `loop x in iter { }`, optional `@label`.
+    // `loop { }`, `loop cond { }`, or the canonical semicolon headers.
     loop_stmt: ($) =>
       seq(optional($.loop_label), "loop", optional($._loop_head), $.block),
 
@@ -626,14 +626,23 @@ module.exports = grammar({
         seq(
           field("var", $.identifier),
           optional(seq(",", field("var2", $.identifier))),
-          "in",
-          field("iter", $._expr),
-          optional(seq("step", $._expr)),
+          ";",
+          field("source", $._expr),
+          optional(seq(";", field("stride", $._expr))),
+        ),
+        seq(
+          field("state", $.identifier),
+          optional(seq(":", field("state_type", $._type))),
+          ":=",
+          field("init", $._expr),
+          ";",
+          field("condition", $._expr),
+          optional(seq(";", field("afterthought", choice($.assign_stmt, $.expr_stmt)))),
         ),
         field("cond", $._expr),
       ),
 
-    loop_label: (_) => /@[a-z_][a-zA-Z0-9_]*/,
+    loop_label: ($) => prec(2, seq($.identifier, "@")),
 
     comptime_stmt: ($) =>
       seq(

@@ -592,6 +592,50 @@ fn run() {}
 }
 
 #[test]
+fn semindex_unified_loop_slots_and_state_scope_are_structural() {
+    let src = r#"fn run() {
+    loop item; [1, 2, 3]; 2 {
+        print(item)
+    }
+    loop cursor := 0; cursor < 1; cursor += 1 {
+        print(cursor)
+    }
+}
+"#;
+    let path = temp_fixture("unified_loop_slots.jet", src);
+    let index = open(&path).expect("unified loops index");
+    let slots = index
+        .structural_nodes()
+        .iter()
+        .map(|node| node.slot.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    for slot in ["source", "stride", "init", "condition", "afterthought", "body"] {
+        assert!(slots.contains(slot), "missing loop structural slot `{slot}`: {slots:?}");
+    }
+
+    let inner_def = index
+        .definitions()
+        .iter()
+        .filter(|def| def.name == "cursor")
+        .max_by_key(|def| def.def_span.start)
+        .expect("inner state definition");
+    for reference in index.references_to("cursor") {
+        assert_eq!(reference.target.as_ref().unwrap().def_span, inner_def.def_span);
+    }
+
+    let out_of_scope = jet::check_document(
+        "state_scope.jet",
+        "fn run() {\n    loop cursor := 0; cursor < 1; cursor += 1 {}\n    print(cursor)\n}\n",
+    );
+    assert!(
+        out_of_scope.iter().any(|diagnostic| {
+            diagnostic.code == "E0107" && diagnostic.what.contains("cursor")
+        }),
+        "state binding must end with the loop: {out_of_scope:?}"
+    );
+}
+
+#[test]
 fn definition_ancestry_identity_ignores_signature_and_body_shape() {
     let path = temp_fixture(
         "ancestry_identity.jet",

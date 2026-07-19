@@ -588,7 +588,9 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(step_block);
                 self.b.seal_block(step_block);
                 self.dead = false;
-                self.lower_stmt(step)?;
+                if let Some(step) = step {
+                    self.lower_stmt(step)?;
+                }
                 if !self.dead { self.b.ins().jump(header, &[]); }
                 self.b.seal_block(header);
 
@@ -725,9 +727,20 @@ impl LowerCtx<'_, '_> {
                 body,
                 ..
             } => {
-                if step.is_some() {
-                    return Err("jit source stride uses semantic fallback".to_string());
-                }
+                let stride = match step {
+                    Some(step) => {
+                        let stride = self.lower_expr(step)?;
+                        let check_ref = self.module.declare_func_in_func(
+                            self.host.coll.loop_stride_check,
+                            self.b.func,
+                        );
+                        let checked = self.b.ins().call(check_ref, &[stride]);
+                        let stride = self.b.inst_results(checked)[0];
+                        self.emit_trap_check()?;
+                        stride
+                    }
+                    None => self.b.ins().iconst(types::I64, 1),
+                };
                 let coll_place = collection_str.trim().to_string();
                 let coll_ty = self
                     .var_tys
@@ -796,8 +809,14 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(step_block);
                 self.b.seal_block(step_block);
                 let idx = self.b.use_var(idx_var);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let next = self.b.ins().iadd(idx, one);
+                let remaining = self.b.ins().isub(len, idx);
+                let at_end = self.b.ins().icmp(
+                    IntCC::SignedGreaterThanOrEqual,
+                    stride,
+                    remaining,
+                );
+                let advanced = self.b.ins().iadd(idx, stride);
+                let next = self.b.ins().select(at_end, len, advanced);
                 self.b.def_var(idx_var, next);
                 self.b.ins().jump(header, &[]);
                 self.b.seal_block(header);

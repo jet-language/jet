@@ -74,11 +74,14 @@ fn run() {
     loop k, v; counts {
         print(\"{k}={v}\")
     }
+    loop entry; counts {
+        print(\"{entry.key}:{entry.value}\")
+    }
 }
 ";
     let (code, stdout) = build_and_run("tir_map", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "5\napple=5\nbanana=3\n");
+    assert_eq!(stdout, "5\napple=5\nbanana=3\napple:5\nbanana:3\n");
 }
 
 // --- c109 Phase 6: methods + clones -----------------------------------------

@@ -196,7 +196,9 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
             cond, step, body, ..
         } => {
             f(cond);
-            walk_stmt_exprs(step, f);
+            if let Some(step) = step {
+                walk_stmt_exprs(step, f);
+            }
             body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }
         Stmt::Loop { body, .. }

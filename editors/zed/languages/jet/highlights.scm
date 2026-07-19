@@ -39,6 +39,7 @@
 
 ; Loop labels (@outer)
 (loop_label) @label
+(next_stmt "next" @keyword.control)
 
 ; Definitions
 (function_def name: (identifier) @function)
@@ -56,7 +57,7 @@
 (named_arg name: (identifier) @property)
 
 ; BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-; keyword.control: break defer else if loop next return
+; keyword.control: break defer else if loop return
 [
   "break"
   "defer"

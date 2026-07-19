@@ -458,7 +458,9 @@ fn scan_stmt_for_variadic_uses(
         } => {
             expr_uses(&init.init, name, other);
             expr_uses(cond, name, other);
-            scan_stmt_for_variadic_uses(step, name, false, for_hits, other);
+            if let Some(step) = step {
+                scan_stmt_for_variadic_uses(step, name, false, for_hits, other);
+            }
             for st in body {
                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
             }

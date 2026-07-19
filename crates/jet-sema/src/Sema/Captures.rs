@@ -72,7 +72,9 @@ pub(crate) fn walk_stmts_for_const_refs(
                 walk_expr_for_const_refs(&init.init, const_names, taken);
                 walk_expr_for_const_refs(cond, const_names, taken);
                 walk_stmts_for_const_refs(inner, const_names, taken);
-                walk_stmts_for_const_refs(std::slice::from_ref(step.as_ref()), const_names, taken);
+                if let Some(step) = step {
+                    walk_stmts_for_const_refs(std::slice::from_ref(step.as_ref()), const_names, taken);
+                }
             }
             Stmt::Loop { body: inner, .. }
             | Stmt::Unsafe { body: inner, .. }
@@ -477,7 +479,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
             expr_refs_name(&init.init, name)
                 || expr_refs_name(cond, name)
                 || body.iter().any(|s| stmt_refs_name(s, name))
-                || stmt_refs_name(step, name)
+                || step.as_ref().is_some_and(|step| stmt_refs_name(step, name))
         }
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
@@ -882,7 +884,9 @@ pub(crate) fn stmt_collect_captures(
             expr_collect_captures(cond, bound, read, mut_cap);
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
-            stmt_collect_captures(step, bound, read, mut_cap);
+            if let Some(step) = step {
+                stmt_collect_captures(step, bound, read, mut_cap);
+            }
         }
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }

@@ -520,7 +520,9 @@ pub(crate) fn collect_core_stmts(
                 collect_core_expr(&init.init, imports, used, spans, ffi_cb);
                 collect_core_expr(cond, imports, used, spans, ffi_cb);
                 collect_core_stmts(body, imports, used, spans, ffi_cb);
-                collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used, spans, ffi_cb);
+                if let Some(step) = step {
+                    collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used, spans, ffi_cb);
+                }
             }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }

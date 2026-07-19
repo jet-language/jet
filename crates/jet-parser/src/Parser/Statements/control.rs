@@ -620,43 +620,56 @@ impl<'a> Parser<'a> {
             self.bump();
             let body = self.block_stmts();
             Ok(Stmt::Loop { body, span, label })
-        } else if self.looks_like_sigil_binding() {
-            // D-LOOP-SEMICOLON1=A: counted loop `loop i := 0; i < 10; i += 1 { … }`.
-            // Detected by `Ident :=` at the start of the header.
+        } else if matches!(self.peek().kind, TokKind::Ident(_))
+            && matches!(self.peek2().kind, TokKind::ColonEq | TokKind::Colon)
+        {
+            // D-LOOP-HEADER2=A: state loop. Only a plain mutable name binding
+            // may initialize state; sigil_binding owns the optional type grammar.
             let init = self.sigil_binding()?;
+            if !init.mutable || init.pattern.is_some() || init.name.is_empty() {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "loop state needs one mutable name binding".to_string(),
+                    "state changes between loop turns, so its header starts with `name := value`"
+                        .to_string(),
+                    "write `loop name[: Type] := value; condition { ... }`".to_string(),
+                    Some(init.name_span),
+                ));
+            }
             self.expect(
                 TokKind::Semi,
-                "after the init in `loop init; cond; step { … }`",
+                "after the state initializer",
             )?;
             let cond = self.expr_no_struct_lit()?;
-            self.expect(
-                TokKind::Semi,
-                "after the condition in `loop init; cond; step { … }`",
-            )?;
-            // Parse the afterthought: an assignment expression (no trailing `;`).
-            let step_expr = self.expr()?;
-            let step: Stmt = if matches!(self.peek().kind, TokKind::Eq)
-                || self.peek().kind.compound_op().is_some()
-            {
-                let op_tok = self.bump();
-                let op = op_tok.kind.compound_op();
-                let value = self.expr()?;
-                let target = self.expr_to_lvalue(step_expr)?;
-                Stmt::Assign {
-                    target,
-                    op,
-                    op_span: op_tok.span,
-                    value,
-                }
+            let step = if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                let step_expr = self.expr()?;
+                let step = if matches!(self.peek().kind, TokKind::Eq)
+                    || self.peek().kind.compound_op().is_some()
+                {
+                    let op_tok = self.bump();
+                    let op = op_tok.kind.compound_op();
+                    let value = self.expr()?;
+                    let target = self.expr_to_lvalue(step_expr)?;
+                    Stmt::Assign {
+                        target,
+                        op,
+                        op_span: op_tok.span,
+                        value,
+                    }
+                } else {
+                    Stmt::Expr(step_expr)
+                };
+                Some(Box::new(step))
             } else {
-                Stmt::Expr(step_expr)
+                None
             };
             self.expect(TokKind::LBrace, "to open the loop body")?;
             let body = self.block_stmts();
             Ok(Stmt::CountedLoop {
                 init,
                 cond,
-                step: Box::new(step),
+                step,
                 body,
                 span,
                 label,

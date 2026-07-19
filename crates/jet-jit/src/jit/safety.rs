@@ -533,7 +533,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             resident_safe_stmt(init, callees)
                 && matches!(&cond.ty, Type::Bool)
                 && resident_safe_expr(cond, callees)
-                && resident_safe_stmt(step, callees)
+                && step.as_ref().is_none_or(|step| resident_safe_stmt(step, callees))
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::Range {
@@ -576,9 +576,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             var2.is_none()
                 && method_kind.is_none()
                 && !columnar
-                // Dynamic source-stride validation currently uses the semantic
-                // fallback tier; resident native code must never skip it.
-                && step.is_none()
+                && step.as_ref().is_none_or(|step| resident_safe_expr(step, callees))
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::EnumMatch {
@@ -639,9 +637,6 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
         }
     }
     for (i, s) in tir.body.iter().enumerate() {
-        if matches!(s, TStmt::ForIn { step: Some(_), .. }) {
-            return Some("source stride uses semantic fallback".into());
-        }
         if !resident_safe_stmt(s, callees) {
             return Some(format!("body stmt {i}"));
         }
@@ -711,7 +706,9 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
                 init, step, body, ..
             } => {
                 count_spawn_sites_stmts(std::slice::from_ref(init), n);
-                count_spawn_sites_stmts(std::slice::from_ref(step), n);
+                if let Some(step) = step {
+                    count_spawn_sites_stmts(std::slice::from_ref(step), n);
+                }
                 count_spawn_sites_stmts(body, n);
             }
             TStmt::Region(body) => count_spawn_sites_stmts(body, n),

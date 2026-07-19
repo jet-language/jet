@@ -164,7 +164,7 @@ fn context_allows_keyword(src: &str, offset: usize, kw: &str) -> bool {
     }
     matches!(
         kw,
-        "return" | "if" | "else" | "when" | "true" | "false" | "break" | "continue"
+        "return" | "if" | "else" | "true" | "false" | "break"
     )
 }
 
@@ -363,6 +363,16 @@ pub(crate) fn compute_completions(
 
     // D-BINDEXPLICIT1: binding snippets with canonical sigils.
     if context_is_binding_start(src, offset) {
+        if seen.insert("contextual:next".to_string()) {
+            items.push(CompletionItem {
+                label: Syntax::KW_NEXT.to_string(),
+                kind: ck::KEYWORD,
+                detail: Some("advance the current loop".to_string()),
+                insert_text: None,
+                insert_text_format: 1,
+                auto_import: None,
+            });
+        }
         for (label, detail, insert) in [
             (
                 "bind immut (inferred)",

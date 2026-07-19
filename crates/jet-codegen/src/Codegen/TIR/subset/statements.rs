@@ -185,7 +185,10 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             if !expr_in_subset(cond, cx, &inner) {
                 return false;
             }
-            if !stmt_in_subset(step.as_ref(), cx, &mut inner) {
+            if step
+                .as_ref()
+                .is_some_and(|step| !stmt_in_subset(step.as_ref(), cx, &mut inner))
+            {
                 return false;
             }
             body.iter().all(|s| stmt_in_subset(s, cx, &mut inner))

@@ -989,7 +989,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 gc_transferred: false,
             });
             let cond = lower_expr(cond, cx, &mut scoped);
-            let step = Box::new(lower_stmt(step.as_ref(), cx, &mut scoped));
+            let step = step
+                .as_ref()
+                .map(|step| Box::new(lower_stmt(step.as_ref(), cx, &mut scoped)));
             TStmt::CountedLoop {
                 label: label_name(label),
                 init: init_stmt,
@@ -1042,8 +1044,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let mut coll_elem_ty: Option<Type> = match &lowered_coll.ty {
                     Type::List(inner) => Some((**inner).clone()),
                     Type::FixedList { elem, .. } => Some((**elem).clone()),
-                    // Map iteration: key type for single-binding form.
-                    Type::Map { key, .. } => Some((**key).clone()),
+                    Type::Map { key, value, .. } => Some(Type::Tuple(vec![
+                        ("key".to_string(), Box::new((**key).clone())),
+                        ("value".to_string(), Box::new((**value).clone())),
+                    ])),
                     // D-STREAMYIELD1: a generator's `Stream<T>`.
                     Type::Apply { name, args } if name == "Stream" && args.len() == 1 => {
                         Some(args[0].clone())
@@ -1074,9 +1078,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     .insert(var.clone(), (mangle(var), coll_elem_ty.clone()));
                 if let Some((v2, _)) = var2 {
                     // Two-binding map form: v2 gets the value type.
-                    let v2_ty = match &coll_elem_ty {
-                        _ => None, // map value type is not tracked here; keep None for v2
+                    let v2_ty = match &lowered_coll.ty {
+                        Type::Map { value, .. } => Some((**value).clone()),
+                        _ => None,
                     };
+                    if let Type::Map { key, .. } = &lowered_coll.ty {
+                        branch.locals.insert(var.clone(), (mangle(var), Some((**key).clone())));
+                    }
                     branch.locals.insert(v2.clone(), (mangle(v2), v2_ty));
                 }
                 // D-SOA1: a single-binding loop over a columnar list iterates the

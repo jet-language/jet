@@ -29,6 +29,15 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
 /// `crates/jet-comptime/src/Comptime/Diagnostics.rs::comptime_panic`). The JIT
 /// tier must report the SAME code/voice, not a new one, for parity.
 fn jit_panic_diag(msg: &str) -> Diagnostic {
+    if let Some(message) = msg.strip_prefix("E0123: ") {
+        return Diagnostic::error(
+            "E0123",
+            message.to_string(),
+            "the stride is checked before the first source item is pulled".to_string(),
+            "use a stride of 1 or more".to_string(),
+            None,
+        );
+    }
     Diagnostic::error(
         "E0953",
         "your comptime code stopped the build".to_string(),

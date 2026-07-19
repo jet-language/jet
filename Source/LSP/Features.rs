@@ -385,6 +385,9 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::KwMove => None,
 
         TokKind::Ident(name) => {
+            if name == Syntax::KW_NEXT && is_contextual_next(tokens, idx) {
+                return Some((st::KEYWORD, 0));
+            }
             if is_live_teaching_semantic_word(name) {
                 return None;
             }
@@ -504,6 +507,13 @@ fn next_significant(tokens: &[Token], idx: usize) -> Option<usize> {
         .enumerate()
         .skip(idx + 1)
         .find_map(|(i, tok)| (!is_trivia(tok)).then_some(i))
+}
+
+fn is_contextual_next(tokens: &[Token], idx: usize) -> bool {
+    matches!(
+        previous_significant(tokens, idx).map(|idx| &tokens[idx].kind),
+        Some(TokKind::LBrace | TokKind::Semi | TokKind::QuestionQuestion)
+    )
 }
 
 fn is_trivia(tok: &Token) -> bool {
