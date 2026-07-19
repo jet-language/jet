@@ -682,10 +682,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
         "core.vault" => &["get", "rotting_new"],
-        // D-AUTH2=A (ratified 2026-07-13): standalone HS256 JWT verification.
-        // verify_jwt checks the signature and optional expiry, returns audience claim
-        // data in typed Claims, and does not validate an expected audience.
-        "core.auth" => &["verify_jwt"],
+        // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: strict HS256 JWT and v4.public
+        // PASETO verification with required expected audience.
+        "core.auth" => &["verify_jwt", "verify_paseto"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -700,7 +699,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         ("jet.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
             | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
-        // D-AUTH2=A: typed claims record returned by verify_jwt.
+        // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
         | ("core.auth", "Claims" | "AuthError")
     )
 }

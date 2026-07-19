@@ -2475,12 +2475,16 @@ index, not a substitute for that law.
   verification. `app.auth(users: db)` is the magic default; every knob
   expert-overridable; secrets carry the `.Credential` taint kind; policy
   may require stronger factors.
-- **D-AUTH2=A** *(ratified 2026-07-13)*: token verification ships as
-  standalone typed `core.auth` functions before the application graph.
-  `auth.verify_jwt(token, key)` verifies HS256 signatures and an optional
-  `exp` claim, then returns `Result<Claims>`; callers validate expected
-  audience from the typed claim. Future `app.auth` reuses this function rather
-  than creating a second verification mechanism.
+- **D-AUTH2=A / D-AUTH-TOKENPOLICY1=A** *(ratified 2026-07-18)*: token
+  verification ships as strict standalone typed `core.auth` functions before
+  the application graph. `verify_jwt(token, key:, audience:, [issuer:,
+  clock_skew:])` accepts HS256 only and requires valid `exp` and `aud` claims.
+  `verify_paseto(token, key:, audience:, [issuer:, clock_skew:, footer:,
+  implicit:])` accepts PASETO v4.public only, verifies Ed25519 over PAE, and
+  applies the same claims policy. Unknown algorithms, versions, and purposes
+  fail closed. Both return `Result<Claims, AuthError>`; `Claims.audience`
+  preserves the validated audience for downstream authorization. Future
+  `app.auth` reuses these functions rather than creating another mechanism.
 - **D-SYNC1=A**: `core.sync` CRDT value types — `SyncText`,
   `SyncMap<K,V>`, `SyncList<T>`, `SyncCounter`; `@Codable`,
   deterministic merge, ride the live-query channel via

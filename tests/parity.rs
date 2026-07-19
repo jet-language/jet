@@ -48,6 +48,10 @@ const EFFECT_GATED_MODULES: &[&str] = &[
 /// PR that closes the gap. Anything AOT supports that ISN'T listed here and
 /// isn't dispatched by comptime fails this test.
 const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
+    // core.auth verifies signatures and reads the system clock. The dev interpreter
+    // names that native boundary and default dev transparently uses the AOT path.
+    ("core.auth", "verify_jwt"),
+    ("core.auth", "verify_paseto"),
     // core.text: full Unicode Standard normalization/segmentation (NFC/NFD/
     // NFKC/NFKD compose+decompose tables, grapheme/word/sentence boundary
     // algorithms) is a large, separate undertaking even though AOT's own
@@ -337,6 +341,17 @@ fn extract_quoted(s: &str) -> Vec<String> {
 fn read(rel: &str) -> String {
     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel);
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {}", path, e))
+}
+
+#[test]
+fn auth_aot_builtins_have_explicit_native_gaps() {
+    let sigs = read("crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs");
+    let aot = extract_pairs(&sigs);
+    let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
+    for method in ["verify_jwt", "verify_paseto"] {
+        assert!(aot.contains(&("core.auth".to_string(), method.to_string())));
+        assert!(gaps.contains(&("core.auth", method)));
+    }
 }
 
 #[test]

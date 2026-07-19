@@ -123,6 +123,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
         "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        | "Claims" | "AuthError"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
         // (`.Stream`/`.Inherit`/`.Capture`, D-ENUMDOT2). `ProcessStdin`/
         // `ProcessStdoutStream`/`ProcessStderrStream` are field-access-only
@@ -255,6 +256,15 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == "Claims" {
+        return match field {
+            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
+            "audience" => Some(Type::String),
+            "expires_at" => Some(Type::Int),
+            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
     if type_name == Syntax::TYPE_IO_CONTEXT {
         return match field {
             "operation" => Some(Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),

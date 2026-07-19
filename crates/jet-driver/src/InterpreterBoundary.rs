@@ -112,6 +112,7 @@ fn native_module_feature(name: &str) -> Option<&'static str> {
         "core.process" => Some("runs another process or exits early"),
         "core.random" => Some("uses random numbers"),
         "core.time" => Some("reads the clock or sleeps"),
+        "core.auth" => Some("verifies signed authentication tokens using the native crypto runtime"),
         _ => None,
     }
 }

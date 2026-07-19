@@ -460,6 +460,8 @@ impl Cx {
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
         let (alias, leaf) = name.split_once('.')?;
         match (self.core_imports.get(alias).map(String::as_str), leaf) {
+            (Some("core.auth"), "Claims") => Some("Claims"),
+            (Some("core.auth"), "AuthError") => Some("AuthError"),
             (Some("core.env"), "EnvError") => Some("EnvError"),
             (Some("core.encoding"), "DataTree") => Some("DataTree"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
@@ -833,6 +835,12 @@ impl Cx {
                 "()".to_string()
             }
             Type::Named(name) if name == "Error" => "String".to_string(),
+            Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
+                format!("{}JetAuthClaims", self.root_prefix)
+            }
+            Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
+                format!("{}JetAuthError", self.root_prefix)
+            }
             Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError") => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 let rust = match name.as_str() {
@@ -1082,6 +1090,10 @@ impl Cx {
             }
             Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
                 let resolved = self.core_qualified_rust_type_name(name).unwrap();
+                if resolved == "Claims" || resolved == "AuthError" {
+                    let rust = if resolved == "Claims" { "JetAuthClaims" } else { "JetAuthError" };
+                    return format!("{}{rust}", self.root_prefix);
+                }
                 if matches!(resolved,
                     "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
                     | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"

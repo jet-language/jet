@@ -292,15 +292,14 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
         )),
-        // D-AUTH2=A (ratified 2026-07-13): `auth.verify_jwt(token, key) -> Result<Claims>`.
-        // Verifies the JWT's HMAC-SHA256 signature and optional expiry. Returns typed
-        // `Claims` (subject, audience, expires_at, issued_at), but does not validate an
-        // expected audience. Failures cover signature mismatch, expiry, and malformed data.
-        // core.auth calls core.crypto primitives; no new deps (I6).
-        ("core.auth", "verify_jwt") => Some((
+        // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: closed token verification. The
+        // three-argument forms are the beginner surface; core_call.rs admits
+        // the same functions' optional named controls.
+        ("core.auth", "verify_jwt" | "verify_paseto") => Some((
             vec![
-                (read, Type::String),                         // token: String (raw JWT)
-                (read, Type::List(Box::new(u8_ty()))),        // key: [Int8N] (HMAC-SHA256 key)
+                (read, Type::String),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::String),
             ],
             Some(result_ty(
                 Type::Named("Claims".into()),

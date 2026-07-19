@@ -1351,6 +1351,9 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.crypto") || t.contains("jet.crypto") {
         return Some("`core.crypto`");
     }
+    if t.contains("core.auth") {
+        return Some("`core.auth` token verification");
+    }
     if t.contains("jet.log") {
         return Some("`core.log`");
     }

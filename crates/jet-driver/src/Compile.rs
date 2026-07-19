@@ -59,7 +59,7 @@ impl Capabilities {
             uses_file_io: any(&["core.io", "core.files", "core.path", "core.watcher"]),
             uses_unsafe: has_unsafe || any(&["core.mem"]),
             uses_ffi: has_ffi,
-            uses_crypto: any(&["jet.crypto", "core.crypto.expert"]),
+            uses_crypto: any(&["jet.crypto", "core.crypto.expert", "core.auth"]),
             uses_concurrency: any(&["core.tasks", "core.time", "jet.time", "core.watcher"]),
         }
     }

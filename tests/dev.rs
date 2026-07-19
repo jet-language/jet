@@ -68,6 +68,7 @@ fn uses_ffi_bridge(stem: &str) -> bool {
             | "crypto/crypto_migration"
             | "crypto/crypto_suite"
             | "crypto/vault_secret"
+            | "crypto/auth_tokens"
             | "io/compress_gzip"
             | "io/compress_zstd"
     )
@@ -1274,6 +1275,44 @@ fn dev_default_runs_env_program_via_aot_fallback() {
     let got = normalize_for_parity("env_fallback", got);
     let expected = normalize_for_parity("env_fallback", expected);
     assert_eq!(got, expected);
+}
+
+/// D-AUTH-TOKENPOLICY1=A: signature verification and expiry checks stay on the
+/// native crypto/clock path; default dev falls back transparently and exactly.
+#[test]
+fn dev_default_runs_auth_verification_via_aot_fallback() {
+    let _guard = FfiBridgeLock::acquire();
+    let dir = std::env::temp_dir().join(format!("jet_dev_auth_fallback_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("auth_fallback.jet");
+    fs::write(
+        &file,
+        r#"use core.auth as auth
+
+fn run() {
+    key: [U8] :: [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]
+    token := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
+    claims :: auth.verify_jwt(token, key: key, audience: "gateway") ?? panic("verification failed")
+    print(claims.audience)
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    match dev_iteration_with_timeout("auth_fallback_boundary", &shown, true) {
+        RunOutcome::Problems(diags) => assert!(diags.iter().any(|d| d.code == "E2201"), "{diags:?}"),
+        RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.auth"),
+    }
+
+    let expected = compiled_binary_output(&dir, "auth_fallback", 0, "auth_fallback", &shown);
+    let got = match dev_iteration_with_timeout("auth_fallback", &shown, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev should AOT-fallback-run core.auth: {diags:?}"),
+    };
+    assert_eq!(normalize_for_parity("auth_fallback", got), normalize_for_parity("auth_fallback", expected));
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// D-SHAPE-PLACE1=A (#613): safe structural splitting follows the sema-proved

@@ -80,6 +80,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "DataGroup"
             | "DataStatus"
             | "DataSummary"
+            | "Claims"
     );
     if ui_name_collision && cx.type_names.contains(type_name) {
         return None;
@@ -162,6 +163,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             "max_reply_line_bytes" | "max_reply_lines" | "max_capabilities" |
             "max_recipients" | "max_message_bytes" | "max_auth_challenge_bytes"),
         "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
+        "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "issued_at"),
         _ => false,
     };
     if known {
@@ -218,6 +220,15 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     let Type::Named(name) = recv_ty else {
         return None;
     };
+    if name == "Claims" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
+            "audience" => Some(Type::String),
+            "expires_at" => Some(Type::Int),
+            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
     // D-MIGRATE3=A: `MigrationStatus` is likewise a reserved core struct —
     // same user-type-wins order.
     if name == "MigrationStatus" && !cx.struct_fields.contains_key(name) {

@@ -117,6 +117,8 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
             || u.starts_with("jet.crypto::")
             || u == "core.crypto.expert"
             || u.starts_with("core.crypto.expert::")
+            || u == "core.auth"
+            || u.starts_with("core.auth::")
             || u == "core.email"
             || u.starts_with("core.email::")
     });

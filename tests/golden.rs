@@ -225,6 +225,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             | "crypto/crypto_migration"
             | "crypto/crypto_suite"
             | "crypto/vault_secret"
+            | "crypto/auth_tokens"
             | "io/compress_gzip"
             | "io/compress_zstd"
     );

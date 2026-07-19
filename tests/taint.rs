@@ -277,6 +277,28 @@ fn run() {
     );
 }
 
+/// Auth accepts credential-tainted tokens for verification, while the token
+/// itself remains protected from accidental logging.
+#[test]
+fn auth_token_keeps_credential_leak_protection() {
+    let src = r#"
+use core.auth as auth
+
+fn run() {
+    token :: @Tainted(Credential) "a.b.c"
+    key: [U8] :: [0, 1, 2]
+    _ := auth.verify_jwt(token, key: key, audience: "gateway")
+    print(token)
+}
+"#;
+    let found = codes(src);
+    assert_eq!(
+        found.iter().filter(|code| code.as_str() == "E0722").count(),
+        1,
+        "{found:?}"
+    );
+}
+
 /// A clean value (no taint) at `print` is fine — no E0722.
 #[test]
 fn clean_value_to_print_is_not_e0722() {

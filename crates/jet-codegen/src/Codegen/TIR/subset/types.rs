@@ -325,6 +325,9 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     if name == "Match" {
         return true;
     }
+    if matches!(name.as_str(), "Claims" | "AuthError") {
+        return true;
+    }
     // A prelude struct constructable via a struct literal, or a core/prelude struct that
     // renders to its own Rust name. (FileReader/TcpStream/Arena/… are opaque handles — no
     // literal form — but are valid value types; admit the constructable + core ones, plus

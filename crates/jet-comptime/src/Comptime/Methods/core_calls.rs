@@ -318,6 +318,7 @@ fn repl_native_only_module(module: &str) -> Option<&'static str> {
         "core.archive" | "jet.archive" => Some("`core.archive`"),
         "core.reactive" | "jet.reactive" => Some("`core.reactive`"),
         "core.crypto" | "core.crypto.random" | "jet.crypto" => Some("`core.crypto`"),
+        "core.auth" => Some("`core.auth` token verification"),
         "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
         "core.mem" | "core.mem.alloc" => Some("`core.mem` (low-level memory tier)"),
         "jet.log" => Some("`core.log`"),
