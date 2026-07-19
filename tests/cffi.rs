@@ -1161,17 +1161,12 @@ fn cffi_header_use_form_lowers_to_lib() {
     // module (header basename → link key `demo`).
     let root = std::env::temp_dir().join(format!("jet_cffi_header_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
-    let cache = root.join(".jet/bindings/c");
-    fs::create_dir_all(&cache).unwrap();
-    fs::write(
-        cache.join("demo.jet"),
-        "@Bindgen module c.demo.__bindgen__ { fn ping() -> Int = \"demo_ping\"; }\n",
-    )
-    .unwrap();
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("demo.h"), "int demo_ping(void);\n").unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
-        "use \"demo.h\" as d;\nfn run() { print(d.ping()); }\n",
+        "use \"demo.h\" as d;\nfn run() { print(d.demo_ping()); }\n",
     )
     .unwrap();
     let src = fs::read_to_string(&main).unwrap();
