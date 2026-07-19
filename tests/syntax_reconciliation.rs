@@ -230,6 +230,14 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     ),
 ];
 
+fn marker_plane_row<'a>(matrix: &'a str, row: &str) -> &'a str {
+    let row_token = format!("| `{row}` |");
+    matrix
+        .lines()
+        .find(|line| line.starts_with(&row_token))
+        .unwrap_or_else(|| panic!("marker-plane matrix missing row `{row}`"))
+}
+
 #[test]
 fn live_surface_has_no_retired_spellings() {
     let mut failures = Vec::new();
@@ -502,17 +510,21 @@ fn marker_plane_matrix_covers_current_marker_families() {
         fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
     for (row, spellings) in MARKER_PLANE_ROWS {
-        let row_token = format!("| `{}` |", row);
-        assert!(
-            matrix.contains(&row_token),
-            "marker-plane matrix missing row `{row}`"
-        );
+        let row_text = marker_plane_row(&matrix, row);
         for spelling in *spellings {
             assert!(
-                matrix.contains(spelling),
+                row_text.contains(spelling),
                 "marker-plane matrix row `{row}` missing spelling `{spelling}`"
             );
         }
+    }
+
+    let effect_row = marker_plane_row(&matrix, "effect-capability-directives");
+    for anchor in ["EFFECT_ARROW_OPEN", "EFFECT_ARROW_CLOSE", "D-SHAPE8"] {
+        assert!(
+            effect_row.contains(anchor),
+            "effect-capability row must cite `{anchor}`"
+        );
     }
 
     for syntax_anchor in [
@@ -521,6 +533,8 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "ATTR_LAYOUT",
         "ATTR_CODABLE",
         "APPLIED_RULES",
+        "EFFECT_ARROW_OPEN",
+        "EFFECT_ARROW_CLOSE",
         "KW_CAPS",
         "KW_GRANT",
         "KW_COMPTIME",
@@ -541,6 +555,7 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "D-BENCH1",
         "D-CAPBUNDLE1",
         "D-CTMARKER1",
+        "D-SHAPE8",
     ] {
         assert!(
             matrix.contains(decision_anchor) && decisions.contains(decision_anchor),

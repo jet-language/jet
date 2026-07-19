@@ -8,10 +8,10 @@
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, ATTR_TARGET,
-// ATTR_LAYOUT, ATTR_CODABLE, APPLIED_RULES, KW_CAPS, KW_GRANT,
-// KW_COMPTIME, KW_DERIVE, ATTR_TRACK. Constants live in the private modules
-// below; keep this root file mentioning them so I7 audits can check one
-// canonical surface entrypoint.
+// ATTR_LAYOUT, ATTR_CODABLE, APPLIED_RULES, EFFECT_ARROW_OPEN,
+// EFFECT_ARROW_CLOSE, KW_CAPS, KW_GRANT, KW_COMPTIME, KW_DERIVE, ATTR_TRACK.
+// Constants live in the private modules below; keep this root file mentioning
+// them so I7 audits can check one canonical surface entrypoint.
 //
 // D-SHAPE-CLI1 reuses the existing `fn run` / `@Cli` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
