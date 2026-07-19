@@ -558,7 +558,7 @@ inspectable enum with `MalformedToken`, `UnsupportedToken`, `InvalidSignature`,
 `DecodeError` variants. The implementation is compiler-embedded, reuses Jet's
 JSON and crypto mechanisms, and adds no external dependency.
 
-Example: `examples/features/web/auth_tokens.jet`.
+Example: `examples/features/crypto/auth_tokens.jet`.
 
 ### `core.watcher` — file/process/port change events
 
