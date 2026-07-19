@@ -44,6 +44,7 @@ fn jet_net_to_io_error(error: JetNetError) -> jet_std::IoError {
         JetNetError::Timeout(_) => jet_std::IoError::TimedOut(context),
         JetNetError::Cancelled(_) => jet_std::IoError::Cancelled(context),
         JetNetError::Closed(_) | JetNetError::NotConnected(_) => jet_std::IoError::Closed(context),
+        JetNetError::Protocol(_) => jet_std::IoError::Protocol(context),
         _ => jet_std::IoError::Other(context),
     }
 }
@@ -106,17 +107,17 @@ impl JetIoReader for JetTlsStream {
                 Some("tls read limit must be positive".to_string()),
             )));
         }
-        jet_net_tls_read_bytes(self, limit).map_err(jet_net_to_io_error)
+        jet_net_tls_read_bytes(self, limit)
     }
 }
 
 impl JetIoWriter for JetTlsStream {
     fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IoError> {
-        jet_net_tls_write_bytes(self, bytes).map_err(jet_net_to_io_error)
+        jet_net_tls_write_bytes(self, bytes)
     }
 
     fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
-        jet_net_tls_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
+        jet_net_tls_write_all_bytes(self, bytes)
     }
 }
 
@@ -258,21 +259,10 @@ pub struct JetTlsRootCertificates {
     pem: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub struct JetTlsClientIdentity {
     cert_chain: Vec<u8>,
-    private_key: Vec<u8>,
-}
-
-impl Clone for JetTlsClientIdentity {
-    fn clone(&self) -> Self {
-        Self { cert_chain: self.cert_chain.clone(), private_key: self.private_key.clone() }
-    }
-}
-
-impl Drop for JetTlsClientIdentity {
-    fn drop(&mut self) {
-        self.private_key.fill(0);
-    }
+    private_key: JetCryptoSecretBytes,
 }
 
 #[derive(Clone)]
@@ -310,9 +300,15 @@ fn jet_tls_client_config_default() -> JetTlsClientConfig {
 fn jet_tls_client_config_with_alpn(
     mut config: JetTlsClientConfig,
     protocols: &Vec<String>,
-) -> JetTlsClientConfig {
+) -> Result<JetTlsClientConfig, jet_std::IoError> {
+    if protocols.iter().any(|protocol| protocol.is_empty() || protocol.len() > u8::MAX as usize) {
+        return Err(jet_tls_config_error(
+            "ClientConfig.with_alpn",
+            "TLS ALPN protocols must contain 1 to 255 bytes".to_string(),
+        ));
+    }
     config.alpn = protocols.clone();
-    config
+    Ok(config)
 }
 
 fn jet_tls_config_error(operation: &str, message: String) -> jet_std::IoError {
@@ -339,7 +335,10 @@ fn jet_tls_client_identity_from_pem(
 ) -> Result<JetTlsClientIdentity, jet_std::IoError> {
     validate(cert_chain, private_key)
         .map_err(|message| jet_tls_config_error("ClientIdentity.from_pem", message))?;
-    Ok(JetTlsClientIdentity { cert_chain: cert_chain.clone(), private_key: private_key.clone() })
+    Ok(JetTlsClientIdentity {
+        cert_chain: cert_chain.clone(),
+        private_key: JetCryptoSecretBytes::new(private_key.clone()),
+    })
 }
 
 fn jet_tls_client_config_with_trust(
@@ -591,6 +590,26 @@ fn jet_net_tls_result<T>(result: Result<T, String>, operation: &str) -> Result<T
             JetNetError::Timeout(detail)
         } else {
             JetNetError::Tls(detail)
+        }
+    })
+}
+
+fn jet_net_tls_io_result<T>(
+    result: Result<T, String>,
+    operation: jet_std::IoOperation,
+) -> Result<T, jet_std::IoError> {
+    result.map_err(|message| {
+        let context = jet_std::IoContext::new(operation, Some("TLS stream".to_string()), None, Some(message.clone()));
+        if message.starts_with("TLS protocol truncation:") || message.starts_with("TLS protocol error:") {
+            jet_std::IoError::Protocol(context)
+        } else if message.contains("closed") {
+            jet_std::IoError::Closed(context)
+        } else if message.contains("timed out") || message.contains("deadline") {
+            jet_std::IoError::TimedOut(context)
+        } else if message.contains("cancelled") {
+            jet_std::IoError::Cancelled(context)
+        } else {
+            jet_std::IoError::Other(context)
         }
     })
 }
@@ -924,6 +943,26 @@ fn jet_net_tls_scheduler_wait(
     jet_net_scheduler_wait(&stream.socket, read, write, operation)
 }
 
+fn jet_net_tls_io_scheduler_wait(
+    stream: &JetTlsStream,
+    fallback_read: bool,
+    fallback_write: bool,
+    operation: jet_std::IoOperation,
+) -> Result<(), jet_std::IoError> {
+    let (mut read, mut write) = jet_net_tls_io_result((stream.wants)(stream.id), operation)?;
+    if !read && !write {
+        read = fallback_read;
+        write = fallback_write;
+    }
+    let label = match operation {
+        jet_std::IoOperation::Read => "tls read",
+        jet_std::IoOperation::Write => "tls write",
+        jet_std::IoOperation::Close => "tls close",
+        _ => "tls I/O",
+    };
+    jet_net_scheduler_wait(&stream.socket, read, write, label).map_err(jet_net_to_io_error)
+}
+
 fn jet_net_tls_client_scheduler(
     stream: JetTcpStream,
     server_name: &String,
@@ -1054,14 +1093,6 @@ fn jet_net_tls_client_scheduler_config_deadline(
     peer_snapshot: fn(i64) -> Result<JetTlsPeerSnapshot, String>,
 ) -> Result<JetTlsStream, JetNetError> {
     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
-    for protocol in &config.alpn {
-        if protocol.is_empty() || protocol.len() > u8::MAX as usize {
-            return Err(JetNetError::InvalidInput(jet_net_detail(
-                "tls handshake", None, None,
-                "TLS ALPN protocols must contain 1 to 255 bytes".to_string(), None,
-            )));
-        }
-    }
     let (trust_mode, roots) = match &config.trust {
         JetTlsTrust::System => (0, Vec::new()),
         JetTlsTrust::SystemPlus(roots) => (1, roots.pem.clone()),
@@ -1069,7 +1100,7 @@ fn jet_net_tls_client_scheduler_config_deadline(
     };
     let empty = Vec::new();
     let (cert_chain, private_key) = config.identity.as_ref()
-        .map(|identity| (&identity.cert_chain, &identity.private_key))
+        .map(|identity| (&identity.cert_chain, identity.private_key.as_vec()))
         .unwrap_or((&empty, &empty));
     let version = |version| match version { JetTlsVersion::Tls12 => 12, JetTlsVersion::Tls13 => 13 };
     jet_net_tls_client_scheduler_with_begin(
@@ -1090,59 +1121,62 @@ fn jet_net_tls_client_scheduler_config_deadline(
     )
 }
 
-fn jet_net_tls_read_bytes(stream: &mut JetTlsStream, limit: i64) -> Result<Vec<u8>, JetNetError> {
+fn jet_net_tls_read_bytes(stream: &mut JetTlsStream, limit: i64) -> Result<Vec<u8>, jet_std::IoError> {
     if limit <= 0 {
-        return Err(JetNetError::InvalidInput(jet_net_detail(
-            "tls read", None, None, "tls read limit must be positive".to_string(), None,
+        return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+            jet_std::IoOperation::Read, Some("TLS stream".to_string()), None,
+            Some("tls read limit must be positive".to_string()),
         )));
     }
     let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
     loop {
-        match jet_net_tls_result((stream.read_step)(stream.id, limit), "tls read")? {
+        match jet_net_tls_io_result((stream.read_step)(stream.id, limit), jet_std::IoOperation::Read)? {
             Some(bytes) => return Ok(bytes),
-            None => jet_net_tls_scheduler_wait(stream, true, false, "tls read")?,
+            None => jet_net_tls_io_scheduler_wait(stream, true, false, jet_std::IoOperation::Read)?,
         }
     }
 }
 
-fn jet_net_tls_read_bytes_deadline(stream: &mut JetTlsStream, limit: i64, deadline: &jet_std::Duration) -> Result<Vec<u8>, JetNetError> {
-    let _deadline = jet_net_explicit_deadline(deadline, "tls read")?;
+fn jet_net_tls_read_bytes_deadline(stream: &mut JetTlsStream, limit: i64, deadline: &jet_std::Duration) -> Result<Vec<u8>, jet_std::IoError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls read").map_err(jet_net_to_io_error)?;
     jet_net_tls_read_bytes(stream, limit)
 }
 
-fn jet_net_tls_read_text(stream: &mut JetTlsStream) -> Result<String, JetNetError> {
+fn jet_net_tls_read_text(stream: &mut JetTlsStream) -> Result<String, jet_std::IoError> {
     let bytes = jet_net_tls_read_bytes(stream, 8192)?;
-    String::from_utf8(bytes).map_err(|error| JetNetError::InvalidInput(jet_net_detail(
-        "tls read text", None, None, format!("tls read text failed: invalid UTF-8: {}", error), None,
+    String::from_utf8(bytes).map_err(|error| jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+        jet_std::IoOperation::Read, Some("TLS stream".to_string()), None,
+        Some(format!("tls read text failed: invalid UTF-8: {}", error)),
     )))
 }
 
 fn jet_net_tls_write_bytes_with_current_deadline(
     stream: &mut JetTlsStream,
     data: &Vec<u8>,
-) -> Result<i64, JetNetError> {
+) -> Result<i64, jet_std::IoError> {
     loop {
-        match jet_net_tls_result((stream.write_step)(stream.id, data), "tls write")? {
+        match jet_net_tls_io_result((stream.write_step)(stream.id, data), jet_std::IoOperation::Write)? {
             Some(count) => return Ok(count),
-            None => jet_net_tls_scheduler_wait(stream, false, true, "tls write")?,
+            None => jet_net_tls_io_scheduler_wait(stream, false, true, jet_std::IoOperation::Write)?,
         }
     }
 }
 
-fn jet_net_tls_write_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
+fn jet_net_tls_write_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Result<i64, jet_std::IoError> {
     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     jet_net_tls_write_bytes_with_current_deadline(stream, data)
 }
 
-fn jet_net_tls_write_all_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Result<(), JetNetError> {
+fn jet_net_tls_write_all_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Result<(), jet_std::IoError> {
     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     let mut offset = 0usize;
     while offset < data.len() {
         let chunk = data[offset..].to_vec();
         let count = jet_net_tls_write_bytes_with_current_deadline(stream, &chunk)? as usize;
         if count == 0 {
-            return Err(JetNetError::ConnectionReset(jet_net_detail(
-                "tls write all", None, None, "tls write all failed: zero bytes written".to_string(), None,
+            return Err(jet_std::IoError::Other(jet_std::IoContext::new(
+                jet_std::IoOperation::Write, Some("TLS stream".to_string()), None,
+                Some("tls write all failed: zero bytes written".to_string()),
             )));
         }
         offset += count;
@@ -1150,35 +1184,35 @@ fn jet_net_tls_write_all_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Res
     Ok(())
 }
 
-fn jet_net_tls_write_all_bytes_deadline(stream: &mut JetTlsStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<(), JetNetError> {
-    let _deadline = jet_net_explicit_deadline(deadline, "tls write all")?;
+fn jet_net_tls_write_all_bytes_deadline(stream: &mut JetTlsStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<(), jet_std::IoError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls write all").map_err(jet_net_to_io_error)?;
     jet_net_tls_write_all_bytes(stream, data)
 }
 
-fn jet_net_tls_write_text(stream: &mut JetTlsStream, text: &String) -> Result<(), JetNetError> {
+fn jet_net_tls_write_text(stream: &mut JetTlsStream, text: &String) -> Result<(), jet_std::IoError> {
     jet_net_tls_write_all_bytes(stream, &text.as_bytes().to_vec())
 }
 
-fn jet_net_tls_close(stream: &mut JetTlsStream) -> Result<(), JetNetError> {
+fn jet_net_tls_close(stream: &mut JetTlsStream) -> Result<(), jet_std::IoError> {
     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     loop {
-        if jet_net_tls_result((stream.close_step)(stream.id), "tls close")? {
+        if jet_net_tls_io_result((stream.close_step)(stream.id), jet_std::IoOperation::Close)? {
             return Ok(());
         }
-        jet_net_tls_scheduler_wait(stream, false, true, "tls close")?;
+        jet_net_tls_io_scheduler_wait(stream, false, true, jet_std::IoOperation::Close)?;
     }
 }
 
 fn jet_net_tls_close_write(
     stream: &mut JetTlsStream,
     deadline: &jet_std::Duration,
-) -> Result<(), JetNetError> {
-    let _deadline = jet_net_explicit_deadline(deadline, "tls close write")?;
+) -> Result<(), jet_std::IoError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls close write").map_err(jet_net_to_io_error)?;
     loop {
-        if jet_net_tls_result((stream.close_write_step)(stream.id), "tls close write")? {
+        if jet_net_tls_io_result((stream.close_write_step)(stream.id), jet_std::IoOperation::Close)? {
             return Ok(());
         }
-        jet_net_tls_scheduler_wait(stream, false, true, "tls close write")?;
+        jet_net_tls_io_scheduler_wait(stream, false, true, jet_std::IoOperation::Close)?;
     }
 }
 
@@ -1214,27 +1248,32 @@ fn jet_net_tls_ready(
     stream: &JetTlsStream,
     interest: JetNetReadyInterest,
     deadline: &jet_std::Duration,
-) -> Result<JetNetReady, JetNetError> {
-    let _deadline = jet_net_explicit_deadline(deadline, "tls ready")?;
+) -> Result<JetNetReady, jet_std::IoError> {
+    let operation = if matches!(interest, JetNetReadyInterest::Write) {
+        jet_std::IoOperation::Write
+    } else {
+        jet_std::IoOperation::Read
+    };
+    let _deadline = jet_net_explicit_deadline(deadline, "tls ready").map_err(jet_net_to_io_error)?;
     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-        return Err(jet_net_deadline_timeout("tls ready"));
+        return Err(jet_net_to_io_error(jet_net_deadline_timeout("tls ready")));
     }
     let want_read = matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite);
     let want_write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
     loop {
-        let readable = want_read && jet_net_tls_result((stream.read_ready)(stream.id), "tls ready")?;
+        let readable = want_read && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?;
         if readable {
             return Ok(JetNetReady { readable: true, writable: false });
         }
-        let (tls_read, tls_write) = jet_net_tls_result((stream.wants)(stream.id), "tls ready")?;
+        let (tls_read, tls_write) = jet_net_tls_io_result((stream.wants)(stream.id), operation)?;
         let (raw_readable, raw_writable) = jet_net_tcp_scheduler_ready_wait(
             &stream.socket,
             want_read || tls_read,
             want_write || tls_write,
             "tls ready",
-        )?;
+        ).map_err(jet_net_to_io_error)?;
         let readable = want_read && raw_readable
-            && jet_net_tls_result((stream.read_ready)(stream.id), "tls ready")?;
+            && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?;
         let writable = want_write && raw_writable;
         if readable || writable {
             return Ok(JetNetReady { readable, writable });

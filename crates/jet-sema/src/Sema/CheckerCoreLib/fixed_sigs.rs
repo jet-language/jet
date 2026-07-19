@@ -1458,7 +1458,7 @@ pub fn core_fixed_sig(
                 AccessConvention::Write,
                 Type::Named("TlsStream".to_string()),
             )],
-            Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
+            Some(result_ty(Type::String, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.net", "tls_write") => Some((
             vec![
@@ -1468,11 +1468,11 @@ pub fn core_fixed_sig(
                 ),
                 (read, Type::String),
             ],
-            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.net", "tls_close") => Some((
             vec![(AccessConvention::Move, Type::Named("TlsStream".to_string()))],
-            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "client") => Some((
             vec![
@@ -1491,7 +1491,7 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(
                 Type::List(Box::new(u8_ty())),
-                Type::Named("NetError".to_string()),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
         ("core.tls", "read_text") => Some((
@@ -1499,32 +1499,32 @@ pub fn core_fixed_sig(
                 (AccessConvention::Write, Type::Named("TlsStream".to_string())),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
+            Some(result_ty(Type::String, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "write") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("TlsStream".to_string())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+            Some(result_ty(Type::Int, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "write_all") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("TlsStream".to_string())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "write_text") => Some((
             vec![
                 (AccessConvention::Write, Type::Named("TlsStream".to_string())),
                 (read, Type::String),
             ],
-            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "close") => Some((
             vec![(AccessConvention::Write, Type::Named("TlsStream".to_string()))],
-            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         // E2-M10: jet.http — HTTP client/server over blocking I/O.
         // GET / HEAD / DELETE requests (no body sent).

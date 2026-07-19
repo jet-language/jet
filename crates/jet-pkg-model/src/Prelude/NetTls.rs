@@ -480,6 +480,20 @@ fn jet_net_tls_dns_names(value: &[u8]) -> Result<Vec<String>, String> {
 }
 
 fn jet_net_tls_name(der: &[u8], start: usize, end: usize) -> Result<String, String> {
+    fn escaped(bytes: &[u8]) -> String {
+        let mut text = String::new();
+        for &byte in bytes {
+            match byte {
+                b'\\' => text.push_str("\\\\"),
+                b',' => text.push_str("\\,"),
+                b'=' => text.push_str("\\="),
+                0x20..=0x7e => text.push(byte as char),
+                _ => text.push_str(&format!("\\x{byte:02x}")),
+            }
+        }
+        text
+    }
+
     let mut rdns = Vec::new();
     let mut p = start;
     while p < end {
@@ -500,10 +514,14 @@ fn jet_net_tls_name(der: &[u8], start: usize, end: usize) -> Result<String, Stri
                 [0x55, 0x04, 0x0b] => "OU",
                 _ => "OID",
             };
-            let value = match tag {
-                0x0c | 0x13 | 0x14 | 0x16 => std::str::from_utf8(&der[value_start..value_end])
-                    .map_err(|_| "TLS certificate name contains invalid text".to_string())?.to_string(),
-                _ => der[value_start..value_end].iter().map(|b| format!("{b:02x}")).collect(),
+            let bytes = &der[value_start..value_end];
+            // Non-UTF8 DirectoryStrings, including Teletex and BMP/Universal,
+            // stay as escaped source bytes: audit text is lossless and cannot
+            // fail an already-verified handshake.
+            let value = if tag == 0x0c {
+                std::str::from_utf8(bytes).map(str::to_string).unwrap_or_else(|_| escaped(bytes))
+            } else {
+                escaped(bytes)
             };
             rdns.push(format!("{label}={value}"));
         }

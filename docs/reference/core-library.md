@@ -2464,7 +2464,7 @@ The built module exposes only this byte/text stream surface:
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `ClientConfig.default().with_alpn(protocols)` | `TlsClientConfig` | Start from verified system-root defaults and offer ALPN protocols without disabling verification |
+| `ClientConfig.default().with_alpn(protocols)` | `TlsClientConfig ? IOError` | Validate and offer ALPN protocols before any stream is consumed, without disabling verification |
 | `RootCertificates.from_pem(bytes)` | `RootCertificates ? IOError` | Validate a custom PEM root bundle before any network use |
 | `ClientIdentity.from_pem(cert_chain: bytes, private_key: bytes)` | `ClientIdentity ? IOError` | Validate one PEM identity chain and matching PKCS#8, PKCS#1, or SEC1 private key; key bytes are secret and wiped on drop |
 | `config.with_trust(policy)` | `TlsClientConfig ? IOError` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` on a new immutable config |
@@ -2472,20 +2472,21 @@ The built module exposes only this byte/text stream surface:
 | `config.with_version_bounds(min: version, max: version)` | `TlsClientConfig ? IOError` | Select inclusive `.Tls12` / `.Tls13` bounds; reversed bounds fail before network use |
 | `client(stream, server_name)` | `TlsStream ? NetError` | Consume the `TcpStream`; verify the server name with system roots; preserve its deadline budgets |
 | `client(stream, server_name: name, config: config, deadline: duration)` | `TlsStream ? NetError` | Use the explicit client configuration and earliest handshake deadline on the same consumed stream |
-| `read(stream, limit)` / `read_text(stream)` | `[U8] ? NetError` / `String ? NetError` | Scheduler-aware byte or checked-text read; empty bytes mean clean EOF |
-| `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? NetError` / `() ? NetError` | Scheduler-aware partial or complete byte write |
-| `write_text(stream, text)` | `() ? NetError` | Write the complete text payload |
-| `close(stream)` | `() ? NetError` | Send close-notify; repeated close is harmless |
+| `read(stream, limit)` / `read_text(stream)` | `[U8] ? IOError` / `String ? IOError` | Scheduler-aware byte or checked-text read; empty bytes mean clean EOF |
+| `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? IOError` / `() ? IOError` | Scheduler-aware partial or complete byte write |
+| `write_text(stream, text)` | `() ? IOError` | Write the complete text payload |
+| `close(stream)` | `() ? IOError` | Send close-notify; repeated close is harmless |
 | `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same TLS handle, explicit per-call deadlines, readiness, and close-notify lifecycle |
 | `stream.peer_identity()` | `TlsPeerIdentity` | Retained verified name plus immutable exact-DER wire-order chain; leaf exposes DER, certificate/SPKI SHA-256, DNS SANs, validity milliseconds, subject, and issuer |
-| `stream.close_write(deadline: Duration)` | `() ? NetError` | Flush close-notify and close only writes; repeated calls are harmless, reads continue, and later writes return `.Closed` |
+| `stream.close_write(deadline: Duration)` | `() ? IOError` | Flush close-notify and close only writes; repeated calls are harmless, reads continue, and later writes return `.Closed` |
 
 TLS handshake, read, write, and close-notify use the consumed socket's shared
-readiness path. Ambient cancellation and the earliest ambient or inherited
-socket deadline return typed `NetError` values. TLS failures use
-`core.net.NetError`; there is no separate TLS error hierarchy.
+readiness path. Handshake failures use `core.net.NetError`; stream byte,
+readiness, and lifecycle failures use the shared `IOError` tree, including
+`.Cancelled`, `.TimedOut`, `.Closed`, and `.Protocol`.
 An empty TLS read is a verified close-notify. Raw transport EOF without
-close-notify is `.Protocol` truncation.
+close-notify is `.Protocol(IOContext.{ operation: .Read, cause: ... })`
+truncation.
 
 ---
 

@@ -4280,7 +4280,7 @@ fn zero_rejected<T: Reader>(&stream: T) -> Bool {
 fn run() {
     tcp :: net.tcp_connect("127.0.0.1:$PORT") ?? panic("tcp")
     budget :: Duration.seconds(1) ?? panic("deadline")
-    cfg :: tls.ClientConfig.default().with_alpn(["http/1.0"])
+    cfg :: tls.ClientConfig.default().with_alpn(["http/1.0"]) ?? panic("ALPN")
     secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("tls handshake")
     request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
     interest: NetReadyInterest :: .Write
@@ -4338,9 +4338,19 @@ fn core_tls_expert_config_peer_identity_and_directional_close_are_real() {
             &ext,
             format!("basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:localhost\nextendedKeyUsage={usage}\n"),
         ).unwrap();
-        let req = Command::new("openssl")
-            .args(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", &format!("/CN={name}"), "-keyout"])
-            .arg(&key).arg("-out").arg(&csr).output().unwrap();
+        let mut request = Command::new("openssl");
+        request.args(["req", "-new", "-newkey", "rsa:2048", "-nodes"]);
+        if name == "localhost" {
+            let config = dir.join("legacy-dn.cnf");
+            fs::write(
+                &config,
+                "[req]\nprompt=no\ndistinguished_name=dn\nstring_mask=default\n[dn]\nCN=Télét\n",
+            ).unwrap();
+            request.arg("-config").arg(config);
+        } else {
+            request.arg("-subj").arg(format!("/CN={name}"));
+        }
+        let req = request.arg("-keyout").arg(&key).arg("-out").arg(&csr).output().unwrap();
         assert!(req.status.success(), "{}", String::from_utf8_lossy(&req.stderr));
         let sign = Command::new("openssl")
             .args(["x509", "-req", "-days", "1", "-CAcreateserial", "-CAserial"])
@@ -4352,6 +4362,10 @@ fn core_tls_expert_config_peer_identity_and_directional_close_are_real() {
     };
     let (server_cert, server_key) = make_cert("localhost", "serverAuth");
     let (client_cert, client_key) = make_cert("jet-client", "clientAuth");
+    let parsed = Command::new("openssl").args(["asn1parse", "-in"])
+        .arg(&server_cert).output().unwrap();
+    assert!(parsed.status.success(), "{}", String::from_utf8_lossy(&parsed.stderr));
+    assert!(String::from_utf8_lossy(&parsed.stdout).contains("T61STRING"));
     let mut server = Command::new("openssl")
         .args(["s_server", "-quiet", "-www", "-alpn", "http/1.0", "-Verify", "1", "-verify_return_error", "-accept", &port.to_string(), "-CAfile"])
         .arg(&ca_cert).arg("-cert").arg(&server_cert).arg("-key").arg(&server_key)
@@ -4369,6 +4383,10 @@ fn core_tls_expert_config_peer_identity_and_directional_close_are_real() {
     let source = format!(r#"
 use core.net as net
 use core.tls as tls
+
+fn invalid_alpn() -> [String] {{
+    return [""]
+}}
 
 fn run() {{
     ca: [U8] :: [{}]
@@ -4389,8 +4407,15 @@ fn run() {{
     cfg0 :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("custom trust")
     cfg1 :: cfg0.with_client_identity(identity) ?? panic("client identity")
     cfg2 :: cfg1.with_version_bounds(min: .Tls12, max: .Tls13) ?? panic("version bounds")
-    cfg :: cfg2.with_alpn(["http/1.0"])
     tcp :: net.tcp_connect("127.0.0.1:{}") ?? panic("tcp")
+    if cfg2.with_alpn(invalid_alpn()) == {{
+        Ok(_) -> panic("empty dynamic ALPN accepted")
+        Err(error) -> if error == {{
+            .InvalidInput(context) -> print(if context.operation == .Connect {{ "alpn-rejected" }} else {{ "wrong-alpn-operation" }})
+            else -> {{ panic("wrong ALPN error") }}
+        }}
+    }}
+    cfg :: cfg2.with_alpn(["http/1.0"]) ?? panic("ALPN")
     budget :: Duration.seconds(2) ?? panic("budget")
     secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("mTLS")
     peer :: secure.peer_identity()
@@ -4402,7 +4427,7 @@ fn run() {{
     print(peer.leaf.spki_sha256.len())
     print(peer.leaf.dns_names.contains("localhost"))
     print(peer.leaf.valid_from_unix_ms < peer.leaf.valid_until_unix_ms)
-    print(peer.leaf.subject.contains("CN=localhost"))
+    print(peer.leaf.subject.contains("CN=T") && peer.leaf.subject.contains("\\xc3"))
     print(peer.leaf.issuer.len() > 0)
     request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
     secure.write_all(request, deadline: budget) ?? panic("request")
@@ -4411,10 +4436,9 @@ fn run() {{
     one: [U8] :: [1]
     if secure.write_all(one, deadline: budget) == {{
         Ok(_) -> panic("write after close_write succeeded")
-        Err(error) -> if net.error_operation(error).contains("write") && net.error_message(error).contains("closed") {{
-            print("write-closed")
-        }} else {{
-            panic("wrong post-close error")
+        Err(error) -> if error == {{
+            .Closed(context) -> print(if context.operation == .Write {{ "write-closed" }} else {{ "wrong-write-operation" }})
+            else -> {{ panic("wrong post-close error") }}
         }}
     }}
     total := 0
@@ -4440,8 +4464,73 @@ fn run() {{
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(
         stdout,
-        "mismatch-rejected\nbounds-rejected\nlocalhost\ntrue\ntrue\ntrue\n32\n32\ntrue\ntrue\ntrue\ntrue\nwrite-closed\ntrue\nlocalhost\n",
+        "mismatch-rejected\nbounds-rejected\nalpn-rejected\nlocalhost\ntrue\ntrue\ntrue\n32\n32\ntrue\ntrue\ntrue\ntrue\nwrite-closed\ntrue\nlocalhost\n",
     );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn core_tls_identity_drop_and_protocol_mapping_use_shared_runtime_laws() {
+    let dir = std::env::temp_dir().join(format!("jet_core_tls_runtime_laws_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let compiled = compile_temp(
+        "tls_runtime_laws.jet",
+        "use core.tls as tls\nfn run() { _config :: tls.ClientConfig.default() }\n",
+    );
+    let mut rust = compiled.rust;
+    rust = rust.replacen("fn main()", "fn jet_generated_main()", 1);
+    rust.push_str(r#"
+fn main() {
+    let zeroized = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<u8>>::new()));
+    let observed = std::rc::Rc::clone(&zeroized);
+    jet_crypto_entropy_set_zeroize_test_observer(move |bytes| {
+        observed.borrow_mut().push(bytes.to_vec());
+    });
+    {
+        let identity = JetTlsClientIdentity {
+            cert_chain: vec![1, 2, 3],
+            private_key: JetCryptoSecretBytes::new(vec![0xa5; 7]),
+        };
+        let config = jet_tls_client_config_with_client_identity(
+            jet_tls_client_config_default(),
+            &identity,
+        ).unwrap();
+        assert!(jet_tls_client_config_with_version_bounds(
+            config,
+            JetTlsVersion::Tls13,
+            JetTlsVersion::Tls12,
+        ).is_err());
+    }
+    jet_crypto_entropy_clear_zeroize_test_observer();
+    assert_eq!(&*zeroized.borrow(), &vec![vec![0; 7], vec![0; 7]]);
+
+    let cause = "TLS protocol truncation: peer closed without close-notify".to_string();
+    match jet_net_tls_io_result::<()>(Err(cause.clone()), jet_std::IoOperation::Read).unwrap_err() {
+        jet_std::IoError::Protocol(context) => {
+            assert_eq!(context.operation, jet_std::IoOperation::Read);
+            assert_eq!(context.cause, Some(cause));
+        }
+        other => panic!("expected Protocol(Read), got {other:?}"),
+    }
+}
+"#);
+    let rs = dir.join("runtime_laws.rs");
+    let bin = dir.join("runtime_laws");
+    fs::write(&rs, rust).unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args(["--edition", "2021", "--cfg", "test"])
+        .arg(&rs).arg("-o").arg(&bin);
+    if let Some(link) = compiled.ffi {
+        rustc.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        if link.deps_dir.is_dir() {
+            rustc.arg("-L").arg(format!("dependency={}", link.deps_dir.display()));
+        }
+    }
+    let built = rustc.output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let ran = Command::new(bin).output().unwrap();
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
     let _ = fs::remove_dir_all(dir);
 }
 

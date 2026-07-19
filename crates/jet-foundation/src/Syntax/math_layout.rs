@@ -138,7 +138,7 @@ pub const TYPE_IO_ERROR: &str = "IOError";
 pub const TYPE_IO_CONTEXT: &str = "IOContext";
 pub const TYPE_IO_OPERATION: &str = "IOOperation";
 pub const IO_ERROR_VARIANTS: &[&str] = &[
-    "InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Other",
+    "InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Protocol", "Other",
 ];
 pub const IO_OPERATION_VARIANTS: &[&str] = &[
     "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",

@@ -874,6 +874,7 @@
                 IoError::TimedOut(context) => ("timed out", context),
                 IoError::Cancelled(context) => ("cancelled", context),
                 IoError::Closed(context) => ("closed", context),
+                IoError::Protocol(context) => ("protocol error", context),
                 IoError::Other(context) => ("I/O error", context),
             };
             let operation = match context.operation {

@@ -95,25 +95,41 @@ pub fn net_method_return(
             Type::Named("UnixStream".to_string()),
             Type::Named("NetError".to_string()),
         ))),
-        ("UnixStream" | "TlsStream", "read") if n_args == 2 => Some(Some(result_ty(
+        ("UnixStream", "read") if n_args == 2 => Some(Some(result_ty(
             Type::List(Box::new(u8_ty())),
             Type::Named("NetError".to_string()),
         ))),
-        ("UnixStream" | "TlsStream", "write_all") if n_args == 2 => Some(Some(result_ty(
+        ("UnixStream", "write_all") if n_args == 2 => Some(Some(result_ty(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),
-        ("UnixStream" | "TlsStream", "ready") if n_args == 2 => Some(Some(result_ty(
+        ("UnixStream", "ready") if n_args == 2 => Some(Some(result_ty(
             Type::Named("NetReady".to_string()),
             Type::Named("NetError".to_string()),
         ))),
-        ("UnixStream" | "TlsStream", "close") if n_args == 0 => Some(Some(result_ty(
+        ("UnixStream", "close") if n_args == 0 => Some(Some(result_ty(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),
+        ("TlsStream", "read") if n_args == 2 => Some(Some(result_ty(
+            Type::List(Box::new(u8_ty())),
+            Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+        ))),
+        ("TlsStream", "write_all") if n_args == 2 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+        ))),
         ("TlsStream", "close_write") if n_args == 1 => Some(Some(result_ty(
             unit.clone(),
-            Type::Named("NetError".to_string()),
+            Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+        ))),
+        ("TlsStream", "close") if n_args == 0 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+        ))),
+        ("TlsStream", "ready") if n_args == 2 => Some(Some(result_ty(
+            Type::Named("NetReady".to_string()),
+            Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
         ))),
         ("TlsStream", "peer_identity") if n_args == 0 => {
             Some(Some(Type::Named("TlsPeerIdentity".to_string())))
@@ -123,7 +139,10 @@ pub fn net_method_return(
             Type::Named("NetError".to_string()),
         ))),
         ("TlsClientConfig", "with_alpn") if n_args == 1 => {
-            Some(Some(Type::Named("TlsClientConfig".to_string())))
+            Some(Some(result_ty(
+                Type::Named("TlsClientConfig".to_string()),
+                Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+            )))
         }
         ("TlsClientConfig", "with_trust" | "with_client_identity") if n_args == 1 => {
             Some(Some(result_ty(

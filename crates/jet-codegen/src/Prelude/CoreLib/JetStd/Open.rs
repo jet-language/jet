@@ -34,6 +34,7 @@ mod jet_std {
         TimedOut(IoContext),
         Cancelled(IoContext),
         Closed(IoContext),
+        Protocol(IoContext),
         Other(IoContext),
     }
 

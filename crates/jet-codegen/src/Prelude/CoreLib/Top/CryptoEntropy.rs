@@ -154,6 +154,25 @@ pub(crate) fn jet_crypto_entropy_zeroize(bytes: &mut [u8]) {
     });
 }
 
+#[derive(Clone)]
+pub(crate) struct JetCryptoSecretBytes(Vec<u8>);
+
+impl JetCryptoSecretBytes {
+    pub(crate) fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    pub(crate) fn as_vec(&self) -> &Vec<u8> {
+        &self.0
+    }
+}
+
+impl Drop for JetCryptoSecretBytes {
+    fn drop(&mut self) {
+        jet_crypto_entropy_zeroize(&mut self.0);
+    }
+}
+
 #[cfg(test)]
 pub fn jet_crypto_entropy_unsupported_for_test(
     out: &mut [u8],
@@ -408,6 +427,7 @@ pub use jet_crypto_entropy::{
 pub use jet_crypto_entropy::JetCryptoError;
 #[allow(unused_imports)]
 pub(crate) use jet_crypto_entropy::jet_crypto_entropy_zeroize;
+pub(crate) use jet_crypto_entropy::JetCryptoSecretBytes;
 
 #[cfg(test)]
 pub use jet_crypto_entropy::{

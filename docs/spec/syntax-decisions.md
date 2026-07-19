@@ -2381,13 +2381,14 @@ index, not a substitute for that law.
   `write(bytes)` may report a positive prefix; zero for nonempty input is an
   error; `write_all` is the one looping implementation. Close stays inherent
   and idempotent, never a trait member. File, TCP, Unix, TLS, and explicit codec
-  adapters convert their native failures into the closed `IOError` tree.
-  Runtime/compiler conformance remains open on card #300; native byte methods
-  keep their existing error types until that one contract is wired end to end.
+  adapters convert their native failures into the closed `IOError` tree. TLS
+  byte and lifecycle methods expose that shared tree directly; other native
+  byte methods keep their network-specific result types.
 - **D-IOERROR-TREE1=A**: every `core.io.Reader`/`Writer` adapter returns one
   closed `IOError` tree: `InvalidInput(IOContext)`, `NotFound(IOContext)`,
   `PermissionDenied(IOContext)`, `TimedOut(IOContext)`,
-  `Cancelled(IOContext)`, `Closed(IOContext)`, or `Other(IOContext)`.
+  `Cancelled(IOContext)`, `Closed(IOContext)`, `Protocol(IOContext)`, or
+  `Other(IOContext)`.
   `IOContext` has `operation: IOOperation`, `resource: String?`,
   `os_code: Int?`, and `cause: String?`. `IOOperation` is exactly `Read`,
   `Write`, `Flush`, `Connect`, `Accept`, `Close`, `Resolve`, or `Codec`.
@@ -2421,7 +2422,8 @@ index, not a substitute for that law.
   with system roots. The stream uses shared socket readiness, deadlines, cancellation,
   explicit close-notify, underlying write half-close, and idempotent close.
   `ClientConfig.default().with_alpn(protocols)` and the ratified labeled
-  `client(..., server_name:, config:, deadline:)` path are implemented.
+  `client(..., server_name:, config:, deadline:)` path are implemented. ALPN
+  validation is fallible at config construction, before the stream is consumed.
 - **D-NETTLSCONFIG1=A**: validated opaque `RootCertificates` and secret
   `ClientIdentity` values configure `.System`, `.SystemPlus(roots)`, or
   `.CustomOnly(roots)` trust, optional mTLS identity, and inclusive `.Tls12` /
@@ -2435,7 +2437,8 @@ index, not a substitute for that law.
 - **D-NETTLSCLOSE1=A**: `stream.close_write(deadline:)` sends and flushes
   close-notify, then closes only the transport write side. Repetition is
   harmless, later writes return `.Closed`, reads continue, empty bytes mean a
-  verified peer close-notify, and raw EOF is `.Protocol` truncation.
+  verified peer close-notify, and raw EOF is `IOError.Protocol` with operation
+  `.Read` and the TLS truncation cause.
 - **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
   and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support
