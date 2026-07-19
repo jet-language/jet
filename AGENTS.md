@@ -26,8 +26,11 @@ follow the higher authority, record it, and stop only the affected slice. Never 
 Read this file, then relevant code, tests, and the current diff. Load only task-triggered references:
 
 - language semantics or syntax: relevant sections of `docs/spec/philosophy.md`,
-  `docs/spec/syntax-decisions.md`, and `docs/spec/architecture.md`;
-- diagnostics: `docs/spec/diagnostics.md` and the matching UI snapshots;
+  `docs/spec/syntax-decisions.md`, and `docs/spec/architecture.md`; adding syntax
+  uses `.claude/skills/verify/SKILL.md`;
+- diagnostics: `docs/spec/diagnostics.md` (including "Adding a diagnostic") and
+  the matching UI snapshots;
+- FFI bridges: `docs/spec/architecture.md` ("Adding an FFI bridge");
 - Tower board mechanics or owner decisions: `plugins/tower/skills/tower/SKILL.md`, plus
   `plugins/tower/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
 - Tower backlog ranking: `plugins/tower/skills/tower-burndown/SKILL.md`; Codeflow owns
@@ -54,6 +57,10 @@ on host tools unless testing host-shell independence. Group dependent checks whe
 
 Rebuild before compiler smoke tests: the `jet` wrapper runs `target/debug/jet`. Check `/tmp` before trusting ENOSPC.
 The verification skill owns snapshot, golden, formatter, grammar, and full-suite traps.
+
+Start the local Tower board with the one canonical command:
+`node plugins/tower/tower.mjs serve --open`. Read and write board state through
+that CLI.
 
 ## Invariants
 
@@ -126,6 +133,12 @@ Before coding, enumerate new syntax, a new stdlib external dependency, an
 invariant carve-out, and any other owner-only call. For Jet project work, make
 each choice ballot-ready in Tower, then pause only the gated slice. Work on
 independent ungated slices meanwhile. Never hand-edit `.tower/` data.
+
+Kill a design slice before ballot or code when it breaks an invariant,
+duplicates a mechanism, burdens the beginner default without necessity, or
+hides expert control or auditability. Otherwise, unresolved owner choices go
+through the Tower ballot workflow; a ratified verdict and its acceptance terms
+remain law until a later owner verdict amends them.
 
 After ratification, implement the complete ruling and acceptance terms; the verification skill owns syntax chores.
 

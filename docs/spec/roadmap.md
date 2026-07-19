@@ -97,7 +97,8 @@ engine as `jet dev`/`jet repl`) — `(jet)` prompt, lldb-familiar
 `step`/`next`/`continue`/`finish`, `break`/`print`/`locals`/`backtrace`, `<- here`
 caret, all in Jet terms (I2). It declines unsteppable native features with E2203,
 pointing at the real build. Step 2's native DAP/lldb backend shipped; remaining
-full-feature stepping and editor work is tracked by Tower #12.
+editor/platform conformance is tracked by Tower #12, which the owner moved to
+Epoch 8 on 2026-07-12.
 
 **E2-M18 — REPL** verified 2026-06-17. `jet repl` interactive
 session; 16 transcript tests green.
@@ -228,7 +229,6 @@ Items with Epoch 2/3 plans are tracked in those plan directories — not
 duplicated here:
 
 - Async/await, Go-scale networking → [`docs/plans/epoch-3/`](../../docs/plans/epoch-3/)
-- DAP step-through / full source-level debugger → Epoch 3 (owner, 2026-06-18)
 - Full adoption documentation (migration, services, debugging guides) → Epoch 3
   (owner, 2026-06-18); per-milestone docs stay as written
 - User token macros (rejected by S26; sanctioned path is S56 comptime derives)

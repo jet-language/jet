@@ -30,20 +30,22 @@ no exceptions, no hidden control flow.
 <!-- CAPABILITY_CLAIM: claim.product-boundaries | jet, jetpack, and jetos have canonical owners. -->
 <!-- CAPABILITY_CLAIMS:END -->
 
-**Current status: Epoch 3** (Epoch 1 v1.0 + Epoch 2 GA are complete — see [roadmap](docs/spec/roadmap.md)).
+Live development status and work order are in [Tower](docs/README.md); the
+[roadmap](docs/spec/roadmap.md) records verified history and durable program
+ownership.
 
 ## Quickstart
 
 ```bash
-nix develop -c cargo build
-nix develop -c jet run examples/features/basics/hello.jet
+scripts/agent/jet-env cargo build
+scripts/agent/jet-env jet run examples/features/basics/hello.jet
 ```
 
 `hello, world` means the toolchain is working. Next:
 
 ```bash
-nix develop -c jet check examples/features/basics/functions.jet
-nix develop -c cargo test    # golden examples + error snapshots
+scripts/agent/jet-env jet check examples/features/basics/functions.jet
+scripts/agent/jet-env cargo test --test golden examples_compile_and_run
 ```
 
 The language spec lives in [docs/spec/spec.md](docs/spec/spec.md). Ratified syntax decisions are in [docs/spec/syntax-decisions.md](docs/spec/syntax-decisions.md).
@@ -56,7 +58,7 @@ feature programs live under [`examples/features/`](examples/features/) with the
 same golden harness (`tests/golden.rs`).
 
 ```bash
-nix develop -c jet run examples/canon.jet
+scripts/agent/jet-env jet run examples/canon.jet
 ```
 
 ## Errors that teach
@@ -65,7 +67,7 @@ Every diagnostic has a stable code, plain **what / why / fix**, and a snapshot
 test. Try a typo:
 
 ```bash
-nix develop -c jet check tests/ui/unknown_function.jet
+scripts/agent/jet-env jet check tests/ui/unknown_function.jet
 ```
 
 Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
@@ -116,18 +118,18 @@ package; the built-in HTTP client is plain HTTP only.
 | [examples/features/](examples/features/) | Milestone feature programs (golden-tested) |
 | [editors/](editors/) | VS Code / Zed extensions + tree-sitter grammar |
 | [tests/ui/](tests/ui/) | Snapshot-pinned diagnostic fixtures |
-| `Source/` | Compiler: lexer → parser → sema → codegen |
+| [crates/](crates/) | Compiler seams, runtime, and developer-product crates |
+| `Source/` | Thin root binary host and native build executor |
 
-## Nix / NixOS
+## Build environment
 
 ```bash
-nix build                    # produces ./result/bin/jet
-nix develop                  # dev shell with Rust, jet, and repo utilities
+nix build                           # produces ./result/bin/jet
+scripts/agent/jet-env cargo build   # pinned contributor environment
 ```
 
-All `jet` and `cargo` commands should run inside `nix develop -c …` to use the pinned toolchain.
-CI uses the same Nix path (`nix flake check`, `nix develop -c cargo check`,
-and focused test suites), so local failures match the hosted environment.
+Run contributor `jet`, `cargo`, and repository-tool commands through
+`scripts/agent/jet-env`; it selects the pinned environment used by CI.
 
 ## License
 
