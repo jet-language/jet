@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 const ANSI = /\x1b\[[0-9;]*m/;
 const stripAnsi = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
+const cjkWidth = (text) => [...text].reduce((n, ch) => n + (/\p{Unified_Ideograph}/u.test(ch) ? 2 : 1), 0);
 
 function env(extra = {}) {
   const clean = { ...process.env, TOWER_DATA: '' };
@@ -113,6 +114,16 @@ test('status card rows fit real 40 and 120 column PTYs without losing readable t
   assert.match(narrow, /Render me with.*…/, 'narrow output keeps a useful title prefix');
   assert.match(wide, /deliberately long title that remains readable/, 'wide output uses available columns');
   assert.match(wide, /\[width-reviewer\]/, 'wide output retains claim context');
+});
+
+test('status card row measures wide CJK glyphs in a real 40 column PTY', () => {
+  const cwd = fresh();
+  run(cwd, ['card', 'update', '#1', '--title', '界'.repeat(40), '--by', 'owner']);
+  const output = ptyRunAt(cwd, 40, ['status', '--color=auto']);
+  const row = stripAnsi(output.split(/\r?\n/).find(line => stripAnsi(line).includes('#1')) || '');
+  assert.ok(row, 'CJK card row is present');
+  assert.ok(cjkWidth(row) <= 40, `CJK row is ${cjkWidth(row)} columns: ${row}`);
+  assert.match(row, /界+…$/, 'CJK title is conservatively ellipsized');
 });
 
 test('help documents status and brief color controls', () => {

@@ -65,11 +65,36 @@ function Theme(flags) {
 }
 
 const cardLine = (c) => `#${String(c.num).padEnd(4)} ${(c.priority || '').padEnd(3)} ${c.lane.lane.padEnd(9)} ${c.title.slice(0, 60)}${c.assignee ? `  [${c.assignee}]` : ''}`;
+const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
+const zeroWidth = /[\p{Mark}\p{Default_Ignorable_Code_Point}\p{Control}]/u;
+const glyphWidth = (glyph) => {
+  const visible = [...glyph].filter(ch => !zeroWidth.test(ch));
+  if (!visible.length) return 0;
+  if (glyph.includes('\ufe0f') || visible.some(ch => {
+    const cp = ch.codePointAt(0);
+    return /[\p{Unified_Ideograph}\p{Extended_Pictographic}]/u.test(ch)
+      || (cp >= 0x1100 && (cp <= 0x115f || cp === 0x2329 || cp === 0x232a
+        || (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f)
+        || (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff)
+        || (cp >= 0xfe10 && cp <= 0xfe6f) || (cp >= 0xff00 && cp <= 0xff60)
+        || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f000 && cp <= 0x1faff)
+        || (cp >= 0x20000 && cp <= 0x3fffd)));
+  })) return 2;
+  return 1;
+};
+const displayWidth = (text) => [...graphemes.segment(text)].reduce((n, part) => n + glyphWidth(part.segment), 0);
 const clip = (text, width) => {
-  const chars = [...text];
-  if (chars.length <= width) return text;
+  if (displayWidth(text) <= width) return text;
   if (width <= 0) return '';
-  return chars.slice(0, Math.max(0, width - 1)).join('') + '…';
+  let used = 0;
+  let out = '';
+  for (const { segment } of graphemes.segment(text)) {
+    const next = glyphWidth(segment);
+    if (used + next + 1 > width) break;
+    out += segment;
+    used += next;
+  }
+  return out + '…';
 };
 
 // ---- commands ----------------------------------------------------------------
@@ -124,8 +149,8 @@ function cmdStatus(store, { flags }) {
       const lanePadded = lane.padEnd(9);
       const prefix = `   · #${number} ${priority} ${lanePadded} `;
       let claim = c.assignee ? `  [${c.assignee}]` : '';
-      if (prefix.length + 12 + claim.length > columns) claim = '';
-      const title = clip(c.title, columns - prefix.length - claim.length);
+      if (displayWidth(prefix) + 12 + displayWidth(claim) > columns) claim = '';
+      const title = clip(c.title, columns - displayWidth(prefix) - displayWidth(claim));
       const laneText = (lane === 'decide' ? t.error : lane === 'verify' ? t.warn : t.success)(lane.padEnd(9));
       console.log(`   ${t.border('·')} #${number} ${c.priority ? t.warn(priority) : priority} ${laneText} ${title}${claim ? t.dim(claim) : ''}`);
     }
