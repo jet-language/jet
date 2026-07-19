@@ -877,6 +877,191 @@ fn run() {{
 }
 
 #[test]
+fn json_canonical_stream_matches_rfc8785_numbers_key_order_and_domain() {
+    let dir = std::env::temp_dir().join(format!("jet_json_jcs_stream_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let canonical_path = dir.join("canonical.json");
+    let int_path = dir.join("int.json");
+    let bytes_path = dir.join("bytes.json");
+    let nonfinite_path = dir.join("nonfinite.json");
+    let duplicate_path = dir.join("duplicate.json");
+    let path = |path: &std::path::Path| path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {{
+    output :: files.create("{}") ?? panic("create canonical")
+    writer :: json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer canonical")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+    writer.write(encoding.DataEvent.Key("𐀀")) ?? panic("astral key")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("astral value")
+    writer.write(encoding.DataEvent.Key("")) ?? panic("bmp key")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Float(1e30)) ?? panic("positive exponent")
+    writer.write(encoding.DataEvent.Float(1e20)) ?? panic("decimal cutover")
+    writer.write(encoding.DataEvent.Float(1e-7)) ?? panic("negative exponent")
+    writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero")
+    writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+    writer.finish() ?? panic("finish")
+
+    int_output :: files.create("{}") ?? panic("create int")
+    int_writer :: json.writer(^int_output, encoding.EncodingLimits.safe(), true) ?? panic("int writer")
+    if int_writer.write(encoding.DataEvent.Int(9007199254740993)) == {{
+        Ok(_) -> print("int accepted")
+        Err(error) -> print(error.reason)
+    }}
+
+    bytes_output :: files.create("{}") ?? panic("create bytes")
+    bytes_writer :: json.writer(^bytes_output, encoding.EncodingLimits.safe(), true) ?? panic("bytes writer")
+    bytes: [U8] :: [U8.from_int(1) ?? panic("byte")]
+    if bytes_writer.write(encoding.DataEvent.Bytes(bytes)) == {{
+        Ok(_) -> print("bytes accepted")
+        Err(error) -> print(error.reason)
+    }}
+
+    nonfinite_output :: files.create("{}") ?? panic("create nonfinite")
+    nonfinite_writer :: json.writer(^nonfinite_output, encoding.EncodingLimits.safe(), true) ?? panic("nonfinite writer")
+    if nonfinite_writer.write(encoding.DataEvent.Float(0.0 / 0.0)) == {{
+        Ok(_) -> print("nonfinite accepted")
+        Err(error) -> print(error.reason)
+    }}
+
+    duplicate_output :: files.create("{}") ?? panic("create duplicate")
+    duplicate_writer :: json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
+    duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
+    duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")
+    duplicate_writer.write(encoding.DataEvent.Null) ?? panic("first value")
+    if duplicate_writer.write(encoding.DataEvent.Key("same")) == {{
+        Ok(_) -> print("duplicate accepted")
+        Err(error) -> print(error.reason)
+    }}
+}}
+"#,
+        path(&canonical_path),
+        path(&int_path),
+        path(&bytes_path),
+        path(&nonfinite_path),
+        path(&duplicate_path),
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_jcs_stream", &source, &[], None);
+    assert_eq!(code, 0, "RFC 8785 stream test failed: {stderr}");
+    assert_eq!(
+        fs::read_to_string(&canonical_path).unwrap(),
+        "{\"𐀀\":1,\"\":[1e+30,100000000000000000000,1e-7,0]}"
+    );
+    assert_eq!(
+        stdout,
+        "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text\nJSON cannot encode Bytes; encode bytes as Text explicitly\nJCS cannot encode a non-finite Float\nJCS requires unique object keys\n"
+    );
+    for rejected in [&int_path, &bytes_path, &nonfinite_path, &duplicate_path] {
+        assert_eq!(fs::read(rejected).unwrap(), b"");
+    }
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rfc8785_corpus_manifest_hashes_and_provenance_are_pinned() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/encoding/rfc8785");
+    let manifest = fs::read_to_string(root.join("MANIFEST.tsv")).unwrap();
+    let mut count = 0;
+    for line in manifest.lines().filter(|line| !line.starts_with('#') && !line.is_empty()) {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 4, "bad corpus manifest row: {line}");
+        let bytes = fs::read(root.join(fields[0])).unwrap();
+        assert_eq!(jet::SHA256::sha256_hex(&bytes), fields[1], "hash drift: {}", fields[0]);
+        assert!(fields[2].starts_with("https://www.rfc-editor.org/rfc/rfc8785.html#"));
+        assert_eq!(fields[3], "IETF-Trust-Legal-Provisions");
+        count += 1;
+    }
+    assert_eq!(count, 2);
+}
+
+#[test]
+fn json_canonical_stream_matches_every_finite_rfc8785_appendix_b_vector() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping RFC 8785 Appendix B stream corpus (need rustc)");
+        return;
+    }
+    let corpus = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/encoding/rfc8785/appendix-b.tsv"),
+    )
+    .unwrap();
+    let cases = corpus
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .map(|line| {
+            let (bits, expected) = line.split_once('\t').unwrap();
+            (u64::from_str_radix(bits, 16).unwrap() as i64, expected)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 24);
+    let writes = cases
+        .iter()
+        .map(|(bits, _)| {
+            let bits = if *bits == i64::MIN {
+                "(-9223372036854775807 - 1)".to_string()
+            } else {
+                bits.to_string()
+            };
+            format!(
+                "    writer.write(encoding.DataEvent.Float(math.from_bits({bits}))) ?? panic(\"Appendix B value\")"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let expected = format!(
+        "[{}]",
+        cases.iter().map(|(_, expected)| *expected).collect::<Vec<_>>().join(",")
+    );
+    let dir = std::env::temp_dir().join(format!("jet_json_jcs_appendix_b_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let output = dir.join("appendix-b.json");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+use core.math as math
+
+fn run() {{
+    output :: files.create("{}") ?? panic("create")
+    writer :: json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+{}
+    writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+    writer.finish() ?? panic("finish")
+}}
+"#,
+        output.to_string_lossy().replace('\\', "\\\\"),
+        writes,
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_jcs_appendix_b", &source, &[], None);
+    assert_eq!(code, 0, "RFC 8785 Appendix B corpus failed: {stderr}");
+    assert_eq!(stdout, "");
+    assert_eq!(fs::read_to_string(&output).unwrap(), expected);
+
+    let source_path = dir.join("json_jcs_appendix_b.jet");
+    fs::write(&source_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(source_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout, stderr), (0, String::new(), String::new()));
+        }
+        other => panic!("RFC 8785 Appendix B default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&output).unwrap(), expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn jsonl_stream_records_are_incremental_bounded_and_terminal() {
     let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

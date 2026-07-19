@@ -65,6 +65,158 @@ enum JetJsonCanonicalFrame {
     },
 }
 
+fn jet_json_big_pow(mut base: jet_std::JetBigInt, mut exponent: usize) -> jet_std::JetBigInt {
+    let mut out = jet_std::JetBigInt::from_int(1);
+    while exponent > 0 {
+        if exponent & 1 == 1 {
+            out = out.mul(&base);
+        }
+        exponent >>= 1;
+        if exponent > 0 {
+            base = base.mul(&base);
+        }
+    }
+    out
+}
+
+fn jet_json_decimal_ratio(text: &str) -> (jet_std::JetBigInt, jet_std::JetBigInt) {
+    let (mantissa, exponent) = text
+        .split_once('e')
+        .map(|(mantissa, exponent)| (mantissa, exponent.parse::<i32>().expect("Rust float exponent")))
+        .unwrap_or((text, 0));
+    let fraction = mantissa.split_once('.').map_or(0, |(_, fraction)| fraction.len()) as i32;
+    let digits = mantissa.replace('.', "");
+    let mut numerator = jet_std::JetBigInt::from_str(&digits).expect("Rust float digits");
+    let mut denominator = jet_std::JetBigInt::from_int(1);
+    let decimal_exponent = exponent - fraction;
+    if decimal_exponent >= 0 {
+        numerator = numerator.mul(&jet_json_big_pow(jet_std::JetBigInt::from_int(10), decimal_exponent as usize));
+    } else {
+        denominator = jet_json_big_pow(jet_std::JetBigInt::from_int(10), (-decimal_exponent) as usize);
+    }
+    (numerator, denominator)
+}
+
+fn jet_json_float_ratio(value: f64) -> (jet_std::JetBigInt, jet_std::JetBigInt) {
+    let bits = value.to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (significand, exponent) = if biased == 0 {
+        (fraction, -1074)
+    } else {
+        ((1u64 << 52) | fraction, biased - 1023 - 52)
+    };
+    let mut numerator = jet_std::JetBigInt::from_int(significand as i64);
+    let mut denominator = jet_std::JetBigInt::from_int(1);
+    if exponent >= 0 {
+        numerator = numerator.mul(&jet_json_big_pow(jet_std::JetBigInt::from_int(2), exponent as usize));
+    } else {
+        denominator = jet_json_big_pow(jet_std::JetBigInt::from_int(2), (-exponent) as usize);
+    }
+    (numerator, denominator)
+}
+
+fn jet_json_decimal_distance(text: &str, exact: &(jet_std::JetBigInt, jet_std::JetBigInt)) -> jet_std::JetBigInt {
+    let candidate = jet_json_decimal_ratio(text);
+    let distance = candidate.0.mul(&exact.1).sub(&exact.0.mul(&candidate.1));
+    let rendered = distance.to_string_rep();
+    jet_std::JetBigInt::from_str(rendered.strip_prefix('-').unwrap_or(&rendered)).expect("absolute decimal distance")
+}
+
+fn jet_json_positive_big_cmp(left: &jet_std::JetBigInt, right: &jet_std::JetBigInt) -> std::cmp::Ordering {
+    let left = left.to_string_rep();
+    let right = right.to_string_rep();
+    left.len().cmp(&right.len()).then_with(|| left.cmp(&right))
+}
+
+fn jet_json_jcs_shortest(value: f64) -> String {
+    let shortest = format!("{:?}", value);
+    let mantissa_end = shortest.find('e').unwrap_or(shortest.len());
+    let Some(index) = shortest[..mantissa_end].rfind(|ch: char| ch.is_ascii_digit()) else { return shortest };
+    let digit = shortest.as_bytes()[index] - b'0';
+    let mut candidates = vec![(shortest.clone(), digit)];
+    for replacement in [digit.checked_sub(1), digit.checked_add(1).filter(|next| *next < 10)].into_iter().flatten() {
+        let mut candidate = shortest.clone().into_bytes();
+        candidate[index] = b'0' + replacement;
+        let candidate = String::from_utf8(candidate).expect("ASCII digit replacement");
+        if candidate.parse::<f64>().is_ok_and(|parsed| parsed.to_bits() == value.to_bits()) {
+            candidates.push((candidate, replacement));
+        }
+    }
+    if candidates.len() == 1 {
+        return shortest;
+    }
+    let exact = jet_json_float_ratio(value);
+    candidates
+        .into_iter()
+        .map(|(candidate, last)| {
+            let distance = jet_json_decimal_distance(&candidate, &exact);
+            (candidate, last, distance)
+        })
+        .min_by(|left, right| {
+            jet_json_positive_big_cmp(&left.2, &right.2)
+                .then_with(|| (left.1 & 1).cmp(&(right.1 & 1)))
+        })
+        .map(|(candidate, _, _)| candidate)
+        .expect("at least one shortest float")
+}
+
+fn jet_json_jcs_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let negative = value.is_sign_negative();
+    let shortest = jet_json_jcs_shortest(value.abs());
+    let (mantissa, exponent) = shortest
+        .split_once('e')
+        .map(|(mantissa, exponent)| (mantissa, exponent.parse::<i32>().expect("Rust float exponent")))
+        .unwrap_or((&shortest, 0));
+    let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
+    let mut digits = mantissa.bytes().filter(|byte| *byte != b'.').collect::<Vec<_>>();
+    let leading = digits.iter().take_while(|byte| **byte == b'0').count();
+    digits.drain(..leading);
+    while digits.len() > 1 && digits.last() == Some(&b'0') {
+        digits.pop();
+    }
+    let n = decimal + exponent - leading as i32;
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    if n > 0 && n <= 21 {
+        if digits.len() <= n as usize {
+            out.extend(digits.iter().map(|byte| *byte as char));
+            out.extend(std::iter::repeat_n('0', n as usize - digits.len()));
+        } else {
+            let split = n as usize;
+            out.extend(digits[..split].iter().map(|byte| *byte as char));
+            out.push('.');
+            out.extend(digits[split..].iter().map(|byte| *byte as char));
+        }
+    } else if n > -6 && n <= 0 {
+        out.push_str("0.");
+        out.extend(std::iter::repeat_n('0', (-n) as usize));
+        out.extend(digits.iter().map(|byte| *byte as char));
+    } else {
+        out.push(digits[0] as char);
+        if digits.len() > 1 {
+            out.push('.');
+            out.extend(digits[1..].iter().map(|byte| *byte as char));
+        }
+        out.push('e');
+        let exponent = n - 1;
+        if exponent >= 0 {
+            out.push('+');
+        }
+        out.push_str(&exponent.to_string());
+    }
+    out
+}
+
+fn jet_json_jcs_key_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    left.encode_utf16().cmp(right.encode_utf16())
+}
+
 fn jet_encoding_error(
     kind: jet_std::EncodingErrorKind,
     offset: i64,
@@ -807,11 +959,11 @@ impl jet_std::JSONWriter {
         if !value.is_empty() {
             return Err(self.state_error("canonical JSON object value was not completed"));
         }
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        entries.sort_by(|left, right| jet_json_jcs_key_cmp(&left.0, &right.0));
         for pair in entries.windows(2) {
             if pair[0].0 == pair[1].0 {
                 self.canonical_retained = self.canonical_retained.saturating_sub(retained);
-                return Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, format!("canonical JSON rejects duplicate object key {:?}", pair[0].0)));
+                return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.total, 1, self.total + 1, "JCS requires unique object keys"));
             }
         }
         let mut total = 2usize;
@@ -852,7 +1004,7 @@ impl jet_std::JSONWriter {
                 };
                 if current.is_some() { return Err(self.state_error("canonical JSON object key has no value")); }
                 if entries.iter().any(|(old, _)| old == &key) {
-                    return Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, format!("canonical JSON rejects duplicate object key {:?}", key)));
+                    return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.total, 1, self.total + 1, "JCS requires unique object keys"));
                 }
                 let frame = self.canonical_frames.len() - 1;
                 self.canonical_charge(frame, key.capacity())?;
@@ -879,8 +1031,9 @@ impl jet_std::JSONWriter {
                 self.canonical_emit(&object)?;
                 self.canonical_complete_value()
             }
-            jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "canonical JSON cannot encode Bytes; encode bytes as Text explicitly")),
-            jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "canonical JSON cannot encode a non-finite Float")),
+            jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JSON cannot encode Bytes; encode bytes as Text explicitly")),
+            jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JCS cannot encode a non-finite Float")),
+            jet_std::DataEvent::Int(value) if (value as f64) as i128 != value as i128 => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text")),
             value => {
                 if matches!(value, jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart)
                     && self.canonical_frames.len() as i64 >= self.limits.max_depth
@@ -891,8 +1044,8 @@ impl jet_std::JSONWriter {
                     jet_std::DataEvent::Null => Some(b"null".to_vec()),
                     jet_std::DataEvent::Bool(true) => Some(b"true".to_vec()),
                     jet_std::DataEvent::Bool(false) => Some(b"false".to_vec()),
-                    jet_std::DataEvent::Int(value) => Some(value.to_string().into_bytes()),
-                    jet_std::DataEvent::Float(value) => Some(format!("{:?}", value).into_bytes()),
+                    jet_std::DataEvent::Int(value) => Some(jet_json_jcs_number(*value as f64).into_bytes()),
+                    jet_std::DataEvent::Float(value) => Some(jet_json_jcs_number(*value).into_bytes()),
                     jet_std::DataEvent::Text(value) => Some(self.canonical_quote(value)?),
                     jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart => None,
                     _ => unreachable!(),
