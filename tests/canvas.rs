@@ -1565,7 +1565,7 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         "\"path\":\"core.event\"",
         "\"path\":\"core.web\"",
         "\"path\":\"core.mem\"",
-        "\"signature\":\"Client.request(method, url)\"",
+        "\"signature\":\"client.request(method, url)\"",
         "\"name\":\"request\"",
         "\"pure\"",
     ] {
