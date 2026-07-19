@@ -268,6 +268,57 @@ fn run() {
 }
 
 #[test]
+fn async_registration_and_once_removal_are_exact() {
+    let Some(running) = spawn_observed(
+        "async_lifecycle",
+        r#"
+use core.event as event
+use core.time as time
+
+fn run() {
+    rejected_scope :: event.scope()
+    rejected_scope.cancel()
+    rejected :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    rejected.on(rejected_scope, (n: Int) => {})
+
+    once_scope :: event.scope()
+    once_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    once_sub :: once_event.once(once_scope, (n: Int) => {})
+    once_event.emit_async(1).join()
+    once_sub.unsubscribe()
+    once_scope.cancel()
+
+    print("READY")
+    time.sleep(30000)
+}
+"#,
+    ) else {
+        return;
+    };
+    let (_snapshot, rendered) =
+        debugger_events(running.child.id(), "\"lifecycle\":\"Removed\"");
+    let subscribed = rendered
+        .lines()
+        .filter(|line| {
+            line.contains("source=AsyncEvent") && line.contains("lifecycle=Subscribed")
+        })
+        .collect::<Vec<_>>();
+    let removed = rendered
+        .lines()
+        .filter(|line| {
+            line.contains("source=AsyncEvent") && line.contains("lifecycle=Removed")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(subscribed.len(), 1, "pre-cancelled registration published: {rendered}");
+    assert_eq!(removed.len(), 1, "async once removal duplicated: {rendered}");
+    let subscription = subscribed[0]
+        .split_whitespace()
+        .find(|field| field.starts_with("subscription="))
+        .unwrap();
+    assert!(removed[0].contains(subscription), "removal did not match once subscription: {rendered}");
+}
+
+#[test]
 fn runtime_event_sequence_is_bounded_and_debugger_preserves_exact_sequence() {
     let Some(running) = spawn_observed(
         "bounded",
