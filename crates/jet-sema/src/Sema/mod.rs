@@ -125,9 +125,10 @@ impl UnitFact {
         Some((scale, offset))
     }
 
-    fn conversion_is_exact_to(&self, destination: &Self) -> bool {
+    fn conversion_is_total_to(&self, destination: &Self) -> bool {
         self.conversion_parts_to(destination).is_some_and(|(scale, offset)| {
-            scale.den.to_string() == "1" && offset.den.to_string() == "1"
+            scale == crate::AST::UnitRatio::integer(1)
+                && offset == crate::AST::UnitRatio::zero()
         })
     }
 
@@ -1067,6 +1068,7 @@ pub(crate) struct Checker<'a> {
     reference_anchors: &'a mut HashMap<(String, usize, usize), Effects::DefinitionAnchorFact>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
+    concrete_unit_values: Vec<HashMap<String, f64>>,
     /// name -> span of the use that gave the value away.
     moved: HashMap<String, Span>,
     loop_depth: usize,
@@ -1261,13 +1263,22 @@ pub(crate) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    fn concrete_unit_value(expr: &Expr) -> Option<f64> {
-        let Expr::MethodCall { method, args, .. } = expr else { return None };
-        if method != crate::Syntax::numeric_conversion_method("Float")? || args.len() != 1 {
-            return None;
-        }
-        match &args[0].expr {
-            Expr::Float(value, _, _) => Some(*value),
+    fn concrete_unit_value(&self, expr: &Expr) -> Option<f64> {
+        match expr {
+            Expr::Ident(name, _) => self
+                .concrete_unit_values
+                .iter()
+                .rev()
+                .find_map(|scope| scope.get(name).copied()),
+            Expr::MethodCall { method, args, .. }
+                if method == crate::Syntax::numeric_conversion_method("Float")?
+                    && args.len() == 1 =>
+            {
+                match &args[0].expr {
+                    Expr::Float(value, _, _) => Some(*value),
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -1355,8 +1366,8 @@ impl<'a> Checker<'a> {
                 .push(self.unit_conversion_overflow_diagnostic(expr.span()));
             return true;
         }
-        let exact = Self::concrete_unit_value(expr).map_or_else(
-            || source_fact.conversion_is_exact_to(&destination_fact),
+        let exact = self.concrete_unit_value(expr).map_or_else(
+            || source_fact.conversion_is_total_to(&destination_fact),
             |value| source_fact.converted_value_is_exact_to(&destination_fact, value),
         );
         if !exact {
@@ -1428,6 +1439,7 @@ impl<'a> Checker<'a> {
         &mut self,
         destination_name: &str,
         source_name: &str,
+        source_expr: &Expr,
         span: Span,
     ) -> bool {
         if let (Some((_, destination)), Some((_, source))) = (
@@ -1439,7 +1451,11 @@ impl<'a> Checker<'a> {
                     .push(self.unit_conversion_overflow_diagnostic(span));
                 return true;
             }
-            if !source.conversion_is_exact_to(&destination) {
+            let exact = self.concrete_unit_value(source_expr).map_or_else(
+                || source.conversion_is_total_to(&destination),
+                |value| source.converted_value_is_exact_to(&destination, value),
+            );
+            if !exact {
                 self.diags.push(self.inexact_unit_diagnostic(
                     destination_name,
                     source_name,

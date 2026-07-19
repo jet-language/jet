@@ -550,6 +550,9 @@ impl<'a> Checker<'a> {
             // E2307 check on `Expr::Ident` reads (this binding's init was already
             // inferred above) already caught `y :: d` for a live view `d`; a
             // second check here would double-report the same span.
+            let concrete_unit_value = (!b.mutable)
+                .then(|| self.concrete_unit_value(&b.init))
+                .flatten();
             self.declare(
                 &b.name,
                 b.name_span,
@@ -564,6 +567,12 @@ impl<'a> Checker<'a> {
                     single_use_span,
                 },
             );
+            if let Some(value) = concrete_unit_value {
+                self.concrete_unit_values
+                    .last_mut()
+                    .expect("binding scope exists")
+                    .insert(b.name.clone(), value);
+            }
             self.current_binding_name = prev_binding_name;
         }
     

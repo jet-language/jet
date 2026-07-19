@@ -573,7 +573,9 @@ rational is an integer that the destination `Float` can represent exactly.
 `.NearestEven` rounds the rational before converting it to `Float`; a
 non-finite input or result outside the destination representation traps rather
 than producing `NaN` or infinity. AOT and resident execution use the same
-conversion mechanism.
+conversion mechanism. For an unknown unrestricted `Float`-backed value, only
+an identity scale and offset proves exact finite conversion over the complete
+source domain; integral coefficients alone are not proof.
 
 Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and

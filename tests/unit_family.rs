@@ -23,6 +23,18 @@ fn codes_of(src: &str) -> Vec<String> {
     }
 }
 
+fn check_codes_of(src: &str) -> Vec<String> {
+    let dir = common::unique_tmp("jet_quantity_check");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    std::fs::write(&path, src).unwrap();
+    jet::Driver::check_file(path.to_str().unwrap(), None, false)
+        .0
+        .into_iter()
+        .map(|diagnostic| diagnostic.code)
+        .collect()
+}
+
 fn parse_family(src: &str) -> jet::AST::UnitFamilyDef {
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}");
@@ -193,6 +205,38 @@ fn run() { takes_meter(3000millimeter) }
     assert!(
         generated.contains("Meter(match jet_unit_conversion_exact("),
         "implicit conversion must lower through the shared TIR UnitConvert path"
+    );
+
+    let family = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    double(scale: 2)
+}
+fn takes_meter(value: Meter) { print(value.raw()) }
+"#;
+    for value in ["0.25", "1.7976931348623157e308"] {
+        let src = format!(
+            "{family}\nfn relay(value: Double) {{ takes_meter(value) }}\nfn run() {{ relay(Double.from_float({value})) }}\n"
+        );
+        assert_eq!(
+            check_codes_of(&src),
+            vec!["E0127"],
+            "unknown scale-2 value {value} must be rejected before runtime"
+        );
+    }
+
+    let identity = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    alias(scale: 1)
+}
+fn takes_meter(value: Meter) { print(value.raw()) }
+fn relay(value: Alias) { takes_meter(value) }
+fn run() { relay(Alias.from_float(0.25)) }
+"#;
+    assert!(
+        check_codes_of(identity).is_empty(),
+        "identity conversion is exact over the complete Float domain"
     );
 }
 

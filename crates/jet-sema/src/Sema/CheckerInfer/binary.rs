@@ -376,7 +376,13 @@ impl<'a> Checker<'a> {
                                 (rname, rfact)
                             };
                             let source_name = if left_wins { rname } else { lname };
-                            if self.reject_implicit_unit_conversion(dest_name, source_name, span) {
+                            let source_expr = if left_wins { &**rhs } else { &**lhs };
+                            if self.reject_implicit_unit_conversion(
+                                dest_name,
+                                source_name,
+                                source_expr,
+                                span,
+                            ) {
                                 return Some(Type::Named(dest_name.clone()));
                             }
                             self.convert_unit_operand(lhs, lname, lfact, dest_name, dest_fact, span);
@@ -390,7 +396,12 @@ impl<'a> Checker<'a> {
                             let (_, delta_fact) = self
                                 .unit_fact_for_type(&Type::Named(delta_name.clone()))
                                 .expect("counterpart unit fact");
-                            if self.reject_implicit_unit_conversion(&delta_name, rname, span) {
+                            if self.reject_implicit_unit_conversion(
+                                &delta_name,
+                                rname,
+                                rhs,
+                                span,
+                            ) {
                                 return Some(Type::Named(lname.clone()));
                             }
                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
@@ -415,7 +426,12 @@ impl<'a> Checker<'a> {
                             let (_, delta_fact) = self
                                 .unit_fact_for_type(&Type::Named(delta_name.clone()))
                                 .expect("counterpart unit fact");
-                            if self.reject_implicit_unit_conversion(&delta_name, lname, span) {
+                            if self.reject_implicit_unit_conversion(
+                                &delta_name,
+                                lname,
+                                lhs,
+                                span,
+                            ) {
                                 return Some(Type::Named(rname.clone()));
                             }
                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
@@ -444,7 +460,13 @@ impl<'a> Checker<'a> {
                                 return None;
                             };
                             let source_name = if left_wins { rname } else { lname };
-                            if self.reject_implicit_unit_conversion(point_name, source_name, span) {
+                            let source_expr = if left_wins { &**rhs } else { &**lhs };
+                            if self.reject_implicit_unit_conversion(
+                                point_name,
+                                source_name,
+                                source_expr,
+                                span,
+                            ) {
                                 return Some(Type::Named(delta_name));
                             }
                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
@@ -482,7 +504,13 @@ impl<'a> Checker<'a> {
                             let left_wins = lfact.scale.abs() <= rfact.scale.abs();
                             let (dest_name, dest_fact) = if left_wins { (lname, lfact) } else { (rname, rfact) };
                             let source_name = if left_wins { rname } else { lname };
-                            if self.reject_implicit_unit_conversion(dest_name, source_name, span) {
+                            let source_expr = if left_wins { &**rhs } else { &**lhs };
+                            if self.reject_implicit_unit_conversion(
+                                dest_name,
+                                source_name,
+                                source_expr,
+                                span,
+                            ) {
                                 return Some(Type::Bool);
                             }
                             self.convert_unit_operand(lhs, lname, lfact, dest_name, dest_fact, span);

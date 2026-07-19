@@ -1723,6 +1723,7 @@ pub(crate) fn check_func_body_bundle(
         reference_anchors,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
+        concrete_unit_values: vec![HashMap::new()],
         moved: HashMap::new(),
         loop_depth: 0,
         loop_labels: Vec::new(),

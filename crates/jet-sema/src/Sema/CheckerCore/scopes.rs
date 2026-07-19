@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
         pub(crate) fn push_scope(&mut self) {
             self.scopes.push(HashMap::new());
+            self.concrete_unit_values.push(HashMap::new());
             self.lambda_mut_borrow_stack.push(HashSet::new());
             self.ct_scopes.push(HashMap::new());
         }
@@ -21,6 +22,7 @@ impl<'a> Checker<'a> {
             let depth = self.scopes.len();
             self.view_facts.leave_scope(depth);
             self.scopes.pop();
+            self.concrete_unit_values.pop();
             self.lambda_mut_borrow_stack.pop();
             self.ct_scopes.pop();
         }
