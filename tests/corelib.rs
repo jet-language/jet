@@ -3771,7 +3771,7 @@ use core.net as net
 fn run() {{
     listener :: net.unix_listen("{socket}") ?? panic("listen")
     budget :: Duration.seconds(1) ?? panic("budget")
-    client := net.unix_connect("{socket}") ?? panic("connect")
+    client := net.unix_connect("{socket}", deadline: budget) ?? panic("connect")
     server := listener.accept(deadline: budget) ?? panic("accept")
     client.set_timeout(budget) ?? panic("persistent timeout")
     interest: NetReadyInterest :: .Read
@@ -4206,9 +4206,9 @@ fn zero_rejected<T: Reader>(&stream: T) -> Bool {
 
 fn run() {
     tcp :: net.tcp_connect("127.0.0.1:$PORT") ?? panic("tcp")
-    secure := tls.client(^tcp, "localhost") ?? panic("tls handshake")
-    request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
     budget :: Duration.seconds(1) ?? panic("deadline")
+    secure := tls.client(^tcp, "localhost", deadline: budget) ?? panic("tls handshake")
+    request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
     interest: NetReadyInterest :: .Write
     readiness :: secure.ready(interest, deadline: budget) ?? panic("ready")
     print(net.ready_writable(readiness))

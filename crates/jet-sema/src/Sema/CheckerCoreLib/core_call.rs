@@ -134,7 +134,32 @@ impl<'a> Checker<'a> {
             if module == "core.ui" && name == "node_role" {
                 self.check_a11y_node_role_label(args, span);
             }
-            let sig = resolved_core_fixed_sig(module, name);
+            let sig = if module == "core.tls" && name == "client" && args.len() == 3 {
+                Some((
+                    vec![
+                        (AccessConvention::Move, Type::Named("TcpStream".to_string())),
+                        (AccessConvention::Read, Type::String),
+                        (AccessConvention::Read, Type::Named("Duration".to_string())),
+                    ],
+                    Some(result_ty(
+                        Type::Named("TlsStream".to_string()),
+                        Type::Named("NetError".to_string()),
+                    )),
+                ))
+            } else if module == "core.net" && name == "unix_connect" && args.len() == 2 {
+                Some((
+                    vec![
+                        (AccessConvention::Read, Type::String),
+                        (AccessConvention::Read, Type::Named("Duration".to_string())),
+                    ],
+                    Some(result_ty(
+                        Type::Named("UnixStream".to_string()),
+                        Type::Named("NetError".to_string()),
+                    )),
+                ))
+            } else {
+                resolved_core_fixed_sig(module, name)
+            };
             match (module, name) {
                 ("core.encoding.cbor", "parse") => {
                     if !(1..=2).contains(&args.len()) {

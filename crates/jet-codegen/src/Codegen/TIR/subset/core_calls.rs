@@ -165,6 +165,26 @@ pub(super) fn core_call_args_in_subset(
     cx: &Cx,
     locals: &std::collections::HashSet<String>,
 ) -> bool {
+    if module == "core.tls" && method == "client" && args.len() == 3 {
+        return args.iter().enumerate().all(|(idx, arg)| {
+            let label_ok = if idx == 2 {
+                matches!(arg.label.as_ref().map(|(label, _)| label.as_str()), Some("deadline"))
+            } else {
+                arg.label.is_none()
+            };
+            label_ok && expr_in_subset(&arg.expr, cx, locals)
+        });
+    }
+    if module == "core.net" && method == "unix_connect" && args.len() == 2 {
+        return args.iter().enumerate().all(|(idx, arg)| {
+            let label_ok = if idx == 1 {
+                matches!(arg.label.as_ref().map(|(label, _)| label.as_str()), Some("deadline"))
+            } else {
+                arg.label.is_none()
+            };
+            label_ok && expr_in_subset(&arg.expr, cx, locals)
+        });
+    }
     if module == "core.http.server" && method == "serve" && args.len() == 3 {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = if idx == 2 {

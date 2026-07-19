@@ -755,6 +755,24 @@ fn jet_net_tls_client_scheduler(
     result
 }
 
+fn jet_net_tls_client_scheduler_deadline(
+    stream: JetTcpStream,
+    server_name: &String,
+    deadline: &jet_std::Duration,
+    begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
+    handshake_step: fn(i64) -> Result<bool, String>,
+    abort: fn(i64),
+    wants: fn(i64) -> Result<(bool, bool), String>,
+    read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
+    write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
+    close_step: fn(i64) -> Result<bool, String>,
+) -> Result<JetTlsStream, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
+    jet_net_tls_client_scheduler(
+        stream, server_name, begin, handshake_step, abort, wants, read_step, write_step, close_step,
+    )
+}
+
 fn jet_net_tls_read_bytes(stream: &mut JetTlsStream, limit: i64) -> Result<Vec<u8>, JetNetError> {
     if limit <= 0 {
         return Err(JetNetError::InvalidInput(jet_net_detail(
@@ -1665,6 +1683,11 @@ fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
 #[cfg(not(unix))]
 fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
     Err(JetNetError::Unsupported(jet_net_detail("unix connect", Some(path.clone()), None, "unix sockets are not supported on this platform".to_string(), None)))
+}
+
+fn jet_net_unix_connect_deadline(path: &String, deadline: &jet_std::Duration) -> Result<JetUnixStream, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "unix connect")?;
+    jet_net_unix_connect(path)
 }
 
 #[cfg(unix)]

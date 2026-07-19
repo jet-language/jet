@@ -1559,7 +1559,16 @@ pub(crate) fn emit_tir_core_call(
         ("core.net", "unix_listen") => format!("{}(&({}))", helper("jet_net_unix_listen"), arg(0)),
         ("core.net", "unix_accept") => format!("{}(&({}))", helper("jet_net_unix_accept"), arg(0)),
         ("core.net", "unix_connect") => {
-            format!("{}(&({}))", helper("jet_net_unix_connect"), arg(0))
+            if args.len() == 2 {
+                format!(
+                    "{}(&({}), &({}))",
+                    helper("jet_net_unix_connect_deadline"),
+                    arg(0),
+                    arg(1)
+                )
+            } else {
+                format!("{}(&({}))", helper("jet_net_unix_connect"), arg(0))
+            }
         }
         ("core.net", "unix_read") => format!("{}(&mut ({}))", helper("jet_net_unix_read"), arg(0)),
         ("core.net", "unix_write") => format!(
@@ -1655,19 +1664,27 @@ pub(crate) fn emit_tir_core_call(
         ("core.net", "tls_close") => {
             format!("{}(&mut ({}))", helper("jet_net_tls_close"), arg(0))
         }
-        ("core.tls", "client") => format!(
-            "{}({}, &({}), {}, {}, {}, {}, {}, {}, {})",
-            helper("jet_net_tls_client_scheduler"),
-            arg(0),
-            arg(1),
-            regex_fn("jet_net_tls_begin_impl"),
-            regex_fn("jet_net_tls_handshake_step_impl"),
-            regex_fn("jet_net_tls_abort_impl"),
-            regex_fn("jet_net_tls_wants_impl"),
-            regex_fn("jet_net_tls_read_step_impl"),
-            regex_fn("jet_net_tls_write_step_impl"),
-            regex_fn("jet_net_tls_close_step_impl")
-        ),
+        ("core.tls", "client") => {
+            let (helper_name, deadline) = if args.len() == 3 {
+                ("jet_net_tls_client_scheduler_deadline", format!(", &({})", arg(2)))
+            } else {
+                ("jet_net_tls_client_scheduler", String::new())
+            };
+            format!(
+                "{}({}, &({}){}, {}, {}, {}, {}, {}, {}, {})",
+                helper(helper_name),
+                arg(0),
+                arg(1),
+                deadline,
+                regex_fn("jet_net_tls_begin_impl"),
+                regex_fn("jet_net_tls_handshake_step_impl"),
+                regex_fn("jet_net_tls_abort_impl"),
+                regex_fn("jet_net_tls_wants_impl"),
+                regex_fn("jet_net_tls_read_step_impl"),
+                regex_fn("jet_net_tls_write_step_impl"),
+                regex_fn("jet_net_tls_close_step_impl")
+            )
+        },
         ("core.tls", "read") => format!(
             "{}(&mut ({}), {})",
             helper("jet_net_tls_read_bytes"), arg(0), arg(1)
