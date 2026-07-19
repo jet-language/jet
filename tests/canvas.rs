@@ -304,6 +304,13 @@ const CANVAS_SHIELD_FIXTURE: &str = r#"fn run() {
 }
 "#;
 
+const CANVAS_POLICY_FIXTURE: &str = r#"fn run() {
+    @Policy(arena_bounded(8192)) {
+        print("bounded")
+    }
+}
+"#;
+
 const CANVAS_TASK_RAIL_FIXTURE: &str = r#"fn worker() -> Int {
     return 1
 }
@@ -3213,6 +3220,22 @@ fn canvas_projects_and_source_edits_shield_region() {
     let graph = jet::Canvas::graph_json_for_file(&path).expect("shield graph after edit");
     assert!(graph.contains("\"kind\":\"shield\""), "{graph}");
     assert!(graph.contains("\"title\":\"\\\"after\\\"\""), "{graph}");
+}
+
+#[test]
+fn canvas_projects_policy_region() {
+    let path = write_fixture("policy_region", CANVAS_POLICY_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("policy graph");
+
+    for field in [
+        "\"kind\":\"policy\"",
+        "\"title\":\"@Policy(arena_bounded)\"",
+        "\"source_span\":{\"start\":",
+        "\"title\":\"print\"",
+        "\"title\":\"\\\"bounded\\\"\"",
+    ] {
+        assert!(graph.contains(field), "policy graph missing {field}: {graph}");
+    }
 }
 
 #[test]
