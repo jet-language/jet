@@ -1,7 +1,158 @@
-//! Shared XML 1.0 pull tokenizer. Kept std-only so generated and comptime
-//! adapters consume identical token, namespace, and error behavior.
+//! Shared std-only encoding engines compiled by generated and comptime tiers.
+//! The primary engine here is the XML 1.0 pull tokenizer.
 
 use std::collections::{BTreeMap, BTreeSet};
+
+/// D-ENCBASE-STRICT1=A edition-2026 compatibility engine. This module lives in
+/// the existing std-only generated/comptime seam so both tiers compile exactly
+/// one decoder source. Edition 2027 strict defaults remain toolchain-gated.
+pub mod base_encoding_2026 {
+    fn base64_digit(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    fn historical_aot(text: &str) -> Option<Vec<u8>> {
+        let input: Vec<u8> = text.bytes().filter(|&b| !b.is_ascii_whitespace()).collect();
+        if input.len() % 4 != 0 {
+            return None;
+        }
+        let mut out = Vec::with_capacity(input.len() / 4 * 3);
+        for chunk in input.chunks(4) {
+            let a = base64_digit(chunk[0])?;
+            let b = base64_digit(chunk[1])?;
+            out.push((a << 2) | (b >> 4));
+            if chunk[2] != b'=' {
+                let c = base64_digit(chunk[2])?;
+                out.push((b << 4) | (c >> 2));
+                if chunk[3] != b'=' {
+                    let d = base64_digit(chunk[3])?;
+                    out.push((c << 6) | d);
+                }
+            }
+        }
+        Some(out)
+    }
+
+    fn historical_comptime(text: &str) -> Option<Vec<u8>> {
+        let input = text.trim_end_matches('=').as_bytes();
+        if input.len() % 4 == 1 {
+            return None;
+        }
+        let mut out = Vec::with_capacity(input.len() / 4 * 3);
+        for chunk in input.chunks(4) {
+            let digits: Vec<u8> = chunk
+                .iter()
+                .map(|&byte| base64_digit(byte))
+                .collect::<Option<_>>()?;
+            out.push((digits[0] << 2) | (digits.get(1).copied().unwrap_or(0) >> 4));
+            if digits.len() > 2 {
+                out.push((digits[1] << 4) | (digits[2] >> 2));
+            }
+            if digits.len() > 3 {
+                out.push((digits[2] << 6) | digits[3]);
+            }
+        }
+        Some(out)
+    }
+
+    fn error(text: &str, url: bool) -> String {
+        let label = if url { "base64url" } else { "base64" };
+        let alphabet = if url {
+            "URL-safe base64"
+        } else {
+            "standard base64"
+        };
+        for (offset, &byte) in text.as_bytes().iter().enumerate() {
+            let accepted = byte.is_ascii_alphanumeric()
+                || matches!(byte, b'=' | b'+' | b'/')
+                || (url && matches!(byte, b'-' | b'_'))
+                || byte.is_ascii_whitespace();
+            if !accepted {
+                return format!(
+                    "invalid {label} at byte {offset}: byte 0x{byte:02X} is not in the {alphabet} alphabet"
+                );
+            }
+        }
+        if let Some(offset) = text.as_bytes().iter().position(|&byte| byte == b'=') {
+            if text.as_bytes()[offset + 1..]
+                .iter()
+                .any(|&byte| byte != b'=' && !byte.is_ascii_whitespace())
+            {
+                return format!(
+                    "invalid {label} at byte {offset}: padding may appear only at the end"
+                );
+            }
+        }
+        format!(
+            "invalid {label} at byte {}: encoded length cannot represent whole bytes",
+            text.len()
+        )
+    }
+
+    fn decode_base64_inner(text: &str, url: bool) -> Result<Vec<u8>, String> {
+        let prepared = if url {
+            let mut value = text.trim().replace('-', "+").replace('_', "/");
+            while value.len() % 4 != 0 {
+                value.push('=');
+            }
+            value
+        } else {
+            text.to_string()
+        };
+        match (historical_aot(&prepared), historical_comptime(&prepared)) {
+            (Some(aot), Some(comptime)) if aot != comptime => Err(format!(
+                "invalid {} at byte {}: historical decoders disagree",
+                if url { "base64url" } else { "base64" },
+                text.len()
+            )),
+            (Some(bytes), _) | (_, Some(bytes)) => Ok(bytes),
+            (None, None) => Err(error(text, url)),
+        }
+    }
+
+    pub fn decode_base64(text: &str) -> Result<Vec<u8>, String> {
+        decode_base64_inner(text, false)
+    }
+
+    pub fn decode_base64url(text: &str) -> Result<Vec<u8>, String> {
+        decode_base64_inner(text, true)
+    }
+
+    pub fn decode_base32(text: &str) -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        let mut buffer = 0u32;
+        let mut bits = 0u8;
+        for (offset, byte) in text.bytes().enumerate() {
+            if byte.is_ascii_whitespace() || byte == b'=' {
+                continue;
+            }
+            let value = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a',
+                b'2'..=b'7' => byte - b'2' + 26,
+                _ => {
+                    return Err(format!(
+                        "invalid base32 at byte {offset}: byte 0x{byte:02X} is not in the base32 alphabet"
+                    ));
+                }
+            };
+            buffer = (buffer << 5) | value as u32;
+            bits += 5;
+            if bits >= 8 {
+                out.push(((buffer >> (bits - 8)) & 0xff) as u8);
+                bits -= 8;
+            }
+        }
+        Ok(out)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Name {

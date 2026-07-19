@@ -46,123 +46,8 @@ fn jet_std_b64_encode(bytes: &Vec<u8>) -> String {
     out
 }
 
-fn jet_b64_val(b: u8) -> Option<u8> {
-    match b {
-        b'A'..=b'Z' => Some(b - b'A'),
-        b'a'..=b'z' => Some(b - b'a' + 26),
-        b'0'..=b'9' => Some(b - b'0' + 52),
-        b'+' => Some(62),
-        b'/' => Some(63),
-        _ => None,
-    }
-}
-
-// D-ENCBASE-STRICT1=A: edition 2026 accepts the union of the two historical
-// decoders. Edition 2027 strict defaults remain gated on toolchain support.
-fn jet_b64_decode_2026_aot(text: &str) -> Option<Vec<u8>> {
-    let input: Vec<u8> = text.bytes().filter(|&b| !b.is_ascii_whitespace()).collect();
-    if input.len() % 4 != 0 {
-        return None;
-    }
-    let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    for chunk in input.chunks(4) {
-        let a = jet_b64_val(chunk[0])?;
-        let b = jet_b64_val(chunk[1])?;
-        out.push(((a << 2) | (b >> 4)) as u8);
-        if chunk[2] != b'=' {
-            let c = jet_b64_val(chunk[2])?;
-            out.push(((b << 4) | (c >> 2)) as u8);
-            if chunk[3] != b'=' {
-                let d = jet_b64_val(chunk[3])?;
-                out.push(((c << 6) | d) as u8);
-            }
-        }
-    }
-    Some(out)
-}
-
-fn jet_b64_decode_2026_comptime(text: &str) -> Option<Vec<u8>> {
-    let input = text.trim_end_matches('=').as_bytes();
-    if input.len() % 4 == 1 {
-        return None;
-    }
-    let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    for chunk in input.chunks(4) {
-        let digits: Vec<u8> = chunk
-            .iter()
-            .map(|&byte| jet_b64_val(byte))
-            .collect::<Option<_>>()?;
-        out.push((digits[0] << 2) | (digits.get(1).copied().unwrap_or(0) >> 4));
-        if digits.len() > 2 {
-            out.push((digits[1] << 4) | (digits[2] >> 2));
-        }
-        if digits.len() > 3 {
-            out.push((digits[2] << 6) | digits[3]);
-        }
-    }
-    Some(out)
-}
-
-fn jet_b64_2026_error(text: &str, url: bool) -> String {
-    let label = if url { "base64url" } else { "base64" };
-    let alphabet = if url {
-        "URL-safe base64"
-    } else {
-        "standard base64"
-    };
-    for (offset, &byte) in text.as_bytes().iter().enumerate() {
-        let accepted = byte.is_ascii_alphanumeric()
-            || matches!(byte, b'=' | b'+' | b'/')
-            || (url && matches!(byte, b'-' | b'_'))
-            || byte.is_ascii_whitespace();
-        if !accepted {
-            return format!(
-                "invalid {label} at byte {offset}: byte 0x{byte:02X} is not in the {alphabet} alphabet"
-            );
-        }
-    }
-    if let Some(offset) = text.as_bytes().iter().position(|&byte| byte == b'=') {
-        if text.as_bytes()[offset + 1..]
-            .iter()
-            .any(|&byte| byte != b'=' && !byte.is_ascii_whitespace())
-        {
-            return format!(
-                "invalid {label} at byte {offset}: padding may appear only at the end"
-            );
-        }
-    }
-    format!(
-        "invalid {label} at byte {}: encoded length cannot represent whole bytes",
-        text.len()
-    )
-}
-
-fn jet_b64_decode_2026(text: &str, url: bool) -> Result<Vec<u8>, String> {
-    let prepared = if url {
-        let mut value = text.trim().replace('-', "+").replace('_', "/");
-        while value.len() % 4 != 0 {
-            value.push('=');
-        }
-        value
-    } else {
-        text.to_string()
-    };
-    match (
-        jet_b64_decode_2026_aot(&prepared),
-        jet_b64_decode_2026_comptime(&prepared),
-    ) {
-        (Some(aot), Some(comptime)) if aot != comptime => Err(format!(
-            "invalid {} at byte {}: historical decoders disagree",
-            if url { "base64url" } else { "base64" },
-            text.len()
-        )),
-        (Some(bytes), _) | (_, Some(bytes)) => Ok(bytes),
-        (None, None) => Err(jet_b64_2026_error(text, url)),
-    }
-}
-
 fn jet_std_b64_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_b64_decode_2026(text, false)
+    jet_xml_pull::base_encoding_2026::decode_base64(text)
 }
 
 fn jet_std_b64url_encode(bytes: &Vec<u8>) -> String {
@@ -172,7 +57,7 @@ fn jet_std_b64url_encode(bytes: &Vec<u8>) -> String {
         .replace('/', "_")
 }
 fn jet_std_b64url_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_b64_decode_2026(text, true)
+    jet_xml_pull::base_encoding_2026::decode_base64url(text)
 }
 
 const JET_BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -198,32 +83,8 @@ fn jet_std_base32_encode(bytes: &Vec<u8>) -> String {
     }
     out
 }
-fn jet_base32_val(b: u8, offset: usize) -> Result<u8, String> {
-    match b {
-        b'A'..=b'Z' => Ok(b - b'A'),
-        b'a'..=b'z' => Ok(b - b'a'),
-        b'2'..=b'7' => Ok(b - b'2' + 26),
-        _ => Err(format!(
-            "invalid base32 at byte {offset}: byte 0x{b:02X} is not in the base32 alphabet"
-        )),
-    }
-}
 fn jet_std_base32_decode(text: &String) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    let mut buffer: u32 = 0;
-    let mut bits = 0u8;
-    for (offset, b) in text.bytes().enumerate() {
-        if b.is_ascii_whitespace() || b == b'=' {
-            continue;
-        }
-        buffer = (buffer << 5) | jet_base32_val(b, offset)? as u32;
-        bits += 5;
-        if bits >= 8 {
-            out.push(((buffer >> (bits - 8)) & 0xff) as u8);
-            bits -= 8;
-        }
-    }
-    Ok(out)
+    jet_xml_pull::base_encoding_2026::decode_base32(text)
 }
 
 fn jet_xml_to_data_tree(value: crate::jet_xml_pull::Value) -> jet_std::DataTree {
