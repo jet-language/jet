@@ -518,6 +518,59 @@ fn jet_net_deadline_timeout(operation: &str) -> JetNetError {
     ))
 }
 
+fn jet_net_scheduler_park(operation: &str, millis: u64) -> Result<(), JetNetError> {
+    match jet_scheduler_wait_without_unwind(|| jet_scheduler_park_ms("network wait", millis)) {
+        JetSchedulerWait::Ready(()) => Ok(()),
+        JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
+            operation, None, None, format!("{} cancelled", operation), None,
+        ))),
+        JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
+        JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
+            operation, None, None, format!("{} scheduler wait failed: {}", operation, message), None,
+        ))),
+    }
+}
+
+fn jet_net_wait_for_connect(
+    receiver: std::sync::mpsc::Receiver<Result<std::net::TcpStream, std::io::Error>>,
+    address: Option<String>,
+) -> Result<JetTcpStream, JetNetError> {
+    loop {
+        match receiver.try_recv() {
+            Ok(Ok(stream)) => return jet_net_tcp_stream(stream),
+            Ok(Err(error)) => return Err(jet_net_io_error("tcp connect", address, error)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                jet_net_scheduler_park("tcp connect", 5)?;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Err(JetNetError::Other(jet_net_detail(
+                    "tcp connect", address, None,
+                    "tcp connect worker stopped without a result".to_string(), None,
+                )));
+            }
+        }
+    }
+}
+
+fn jet_net_connect_addr_worker(addr: std::net::SocketAddr) -> Result<JetTcpStream, JetNetError> {
+    let address = addr.to_string();
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout("tcp connect"));
+    }
+    let timeout = jet_deadline_remaining_ms().map(|ms| {
+        std::time::Duration::from_millis(ms.max(1) as u64)
+    });
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = match timeout {
+            Some(timeout) => std::net::TcpStream::connect_timeout(&addr, timeout),
+            None => std::net::TcpStream::connect(addr),
+        };
+        let _ = sender.send(result);
+    });
+    jet_net_wait_for_connect(receiver, Some(address))
+}
+
 fn jet_net_scheduler_wait(
     stream: &std::net::TcpStream,
     read: bool,
@@ -832,46 +885,104 @@ fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTcpListener, JetNe
 }
 
 fn jet_net_tcp_connect_addr(addr: &JetSocketAddr) -> Result<JetTcpStream, JetNetError> {
-    std::net::TcpStream::connect(addr.inner)
-        .map_err(|e| jet_net_io_error("tcp connect", Some(addr.inner.to_string()), e))
-        .and_then(jet_net_tcp_stream)
+    jet_net_connect_addr_worker(addr.inner)
 }
 
 fn jet_net_tcp_connect_timeout(addr: &JetSocketAddr, ms: i64) -> Result<JetTcpStream, JetNetError> {
-    let timeout = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("tcp connect", Some(addr.inner.to_string()), None, m, None)))?;
-    std::net::TcpStream::connect_timeout(&addr.inner, timeout)
-        .map_err(|e| jet_net_io_error("tcp connect", Some(addr.inner.to_string()), e))
-        .and_then(jet_net_tcp_stream)
+    jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("tcp connect", Some(addr.inner.to_string()), None, m, None)))?;
+    let _deadline = jet_net_operation_deadline(Some(ms));
+    jet_net_connect_addr_worker(addr.inner)
 }
 
 fn jet_net_tcp_connect_happy(host: &String, port: i64, ms: i64) -> Result<JetTcpStream, JetNetError> {
     if port < 0 || port > u16::MAX as i64 {
         return Err(JetNetError::InvalidInput(jet_net_detail("tcp connect", Some(host.clone()), None, format!("invalid port `{}`: expected 0..65535", port), None)));
     }
-    let timeout = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("tcp connect", Some(host.clone()), None, m, None)))?;
-    let deadline = std::time::Instant::now() + timeout;
-    let mut addrs: Vec<std::net::SocketAddr> = {
+    jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("tcp connect", Some(host.clone()), None, m, None)))?;
+    let _deadline = jet_net_operation_deadline(Some(ms));
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout("tcp connect"));
+    }
+    let query = host.clone();
+    let (resolve_sender, resolve_receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
         use std::net::ToSocketAddrs;
-        (host.as_str(), port as u16)
+        let result = (query.as_str(), port as u16)
             .to_socket_addrs()
-            .map_err(|e| jet_net_io_error("resolve socket address", Some(host.clone()), e))?
-            .collect()
-    };
-    addrs.sort_by_key(|a| if a.is_ipv6() { 0 } else { 1 });
-    let mut last = None;
-    for addr in addrs {
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            break;
+            .map(|addrs| addrs.collect::<Vec<_>>());
+        let _ = resolve_sender.send(result);
+    });
+    let addrs = loop {
+        match resolve_receiver.try_recv() {
+            Ok(Ok(addrs)) => break addrs,
+            Ok(Err(error)) => return Err(jet_net_io_error("resolve socket address", Some(host.clone()), error)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => jet_net_scheduler_park("tcp connect", 5)?,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Err(JetNetError::Other(jet_net_detail(
+                    "tcp connect", Some(host.clone()), None,
+                    "socket address resolver stopped without a result".to_string(), None,
+                )));
+            }
         }
-        match std::net::TcpStream::connect_timeout(&addr, deadline.saturating_duration_since(now)) {
-            Ok(s) => return jet_net_tcp_stream(s),
-            Err(e) => last = Some((addr, e)),
+    };
+    if addrs.is_empty() {
+        return Err(JetNetError::AddressUnavailable(jet_net_detail("tcp connect", Some(host.clone()), None, format!("tcp connect failed: no address for `{}`", host), None)));
+    }
+
+    let first_is_v6 = addrs[0].is_ipv6();
+    let mut v6 = addrs.iter().copied().filter(std::net::SocketAddr::is_ipv6);
+    let mut v4 = addrs.iter().copied().filter(std::net::SocketAddr::is_ipv4);
+    let mut ordered = Vec::with_capacity(addrs.len());
+    loop {
+        let next = if ordered.len() % 2 == 0 {
+            if first_is_v6 { v6.next().or_else(|| v4.next()) } else { v4.next().or_else(|| v6.next()) }
+        } else if first_is_v6 {
+            v4.next().or_else(|| v6.next())
+        } else {
+            v6.next().or_else(|| v4.next())
+        };
+        match next {
+            Some(addr) => ordered.push(addr),
+            None => break,
         }
     }
-    match last {
-        Some((addr, error)) => Err(jet_net_io_error("tcp connect", Some(addr.to_string()), error)),
-        None => Err(JetNetError::AddressUnavailable(jet_net_detail("tcp connect", Some(host.clone()), None, format!("tcp connect failed: no address for `{}`", host), None))),
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let mut next = 0usize;
+    let mut in_flight = 0usize;
+    let mut last = None;
+    let mut next_launch = std::time::Instant::now();
+    loop {
+        if next < ordered.len() && std::time::Instant::now() >= next_launch {
+            let addr = ordered[next];
+            let remaining = jet_deadline_remaining_ms().unwrap_or(0);
+            if remaining <= 0 {
+                return Err(jet_net_deadline_timeout("tcp connect"));
+            }
+            let attempt_sender = sender.clone();
+            std::thread::spawn(move || {
+                let timeout = std::time::Duration::from_millis(remaining as u64);
+                let _ = attempt_sender.send((addr, std::net::TcpStream::connect_timeout(&addr, timeout)));
+            });
+            next += 1;
+            in_flight += 1;
+            next_launch = std::time::Instant::now() + std::time::Duration::from_millis(250);
+        }
+        match receiver.try_recv() {
+            Ok((_addr, Ok(stream))) => return jet_net_tcp_stream(stream),
+            Ok((addr, Err(error))) => {
+                in_flight -= 1;
+                last = Some((addr, error));
+                next_launch = std::time::Instant::now();
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => unreachable!("connect sender retained"),
+        }
+        if next == ordered.len() && in_flight == 0 {
+            let (addr, error) = last.expect("at least one connection attempt completed");
+            return Err(jet_net_io_error("tcp connect", Some(addr.to_string()), error));
+        }
+        jet_net_scheduler_park("tcp connect", 5)?;
     }
 }
 
@@ -926,9 +1037,13 @@ fn jet_net_tcp_accept(listener: &JetTcpListener) -> Result<JetTcpStream, JetNetE
 }
 
 fn jet_net_tcp_connect(addr: &String) -> Result<JetTcpStream, JetNetError> {
-    std::net::TcpStream::connect(addr.as_str())
-        .map_err(|e| jet_net_io_error("tcp connect", Some(addr.clone()), e))
-        .and_then(jet_net_tcp_stream)
+    let address = addr.clone();
+    let worker_address = address.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = sender.send(std::net::TcpStream::connect(worker_address.as_str()));
+    });
+    jet_net_wait_for_connect(receiver, Some(address))
 }
 
 fn jet_net_tcp_read(stream: &mut JetTcpStream) -> Result<String, JetNetError> {

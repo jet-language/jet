@@ -3493,6 +3493,41 @@ fn run() {
 }
 
 #[test]
+fn core_net_happy_eyeballs_uses_one_deadline_and_live_loopback() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_happy_eyeballs_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_happy_eyeballs",
+        r#"
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    if net.tcp_connect_timeout(address, 0) == {
+        Ok(_) -> panic("expired connect succeeded")
+        Err(error) -> print(net.error_operation(error))
+    }
+    client :: net.tcp_connect_happy("localhost", net.socket_port(address), 1000) ?? panic("happy connect")
+    server := listener.accept() ?? panic("accept")
+    client.write_text("happy") ?? panic("write")
+    print(server.read_text(5) ?? panic("read"))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "tcp connect\nhappy\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn core_net_tcp_implements_nominal_io_reader_writer() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_net_io_contract_{}",

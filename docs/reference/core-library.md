@@ -2396,7 +2396,7 @@ Beginner calls accept strings; expert calls accept typed
 | `tcp_listen(addr)` / `tcp_connect(addr)` | `TcpListener ? NetError` / `TcpStream ? NetError` | String entrypoints |
 | `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener ? NetError` / `TcpStream ? NetError` | Typed entrypoints |
 | `tcp_connect_timeout(addr, ms)` | `TcpStream ? NetError` | Typed dial with timeout |
-| `tcp_connect_happy(host, port, ms)` | `TcpStream ? NetError` | Dual-stack dial, IPv6 tried before IPv4 |
+| `tcp_connect_happy(host, port, ms)` | `TcpStream ? NetError` | Dual-stack dial with staggered IPv6/IPv4 racing under one cancellation/deadline budget |
 | `stream.read(limit)` / `stream.write(bytes)` / `stream.write_all(bytes)` | `[U8] ? NetError` / `Int ? NetError` / `() ? NetError` | Canonical byte stream operations |
 | `stream.read_text(limit)` / `stream.write_text(text)` | `String ? NetError` / `() ? NetError` | Checked UTF-8 projections over the same byte stream |
 | `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `() ? NetError` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
