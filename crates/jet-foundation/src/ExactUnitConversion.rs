@@ -195,6 +195,11 @@ pub const UNIT_ROUNDING_NEGATIVE_DIGITS: &str =
 pub const UNIT_ROUNDING_UNREPRESENTABLE: &str =
     "unit conversion overflows its runtime representation";
 
+// The smallest positive Float is 2^-1074, so every finite Float terminates by
+// this many decimal places. Greater precision can be checked without building
+// a power of ten proportional to the runtime `digits` value.
+const MAX_FINITE_FLOAT_DECIMAL_PLACES: i64 = 1074;
+
 fn rounded_integer(
     numerator: &Integer,
     denominator: &Integer,
@@ -219,7 +224,7 @@ fn rounded_integer(
     Some(quotient)
 }
 
-fn decimal_float(integer: &Integer, digits: usize) -> Option<f64> {
+fn decimal_value(integer: &Integer, digits: usize) -> Option<f64> {
     let negative = integer.sign < 0;
     let mut decimal = integer.abs().decimal();
     if digits != 0 {
@@ -233,14 +238,156 @@ fn decimal_float(integer: &Integer, digits: usize) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
+fn ratio_cmp(
+    left_num: &Integer,
+    left_den: &Integer,
+    right_num: &Integer,
+    right_den: &Integer,
+) -> std::cmp::Ordering {
+    let difference = left_num
+        .mul(right_den)
+        .add(&right_num.mul(left_den).neg());
+    difference.sign.cmp(&0)
+}
+
+fn float_represents_ratio(value: f64, numerator: &Integer, denominator: &Integer) -> bool {
+    float_ratio(value).is_some_and(|(float_num, float_den)| {
+        ratio_cmp(numerator, denominator, &float_num, &float_den)
+            == std::cmp::Ordering::Equal
+    })
+}
+
 fn exactly_represented_float(integer: &Integer) -> Option<f64> {
     let value = integer.decimal().parse::<f64>().ok()?;
     if !value.is_finite() { return None; }
-    let (float_num, float_den) = float_ratio(value)?;
-    float_num
-        .add(&integer.mul(&float_den).neg())
-        .is_zero()
-        .then_some(value)
+    float_represents_ratio(value, integer, &Integer::one()).then_some(value)
+}
+
+fn exactly_represented_decimal(integer: &Integer, digits: usize) -> Option<f64> {
+    let value = decimal_value(integer, digits)?;
+    let mut denominator = Integer::one();
+    for _ in 0..digits { denominator = denominator.mul_small(10); }
+    float_represents_ratio(value, integer, &denominator).then_some(value)
+}
+
+fn ratio_cmp_float(numerator: &Integer, denominator: &Integer, value: f64) -> std::cmp::Ordering {
+    let (float_num, float_den) = float_ratio(value)
+        .expect("finite Float bound has an exact ratio");
+    ratio_cmp(numerator, denominator, &float_num, &float_den)
+}
+
+fn positive_float_bounds(
+    numerator: &Integer,
+    denominator: &Integer,
+) -> (f64, bool, Option<f64>) {
+    const MAX_FINITE_BITS: u64 = 0x7fefffffffffffff;
+    let mut low = 0_u64;
+    let mut high = MAX_FINITE_BITS;
+    while low < high {
+        let middle = low + (high - low) / 2 + 1;
+        if ratio_cmp_float(numerator, denominator, f64::from_bits(middle))
+            != std::cmp::Ordering::Less
+        {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    let floor = f64::from_bits(low);
+    let exact = ratio_cmp_float(numerator, denominator, floor)
+        == std::cmp::Ordering::Equal;
+    let ceiling = (!exact && low < MAX_FINITE_BITS).then(|| f64::from_bits(low + 1));
+    (floor, exact, ceiling)
+}
+
+fn float_bounds(
+    numerator: &Integer,
+    denominator: &Integer,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    if numerator.is_zero() {
+        return (Some(0.0), Some(0.0), Some(0.0));
+    }
+    let (floor_abs, exact, ceiling_abs) =
+        positive_float_bounds(&numerator.abs(), denominator);
+    if exact {
+        let value = if numerator.sign < 0 { -floor_abs } else { floor_abs };
+        return (Some(value), Some(value), Some(value));
+    }
+    if numerator.sign < 0 {
+        (ceiling_abs.map(|value| -value), None, Some(-floor_abs))
+    } else {
+        (Some(floor_abs), None, ceiling_abs)
+    }
+}
+
+fn cmp_times_power10(
+    left: &Integer,
+    right: &Integer,
+    power: u64,
+) -> std::cmp::Ordering {
+    if left.is_zero() { return std::cmp::Ordering::Less; }
+    let left = left.abs().decimal();
+    let right = right.abs().decimal();
+    let left_len = left.len() as u128 + power as u128;
+    match left_len.cmp(&(right.len() as u128)) {
+        std::cmp::Ordering::Equal => {
+            let prefix = &right[..left.len()];
+            match left.as_str().cmp(prefix) {
+                std::cmp::Ordering::Equal => {
+                    if right[left.len()..].bytes().all(|byte| byte == b'0') {
+                        std::cmp::Ordering::Equal
+                    } else {
+                        std::cmp::Ordering::Less
+                    }
+                }
+                ordering => ordering,
+            }
+        }
+        ordering => ordering,
+    }
+}
+
+fn candidate_distance_cmp(
+    numerator: &Integer,
+    denominator: &Integer,
+    candidate: f64,
+    digits: u64,
+    half_step: bool,
+) -> std::cmp::Ordering {
+    let (candidate_num, candidate_den) =
+        float_ratio(candidate).expect("finite Float candidate has an exact ratio");
+    let mut difference = numerator
+        .mul(&candidate_den)
+        .add(&candidate_num.mul(denominator).neg())
+        .abs();
+    if half_step { difference = difference.mul_small(2); }
+    cmp_times_power10(&difference, &denominator.mul(&candidate_den), digits)
+}
+
+fn huge_precision_rounded_float(
+    numerator: &Integer,
+    denominator: &Integer,
+    mode: UnitRoundingMode,
+    digits: u64,
+) -> Option<f64> {
+    let (lower, exact, upper) = float_bounds(numerator, denominator);
+    if exact.is_some() { return exact; }
+    let directed = match mode {
+        UnitRoundingMode::TowardZero if numerator.sign < 0 => upper,
+        UnitRoundingMode::TowardZero | UnitRoundingMode::Floor => lower,
+        UnitRoundingMode::Ceiling => upper,
+        UnitRoundingMode::NearestEven => None,
+    };
+    if mode != UnitRoundingMode::NearestEven {
+        return directed.filter(|candidate| {
+            candidate_distance_cmp(numerator, denominator, *candidate, digits, false)
+                == std::cmp::Ordering::Less
+        });
+    }
+    [lower, upper].into_iter().flatten().find(|candidate| {
+        candidate_distance_cmp(numerator, denominator, *candidate, digits, true)
+            != std::cmp::Ordering::Greater
+    })
 }
 
 /// Converts a Float only when exact rational arithmetic proves the result integral.
@@ -260,12 +407,22 @@ pub fn jet_unit_conversion_rounded(
     mode: UnitRoundingMode,
     digits: i64,
 ) -> Result<f64, &'static str> {
-    let digits = usize::try_from(digits).map_err(|_| UNIT_ROUNDING_NEGATIVE_DIGITS)?;
+    if digits < 0 { return Err(UNIT_ROUNDING_NEGATIVE_DIGITS); }
     let (mut numerator, denominator) =
         converted_ratio(value, scale_num, scale_den, offset_num, offset_den)
             .ok_or(UNIT_ROUNDING_UNREPRESENTABLE)?;
+    if digits > MAX_FINITE_FLOAT_DECIMAL_PLACES {
+        return huge_precision_rounded_float(
+            &numerator,
+            &denominator,
+            mode,
+            digits as u64,
+        )
+        .ok_or(UNIT_ROUNDING_UNREPRESENTABLE);
+    }
+    let digits = digits as usize;
     for _ in 0..digits { numerator = numerator.mul_small(10); }
     let integer = rounded_integer(&numerator, &denominator, mode)
         .ok_or(UNIT_ROUNDING_UNREPRESENTABLE)?;
-    decimal_float(&integer, digits).ok_or(UNIT_ROUNDING_UNREPRESENTABLE)
+    exactly_represented_decimal(&integer, digits).ok_or(UNIT_ROUNDING_UNREPRESENTABLE)
 }

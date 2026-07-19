@@ -2509,12 +2509,12 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
 @UnitFamily(Length, base: meter) {
     meter
     half(scale: 1/2)
-    eighth(scale: 1/8)
-    three_eighths(scale: 3/8)
+    near_quarter(scale: 249/1000)
+    near_three_quarters(scale: 751/1000)
 }
 @UnitFamily(Temperature, base: kelvin) {
     kelvin
-    shifted(scale: 1, offset: 1/8)
+    shifted(scale: 1, offset: 249/1000)
 }
 fn run() -> Void ? {
     positive :: Half.from_float(5.0)
@@ -2522,14 +2522,14 @@ fn run() -> Void ? {
     toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
     floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)?
     ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)?
-    nearest_even :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2)?
-    nearest_odd :: Meter.from_three_eighths_rounded(1three_eighths, .NearestEven, digits: 2)?
+    nearest_even :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2)?
+    nearest_odd :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2)?
     point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(0.0), .Ceiling, digits: 2)?
     delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(0.0), .Ceiling, digits: 2)?
     print("{(toward_zero.raw())} {(floor.raw())} {(ceiling.raw())} {(nearest_even.raw())} {(nearest_odd.raw())} {(point.raw())} {(delta.raw())}")
 }
 "#;
-    let expected = ProgramOutput::ran("2.0 -3.0 3.0 0.12 0.38 0.13 0.0\n".into(), "".into(), 0);
+    let expected = ProgramOutput::ran("2.0 -3.0 3.0 0.25 0.75 0.25 0.0\n".into(), "".into(), 0);
     let resident = run_cranelift_without_fallback(src, "rounded_quantity_parity");
 
     let dir = std::env::temp_dir().join(format!(

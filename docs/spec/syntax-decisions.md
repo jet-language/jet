@@ -577,10 +577,11 @@ places. `.TowardZero` truncates, `.Floor` rounds toward negative infinity,
 `.Ceiling` toward positive infinity, and `.NearestEven` chooses the even result
 at an exact tie (so `-2.5` becomes `-2`, while `-3.5` becomes `-4`). Point
 conversion includes the offset; Delta conversion never does. Integer-backed
-destinations require `digits: 0`; current physical-unit storage is `Float`. A
-negative `digits`, non-finite input, or result outside the destination
-representation is a conversion error carried by `Result`, never `NaN`, infinity,
-or a trap. AOT
+destinations require `digits: 0`; current physical-unit storage is `Float`. The
+rounded rational must itself be exactly representable by the destination, so
+binary storage never adds precision loss beyond the requested decimal rounding.
+A negative `digits`, non-finite input, or unrepresentable result is a conversion
+error carried by `Result`, never `NaN`, infinity, or a trap. AOT
 and resident execution use the same conversion mechanism. For an unknown
 unrestricted `Float`-backed value, only an identity scale and offset proves
 exact finite conversion over the complete source domain; integral coefficients

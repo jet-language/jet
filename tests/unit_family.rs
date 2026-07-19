@@ -375,12 +375,13 @@ fn rounded_conversion_honors_mode_digits_affinity_and_fallibility() {
     meter
     half(scale: 1/2)
     eighth(scale: 1/8)
-    three_eighths(scale: 3/8)
+    near_quarter(scale: 249/1000)
+    near_three_quarters(scale: 751/1000)
     double(scale: 2)
 }
 @UnitFamily(Temperature, base: kelvin) {
     kelvin
-    shifted(scale: 1, offset: 1/8)
+    shifted(scale: 1, offset: 249/1000)
 }
 fn run() {
     positive :: Half.from_float(5.0)
@@ -397,19 +398,20 @@ fn run() {
     nearest_negative :: Meter.from_half_rounded(negative, .NearestEven, digits: 0) ?? panic("nearest negative")
     nearest_positive_odd :: Meter.from_half_rounded(positive_odd_tie, .NearestEven, digits: 0) ?? panic("nearest positive odd")
     nearest_negative_odd :: Meter.from_half_rounded(negative_odd_tie, .NearestEven, digits: 0) ?? panic("nearest negative odd")
-    nearest_even_hundredth :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2) ?? panic("nearest hundredth")
-    nearest_odd_hundredth :: Meter.from_three_eighths_rounded(1three_eighths, .NearestEven, digits: 2) ?? panic("nearest odd hundredth")
+    nearest_quarter :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2) ?? panic("nearest quarter")
+    nearest_three_quarters :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2) ?? panic("nearest three quarters")
+    unrepresentable_decimal :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2) ?? Meter.from_float(-2.0)
     point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(0.0), .Ceiling, digits: 2) ?? panic("point")
     delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(0.0), .Ceiling, digits: 2) ?? panic("delta")
     overflow :: Meter.from_double_rounded(Double.from_float(1.7976931348623157e308), .NearestEven, digits: 0) ?? Meter.from_float(-1.0)
-    print("{(toward_zero_positive.raw())} {(floor_positive.raw())} {(ceiling_positive.raw())} {(nearest_positive.raw())} {(toward_zero_negative.raw())} {(floor_negative.raw())} {(ceiling_negative.raw())} {(nearest_negative.raw())} {(nearest_positive_odd.raw())} {(nearest_negative_odd.raw())} {(nearest_even_hundredth.raw())} {(nearest_odd_hundredth.raw())} {(point.raw())} {(delta.raw())} {(overflow.raw())}")
+    print("{(toward_zero_positive.raw())} {(floor_positive.raw())} {(ceiling_positive.raw())} {(nearest_positive.raw())} {(toward_zero_negative.raw())} {(floor_negative.raw())} {(ceiling_negative.raw())} {(nearest_negative.raw())} {(nearest_positive_odd.raw())} {(nearest_negative_odd.raw())} {(nearest_quarter.raw())} {(nearest_three_quarters.raw())} {(unrepresentable_decimal.raw())} {(point.raw())} {(delta.raw())} {(overflow.raw())}")
 }
 "#;
     let (code, stdout) = tir_support::build_and_run("quantity_rounded_contract", src);
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "2.0 2.0 3.0 2.0 -2.0 -3.0 -2.0 -2.0 4.0 -4.0 0.12 0.38 0.13 0.0 -1.0\n"
+        "2.0 2.0 3.0 2.0 -2.0 -3.0 -2.0 -2.0 4.0 -4.0 0.25 0.75 -2.0 0.25 0.0 -1.0\n"
     );
 
     let negative_digits = r#"
@@ -430,6 +432,105 @@ fn run() -> Void ? {
         stderr.ends_with("rounded unit conversion needs nonnegative digits\n"),
         "unexpected stderr: {stderr}"
     );
+}
+
+#[test]
+fn rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits() {
+    use jet_foundation::UnitRoundingMode::{Ceiling, Floor, NearestEven, TowardZero};
+
+    for scale in ["9007199254740993", "-9007199254740993"] {
+        assert_eq!(
+            jet_foundation::jet_unit_conversion_rounded(
+                1.0,
+                scale,
+                "1",
+                "0",
+                "1",
+                NearestEven,
+                0,
+            ),
+            Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
+            "rounded conversion must not add Float precision loss"
+        );
+    }
+
+    for mode in [TowardZero, Floor, Ceiling, NearestEven] {
+        for value in [0.5, -0.5, f64::from_bits(1), -f64::from_bits(1), f64::MAX] {
+            assert_eq!(
+                jet_foundation::jet_unit_conversion_rounded(
+                    value,
+                    "1",
+                    "1",
+                    "0",
+                    "1",
+                    mode,
+                    i64::MAX,
+                ),
+                Ok(value),
+                "huge decimal precision must preserve exact finite Float {value:?} in {mode:?}"
+            );
+        }
+        assert_eq!(
+            jet_foundation::jet_unit_conversion_rounded(
+                1.0,
+                "1",
+                "3",
+                "0",
+                "1",
+                mode,
+                i64::MAX,
+            ),
+            Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
+            "huge precision must reject a rounded rational Float cannot represent"
+        );
+    }
+
+    assert_eq!(
+        jet_foundation::jet_unit_conversion_rounded(
+            f64::from_bits(1),
+            "1",
+            "1",
+            "0",
+            "1",
+            NearestEven,
+            1074,
+        ),
+        Ok(f64::from_bits(1)),
+        "the bounded path must retain the smallest subnormal"
+    );
+
+    let denominator = format!("1{}", "0".repeat(2001));
+    let just_above_one = format!("1{}1", "0".repeat(2000));
+    let halfway_above_one = format!("1{}5", "0".repeat(2000));
+    let just_below_negative_one = format!("-{just_above_one}");
+    let halfway_below_negative_one = format!("-{halfway_above_one}");
+    for (scale, toward_zero, floor, ceiling, nearest) in [
+        (just_above_one.as_str(), Ok(1.0), Ok(1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(1.0)),
+        (just_below_negative_one.as_str(), Ok(-1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(-1.0), Ok(-1.0)),
+        (halfway_above_one.as_str(), Ok(1.0), Ok(1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(1.0)),
+        (halfway_below_negative_one.as_str(), Ok(-1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(-1.0), Ok(-1.0)),
+    ] {
+        for (mode, expected) in [
+            (TowardZero, toward_zero),
+            (Floor, floor),
+            (Ceiling, ceiling),
+            (NearestEven, nearest),
+        ] {
+            assert_eq!(
+                jet_foundation::jet_unit_conversion_rounded(
+                    1.0,
+                    scale,
+                    &denominator,
+                    "0",
+                    "1",
+                    mode,
+                    2000,
+                ),
+                expected,
+                "huge precision must compare the exact rational to its Float neighbor"
+            );
+        }
+    }
 }
 
 #[test]

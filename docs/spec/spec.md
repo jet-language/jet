@@ -3416,7 +3416,9 @@ implicit conversion is value-aware and never rounds, destination-owned exact
 conversion returns `Result`, and `_rounded(value, mode, digits: n)` is the
 fallible explicit rounding path. Its ratified modes are `.TowardZero`,
 `.Floor`, `.Ceiling`, and `.NearestEven`; `n` is a nonnegative count of
-destination decimal places. Imported `Quantity<Dimension, Kind>` bounds preserve their
+destination decimal places, and the rounded rational must be exactly
+representable by the destination so binary storage adds no further loss.
+Imported `Quantity<Dimension, Kind>` bounds preserve their
 concrete unit through checking, API freeze, semantic inspection, Codable, AOT,
 and resident JIT lowering.
 
