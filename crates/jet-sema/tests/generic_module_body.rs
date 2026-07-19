@@ -344,6 +344,37 @@ fn run() {}
 }
 
 #[test]
+fn ordinary_nested_module_recursively_expands_generic_aliases() {
+    let (bundle, diagnostics) = check(r#"
+module outer<T, count: Int> {
+    module plain {
+        module inner<U> { pub fn total(value: U) -> Int { return count } }
+        module closed = inner<T>
+        pub fn result(value: T) -> Int { return closed.total(value) }
+    }
+    pub fn result(value: T) -> Int { return plain.result(value) }
+}
+module selected = outer<Int, 6>
+fn run() { print(selected.result(1)) }
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    let items = &bundle.modules[0].items;
+    let plain = items.iter().find_map(|item| match item {
+        Item::CodeModule(module) if module.name == "selected_plain" => Some(module),
+        _ => None,
+    }).expect("ordinary nested module remains a real checked module");
+    assert!(!plain.body.as_ref().unwrap().iter().any(|item| matches!(
+        item,
+        Item::GenericModule(_) | Item::ModuleAlias(_)
+    )));
+    let closed = items.iter().find_map(|item| match item {
+        Item::CodeModule(module) if module.name == "selected_plain_closed" => Some(module),
+        _ => None,
+    }).expect("contained generic alias expands to a real module");
+    assert!(closed.instance_identity.is_some());
+}
+
+#[test]
 fn tests_and_benches_are_specialized_once_per_instance_with_unique_names() {
     let (bundle, diagnostics) = check(r#"
 module checks<T, count: Int> {

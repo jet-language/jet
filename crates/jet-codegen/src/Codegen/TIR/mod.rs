@@ -186,7 +186,6 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 }
             }
             Item::CodeModule(cm) => {
-                if cm.instance_identity.is_none() { continue; }
                 let Some(body) = &cm.body else { continue };
                 for inner in body {
                     match inner {

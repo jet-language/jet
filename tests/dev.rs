@@ -2358,6 +2358,41 @@ fn run() { print(three.get()); print(same.get()) }
 }
 
 #[test]
+fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
+    let src = r#"
+module outer<T, n: Int> {
+    module plain {
+        module inner<U> { pub fn total(value: U) -> Int { return n } }
+        module closed = inner<T>
+        pub fn result(value: T) -> Int { return closed.total(value) }
+    }
+    pub fn result(value: T) -> Int { return plain.result(value) }
+}
+module selected = outer<Int, 6>
+fn run() { print(selected.result(1)) }
+"#;
+    let jit = run_cranelift_without_fallback(src, "nested_ordinary_generic_module");
+    assert_eq!(jit.stdout, "6\n");
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_nested_ordinary_generic_module_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("nested_ordinary_generic_module.jet");
+    fs::write(&file, src).unwrap();
+    let aot = compiled_binary_output(
+        &dir,
+        "nested_ordinary_generic_module",
+        0,
+        "nested_ordinary_generic_module",
+        file.to_str().unwrap(),
+    );
+    assert_eq!(jit, aot);
+}
+
+#[test]
 fn solver_state_transitions_match_aot_in_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

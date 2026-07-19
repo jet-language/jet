@@ -586,6 +586,12 @@ fn specialize_nested_code_module(
                 Some(Item::Const(result))
             }
             Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(child, params, args, types, values))),
+            Item::GenericModule(def) => Some(Item::GenericModule(
+                specialize_nested_template_outer(def, types, values),
+            )),
+            Item::ModuleAlias(def) => Some(Item::ModuleAlias(
+                specialize_nested_alias_outer(def, types, values),
+            )),
             Item::Trait(def) => Some(Item::Trait(specialize_trait(def, params, args, types, values))),
             Item::Tag(def) => Some(Item::Tag(specialize_tag(def, types, values))),
             Item::Impl(def) => Some(Item::Impl(specialize_impl(def, params, args, types, values))),
@@ -876,6 +882,172 @@ fn specialize_nested_alias_outer(
     ModuleAliasDef { name: source.name.clone(), name_span: source.name_span,
         is_pub: source.is_pub, is_package_pub: source.is_package_pub, target: source.target.clone(),
         target_span: source.target_span, args, span: source.span }
+}
+
+fn expand_nested_generics_in_code_module(
+    module: &mut CodeModule,
+    lexical_path: &str,
+    consumer_module: usize,
+    application_module: &str,
+    enclosing_full_key: &[u8],
+    inherited_values: &HashMap<String, crate::AST::CtValue>,
+    diags: &mut Vec<Diagnostic>,
+    instances: &mut HashMap<ModuleInstanceKey, String>,
+    fingerprints: &mut HashMap<String, Vec<u8>>,
+    applications: &mut HashMap<String, Vec<crate::AST::ModuleInstanceApplication>>,
+) -> Vec<Item> {
+    let Some(items) = module.body.as_mut() else { return Vec::new() };
+    let enclosing_identity = crate::SHA256::sha256_hex(enclosing_full_key);
+    let scope_full_key = definition_full_key("nested", "", &enclosing_identity, lexical_path);
+    let mut declarations = Vec::new();
+
+    for item in items.iter_mut() {
+        let Item::CodeModule(child) = item else { continue };
+        let child_local = child.name.clone();
+        child.name = module_value_name(&module.name, &child_local);
+        declarations.extend(expand_nested_generics_in_code_module(
+            child,
+            &format!("{lexical_path}.{child_local}"),
+            consumer_module,
+            application_module,
+            &scope_full_key,
+            inherited_values,
+            diags,
+            instances,
+            fingerprints,
+            applications,
+        ));
+    }
+
+    let nested_defs: Vec<GenericModuleDef> = items.iter().filter_map(|item| {
+        let Item::GenericModule(def) = item else { return None };
+        Some(def.clone())
+    }).collect();
+    if nested_defs.is_empty() {
+        return declarations;
+    }
+
+    let mut traits = TraitRegistry::default();
+    traits.register_synthetic_rollback();
+    traits.register_synthetic_display_debug();
+    traits.register_synthetic_close();
+    traits.register_synthetic_operators();
+    traits.register_synthetic_iter_index();
+    traits.register_synthetic_io();
+    traits.register_items(items, &mut Vec::new());
+    for def in &nested_defs { traits.register_items(&def.body, &mut Vec::new()); }
+
+    let enums: HashMap<String, bool> = items.iter()
+        .chain(nested_defs.iter().flat_map(|def| def.body.iter()))
+        .filter_map(|item| {
+            let Item::Enum(def) = item else { return None };
+            Some((def.name.clone(), def.variants.iter().all(|variant| matches!(variant.payload, VariantPayload::Unit))))
+        })
+        .collect();
+    let funcs: HashMap<String, &Func> = items.iter()
+        .chain(nested_defs.iter().flat_map(|def| def.body.iter()))
+        .filter_map(|item| {
+            let Item::Func(def) = item else { return None };
+            Some((def.name.clone(), def))
+        })
+        .collect();
+    let mut values = inherited_values.clone();
+    for item in items.iter() {
+        let Item::Const(def) = item else { continue };
+        if let Some(value) = def.ct.clone().or_else(|| {
+            crate::Comptime::evaluate(&def.value, &funcs, &HashSet::new(), Path::new("."), &values).ok()
+        }) {
+            values.insert(def.name.clone(), value);
+        }
+    }
+
+    let templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
+        let full_key = definition_full_key("nested", "", &crate::SHA256::sha256_hex(&scope_full_key), &def.name);
+        (def.name.clone(), TemplateInfo {
+            def: def.clone(),
+            definition_id: crate::SHA256::sha256_hex(&full_key),
+            definition_full_key: full_key,
+            params: resolve_params(def, &traits, &enums, diags),
+            source_module: consumer_module,
+            source_items: Vec::new(),
+            source_values: values.clone(),
+        })
+    }).collect();
+    let alias_defs: Vec<ModuleAliasDef> = items.iter().filter_map(|item| {
+        let Item::ModuleAlias(def) = item else { return None };
+        Some(def.clone())
+    }).collect();
+    let aliases: HashMap<String, &ModuleAliasDef> = alias_defs.iter()
+        .map(|def| (def.name.clone(), def))
+        .collect();
+    let mut ordered: Vec<&ModuleAliasDef> = alias_defs.iter().collect();
+    ordered.sort_by_key(|def| local_alias_depth(def, &aliases));
+    let mut call_projections = HashMap::new();
+    let mut type_projections = HashMap::new();
+
+    for nested_alias in ordered {
+        let Some(mut resolved) = resolve_local_alias(nested_alias, &aliases, &templates, diags) else { continue };
+        let local_name = resolved.name.clone();
+        resolved.name = module_value_name(&module.name, &local_name);
+        let Some(info) = templates.get(&resolved.target) else { continue };
+        let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &values, &enums, diags) else { continue };
+        let key = instance_key(info, &args, &HashMap::new());
+        let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
+        applications.entry(fingerprint.clone()).or_default().push(
+            crate::AST::ModuleInstanceApplication {
+                name: resolved.name.clone(),
+                source_module: application_module.to_string(),
+                semantic_identity: format!("instance:{fingerprint}"),
+                span: resolved.name_span,
+            },
+        );
+        let canonical = if let Some(canonical) = instances.get(&key) {
+            canonical.clone()
+        } else {
+            let Some(mut expansion) = expand_alias(
+                &resolved,
+                consumer_module,
+                application_module,
+                &key.bytes(),
+                &templates,
+                diags,
+                &traits,
+                &funcs,
+                &values,
+                &enums,
+                instances,
+                fingerprints,
+                applications,
+                Some(args),
+            ) else { continue };
+            let identity = instance_identity(&key, info, &resolved, application_module);
+            register_instance_fingerprint(fingerprints, &identity, resolved.span);
+            expansion.module.instance_identity = Some(identity);
+            instances.insert(key, resolved.name.clone());
+            declarations.push(Item::CodeModule(expansion.module));
+            declarations.extend(expansion.declarations);
+            resolved.name.clone()
+        };
+        call_projections.insert(local_name.clone(), canonical.clone());
+        type_projections.insert(local_name, Type::Named(canonical.clone()));
+        type_projections.insert(resolved.name, Type::Named(canonical));
+    }
+
+    items.retain(|item| !matches!(item, Item::GenericModule(_) | Item::ModuleAlias(_)));
+    for item in items.iter_mut() {
+        let Item::Func(func) = item else { continue };
+        for (local, canonical) in &call_projections {
+            rewrite_inline_calls_stmts(&mut func.body, &HashSet::from([local.clone()]), canonical);
+        }
+        for param in &mut func.params {
+            param.ty = crate::Generics::substitute_type(&param.ty, &type_projections);
+        }
+        if let Some(ret) = &mut func.return_type {
+            *ret = crate::Generics::substitute_type(ret, &type_projections);
+        }
+        substitute_stmts(&mut func.body, &type_projections, &HashMap::new());
+    }
+    declarations
 }
 
 #[derive(Clone)]
@@ -1599,6 +1771,7 @@ fn expand_alias(
             )));
         }
         if let Item::CodeModule(module) = item {
+            let lexical_path = module.name.clone();
             let mut module = specialize_nested_code_module(
                 module,
                 &info.params,
@@ -1607,7 +1780,20 @@ fn expand_alias(
                 &definition_values,
             );
             module.name = module_value_name(&alias.name, &module.name);
+            let nested_declarations = expand_nested_generics_in_code_module(
+                &mut module,
+                &lexical_path,
+                consumer_module,
+                application_module,
+                instance_full_key,
+                &definition_values,
+                diags,
+                instances,
+                fingerprints,
+                applications,
+            );
             declarations.push(Item::CodeModule(module));
+            declarations.extend(nested_declarations);
         }
     }
 

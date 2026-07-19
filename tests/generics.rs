@@ -151,15 +151,17 @@ fn assert_nested_generic_module_execution() {
     let source = r#"
 module outer<T, count: Int> {
     module plain {
-        pub fn captured() -> Int { return count }
+        module inner<U> {
+            pub fn total(value: U) -> Int { return count }
+        }
+        module closed = inner<T>
+        module forwarded = closed
+        pub fn result(value: T) -> Int {
+            return closed.total(value) + forwarded.total(value)
+        }
     }
-    module inner<U, extra: Int> {
-        pub fn total(value: U) -> Int { return count + extra }
-    }
-    module closed = inner<T, count>
-    module forwarded = closed
     pub fn result(value: T) -> Int {
-        return plain.captured() + closed.total(value) + forwarded.total(value)
+        return plain.result(value)
     }
 }
 module selected = outer<Int, 3>
@@ -191,7 +193,7 @@ fn run() {
             instance
                 .applications
                 .iter()
-                .any(|application| application.name == "selected_closed")
+                .any(|application| application.name == "selected_plain_closed")
         })
         .expect("nested generic-module instance fact");
     assert_eq!(
@@ -200,7 +202,7 @@ fn run() {
             .iter()
             .map(|application| application.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["selected_closed", "selected_forwarded"]
+        vec!["selected_plain_closed", "selected_plain_forwarded"]
     );
     assert!(nested
         .applications
@@ -216,7 +218,7 @@ fn run() {
         "nested generic-module AOT run failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "15\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "6\n");
     let _ = std::fs::remove_dir_all(root);
 }
 
