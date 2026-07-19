@@ -36,11 +36,13 @@ fn diagnostic_body_validator_rejects_malformed_rows() {
     let malformed = "| Code | What | Why | Fix |\n\
                      | --- | --- | --- | --- |\n\
                      | E0001 | what | why | |\n\
-                     | E0002 | what | why |\n";
+                     | E0002 | what | why |\n\
+                     | `E0003` | what | why | |\n";
     let violations = diagnostic_body_violations(malformed);
-    assert_eq!(violations.len(), 2, "{violations:#?}");
+    assert_eq!(violations.len(), 3, "{violations:#?}");
     assert!(violations[0].contains("E0001") && violations[0].contains("non-empty"));
     assert!(violations[1].contains("E0002") && violations[1].contains("malformed"));
+    assert!(violations[2].contains("E0003") && violations[2].contains("non-empty"));
 }
 
 fn diagnostic_body_violations(text: &str) -> Vec<String> {
@@ -65,7 +67,7 @@ fn diagnostic_body_violations(text: &str) -> Vec<String> {
         if cells.iter().all(|c| c.is_empty() || c.chars().all(|ch| ch == '-')) {
             continue; // header separator row
         }
-        let Some(code) = cells.get(1).map(String::as_str).filter(|code| is_code_like(code)) else {
+        let Some(code) = cells.get(1).and_then(|code| diagnostic_code(code)) else {
             continue;
         };
         if cells.len() != 6 {
@@ -121,9 +123,15 @@ fn is_wwf_header(cells: &[String]) -> bool {
 
 fn is_code_like(code: &str) -> bool {
     let bytes = code.as_bytes();
-    // Codes may be backtick-quoted with markdown emphasis stripped by callers;
-    // accept the bare `[EL]NNNN` shape only.
     bytes.len() == 5
         && (bytes[0] == b'E' || bytes[0] == b'L')
         && bytes[1..].iter().all(|b| b.is_ascii_digit())
+}
+
+fn diagnostic_code(cell: &str) -> Option<&str> {
+    let code = cell
+        .strip_prefix('`')
+        .and_then(|cell| cell.strip_suffix('`'))
+        .unwrap_or(cell);
+    is_code_like(code).then_some(code)
 }

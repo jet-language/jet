@@ -871,22 +871,68 @@ fn formatted_variant_pattern_dot(
         (TokKind::KwNull, TokKind::KwNull) => true,
         _ => false,
     };
-    let previous = formatted_i
-        .checked_sub(1)
-        .and_then(|i| formatted.get(i))
-        .map(|token| &token.kind);
-    if !same_variant
-        || !matches!(
-            previous,
-            Some(TokKind::EqEq | TokKind::LBrace | TokKind::RBrace | TokKind::Pipe)
-        )
-    {
-        return false;
+    same_variant && variant_pattern_context(original, original_i)
+}
+
+fn variant_pattern_context(tokens: &[Token], index: usize) -> bool {
+    if matches!(
+        index.checked_sub(1).and_then(|i| tokens.get(i)).map(|token| &token.kind),
+        Some(TokKind::EqEq)
+    ) {
+        return true;
     }
-    matches!(previous, Some(TokKind::EqEq))
-        || formatted[formatted_i + 2..]
-            .iter()
-            .any(|token| matches!(token.kind, TokKind::Arrow))
+
+    let mut brace_depth = 0usize;
+    let mut dispatch_open = None;
+    for cursor in (0..index).rev() {
+        match tokens[cursor].kind {
+            TokKind::RBrace => brace_depth += 1,
+            TokKind::LBrace if brace_depth > 0 => brace_depth -= 1,
+            TokKind::LBrace => {
+                dispatch_open = Some(cursor);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(open) = dispatch_open else {
+        return false;
+    };
+    matches!(
+        open.checked_sub(1).and_then(|i| tokens.get(i)).map(|token| &token.kind),
+        Some(TokKind::EqEq)
+    ) && same_brace_scope_has_if(tokens, open - 1)
+        && pattern_reaches_arrow(tokens, index)
+}
+
+fn same_brace_scope_has_if(tokens: &[Token], before: usize) -> bool {
+    for token in tokens[..before].iter().rev() {
+        match token.kind {
+            TokKind::KwIf => return true,
+            TokKind::LBrace | TokKind::RBrace | TokKind::Arrow => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn pattern_reaches_arrow(tokens: &[Token], index: usize) -> bool {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for token in &tokens[index + 1..] {
+        match token.kind {
+            TokKind::LParen => paren_depth += 1,
+            TokKind::RParen if paren_depth > 0 => paren_depth -= 1,
+            TokKind::LBracket => bracket_depth += 1,
+            TokKind::RBracket if bracket_depth > 0 => bracket_depth -= 1,
+            TokKind::Arrow if paren_depth == 0 && bracket_depth == 0 => return true,
+            TokKind::LBrace | TokKind::RBrace if paren_depth == 0 && bracket_depth == 0 => {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn formatted_arm_block_opens(tokens: &[Token], index: usize) -> bool {
@@ -1292,6 +1338,11 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "variant-dot rule requires a PascalCase pattern",
             "fn run() { if x == { value -> print(value) } }\n",
             "fn run() { if x == { .value -> print(value) } }\n",
+        ),
+        (
+            "variant-dot rule requires a dispatch arm context",
+            "fn run() { Foo work -> print(1) }\n",
+            "fn run() { .Foo work -> print(1) }\n",
         ),
         (
             "shorthand expansion preserves field value",

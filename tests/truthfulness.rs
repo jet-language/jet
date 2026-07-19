@@ -411,7 +411,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     const EXEMPTIONS: &[(&str, &[&str])] = &[
         ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
         ("jet-net", &["D-NETDEP1", "D-TLS1"]),
-        ("jetpack", &["D-PKGSIGN1"]),
+        ("jetpack", &["D-DEP-CRYPTO1=A"]),
         // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
         // loopback peer) moved from `jetpack` to `jet-pkg-model`.
         ("jet-pkg-model", &["D-TLS1", "D-EMAIL-DKIM-CONFIG1"]),
@@ -421,14 +421,16 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     let decisions_doc = fs::read_to_string(root.join("docs/spec/syntax-decisions.md"))
         .expect("docs/spec/syntax-decisions.md missing");
     let ratified_doc = section_between_pub(&decisions_doc);
+    let tower = fs::read_to_string(root.join(".tower/tower.json"))
+        .expect(".tower/tower.json missing");
 
     for (crate_name, ids) in EXEMPTIONS {
         for id in *ids {
             assert!(
-                ratified_doc.contains(id),
-                "I6 exemption for `{crate_name}` cites {id}, which does not appear in \
-                 docs/spec/syntax-decisions.md's Ratified section — revoke the exemption \
-                 or get {id} ratified"
+                ratified_decision_exists(ratified_doc, &tower, id),
+                "I6 exemption for `{crate_name}` cites {id}, which is not ratified in \
+                 docs/spec/syntax-decisions.md or Tower — revoke the exemption or get \
+                 {id} ratified"
             );
         }
     }
@@ -551,6 +553,25 @@ fn section_between_pub(docs: &str) -> &str {
     &rest[..to]
 }
 
+fn ratified_decision_exists(ratified_doc: &str, tower: &str, authority: &str) -> bool {
+    if ratified_doc.contains(authority) {
+        return true;
+    }
+    let (id, outcome) = authority
+        .rsplit_once('=')
+        .map_or((authority, None), |(id, outcome)| (id, Some(outcome)));
+    let marker = format!("\"id\": \"{id}\"");
+    let Some((_, tail)) = tower.split_once(&marker) else {
+        return false;
+    };
+    let record_end = tail.find("\n      \"id\": \"").unwrap_or(tail.len());
+    let record = &tail[..record_end];
+    record.contains("\"status\": \"ratified\"")
+        && outcome.map_or(true, |outcome| {
+            record.contains(&format!("\"outcome\": \"{outcome}\""))
+        })
+}
+
 /// Like `dependency_lines`, but also returns any `#`-comment lines
 /// immediately preceding each dependency line (joined), so exemption
 /// decision IDs cited above a dep can be matched to it.
@@ -564,10 +585,7 @@ fn dependency_lines_with_context(text: &str) -> Vec<(String, String)> {
     for raw in text.lines() {
         let line = raw.trim();
         if line.starts_with('[') {
-            in_deps = matches!(
-                line,
-                "[dependencies]" | "[dev-dependencies]" | "[build-dependencies]"
-            );
+            in_deps = is_dependency_table(line);
             current_context.clear();
             continue;
         }
@@ -583,9 +601,45 @@ fn dependency_lines_with_context(text: &str) -> Vec<(String, String)> {
             current_context.push('\n');
             continue;
         }
-        out.push((line.to_string(), current_context.clone()));
+        out.push((line.to_string(), std::mem::take(&mut current_context)));
     }
     out
+}
+
+fn is_dependency_table(line: &str) -> bool {
+    let Some(table) = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) else {
+        return false;
+    };
+    matches!(table, "dependencies" | "dev-dependencies" | "build-dependencies")
+        || (table.starts_with("target.")
+            && [".dependencies", ".dev-dependencies", ".build-dependencies"]
+                .iter()
+                .any(|suffix| table.ends_with(suffix)))
+}
+
+#[test]
+fn dependency_scanner_covers_target_tables_and_one_dependency_per_comment() {
+    let manifest = "[dependencies]\n\
+                    # D-ONE=A\n\
+                    first = \"1\"\n\
+                    second = \"2\"\n\
+                    [target.'cfg(unix)'.dependencies]\n\
+                    # D-TWO=B\n\
+                    third = \"3\"\n\
+                    [target.x86_64-unknown-linux-gnu.build-dependencies]\n\
+                    # D-THREE=C\n\
+                    fourth = \"4\"\n\
+                    [package.metadata.dependencies]\n\
+                    ignored = \"5\"\n";
+    assert_eq!(
+        dependency_lines_with_context(manifest),
+        vec![
+            ("first = \"1\"".to_string(), "# D-ONE=A\n".to_string()),
+            ("second = \"2\"".to_string(), String::new()),
+            ("third = \"3\"".to_string(), "# D-TWO=B\n".to_string()),
+            ("fourth = \"4\"".to_string(), "# D-THREE=C\n".to_string()),
+        ]
+    );
 }
 
 // ---------------------------------------------------------------------------
