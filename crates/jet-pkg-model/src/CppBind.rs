@@ -323,43 +323,108 @@ fn binding_identity(
     target: &str,
 ) -> Vec<u8> {
     let mut identity = Vec::new();
-    for value in [
-        SCHEMA.as_bytes(),
-        header.to_string_lossy().as_bytes(),
-        header_bytes,
-        ast,
-        clang_version,
-        archiver_version,
-        shim.as_bytes(),
-        jet.as_bytes(),
-        target.as_bytes(),
-        options.clang.to_string_lossy().as_bytes(),
-        options.archiver.to_string_lossy().as_bytes(),
+    push_identity(&mut identity, "schema", SCHEMA.as_bytes());
+    push_identity(
+        &mut identity,
+        "header",
+        header.as_os_str().as_encoded_bytes(),
+    );
+    push_identity(&mut identity, "header_bytes", header_bytes);
+    push_identity(&mut identity, "ast", ast);
+    push_identity(&mut identity, "clang_version", clang_version);
+    push_identity(&mut identity, "archiver_version", archiver_version);
+    push_identity(&mut identity, "shim", shim.as_bytes());
+    push_identity(&mut identity, "jet", jet.as_bytes());
+    push_identity(&mut identity, "lib", options.lib.as_bytes());
+    push_identity(&mut identity, "selected_target", target.as_bytes());
+    push_identity(&mut identity, "command_target", options.target.as_bytes());
+    push_identity(
+        &mut identity,
+        "clang",
+        options.clang.as_os_str().as_encoded_bytes(),
+    );
+    push_identity(
+        &mut identity,
+        "archiver",
+        options.archiver.as_os_str().as_encoded_bytes(),
+    );
+    push_identity(
+        &mut identity,
+        "proof_suffix",
         crate::FFI::proof_suffix_for_target(target).as_bytes(),
+    );
+    push_identity(
+        &mut identity,
+        "undefined_symbols",
         crate::FFI::undefined_symbol_flag_for_target(target).as_bytes(),
+    );
+    push_identity(
+        &mut identity,
+        "cxx_runtime",
         crate::FFI::cxx_runtime_for_target(target).as_bytes(),
+    );
+    push_identity(
+        &mut identity,
+        "fixed_flags",
         b"-std=c++17\0-fPIC\0-c\0-target\0-shared\0rcs",
-    ] {
-        identity.extend_from_slice(value);
-        identity.push(0);
+    );
+    push_identity_count(&mut identity, "include_dirs", options.include_dirs.len());
+    for value in &options.include_dirs {
+        push_identity(
+            &mut identity,
+            "include_dir",
+            value.as_os_str().as_encoded_bytes(),
+        );
     }
-    for value in options
-        .include_dirs
-        .iter()
-        .chain(&options.library_dirs)
-        .map(|path| path.to_string_lossy().into_owned())
-        .chain(options.libraries.iter().cloned())
-        .chain(options.namespaces.iter().cloned())
-        .chain(options.templates.iter().flat_map(|request| {
-            std::iter::once(request.qualified_name.clone())
-                .chain(request.cpp_args.iter().cloned())
-                .chain(std::iter::once(request.jet_name.clone()))
-        }))
-    {
-        identity.extend_from_slice(value.as_bytes());
-        identity.push(0);
+    push_identity_count(&mut identity, "library_dirs", options.library_dirs.len());
+    for value in &options.library_dirs {
+        push_identity(
+            &mut identity,
+            "library_dir",
+            value.as_os_str().as_encoded_bytes(),
+        );
+    }
+    push_identity_count(&mut identity, "libraries", options.libraries.len());
+    for value in &options.libraries {
+        push_identity(&mut identity, "library", value.as_bytes());
+    }
+    push_identity_count(&mut identity, "namespaces", options.namespaces.len());
+    for value in &options.namespaces {
+        push_identity(&mut identity, "namespace", value.as_bytes());
+    }
+    push_identity_count(&mut identity, "templates", options.templates.len());
+    for template in &options.templates {
+        push_identity(
+            &mut identity,
+            "template.qualified_name",
+            template.qualified_name.as_bytes(),
+        );
+        push_identity_count(
+            &mut identity,
+            "template.cpp_args",
+            template.cpp_args.len(),
+        );
+        for value in &template.cpp_args {
+            push_identity(&mut identity, "template.cpp_arg", value.as_bytes());
+        }
+        push_identity(
+            &mut identity,
+            "template.jet_name",
+            template.jet_name.as_bytes(),
+        );
     }
     identity
+}
+
+fn push_identity(identity: &mut Vec<u8>, tag: &str, value: &[u8]) {
+    identity.extend_from_slice(&(tag.len() as u64).to_le_bytes());
+    identity.extend_from_slice(tag.as_bytes());
+    identity.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    identity.extend_from_slice(value);
+}
+
+fn push_identity_count(identity: &mut Vec<u8>, tag: &str, count: usize) {
+    push_identity(identity, tag, &(count as u64).to_le_bytes());
 }
 
 fn project_surface(ast: &Json, header: &Path, selected: &[String]) -> Result<Surface, BindError> {

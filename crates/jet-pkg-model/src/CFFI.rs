@@ -692,33 +692,40 @@ pub fn resolve_link_for_target(
             .join(ForeignLanguage::Cpp.bindings_subdir());
         let archive = dir.join(format!("libjet_cpp_{actual}.a"));
         if archive.is_file() {
+            let metadata = dir.join(format!("{actual}.link"));
+            let source = std::fs::read_to_string(metadata).map_err(|_| e3201(lib))?;
+            let mut bound_target = None;
+            for line in source.lines() {
+                if let Some(value) = line.strip_prefix("target\t") {
+                    let duplicate = bound_target.replace(value).is_some();
+                    if value.is_empty() || value.contains('\t') || duplicate {
+                        return Err(e3201(lib));
+                    }
+                } else if line.starts_with("target") {
+                    return Err(e3201(lib));
+                }
+            }
+            if bound_target != Some(target) {
+                return Err(e3201(lib));
+            }
             let mut flags = LinkFlags {
                 lib_dirs: vec![dir.display().to_string()],
                 link_names: vec![format!("static=jet_cpp_{actual}")],
                 ..Default::default()
             };
-            let metadata = dir.join(format!("{actual}.link"));
-            let mut bound_target = None;
             let mut has_runtime = false;
-            if let Ok(source) = std::fs::read_to_string(metadata) {
-                for line in source.lines() {
-                    if let Some(value) = line.strip_prefix("target\t") {
-                        bound_target = Some(value.to_string());
-                    } else if let Some(value) = line.strip_prefix("L\t") {
-                        if std::path::Path::new(value).is_absolute() {
-                            flags.lib_dirs.push(value.to_string());
-                            flags.rpath_dirs.push(value.to_string());
-                        }
-                    } else if let Some(value) = line.strip_prefix("l\t") {
-                        if value.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
-                            has_runtime |= value == crate::FFI::cxx_runtime_for_target(target);
-                            flags.link_names.push(value.to_string());
-                        }
+            for line in source.lines() {
+                if let Some(value) = line.strip_prefix("L\t") {
+                    if std::path::Path::new(value).is_absolute() {
+                        flags.lib_dirs.push(value.to_string());
+                        flags.rpath_dirs.push(value.to_string());
+                    }
+                } else if let Some(value) = line.strip_prefix("l\t") {
+                    if value.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                        has_runtime |= value == crate::FFI::cxx_runtime_for_target(target);
+                        flags.link_names.push(value.to_string());
                     }
                 }
-            }
-            if bound_target.as_deref().is_some_and(|bound| bound != target) {
-                return Err(e3201(lib));
             }
             if !has_runtime {
                 flags

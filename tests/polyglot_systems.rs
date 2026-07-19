@@ -270,6 +270,37 @@ if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 1'; exit 0; fi
     assert!(flags.link_names.contains(&"c++".to_string()));
     assert!(!flags.link_names.contains(&"stdc++".to_string()));
 
+    let shared_input = root.join("same-input");
+    fs::create_dir(&shared_input).unwrap();
+    let mut include_options = options.clone();
+    include_options.include_dirs = vec![shared_input.clone()];
+    let mut library_options = options.clone();
+    library_options.library_dirs = vec![shared_input.clone()];
+    let include_identity =
+        jet::CppBind::cache_identity_for_test(&header, &include_options, target);
+    let library_identity =
+        jet::CppBind::cache_identity_for_test(&header, &library_options, target);
+    assert_ne!(include_identity, library_identity);
+
+    fs::write(&clang_log, "").unwrap();
+    let include_result = jet::CppBind::bind(&header, &cache, &include_options).unwrap();
+    let include_commands = fs::read_to_string(&clang_log).unwrap();
+    let include_proof = include_commands
+        .lines()
+        .find(|line| line.contains("-shared"))
+        .unwrap();
+    assert!(!include_proof.contains(&format!("-L {}", shared_input.display())));
+
+    fs::write(&clang_log, "").unwrap();
+    let library_result = jet::CppBind::bind(&header, &cache, &library_options).unwrap();
+    assert_ne!(include_result.archive.parent(), library_result.archive.parent());
+    let library_commands = fs::read_to_string(&clang_log).unwrap();
+    let library_proof = library_commands
+        .lines()
+        .find(|line| line.contains("-shared"))
+        .unwrap();
+    assert!(library_proof.contains(&format!("-L {}", shared_input.display())));
+
     let first_identity = jet::CppBind::cache_identity_for_test(&header, &options, target);
     fs::write(
         &ar,
@@ -285,6 +316,35 @@ if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 2'; exit 0; fi
     .unwrap();
     let second_identity = jet::CppBind::cache_identity_for_test(&header, &options, target);
     assert_ne!(first_identity, second_identity);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn cpp_link_metadata_requires_exact_selected_target() {
+    let target = "aarch64-apple-darwin";
+    let root = std::env::temp_dir().join(format!(
+        "jet_cpp_link_target_{}_{}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ));
+    let dir = root.join(".jet/bindings/cpp");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("libjet_cpp_probe.a"), "archive").unwrap();
+    let metadata = dir.join("probe.link");
+
+    for invalid in [
+        "l\tc++\n",
+        "target\tx86_64-unknown-linux-gnu\nl\tc++\n",
+        "target\taarch64-apple-darwin\ntarget\taarch64-apple-darwin\nl\tc++\n",
+        "target aarch64-apple-darwin\nl\tc++\n",
+    ] {
+        fs::write(&metadata, invalid).unwrap();
+        assert!(jet::CFFI::resolve_link_for_target("jet_cpp_probe", &root, target).is_err());
+    }
+    fs::write(&metadata, "target\taarch64-apple-darwin\nl\tc++\n").unwrap();
+    assert!(jet::CFFI::resolve_link_for_target("jet_cpp_probe", &root, target).is_ok());
 
     let _ = fs::remove_dir_all(root);
 }
