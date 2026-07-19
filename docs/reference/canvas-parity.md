@@ -61,7 +61,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::Shield] status=readonly cancellation shield region, source edits; projection:tests/canvas.rs::canvas_projects_and_source_edits_shield_region.
 - [Stmt::SuppressMustUse] status=readonly expert suppression, source edits.
 - [Stmt::Region] status=readonly lifetime region, source edits.
-- [Stmt::Policy] status=graph scoped policy region with effective keys in the title, nested body projection, and source edits; projection:tests/canvas.rs::canvas_projects_policy_region.
+- [Stmt::Policy] status=graph scoped policy region with declared keys in the title, nested body projection, and source edits; projection:tests/canvas.rs::canvas_projects_policy_region.
 - [Stmt::TaskGroup] status=readonly task scope, source edits.
 - [Stmt::Layout] status=readonly layout scope, source edits.
 - [Stmt::Caps] status=readonly effect restriction, source edits.
