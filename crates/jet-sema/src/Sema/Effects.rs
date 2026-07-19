@@ -769,6 +769,26 @@ pub(crate) fn seed_trait_dispatch_effects(
     }
 }
 
+fn inferred_purity_display_name<'a>(module_alias: &str, name: &'a str) -> &'a str {
+    name.strip_prefix(module_alias)
+        .and_then(|name| name.strip_prefix("::"))
+        .unwrap_or(name)
+}
+
+#[cfg(test)]
+mod inferred_purity_display_tests {
+    use super::inferred_purity_display_name;
+
+    #[test]
+    fn strips_only_the_current_module_prefix() {
+        assert_eq!(inferred_purity_display_name("app", "app::leaky"), "leaky");
+        assert_eq!(
+            inferred_purity_display_name("app", "dependency::leaky"),
+            "dependency::leaky"
+        );
+    }
+}
+
 /// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
 /// empty. Callees need not repeat `--[]->`; their solved row is the authority.
 pub fn check_inferred_purity(
@@ -839,12 +859,21 @@ pub fn check_inferred_purity(
         }
         let path = if chain.len() > 1 {
             std::iter::once(f.name.clone())
-                .chain(chain[..chain.len() - 1].iter().cloned())
+                .chain(
+                    chain[..chain.len() - 1]
+                        .iter()
+                        .map(|name| inferred_purity_display_name(module_alias, name).to_string()),
+                )
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
         };
-        diags.push(crate::Sema::e3401(&f.name, call_name, &path, span));
+        diags.push(crate::Sema::e3401(
+            &f.name,
+            inferred_purity_display_name(module_alias, call_name),
+            &path,
+            span,
+        ));
     }
 
     use crate::AST::Item;
