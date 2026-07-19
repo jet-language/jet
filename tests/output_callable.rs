@@ -214,7 +214,86 @@ fn runnable_contracts_and_selection_fail_in_sema() {
         jet::Sema::CompileMode::Run,
     );
     assert_eq!(ambiguity.iter().filter(|code| *code == "E1321").count(), 1);
-    assert!(!ambiguity.contains(&"E0101".to_string()), "{ambiguity:?}");
+    assert!(ambiguity.contains(&"E0101".to_string()), "{ambiguity:?}");
+
+    for source in [
+        "lib: Output :: .Library.{ name: \"lib\" };\n",
+        "api: Output :: .Service.{ name: \"api\", entry: serve }\nfn serve() {}\n",
+    ] {
+        let no_entry = codes(source, jet::Sema::CompileMode::Run);
+        assert!(no_entry.contains(&"E0101".to_string()), "{no_entry:?}");
+    }
+
+    let dir = common::unique_tmp("jet_output_explicit_check_bad");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        "release: Output :: .Check.{ name: \"release\", entry: verify }\nfn verify() {}\n",
+    )
+    .unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+    let explicit_check = jet::Sema::check_bundle_for_output(
+        &mut bundle,
+        jet::Sema::CompileMode::Run,
+        "release",
+    );
+    assert!(
+        explicit_check.iter().any(|diagnostic| diagnostic.code == "E1321"),
+        "{explicit_check:?}"
+    );
+
+    for source in [
+        "app: Output :: .Executable.{ name: \"app\", entry: start };\ndefaults: .{ run: missing };\nfn start() {}\n",
+        "app: Output :: .Executable.{ name: \"app\", entry: start };\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
+        "app: Output :: .Executable.{ name: \"app\", entry: start };\napi: Output :: .Service.{ name: \"api\", entry: serve };\ndefaults: .{ run: api };\nfn start() {}\nfn serve() {}\n",
+    ] {
+        let stale_default = codes(source, jet::Sema::CompileMode::Run);
+        assert!(
+            stale_default.contains(&"E1321".to_string()),
+            "{stale_default:?}"
+        );
+    }
+}
+
+#[test]
+fn invalid_output_selection_stops_in_jet_before_codegen() {
+    fn reject(source: &str, args: &[&str], code: &str) {
+        let dir = common::unique_tmp("jet_output_selection_cli_bad");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.jet");
+        std::fs::write(&file, source).unwrap();
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        command.args(args);
+        let output = command.arg(&file).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{stderr}");
+        assert!(stderr.contains(&format!("Error [{code}]")), "{stderr}");
+        assert!(!stderr.contains("internal compiler error"), "{stderr}");
+        assert!(!stderr.contains("rustc rejected"), "{stderr}");
+    }
+
+    reject(
+        "lib: Output :: .Library.{ name: \"lib\" };\n",
+        &[],
+        "E0101",
+    );
+    reject(
+        "api: Output :: .Service.{ name: \"api\", entry: serve };\nfn serve() {}\n",
+        &[],
+        "E0101",
+    );
+    reject(
+        "release: Output :: .Check.{ name: \"release\", entry: verify };\nfn verify() {}\n",
+        &["--output", "release"],
+        "E1321",
+    );
+    reject(
+        "app: Output :: .Executable.{ name: \"app\", entry: start };\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
+        &[],
+        "E1321",
+    );
 }
 
 #[test]

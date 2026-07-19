@@ -414,16 +414,45 @@ fn resolve_outputs(
     let has_legacy_run = bundle.modules[bundle.entry].items.iter().any(|item| {
         matches!(item, Item::Func(function) if function.name == "run")
     });
+    let run_default = output_default(bundle, Syntax::OUTPUT_DEFAULT_RUN, diags);
+    let run_default_index = run_default.as_ref().and_then(|address| {
+        resolved.iter().position(|(_, _, fact)| {
+            fact.kind == crate::AST::OutputKind::Executable && fact.address == *address
+        })
+    });
+    if let Some(default) = run_default.as_ref().filter(|_| run_default_index.is_none()) {
+        diags.push(output_error(
+            format!("default `run` names incompatible Output `{default}`"),
+            "the run default must name an Executable Output in this Package".to_string(),
+            "point `defaults.run` at one checked Executable address".to_string(),
+            Span::new(0, 0),
+        ));
+    }
     if mode == CompileMode::Run {
         if let Some(address) = explicit {
-            if let Some((_, _, fact)) = resolved.iter_mut().find(|(_, _, fact)| fact.address == address) {
+            if let Some((_, _, fact)) = resolved.iter_mut().find(|(_, _, fact)| {
+                fact.address == address
+                    && matches!(
+                        fact.kind,
+                        crate::AST::OutputKind::Executable | crate::AST::OutputKind::Service
+                    )
+            }) {
                 fact.selected = true;
             } else {
-                let mut choices = resolved.iter().map(|(_, _, fact)| fact.address.clone()).collect::<Vec<_>>();
+                let mut choices = resolved
+                    .iter()
+                    .filter(|(_, _, fact)| {
+                        matches!(
+                            fact.kind,
+                            crate::AST::OutputKind::Executable | crate::AST::OutputKind::Service
+                        )
+                    })
+                    .map(|(_, _, fact)| fact.address.clone())
+                    .collect::<Vec<_>>();
                 choices.sort();
                 diags.push(output_error(
-                    format!("no runnable Output has address `{address}`"),
-                    "an explicit Output address must name one checked runnable Output".to_string(),
+                    format!("`{address}` is not an Output compatible with `jet run`"),
+                    "an explicit run address must name one checked Executable or Service Output".to_string(),
                     format!("choose one of: {}", choices.join(", ")),
                     Span::new(0, 0),
                 ));
@@ -436,19 +465,9 @@ fn resolve_outputs(
             if executable.len() == 1 {
                 resolved[executable[0]].2.selected = true;
             } else if executable.len() > 1 {
-                let default = output_default(bundle, Syntax::OUTPUT_DEFAULT_RUN, diags);
-                if let Some(default) = default {
-                    if let Some(index) = executable.iter().copied().find(|index| resolved[*index].2.address == default) {
-                        resolved[index].2.selected = true;
-                    } else {
-                        diags.push(output_error(
-                            format!("default `run` names incompatible Output `{default}`"),
-                            "the run default must name an Executable Output in this Package".to_string(),
-                            "point `defaults.run` at one of the listed Executable addresses".to_string(),
-                            Span::new(0, 0),
-                        ));
-                    }
-                } else {
+                if let Some(index) = run_default_index {
+                    resolved[index].2.selected = true;
+                } else if run_default.is_none() {
                     let mut names = executable.iter().map(|index| resolved[*index].2.address.clone()).collect::<Vec<_>>();
                     names.sort();
                     diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output or a checked default".to_string(), format!("choose an explicit Output or add `defaults: .{{ run: {} }}`; candidates: {}", names[0], names.join(", ")), None));
@@ -2026,9 +2045,7 @@ fn check_bundle_opts_for_output(
             } else {
                 diags.push(e1308(Some(run_fn.name_span)));
             }
-        } else if !entry_items.iter().any(|item| {
-            matches!(item, Item::Const(value) if matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT))
-        }) {
+        } else {
             diags.push(no_run_error());
         }
     }

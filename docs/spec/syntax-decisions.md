@@ -4546,7 +4546,9 @@ select in order: explicit address, legacy zero-config entry, sole compatible
 Output, checked `defaults:` entry, then an ambiguity error listing choices.
 `jet run --output api package.jet` is the explicit form; `defaults: .{ run: app };`
 is checked against the Package's Executable Output addresses. Explicit
-selection wins even when a legacy `fn run` exists.
+selection wins even when a legacy `fn run` exists, but accepts only an
+Executable or Service; Check Outputs remain plural under `jet test`. Defaults
+are validated even when a sole Output or legacy `fn run` would otherwise win.
 
 **D-SHAPE-INTERNAL1=A — `pub _name` is soft-public** *(ratified 2026-07-15)*:
 outside use is allowed with one unsuppressible warning, but the name is omitted
