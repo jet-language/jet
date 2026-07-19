@@ -107,6 +107,7 @@ pub enum LockSource {
         output: String,
         source_hash: String,
         repository: String,
+        authority: String,
     },
     /// D-FFI-LUA1 / D-JPK-PROVIDERS2: exact LuaRocks closure and output.
     LuaRocks {
@@ -114,6 +115,7 @@ pub enum LockSource {
         output: String,
         source_hash: String,
         repository: String,
+        authority: String,
     },
     /// D-FFI-RUBY1/PERL1/PHP1: exact foreign scripting-registry closure.
     Registry {
@@ -122,6 +124,7 @@ pub enum LockSource {
         output: String,
         source_hash: String,
         repository: String,
+        authority: String,
     },
 }
 
@@ -184,17 +187,17 @@ pub fn write(lock: &LockFile) -> String {
                 escape_str(reference),
                 escape_str(output)
             ),
-            LockSource::Cran { reference, output, source_hash, repository } => format!(
-                "{{ cran = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\" }}",
-                escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository)
+            LockSource::Cran { reference, output, source_hash, repository, authority } => format!(
+                "{{ cran = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\" }}",
+                escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
             ),
-            LockSource::LuaRocks { reference, output, source_hash, repository } => format!(
-                "{{ luarocks = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\" }}",
-                escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository)
+            LockSource::LuaRocks { reference, output, source_hash, repository, authority } => format!(
+                "{{ luarocks = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\" }}",
+                escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
             ),
-            LockSource::Registry { registry, reference, output, source_hash, repository } => format!(
-                "{{ registry = \"{}\", reference = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\" }}",
-                escape_str(registry), escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository)
+            LockSource::Registry { registry, reference, output, source_hash, repository, authority } => format!(
+                "{{ registry = \"{}\", reference = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\" }}",
+                escape_str(registry), escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
             ),
         };
         out.push_str(&format!("source = {}\n", source_str));
@@ -653,6 +656,7 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
             output: kv_field(s, "output").unwrap_or_default(),
             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
             repository: kv_field(s, "repository").unwrap_or_default(),
+            authority: kv_field(s, "authority").unwrap_or_default(),
         });
     }
     if let Some(reference) = kv_field(s, "luarocks") {
@@ -661,6 +665,7 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
             output: kv_field(s, "output").unwrap_or_default(),
             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
             repository: kv_field(s, "repository").unwrap_or_default(),
+            authority: kv_field(s, "authority").unwrap_or_default(),
         });
     }
     if let Some(registry) = kv_field(s, "registry") {
@@ -670,6 +675,7 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
             output: kv_field(s, "output").unwrap_or_default(),
             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
             repository: kv_field(s, "repository").unwrap_or_default(),
+            authority: kv_field(s, "authority").unwrap_or_default(),
         });
     }
     if let Some(url) = kv_field(s, "git") {
@@ -707,7 +713,24 @@ fn parse_locked(s: &str) -> Result<LockedRevision, String> {
 
 /// Extract the value for `key = "..."` or `key = digits` from an inline table string.
 fn kv_field(inline: &str, key: &str) -> Option<String> {
-    for part in inline.split(',') {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, character) in inline.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if quoted && character == '\\' {
+            escaped = true;
+        } else if character == '"' {
+            quoted = !quoted;
+        } else if character == ',' && !quoted {
+            parts.push(&inline[start..index]);
+            start = index + 1;
+        }
+    }
+    parts.push(&inline[start..]);
+    for part in parts {
         let part = part.trim();
         if let Some(rest) = part.strip_prefix(key) {
             let rest = rest.trim().strip_prefix('=')?.trim();
@@ -861,6 +884,7 @@ pub fn record_cran_realization(
     output: &str,
     source_hash: &str,
     repository: &str,
+    authority: &str,
     dependencies: Vec<String>,
     envelope: LockEnvelope,
 ) {
@@ -886,6 +910,7 @@ pub fn record_cran_realization(
             output: output.to_string(),
             source_hash: source_hash.to_string(),
             repository: repository.to_string(),
+            authority: authority.to_string(),
         },
         locked: None,
         fingerprint: source_hash.to_string(),
@@ -914,12 +939,12 @@ pub fn record_cran_realization(
 pub fn cran_realization(
     project_root: &Path,
     reference: &str,
-) -> Option<(String, String, String, LockEnvelope)> {
+) -> Option<(String, String, String, String, LockEnvelope)> {
     let lock = load(project_root)?;
     for pkg in lock.packages {
-        if let LockSource::Cran { reference: r, output, source_hash, repository } = pkg.source {
+        if let LockSource::Cran { reference: r, output, source_hash, repository, authority } = pkg.source {
             if r == reference {
-                return Some((output, source_hash, repository, pkg.envelope?));
+                return Some((output, source_hash, repository, authority, pkg.envelope?));
             }
         }
     }
@@ -935,6 +960,7 @@ pub fn record_luarocks_realization(
     output: &str,
     source_hash: &str,
     repository: &str,
+    authority: &str,
     dependencies: Vec<String>,
     envelope: LockEnvelope,
 ) {
@@ -960,6 +986,7 @@ pub fn record_luarocks_realization(
             output: output.to_string(),
             source_hash: source_hash.to_string(),
             repository: repository.to_string(),
+            authority: authority.to_string(),
         },
         locked: None,
         fingerprint: source_hash.to_string(),
@@ -988,12 +1015,12 @@ pub fn record_luarocks_realization(
 pub fn luarocks_realization(
     project_root: &Path,
     reference: &str,
-) -> Option<(String, String, String, LockEnvelope)> {
+) -> Option<(String, String, String, String, LockEnvelope)> {
     let lock = load(project_root)?;
     for pkg in lock.packages {
-        if let LockSource::LuaRocks { reference: r, output, source_hash, repository } = pkg.source {
+        if let LockSource::LuaRocks { reference: r, output, source_hash, repository, authority } = pkg.source {
             if r == reference {
-                return Some((output, source_hash, repository, pkg.envelope?));
+                return Some((output, source_hash, repository, authority, pkg.envelope?));
             }
         }
     }
@@ -1010,6 +1037,7 @@ pub fn record_registry_realization(
     output: &str,
     source_hash: &str,
     repository: &str,
+    authority: &str,
     dependencies: Vec<String>,
     envelope: LockEnvelope,
 ) {
@@ -1036,6 +1064,7 @@ pub fn record_registry_realization(
             output: output.to_string(),
             source_hash: source_hash.to_string(),
             repository: repository.to_string(),
+            authority: authority.to_string(),
         },
         locked: None,
         fingerprint: source_hash.to_string(),
@@ -1066,7 +1095,7 @@ pub fn registry_realization(
     project_root: &Path,
     registry: &str,
     reference: &str,
-) -> Option<(String, String, String, LockEnvelope)> {
+) -> Option<(String, String, String, String, LockEnvelope)> {
     let lock = load(project_root)?;
     for package in lock.packages {
         if let LockSource::Registry {
@@ -1075,10 +1104,11 @@ pub fn registry_realization(
             output,
             source_hash,
             repository,
+            authority,
         } = package.source
         {
             if locked_registry == registry && locked_reference == reference {
-                return Some((output, source_hash, repository, package.envelope?));
+                return Some((output, source_hash, repository, authority, package.envelope?));
             }
         }
     }

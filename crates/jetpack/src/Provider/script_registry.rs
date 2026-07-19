@@ -1,6 +1,6 @@
 //! Native RubyGems, CPAN, and Packagist providers (D-FFI-RUBY1/PERL1/PHP1).
 
-use super::{cache_identity, producer_record, Ctx, Provider, ProviderError, Realized, SourceState};
+use super::{producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState};
 use crate::RefSpec::{RefSpec, SourceTable};
 use crate::JSON::Json;
 use crate::SHA256;
@@ -24,7 +24,7 @@ impl Kind {
         }
     }
 
-    fn title(self) -> &'static str {
+    pub(super) fn title(self) -> &'static str {
         match self {
             Self::RubyGems => "RubyGems",
             Self::Cpan => "CPAN",
@@ -136,13 +136,7 @@ impl Provider for ScriptRegistryProvider {
             )));
         }
         let (root_name, root_version) = parse_ref(kind, &spec.package)?;
-        let authority = super::fetch::Authority::load(
-            ctx,
-            kind.label(),
-            &kind.repository(),
-            kind.fetch_authorities(),
-        )
-        .map_err(|error| fail(kind, error))?;
+        let authority = authority(kind, ctx, true)?;
         let repository = authority.registry().to_string();
         let fetch_authority = authority.provenance();
         let scratch = Scratch::new(ctx.store_dir, kind)?;
@@ -175,10 +169,10 @@ impl Provider for ScriptRegistryProvider {
         }
         let source_hash = closure_hash(kind, &artifacts);
         if let Some(project) = ctx.project_dir {
-            if let Some((_output, locked_hash, locked_repository, _)) =
+            if let Some((_output, locked_hash, locked_repository, locked_authority, _)) =
                 crate::Lock::registry_realization(project, kind.label(), &spec.raw)
             {
-                if locked_hash != source_hash || locked_repository != repository {
+                if locked_hash != source_hash || locked_repository != repository || locked_authority != fetch_authority {
                     return Err(fail(
                         kind,
                         format!(
@@ -255,6 +249,7 @@ impl Provider for ScriptRegistryProvider {
                 &out,
                 &source_hash,
                 &repository,
+                &fetch_authority,
                 dependencies,
                 crate::Lock::LockEnvelope {
                     output_hash: envelope.output_hash.clone(),
@@ -264,7 +259,7 @@ impl Provider for ScriptRegistryProvider {
                 },
             );
         }
-        let identity = cache_identity(&source_hash, kind.recipe(), ctx);
+        let identity = provider_cache_identity(&source_hash, kind.recipe(), ctx, &fetch_authority);
         let (references, mut facts) = dependency_objects(&root.package.name, &artifacts);
         facts.insert("repository".into(), repository.clone());
         facts.insert("fetch.authority".into(), fetch_authority.clone());
@@ -300,6 +295,19 @@ impl Provider for ScriptRegistryProvider {
             producer,
         })
     }
+}
+
+fn authority(kind: Kind, ctx: &Ctx<'_>, fetch: bool) -> Result<super::fetch::Authority, ProviderError> {
+    let result = if fetch {
+        super::fetch::Authority::load(ctx, kind.label(), &kind.repository(), kind.fetch_authorities())
+    } else {
+        super::fetch::Authority::load_for_cache(ctx, kind.label(), &kind.repository(), kind.fetch_authorities())
+    };
+    result.map_err(|error| fail(kind, error))
+}
+
+pub(super) fn cache_authority(kind: Kind, ctx: &Ctx<'_>) -> Result<super::fetch::Authority, ProviderError> {
+    authority(kind, ctx, false)
 }
 
 fn fail(kind: Kind, reason: impl Into<String>) -> ProviderError {
@@ -346,7 +354,7 @@ fn resolve_closure(
             constraints
                 .get(name)
                 .is_some_and(|requirements| !requirements.iter().all(|requirement| {
-                    version_satisfies(&package.version, requirement)
+                    version_satisfies(kind, &package.version, requirement)
                 }))
         }) {
             return Ok(None);
@@ -370,7 +378,7 @@ fn resolve_closure(
         for package in candidates.get(&name).cloned().unwrap_or_default() {
             if !requirements
                 .iter()
-                .all(|requirement| version_satisfies(&package.version, requirement))
+                .all(|requirement| version_satisfies(kind, &package.version, requirement))
             {
                 continue;
             }
@@ -987,7 +995,8 @@ fn install_composer(
     out: &Path,
     scratch: &Scratch,
 ) -> Result<(), ProviderError> {
-    const ZIP_LIST: &str = "$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); for($i=0;$i<$z->numFiles;$i++){ $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),\"\\t\",$z->getNameIndex($i),\"\\n\"; }";
+    super::fetch::ensure_download_budget(&artifact.path).map_err(|error| fail(Kind::Packagist, error))?;
+    const ZIP_LIST: &str = "$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); $count=$z->numFiles; if($count>(int)$argv[2]) exit(4); $total=0; for($i=0;$i<$count;$i++){ $stat=$z->statIndex($i); if($stat===false) exit(5); $name=$stat['name']; $size=(int)$stat['size']; if(strlen($name)>(int)$argv[5]||$size<0||$size>(int)$argv[3]) exit(6); $total+=$size; if($total>(int)$argv[4]) exit(7); $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),\"\\t\",$name,\"\\n\"; }";
     let listing = Command::new("php")
         .args([
             "-d",
@@ -999,6 +1008,10 @@ fn install_composer(
             "--",
         ])
         .arg(&artifact.path)
+        .arg(super::fetch::MAX_ARCHIVE_ENTRIES.to_string())
+        .arg(super::fetch::MAX_ARCHIVE_ENTRY_BYTES.to_string())
+        .arg(super::fetch::MAX_ARCHIVE_TOTAL_BYTES.to_string())
+        .arg(super::fetch::MAX_ARCHIVE_PATH_BYTES.to_string())
         .output()
         .map_err(|error| {
             fail(
@@ -1174,51 +1187,7 @@ fn write_runtime_projection(
 }
 
 fn validate_tar(kind: Kind, path: &Path, gzip: bool) -> Result<(), ProviderError> {
-    let list_flag = if gzip { "-tzf" } else { "-tf" };
-    let verbose_flag = if gzip { "-tvzf" } else { "-tvf" };
-    let listing = Command::new("tar")
-        .arg(list_flag)
-        .arg(path)
-        .output()
-        .map_err(|error| fail(kind, format!("could not inspect source archive: {error}")))?;
-    if !listing.status.success() {
-        return Err(fail(kind, "source is not a readable tar archive"));
-    }
-    let listing = String::from_utf8(listing.stdout)
-        .map_err(|_| fail(kind, "source archive paths are not UTF-8"))?;
-    for entry in listing.lines() {
-        if entry.is_empty() || !safe_relative(Path::new(entry.trim_end_matches('/'))) {
-            return Err(fail(
-                kind,
-                format!("source archive contains unsafe path `{entry}`"),
-            ));
-        }
-    }
-    let verbose = Command::new("tar")
-        .arg(verbose_flag)
-        .arg(path)
-        .output()
-        .map_err(|error| {
-            fail(
-                kind,
-                format!("could not inspect source archive types: {error}"),
-            )
-        })?;
-    if !verbose.status.success() {
-        return Err(fail(kind, "source archive types could not be inspected"));
-    }
-    for line in String::from_utf8(verbose.stdout)
-        .map_err(|_| fail(kind, "source archive listing is not UTF-8"))?
-        .lines()
-    {
-        if !matches!(line.as_bytes().first(), Some(b'-' | b'd')) {
-            return Err(fail(
-                kind,
-                "source archives may contain only regular files and directories",
-            ));
-        }
-    }
-    Ok(())
+    super::fetch::validate_tar_archive(path, gzip).map_err(|error| fail(kind, error))
 }
 
 fn run_archive_command(
@@ -1510,7 +1479,15 @@ impl Drop for Scratch {
     }
 }
 
-fn version_satisfies(actual: &str, requirement: &str) -> bool {
+fn version_satisfies(kind: Kind, actual: &str, requirement: &str) -> bool {
+    if kind == Kind::Packagist {
+        composer_version_satisfies(actual, requirement)
+    } else {
+        basic_version_satisfies(actual, requirement)
+    }
+}
+
+fn basic_version_satisfies(actual: &str, requirement: &str) -> bool {
     let requirement = requirement.trim();
     if requirement.is_empty() || matches!(requirement, "*" | ">= 0" | ">=0") {
         return true;
@@ -1545,6 +1522,90 @@ fn version_satisfies(actual: &str, requirement: &str) -> bool {
         }
         true
     })
+}
+
+fn composer_version_satisfies(actual: &str, requirement: &str) -> bool {
+    let requirement = requirement.trim();
+    if requirement.is_empty() || requirement == "*" {
+        return true;
+    }
+    requirement.replace("||", "|").split('|').any(|alternative| {
+        let normalized = alternative.replace(',', " ");
+        let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+        if tokens.len() == 3 && tokens[1] == "-" {
+            return composer_hyphen_satisfies(actual, tokens[0], tokens[2]);
+        }
+        let mut index = 0;
+        while index < tokens.len() {
+            let token = tokens[index];
+            let (operator, wanted, consumed) = if is_operator(token) {
+                let Some(wanted) = tokens.get(index + 1) else { return false; };
+                (token, *wanted, 2)
+            } else {
+                let (operator, wanted) = [">=", "<=", "!=", "==", "=", ">", "<", "~", "^"]
+                    .into_iter()
+                    .find_map(|operator| token.strip_prefix(operator).map(|wanted| (operator, wanted)))
+                    .unwrap_or(("=", token));
+                (operator, wanted, 1)
+            };
+            let wanted = wanted.trim_start_matches('v');
+            let wildcard = wanted.split('.').any(|part| matches!(part, "*" | "x" | "X"));
+            let matched = if wildcard {
+                let matched = composer_wildcard_satisfies(actual, wanted);
+                if operator == "!=" { !matched } else { matches!(operator, "=" | "==") && matched }
+            } else if operator == "~" {
+                compare_versions(actual, wanted) != std::cmp::Ordering::Less
+                    && upper_bound(wanted, wanted.split('.').count() > 2)
+                        .is_some_and(|upper| compare_versions(actual, &upper) == std::cmp::Ordering::Less)
+            } else {
+                !wanted.is_empty() && satisfies_one(actual, operator, wanted)
+            };
+            if !matched {
+                return false;
+            }
+            index += consumed;
+        }
+        !tokens.is_empty()
+    })
+}
+
+fn composer_wildcard_satisfies(actual: &str, wanted: &str) -> bool {
+    let wanted = wanted.split('.').collect::<Vec<_>>();
+    let actual = actual.trim_start_matches('v').split(['.', '-', '+']).collect::<Vec<_>>();
+    let Some(wildcard) = wanted.iter().position(|part| matches!(*part, "*" | "x" | "X")) else {
+        return false;
+    };
+    wildcard > 0
+        && wanted[..wildcard]
+            .iter()
+            .zip(actual.iter())
+            .all(|(left, right)| left.parse::<u64>().ok() == right.parse::<u64>().ok())
+        && actual.len() >= wildcard
+}
+
+fn composer_hyphen_satisfies(actual: &str, lower: &str, upper: &str) -> bool {
+    let lower = lower.trim_start_matches('v');
+    let upper = upper.trim_start_matches('v');
+    if compare_versions(actual, lower) == std::cmp::Ordering::Less {
+        return false;
+    }
+    let components = upper.split('.').count();
+    if components >= 3 {
+        compare_versions(actual, upper) != std::cmp::Ordering::Greater
+    } else {
+        partial_upper_bound(upper)
+            .is_some_and(|exclusive| compare_versions(actual, &exclusive) == std::cmp::Ordering::Less)
+    }
+}
+
+fn partial_upper_bound(version: &str) -> Option<String> {
+    let mut parts = numeric_parts(version)?;
+    let index = parts.len().checked_sub(1)?;
+    parts[index] += 1;
+    for part in parts.iter_mut().skip(index + 1) {
+        *part = 0;
+    }
+    Some(parts.into_iter().map(|part| part.to_string()).collect::<Vec<_>>().join("."))
 }
 
 fn cpan_requirement(requirement: &str) -> String {
@@ -1731,12 +1792,17 @@ mod tests {
     #[test]
     fn parses_native_registry_metadata_and_constraints() {
         assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
-        assert!(version_satisfies("2.4.1", "^2.0"));
-        assert!(!version_satisfies("3.0.0", "^2.0"));
-        assert!(version_satisfies("1.8.9", "~> 1.8"));
-        assert!(!version_satisfies("2.0", "~> 1.8"));
-        assert!(version_satisfies("1.5", ">=1.0 <2.0"));
-        assert!(!version_satisfies("2.5", ">=1.0 <2.0"));
+        assert!(version_satisfies(Kind::Packagist, "2.4.1", "^2.0"));
+        assert!(!version_satisfies(Kind::Packagist, "3.0.0", "^2.0"));
+        assert!(version_satisfies(Kind::RubyGems, "1.8.9", "~> 1.8"));
+        assert!(!version_satisfies(Kind::RubyGems, "2.0", "~> 1.8"));
+        assert!(version_satisfies(Kind::Cpan, "1.5", ">=1.0 <2.0"));
+        assert!(!version_satisfies(Kind::Cpan, "2.5", ">=1.0 <2.0"));
+        assert!(version_satisfies(Kind::Packagist, "1.8.4", "1.*"));
+        assert!(version_satisfies(Kind::Packagist, "2.0.7", "1.0 - 2.0"));
+        assert!(!version_satisfies(Kind::Packagist, "2.1.0", "1.0 - 2.0"));
+        assert!(version_satisfies(Kind::Packagist, "3.2.1", "1.* | ^3.1"));
+        assert!(version_satisfies(Kind::Packagist, "1.2.9", "~1.2"));
         assert_eq!(cpan_requirement("2.27300"), ">= 2.27300");
 
         let ruby = "2.0.0 jetdep:>= 1.0&< 2.0|checksum:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n";
@@ -1792,10 +1858,79 @@ mod tests {
         assert_eq!(selected.get("a"), Some(&"1.0"));
         assert_eq!(selected.get("c"), Some(&"1.0"));
 
+        fs::create_dir_all(dir.join("p2/vendor")).unwrap();
+        let sha1 = "a".repeat(40);
+        fs::write(dir.join("p2/vendor/root.json"), format!(r#"{{"packages":{{"vendor/root":[{{"version":"1.0.0","dist":{{"type":"zip","url":"/root.zip","shasum":"{sha1}"}},"require":{{"vendor/a":"1.* | ^3.1","vendor/b":"1.0 - 2.0"}}}}]}}}}"#)).unwrap();
+        fs::write(dir.join("p2/vendor/a.json"), format!(r#"{{"packages":{{"vendor/a":[{{"version":"3.2.0","dist":{{"type":"zip","url":"/a3.zip","shasum":"{sha1}"}},"require":{{"vendor/c":"^2.0"}}}},{{"version":"1.5.0","dist":{{"type":"zip","url":"/a1.zip","shasum":"{sha1}"}},"require":{{"vendor/c":"1.*"}}}}]}}}}"#)).unwrap();
+        fs::write(dir.join("p2/vendor/b.json"), format!(r#"{{"packages":{{"vendor/b":[{{"version":"2.0.7","dist":{{"type":"zip","url":"/b.zip","shasum":"{sha1}"}},"require":{{"vendor/c":"1.*"}}}}]}}}}"#)).unwrap();
+        fs::write(dir.join("p2/vendor/c.json"), format!(r#"{{"packages":{{"vendor/c":[{{"version":"2.1.0","dist":{{"type":"zip","url":"/c2.zip","shasum":"{sha1}"}}}},{{"version":"1.9.0","dist":{{"type":"zip","url":"/c1.zip","shasum":"{sha1}"}}}}]}}}}"#)).unwrap();
+        let composer_scratch = Scratch::new(&dir, Kind::Packagist).unwrap();
+        let composer_authority = super::super::fetch::Authority::load(
+            &ctx,
+            "php",
+            &format!("file://{}", dir.display()),
+            Kind::Packagist.fetch_authorities(),
+        ).unwrap();
+        let composer = resolve_closure(Kind::Packagist, &composer_authority, &composer_scratch, "vendor/root", "1.0.0").unwrap();
+        let composer_selected = composer.iter().map(|package| (package.name.as_str(), package.version.as_str())).collect::<BTreeMap<_, _>>();
+        assert_eq!(composer_selected.get("vendor/a"), Some(&"1.5.0"));
+        assert_eq!(composer_selected.get("vendor/b"), Some(&"2.0.7"));
+        assert_eq!(composer_selected.get("vendor/c"), Some(&"1.9.0"));
+
         let cpan = parse_cpan_search_fixture(r#"{"hits":{"hits":[{"_source":{"distribution":"Jet-App","version":"2.0","download_url":"/Jet-App-2.tar.gz","checksum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependency":[]}},{"_source":{"distribution":"Jet-App","version":"1.0","download_url":"/Jet-App-1.tar.gz","checksum_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","dependency":[]}}]}}"#).unwrap();
         assert_eq!(cpan.iter().map(|package| package.version.as_str()).collect::<Vec<_>>(), vec!["2.0", "1.0"]);
-        assert!(cpan.iter().any(|package| version_satisfies(&package.version, "=1.0")));
+        assert!(cpan.iter().any(|package| version_satisfies(Kind::Cpan, &package.version, "=1.0")));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cached_registry_rejects_policy_authority_drift() {
+        let base = std::env::temp_dir().join(format!("jet-registry-authority-cache-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let project = base.join("project");
+        let repo = base.join("repo");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&repo).unwrap();
+        let manifest = crate::PackageManifest::PackManifest::path_in(&project);
+        let write_policy = |registry: &Path, allow: &str, deny: &str| {
+            fs::write(&manifest, format!(r#"payload: {{ name: "p", version: "1" }}
+policy: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], deny: [{deny}] }} }} }}
+"#, registry.display())).unwrap();
+        };
+        write_policy(&repo, "\"dist.example.test\"", "");
+        let store = base.join("store");
+        fs::create_dir_all(&store).unwrap();
+        let ctx = Ctx { fixtures: None, store_dir: &store, offline: true, project_dir: Some(&project) };
+        let table = SourceTable::empty();
+        let spec = crate::RefSpec::classify_in("ruby:demo#version=1.0", &table).unwrap();
+        let authority = cache_authority(Kind::RubyGems, &ctx).unwrap();
+        crate::Lock::record_registry_realization(
+            &project,
+            "ruby",
+            "demo",
+            "1.0",
+            &spec.raw,
+            "/hangar/demo",
+            &"a".repeat(64),
+            authority.registry(),
+            &authority.provenance(),
+            Vec::new(),
+            crate::Lock::LockEnvelope::default(),
+        );
+        assert!(crate::Provider::validate_cache_authority(&spec, &table, &ctx).is_ok());
+        let locked_policy = crate::Provider::cache_expectation(&spec, &table, &ctx).unwrap().identity.policy_fingerprint;
+
+        write_policy(&repo, "\"dist.example.test\", \"more.example.test\"", "");
+        let changed_policy = crate::Provider::cache_expectation(&spec, &table, &ctx).unwrap().identity.policy_fingerprint;
+        assert_ne!(locked_policy, changed_policy);
+        assert!(crate::Provider::validate_cache_authority(&spec, &table, &ctx).is_err());
+        let remap = base.join("other-repo");
+        fs::create_dir_all(&remap).unwrap();
+        write_policy(&remap, "\"dist.example.test\"", "");
+        assert!(crate::Provider::validate_cache_authority(&spec, &table, &ctx).is_err());
+        write_policy(&repo, "\"dist.example.test\"", "\"file\"");
+        assert!(crate::Provider::validate_cache_authority(&spec, &table, &ctx).is_err());
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]
@@ -1987,6 +2122,85 @@ mod tests {
         let php_scratch = Scratch::new(&base, Kind::Packagist).unwrap();
         assert!(install_composer(&php, &base.join("php-out"), &php_scratch).is_err());
 
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn checksum_valid_sparse_archive_is_rejected_before_extraction() {
+        assert!(which("tar").is_some(), "Nix dev shell must provision tar");
+        let base = std::env::temp_dir().join(format!("jet-script-budget-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let source = base.join("source/Bad-1.0/lib");
+        fs::create_dir_all(&source).unwrap();
+        fs::File::create(source.join("Bad.pm")).unwrap().set_len(super::super::fetch::MAX_ARCHIVE_ENTRY_BYTES + 1).unwrap();
+        let archive = base.join("Bad-1.0.tar.gz");
+        assert!(Command::new("tar")
+            .args(["--sparse", "-czf"])
+            .arg(&archive)
+            .arg("-C")
+            .arg(base.join("source"))
+            .arg("Bad-1.0")
+            .status()
+            .unwrap()
+            .success());
+        let mut artifact = test_artifact(Kind::Cpan, "Bad", "1.0", archive);
+        artifact.package.integrity = Integrity::Sha256(artifact.sha256.clone());
+        let bytes = fs::read(&artifact.path).unwrap();
+        assert!(verify_integrity(Kind::Cpan, &artifact.package, &bytes).is_ok());
+        let scratch = Scratch::new(&base, Kind::Cpan).unwrap();
+        let out = base.join("out");
+        let error = install_cpan(&artifact, &out, &scratch).unwrap_err();
+        let ProviderError::Registry(_, reason) = error else { panic!("{error:?}") };
+        assert!(reason.contains("per-entry limit") || reason.contains("sparse source"), "{reason}");
+        assert!(!out.exists());
+
+        let total_root = base.join("total/Total-1.0/lib");
+        fs::create_dir_all(&total_root).unwrap();
+        for index in 0..5 {
+            fs::File::create(total_root.join(format!("Part{index}.pm")))
+                .unwrap()
+                .set_len(60 * 1024 * 1024)
+                .unwrap();
+        }
+        let total_archive = base.join("Total-1.0.tar.gz");
+        assert!(Command::new("tar")
+            .args(["--sparse", "-czf"])
+            .arg(&total_archive)
+            .arg("-C")
+            .arg(base.join("total"))
+            .arg("Total-1.0")
+            .status()
+            .unwrap()
+            .success());
+        let mut total = test_artifact(Kind::Cpan, "Total", "1.0", total_archive);
+        total.package.integrity = Integrity::Sha256(total.sha256.clone());
+        assert!(verify_integrity(Kind::Cpan, &total.package, &fs::read(&total.path).unwrap()).is_ok());
+        let error = install_cpan(&total, &base.join("total-out"), &Scratch::new(&base, Kind::Cpan).unwrap()).unwrap_err();
+        let ProviderError::Registry(_, reason) = error else { panic!("{error:?}") };
+        assert!(reason.contains("expands beyond"), "{reason}");
+
+        let many_root = base.join("many/Many-1.0/lib");
+        fs::create_dir_all(&many_root).unwrap();
+        for index in 0..super::super::fetch::MAX_ARCHIVE_ENTRIES {
+            fs::write(many_root.join(format!("M{index}.pm")), []).unwrap();
+        }
+        let many_archive = base.join("Many-1.0.tar.gz");
+        assert!(Command::new("tar")
+            .args(["-czf"])
+            .arg(&many_archive)
+            .arg("-C")
+            .arg(base.join("many"))
+            .arg("Many-1.0")
+            .status()
+            .unwrap()
+            .success());
+        let mut many = test_artifact(Kind::Cpan, "Many", "1.0", many_archive);
+        many.package.integrity = Integrity::Sha256(many.sha256.clone());
+        assert!(verify_integrity(Kind::Cpan, &many.package, &fs::read(&many.path).unwrap()).is_ok());
+        let error = install_cpan(&many, &base.join("many-out"), &Scratch::new(&base, Kind::Cpan).unwrap()).unwrap_err();
+        let ProviderError::Registry(_, reason) = error else { panic!("{error:?}") };
+        assert!(reason.contains("too many entries"), "{reason}");
         let _ = fs::remove_dir_all(base);
     }
 

@@ -1,6 +1,6 @@
 //! Native CRAN provider (D-FFI-R1, D-JPK-PROVIDERS2).
 
-use super::{cache_identity, producer_record, Ctx, Provider, ProviderError, Realized, SourceState};
+use super::{producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState};
 use crate::RefSpec::{RefSpec, SourceTable};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -63,13 +63,7 @@ impl Provider for CranProvider {
                 spec.raw
             )));
         }
-        let authority = super::fetch::Authority::load(
-            ctx,
-            "cran",
-            &repository(),
-            &["cran.r-project.org", "cloud.r-project.org"],
-        )
-        .map_err(ProviderError::Cran)?;
+        let authority = authority(ctx, true)?;
         let repository = authority.registry().to_string();
         let fetch_authority = authority.provenance();
         let (root_name, wanted_version) = parse_ref(&spec.package)?;
@@ -126,10 +120,10 @@ impl Provider for CranProvider {
         }
         let source_hash = closure_hash(&artifacts);
         if let Some(project) = ctx.project_dir {
-            if let Some((_output, locked_hash, locked_repo, _)) =
+            if let Some((_output, locked_hash, locked_repo, locked_authority, _)) =
                 crate::Lock::cran_realization(project, &spec.raw)
             {
-                if locked_hash != source_hash || locked_repo != repository {
+                if locked_hash != source_hash || locked_repo != repository || locked_authority != fetch_authority {
                     return Err(ProviderError::Cran(format!(
                         "locked CRAN source integrity changed for `{}` (expected {} from {}, got {} from {})",
                         spec.raw, locked_hash, locked_repo, source_hash, repository
@@ -159,6 +153,7 @@ impl Provider for CranProvider {
             let target = sources.join(artifact.path.file_name().unwrap_or_default());
             std::fs::copy(&artifact.path, &target)
                 .map_err(|e| ProviderError::Cran(format!("could not preserve CRAN source: {e}")))?;
+            super::fetch::validate_tar_archive(&target, true).map_err(ProviderError::Cran)?;
             install(&target, &library)?;
         }
         write_runtime_wrapper(&out_dir, &library)?;
@@ -183,6 +178,7 @@ impl Provider for CranProvider {
                 &out,
                 &source_hash,
                 &repository,
+                &fetch_authority,
                 deps,
                 crate::Lock::LockEnvelope {
                     output_hash: envelope.output_hash.clone(),
@@ -192,7 +188,7 @@ impl Provider for CranProvider {
                 },
             );
         }
-        let identity = cache_identity(&source_hash, RECIPE_ID, ctx);
+        let identity = provider_cache_identity(&source_hash, RECIPE_ID, ctx, &fetch_authority);
         let (references, mut dependency_facts) = dependency_objects(&root.name, &artifacts);
         dependency_facts.insert("repository".into(), repository.clone());
         dependency_facts.insert("fetch.authority".into(), fetch_authority.clone());
@@ -226,6 +222,19 @@ impl Provider for CranProvider {
             producer,
         })
     }
+}
+
+fn authority(ctx: &Ctx<'_>, fetch: bool) -> Result<super::fetch::Authority, ProviderError> {
+    let result = if fetch {
+        super::fetch::Authority::load(ctx, "cran", &repository(), &["cran.r-project.org", "cloud.r-project.org"])
+    } else {
+        super::fetch::Authority::load_for_cache(ctx, "cran", &repository(), &["cran.r-project.org", "cloud.r-project.org"])
+    };
+    result.map_err(ProviderError::Cran)
+}
+
+pub(super) fn cache_authority(ctx: &Ctx<'_>) -> Result<super::fetch::Authority, ProviderError> {
+    authority(ctx, false)
 }
 
 fn repository() -> String {

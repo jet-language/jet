@@ -3,10 +3,16 @@
 use super::Ctx;
 use crate::PackageManifest::PackManifest;
 use std::collections::BTreeSet;
-#[cfg(test)]
+use std::io::{BufRead, Read};
 use std::path::Component;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+
+pub(super) const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
+pub(super) const MAX_ARCHIVE_ENTRIES: u64 = 4096;
+pub(super) const MAX_ARCHIVE_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+pub(super) const MAX_ARCHIVE_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+pub(super) const MAX_ARCHIVE_PATH_BYTES: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub(super) struct Authority {
@@ -23,6 +29,25 @@ impl Authority {
         provider: &str,
         default_registry: &str,
         default_allow: &[&str],
+    ) -> Result<Self, String> {
+        Self::load_inner(ctx, provider, default_registry, default_allow, true)
+    }
+
+    pub(super) fn load_for_cache(
+        ctx: &Ctx<'_>,
+        provider: &str,
+        default_registry: &str,
+        default_allow: &[&str],
+    ) -> Result<Self, String> {
+        Self::load_inner(ctx, provider, default_registry, default_allow, false)
+    }
+
+    fn load_inner(
+        ctx: &Ctx<'_>,
+        provider: &str,
+        default_registry: &str,
+        default_allow: &[&str],
+        require_curl: bool,
     ) -> Result<Self, String> {
         let configured = ctx
             .project_dir
@@ -63,7 +88,11 @@ impl Authority {
                 "policy.providers.{provider} denies an explicitly allowed authority"
             ));
         }
-        let curl = which("curl").ok_or_else(|| "provisioned curl was not found".to_string())?;
+        let curl = if require_curl {
+            which("curl").ok_or_else(|| "provisioned curl was not found".to_string())?
+        } else {
+            PathBuf::new()
+        };
         let result = Self {
             provider: provider.to_string(),
             registry,
@@ -112,6 +141,7 @@ impl Authority {
                     if !safe_file_under(&root, &path) {
                         return Err("file fetch escaped provider registry root".to_string());
                     }
+                    ensure_download_budget(&path)?;
                     std::fs::copy(path, destination)
                         .map_err(|error| format!("could not copy registry fixture: {error}"))?;
                     return Ok(());
@@ -136,6 +166,7 @@ impl Authority {
                 .and_then(|value| value.trim().parse::<u16>().ok())
                 .ok_or_else(|| "curl returned no HTTP status".to_string())?;
             if (200..300).contains(&status) {
+                ensure_download_budget(&body)?;
                 std::fs::rename(&body, destination)
                     .or_else(|_| std::fs::copy(&body, destination).map(|_| ()))
                     .map_err(|error| format!("could not preserve fetched bytes: {error}"))?;
@@ -178,6 +209,8 @@ fn hardened_curl(path: &Path) -> Command {
         "--show-error",
         "--max-time",
         "60",
+        "--max-filesize",
+        "67108864",
         "--max-redirs",
         "0",
         "--proto",
@@ -190,10 +223,207 @@ fn hardened_curl(path: &Path) -> Command {
     for name in [
         "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY",
         "ALL_PROXY", "NO_PROXY", "CURL_HOME", "XDG_CONFIG_HOME", "NETRC",
+        "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR",
     ] {
         command.env_remove(name);
     }
     command
+}
+
+pub(super) fn ensure_download_budget(path: &Path) -> Result<(), String> {
+    let size = std::fs::metadata(path)
+        .map_err(|error| format!("could not inspect fetched bytes: {error}"))?
+        .len();
+    if size > MAX_DOWNLOAD_BYTES {
+        Err(format!("fetched object is {size} bytes; limit is {MAX_DOWNLOAD_BYTES}"))
+    } else {
+        Ok(())
+    }
+}
+
+pub(super) fn validate_tar_archive(path: &Path, gzip: bool) -> Result<(), String> {
+    ensure_download_budget(path)?;
+    preflight_tar_stream(path, gzip)?;
+    let list_flag = if gzip { "-tzf" } else { "-tf" };
+    let verbose_flag = if gzip { "-tvzf" } else { "-tvf" };
+    let mut entries = 0u64;
+    stream_tar_listing(path, list_flag, |entry| {
+        entries += 1;
+        if entries > MAX_ARCHIVE_ENTRIES {
+            return Err("source archive has too many entries".to_string());
+        }
+        if entry.is_empty() || !safe_archive_path(Path::new(entry.trim_end_matches('/'))) {
+            return Err(format!("source archive contains unsafe path `{entry}`"));
+        }
+        Ok(())
+    })?;
+    let mut total = 0u64;
+    stream_tar_listing(path, verbose_flag, |line| {
+        if !matches!(line.as_bytes().first(), Some(b'-' | b'd')) {
+            return Err("source archives may contain only regular files and directories".to_string());
+        }
+        let size = line
+            .split_whitespace()
+            .nth(2)
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or_else(|| "source archive size listing is malformed".to_string())?;
+        if size > MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(format!("source archive entry is {size} bytes; per-entry limit is {MAX_ARCHIVE_ENTRY_BYTES}"));
+        }
+        total = total.checked_add(size).ok_or_else(|| "source archive expanded size overflowed".to_string())?;
+        if total > MAX_ARCHIVE_TOTAL_BYTES {
+            return Err(format!("source archive expands beyond {MAX_ARCHIVE_TOTAL_BYTES} bytes"));
+        }
+        Ok(())
+    })
+}
+
+fn preflight_tar_stream(path: &Path, gzip: bool) -> Result<(), String> {
+    if gzip {
+        let mut child = Command::new("gzip")
+            .args(["-dc"])
+            .arg(path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not start archive preflight: {error}"))?;
+        let result = inspect_tar_stream(child.stdout.take().unwrap());
+        if result.is_err() {
+            let _ = child.kill();
+        }
+        let status = child.wait().map_err(|error| format!("could not wait for archive preflight: {error}"))?;
+        result?;
+        if !status.success() {
+            return Err("source is not a readable gzip tar archive".to_string());
+        }
+        Ok(())
+    } else {
+        inspect_tar_stream(std::fs::File::open(path).map_err(|error| format!("could not open archive: {error}"))?)
+    }
+}
+
+fn inspect_tar_stream(mut input: impl Read) -> Result<(), String> {
+    let mut header = [0u8; 512];
+    let mut entries = 0u64;
+    let mut total = 0u64;
+    let mut pax_logical_size = None;
+    loop {
+        input.read_exact(&mut header).map_err(|error| format!("truncated tar header: {error}"))?;
+        if header.iter().all(|byte| *byte == 0) {
+            return Ok(());
+        }
+        entries += 1;
+        if entries > MAX_ARCHIVE_ENTRIES {
+            return Err("source archive has too many entries".to_string());
+        }
+        let stored = tar_number(&header[124..136])?;
+        let kind = header[156];
+        let metadata = matches!(kind, b'x' | b'g' | b'L' | b'K');
+        let logical = pax_logical_size.take().unwrap_or_else(|| {
+            if kind == b'S' { tar_number(&header[483..495]).unwrap_or(stored) } else { stored }
+        });
+        if logical > MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(format!("source archive entry is {logical} bytes; per-entry limit is {MAX_ARCHIVE_ENTRY_BYTES}"));
+        }
+        total = total.checked_add(logical).ok_or_else(|| "source archive expanded size overflowed".to_string())?;
+        if total > MAX_ARCHIVE_TOTAL_BYTES {
+            return Err(format!("source archive expands beyond {MAX_ARCHIVE_TOTAL_BYTES} bytes"));
+        }
+        let mut payload = if metadata { Vec::with_capacity(stored as usize) } else { Vec::new() };
+        read_tar_payload(&mut input, stored, if metadata { Some(&mut payload) } else { None })?;
+        if matches!(kind, b'x' | b'g') {
+            let text = std::str::from_utf8(&payload).map_err(|_| "tar PAX metadata is not UTF-8".to_string())?;
+            pax_logical_size = text.lines().find_map(|line| {
+                let (_, field) = line.split_once(' ')?;
+                let (key, value) = field.split_once('=')?;
+                matches!(key, "GNU.sparse.realsize" | "GNU.sparse.size").then(|| value.parse::<u64>().ok()).flatten()
+            });
+            if pax_logical_size.is_some_and(|size| size > MAX_ARCHIVE_ENTRY_BYTES) {
+                return Err("sparse source archive entry exceeds the per-entry limit".to_string());
+            }
+        }
+    }
+}
+
+fn tar_number(field: &[u8]) -> Result<u64, String> {
+    if field.first().is_some_and(|byte| byte & 0x80 != 0) {
+        let mut value = (field[0] & 0x7f) as u64;
+        for byte in &field[1..] {
+            value = value.checked_mul(256).and_then(|value| value.checked_add(*byte as u64))
+                .ok_or_else(|| "tar size overflows".to_string())?;
+        }
+        Ok(value)
+    } else {
+        let text = std::str::from_utf8(field).map_err(|_| "tar size is not ASCII".to_string())?;
+        let text = text.trim_matches(['\0', ' ']);
+        if text.is_empty() { Ok(0) } else { u64::from_str_radix(text, 8).map_err(|_| "tar size is malformed".to_string()) }
+    }
+}
+
+fn read_tar_payload(input: &mut impl Read, size: u64, capture: Option<&mut Vec<u8>>) -> Result<(), String> {
+    let padded = size.checked_add(511).ok_or_else(|| "tar size overflows".to_string())? / 512 * 512;
+    let mut remaining = padded;
+    let mut buffer = [0u8; 8192];
+    let mut capture = capture;
+    while remaining > 0 {
+        let take = remaining.min(buffer.len() as u64) as usize;
+        input.read_exact(&mut buffer[..take]).map_err(|error| format!("truncated tar payload: {error}"))?;
+        if let Some(output) = capture.as_deref_mut() {
+            let meaningful = size.saturating_sub(output.len() as u64).min(take as u64) as usize;
+            output.extend_from_slice(&buffer[..meaningful]);
+        }
+        remaining -= take as u64;
+    }
+    Ok(())
+}
+
+fn stream_tar_listing(
+    path: &Path,
+    flag: &str,
+    mut inspect: impl FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut child = Command::new("tar")
+        .arg(flag)
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("could not inspect source archive: {error}"))?;
+    let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let read = reader.read_until(b'\n', &mut line)
+            .map_err(|error| format!("could not read source archive listing: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        if line.len() > MAX_ARCHIVE_PATH_BYTES + 256 {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("source archive listing line is too long".to_string());
+        }
+        while matches!(line.last(), Some(b'\n' | b'\r')) {
+            line.pop();
+        }
+        let text = std::str::from_utf8(&line)
+            .map_err(|_| "source archive listing is not UTF-8".to_string())?;
+        if let Err(reason) = inspect(text) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(reason);
+        }
+    }
+    if child.wait().map_err(|error| format!("could not wait for archive inspector: {error}"))?.success() {
+        Ok(())
+    } else {
+        Err("source is not a readable tar archive".to_string())
+    }
+}
+
+fn safe_archive_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path.components().all(|component| matches!(component, Component::Normal(_)))
 }
 
 fn authority_of(url: &str) -> Result<String, String> {
@@ -382,9 +612,34 @@ policy: {
             .get_envs()
             .filter_map(|(name, value)| value.is_none().then(|| name.to_string_lossy().into_owned()))
             .collect::<BTreeSet<_>>();
-        for name in ["http_proxy", "HTTPS_PROXY", "CURL_HOME", "XDG_CONFIG_HOME", "NETRC"] {
-            assert!(removed.contains(name), "{name} was not removed");
-        }
+        let expected = BTreeSet::from([
+            "http_proxy".to_string(), "https_proxy".to_string(), "all_proxy".to_string(),
+            "no_proxy".to_string(), "HTTP_PROXY".to_string(), "HTTPS_PROXY".to_string(),
+            "ALL_PROXY".to_string(), "NO_PROXY".to_string(), "CURL_HOME".to_string(),
+            "XDG_CONFIG_HOME".to_string(), "NETRC".to_string(), "CURL_CA_BUNDLE".to_string(),
+            "SSL_CERT_FILE".to_string(), "SSL_CERT_DIR".to_string(),
+        ]);
+        assert_eq!(removed, expected);
         assert!(!command.get_args().any(|value| value == "--netrc"));
+    }
+
+    #[test]
+    fn file_fetch_rejects_oversized_object_before_copy() {
+        let dir = std::env::temp_dir().join(format!("jet-fetch-budget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("huge");
+        std::fs::File::create(&source).unwrap().set_len(MAX_DOWNLOAD_BYTES + 1).unwrap();
+        let authority = Authority {
+            provider: "ruby".into(),
+            registry: format!("file://{}", dir.display()),
+            allow: BTreeSet::from(["file".into()]),
+            deny: BTreeSet::new(),
+            curl: PathBuf::new(),
+        };
+        let destination = dir.join("copied");
+        assert!(authority.to_path(&format!("file://{}", source.display()), &destination, &dir).is_err());
+        assert!(!destination.exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

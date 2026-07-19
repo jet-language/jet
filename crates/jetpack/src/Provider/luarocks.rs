@@ -1,6 +1,6 @@
 //! Native LuaRocks provider (D-FFI-LUA1, D-JPK-PROVIDERS2).
 
-use super::{cache_identity, producer_record, Ctx, Provider, ProviderError, Realized, SourceState};
+use super::{producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState};
 use crate::RefSpec::{RefSpec, SourceTable};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -69,18 +69,7 @@ impl Provider for LuaRocksProvider {
                 spec.raw
             )));
         }
-        let authority = super::fetch::Authority::load(
-            ctx,
-            "luarocks",
-            &repository(),
-            &[
-                "luarocks.org",
-                "github.com",
-                "codeload.github.com",
-                "raw.githubusercontent.com",
-            ],
-        )
-        .map_err(error)?;
+        let authority = authority(ctx, true)?;
         let repository = authority.registry().to_string();
         let fetch_authority = authority.provenance();
         let (root_name, root_version) = parse_ref(&spec.package)?;
@@ -148,10 +137,10 @@ impl Provider for LuaRocksProvider {
         }
         let source_hash = closure_hash(&artifacts);
         if let Some(project) = ctx.project_dir {
-            if let Some((_output, locked_hash, locked_repo, _)) =
+            if let Some((_output, locked_hash, locked_repo, locked_authority, _)) =
                 crate::Lock::luarocks_realization(project, &spec.raw)
             {
-                if locked_hash != source_hash || locked_repo != repository {
+                if locked_hash != source_hash || locked_repo != repository || locked_authority != fetch_authority {
                     return Err(error(format!(
                         "locked LuaRocks source integrity changed for `{}` (expected {} from {}, got {} from {})",
                         spec.raw, locked_hash, locked_repo, source_hash, repository
@@ -217,6 +206,7 @@ impl Provider for LuaRocksProvider {
                 &out,
                 &source_hash,
                 &repository,
+                &fetch_authority,
                 deps,
                 crate::Lock::LockEnvelope {
                     output_hash: envelope.output_hash.clone(),
@@ -226,7 +216,7 @@ impl Provider for LuaRocksProvider {
                 },
             );
         }
-        let identity = cache_identity(&source_hash, RECIPE_ID, ctx);
+        let identity = provider_cache_identity(&source_hash, RECIPE_ID, ctx, &fetch_authority);
         let (references, mut dependency_facts) = dependency_objects(&root.name, &artifacts);
         dependency_facts.insert("repository".into(), repository.clone());
         dependency_facts.insert("fetch.authority".into(), fetch_authority.clone());
@@ -260,6 +250,25 @@ impl Provider for LuaRocksProvider {
             producer,
         })
     }
+}
+
+fn authority(ctx: &Ctx<'_>, fetch: bool) -> Result<super::fetch::Authority, ProviderError> {
+    let defaults = [
+        "luarocks.org",
+        "github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com",
+    ];
+    let result = if fetch {
+        super::fetch::Authority::load(ctx, "luarocks", &repository(), &defaults)
+    } else {
+        super::fetch::Authority::load_for_cache(ctx, "luarocks", &repository(), &defaults)
+    };
+    result.map_err(error)
+}
+
+pub(super) fn cache_authority(ctx: &Ctx<'_>) -> Result<super::fetch::Authority, ProviderError> {
+    authority(ctx, false)
 }
 
 fn error(message: impl Into<String>) -> ProviderError {
@@ -525,6 +534,7 @@ fn preserve_and_install(
 }
 
 fn validate_archive(path: &Path) -> Result<(), ProviderError> {
+    super::fetch::validate_tar_archive(path, true).map_err(error)?;
     let output = Command::new("tar")
         .arg("-tzf")
         .arg(path)

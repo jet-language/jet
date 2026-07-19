@@ -1519,10 +1519,14 @@ pub fn realize_verified(
     // selected-candidate proofs run below so invalid bytes can be quarantined.
     Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
     let (reference, expectation) = match request {
-        RealizeRequest::Package { spec, table } => (
-            spec.raw.clone(),
-            super::Provider::cache_expectation(spec, table, ctx),
-        ),
+        RealizeRequest::Package { spec, table } => {
+            super::Provider::validate_cache_authority(spec, table, ctx)
+                .map_err(RealizeError::Provider)?;
+            (
+                spec.raw.clone(),
+                super::Provider::cache_expectation(spec, table, ctx),
+            )
+        }
         RealizeRequest::Adapter(plan) => (
             format!("adapt:{}:{}", plan.name, plan.source),
             Some(

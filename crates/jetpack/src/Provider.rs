@@ -99,6 +99,71 @@ fn cache_identity(source: &str, recipe: &str, ctx: &Ctx) -> super::Store::CacheI
     }
 }
 
+fn provider_cache_identity(
+    source: &str,
+    recipe: &str,
+    ctx: &Ctx,
+    authority: &str,
+) -> super::Store::CacheIdentity {
+    let policy = format!(
+        "{}\n{authority}",
+        super::RuntimePolicy::cache_policy_fingerprint(ctx.offline)
+    );
+    super::Store::CacheIdentity {
+        source_fingerprint: source.to_string(),
+        recipe_fingerprint: SHA256::sha256_hex(recipe.as_bytes()),
+        policy_fingerprint: SHA256::sha256_hex(policy.as_bytes()),
+        platform: super::Envelope::host_platform(),
+    }
+}
+
+pub fn validate_cache_authority(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Result<(), ProviderError> {
+    let Some(project) = ctx.project_dir else { return Ok(()); };
+    match resolve_kind(spec, table, ctx.offline, ctx.store_dir) {
+        ProviderKind::Cran => {
+            let Some((_, _, repository, locked, _)) = super::Lock::cran_realization(project, &spec.raw) else { return Ok(()); };
+            let current = cran::cache_authority(ctx)?;
+            ensure_locked_authority("CRAN", &repository, &locked, &current)
+        }
+        ProviderKind::LuaRocks => {
+            let Some((_, _, repository, locked, _)) = super::Lock::luarocks_realization(project, &spec.raw) else { return Ok(()); };
+            let current = luarocks::cache_authority(ctx)?;
+            ensure_locked_authority("LuaRocks", &repository, &locked, &current)
+        }
+        ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
+            let kind = script_registry_kind(resolve_kind(spec, table, ctx.offline, ctx.store_dir))
+                .ok_or_else(|| ProviderError::Registry("script registry", "unknown provider".into()))?;
+            let Some((_, _, repository, locked, _)) = super::Lock::registry_realization(project, kind.label(), &spec.raw) else { return Ok(()); };
+            let current = script_registry::cache_authority(kind, ctx)?;
+            ensure_locked_authority(kind.title(), &repository, &locked, &current)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn ensure_locked_authority(
+    provider: &'static str,
+    repository: &str,
+    locked: &str,
+    current: &fetch::Authority,
+) -> Result<(), ProviderError> {
+    if repository != current.registry() || locked != current.provenance() {
+        Err(ProviderError::Registry(
+            provider,
+            format!(
+                "locked provider authority does not match current policy.providers (locked repository `{repository}`, current `{}`)",
+                current.registry()
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn core_recipe_identity(
     src_dir: &Path,
     package: &str,
@@ -227,14 +292,13 @@ pub fn cache_expectation(
         }
         ProviderKind::Cran => {
             let project = ctx.project_dir?;
-            let (output, source_hash, _repository, env) =
+            let (output, source_hash, _repository, _locked_authority, env) =
                 super::Lock::cran_realization(project, &spec.raw)?;
+            let authority = cran::cache_authority(ctx).ok()?;
             Some(super::Store::CacheExpectation {
                 identity: super::Store::CacheIdentity {
-                    source_fingerprint: source_hash,
-                    recipe_fingerprint: SHA256::sha256_hex(cran::RECIPE_ID.as_bytes()),
-                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
                     platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
+                    ..provider_cache_identity(&source_hash, cran::RECIPE_ID, ctx, &authority.provenance())
                 },
                 owned_output: Some(PathBuf::from(output)),
                 allow_unsigned_local: true,
@@ -242,14 +306,13 @@ pub fn cache_expectation(
         }
         ProviderKind::LuaRocks => {
             let project = ctx.project_dir?;
-            let (output, source_hash, _repository, env) =
+            let (output, source_hash, _repository, _locked_authority, env) =
                 super::Lock::luarocks_realization(project, &spec.raw)?;
+            let authority = luarocks::cache_authority(ctx).ok()?;
             Some(super::Store::CacheExpectation {
                 identity: super::Store::CacheIdentity {
-                    source_fingerprint: source_hash,
-                    recipe_fingerprint: SHA256::sha256_hex(luarocks::RECIPE_ID.as_bytes()),
-                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
                     platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
+                    ..provider_cache_identity(&source_hash, luarocks::RECIPE_ID, ctx, &authority.provenance())
                 },
                 owned_output: Some(PathBuf::from(output)),
                 allow_unsigned_local: true,
@@ -258,14 +321,13 @@ pub fn cache_expectation(
         ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
             let project = ctx.project_dir?;
             let kind = script_registry_kind(resolve_kind(spec, table, ctx.offline, ctx.store_dir))?;
-            let (output, source_hash, _repository, env) =
+            let (output, source_hash, _repository, _locked_authority, env) =
                 super::Lock::registry_realization(project, kind.label(), &spec.raw)?;
+            let authority = script_registry::cache_authority(kind, ctx).ok()?;
             Some(super::Store::CacheExpectation {
                 identity: super::Store::CacheIdentity {
-                    source_fingerprint: source_hash,
-                    recipe_fingerprint: SHA256::sha256_hex(kind.recipe().as_bytes()),
-                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
                     platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
+                    ..provider_cache_identity(&source_hash, kind.recipe(), ctx, &authority.provenance())
                 },
                 owned_output: Some(PathBuf::from(output)),
                 allow_unsigned_local: true,
