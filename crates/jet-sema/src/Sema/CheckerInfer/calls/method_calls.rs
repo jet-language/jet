@@ -1696,8 +1696,15 @@ impl<'a> Checker<'a> {
             }
             // D-PENDING1=B: method calls on `Loadable<T,E>` handle.
             if let Some(ret) = loadable_method_return(&recv_ty, method, args.len()) {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
+                if method == "or_else" {
+                    let Type::Apply { args: type_args, .. } = &recv_ty else {
+                        unreachable!("loadable_method_return accepted a non-Loadable type")
+                    };
+                    self.expect_core_arg("Loadable.or_else", 0, &type_args[0], &mut args[0]);
+                } else {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                 }
                 *recv_type_out = Some("Loadable".to_string());
                 return ret;

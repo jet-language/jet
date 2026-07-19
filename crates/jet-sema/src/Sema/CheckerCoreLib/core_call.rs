@@ -2134,27 +2134,29 @@ impl<'a> Checker<'a> {
                 }
                 // D-PENDING1=B: Loadable<T,E> constructors — idle/loading/loaded/failed.
                 ("core.reactive.loadable", "idle") => {
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
+                    if !args.is_empty() {
+                        self.diags.push(wrong_core_arity("idle", 0, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
                     }
                     return Some(Type::Apply {
                         name: "Loadable".to_string(),
-                        args: vec![
-                            Type::Named("Unknown".to_string()),
-                            Type::Named("Unknown".to_string()),
-                        ],
+                        args: vec![unit_ty(), unit_ty()],
                     });
                 }
                 ("core.reactive.loadable", "loading") => {
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
+                    if !args.is_empty() {
+                        self.diags.push(wrong_core_arity("loading", 0, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
                     }
                     return Some(Type::Apply {
                         name: "Loadable".to_string(),
-                        args: vec![
-                            Type::Named("Unknown".to_string()),
-                            Type::Named("Unknown".to_string()),
-                        ],
+                        args: vec![unit_ty(), unit_ty()],
                     });
                 }
                 ("core.reactive.loadable", "loaded") => {
@@ -2171,7 +2173,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::Named("Unknown".to_string()));
                     return Some(Type::Apply {
                         name: "Loadable".to_string(),
-                        args: vec![val_ty, Type::Named("Unknown".to_string())],
+                        args: vec![val_ty, unit_ty()],
                     });
                 }
                 ("core.reactive.loadable", "failed") => {
@@ -2188,7 +2190,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::Named("Unknown".to_string()));
                     return Some(Type::Apply {
                         name: "Loadable".to_string(),
-                        args: vec![Type::Named("Unknown".to_string()), err_ty],
+                        args: vec![unit_ty(), err_ty],
                     });
                 }
                 // D-TTLVAL1=A: Expiring<T> — value + TTL + injectable Clock.

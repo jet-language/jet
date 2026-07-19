@@ -653,6 +653,17 @@ pub(super) fn apply_core_call(
     };
 
     match (module, method) {
+        // D-PENDING1=B: the same four enum variants AOT lowers to JetLoadable.
+        ("core.reactive.loadable", state @ ("idle" | "loading")) => Ok(CtValue::Enum {
+            type_name: "Loadable".to_string(),
+            variant: if state == "idle" { "Idle" } else { "Loading" }.to_string(),
+            args: Vec::new(),
+        }),
+        ("core.reactive.loadable", state @ ("loaded" | "failed")) => Ok(CtValue::Enum {
+            type_name: "Loadable".to_string(),
+            variant: if state == "loaded" { "Loaded" } else { "Failed" }.to_string(),
+            args: vec![(None, one(0)?.clone())],
+        }),
         // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
         // same f32-backed range and validation contract as AOT/JIT.
         ("core.perf", "fidelity") => Ok(CtValue::Float(

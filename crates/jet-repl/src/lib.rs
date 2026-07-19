@@ -1302,6 +1302,12 @@ fn looks_like_import(text: &str) -> bool {
 /// Detect hard-reject features (D-REPL6=A).
 fn reject_feature(text: &str) -> Option<&'static str> {
     let t = text.trim();
+    let import = t
+        .strip_prefix("pub ")
+        .unwrap_or(t)
+        .strip_prefix("use ")
+        .and_then(|rest| rest.split_ascii_whitespace().next())
+        .map(|path| path.trim_end_matches(';'));
     if t.contains("@Unsafe") {
         return Some("`@Unsafe`");
     }
@@ -1329,7 +1335,9 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.archive") || t.contains("jet.archive") {
         return Some("`core.archive`");
     }
-    if t.contains("core.reactive") || t.contains("jet.reactive") {
+    if import != Some("core.reactive.loadable")
+        && (t.contains("core.reactive") || t.contains("jet.reactive"))
+    {
         return Some("`core.reactive`");
     }
     if t.contains("core.crypto") || t.contains("jet.crypto") {
@@ -1866,7 +1874,7 @@ pub(crate) fn display_value(v: &CtValue) -> String {
     }
 }
 
-pub(crate) fn type_name(v: &CtValue) -> &'static str {
+pub(crate) fn type_name(v: &CtValue) -> &str {
     match v {
         CtValue::Int(_) => "Int",
         CtValue::Float(_) => "Float",
@@ -1877,8 +1885,7 @@ pub(crate) fn type_name(v: &CtValue) -> &'static str {
         CtValue::Bytes(_) => "[U8]",
         CtValue::List(_) => "List",
         CtValue::Map(_) => "Map",
-        CtValue::Struct { .. } => "Struct",
-        CtValue::Enum { .. } => "Enum",
+        CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name,
         CtValue::Some(_) | CtValue::None(_) => "Option",
         CtValue::ResOk(_) | CtValue::ResErr(_) => "Result",
         CtValue::Unit => "()",

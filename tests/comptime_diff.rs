@@ -138,6 +138,59 @@ const MODULE_CASES: &[&str] = &[
     "use core.encoding.json as json\ncomptime comptime_value = json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
 ];
 
+const LOADABLE_CASES: &[&str] = &[
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.idle()\n\nfn run() {\n    r :: loadable.idle()\n    print(\"{comptime_value.is_idle()}\")\n    print(\"{r.is_idle()}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.loading()\n\nfn run() {\n    r :: loadable.loading()\n    print(\"{comptime_value.is_loading()}\")\n    print(\"{r.is_loading()}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.loaded(7)\n\nfn run() {\n    r :: loadable.loaded(7)\n    print(\"{comptime_value.loaded() ?? 0}\")\n    print(\"{r.loaded() ?? 0}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.failed(\"offline\")\n\nfn run() {\n    r :: loadable.failed(\"offline\")\n    print(\"{comptime_value.is_failed()}\")\n    print(\"{r.is_failed()}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.idle().is_idle()\n\nfn run() {\n    r :: loadable.idle().is_idle()\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.loading().is_loading()\n\nfn run() {\n    r :: loadable.loading().is_loading()\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.loaded(7).is_loaded()\n\nfn run() {\n    r :: loadable.loaded(7).is_loaded()\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.failed(\"offline\").is_failed()\n\nfn run() {\n    r :: loadable.failed(\"offline\").is_failed()\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.loaded(7).loaded() ?? 0\n\nfn run() {\n    r :: loadable.loaded(7).loaded() ?? 0\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.reactive.loadable as loadable\ncomptime comptime_value = loadable.loaded(7).or_else(0)\n\nfn run() {\n    r :: loadable.loaded(7).or_else(0)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+];
+
+#[test]
+fn comptime_loadable_matches_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping Loadable differential battery");
+        return;
+    }
+    for (i, src) in LOADABLE_CASES.iter().enumerate() {
+        if let Err(payload) = std::panic::catch_unwind(|| {
+            check_comptime_src(10_000 + i, "core.reactive.loadable", src)
+        }) {
+            panic!("Loadable case {i} failed: {}", panic_message(payload));
+        }
+    }
+}
+
+#[test]
+fn loadable_incompatible_defaults_stop_before_rustc() {
+    for (name, expression) in [
+        ("idle", "loadable.idle().or_else(7)"),
+        ("loading", "loadable.loading().or_else(7)"),
+        ("failed", "loadable.failed(\"offline\").or_else(7)"),
+        ("loaded", "loadable.loaded(7).or_else(\"bad\")"),
+    ] {
+        let src = format!(
+            "use core.reactive.loadable as loadable\n\nfn run() {{\n    print({expression})\n}}\n"
+        );
+        let Err(diags) = jet::Driver::compile_generated_src(
+            &src,
+            "loadable_default.jet",
+            jet::Sema::CompileMode::Run,
+        ) else {
+            panic!("{name} incompatible fallback reached codegen and would be an I2 rustc rejection");
+        };
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0112"),
+            "{name} fallback missed the type mismatch: {diags:?}"
+        );
+    }
+}
+
 #[test]
 fn comptime_matches_runtime() {
     let have_rustc = have_rustc();

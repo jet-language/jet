@@ -193,8 +193,12 @@ pub(crate) fn eval_comptime_items(
                             // falls back to a placeholder — wrong, and (via codegen)
                             // an unannotated `vec![]` rustc rejects as E0282 (I2). Prefer
                             // the builtin's known static return type when one applies.
-                            let ty =
-                                comptime_builtin_fixed_return_type(&c.value).unwrap_or_else(|| v.jet_type());
+                            let ty = comptime_builtin_fixed_return_type(
+                                &c.value,
+                                core_imports,
+                                &v,
+                            )
+                            .unwrap_or_else(|| v.jet_type());
                             consts.insert(c.name.clone(), ty);
                             globals.insert(c.name.clone(), v.clone());
                             results.push((c.name.clone(), v));
@@ -227,10 +231,44 @@ pub(crate) fn eval_comptime_items(
 /// first element and has nothing to sample when the result is empty) is what
 /// lets codegen render a correctly-typed empty Rust collection instead of an
 /// ambiguous `vec![]` (see `ConstDef::ty`).
-fn comptime_builtin_fixed_return_type(value: &Expr) -> Option<Type> {
+fn comptime_builtin_fixed_return_type(
+    value: &Expr,
+    core_imports: &HashMap<String, String>,
+    evaluated: &crate::Comptime::CtValue,
+) -> Option<Type> {
     match value {
         Expr::Call(call) if call.name == Syntax::BUILTIN_FIND => {
             Some(Type::List(Box::new(Type::String)))
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } if matches!(receiver.as_ref(), Expr::Ident(alias, _)
+            if core_imports.get(alias).map(String::as_str) == Some("core.reactive.loadable")) =>
+        {
+            let unit = Type::Named("Unit".to_string());
+            let payload = match evaluated {
+                crate::Comptime::CtValue::Enum { args, .. } => {
+                    args.first().map(|(_, value)| value.jet_type())
+                }
+                _ => None,
+            };
+            match method.as_str() {
+                "idle" | "loading" => Some(Type::Apply {
+                    name: "Loadable".to_string(),
+                    args: vec![unit.clone(), unit],
+                }),
+                "loaded" => payload.map(|value| Type::Apply {
+                    name: "Loadable".to_string(),
+                    args: vec![value, unit],
+                }),
+                "failed" => payload.map(|error| Type::Apply {
+                    name: "Loadable".to_string(),
+                    args: vec![unit, error],
+                }),
+                _ => None,
+            }
         }
         _ => None,
     }

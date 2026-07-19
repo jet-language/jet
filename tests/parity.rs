@@ -256,10 +256,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.encoding.toml", "to_string_pretty"),
     ("core.encoding.yaml", "to_string_pretty"),
     ("core.encoding.xml", "canonical"),
-    ("core.reactive.loadable", "failed"),
-    ("core.reactive.loadable", "idle"),
-    ("core.reactive.loadable", "loaded"),
-    ("core.reactive.loadable", "loading"),
     ("core.science.measurement", "from"),
     ("core.sketch.cms", "new"),
     ("core.sketch.hll", "new"),
@@ -1015,6 +1011,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert!(bespoke >= 3, "bespoke inventory lost data joins/pivot: {bespoke}");
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "idle").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loading").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loaded").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "failed").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Int", "parse").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::PurePending);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
@@ -1043,7 +1043,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     );
     assert_eq!(
         stable_hash(&rendered),
-        10086141017481800420,
+        6050875465191043088,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

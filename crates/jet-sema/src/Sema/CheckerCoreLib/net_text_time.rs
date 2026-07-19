@@ -253,7 +253,7 @@ pub fn regex_method_return(
 pub fn loadable_method_return(
     type_apply: &Type,
     method: &str,
-    _n_args: usize,
+    n_args: usize,
 ) -> Option<Option<Type>> {
     let (val_ty, _err_ty) = match type_apply {
         Type::Apply { name, args } if name == "Loadable" && args.len() == 2 => {
@@ -261,15 +261,14 @@ pub fn loadable_method_return(
         }
         _ => return None,
     };
-    match method {
-        "is_loading" => Some(Some(Type::Bool)),
-        "is_loaded" => Some(Some(Type::Bool)),
-        "is_failed" => Some(Some(Type::Bool)),
-        "is_idle" => Some(Some(Type::Bool)),
+    match (method, n_args) {
+        ("is_loading" | "is_loaded" | "is_failed" | "is_idle", 0) => {
+            Some(Some(Type::Bool))
+        }
         // loaded() → T? — returns the value if in Loaded state, null otherwise.
-        "loaded" => Some(Some(Type::Option(Box::new(val_ty)))),
+        ("loaded", 0) => Some(Some(Type::Option(Box::new(val_ty)))),
         // or_else(default: T) → T
-        "or_else" => Some(Some(val_ty)),
+        ("or_else", 1) => Some(Some(val_ty)),
         _ => None,
     }
 }

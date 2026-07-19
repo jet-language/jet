@@ -992,6 +992,33 @@ fn repl_core_result_stored_in_binding() {
 }
 
 #[test]
+fn repl_core_loadable_constructors_and_methods_exact() {
+    let out = run_transcript(
+        &[
+            "use core.reactive.loadable as loadable",
+            "loadable.idle()",
+            "loadable.loading()",
+            "loadable.loaded(7)",
+            "loadable.failed(\"offline\")",
+            "loadable.loading().loaded()",
+            "loadable.idle().is_idle()",
+            "loadable.loading().is_loading()",
+            "ready :: loadable.loaded(7)",
+            "ready.is_loaded()",
+            "offline :: loadable.failed(\"offline\")",
+            "offline.is_failed()",
+            "ready.loaded() ?? 0",
+            "ready.or_else(0)",
+        ],
+        None,
+    );
+    assert_eq!(
+        out.trim(),
+        "ok\nIdle : Loadable\nLoading : Loadable\nLoaded(7) : Loadable\nFailed(offline) : Loadable\nnull : Option\ntrue : Bool\ntrue : Bool\ntrue : Bool\ntrue : Bool\n7 : Int\n7 : Int"
+    );
+}
+
+#[test]
 fn repl_complex_bindings_keep_exact_typed_ast_across_turns() {
     let out = run_transcript(
         &[

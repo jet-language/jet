@@ -307,6 +307,17 @@ impl CtValue {
                     .collect();
                 format!("{}({})", type_name, parts.join(", "))
             }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "Loadable" => match (variant.as_str(), args.first()) {
+                ("Idle" | "Loading", _) => variant.clone(),
+                ("Loaded" | "Failed", Some((_, value))) => {
+                    format!("{}({})", variant, value.jet_show())
+                }
+                _ => variant.clone(),
+            },
             // The compiled program's Rust `#[derive(Debug)]` output for a user
             // enum: the variant's Rust identifier is `user_<Variant>` (S34,
             // `Codegen::mangle_variant`), and a payload prints tuple-style with
@@ -377,6 +388,17 @@ impl CtValue {
                     format!("{} {{ {} }}", mangled, parts.join(", "))
                 }
             }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "Loadable" => match (variant.as_str(), args.first()) {
+                ("Idle" | "Loading", _) => variant.clone(),
+                ("Loaded" | "Failed", Some((_, value))) => {
+                    format!("{}({})", variant, value.debug_rust())
+                }
+                _ => variant.clone(),
+            },
             CtValue::Enum { variant, args, .. } => {
                 let mangled = format!("user_{}", variant.replace('.', "__"));
                 if args.is_empty() {
@@ -476,6 +498,9 @@ impl CtValue {
                     out.push_str(&indent);
                     out.push('}');
                 }
+            }
+            CtValue::Enum { type_name, .. } if type_name == "Loadable" => {
+                out.push_str(&self.jet_show())
             }
             CtValue::Enum {
                 type_name,
@@ -665,6 +690,21 @@ impl CtValue {
                 type_name,
                 variant,
                 args,
+            } if type_name == "Loadable" => match (variant.as_str(), args.first()) {
+                ("Idle", _) => "JetLoadable::<(), ()>::Idle".to_string(),
+                ("Loading", _) => "JetLoadable::<(), ()>::Loading".to_string(),
+                ("Loaded", Some((_, value))) => {
+                    format!("JetLoadable::<_, ()>::Loaded({})", value.serialize())
+                }
+                ("Failed", Some((_, value))) => {
+                    format!("JetLoadable::<(), _>::Failed({})", value.serialize())
+                }
+                _ => unreachable!("invalid Loadable comptime value"),
+            },
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
             } => {
                 let prefix = format!("user_{}::{}", type_name, ct_mangle(variant));
                 if args.is_empty() {
@@ -699,4 +739,25 @@ impl CtValue {
 
 fn ct_mangle(name: &str) -> String {
     format!("user_{}", name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CtValue;
+
+    #[test]
+    fn loadable_uses_aot_debug_inside_user_enum_payload() {
+        let loaded = CtValue::Enum {
+            type_name: "Loadable".to_string(),
+            variant: "Loaded".to_string(),
+            args: vec![(None, CtValue::Int(7))],
+        };
+        let wrapped = CtValue::Enum {
+            type_name: "Wrapper".to_string(),
+            variant: "Ready".to_string(),
+            args: vec![(None, loaded)],
+        };
+
+        assert_eq!(wrapped.jet_show(), "user_Ready(Loaded(7))");
+    }
 }

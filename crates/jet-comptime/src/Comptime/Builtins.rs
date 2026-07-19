@@ -602,6 +602,36 @@ pub(super) fn apply_method(
                 None => CtValue::None(crate::AST::Type::String),
             })
         }
+        (CtValue::Enum { type_name, variant, .. }, method)
+            if type_name == "Loadable"
+                && matches!(method, "is_idle" | "is_loading" | "is_loaded" | "is_failed") =>
+        {
+            let expected = match method {
+                "is_idle" => "Idle",
+                "is_loading" => "Loading",
+                "is_loaded" => "Loaded",
+                _ => "Failed",
+            };
+            Ok(CtValue::Bool(variant == expected))
+        }
+        (CtValue::Enum { type_name, variant, args }, "loaded") if type_name == "Loadable" => {
+            Ok(if variant == "Loaded" {
+                args.first()
+                    .map(|(_, value)| CtValue::Some(Box::new(value.clone())))
+                    .unwrap_or_else(|| CtValue::None(crate::AST::Type::Named("Unit".to_string())))
+            } else {
+                CtValue::None(crate::AST::Type::Named("Unit".to_string()))
+            })
+        }
+        (CtValue::Enum { type_name, variant, args: values }, "or_else") if type_name == "Loadable" => {
+            if variant == "Loaded" {
+                Ok(values.first().map(|(_, value)| value.clone()).unwrap_or(CtValue::Unit))
+            } else {
+                args.into_iter()
+                    .next()
+                    .ok_or_else(|| unsupported("`Loadable.or_else` requires a default", span))
+            }
+        }
         (CtValue::Struct { type_name, fields }, "now")
             if type_name == crate::Syntax::CLOCK_TYPE =>
         {
