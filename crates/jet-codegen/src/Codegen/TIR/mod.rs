@@ -1183,6 +1183,9 @@ pub enum TExprKind {
         scale: crate::AST::UnitRatio,
         offset: crate::AST::UnitRatio,
         rounded: bool,
+        fallible: bool,
+        file: String,
+        line: u32,
     },
     /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
     /// `Vec3(x,y,z)` / `Mat3(…)`, or a static method `F32x4.splat(x)` /

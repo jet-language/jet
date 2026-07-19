@@ -231,6 +231,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             scale,
             offset,
             rounded,
+            fallible,
+            file,
+            line,
         } => {
             let destination = cx.rust_type(&Type::Named(destination.clone()));
             let value = format!("({}).0", emit_tir_expr(arg, cx));
@@ -242,11 +245,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 offset.den.to_string(),
             );
             if *rounded {
-                format!("{destination}(jet_unit_conversion_rounded({args}).expect(\"validated finite unit conversion\"))")
-            } else {
+                format!("{destination}(match jet_unit_conversion_rounded({args}) {{ Some(converted) => converted, None => jet_panic({file:?}, {line}, \"unit conversion overflows its runtime representation\") }})")
+            } else if *fallible {
                 format!(
                     "match jet_unit_conversion_exact({args}) {{ Some(converted) => Ok({destination}(converted)), None => Err(\"unit conversion would round\".to_string()) }}"
                 )
+            } else {
+                format!("{destination}(match jet_unit_conversion_exact({args}) {{ Some(converted) => converted, None => jet_panic({file:?}, {line}, \"unit conversion would round\") }})")
             }
         }
         // D-SIMD2 / D-LINALG1: a math constructor / static method → the prelude free

@@ -1355,9 +1355,10 @@ impl<'a> Checker<'a> {
                 .push(self.unit_conversion_overflow_diagnostic(expr.span()));
             return true;
         }
-        let exact = source_fact.conversion_is_exact_to(&destination_fact)
-            || Self::concrete_unit_value(expr)
-                .is_some_and(|value| source_fact.converted_value_is_exact_to(&destination_fact, value));
+        let exact = Self::concrete_unit_value(expr).map_or_else(
+            || source_fact.conversion_is_exact_to(&destination_fact),
+            |value| source_fact.converted_value_is_exact_to(&destination_fact, value),
+        );
         if !exact {
             self.diags.push(self.inexact_unit_diagnostic(
                 &destination_name,

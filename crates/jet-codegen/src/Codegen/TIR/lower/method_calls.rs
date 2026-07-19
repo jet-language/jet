@@ -2371,8 +2371,9 @@ pub(crate) fn lower_method_call(
                     let offset = source.offset.sub(&destination.offset)
                         .and_then(|value| value.div(&destination.scale))
                         .expect("sema validated unit offset");
+                    let fallible = !rounded && matches!(resolved_ret, Some(Type::Result { .. }));
                     return TExpr {
-                        ty: if rounded {
+                        ty: if rounded || !fallible {
                             Type::Float
                         } else {
                             Type::Result {
@@ -2386,6 +2387,10 @@ pub(crate) fn lower_method_call(
                             scale,
                             offset,
                             rounded,
+                            fallible,
+                            file: cx.file.clone(),
+                            line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
+                                as u32,
                         },
                     };
                 }

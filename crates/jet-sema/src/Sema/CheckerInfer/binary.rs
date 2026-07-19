@@ -9,19 +9,6 @@ use crate::AST::{BinOp, Dimension, Expr, Pattern, Type};
 use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
-    fn unit_ratio_expr(value: &crate::AST::UnitRatio, span: Span) -> Expr {
-        let numerator = value.num.to_string().parse::<f64>().unwrap_or_else(|_| {
-            if value.num.is_negative() { f64::NEG_INFINITY } else { f64::INFINITY }
-        });
-        let denominator = value.den.to_string().parse::<f64>().unwrap_or(f64::INFINITY);
-        Expr::Binary(
-            BinOp::Div,
-            Box::new(Expr::Float(numerator, span, false)),
-            Box::new(Expr::Float(denominator, span, false)),
-            span,
-        )
-    }
-
     fn unit_raw(expr: Expr, type_name: &str, span: Span) -> Expr {
         Expr::MethodCall {
             receiver: Box::new(expr),
@@ -38,39 +25,23 @@ impl<'a> Checker<'a> {
         &self,
         expr: Expr,
         source_name: &str,
-        source: &UnitFact,
+        _source: &UnitFact,
         destination_name: &str,
-        destination: &UnitFact,
+        _destination: &UnitFact,
         span: Span,
     ) -> Expr {
         if source_name == destination_name {
             return expr;
         }
-        let raw = Self::unit_raw(expr, source_name, span);
-        let (scale, offset) = source
-            .conversion_parts_to(destination)
-            .expect("unit conversion ratios were validated");
-        let stored = Expr::Binary(
-            BinOp::Add,
-            Box::new(Expr::Binary(
-                BinOp::Mul,
-                Box::new(raw),
-                Box::new(Self::unit_ratio_expr(&scale, span)),
-                span,
-            )),
-            Box::new(Self::unit_ratio_expr(&offset, span)),
-            span,
-        );
+        let source_leaf = source_name.rsplit('.').next().unwrap_or(source_name);
         Expr::MethodCall {
             receiver: Box::new(Expr::Ident(destination_name.to_string(), span)),
-            method: Syntax::numeric_conversion_method("Float")
-                .expect("Float conversion is registered")
-                .to_string(),
+            method: Syntax::conversion_method_for_source(source_leaf),
             method_span: span,
             type_args: Vec::new(),
             args: vec![crate::AST::CallArg {
                 convention: crate::AST::AccessConvention::Read,
-                expr: stored,
+                expr,
                 span,
                 flags: crate::AST::CallArgFlags::default(),
                 label: None,

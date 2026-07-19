@@ -189,6 +189,11 @@ fn run() { takes_meter(3000millimeter) }
 "#;
     let codes = codes_of(src);
     assert!(codes.is_empty(), "3000 millimeters is exactly 3 meters: {codes:?}");
+    let generated = jet::compile(src).expect("implicit exact conversion should compile").rust;
+    assert!(
+        generated.contains("Meter(match jet_unit_conversion_exact("),
+        "implicit conversion must lower through the shared TIR UnitConvert path"
+    );
 }
 
 #[test]
@@ -204,6 +209,11 @@ fn exactness_uses_rational_math_beyond_f64_integer_precision() {
     );
     assert_eq!(codes_of(&implicit), vec!["E0127"]);
 
+    let unrepresentable_implicit = format!(
+        "{family}\nfn takes_meter(value: Meter) {{ print(value.raw()) }}\nfn run() {{ takes_meter(Almost.from_float(9007199254740992.0)) }}\n"
+    );
+    assert_eq!(codes_of(&unrepresentable_implicit), vec!["E0127"]);
+
     if tir_support::have_rustc() {
         let explicit = format!(
             "{family}\nfn run() {{ value :: Meter.from_almost(1almost) ?? Meter.from_float(-1.0); print(value.raw()) }}\n"
@@ -211,7 +221,66 @@ fn exactness_uses_rational_math_beyond_f64_integer_precision() {
         let (code, stdout) = tir_support::build_and_run("quantity_exact_rational_edge", &explicit);
         assert_eq!(code, 0);
         assert_eq!(stdout, "-1.0\n");
+
+        let rounding = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+    half(scale: 1/2)
+    above_half(scale: 9007199254740993/18014398509481984)
+    three_halves(scale: 3/2)
+}
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    tie_offset(scale: 1, offset: 1/2)
+    above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
+    below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
+}
+fn run() {
+    exact :: Meter.from_almost(Almost.from_float(9007199254740992.0)) ?? Meter.from_float(-1.0)
+    tie :: Meter.from_half_rounded(Half.from_float(1.0), .NearestEven)
+    above :: Meter.from_above_half_rounded(AboveHalf.from_float(1.0), .NearestEven)
+    negative :: Meter.from_three_halves_rounded(ThreeHalves.from_float(-1.0), .NearestEven)
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(TieOffsetPoint.from_float(0.0), .NearestEven)
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(AboveOffsetPoint.from_float(0.0), .NearestEven)
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(BelowOffsetPoint.from_float(0.0), .NearestEven)
+    print("{(exact.raw())} {(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
+}
+"#;
+        let (code, stdout) =
+            tir_support::build_and_run("quantity_exact_rational_rounding_edges", rounding);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "-1.0 0.0 1.0 -2.0 0.0 1.0 -1.0\n");
+
+        let overflow = r#"
+@UnitFamily(Length, base: meter) { meter double(scale: 2) }
+fn run() {
+    source :: Double.from_float(1.7976931348623157e308)
+    value :: Meter.from_double_rounded(source, .NearestEven)
+    print(value.raw())
+}
+"#;
+        let (code, stdout, stderr) = tir_support::build_and_run_full(
+            "quantity_unit_conversion",
+            "rounded_overflow",
+            overflow,
+        );
+        assert_eq!(code, 70);
+        assert!(stdout.is_empty());
+        assert!(
+            stderr.contains("unit conversion overflows its runtime representation"),
+            "unexpected stderr: {stderr}"
+        );
     }
+
+    assert_eq!(
+        jet_foundation::jet_unit_conversion_rounded(f64::MAX, "2", "1", "0", "1"),
+        None,
+    );
+    assert_eq!(
+        jet_foundation::jet_unit_conversion_rounded(f64::INFINITY, "1", "1", "0", "1"),
+        None,
+    );
 }
 
 #[test]

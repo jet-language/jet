@@ -24,6 +24,8 @@ impl Integer {
         Some(value)
     }
     fn is_zero(&self) -> bool { self.sign == 0 }
+    fn is_odd(&self) -> bool { self.limbs.first().is_some_and(|limb| limb % 2 == 1) }
+    fn neg(mut self) -> Self { self.sign = -self.sign; self }
     fn normalize(&mut self) {
         while self.limbs.last() == Some(&0) { self.limbs.pop(); }
         if self.limbs.is_empty() { self.sign = 0; }
@@ -123,6 +125,14 @@ impl Integer {
         let mut quotient = Self { sign: 1, limbs: quotient }; quotient.normalize();
         Some((quotient, remainder))
     }
+    fn decimal(&self) -> String {
+        if self.is_zero() { return "0".to_string(); }
+        let mut limbs = self.limbs.iter().rev();
+        let mut text = limbs.next().expect("nonzero integer has limbs").to_string();
+        for limb in limbs { text.push_str(&format!("{limb:09}")); }
+        if self.sign < 0 { text.insert(0, '-'); }
+        text
+    }
 }
 
 fn float_ratio(value: f64) -> Option<(Integer, Integer)> {
@@ -141,29 +151,68 @@ fn float_ratio(value: f64) -> Option<(Integer, Integer)> {
     Some((numerator, denominator))
 }
 
-fn approximate(num: &str, den: &str) -> Option<f64> {
-    let value = num.parse::<f64>().ok()? / den.parse::<f64>().ok()?;
-    value.is_finite().then_some(value)
+fn converted_ratio(
+    value: f64,
+    scale_num: &str,
+    scale_den: &str,
+    offset_num: &str,
+    offset_den: &str,
+) -> Option<(Integer, Integer)> {
+    let (value_num, value_den) = float_ratio(value)?;
+    let scale_num = Integer::parse(scale_num)?;
+    let scale_den = Integer::parse(scale_den)?;
+    let offset_num = Integer::parse(offset_num)?;
+    let offset_den = Integer::parse(offset_den)?;
+    if scale_den.is_zero() || offset_den.is_zero() { return None; }
+    let mut numerator = value_num.mul(&scale_num).mul(&offset_den)
+        .add(&offset_num.mul(&value_den).mul(&scale_den));
+    let mut denominator = value_den.mul(&scale_den).mul(&offset_den);
+    if denominator.sign < 0 {
+        numerator = numerator.neg();
+        denominator = denominator.neg();
+    }
+    Some((numerator, denominator))
+}
+
+fn exact_integer(numerator: &Integer, denominator: &Integer) -> Option<Integer> {
+    let (mut quotient, remainder) = numerator.div_rem_abs(denominator)?;
+    if !remainder.is_zero() { return None; }
+    if !quotient.is_zero() { quotient.sign = numerator.sign * denominator.sign; }
+    Some(quotient)
+}
+
+fn nearest_even_integer(numerator: &Integer, denominator: &Integer) -> Option<Integer> {
+    let (mut quotient, remainder) = numerator.div_rem_abs(denominator)?;
+    let comparison = remainder.mul_small(2).abs_cmp(&denominator.abs());
+    if comparison == std::cmp::Ordering::Greater
+        || (comparison == std::cmp::Ordering::Equal && quotient.is_odd())
+    {
+        quotient = quotient.add(&Integer::one());
+    }
+    if !quotient.is_zero() { quotient.sign = numerator.sign * denominator.sign; }
+    Some(quotient)
+}
+
+fn exactly_represented_float(integer: &Integer) -> Option<f64> {
+    let value = integer.decimal().parse::<f64>().ok()?;
+    if !value.is_finite() { return None; }
+    let (float_num, float_den) = float_ratio(value)?;
+    float_num
+        .add(&integer.mul(&float_den).neg())
+        .is_zero()
+        .then_some(value)
 }
 
 /// Converts a Float only when exact rational arithmetic proves the result integral.
 pub fn jet_unit_conversion_exact(value: f64, scale_num: &str, scale_den: &str, offset_num: &str, offset_den: &str) -> Option<f64> {
-    let (value_num, value_den) = float_ratio(value)?;
-    let scale_num_integer = Integer::parse(scale_num)?;
-    let scale_den_integer = Integer::parse(scale_den)?;
-    let offset_num_integer = Integer::parse(offset_num)?;
-    let offset_den_integer = Integer::parse(offset_den)?;
-    if scale_den_integer.is_zero() || offset_den_integer.is_zero() { return None; }
-    let numerator = value_num.mul(&scale_num_integer).mul(&offset_den_integer)
-        .add(&offset_num_integer.mul(&value_den).mul(&scale_den_integer));
-    let denominator = value_den.mul(&scale_den_integer).mul(&offset_den_integer);
-    if !numerator.div_rem_abs(&denominator)?.1.is_zero() { return None; }
-    let converted = value * approximate(scale_num, scale_den)? + approximate(offset_num, offset_den)?;
-    converted.is_finite().then_some(converted)
+    let (numerator, denominator) =
+        converted_ratio(value, scale_num, scale_den, offset_num, offset_den)?;
+    exactly_represented_float(&exact_integer(&numerator, &denominator)?)
 }
 
 /// Applies the declared rational conversion, then rounds ties to even.
 pub fn jet_unit_conversion_rounded(value: f64, scale_num: &str, scale_den: &str, offset_num: &str, offset_den: &str) -> Option<f64> {
-    let converted = value * approximate(scale_num, scale_den)? + approximate(offset_num, offset_den)?;
-    converted.is_finite().then(|| converted.round_ties_even())
+    let (numerator, denominator) =
+        converted_ratio(value, scale_num, scale_den, offset_num, offset_den)?;
+    exactly_represented_float(&nearest_even_integer(&numerator, &denominator)?)
 }

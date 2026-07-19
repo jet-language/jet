@@ -1883,6 +1883,7 @@ impl LowerCtx<'_, '_> {
                 scale,
                 offset,
                 rounded,
+                fallible,
                 ..
             } => {
                 let value = self.lower_expr(arg)?;
@@ -1896,14 +1897,19 @@ impl LowerCtx<'_, '_> {
                 .map(|id| self.b.ins().iconst(types::I64, id));
                 let host = if *rounded {
                     self.host.unit_convert_rounded
-                } else {
+                } else if *fallible {
                     self.host.unit_convert_exact
+                } else {
+                    self.host.unit_convert_implicit
                 };
                 let host = self.module.declare_func_in_func(host, self.b.func);
                 let call = self.b.ins().call(
                     host,
                     &[value, ratios[0], ratios[1], ratios[2], ratios[3]],
                 );
+                if *rounded || !*fallible {
+                    self.emit_trap_check()?;
+                }
                 Ok(self.b.inst_results(call)[0])
             }
             TExprKind::OverflowOpt { .. } => {

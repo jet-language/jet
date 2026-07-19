@@ -621,7 +621,7 @@ extern "C" fn jet_jit_unit_convert_rounded(
     Concurrency::with_runtime_mut(|rt| {
         let ratios = [scale_num, scale_den, offset_num, offset_den]
             .map(|id| rt.heap.get_string(id).map(str::to_owned));
-        match &ratios {
+        let converted = match &ratios {
             [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] => {
                 jet_foundation::jet_unit_conversion_rounded(
                     value,
@@ -630,9 +630,47 @@ extern "C" fn jet_jit_unit_convert_rounded(
                     offset_num,
                     offset_den,
                 )
-                .unwrap_or(f64::NAN)
             }
-            _ => f64::NAN,
+            _ => None,
+        };
+        match converted {
+            Some(converted) => converted,
+            None => {
+                rt.set_trap("unit conversion overflows its runtime representation");
+                0.0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_unit_convert_implicit(
+    value: f64,
+    scale_num: i64,
+    scale_den: i64,
+    offset_num: i64,
+    offset_den: i64,
+) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let ratios = [scale_num, scale_den, offset_num, offset_den]
+            .map(|id| rt.heap.get_string(id).map(str::to_owned));
+        let converted = match &ratios {
+            [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] => {
+                jet_foundation::jet_unit_conversion_exact(
+                    value,
+                    scale_num,
+                    scale_den,
+                    offset_num,
+                    offset_den,
+                )
+            }
+            _ => None,
+        };
+        match converted {
+            Some(converted) => converted,
+            None => {
+                rt.set_trap("unit conversion would round");
+                0.0
+            }
         }
     })
 }
@@ -743,6 +781,7 @@ pub(crate) struct HostFns {
     pub(crate) result_new_i32: FuncId,
     pub(crate) unit_convert_exact: FuncId,
     pub(crate) unit_convert_rounded: FuncId,
+    pub(crate) unit_convert_implicit: FuncId,
     pub(crate) result_is_ok: FuncId,
     pub(crate) result_get_i64: FuncId,
     pub(crate) result_get_f64: FuncId,
@@ -843,6 +882,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_result_new_i32", jet_jit_result_new_i32 as *const u8);
     builder.symbol("jet_jit_unit_convert_exact", jet_jit_unit_convert_exact as *const u8);
     builder.symbol("jet_jit_unit_convert_rounded", jet_jit_unit_convert_rounded as *const u8);
+    builder.symbol("jet_jit_unit_convert_implicit", jet_jit_unit_convert_implicit as *const u8);
     builder.symbol("jet_jit_result_is_ok", jet_jit_result_is_ok as *const u8);
     builder.symbol("jet_jit_result_get_i64", jet_jit_result_get_i64 as *const u8);
     builder.symbol("jet_jit_result_get_f64", jet_jit_result_get_f64 as *const u8);
@@ -1092,6 +1132,7 @@ fn declare_host_fns(
         result_new_i32: import("jet_jit_result_new_i32", &sig_result_new_i32)?,
         unit_convert_exact: import("jet_jit_unit_convert_exact", &sig_unit_convert_exact)?,
         unit_convert_rounded: import("jet_jit_unit_convert_rounded", &sig_unit_convert_rounded)?,
+        unit_convert_implicit: import("jet_jit_unit_convert_implicit", &sig_unit_convert_rounded)?,
         result_is_ok: import("jet_jit_result_is_ok", &sig_result_query_i8)?,
         result_get_i64: import("jet_jit_result_get_i64", &sig_result_query_i64)?,
         result_get_f64: import("jet_jit_result_get_f64", &sig_result_query_f64)?,

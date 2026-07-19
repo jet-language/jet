@@ -567,6 +567,14 @@ represented exactly is a compile error naming the destination-owned
 `from_*_rounded` fix. This amends E0127 for exact commensurable-unit mixing;
 inexact mixing remains rejected.
 
+Conversion checks use the exact rational value represented by the source
+`Float`, scale, and point offset. Exact conversion succeeds only when that
+rational is an integer that the destination `Float` can represent exactly.
+`.NearestEven` rounds the rational before converting it to `Float`; a
+non-finite input or result outside the destination representation traps rather
+than producing `NaN` or infinity. AOT and resident execution use the same
+conversion mechanism.
+
 Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and
 `@Policy(explicit_units)` does the same at module, function, or block scope.

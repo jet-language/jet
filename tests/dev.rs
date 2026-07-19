@@ -2449,6 +2449,56 @@ fn run() -> Void ? {
         beyond_f64,
         ProgramOutput::ran("".into(), "unit conversion would round\n".into(), 1)
     );
+
+    let rational_edges = run_cranelift_without_fallback(r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+    half(scale: 1/2)
+    above_half(scale: 9007199254740993/18014398509481984)
+    three_halves(scale: 3/2)
+}
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    tie_offset(scale: 1, offset: 1/2)
+    above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
+    below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
+}
+fn run() {
+    tie :: Meter.from_half_rounded(1half, .NearestEven)
+    above :: Meter.from_above_half_rounded(1above_half, .NearestEven)
+    negative_source :: ThreeHalves.from_float(-1.0)
+    negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven)
+    tie_point :: TieOffsetPoint.from_float(0.0)
+    above_point :: AboveOffsetPoint.from_float(0.0)
+    below_point :: BelowOffsetPoint.from_float(0.0)
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven)
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven)
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven)
+    print("{(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
+}
+"#, "physical_quantity_rational_edges");
+    assert_eq!(
+        rational_edges,
+        ProgramOutput::ran("0.0 1.0 -2.0 0.0 1.0 -1.0\n".into(), "".into(), 0)
+    );
+
+    let overflow = r#"
+@UnitFamily(Length, base: meter) { meter double(scale: 2) }
+fn run() {
+    source :: Double.from_float(1.7976931348623157e308)
+    value :: Meter.from_double_rounded(source, .NearestEven)
+    print(value.raw())
+}
+"#;
+    match run_cranelift_outcome_without_fallback(overflow, "physical_quantity_rounded_overflow") {
+        RunOutcome::Problems(diags) => assert!(
+            diags.iter().any(|d| d.code == "E0953"
+                && d.why.contains("unit conversion overflows its runtime representation")),
+            "expected rounded unit-conversion overflow trap, got {diags:?}"
+        ),
+        outcome => panic!("expected rounded unit-conversion overflow trap, got {outcome:?}"),
+    }
 }
 
 #[test]
