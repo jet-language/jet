@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 const ANSI = /\x1b\[[0-9;]*m/;
+const stripAnsi = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 
 function env(extra = {}) {
   const clean = { ...process.env, TOWER_DATA: '' };
@@ -32,6 +33,15 @@ function quote(s) {
 // dependency or a fake isTTY flag.
 function ptyRun(cwd, args, extra = {}) {
   const command = [process.execPath, TOWER, ...args].map(quote).join(' ');
+  return execFileSync('script', ['-q', '-e', '-c', command, '/dev/null'], {
+    cwd,
+    encoding: 'utf8',
+    env: env(extra),
+  });
+}
+
+function ptyRunAt(cwd, columns, args, extra = {}) {
+  const command = `stty cols ${columns}; ${[process.execPath, TOWER, ...args].map(quote).join(' ')}`;
   return execFileSync('script', ['-q', '-e', '-c', command, '/dev/null'], {
     cwd,
     encoding: 'utf8',
@@ -82,4 +92,31 @@ test('human brief prints each open question exactly once', () => {
   run(cwd, ['question', 'ask', '#1', '--text', text, '--by', 'owner']);
   const output = run(cwd, ['brief', '#1', '--color=never']);
   assert.equal(output.split(text).length - 1, 1);
+});
+
+test('status card rows fit real 40 and 120 column PTYs without losing readable titles', () => {
+  const cwd = fresh();
+  run(cwd, ['card', 'update', '#1', '--title', 'Render me with a deliberately long title that remains readable while terminal widths change', '--by', 'owner']);
+  run(cwd, ['card', 'claim', '#1', '--by', 'width-reviewer']);
+
+  const rowAt = (columns) => {
+    const output = ptyRunAt(cwd, columns, ['status', '--color=auto']);
+    assert.match(output, ANSI);
+    const row = output.split(/\r?\n/).find(line => stripAnsi(line).includes('#1'));
+    assert.ok(row, `card row is present at ${columns} columns`);
+    return stripAnsi(row);
+  };
+  const narrow = rowAt(40);
+  const wide = rowAt(120);
+  assert.ok([...narrow].length <= 40, `40-column row is ${[...narrow].length} columns: ${narrow}`);
+  assert.ok([...wide].length <= 120, `120-column row is ${[...wide].length} columns: ${wide}`);
+  assert.match(narrow, /Render me with.*…/, 'narrow output keeps a useful title prefix');
+  assert.match(wide, /deliberately long title that remains readable/, 'wide output uses available columns');
+  assert.match(wide, /\[width-reviewer\]/, 'wide output retains claim context');
+});
+
+test('help documents status and brief color controls', () => {
+  const output = run(fresh(), ['help']);
+  assert.match(output, /tower status .*--color=auto\|always\|never/);
+  assert.match(output, /tower brief[^\n]*\n\s+\[--color=auto\|always\|never\]/);
 });

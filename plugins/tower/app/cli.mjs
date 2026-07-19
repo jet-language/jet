@@ -65,6 +65,12 @@ function Theme(flags) {
 }
 
 const cardLine = (c) => `#${String(c.num).padEnd(4)} ${(c.priority || '').padEnd(3)} ${c.lane.lane.padEnd(9)} ${c.title.slice(0, 60)}${c.assignee ? `  [${c.assignee}]` : ''}`;
+const clip = (text, width) => {
+  const chars = [...text];
+  if (chars.length <= width) return text;
+  if (width <= 0) return '';
+  return chars.slice(0, Math.max(0, width - 1)).join('') + '…';
+};
 
 // ---- commands ----------------------------------------------------------------
 
@@ -112,9 +118,16 @@ function cmdStatus(store, { flags }) {
     if (!cs.length) return;
     console.log(`  ${t.accent(label)}${t.border(':')}`);
     for (const c of cs.slice(0, 12)) {
-      const priority = c.priority ? `${t.warn(c.priority.padEnd(3))} ` : '    ';
+      const columns = process.stdout.columns || 80;
+      const number = String(c.num).padEnd(4);
+      const priority = (c.priority || '').padEnd(3);
+      const lanePadded = lane.padEnd(9);
+      const prefix = `   · #${number} ${priority} ${lanePadded} `;
+      let claim = c.assignee ? `  [${c.assignee}]` : '';
+      if (prefix.length + 12 + claim.length > columns) claim = '';
+      const title = clip(c.title, columns - prefix.length - claim.length);
       const laneText = (lane === 'decide' ? t.error : lane === 'verify' ? t.warn : t.success)(lane.padEnd(9));
-      console.log(`   ${t.border('·')} #${String(c.num).padEnd(4)} ${priority}${laneText} ${c.title.slice(0, 60)}${c.assignee ? `  ${t.dim(`[${c.assignee}]`)}` : ''}`);
+      console.log(`   ${t.border('·')} #${number} ${c.priority ? t.warn(priority) : priority} ${laneText} ${title}${claim ? t.dim(claim) : ''}`);
     }
   };
   show('OWNER — decide', 'decide');
@@ -638,7 +651,8 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             board UI + HTTP API; self-restarts
                                             when Tower's own source changes
                                             (--no-watch disables that)
-  tower status [--json]                     terminal snapshot
+  tower status [--json] [--color=auto|always|never]
+                                            terminal snapshot
   tower state                               full projected state (JSON)
   tower next [--epoch E] [--track T] [--agent A] [--limit N] [--burndown]
                                             what an agent should pick up next;
@@ -655,6 +669,7 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             in docs/ballots/*.md; exit 1 on
                                             any finding, 0 clean
   tower brief [ref] [--agent me] [--json] [--no-claim]
+              [--color=auto|always|never]
                                             one-shot work packet: card, blockers,
                                             criteria, decisions VERBATIM, questions,
                                             refs, recent log, rules — zero other reads
