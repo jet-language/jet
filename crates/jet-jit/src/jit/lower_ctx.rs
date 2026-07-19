@@ -367,10 +367,7 @@ impl LowerCtx<'_, '_> {
                                 .meta
                                 .struct_field_index(&type_name, field)
                                 .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
-                            let field_ty = self
-                                .meta
-                                .struct_field_type(&type_name, field)
-                                .unwrap_or_else(|| value.ty.clone());
+                            let field_ty = value.ty.clone();
                             let host_id = match &field_ty {
                                 Type::Int => self.host.struct_set_i64,
                                 Type::Float => self.host.struct_set_f64,
@@ -1146,16 +1143,29 @@ impl LowerCtx<'_, '_> {
     /// `static_method_key` must reproduce the AOT emitter's exact naming
     /// convention or `func_ids.get(&key)` misses (an internal lookup failure,
     /// not a user-facing error — surfaces here as "missing method").
-    fn method_key(recv_ty: &Type, method_rust: &str) -> Option<String> {
-        let type_name = user_type_name(recv_ty)?;
+    fn method_key(&self, recv_ty: &Type, method_rust: &str) -> Option<String> {
+        let base = user_type_name(recv_ty)?;
         let method = method_rust.strip_prefix("user_").unwrap_or(method_rust);
-        Some(format!("{type_name}::{method}"))
+        if matches!(recv_ty, Type::Apply { .. }) {
+            let concrete = format!("{}::{method}", recv_ty.name());
+            if self.func_ids.contains_key(&concrete) {
+                return Some(concrete);
+            }
+        }
+        Some(format!("{base}::{method}"))
     }
 
-    fn static_method_key(type_prefix: &str, method_rust: &str) -> Option<String> {
+    fn static_method_key(
+        type_prefix: &str,
+        owner_type: Option<&Type>,
+        method_rust: &str,
+    ) -> Option<String> {
         let type_name = type_prefix.strip_prefix("user_")?;
         let method = method_rust.strip_prefix("user_").unwrap_or(method_rust);
-        Some(format!("{type_name}::{method}"))
+        Some(format!(
+            "{}::{method}",
+            owner_type.map_or_else(|| type_name.to_string(), Type::name)
+        ))
     }
 
     /// Shared backing for `TExprKind::StructLit`/`TupleLit`: both lower to the
@@ -1215,11 +1225,10 @@ impl LowerCtx<'_, '_> {
             .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
             as i64;
         let idx_val = self.b.ins().iconst(types::I64, idx);
-        let field_ty = self
-            .meta
-            .struct_field_type(type_name, field_rust)
-            .unwrap_or_else(|| fallback_ty.clone());
-        let host_id = match &field_ty {
+        // TIR has already substituted any generic owner arguments. The
+        // metadata type is only the declaration (`T` for `Box<T>`), so use
+        // the total expression fact for ABI selection.
+        let host_id = match fallback_ty {
             Type::Int => self.host.struct_get_i64,
             Type::Float => self.host.struct_get_f64,
             Type::Bool => self.host.struct_get_bool,
@@ -1673,7 +1682,7 @@ impl LowerCtx<'_, '_> {
                 recv, field_rust, ..
             } => {
                 if let Some(method_rust) = field_rust.strip_suffix("()") {
-                    let key = Self::method_key(&recv.ty, method_rust)
+                    let key = self.method_key(&recv.ty, method_rust)
                         .ok_or_else(|| format!("jit computed field on {:?}", recv.ty))?;
                     let func_id = self
                         .func_ids
@@ -1699,7 +1708,7 @@ impl LowerCtx<'_, '_> {
                 args,
                 ..
             } => {
-                let key = Self::method_key(&recv.ty, method_rust)
+                let key = self.method_key(&recv.ty, method_rust)
                     .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
                 let func_id = self
                     .func_ids
@@ -1718,10 +1727,11 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::StaticCall {
                 type_prefix,
+                owner_type,
                 method_rust,
                 args,
             } => {
-                let key = Self::static_method_key(type_prefix, method_rust)
+                let key = Self::static_method_key(type_prefix, owner_type.as_ref(), method_rust)
                     .ok_or_else(|| format!("jit static `{type_prefix}::{method_rust}`"))?;
                 let func_id = self
                     .func_ids
@@ -2251,6 +2261,23 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_clone(&mut self, inner: &TExpr) -> Result<Value, String> {
+        if matches!(
+            inner.ty,
+            Type::Int
+                | Type::Float
+                | Type::Bool
+                | Type::Char
+                | Type::IntN { .. }
+                | Type::Float32
+        ) {
+            return self.lower_expr(inner);
+        }
+        if inner.ty == Type::String {
+            let val = self.lower_expr(inner)?;
+            let host_ref = self.module.declare_func_in_func(self.host.str_clone, self.b.func);
+            let call = self.b.ins().call(host_ref, &[val]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
         if jit_list_int_type(&inner.ty) || jit_list_float_type(&inner.ty) {
             let val = self.lower_expr(inner)?;
             let host_ref = self.module.declare_func_in_func(self.host.coll.list_clone, self.b.func);
@@ -2770,7 +2797,7 @@ impl LowerCtx<'_, '_> {
         self.b.append_block_param(merge, types::I8);
         for (i, op) in ops.iter().enumerate() {
             let cmp = if hooks[i] {
-                let key = Self::method_key(&operands[i].ty, "compare")
+                let key = self.method_key(&operands[i].ty, "compare")
                     .ok_or_else(|| format!("jit compare hook on {:?}", operands[i].ty))?;
                 let func_id = self
                     .func_ids
@@ -2867,14 +2894,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn expr_field_type(&self, expr: &TExpr) -> Option<Type> {
-        let TExprKind::Field {
-            recv, field_rust, ..
-        } = &expr.kind
-        else {
-            return None;
-        };
-        let type_name = record_type_key(&recv.ty).or_else(|| self.method_struct.clone())?;
-        self.meta.struct_field_type(&type_name, field_rust)
+        matches!(expr.kind, TExprKind::Field { .. }).then(|| expr.ty.clone())
     }
 
     fn expr_arith_type(&self, expr: &TExpr) -> Type {
@@ -3087,6 +3107,10 @@ impl LowerCtx<'_, '_> {
 
 fn simple_record_field_place(place: &str) -> Option<(&str, &str)> {
     let (base, field) = place.strip_prefix('(')?.split_once(").")?;
+    let base = base
+        .strip_prefix("(*")
+        .and_then(|base| base.strip_suffix(')'))
+        .unwrap_or(base);
     (base.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
         && field
             .chars()

@@ -376,11 +376,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `user_<Type>::user_<method>(args)`. All facts resolved at lowering.
         TExprKind::StaticCall {
             type_prefix,
+            owner_type,
             method_rust,
             args,
         } => {
             let arg_str = emit_tir_call_args(args, cx);
-            format!("{}::{}({})", type_prefix, method_rust, arg_str)
+            let owner = match owner_type {
+                Some(ty @ Type::Apply { .. }) => format!("<{}>", cx.rust_type(ty)),
+                Some(ty) => cx.rust_type(ty),
+                None => type_prefix.clone(),
+            };
+            format!("{}::{}({})", owner, method_rust, arg_str)
         }
         // c109 Phase 9: a built-in collection/string method. The Map-vs-List-vs-String
         // branch was resolved into `op` at lowering; emit only formats, reproducing

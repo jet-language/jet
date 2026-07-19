@@ -114,7 +114,7 @@ pub(crate) fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signatur
 
 pub(crate) fn func_has_receiver(tir: &TFunc) -> bool {
     match &tir.kind {
-        TFuncKind::Method { self_conv } => self_conv.is_some(),
+        TFuncKind::Method { self_conv, .. } => self_conv.is_some(),
         TFuncKind::TraitMethod { serde, .. } => *serde != Some(SerdeCodec::Decode),
         _ => false,
     }
@@ -126,7 +126,6 @@ pub(crate) fn jit_fn_name(name: &str) -> String {
 
 pub(crate) struct JitMeta<'a> {
     struct_fields: &'a HashMap<String, Vec<String>>,
-    struct_field_types: &'a HashMap<String, Vec<Type>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
     int_constants: &'a HashMap<String, i64>,
     has_generic_instances: bool,
@@ -137,7 +136,6 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn from_program(program: &'a JitProgram) -> Self {
         JitMeta {
             struct_fields: &program.struct_fields,
-            struct_field_types: &program.struct_field_types,
             enum_variants: &program.enum_variants,
             int_constants: &program.int_constants,
             has_generic_instances: !program.instance_provenance.is_empty(),
@@ -158,11 +156,6 @@ impl<'a> JitMeta<'a> {
             .get(type_name)?
             .iter()
             .position(|f| f == field_rust)
-    }
-
-    pub(crate) fn struct_field_type(&self, type_name: &str, field_rust: &str) -> Option<Type> {
-        let idx = self.struct_field_index(type_name, field_rust)?;
-        self.struct_field_types.get(type_name)?.get(idx).cloned()
     }
 
     pub(crate) fn enum_variant_disc(&self, prefix: &str) -> Option<i64> {

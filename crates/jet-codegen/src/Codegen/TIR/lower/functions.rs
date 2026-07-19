@@ -320,6 +320,22 @@ pub(crate) fn param_place_generic(
 /// The `self_conv` (instance) / `None` (static) and the resolved return type drive
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
+    let owner_ty = match cx.struct_type_param_order.get(type_name) {
+        Some(params) if !params.is_empty() => Type::Apply {
+            name: type_name.to_string(),
+            args: params.iter().cloned().map(Type::Named).collect(),
+        },
+        _ => Type::Named(type_name.to_string()),
+    };
+    lower_method_for_owner(f, type_name, owner_ty, cx)
+}
+
+pub(crate) fn lower_method_for_owner(
+    f: &Func,
+    type_name: &str,
+    owner_ty: Type,
+    cx: &Cx,
+) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
     env.self_owner = Some(type_name.to_string());
@@ -338,7 +354,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             } else {
                 "self".to_string()
             };
-            env.bind(Syntax::KW_SELF, place, None);
+            env.bind(Syntax::KW_SELF, place, Some(owner_ty.clone()));
             if matches!(p.convention, AccessConvention::Read) {
                 env.mark_borrowed(Syntax::KW_SELF);
             }
@@ -368,6 +384,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     // An instance method carries `Some(conv)`; a static method carries `None`.
     let kind = TFuncKind::Method {
         self_conv: if is_static { None } else { self_conv },
+        owner_type: owner_ty,
     };
     TFunc {
         name: f.name.clone(),

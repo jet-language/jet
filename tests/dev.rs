@@ -2580,6 +2580,189 @@ fn run() { print(three.get()); print(same.get()) }
 }
 
 #[test]
+fn generic_user_derive_multi_instantiation_matches_resident_default_dev_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let src = r#"
+derive T.Access {
+    info :: T.reflect()
+    name :: info.name
+    param :: info.type_params[0].name
+    emit("impl $name {{ fn make(value: ^$param) -> $name<$param> {{ return $name<$param>.{{ value: value }} }} fn marker() -> Int {{ return 17 }} fn get_value(self) -> $param {{ return ~self.value }} fn type_name(self) -> String {{ return \"$name\" }} }}")
+}
+
+derive T.NumericAccess {
+    info :: T.reflect()
+    name :: info.name
+    param :: info.type_params[0].name
+    emit("""
+impl $name {{
+    fn replace(&self, value: ^$param) -> $param {{
+        self.value = value
+        return ~self.value
+    }}
+    fn plus(self, rhs: $param) -> $param {{ return self.value + rhs }}
+    fn equal_to(self, rhs: $param) -> Bool {{ return self.value == rhs }}
+}}
+""")
+}
+
+@Access
+struct Box<T: Printable> { value: T }
+@Access
+struct StaticOnly<T: Printable> { value: T }
+struct Wrapper<U: Printable> { boxed: Box<U> }
+@NumericAccess
+struct NumericBox<T: [Printable, Add, Equatable]> { value: T }
+
+fn run() {
+    number := Box<Int>.make(7)
+    decimal := Box<Float>.{ value: 2.5 }
+    flag := Box<Bool>.{ value: true }
+    letter := Box<Char>.{ value: 'J' }
+    text := Box<String>.make("jet")
+    numeric := NumericBox<Float>.{ value: 1.5 }
+    print(number.get_value())
+    print(decimal.get_value())
+    print(flag.get_value())
+    print(letter.get_value())
+    print(text.get_value())
+    print(text.get_value())
+    print(number.type_name())
+    print(numeric.replace(4.5))
+    print(numeric.plus(0.5))
+    print(numeric.equal_to(4.5))
+    print(StaticOnly<Int>.marker())
+    print(StaticOnly<String>.marker())
+}
+"#;
+    let expected = ProgramOutput::ran(
+        "7\n2.5\ntrue\nJ\njet\njet\nBox\n4.5\n5.0\ntrue\n17\n17\n".into(),
+        "".into(),
+        0,
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "jet_generic_user_derive_jit_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("generic_user_derive.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    let run_func = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Func(func) if func.name == "run" => Some(func),
+            _ => None,
+        })
+        .expect("run function");
+    let numeric_binding = run_func
+        .body
+        .iter()
+        .find_map(|stmt| match stmt {
+            jet::AST::Stmt::Val(binding) if binding.name == "numeric" => Some(binding),
+            _ => None,
+        })
+        .expect("numeric binding");
+    assert_eq!(
+        numeric_binding.ty,
+        Some(jet::AST::Type::Apply {
+            name: "NumericBox".to_string(),
+            args: vec![jet::AST::Type::Float],
+        }),
+        "sema must retain the concrete generic binding identity"
+    );
+    let tir = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("concrete generic derive lowers to resident JIT TIR");
+    let numeric_init_ty = tir
+        .funcs
+        .iter()
+        .find(|func| func.name == "run")
+        .and_then(|func| {
+            func.body.iter().find_map(|stmt| match stmt {
+                jet::Codegen::TIR::TStmt::Let { name, init, .. } if name == "numeric" => {
+                    Some(init.ty.clone())
+                }
+                _ => None,
+            })
+        })
+        .expect("numeric TIR binding");
+    assert_eq!(numeric_init_ty, numeric_binding.ty.clone().unwrap());
+    assert!(tir.funcs.iter().any(|func| func.name == "Box<Int>::get_value"));
+    assert!(tir.funcs.iter().any(|func| func.name == "Box<Float>::get_value"));
+    assert!(tir.funcs.iter().any(|func| func.name == "Box<Bool>::get_value"));
+    assert!(tir.funcs.iter().any(|func| func.name == "Box<Char>::get_value"));
+    assert!(tir.funcs.iter().any(|func| func.name == "Box<String>::get_value"));
+    assert!(tir.funcs.iter().any(|func| func.name == "Box<Int>::make"));
+    assert!(tir.funcs.iter().any(|func| func.name == "Box<String>::make"));
+    assert!(tir.funcs.iter().any(|func| func.name == "StaticOnly<Int>::marker"));
+    assert!(tir.funcs.iter().any(|func| func.name == "StaticOnly<String>::marker"));
+    assert!(tir.funcs.iter().any(|func| func.name == "NumericBox<Float>::replace"));
+    assert!(tir.funcs.iter().any(|func| func.name == "NumericBox<Float>::plus"));
+    assert!(tir.funcs.iter().any(|func| func.name == "NumericBox<Float>::equal_to"));
+    assert!(
+        tir.funcs.iter().all(|func| {
+            !func.name.starts_with("Box<T>::") && !func.name.starts_with("Box<U>::")
+        }),
+        "abstract field types must not become fake JIT instances: {:?}",
+        tir.funcs.iter().map(|func| &func.name).collect::<Vec<_>>()
+    );
+    let generic_method_file = dir.join("generic_method_shadow.jet");
+    fs::write(
+        &generic_method_file,
+        r#"
+derive T.GenericMethod {
+    info :: T.reflect()
+    name :: info.name
+    emit("impl $name {{ fn keep<T>(self, value: ^T) -> T {{ return value }} }}")
+}
+@GenericMethod
+struct Shadow<T: Printable> { value: T }
+fn run() {
+    item := Shadow<Int>.{ value: 1 }
+    print(item.value)
+}
+"#,
+    )
+    .unwrap();
+    let generic_method_bundle =
+        checked_bundle_from_path(generic_method_file.to_str().unwrap());
+    let generic_method_tir = jet::Codegen::TIR::lower_jit_program(&generic_method_bundle)
+        .expect("generic-method fixture lowers around the unsupported method");
+    assert!(
+        generic_method_tir
+            .funcs
+            .iter()
+            .all(|func| !func.name.ends_with("::keep")),
+        "method-owned generic T must not be captured by the owner's T substitution"
+    );
+    let resident = run_cranelift_without_fallback(src, "generic_user_derive");
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev failed generic user derive: {diags:?}"),
+    };
+    let aot = compiled_binary_output(
+        &dir,
+        "generic_user_derive",
+        0,
+        "generic_user_derive",
+        &shown,
+    );
+    assert_eq!(resident, expected);
+    assert_eq!(default, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"

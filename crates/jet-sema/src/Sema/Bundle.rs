@@ -14,6 +14,7 @@ mod GenericModules;
 mod Validation;
 
 pub(crate) use GenericModules::expand_generic_module_aliases;
+pub use GenericModules::specialize_function_types;
 use GenericModules::{clone_enum, clone_struct};
 #[allow(unused_imports)]
 pub(crate) use Validation::{

@@ -210,10 +210,17 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     // first so a same-named user field always wins.
     if let Type::Apply { name, args } = recv_ty {
         if let Some(fields) = cx.struct_fields.get(name) {
-            return fields
+            let field_ty = fields
                 .iter()
                 .find(|(f, _)| f == field)
-                .map(|(_, t)| t.clone());
+                .map(|(_, t)| t.clone())?;
+            let params = cx.struct_type_param_order.get(name)?;
+            let subst = params
+                .iter()
+                .zip(args)
+                .map(|(param, arg)| (param.clone(), arg.clone()))
+                .collect();
+            return Some(crate::Generics::substitute_type(&field_ty, &subst));
         }
         if name == "DecodeResult" {
             return match field {

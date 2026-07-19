@@ -1,10 +1,61 @@
 use super::*;
 use crate::AST::{
-    ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, Item, LambdaBody, OrFallback, Stmt, StrPart,
-    Type, VariantPayload,
+    ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, Item, LambdaBody, OrFallback, Stmt,
+    StrPart, Type, VariantPayload,
 };
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
+
+pub(crate) struct CollectedTypeShapes {
+    pub(crate) tuples: BTreeMap<String, Vec<(String, Type)>>,
+    pub(crate) generic_apps: BTreeMap<String, Type>,
+    abstract_params: Vec<String>,
+}
+
+impl CollectedTypeShapes {
+    pub(crate) fn concrete_apps(&self, type_name: &str) -> Vec<Type> {
+        self.generic_apps
+            .values()
+            .filter(|ty| matches!(ty, Type::Apply { name, .. } if name == type_name))
+            .cloned()
+            .collect()
+    }
+}
+
+fn type_mentions_params(ty: &Type, params: &[String]) -> bool {
+    match ty {
+        Type::Named(name) => params.contains(name),
+        Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+            type_mentions_params(inner, params)
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            type_mentions_params(key, params) || type_mentions_params(value, params)
+        }
+        Type::Fn { params: inputs, ret, .. } => {
+            inputs.iter().any(|ty| type_mentions_params(ty, params))
+                || ret.as_deref().is_some_and(|ty| type_mentions_params(ty, params))
+        }
+        Type::Apply { args, .. } => args.iter().any(|ty| type_mentions_params(ty, params)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, ty)| type_mentions_params(ty, params)),
+        Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+            type_mentions_params(elem, params)
+        }
+        _ => false,
+    }
+}
+
+fn with_type_params(
+    out: &mut CollectedTypeShapes,
+    params: Vec<String>,
+    collect: impl FnOnce(&mut CollectedTypeShapes),
+) {
+    let previous = std::mem::replace(&mut out.abstract_params, params);
+    collect(out);
+    out.abstract_params = previous;
+}
+
 pub(crate) fn tuple_struct_name(fields: &[(String, Type)]) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for (name, ty) in fields {
@@ -21,10 +72,10 @@ pub(crate) fn tuple_fields_plain(fields: &[(String, Box<Type>)]) -> Vec<(String,
         .collect()
 }
 
-fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+fn collect_tuple_shapes_from_type(ty: &Type, out: &mut CollectedTypeShapes) {
     if let Type::Tuple(fields) = ty {
         let plain = tuple_fields_plain(fields);
-        out.insert(tuple_struct_name(&plain), plain);
+        out.tuples.insert(tuple_struct_name(&plain), plain);
         for (_, t) in fields {
             collect_tuple_shapes_from_type(t, out);
         }
@@ -39,7 +90,7 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(Str
                 ("key".to_string(), (**key).clone()),
                 ("value".to_string(), (**value).clone()),
             ];
-            out.insert(tuple_struct_name(&fields), fields);
+            out.tuples.insert(tuple_struct_name(&fields), fields);
             collect_tuple_shapes_from_type(key, out);
             collect_tuple_shapes_from_type(value, out);
         }
@@ -55,7 +106,14 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(Str
                 collect_tuple_shapes_from_type(r, out);
             }
         }
-        Type::Apply { args, .. } => {
+        Type::Apply { name, args } => {
+            let applied = Type::Apply {
+                name: name.clone(),
+                args: args.clone(),
+            };
+            if !type_mentions_params(&applied, &out.abstract_params) {
+                out.generic_apps.insert(applied.name(), applied);
+            }
             for a in args {
                 collect_tuple_shapes_from_type(a, out);
             }
@@ -64,7 +122,7 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(Str
     }
 }
 
-fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
     match expr {
         Expr::TupleLit(_, _, Some(ty)) => collect_tuple_shapes_from_type(ty, out),
         Expr::Str(parts, _) => {
@@ -141,8 +199,30 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         Expr::Field(inner, _, _) | Expr::OptField { base: inner, .. } => {
             collect_tuple_shapes_from_expr(inner, out);
         }
-        Expr::MethodCall { receiver, args, resolved_ret, .. } => {
+        Expr::MethodCall {
+            receiver,
+            type_args,
+            args,
+            resolved_ret,
+            ..
+        } => {
             collect_tuple_shapes_from_expr(receiver, out);
+            if let Expr::Ident(type_name, _) = receiver.as_ref() {
+                if !type_args.is_empty()
+                    && type_name.chars().next().is_some_and(char::is_uppercase)
+                {
+                    collect_tuple_shapes_from_type(
+                        &Type::Apply {
+                            name: type_name.clone(),
+                            args: type_args.clone(),
+                        },
+                        out,
+                    );
+                }
+            }
+            for ty in type_args {
+                collect_tuple_shapes_from_type(ty, out);
+            }
             for a in args {
                 collect_tuple_shapes_from_expr(&a.expr, out);
             }
@@ -153,7 +233,21 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
                 collect_tuple_shapes_from_type(ty, out);
             }
         }
-        Expr::StructLit { fields, .. } => {
+        Expr::StructLit {
+            type_name,
+            type_args,
+            fields,
+            ..
+        } => {
+            if !type_args.is_empty() {
+                collect_tuple_shapes_from_type(
+                    &Type::Apply {
+                        name: type_name.clone(),
+                        args: type_args.clone(),
+                    },
+                    out,
+                );
+            }
             for (_, _, e) in fields {
                 collect_tuple_shapes_from_expr(e, out);
             }
@@ -225,7 +319,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
     }
 }
 
-fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
     match stmt {
         Stmt::Expr(e) | Stmt::Yield(e, _) => collect_tuple_shapes_from_expr(e, out),
         Stmt::Val(b) => {
@@ -355,7 +449,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
     }
 }
 
-fn collect_tuple_shapes_from_if(i: &IfStmt, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+fn collect_tuple_shapes_from_if(i: &IfStmt, out: &mut CollectedTypeShapes) {
     collect_tuple_shapes_from_expr(&i.cond, out);
     for s in &i.then_body {
         collect_tuple_shapes_from_stmt(s, out);
@@ -371,64 +465,79 @@ fn collect_tuple_shapes_from_if(i: &IfStmt, out: &mut BTreeMap<String, Vec<(Stri
     }
 }
 
-pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(String, Type)>> {
-    let mut out = BTreeMap::new();
+fn collect_func_shapes(f: &Func, inherited: &[String], out: &mut CollectedTypeShapes) {
+    let mut params = inherited.to_vec();
+    params.extend(f.type_params.iter().map(|param| param.name.clone()));
+    with_type_params(out, params, |out| {
+        for param in &f.params {
+            collect_tuple_shapes_from_type(&param.ty, out);
+        }
+        if let Some(ret) = &f.return_type {
+            collect_tuple_shapes_from_type(ret, out);
+        }
+        for stmt in &f.body {
+            collect_tuple_shapes_from_stmt(stmt, out);
+        }
+    });
+}
+
+pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
+    let owner_params: BTreeMap<String, Vec<String>> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(def) => Some((&def.name, &def.type_params)),
+            Item::Enum(def) => Some((&def.name, &def.type_params)),
+            _ => None,
+        })
+        .map(|(name, params)| {
+            (
+                name.clone(),
+                params.iter().map(|param| param.name.clone()).collect(),
+            )
+        })
+        .collect();
+    let mut out = CollectedTypeShapes {
+        tuples: BTreeMap::new(),
+        generic_apps: BTreeMap::new(),
+        abstract_params: Vec::new(),
+    };
     for item in items {
         match item {
-            Item::Func(f) => {
-                for p in &f.params {
-                    collect_tuple_shapes_from_type(&p.ty, &mut out);
-                }
-                if let Some(ret) = &f.return_type {
-                    collect_tuple_shapes_from_type(ret, &mut out);
-                }
-                for s in &f.body {
-                    collect_tuple_shapes_from_stmt(s, &mut out);
-                }
-            }
+            Item::Func(f) => collect_func_shapes(f, &[], &mut out),
             Item::Struct(s) => {
-                for field in &s.fields {
-                    collect_tuple_shapes_from_type(&field.ty, &mut out);
-                }
+                let params = owner_params.get(&s.name).cloned().unwrap_or_default();
+                with_type_params(&mut out, params.clone(), |out| {
+                    for field in &s.fields {
+                        collect_tuple_shapes_from_type(&field.ty, out);
+                    }
+                });
                 for m in &s.methods {
-                    for p in &m.params {
-                        collect_tuple_shapes_from_type(&p.ty, &mut out);
-                    }
-                    if let Some(ret) = &m.return_type {
-                        collect_tuple_shapes_from_type(ret, &mut out);
-                    }
-                    for s in &m.body {
-                        collect_tuple_shapes_from_stmt(s, &mut out);
-                    }
+                    collect_func_shapes(m, &params, &mut out);
                 }
             }
             Item::Enum(e) => {
-                for v in &e.variants {
-                    match &v.payload {
-                        VariantPayload::Unit => {}
-                        VariantPayload::Single(t, _) => collect_tuple_shapes_from_type(t, &mut out),
-                        VariantPayload::Named(fs) => {
-                            for f in fs {
-                                collect_tuple_shapes_from_type(&f.ty, &mut out);
+                let params = owner_params.get(&e.name).cloned().unwrap_or_default();
+                with_type_params(&mut out, params, |out| {
+                    for v in &e.variants {
+                        match &v.payload {
+                            VariantPayload::Unit => {}
+                            VariantPayload::Single(t, _) => collect_tuple_shapes_from_type(t, out),
+                            VariantPayload::Named(fs) => {
+                                for f in fs {
+                                    collect_tuple_shapes_from_type(&f.ty, out);
+                                }
                             }
                         }
                     }
-                }
+                });
             }
             Item::Const(c) => {
                 collect_tuple_shapes_from_expr(&c.value, &mut out);
             }
             Item::Impl(i) => {
+                let params = owner_params.get(&i.type_name).cloned().unwrap_or_default();
                 for m in &i.methods {
-                    for p in &m.params {
-                        collect_tuple_shapes_from_type(&p.ty, &mut out);
-                    }
-                    if let Some(ret) = &m.return_type {
-                        collect_tuple_shapes_from_type(ret, &mut out);
-                    }
-                    for s in &m.body {
-                        collect_tuple_shapes_from_stmt(s, &mut out);
-                    }
+                    collect_func_shapes(m, &params, &mut out);
                 }
             }
             Item::Test(t) => {
@@ -453,6 +562,10 @@ pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(Stri
         }
     }
     out
+}
+
+pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(String, Type)>> {
+    collect_type_shapes(items).tuples
 }
 
 fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {

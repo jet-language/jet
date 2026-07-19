@@ -102,6 +102,7 @@ pub(crate) fn lower_method_call(
     receiver: &Expr,
     method: &str,
     method_span: Span,
+    type_args: &[Type],
     args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
     resolved_ret: Option<&Type>,
@@ -145,6 +146,7 @@ pub(crate) fn lower_method_call(
                 receiver,
                 method,
                 method_span,
+                type_args,
                 &lowered_args,
                 recv_type,
                 resolved_ret,
@@ -2208,6 +2210,7 @@ pub(crate) fn lower_method_call(
                     ty: Type::Named("EncodingLimits".to_string()),
                     kind: TExprKind::StaticCall {
                         type_prefix: format!("{}jet_std::EncodingLimits", cx.root_prefix),
+                        owner_type: None,
                         method_rust: "safe".to_string(),
                         args: vec![],
                     },
@@ -2220,6 +2223,7 @@ pub(crate) fn lower_method_call(
                     ty: Type::Named("CBOROptions".to_string()),
                     kind: TExprKind::StaticCall {
                         type_prefix: format!("{}jet_std::CBOROptions", cx.root_prefix),
+                        owner_type: None,
                         method_rust: "safe".to_string(),
                         args: vec![],
                     },
@@ -2232,6 +2236,7 @@ pub(crate) fn lower_method_call(
                     ty: Type::Named(leaf.clone()),
                     kind: TExprKind::StaticCall {
                         type_prefix: format!("{}jet_std::{leaf}", cx.root_prefix),
+                        owner_type: None,
                         method_rust: "safe".to_string(),
                         args: vec![],
                     },
@@ -2244,6 +2249,7 @@ pub(crate) fn lower_method_call(
                     ty: Type::Named("Limits".to_string()),
                     kind: TExprKind::StaticCall {
                         type_prefix: format!("{}jet_email::Limits", cx.root_prefix),
+                        owner_type: None,
                         method_rust: "safe".to_string(),
                         args: vec![],
                     },
@@ -2521,6 +2527,7 @@ pub(crate) fn lower_method_call(
                 },
                 kind: TExprKind::StaticCall {
                     type_prefix: format!("std::collections::BTreeSet::<{}>", elem_rust),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![],
                 },
@@ -2557,6 +2564,7 @@ pub(crate) fn lower_method_call(
                 },
                 kind: TExprKind::StaticCall {
                     type_prefix: format!("std::collections::BinaryHeap::<{}>", elem_rust),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![],
                 },
@@ -2577,6 +2585,7 @@ pub(crate) fn lower_method_call(
                 },
                 kind: TExprKind::StaticCall {
                     type_prefix: "JetLru".to_string(),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![TCallArg {
                         value: cap_arg,
@@ -2595,6 +2604,7 @@ pub(crate) fn lower_method_call(
                 ty: Type::Named(crate::Syntax::TYPE_BIT_SET.to_string()),
                 kind: TExprKind::StaticCall {
                     type_prefix: "JetBitSet".to_string(),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![],
                 },
@@ -2605,6 +2615,7 @@ pub(crate) fn lower_method_call(
                 ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
                 kind: TExprKind::StaticCall {
                     type_prefix: "JetByteBuffer".to_string(),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![],
                 },
@@ -2637,6 +2648,7 @@ pub(crate) fn lower_method_call(
                 ty: deque_ty,
                 kind: TExprKind::StaticCall {
                     type_prefix: format!("std::collections::VecDeque::<{}>", elem_rust),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![],
                 },
@@ -2657,6 +2669,7 @@ pub(crate) fn lower_method_call(
                 ty: bag_ty,
                 kind: TExprKind::StaticCall {
                     type_prefix: format!("std::collections::HashMap::<{}, usize>", elem_rust),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![],
                 },
@@ -2679,6 +2692,7 @@ pub(crate) fn lower_method_call(
                 ty: pool_ty,
                 kind: TExprKind::StaticCall {
                     type_prefix: format!("{}jet_std::JetPool::<{}>", cx.root_prefix, elem_rust),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![],
                 },
@@ -2695,6 +2709,7 @@ pub(crate) fn lower_method_call(
                 ty: Type::Shared(Box::new(elem_ty)),
                 kind: TExprKind::StaticCall {
                     type_prefix: format!("{}jet_std::JetShared::<{}>", cx.root_prefix, elem_rust),
+                    owner_type: None,
                     method_rust: "new".to_string(),
                     args: vec![TCallArg {
                         value: arg_t,
@@ -2808,6 +2823,14 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::StaticCall {
                 // The AST path uses `cx.type_prefix(type_name)` = `user_<T>`.
                 type_prefix: cx.type_prefix(&type_name),
+                owner_type: Some(if type_args.is_empty() {
+                    Type::Named(type_name.clone())
+                } else {
+                    Type::Apply {
+                        name: type_name.clone(),
+                        args: type_args.to_vec(),
+                    }
+                }),
                 method_rust: mangle(method),
                 args: targs,
             },
@@ -2878,12 +2901,14 @@ pub(crate) fn lower_method_call(
     // rarely load-bearing in emit (a binding carries sema's `b.ty`; arithmetic on a
     // method result doesn't trap — matching the AST `expr_jet_ty`/`operand_is_integer`),
     // but the TIR keeps it total per the design principle.
-    let ret_ty = cx
-        .method_rets
-        .get(&(ty_name.clone(), method.to_string()))
+    let ret_ty = resolved_ret
         .cloned()
-        .flatten()
-        .or_else(|| resolved_ret.cloned())
+        .or_else(|| {
+            cx.method_rets
+                .get(&(ty_name.clone(), method.to_string()))
+                .cloned()
+                .flatten()
+        })
         .unwrap_or_else(unit_type);
     TExpr {
         ty: ret_ty,

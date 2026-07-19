@@ -107,8 +107,11 @@ fn substitute_expr(
         Expr::OptField { base, .. } => substitute_expr(base, types, values),
         Expr::MethodCall {
             receiver,
+            method,
+            method_span,
             type_args,
             args,
+            recv_type,
             resolved_ret,
             ..
         } => {
@@ -126,6 +129,33 @@ fn substitute_expr(
             }
             args.iter_mut()
                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
+            let primitive = recv_type
+                .as_ref()
+                .and_then(|name| types.get(name))
+                .is_some_and(|ty| {
+                    matches!(
+                        ty,
+                        Type::Int | Type::Float | Type::Bool | Type::Char | Type::String
+                    )
+                });
+            let op = match method.as_str() {
+                "add" => Some(crate::AST::BinOp::Add),
+                "sub" => Some(crate::AST::BinOp::Sub),
+                "mul" => Some(crate::AST::BinOp::Mul),
+                "div" => Some(crate::AST::BinOp::Div),
+                "equal" => Some(crate::AST::BinOp::Eq),
+                _ => None,
+            };
+            if primitive && args.len() == 1 {
+                if let Some(op) = op {
+                    *expr = Expr::Binary(
+                        op,
+                        receiver.clone(),
+                        Box::new(args[0].expr.clone()),
+                        *method_span,
+                    );
+                }
+            }
         }
         Expr::StructLit {
             type_name,
@@ -413,6 +443,22 @@ fn specialize_func(
         *ret = specialize_module_type(ret, &types, &values);
     }
     substitute_stmts(&mut func.body, &types, &values);
+    func
+}
+
+pub fn specialize_function_types(mut func: Func, types: &HashMap<String, Type>) -> Func {
+    let values = HashMap::new();
+    substitute_meta(&mut func.meta, types, &values);
+    for param in &mut func.params {
+        param.ty = specialize_module_type(&param.ty, types, &values);
+        if let Some(default) = &mut param.default {
+            substitute_expr(default, types, &values);
+        }
+    }
+    if let Some(ret) = &mut func.return_type {
+        *ret = specialize_module_type(ret, types, &values);
+    }
+    substitute_stmts(&mut func.body, types, &values);
     func
 }
 

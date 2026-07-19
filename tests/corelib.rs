@@ -7459,7 +7459,7 @@ derive T.TypeName {
     info :: T.reflect()
     name :: info.name
     param :: info.type_params[0].name
-    emit("impl $name {{ fn get_value(self) -> $param {{ return self.value }} fn type_name(self) -> String {{ return \"$name\" }} }}")
+    emit("impl $name {{ fn get_value(self) -> $param {{ return ~self.value }} fn type_name(self) -> String {{ return \"$name\" }} }}")
 }
 
 @TypeName
@@ -7490,6 +7490,29 @@ fn run() {
         other => panic!("generic user derive did not run in default dev: {other:?}"),
     }
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// R11 also means generated code gets ordinary semantic rejection. A derive
+/// cannot smuggle a non-duplicable function value through explicit `copy`.
+#[test]
+fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
+    let src = r#"
+derive T.CopyCallback {
+    info :: T.reflect()
+    name :: info.name
+    emit("impl $name {{ fn duplicate(self) -> fn(Int) -> Int {{ return ~self.callback }} }}")
+}
+
+@CopyCallback
+struct Handler { callback: fn(Int) -> Int }
+
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("generated function copy must be rejected");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0211"),
+        "expected generated code to re-enter cloneability checking: {diags:?}"
+    );
 }
 
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in

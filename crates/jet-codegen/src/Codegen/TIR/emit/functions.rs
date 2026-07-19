@@ -17,7 +17,7 @@ use crate::Codegen::TIR::TStmt;
 pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
     match &tir.kind {
         TFuncKind::TopLevel => emit_tir_toplevel(tir, cx, out),
-        TFuncKind::Method { self_conv } => emit_tir_method(tir, *self_conv, cx, out),
+        TFuncKind::Method { self_conv, .. } => emit_tir_method(tir, *self_conv, cx, out),
         TFuncKind::TraitMethod {
             is_unsafe,
             self_conv,

@@ -144,6 +144,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         &extern_funcs,
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+    let type_shapes = collect_type_shapes(&module.items);
     let mut funcs = Vec::new();
     let entry_name = module
         .items
@@ -174,33 +175,106 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 funcs.push(lowered);
             }
             Item::Struct(s) => {
-                if !s.type_params.is_empty() {
-                    continue;
-                }
-                for m in &s.methods {
-                    if !tir_covers_method(m, &s.name, &cx) {
-                        continue;
+                if s.type_params.is_empty() {
+                    for m in &s.methods {
+                        if !tir_covers_method(m, &s.name, &cx) {
+                            continue;
+                        }
+                        let mut lowered = lower_method(m, &s.name, &cx);
+                        lowered.name = format!("{}::{}", s.name, m.name);
+                        funcs.push(lowered);
                     }
-                    let mut lowered = lower_method(m, &s.name, &cx);
-                    lowered.name = format!("{}::{}", s.name, m.name);
-                    funcs.push(lowered);
+                } else {
+                    for owner_ty in type_shapes.concrete_apps(&s.name) {
+                        let Type::Apply { args, .. } = &owner_ty else {
+                            continue;
+                        };
+                        let subst = s
+                            .type_params
+                            .iter()
+                            .zip(args)
+                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                            .collect();
+                        for m in &s.methods {
+                            let specialized =
+                                crate::Sema::specialize_function_types(m.clone(), &subst);
+                            if !specialized.type_params.is_empty() {
+                                continue;
+                            }
+                            if !tir_covers_method(&specialized, &s.name, &cx) {
+                                continue;
+                            }
+                            let mut lowered = lower_method_for_owner(
+                                &specialized,
+                                &s.name,
+                                owner_ty.clone(),
+                                &cx,
+                            );
+                            lowered.name = format!("{}::{}", owner_ty.name(), m.name);
+                            funcs.push(lowered);
+                        }
+                    }
                 }
             }
             Item::Impl(imp) => {
-                for method in &imp.methods {
-                    let mut lowered = if let Some(trait_name) = &imp.trait_name {
-                        if !tir_covers_trait_method(method, &imp.type_name, &cx, trait_name) {
-                            continue;
+                let owner_params = module
+                    .items
+                    .iter()
+                    .find_map(|item| match item {
+                        Item::Struct(s) if s.name == imp.type_name => {
+                            Some(s.type_params.as_slice())
                         }
-                        lower_trait_method(method, &imp.type_name, &cx, trait_name)
-                    } else {
-                        if !tir_covers_method(method, &imp.type_name, &cx) {
-                            continue;
-                        }
-                        lower_method(method, &imp.type_name, &cx)
+                        Item::Enum(e) if e.name == imp.type_name => Some(e.type_params.as_slice()),
+                        _ => None,
+                    })
+                    .unwrap_or(&[]);
+                let owners = if imp.trait_name.is_none() && !owner_params.is_empty() {
+                    type_shapes.concrete_apps(&imp.type_name)
+                } else {
+                    vec![Type::Named(imp.type_name.clone())]
+                };
+                for owner_ty in owners {
+                    let subst = match &owner_ty {
+                        Type::Apply { args, .. } => owner_params
+                            .iter()
+                            .zip(args)
+                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                            .collect(),
+                        _ => std::collections::HashMap::new(),
                     };
-                    lowered.name = format!("{}::{}", imp.type_name, method.name);
-                    funcs.push(lowered);
+                    for method in &imp.methods {
+                        let specialized = if subst.is_empty() {
+                            method.clone()
+                        } else {
+                            crate::Sema::specialize_function_types(method.clone(), &subst)
+                        };
+                        if !specialized.type_params.is_empty() {
+                            continue;
+                        }
+                        let mut lowered = if let Some(trait_name) = &imp.trait_name {
+                            if !tir_covers_trait_method(
+                                &specialized,
+                                &imp.type_name,
+                                &cx,
+                                trait_name,
+                            ) {
+                                continue;
+                            }
+                            lower_trait_method(&specialized, &imp.type_name, &cx, trait_name)
+                        } else {
+                            if !tir_covers_method(&specialized, &imp.type_name, &cx) {
+                                continue;
+                            }
+                            lower_method_for_owner(
+                                &specialized,
+                                &imp.type_name,
+                                owner_ty.clone(),
+                                &cx,
+                            )
+                        };
+                        lowered.name = format!("{}::{}", owner_ty.name(), method.name);
+                        funcs.push(lowered);
+                    }
                 }
             }
             Item::CodeModule(cm) => {
@@ -280,7 +354,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let mut int_constants = std::collections::HashMap::new();
     for item in &module.items {
         match item {
-            Item::Struct(s) if s.type_params.is_empty() => {
+            Item::Struct(s) => {
                 struct_fields.insert(
                     s.name.clone(),
                     s.fields
@@ -367,7 +441,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
-    for (_, fields) in collect_tuple_shapes(&module.items) {
+    for (_, fields) in type_shapes.tuples {
         let tuple_ty = Type::Tuple(
             fields
                 .iter()
@@ -579,7 +653,10 @@ pub enum TFuncKind {
     /// convention for an instance method (`Read`→`&self`, `Mutate`→`&mut self`,
     /// `Move`→`self`), or `None` for a STATIC (associated) method (no `self`
     /// parameter). The method name is mangled (`user_<name>`) and emitted with `pub`.
-    Method { self_conv: Option<AccessConvention> },
+    Method {
+        self_conv: Option<AccessConvention>,
+        owner_type: Type,
+    },
     /// c109 Phase 12: a trait-impl method inside `impl Trait for user_<T> { … }` (the
     /// caller `emit_trait_impl`/`emit_external_trait_impl` opened the block). Distinct
     /// from an inherent `Method`: the method name is BARE (the trait owns it — no
@@ -1529,6 +1606,7 @@ pub enum TExprKind {
     /// method name. Mirrors the AST type-name dispatch (Expression.rs ~L1644).
     StaticCall {
         type_prefix: String,
+        owner_type: Option<Type>,
         method_rust: String,
         args: Vec<TCallArg>,
     },

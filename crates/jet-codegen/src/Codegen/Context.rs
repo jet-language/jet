@@ -176,6 +176,9 @@ pub(crate) struct Cx {
     /// `build_cx_items` from `StructDef.type_params`. Lets `struct_is_generic` and
     /// field-type checks recognize multi-char type params (`Kind`, `Elem`, …).
     pub(crate) struct_type_params: HashMap<String, HashSet<String>>,
+    /// The same parameters in declaration order, for substituting a concrete
+    /// `Struct<A, B>` receiver into its declared field types.
+    pub(crate) struct_type_param_order: HashMap<String, Vec<String>>,
     /// c148: type-parameter names for the function currently being emitted. Set
     /// from `f.type_params` at the start of `emit_func` so `rust_type` and
     /// `rust_param_type` can recognize multi-char params without the single-letter
@@ -1954,6 +1957,7 @@ pub(crate) fn build_cx_items(
         index_hooks: HashMap::new(),
         current_fn: std::cell::RefCell::new(String::new()),
         struct_type_params: HashMap::new(),
+        struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
         variadic_bound_fns: HashMap::new(),
@@ -2074,6 +2078,10 @@ pub(crate) fn build_cx_items(
                 // c148: record the declared type params so multi-char names are
                 // recognized everywhere (struct_is_generic, field_type_cloneable, …).
                 cx.struct_type_params.insert(
+                    s.name.clone(),
+                    s.type_params.iter().map(|p| p.name.clone()).collect(),
+                );
+                cx.struct_type_param_order.insert(
                     s.name.clone(),
                     s.type_params.iter().map(|p| p.name.clone()).collect(),
                 );

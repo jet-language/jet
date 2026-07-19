@@ -621,6 +621,10 @@ fn simple_record_field_place(place: &str) -> bool {
     let Some((base, field)) = place.strip_prefix('(').and_then(|p| p.split_once(").")) else {
         return false;
     };
+    let base = base
+        .strip_prefix("(*")
+        .and_then(|base| base.strip_suffix(')'))
+        .unwrap_or(base);
     base.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
         && field
             .chars()

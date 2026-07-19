@@ -287,6 +287,13 @@ extern "C" fn jet_jit_str_len(id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_str_clone(id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        rt.heap.alloc_string(text)
+    })
+}
+
 extern "C" fn jet_jit_str_trim(id: i64) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt
@@ -761,6 +768,7 @@ pub(crate) struct HostFns {
     pub(crate) str_push_char: FuncId,
     pub(crate) str_push_str: FuncId,
     pub(crate) str_eq: FuncId,
+    pub(crate) str_clone: FuncId,
     pub(crate) str_len: FuncId,
     pub(crate) str_trim: FuncId,
     pub(crate) str_to_upper: FuncId,
@@ -832,6 +840,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
     builder.symbol("jet_jit_str_eq", jet_jit_str_eq as *const u8);
+    builder.symbol("jet_jit_str_clone", jet_jit_str_clone as *const u8);
     builder.symbol("jet_jit_str_len", jet_jit_str_len as *const u8);
     builder.symbol("jet_jit_str_trim", jet_jit_str_trim as *const u8);
     builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
@@ -1116,6 +1125,7 @@ fn declare_host_fns(
         str_push_char: import("jet_jit_str_push_char", &sig_str_push_char)?,
         str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,
         str_eq: import("jet_jit_str_eq", &sig_str_eq)?,
+        str_clone: import("jet_jit_str_clone", &sig_str_unary_i64)?,
         str_len: import("jet_jit_str_len", &sig_str_unary_i64)?,
         str_trim: import("jet_jit_str_trim", &sig_str_unary_i64)?,
         str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,

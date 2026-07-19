@@ -1020,7 +1020,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             receiver,
             method,
             method_span,
-            type_args: _,
+            type_args,
             args,
             recv_type,
             resolved_ret,
@@ -1031,6 +1031,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 receiver,
                 method,
                 *method_span,
+                type_args,
                 args,
                 recv_type,
                 resolved_ret.as_ref(),
@@ -1377,7 +1378,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
             let ty = match as_trait {
                 Some(t) => Type::TraitObject(vec![t.clone()]),
-                None => Type::Named(type_name.clone()),
+                None if type_args.is_empty() => Type::Named(type_name.clone()),
+                None => Type::Apply {
+                    name: type_name.clone(),
+                    args: type_args.clone(),
+                },
             };
             TExpr {
                 ty,

@@ -150,11 +150,16 @@ fn lower_function(
 
         let param_vals = b.block_params(entry).to_vec();
         let mut param_idx = 0usize;
-        let method_struct = match &tir.kind {
-            TFuncKind::Method { .. } | TFuncKind::TraitMethod { .. } => {
-                tir.name.split_once("::").map(|(t, _)| t.to_string())
+        let (method_struct, self_type) = match &tir.kind {
+            TFuncKind::Method { owner_type, .. } => (
+                owner_type.base_name().map(str::to_string),
+                Some(owner_type.clone()),
+            ),
+            TFuncKind::TraitMethod { .. } => {
+                let owner = tir.name.split_once("::").map(|(t, _)| t.to_string());
+                (owner.clone(), owner.map(Type::Named))
             }
-            _ => None,
+            _ => (None, None),
         };
         let mut lctx = LowerCtx {
             b: &mut b,
@@ -179,9 +184,8 @@ fn lower_function(
             let self_var = lctx.fresh_var(types::I64);
             lctx.b.def_var(self_var, param_vals[0]);
             lctx.vars.insert("self".to_string(), self_var);
-            if let Some(struct_name) = &lctx.method_struct {
-                lctx.var_tys
-                    .insert("self".to_string(), Type::Named(struct_name.clone()));
+            if let Some(owner_type) = self_type {
+                lctx.var_tys.insert("self".to_string(), owner_type);
             }
             param_idx = 1;
         }
