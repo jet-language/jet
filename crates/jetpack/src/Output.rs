@@ -37,8 +37,13 @@ impl PlanMark {
 impl Theme {
     /// Resolve the shared explicit > NO_COLOR > FORCE_COLOR > TTY policy.
     pub fn resolve(choice: ColorChoice) -> Theme {
+        Self::resolve_for(choice, std::io::stderr().is_terminal())
+    }
+
+    /// Resolve against the stream that will actually receive the bytes.
+    pub fn resolve_for(choice: ColorChoice, is_terminal: bool) -> Theme {
         Theme {
-            color: choice.resolve(std::io::stderr().is_terminal()),
+            color: choice.resolve(is_terminal),
         }
     }
 
@@ -375,11 +380,12 @@ impl Theme {
         let flag = stop.clone();
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
         let msg = msg.to_string();
+        let accent = SharedTheme::ACCENT_SGR;
         let handle = std::thread::spawn(move || {
             const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let mut i = 0usize;
             while !flag.load(Ordering::Relaxed) {
-                eprint!("\r{pad}\x1b[36m{}\x1b[0m {msg}", FRAMES[i % FRAMES.len()]);
+                eprint!("\r{pad}\x1b[{accent}m{}\x1b[0m {msg}", FRAMES[i % FRAMES.len()]);
                 use std::io::Write;
                 let _ = std::io::stderr().flush();
                 i += 1;

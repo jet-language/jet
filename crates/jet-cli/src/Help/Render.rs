@@ -116,10 +116,12 @@ fn selected_row(width: usize, text: &str, selected: bool, color: bool) -> String
     let theme = Theme::new(color);
     if selected && color {
         let inner = width.saturating_sub(2);
+        let reapply = format!("\x1b[0m\x1b[{}m", Theme::INVERT_SGR);
+        let text = pad(text, inner).replace("\x1b[0m", &reapply);
         format!(
             "{}{}{}",
             theme.border("│"),
-            theme.invert(&pad(text, inner)),
+            theme.invert(&text),
             theme.border("│")
         )
     } else if color {
@@ -642,6 +644,29 @@ mod tests {
         assert!(code_out.contains("\x1b[31mE0102\x1b[0m"), "{code_out}");
         let empty = render_result_list(&[], "definitely-not-a-command", 64, true, None);
         assert!(empty.contains("\x1b[33mno matches\x1b[0m"), "{empty}");
+    }
+
+    #[test]
+    fn selected_result_roles_reapply_invert_after_inner_resets() {
+        let index = build_index();
+        let invert = format!("\x1b[{}m", Theme::INVERT_SGR);
+
+        let code = super::super::search(&index, "E0102");
+        let code_out = render_result_list(&code, "E0102", 64, true, Some(0));
+        assert!(
+            code_out.contains(&format!("{invert}\x1b[31mE0102\x1b[0m{invert}")),
+            "{code_out}"
+        );
+
+        let command = super::super::search(&index, "run");
+        let command_out = render_result_list(&command, "run", 64, true, Some(0));
+        assert!(
+            command_out.contains(&format!(
+                "{invert}jet \x1b[{}mrun\x1b[0m{invert}",
+                Theme::ACCENT_SGR
+            )),
+            "{command_out}"
+        );
     }
 
     #[test]

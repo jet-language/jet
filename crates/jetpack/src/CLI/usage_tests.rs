@@ -1,10 +1,5 @@
 use crate::Syntax;
-use jet_foundation::Terminal::{ColorChoice, Theme};
-use std::io::IsTerminal;
-
-pub(super) fn usage() -> String {
-    usage_with_color(ColorChoice::Auto.resolve(std::io::stdout().is_terminal()))
-}
+use jet_foundation::Terminal::Theme;
 
 pub(super) fn usage_with_color(color: bool) -> String {
     let bin = Syntax::JETPACK_BINARY_NAME;
@@ -140,20 +135,21 @@ mod tests {
     use super::super::run_enter_dev::{foreign_flake_path, project_declares_env};
     use super::*;
     use crate::RuntimePolicy;
+    use jet_foundation::Terminal::ColorChoice;
     use std::path::PathBuf;
 
     #[test]
     fn doctor_is_in_canonical_route_registry_and_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&"doctor"));
-        assert!(usage().contains("jetpack doctor [--online]"));
+        assert!(usage_with_color(false).contains("jetpack doctor [--online]"));
         assert_eq!(RuntimePolicy::verb_policy("doctor", &[]).verb, "doctor");
     }
 
     #[test]
     fn tool_is_in_canonical_route_registry_and_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&Syntax::TOOL_SUBCOMMAND));
-        assert!(usage().contains("tool run"));
-        assert!(usage().contains("tool install"));
+        assert!(usage_with_color(false).contains("tool run"));
+        assert!(usage_with_color(false).contains("tool install"));
         assert_eq!(
             RuntimePolicy::verb_policy(Syntax::TOOL_SUBCOMMAND, &[]).verb,
             Syntax::TOOL_SUBCOMMAND

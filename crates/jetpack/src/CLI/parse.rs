@@ -9,11 +9,11 @@ use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
 };
-use super::usage_tests::usage;
 use crate::Output::Theme;
 use crate::Store;
 use crate::Syntax;
 use jet_foundation::Terminal::ColorChoice;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 /// Parsed global flags shared by every command.
@@ -252,16 +252,22 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
 /// Entry point. Returns a process exit code.
 pub fn main(args: Vec<String>) -> i32 {
     let Some((verb, rest)) = args.split_first() else {
-        eprintln!("{}", usage());
+        let theme = Theme::resolve(ColorChoice::Auto);
+        eprintln!("{}", super::usage_tests::usage_with_color(theme.color));
         return 2;
     };
     let parsed = parse_args_for(verb, rest);
+    let color = if parsed.flags.json {
+        ColorChoice::Never
+    } else {
+        parsed.flags.color
+    };
     if let Some(diag) = crate::MemberSelect::reject_filter_dsl(rest) {
-        let theme = Theme::resolve(parsed.flags.color);
+        let theme = Theme::resolve(color);
         theme.error_coded(&diag.code, &diag.what, &diag.why, &diag.fix);
         return 2;
     }
-    let theme = Theme::resolve(parsed.flags.color);
+    let theme = Theme::resolve(color);
     // Doctor must observe state without repairing or migrating it.
     if verb != "doctor" {
         if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {
@@ -317,6 +323,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         v if v == Syntax::TOOL_SUBCOMMAND => cmd_tool(&theme, &parsed),
         "help" | "--help" | "-h" => {
+            let theme = Theme::resolve_for(color, std::io::stdout().is_terminal());
             println!("{}", super::usage_tests::usage_with_color(theme.color));
             0
         }
