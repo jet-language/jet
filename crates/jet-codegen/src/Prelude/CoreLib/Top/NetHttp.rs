@@ -567,6 +567,24 @@ fn jet_net_unix_scheduler_wait(
     }
 }
 
+fn jet_net_tcp_listener_scheduler_wait(
+    listener: &std::net::TcpListener,
+    operation: &str,
+) -> Result<(), JetNetError> {
+    match jet_scheduler_wait_without_unwind(|| {
+        jet_scheduler_tcp_listener_io_wait(listener, operation)
+    }) {
+        JetSchedulerWait::Ready(()) => Ok(()),
+        JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
+            operation, None, None, format!("{} cancelled", operation), None,
+        ))),
+        JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
+        JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
+            operation, None, None, format!("{} scheduler wait failed: {}", operation, message), None,
+        ))),
+    }
+}
+
 #[cfg(unix)]
 fn jet_net_unix_listener_scheduler_wait(
     listener: &std::os::unix::net::UnixListener,
@@ -806,9 +824,11 @@ fn jet_net_socket_to_string(addr: &JetSocketAddr) -> String {
 }
 
 fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTcpListener, JetNetError> {
-    std::net::TcpListener::bind(addr.inner)
-        .map(|l| JetTcpListener { inner: l })
-        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))
+    let inner = std::net::TcpListener::bind(addr.inner)
+        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
+    inner.set_nonblocking(true)
+        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
+    Ok(JetTcpListener { inner })
 }
 
 fn jet_net_tcp_connect_addr(addr: &JetSocketAddr) -> Result<JetTcpStream, JetNetError> {
@@ -886,17 +906,23 @@ impl JetShow for JetHttpRouter {
 }
 
 fn jet_net_tcp_listen(addr: &String) -> Result<JetTcpListener, JetNetError> {
-    std::net::TcpListener::bind(addr.as_str())
-        .map(|l| JetTcpListener { inner: l })
-        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))
+    let inner = std::net::TcpListener::bind(addr.as_str())
+        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
+    inner.set_nonblocking(true)
+        .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
+    Ok(JetTcpListener { inner })
 }
 
 fn jet_net_tcp_accept(listener: &JetTcpListener) -> Result<JetTcpStream, JetNetError> {
-    listener
-        .inner
-        .accept()
-        .map_err(|e| jet_net_io_error("tcp accept", None, e))
-        .and_then(|(stream, _)| jet_net_tcp_stream(stream))
+    loop {
+        match listener.inner.accept() {
+            Ok((stream, _)) => return jet_net_tcp_stream(stream),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
+                jet_net_tcp_listener_scheduler_wait(&listener.inner, "tcp accept")?;
+            }
+            Err(error) => return Err(jet_net_io_error("tcp accept", None, error)),
+        }
+    }
 }
 
 fn jet_net_tcp_connect(addr: &String) -> Result<JetTcpStream, JetNetError> {
@@ -1049,21 +1075,17 @@ fn jet_net_tcp_ready(
     if stream.closed {
         return Err(jet_net_closed("tcp ready"));
     }
-    let explicit = jet_net_timeout(deadline_ms).map_err(|message| {
+    let _ = jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp ready", None, None, message, None))
     })?;
-    let ambient = jet_deadline_remaining_ms()
-        .filter(|ms| *ms >= 0)
-        .map(|ms| std::time::Duration::from_millis(ms as u64));
-    let budget = ambient.map_or(explicit, |duration| duration.min(explicit));
-    let deadline = std::time::Instant::now() + budget;
-    let result = loop {
+    let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+    loop {
         let readable = if matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite) {
             let mut byte = [0u8; 1];
             match stream.inner.peek(&mut byte) {
                 Ok(_) => true,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
-                Err(e) => break Err(jet_net_io_error("tcp ready", None, e)),
+                Err(e) => return Err(jet_net_io_error("tcp ready", None, e)),
             }
         } else { false };
         let writable = if matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite) {
@@ -1071,7 +1093,7 @@ fn jet_net_tcp_ready(
             match stream.inner.write(&[]) {
                 Ok(_) => true,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
-                Err(e) => break Err(jet_net_io_error("tcp ready", None, e)),
+                Err(e) => return Err(jet_net_io_error("tcp ready", None, e)),
             }
         } else { false };
         let satisfied = match interest {
@@ -1080,16 +1102,15 @@ fn jet_net_tcp_ready(
             JetNetReadyInterest::ReadWrite => readable || writable,
         };
         if satisfied {
-            break Ok(JetNetReady { readable, writable });
+            return Ok(JetNetReady { readable, writable });
         }
-        if std::time::Instant::now() >= deadline {
-            break Err(JetNetError::Timeout(jet_net_detail(
-                "tcp ready", None, None, "tcp readiness deadline expired".to_string(), None,
-            )));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    };
-    result
+        jet_net_scheduler_wait(
+            &stream.inner,
+            matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite),
+            matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite),
+            "tcp ready",
+        )?;
+    }
 }
 
 fn jet_net_ready_readable(ready: &JetNetReady) -> bool {

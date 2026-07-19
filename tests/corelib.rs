@@ -3400,6 +3400,99 @@ fn run() {
 }
 
 #[test]
+fn core_net_tcp_accept_and_ready_are_scheduler_interrupt_points() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_accept_ready_interrupts_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_accept_ready_interrupts",
+        r#"
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    cancelled_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
+    cancelled_address :: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
+    (accept_tx, accept_rx) :: tasks.channel<Int>()
+    cancelled_accept :: tasks.spawn(take(cancelled_listener, accept_tx) () => {
+        accept_tx.send(1)
+        if cancelled_listener.accept() == {
+            Ok(_) -> print("accept unexpectedly succeeded")
+            Err(error) -> print(net.error_message(error))
+        }
+    })
+    _accept_ready :: accept_rx.receive() ?? panic("accept ready")
+    time.sleep(10)
+    cancelled_accept.cancel()
+    time.sleep(10)
+    release_accept :: net.tcp_connect(cancelled_address) ?? panic("release accept")
+    release_accept.close() ?? panic("release close")
+    cancelled_accept.join()
+
+    ready_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
+    ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
+    ready_client :: net.tcp_connect(ready_address) ?? panic("ready connect")
+    ready_server := net.tcp_accept(ready_listener) ?? panic("ready accept")
+    (wait_tx, wait_rx) :: tasks.channel<Int>()
+    ready_wait :: tasks.spawn(take(ready_server, wait_tx) () => {
+        wait_tx.send(1)
+        if net.tcp_ready(&ready_server, .Read, 1000) == {
+            Ok(_) -> print("ready unexpectedly succeeded")
+            Err(error) -> print(net.error_message(error))
+        }
+    })
+    _wait_ready :: wait_rx.receive() ?? panic("wait ready")
+    time.sleep(10)
+    ready_wait.cancel()
+    ready_wait.join()
+    ready_client.close() ?? panic("ready client close")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "tcp accept cancelled\ntcp ready cancelled\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_net_udp_loopback_preserves_datagram_truncation_metadata() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_udp_truncation_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_udp_truncation",
+        r#"
+use core.net as net
+
+fn run() {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("server bind")
+    client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
+    address :: net.udp_local_addr(server) ?? panic("server address")
+    sent :: net.udp_send_bytes_to(client, [0, 255, 1, 2, 3], address) ?? panic("send")
+    packet :: net.udp_receive(server, 3) ?? panic("receive")
+    print("{sent}:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "5:[0, 255, 1]:5:true\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_net_tcp_implements_nominal_io_reader_writer() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_net_io_contract_{}",

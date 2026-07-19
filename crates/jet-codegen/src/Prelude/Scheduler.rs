@@ -1266,6 +1266,7 @@ impl IoPoller {
 // One process-wide poller owns all raw-descriptor readiness registrations.
 #[cfg(unix)]
 enum JetRawIoHandle {
+    TcpListener(std::net::TcpListener),
     UnixStream(std::os::unix::net::UnixStream),
     UnixListener(std::os::unix::net::UnixListener),
     Udp(std::net::UdpSocket),
@@ -1276,6 +1277,7 @@ impl JetRawIoHandle {
     fn fd(&self) -> i32 {
         use std::os::fd::AsRawFd;
         match self {
+            JetRawIoHandle::TcpListener(handle) => handle.as_raw_fd(),
             JetRawIoHandle::UnixStream(handle) => handle.as_raw_fd(),
             JetRawIoHandle::UnixListener(handle) => handle.as_raw_fd(),
             JetRawIoHandle::Udp(handle) => handle.as_raw_fd(),
@@ -1431,6 +1433,25 @@ pub fn jet_scheduler_unix_stream_io_wait(
         .try_clone()
         .unwrap_or_else(|_| jet_scheduler_fatal("unix stream clone failed"));
     jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind);
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_tcp_listener_io_wait(
+    listener: &std::net::TcpListener,
+    wait_kind: &str,
+) {
+    let handle = listener
+        .try_clone()
+        .unwrap_or_else(|_| jet_scheduler_fatal("tcp listener clone failed"));
+    jet_scheduler_raw_io_wait(JetRawIoHandle::TcpListener(handle), true, false, wait_kind);
+}
+
+#[cfg(not(unix))]
+pub fn jet_scheduler_tcp_listener_io_wait(
+    _listener: &std::net::TcpListener,
+    _wait_kind: &str,
+) {
+    jet_scheduler_park_ms("tcp accept readiness", 5);
 }
 
 #[cfg(unix)]
