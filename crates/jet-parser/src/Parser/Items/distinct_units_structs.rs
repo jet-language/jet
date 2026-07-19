@@ -520,50 +520,50 @@ impl<'a> Parser<'a> {
         }
 
         fn unit_family_ratio(&mut self) -> Result<crate::AST::UnitRatio, Diagnostic> {
-            let negative = matches!(self.peek().kind, TokKind::Minus);
-            if negative {
+            let (numerator, numerator_span) = self.unit_family_integer("as conversion metadata")?;
+            let (denominator, error_span) = if matches!(self.peek().kind, TokKind::Slash) {
                 self.bump();
-            }
-            let token = self.bump();
-            let TokKind::Int(value, _) = token.kind else {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    "unit conversion metadata must be an exact integer or ratio".to_string(),
-                    "floating-point metadata would make package identity and conversion unstable".to_string(),
-                    "write an integer or `numerator/denominator`".to_string(),
-                    Some(token.span),
-                ));
-            };
-            let numerator = if negative {
-                -i128::from(value)
+                let (denominator, denominator_span) =
+                    self.unit_family_integer("as a ratio denominator")?;
+                (denominator, denominator_span)
             } else {
-                i128::from(value)
+                ("1".to_string(), numerator_span)
             };
-            let denominator = if matches!(self.peek().kind, TokKind::Slash) {
-                self.bump();
-                let token = self.bump();
-                let TokKind::Int(value, _) = token.kind else {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        "expected a ratio denominator".to_string(),
-                        "exact ratios have an integer denominator".to_string(),
-                        "write `numerator/denominator`".to_string(),
-                        Some(token.span),
-                    ));
-                };
-                i128::from(value)
-            } else {
-                1
-            };
-            crate::AST::UnitRatio::new(numerator, denominator).map_err(|reason| {
+            crate::AST::UnitRatio::parse_source(&numerator, &denominator).map_err(|reason| {
                 Diagnostic::error(
                     "E0003",
                     format!("invalid unit conversion ratio: {reason}"),
                     "unit conversion metadata must be a finite exact ratio".to_string(),
                     "use a nonzero integer denominator".to_string(),
-                    Some(token.span),
+                    Some(error_span),
                 )
             })
+        }
+
+        fn unit_family_integer(&mut self, expected: &str) -> Result<(String, Span), Diagnostic> {
+            let sign = if matches!(self.peek().kind, TokKind::Minus) {
+                Some(self.bump().span)
+            } else {
+                None
+            };
+            let token = self.bump();
+            let TokKind::Int(_, raw) = token.kind else {
+                let span = sign.map_or(token.span, |sign| Span::new(sign.start, token.span.end));
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected an exact integer {expected}"),
+                    "unit conversion metadata uses exact integer ratios, not floating point"
+                        .to_string(),
+                    "write an integer or `numerator/denominator`".to_string(),
+                    Some(span),
+                ));
+            };
+            let span = sign.map_or(token.span, |sign| Span::new(sign.start, token.span.end));
+            let mut source = raw;
+            if sign.is_some() {
+                source.insert(0, '-');
+            }
+            Ok((source, span))
         }
     
         // --- layout attribute (D-REPRC1) ----------------------------------------

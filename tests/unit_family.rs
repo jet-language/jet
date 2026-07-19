@@ -52,6 +52,36 @@ fn scaled_and_affine_metadata_is_exact_and_normalized() {
 }
 
 #[test]
+fn unit_metadata_uses_arbitrary_precision_signed_ratios() {
+    let src = r#"@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    huge(scale: -123_456_789_012_345_678_901_234_567_890/-10, offset: -0xA/-0b100)
+}"#;
+    let family = parse_family(src);
+    let huge = family
+        .members
+        .iter()
+        .find(|member| member.name == "huge")
+        .unwrap();
+    assert_eq!(huge.scale.to_string(), "12345678901234567890123456789");
+    assert_eq!(huge.offset.to_string(), "5/2");
+}
+
+#[test]
+fn zero_ratio_denominator_points_at_the_denominator() {
+    let src = "@UnitFamily(Length, base: meter) { meter broken(scale: 1/0) }";
+    let (tokens, lex) = jet::Lexer::lex(src);
+    assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
+    let diagnostics = jet::Parser::parse(&tokens).unwrap_err();
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.what.contains("denominator is zero"))
+        .expect("zero-denominator diagnostic");
+    let zero = src.rfind('0').unwrap();
+    assert_eq!(diagnostic.span, Some(jet::Diagnostics::Span::new(zero, zero + 1)));
+}
+
+#[test]
 fn affine_family_mints_point_and_delta_types_only() {
     let family = parse_family(
         r#"@UnitFamily(Temperature, base: kelvin) {

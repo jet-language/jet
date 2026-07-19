@@ -14,6 +14,7 @@ use super::Tokens::{is_comment, TokKind, Token};
 /// The grammar stays terminator-based; users never type `;`.
 pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let (mut toks, mut diags) = lex_raw(src);
+    retain_non_metadata_integer_errors(&toks, &mut diags);
     insert_terminators(src, &mut toks, &mut diags);
     (toks, diags)
 }
@@ -22,8 +23,68 @@ pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
 /// namespace. User source must always go through [`lex`].
 pub fn lex_generated(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let (mut toks, mut diags) = lex_raw_generated(src);
+    retain_non_metadata_integer_errors(&toks, &mut diags);
     insert_terminators(src, &mut toks, &mut diags);
     (toks, diags)
+}
+
+/// `@UnitFamily` conversion metadata is parsed as arbitrary-precision source
+/// integers. Keep ordinary E0007 integer limits everywhere else.
+fn retain_non_metadata_integer_errors(toks: &[Token], diags: &mut Vec<Diagnostic>) {
+    let significant: Vec<_> = toks
+        .iter()
+        .filter(|token| !is_comment(&token.kind))
+        .collect();
+    let mut exact_spans = Vec::new();
+    let mut i = 0;
+    while i + 2 < significant.len() {
+        if !matches!(significant[i].kind, TokKind::At)
+            || !matches!(&significant[i + 1].kind, TokKind::Ident(name) if name == crate::Syntax::ATTR_UNIT_FAMILY)
+            || !matches!(significant[i + 2].kind, TokKind::LParen)
+        {
+            i += 1;
+            continue;
+        }
+
+        let mut header_depth = 1usize;
+        i += 3;
+        while i < significant.len() && header_depth != 0 {
+            match significant[i].kind {
+                TokKind::LParen => header_depth += 1,
+                TokKind::RParen => header_depth -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        if i >= significant.len() || !matches!(significant[i].kind, TokKind::LBrace) {
+            continue;
+        }
+
+        let mut body_depth = 1usize;
+        let mut metadata_depth = 0usize;
+        i += 1;
+        while i < significant.len() && body_depth != 0 {
+            match significant[i].kind {
+                TokKind::LBrace => body_depth += 1,
+                TokKind::RBrace => body_depth -= 1,
+                TokKind::LParen if body_depth == 1 => metadata_depth += 1,
+                TokKind::RParen if body_depth == 1 => {
+                    metadata_depth = metadata_depth.saturating_sub(1)
+                }
+                TokKind::Int(..) if body_depth == 1 && metadata_depth != 0 => {
+                    exact_spans.push(significant[i].span)
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    diags.retain(|diagnostic| {
+        diagnostic.code != "E0007"
+            || diagnostic
+                .span
+                .map_or(true, |span| !exact_spans.contains(&span))
+    });
 }
 
 /// True when a token of this kind ends a statement, so a following line break

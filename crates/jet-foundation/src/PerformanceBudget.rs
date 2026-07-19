@@ -212,6 +212,39 @@ impl BigInt {
         }
         Ok(Self { sign, limbs })
     }
+    pub fn parse_source(text: &str) -> Result<Self, String> {
+        let (negative, unsigned) = match text.strip_prefix('-') {
+            Some(value) => (true, value),
+            None => (false, text),
+        };
+        let (radix, digits) = if let Some(value) = unsigned.strip_prefix("0x") {
+            (16, value)
+        } else if let Some(value) = unsigned.strip_prefix("0o") {
+            (8, value)
+        } else if let Some(value) = unsigned.strip_prefix("0b") {
+            (2, value)
+        } else {
+            (10, unsigned)
+        };
+        let mut value = Self::zero();
+        let mut saw_digit = false;
+        for ch in digits
+            .chars()
+            .filter(|ch| *ch != crate::Syntax::DIGIT_SEPARATOR)
+        {
+            let digit = ch
+                .to_digit(radix)
+                .ok_or_else(|| format!("invalid base-{radix} integer `{text}`"))?;
+            value = value
+                .mul_small(radix)
+                .add(&Self::from_i128(i128::from(digit)));
+            saw_digit = true;
+        }
+        if !saw_digit {
+            return Err(format!("invalid integer `{text}`"));
+        }
+        Ok(if negative { value.neg() } else { value })
+    }
     pub fn is_zero(&self) -> bool { self.sign == 0 }
     pub fn is_negative(&self) -> bool { self.sign < 0 }
     pub fn abs(&self) -> Self { let mut out = self.clone(); if out.sign < 0 { out.sign = 1; } out }
@@ -266,6 +299,9 @@ impl Rational {
         Self::from_bigints(BigInt::from_i128(num), BigInt::from_i128(den))
     }
     pub fn parse(num:&str,den:&str)->Result<Self,String>{Self::from_bigints(BigInt::parse(num)?,BigInt::parse(den)?)}
+    pub fn parse_source(num: &str, den: &str) -> Result<Self, String> {
+        Self::from_bigints(BigInt::parse_source(num)?, BigInt::parse_source(den)?)
+    }
     pub fn from_bigints(mut num:BigInt,mut den:BigInt)->Result<Self,String>{if den.is_zero(){return Err("rational denominator is zero".into());}if den.is_negative(){num=num.neg();den=den.neg();}if num.is_zero(){return Ok(Self::zero());}let divisor=BigInt::gcd(num.clone(),den.clone())?;Ok(Self{num:num.exact_div(&divisor)?,den:den.exact_div(&divisor)?})}
     pub fn zero()->Self{Self{num:BigInt::zero(),den:BigInt::one()}}
     pub fn integer(value: i128) -> Self { Self { num: BigInt::from_i128(value), den: BigInt::one() } }

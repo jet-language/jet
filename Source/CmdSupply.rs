@@ -187,7 +187,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // registry we cannot fetch the old version; we report that the check is advisory
     // (would fire on an actual publish to the registry which has the old version).
     // We still extract the current API so the output shows what would be published.
-    let current_api = jet::Publish::extract_public_api("", &entry_str);
+    let current_api = jet::Publish::extract_public_api_for_package("", &entry_str, name);
     println!("  public API surface: {} items", current_api.len());
     for item in &current_api {
         println!("    {} {}", item.kind, item.name);

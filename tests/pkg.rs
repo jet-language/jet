@@ -2662,13 +2662,17 @@ pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
 
 #[test]
 fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
-    use jet::Publish::{diff_public_api, extract_public_api, ApiItem};
+    use jet::Publish::{diff_public_api, ApiItem};
 
     let dir = tmp_dir("physical_unit_api_freeze");
-    let current = "@UnitFamily(Length) { meter }\npub fn distance() -> Meter { return 1meter }\n";
+    let current = "@UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0)? }\n";
     let current_path = dir.join("current.jet");
     fs::write(&current_path, current).unwrap();
-    let current_api = extract_public_api(current, current_path.to_str().unwrap());
+    let current_api = jet::Publish::extract_public_api_for_package(
+        current,
+        current_path.to_str().unwrap(),
+        "physics",
+    );
     let mut bundle = jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true)
         .unwrap();
     let (_, facts) = jet::Sema::check_bundle_with_effect_facts(
@@ -2695,11 +2699,39 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         .collect();
     assert!(diff_public_api(&frozen_api, &current_api).is_empty());
 
-    let changed = "@UnitFamily(Time) { meter }\npub fn distance() -> Meter { return 1meter }\n";
+    let changed = "@UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0)? }\n";
     let changed_path = dir.join("changed.jet");
     fs::write(&changed_path, changed).unwrap();
-    let changed_api = extract_public_api(changed, changed_path.to_str().unwrap());
+    let changed_api = jet::Publish::extract_public_api_for_package(
+        changed,
+        changed_path.to_str().unwrap(),
+        "physics",
+    );
     assert_eq!(diff_public_api(&current_api, &changed_api).len(), 1);
+    let foreign_api = jet::Publish::extract_public_api_for_package(
+        current,
+        current_path.to_str().unwrap(),
+        "geometry",
+    );
+    assert_eq!(diff_public_api(&current_api, &foreign_api).len(), 1);
+
+    let affine = "@UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let affine_path = dir.join("affine.jet");
+    fs::write(&affine_path, affine).unwrap();
+    let affine_api = jet::Publish::extract_public_api_for_package(
+        affine,
+        affine_path.to_str().unwrap(),
+        "physics",
+    );
+    let shifted = "@UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let shifted_path = dir.join("shifted.jet");
+    fs::write(&shifted_path, shifted).unwrap();
+    let shifted_api = jet::Publish::extract_public_api_for_package(
+        shifted,
+        shifted_path.to_str().unwrap(),
+        "physics",
+    );
+    assert_eq!(diff_public_api(&affine_api, &shifted_api).len(), 1);
     let _ = fs::remove_dir_all(&dir);
 }
 

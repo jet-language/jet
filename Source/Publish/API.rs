@@ -20,6 +20,22 @@ pub struct ApiItem {
 /// Extract the public API surface from a parsed Jet source file.
 /// Includes `pub` items at file scope and inside inline code modules.
 pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
+    let package = std::path::Path::new(file)
+        .parent()
+        .and_then(|parent| {
+            parent
+                .ancestors()
+                .find_map(crate::PackageManifest::PackManifest::load)
+        })
+        .and_then(Result::ok)
+        .map(|manifest| manifest.package.name)
+        .unwrap_or_else(|| "package".to_string());
+    extract_public_api_for_package(src, file, &package)
+}
+
+/// Extract with the canonical package provenance already resolved by the
+/// publish caller. API freeze and SemVer must receive this same identity.
+pub fn extract_public_api_for_package(src: &str, file: &str, package: &str) -> Vec<ApiItem> {
     use crate::Loader;
 
     let mut bundle = match Loader::load_entry_with_overlay(file, None, true) {
@@ -36,7 +52,7 @@ pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
     // Entry file items (the main module).
     let entry = &bundle.modules[bundle.entry];
     let mut dimensions = crate::Sema::ApiFreeze::ApiUnitDimensions::new();
-    crate::Sema::ApiFreeze::collect_api_unit_dimensions(&entry.items, &entry.alias, &mut dimensions);
+    crate::Sema::ApiFreeze::collect_api_unit_dimensions(&entry.items, package, &mut dimensions);
     collect_public_api(
         &entry.items,
         &entry.alias,
