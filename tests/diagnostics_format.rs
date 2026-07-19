@@ -10,7 +10,6 @@
 //!
 //! Run: `cargo test --test diagnostics_format`
 
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -18,20 +17,33 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-// TODO-ratchet: claude-main (card #465) is mid-editing E9999/E1291 table rows
-// concurrently with this card. Exclude them here rather than fight a moving
-// target; remove this exclusion once both codes have settled.
-fn excluded_codes() -> BTreeSet<&'static str> {
-    BTreeSet::from(["E9999", "E1291"])
-}
-
 #[test]
 fn every_what_why_fix_table_row_is_complete() {
     let root = root();
     let text = fs::read_to_string(root.join("docs/spec/diagnostics.md"))
         .expect("docs/spec/diagnostics.md missing");
+    let violations = diagnostic_body_violations(&text);
+    assert!(
+        violations.is_empty(),
+        "docs/spec/diagnostics.md has malformed or incomplete What/Why/Fix table rows \
+         (I4 — every diagnostic needs what/why/fix, not just a code):\n{}",
+        violations.join("\n")
+    );
+}
 
-    let excluded = excluded_codes();
+#[test]
+fn diagnostic_body_validator_rejects_malformed_rows() {
+    let malformed = "| Code | What | Why | Fix |\n\
+                     | --- | --- | --- | --- |\n\
+                     | E0001 | what | why | |\n\
+                     | E0002 | what | why |\n";
+    let violations = diagnostic_body_violations(malformed);
+    assert_eq!(violations.len(), 2, "{violations:#?}");
+    assert!(violations[0].contains("E0001") && violations[0].contains("non-empty"));
+    assert!(violations[1].contains("E0002") && violations[1].contains("malformed"));
+}
+
+fn diagnostic_body_violations(text: &str) -> Vec<String> {
     let mut violations = Vec::new();
     let mut in_wwf_table = false;
 
@@ -41,7 +53,7 @@ fn every_what_why_fix_table_row_is_complete() {
             in_wwf_table = false;
             continue;
         }
-        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        let cells = markdown_cells(line);
         // split('|') on "| a | b | c | d |" yields ["", "a", "b", "c", "d", ""]
         if is_wwf_header(&cells) {
             in_wwf_table = true;
@@ -53,19 +65,21 @@ fn every_what_why_fix_table_row_is_complete() {
         if cells.iter().all(|c| c.is_empty() || c.chars().all(|ch| ch == '-')) {
             continue; // header separator row
         }
-        if cells.len() < 5 {
+        let Some(code) = cells.get(1).map(String::as_str).filter(|code| is_code_like(code)) else {
+            continue;
+        };
+        if cells.len() != 6 {
+            violations.push(format!(
+                "line {}: {} — malformed What/Why/Fix row has {} pipe-delimited cells, expected 6",
+                idx + 1,
+                code,
+                cells.len()
+            ));
             continue;
         }
-        let code = cells[1];
-        let what = cells[2];
-        let why = cells[3];
-        let fix = cells[4];
-        if code.is_empty() || !is_code_like(code) {
-            continue; // not a per-code data row (e.g. a continuation/prose row)
-        }
-        if excluded.contains(code) {
-            continue;
-        }
+        let what = &cells[2];
+        let why = &cells[3];
+        let fix = &cells[4];
         if what.is_empty() || why.is_empty() || fix.is_empty() {
             violations.push(format!(
                 "line {}: {} — What/Why/Fix must all be non-empty (what={:?} why={:?} fix={:?})",
@@ -77,16 +91,27 @@ fn every_what_why_fix_table_row_is_complete() {
             ));
         }
     }
-
-    assert!(
-        violations.is_empty(),
-        "docs/spec/diagnostics.md has incomplete What/Why/Fix table rows (I4 — \
-         every diagnostic needs what/why/fix, not just a code):\n{}",
-        violations.join("\n")
-    );
+    violations
 }
 
-fn is_wwf_header(cells: &[&str]) -> bool {
+fn markdown_cells(line: &str) -> Vec<String> {
+    let mut cells = vec![String::new()];
+    let mut escaped = false;
+    for ch in line.chars() {
+        if ch == '|' && !escaped {
+            cells.push(String::new());
+        } else {
+            cells.last_mut().unwrap().push(ch);
+        }
+        escaped = ch == '\\' && !escaped;
+    }
+    cells
+        .into_iter()
+        .map(|cell| cell.trim().to_string())
+        .collect()
+}
+
+fn is_wwf_header(cells: &[String]) -> bool {
     cells.len() >= 5
         && cells[1].eq_ignore_ascii_case("code")
         && cells[2].eq_ignore_ascii_case("what")

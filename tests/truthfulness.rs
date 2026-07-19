@@ -411,6 +411,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     const EXEMPTIONS: &[(&str, &[&str])] = &[
         ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
         ("jet-net", &["D-NETDEP1", "D-TLS1"]),
+        ("jetpack", &["D-PKGSIGN1"]),
         // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
         // loopback peer) moved from `jetpack` to `jet-pkg-model`.
         ("jet-pkg-model", &["D-TLS1", "D-EMAIL-DKIM-CONFIG1"]),
@@ -628,8 +629,8 @@ fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
 
 // ---------------------------------------------------------------------------
 // Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — zero
-// `Diagnostic::` calls in jet-codegen. All checking lives in sema; codegen
-// must never "try rustc and see" or synthesize its own diagnostics.
+// references to the `Diagnostic` type in jet-codegen. All checking lives in
+// sema; codegen must never import, alias, or construct diagnostics.
 // ---------------------------------------------------------------------------
 #[test]
 fn codegen_never_constructs_diagnostics() {
@@ -638,23 +639,153 @@ fn codegen_never_constructs_diagnostics() {
     let mut offenders = Vec::new();
     for path in rs_files(&dir) {
         let text = fs::read_to_string(&path).unwrap_or_default();
-        for (i, line) in text.lines().enumerate() {
-            if line.contains("Diagnostic::") {
-                offenders.push(format!(
-                    "{}:{}: {}",
-                    path.strip_prefix(&root).unwrap().display(),
-                    i + 1,
-                    line.trim()
-                ));
-            }
+        for line in diagnostic_identifier_lines(&text) {
+            offenders.push(format!(
+                "{}:{line}: {}",
+                path.strip_prefix(&root).unwrap().display(),
+                text.lines().nth(line - 1).unwrap_or_default().trim()
+            ));
         }
     }
     assert!(
         offenders.is_empty(),
-        "jet-codegen must never construct Diagnostic:: (I3 — codegen is dumb, \
+        "jet-codegen must never reference Diagnostic (I3 — codegen is dumb, \
          all checking lives in sema):\n{}",
         offenders.join("\n")
     );
+}
+
+#[test]
+fn codegen_diagnostic_scanner_rejects_references_without_matching_prose() {
+    let forbidden = "use jet_diagnostics::Diagnostic as D;\n\
+                     type D = Diagnostic;\n\
+                     let d = Diagnostic { code: code };\n\
+                     let d = jet::Diagnostic::error(code);\n";
+    assert_eq!(diagnostic_identifier_lines(forbidden), vec![1, 2, 3, 4]);
+
+    let allowed = r###"// Diagnostic is forbidden in codegen.
+let word = "Diagnostic";
+let raw = r#"Diagnostic"#;
+let DiagnosticFactory = factory;
+"###;
+    assert!(diagnostic_identifier_lines(allowed).is_empty());
+}
+
+fn diagnostic_identifier_lines(source: &str) -> Vec<usize> {
+    let bytes = source.as_bytes();
+    let mut lines = Vec::new();
+    let mut i = 0;
+    let mut line = 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\n' {
+            line += 1;
+            i += 1;
+            continue;
+        }
+        if bytes[i..].starts_with(b"//") {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i..].starts_with(b"/*") {
+            i += 2;
+            let mut depth = 1;
+            while i < bytes.len() && depth > 0 {
+                if bytes[i..].starts_with(b"/*") {
+                    depth += 1;
+                    i += 2;
+                } else if bytes[i..].starts_with(b"*/") {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    if bytes[i] == b'\n' {
+                        line += 1;
+                    }
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        if let Some(end) = rust_raw_string_end(bytes, i) {
+            line += bytes[i..end].iter().filter(|byte| **byte == b'\n').count();
+            i = end;
+            continue;
+        }
+        let string_prefix = if bytes[i..].starts_with(b"b\"")
+            || bytes[i..].starts_with(b"c\"")
+        {
+            Some(2)
+        } else if bytes[i] == b'"' {
+            Some(1)
+        } else {
+            None
+        };
+        if let Some(prefix) = string_prefix {
+            i += prefix;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i = (i + 2).min(bytes.len());
+                } else if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                } else {
+                    if bytes[i] == b'\n' {
+                        line += 1;
+                    }
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        if bytes[i] == b'_' || bytes[i].is_ascii_alphabetic() {
+            let start = i;
+            i += 1;
+            while i < bytes.len()
+                && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric())
+            {
+                i += 1;
+            }
+            if &source[start..i] == "Diagnostic" {
+                lines.push(line);
+            }
+            continue;
+        }
+        i += 1;
+    }
+    lines
+}
+
+fn rust_raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    if bytes.get(i) == Some(&b'b') || bytes.get(i) == Some(&b'c') {
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'r') {
+        return None;
+    }
+    i += 1;
+    let hashes_start = i;
+    while bytes.get(i) == Some(&b'#') {
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'"') {
+        return None;
+    }
+    let hashes = i - hashes_start;
+    i += 1;
+    while i < bytes.len() {
+        if bytes[i] == b'"'
+            && bytes
+                .get(i + 1..i + 1 + hashes)
+                .is_some_and(|suffix| suffix.iter().all(|byte| *byte == b'#'))
+        {
+            return Some(i + 1 + hashes);
+        }
+        i += 1;
+    }
+    Some(bytes.len())
 }
 
 // ---------------------------------------------------------------------------

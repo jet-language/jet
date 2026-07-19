@@ -16,19 +16,21 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/binpat_take_pattern_bad_width.jet",
     "tests/ui/build_locked_drift.jet",
     "tests/ui/cffi_e3206_reserved_segment.jet",
+    "tests/ui/cffi_e3207_bindgen_outside_cache.jet",
     "tests/ui/cffi_retired_at_extern.jet",
     "tests/ui/cffi_retired_hash_extern.jet",
     "tests/ui/chained_comparison_mixed_direction.jet",
     "tests/ui/context_eq_rejected.jet",
     "tests/ui/context_unknown_field.jet",
     "tests/ui/copy_keyword_retired_e0991.jet",
-    "tests/ui/core_reserved_shadow/scoring.jet",
     "tests/ui/core_selective_import.jet",
     "tests/ui/debug_unknown_selector.jet",
     "tests/ui/defer_only_close.jet",
     "tests/ui/dispatch_missing_eq.jet",
     "tests/ui/dispatch_redundant_subject.jet",
     "tests/ui/dotless_struct_e0320.jet",
+    "tests/ui/dunder_marker_not_generated.jet",
+    "tests/ui/dunder_reserved.jet",
     "tests/ui/effect_arrow_retired.jet",
     "tests/ui/empty_map_colon_retired.jet",
     "tests/ui/enum_group_payload.jet",
@@ -36,6 +38,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/ffi_body_not_string.jet",
     "tests/ui/ffi_foreign_unsafe.jet",
     "tests/ui/flow_pipe_unassigned.jet",
+    "tests/ui/generated_cffi_e3206.jet",
+    "tests/ui/generated_cffi_e3207.jet",
     "tests/ui/generic_square_brackets.jet",
     "tests/ui/if_expr_missing_else.jet",
     "tests/ui/impl_colon_separator.jet",
@@ -84,6 +88,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/off_debug_attr_on_expression.jet",
     "tests/ui/off_debug_attr_on_item.jet",
     "tests/ui/off_debug_doubled_attr.jet",
+    "tests/ui/operator_foreign_guess.jet",
     "tests/ui/opt_chain_method.jet",
     "tests/ui/params_not_yet.jet",
     "tests/ui/parse_pattern_adjacent_holes.jet",
@@ -91,6 +96,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/persist_not_module_level.jet",
     "tests/ui/policy_conflicting_module.jet",
     "tests/ui/policy_site_bound_authority.jet",
+    "tests/ui/project_module_invalid/broken.jet",
     "tests/ui/protocol_bad_endpoint.jet",
     "tests/ui/pub_file_duplicate_marker.jet",
     "tests/ui/pub_file_priv_without_marker.jet",
@@ -112,6 +118,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/shield_arguments.jet",
     "tests/ui/stacked_type_markers.jet",
     "tests/ui/string_lone_brace.jet",
+    "tests/ui/subjectless_guard_direct_nesting.jet",
+    "tests/ui/subjectless_guard_value_missing_else.jet",
     "tests/ui/suppress_retired.jet",
     "tests/ui/take_pattern_bad_hole.jet",
     "tests/ui/take_pattern_computed_arg.jet",
@@ -144,6 +152,9 @@ fn collect_jet_files_recursive(dir: &PathBuf) -> Vec<PathBuf> {
 }
 
 fn collect_matching_jet_files(dir: &PathBuf, out: &mut Vec<PathBuf>) {
+    if dir.file_name().and_then(|name| name.to_str()) == Some(".jet") {
+        return; // generated bindings/cache, not checked source corpus
+    }
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         if path.is_dir() {
@@ -158,9 +169,10 @@ fn collect_matching_jet_files(dir: &PathBuf, out: &mut Vec<PathBuf>) {
 // top-level formatter ordering; marker-list grouping; `Type<T>.method()`;
 // external-method and task-block sugar; optional declaration/trailing commas;
 // redundant default file aliases. The comparator itself permits only formatter-
-// added arm blocks, bare-lambda parens, struct shorthand labels/separators, and
-// a required default alias on a dotted module import. No rule can reorder or
-// discard an operand, operator, marker payload, comment, or string interpolation.
+// added arm blocks, bare-lambda parens, leading-dot variant patterns, struct
+// shorthand labels/separators, and a required default alias on a dotted module
+// import. No rule can reorder or discard an operand, operator, marker payload,
+// comment, or string interpolation.
 fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(
@@ -771,6 +783,10 @@ fn ordered_token_diff(
             formatted_i += 1;
             continue;
         }
+        if formatted_variant_pattern_dot(original, original_i, formatted, formatted_i) {
+            formatted_i += 1;
+            continue;
+        }
         if inserted_lambda_parens > 0
             && matches!(formatted.get(formatted_i).map(|t| &t.kind), Some(TokKind::RParen))
             && matches!(
@@ -788,7 +804,13 @@ fn ordered_token_diff(
         }
         if inserted_arm_braces > 0
             && matches!(formatted.get(formatted_i).map(|t| &t.kind), Some(TokKind::RBrace))
-            && next_token_matches(original, original_i, formatted, formatted_i + 1)
+            && (next_token_matches(original, original_i, formatted, formatted_i + 1)
+                || formatted_variant_pattern_dot(
+                    original,
+                    original_i,
+                    formatted,
+                    formatted_i + 1,
+                ))
         {
             inserted_arm_braces -= 1;
             formatted_i += 1;
@@ -827,6 +849,44 @@ fn ordered_token_diff(
         ));
     }
     Ok(())
+}
+
+fn formatted_variant_pattern_dot(
+    original: &[Token],
+    original_i: usize,
+    formatted: &[Token],
+    formatted_i: usize,
+) -> bool {
+    let (Some(original_token), Some(Token { kind: TokKind::Dot, .. }), Some(formatted_token)) = (
+        original.get(original_i),
+        formatted.get(formatted_i),
+        formatted.get(formatted_i + 1),
+    ) else {
+        return false;
+    };
+    let same_variant = match (&original_token.kind, &formatted_token.kind) {
+        (TokKind::Ident(original), TokKind::Ident(formatted)) => {
+            original == formatted && original.starts_with(char::is_uppercase)
+        }
+        (TokKind::KwNull, TokKind::KwNull) => true,
+        _ => false,
+    };
+    let previous = formatted_i
+        .checked_sub(1)
+        .and_then(|i| formatted.get(i))
+        .map(|token| &token.kind);
+    if !same_variant
+        || !matches!(
+            previous,
+            Some(TokKind::EqEq | TokKind::LBrace | TokKind::RBrace | TokKind::Pipe)
+        )
+    {
+        return false;
+    }
+    matches!(previous, Some(TokKind::EqEq))
+        || formatted[formatted_i + 2..]
+            .iter()
+            .any(|token| matches!(token.kind, TokKind::Arrow))
 }
 
 fn formatted_arm_block_opens(tokens: &[Token], index: usize) -> bool {
@@ -1130,6 +1190,16 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "fn run() { f :: (x) => x }\n",
         ),
         (
+            "bare enum variant pattern",
+            "fn run() { if x == { A(v) -> print(v) } }\n",
+            "fn run() { if x == { .A(v) -> print(v) } }\n",
+        ),
+        (
+            "bare None variant pattern",
+            "fn run() { if x == { None -> print(0) } }\n",
+            "fn run() { if x == { .None -> print(0) } }\n",
+        ),
+        (
             "struct shorthand label",
             "fn run() { p :: Point.{x} }\n",
             "fn run() { p :: Point.{x: x} }\n",
@@ -1217,6 +1287,11 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "lambda rule does not remove explicit parens",
             "fn run() { f :: (x) => x }\n",
             "fn run() { f :: x => x }\n",
+        ),
+        (
+            "variant-dot rule requires a PascalCase pattern",
+            "fn run() { if x == { value -> print(value) } }\n",
+            "fn run() { if x == { .value -> print(value) } }\n",
         ),
         (
             "shorthand expansion preserves field value",
