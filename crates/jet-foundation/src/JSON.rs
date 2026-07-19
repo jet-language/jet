@@ -1,6 +1,7 @@
 //! Minimal hand-rolled JSON (parse only what LSP needs) — invariant I6.
 
 use std::collections::HashMap;
+use std::io::{self, BufRead};
 
 #[derive(Debug, Clone)]
 pub enum JsonValue {
@@ -28,6 +29,48 @@ pub const MAX_JSON_DEPTH: usize = 64;
 
 /// Maximum decoded LSP/DAP message body accepted from a `Content-Length` frame.
 pub const MAX_PROTOCOL_MESSAGE_BYTES: usize = 1024 * 1024;
+
+/// Maximum cumulative bytes and field count accepted in an LSP/DAP frame header.
+pub const MAX_PROTOCOL_HEADER_BYTES: usize = 8 * 1024;
+pub const MAX_PROTOCOL_HEADER_COUNT: usize = 64;
+
+/// Read a bounded LSP/DAP header block and return its `Content-Length`.
+/// Each line is capped by the remaining aggregate budget before `read_line`
+/// can grow its destination.
+pub fn read_protocol_content_length(reader: &mut impl BufRead) -> io::Result<Option<usize>> {
+    let mut content_length = None;
+    let mut total = 0;
+    let mut count = 0;
+    loop {
+        let remaining = MAX_PROTOCOL_HEADER_BYTES.saturating_sub(total);
+        let mut line = String::new();
+        let read = std::io::Read::take(&mut *reader, (remaining + 1) as u64)
+            .read_line(&mut line)?;
+        if read == 0 {
+            return Ok(None);
+        }
+        if read > remaining {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "protocol headers exceed the 8192-byte limit",
+            ));
+        }
+        total += read;
+        if line == "\r\n" || line == "\n" {
+            return Ok(content_length);
+        }
+        count += 1;
+        if count > MAX_PROTOCOL_HEADER_COUNT {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "protocol headers exceed the 64-field limit",
+            ));
+        }
+        if let Some(rest) = line.strip_prefix("Content-Length:") {
+            content_length = rest.trim().parse().ok();
+        }
+    }
+}
 
 struct JsonParser<'a> {
     s: &'a str,
@@ -340,5 +383,24 @@ mod tests {
         assert_eq!(json_u32(&JsonValue::Number(-1)), None);
         assert_eq!(json_u32(&JsonValue::Flt(1.5)), None);
         assert_eq!(json_u32(&JsonValue::Number(i64::MAX)), None);
+    }
+
+    #[test]
+    fn protocol_headers_reject_an_overlong_line_with_bounded_growth() {
+        let frame = format!("X-Fill: {}\r\n", "x".repeat(MAX_PROTOCOL_HEADER_BYTES));
+        let error = read_protocol_content_length(&mut std::io::Cursor::new(frame)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "protocol headers exceed the 8192-byte limit"
+        );
+    }
+
+    #[test]
+    fn protocol_headers_reject_too_many_fields() {
+        let frame = format!("{}\r\n", "X: y\r\n".repeat(MAX_PROTOCOL_HEADER_COUNT + 1));
+        let error = read_protocol_content_length(&mut std::io::Cursor::new(frame)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "protocol headers exceed the 64-field limit");
     }
 }

@@ -332,6 +332,11 @@ fn parse_partial(s: &str) -> Option<Partial> {
             build: None,
         });
     }
+    let s = match s.strip_prefix('v') {
+        Some("") => return None,
+        Some(version) => version,
+        None => s,
+    };
     let (rest, build) = match s.split_once('+') {
         Some((r, b)) => (r, Some(validate_build(b)?)),
         None => (s, None),
@@ -431,8 +436,9 @@ fn parse_simple(s: &str) -> Option<Vec<Comparator>> {
         return expand_caret(parse_partial(rest)?);
     }
     if let Some(rest) = s.strip_prefix('~') {
-        // `~>1.2` is accepted as an alias for `~1.2`.
-        let rest = rest.strip_prefix('>').unwrap_or(rest);
+        if rest.starts_with('>') {
+            return None;
+        }
         if rest.trim().is_empty() {
             return None;
         }

@@ -508,23 +508,32 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             continue;
         }
 
+        // A source-level header import authorizes only bindings derived from
+        // that readable header. `use c.<lib>` remains the explicit headerless
+        // cache mode.
+        let header_src = match lib_header.get(&lib) {
+            Some(header_path) => {
+                let header_abs = resolve_header_path(header_path, &bundle.project_root);
+                match std::fs::read_to_string(&header_abs) {
+                    Ok(source) => Some(source),
+                    Err(_) => {
+                        diags.push(e3208(header_path, &lib));
+                        continue;
+                    }
+                }
+            }
+            None => None,
+        };
+
         // --- Phase 3: hash invalidation ---
         // If the cache exists and we know the header path, check whether the
         // header content has changed since the cache was generated. On a
         // mismatch, re-run the bind backend before loading.
         let need_rebind = if cache_path.is_file() {
-            if let Some(header_path) = lib_header.get(&lib) {
-                // Resolve header relative to project root (for `use "x.h"` forms
-                // where the path is relative to the importing file's directory;
-                // here we accept absolute or project-root-relative).
-                let header_abs = resolve_header_path(header_path, &bundle.project_root);
-                if let Ok(header_src) = std::fs::read_to_string(&header_abs) {
-                    let current_hash = crate::CBind::compute_bind_hash(&header_src, "");
-                    let stored = crate::CBind::read_stored_hash(&cache_path);
-                    stored.map(|s| s != current_hash).unwrap_or(false)
-                } else {
-                    false
-                }
+            if let Some(header_src) = &header_src {
+                let current_hash = crate::CBind::compute_bind_hash(header_src, "");
+                let stored = crate::CBind::read_stored_hash(&cache_path);
+                stored.map(|s| s != current_hash).unwrap_or(false)
             } else {
                 false
             }
@@ -552,22 +561,8 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
                 load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
                 continue;
             };
-            let header_abs = resolve_header_path(header_path, &bundle.project_root);
-            let header_src = match std::fs::read_to_string(&header_abs) {
-                Ok(s) => s,
-                Err(_) => {
-                    // Header not readable — can't auto-bind; if cache exists load it.
-                    if cache_path.is_file() {
-                        let source = match std::fs::read_to_string(&cache_path) {
-                            Ok(s) => s,
-                            Err(_) => continue,
-                        };
-                        load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
-                    }
-                    continue;
-                }
-            };
-            let result = match crate::CBind::generate(&header_src, &lib) {
+            let header_src = header_src.as_deref().expect("header path was collected");
+            let result = match crate::CBind::generate(header_src, &lib) {
                 Ok(r) => r,
                 Err(_) => {
                     // A changed header that no longer parses must never revive
@@ -581,7 +576,7 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
                 let _ = std::fs::create_dir_all(parent);
             }
             if std::fs::write(&cache_path, &result.source).is_ok() {
-                let _ = crate::CBind::write_bind_hash(&cache_path, &header_src, "");
+                let _ = crate::CBind::write_bind_hash(&cache_path, header_src, "");
             }
             load_cache_source(
                 &result.source,

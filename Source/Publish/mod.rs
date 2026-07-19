@@ -175,9 +175,24 @@ mod tests {
             "^",
             "~",
             "~>",
+            "~>1.2",
         ] {
             assert!(VersionReq::parse(range).is_none(), "accepted hostile range: {range}");
         }
+    }
+
+    #[test]
+    fn semver_leading_v_is_consistent_across_versions_and_ranges() {
+        assert_eq!(SemVer::SemVer::parse("v1.2.3"), Some(sv("1.2.3")));
+        for range in ["v1.2", "=v1.2.3", ">=v1.2.3", "^v1.2.3", "~v1.2.3"] {
+            assert!(
+                VersionReq::parse(range).unwrap().matches(&sv("1.2.3")),
+                "leading v failed in {range}"
+            );
+        }
+        assert!(VersionReq::parse("v1.2.3 - v2.0.0")
+            .unwrap()
+            .matches(&sv("1.5.0")));
     }
 
     #[test]

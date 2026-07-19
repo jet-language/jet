@@ -1349,6 +1349,35 @@ fn failed_rebind_rejects_stale_cffi_cache() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn missing_declared_header_rejects_stale_cffi_cache() {
+    let root = std::env::temp_dir().join(format!("jet_missing_cbind_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let cache_dir = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache_dir).unwrap();
+    let cache_file = cache_dir.join("missing.jet");
+    let old_cache = jet::CBind::generate("int stale_value(void);\n", "missing")
+        .unwrap()
+        .source;
+    fs::write(&cache_file, &old_cache).unwrap();
+
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        "use \"include/missing.h\" as missing;\nfn run() { print(missing.stale_value()); }\n",
+    )
+    .unwrap();
+    let src = fs::read_to_string(&main).unwrap();
+    let diagnostics = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_err();
+
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
+        "missing declared header must report E3208, got: {diagnostics:?}"
+    );
+    assert_eq!(fs::read_to_string(&cache_file).unwrap(), old_cache);
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// Probe 3 — unchanged header + present cache → NO re-bind (fast path: the
 /// cache is loaded as-is, hash stays the same).
 #[test]

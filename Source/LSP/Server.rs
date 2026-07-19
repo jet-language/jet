@@ -20,7 +20,7 @@ use super::Position::{
 };
 use super::SymbolDB::{build_symbol_db, InlayHint, SymKind, SymbolDB};
 use jet_foundation::JSON::{
-    json_escape, json_get, json_str, json_u32, parse_json, JsonValue,
+    json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length, JsonValue,
     MAX_PROTOCOL_MESSAGE_BYTES,
 };
 
@@ -242,21 +242,7 @@ fn write_log(msg: &str) -> io::Result<()> {
 }
 
 fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
-    let mut content_length: Option<usize> = None;
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 {
-            return Ok(None);
-        }
-        if line == "\r\n" || line == "\n" {
-            break;
-        }
-        if let Some(rest) = line.strip_prefix("Content-Length:") {
-            content_length = rest.trim().parse().ok();
-        }
-    }
-    let len = match content_length {
+    let len = match read_protocol_content_length(reader)? {
         Some(l) => l,
         None => return Ok(None),
     };
