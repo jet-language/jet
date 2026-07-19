@@ -375,6 +375,20 @@ fn run() { print(selected.result(1)) }
 }
 
 #[test]
+fn ordinary_nested_module_rejects_unknown_generic_target() {
+    let (_, diagnostics) = check(r#"
+module outer<T> {
+    module plain {
+        module bad = missing<T>
+    }
+}
+module selected = outer<Int>
+fn run() {}
+"#);
+    assert_eq!(error_codes(&diagnostics), vec!["E0850"]);
+}
+
+#[test]
 fn tests_and_benches_are_specialized_once_per_instance_with_unique_names() {
     let (bundle, diagnostics) = check(r#"
 module checks<T, count: Int> {

@@ -923,7 +923,11 @@ fn expand_nested_generics_in_code_module(
         let Item::GenericModule(def) = item else { return None };
         Some(def.clone())
     }).collect();
-    if nested_defs.is_empty() {
+    let alias_defs: Vec<ModuleAliasDef> = items.iter().filter_map(|item| {
+        let Item::ModuleAlias(def) = item else { return None };
+        Some(def.clone())
+    }).collect();
+    if nested_defs.is_empty() && alias_defs.is_empty() {
         return declarations;
     }
 
@@ -973,10 +977,6 @@ fn expand_nested_generics_in_code_module(
             source_values: values.clone(),
         })
     }).collect();
-    let alias_defs: Vec<ModuleAliasDef> = items.iter().filter_map(|item| {
-        let Item::ModuleAlias(def) = item else { return None };
-        Some(def.clone())
-    }).collect();
     let aliases: HashMap<String, &ModuleAliasDef> = alias_defs.iter()
         .map(|def| (def.name.clone(), def))
         .collect();
@@ -984,13 +984,34 @@ fn expand_nested_generics_in_code_module(
     ordered.sort_by_key(|def| local_alias_depth(def, &aliases));
     let mut call_projections = HashMap::new();
     let mut type_projections = HashMap::new();
+    let mut invalid_aliases = HashSet::new();
 
     for nested_alias in ordered {
-        let Some(mut resolved) = resolve_local_alias(nested_alias, &aliases, &templates, diags) else { continue };
+        if alias_chain_contains(nested_alias, &aliases, &invalid_aliases) {
+            continue;
+        }
+        let Some(mut resolved) = resolve_local_alias(nested_alias, &aliases, &templates, diags) else {
+            invalid_aliases.insert(nested_alias.name.clone());
+            continue;
+        };
         let local_name = resolved.name.clone();
         resolved.name = module_value_name(&module.name, &local_name);
-        let Some(info) = templates.get(&resolved.target) else { continue };
-        let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &values, &enums, diags) else { continue };
+        let Some(info) = templates.get(&resolved.target) else {
+            diags.push(Diagnostic::error(
+                "E0850",
+                format!("generic module `{}` not found in this scope", resolved.target),
+                "check the module template name and make sure it is defined in the same file"
+                    .to_string(),
+                format!("example: `module {} = MyTemplate<String>`", local_name),
+                Some(resolved.target_span),
+            ));
+            invalid_aliases.insert(nested_alias.name.clone());
+            continue;
+        };
+        let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &values, &enums, diags) else {
+            invalid_aliases.insert(nested_alias.name.clone());
+            continue;
+        };
         let key = instance_key(info, &args, &HashMap::new());
         let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
         applications.entry(fingerprint.clone()).or_default().push(
