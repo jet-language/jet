@@ -2058,15 +2058,18 @@ fn run() {
 | Call | Returns | Does |
 |------|---------|------|
 | `event.new<T>()` | `Event<T>` | create a typed many-subscriber event |
-| `event.with_policy<T>(policy)` | `Event<T>` | create an event with explicit dispatch/backpressure policy |
+| `event.async_result<T, E>(policy, failures)` | `AsyncEvent<T, E> ? String` | create one scheduler-backed bounded event queue |
 | `event.hook<T, R>(fallback)` | `Hook<T, R>` | create an ordered hook; last active handler result wins |
+| `event.decision_hook<T, E>(policy)` | `DecisionHook<T, E>` | create an ordered transform/continue/cancel/fail fold |
 | `event.scope()` | `EventScope` | create an owner for subscriptions |
-| `event.policy_sync()` | `EventPolicy` | synchronous deterministic dispatch |
-| `event.policy_async(n)` | `EventPolicy` | queued dispatch with an explicit buffer size |
 | `ev.on(scope, handler)` / `ev.once(scope, handler)` | `Subscription` | subscribe a handler owned by `scope`; `once` auto-unsubscribes |
 | `ev.on_priority(scope, priority, handler)` | `Subscription` | subscribe with higher priority before source order |
-| `ev.emit(payload)` / `ev.emit_async(payload)` | `EventTrace` | dispatch and return delivered/queued/dropped counts |
+| `ev.emit(payload)` | `EventTrace` | synchronously dispatch and return delivered counts |
+| `async_ev.emit_async(payload)` | `Task<DispatchReport<E>>` | enqueue and return the single terminal report |
+| `async_ev.queued_count()` / `.running_count()` / `.blocked_count()` | `Int` | inspect truthful scheduler states |
+| `async_ev.close()` | — | reject pending/new producers and drain accepted work |
 | `hook.run(payload, fallback)` | `R` | run active hook handlers or return fallback |
+| `decision.run(payload)` | `HookOutcome<T, E>` | return final transformed value, cancellation, or failure |
 | `sub.unsubscribe()` / `sub.is_active()` | — / `Bool` | manage an explicit subscription |
 | `scope.cancel()` / `scope.active_count()` | — / `Int` | cancel all owned subscriptions and count active ones |
 | `trace.summary()` | `String` | compact delivery trace for logs/tests |
@@ -2080,6 +2083,13 @@ and later registration through that scope returns an inactive subscription.
 During synchronous dispatch, removals before a listener's turn take effect,
 additions wait for a later or nested dispatch, reentrant emissions run
 depth-first, and `once` deactivates before calling its handler.
+
+`AsyncPolicy` requires a positive capacity and chooses `Block`, `DropNewest`,
+or `DropOldest`; `FailurePolicy` is `StopFirst`, `Collect`, `Log`, or `Ignore`.
+Cancellation, inherited deadlines, close, and owner teardown share one terminal
+transition. With `JET_OBSERVE=1`, the debugger and Canvas `?pid=` live view read
+the same bounded payload-free executed lifecycle sequence; without a live PID,
+Canvas reports no runtime Event facts.
 
 ---
 

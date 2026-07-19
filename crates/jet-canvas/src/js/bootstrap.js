@@ -31,7 +31,12 @@
   });
 
   const base = window.__JET_CANVAS_BASE__ || "/canvas";
-  const graphUrl = window.__JET_CANVAS_GRAPH__ || (base + "/graph");
+  const configuredGraphUrl = window.__JET_CANVAS_GRAPH__ || (base + "/graph");
+  const livePid = new URLSearchParams(window.location.search).get("pid");
+  const graphUrl = livePid && !configuredGraphUrl.includes("pid=")
+    ? configuredGraphUrl + (configuredGraphUrl.includes("?") ? "&" : "?")
+      + "pid=" + encodeURIComponent(livePid)
+    : configuredGraphUrl;
   const queryUrl = window.__JET_CANVAS_QUERY__ || (base + "/query");
   const coreCatalogUrl = window.__JET_CANVAS_CORE_CATALOG__ || (base + "/core-catalog");
   const sourceControlUrl = window.__JET_CANVAS_SCM__ || (base + "/source-control");

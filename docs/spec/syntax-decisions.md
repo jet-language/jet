@@ -2072,9 +2072,10 @@ debugger/Canvas projection, and editor highlighting; source sugar remains
 reserved until examples prove the library spelling is too noisy. Default
 dispatch is synchronous and deterministic: priority first, then subscription
 order. `once` auto-unsubscribes, `scope.cancel()` drops all owned subscriptions,
-and `with_policy<T>(policy_async(n))` gives an explicit queued/backpressure
-entrypoint. Hooks combine by "last active handler result wins" in this first
-slice, with the call-site fallback used when no handler is active.
+and `with_policy<T>(policy_async(n))` gave the original queued entrypoint;
+D-EVENT2=A supersedes it with `AsyncEvent<T,E>`. Ordinary hooks combine by
+"last active handler result wins", with the call-site fallback used when no
+handler is active.
 
 **D-EVENT2=A — Typed async events (scheduler tranche)** *(ratified 2026-07-11,
 card #286)*: `Event<T>` and `Hook<T,R>` stay synchronous. `core.event`
@@ -2095,8 +2096,15 @@ after the first `E`; Collect preserves
 all `E` values in order; Log records failure facts in trace without storing `E`;
 Ignore stores neither. A panic always stops that payload as HandlerFailed with
 `DispatchFailure.Panic`, independent of failure policy. DecisionHook remains
-gated on clarification of the ratified `Continue` result arity; no spelling is
-inferred meanwhile.
+in the same subscription and owner-lifetime family.
+
+**D-EVENT-CONTINUE1=C — Decision input, outcome output** *(ratified
+2026-07-14, card #286)*: `DecisionHook<T,E>` handlers return
+`HookDecision<T,E>`. `Continue` preserves the current value, `Transform(T)`
+replaces it, and `Cancel`/`Fail(E)` stop the ordered fold. `run(T)` returns
+`HookOutcome<T,E>`: `Continue(final T)`, `Cancel`, or `Fail(E)`. Zero handlers
+returns `Continue(original)`. This keeps handler approval payload-free without
+creating a second transform spelling or nullable run record.
 
 **D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
 2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file

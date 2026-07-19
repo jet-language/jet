@@ -2766,7 +2766,8 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
         "diagnostics",
         "facts",
         "facts.blueprint",
-        "event_dispatchers",
+        "runtime_events",
+        "executed, payload-free",
         "interfaces",
         "task_flows",
         "rails",
@@ -3228,47 +3229,12 @@ fn canvas_projects_async_task_rail() {
 }
 
 #[test]
-fn canvas_projects_event_dispatchers_from_core_event() {
+fn canvas_does_not_masquerade_static_event_calls_as_runtime_facts() {
     let path = write_fixture("event_dispatchers", CANVAS_EVENT_DISPATCHER_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-
-    for field in [
-        "\"event_dispatchers\"",
-        "\"kind\":\"event_stream_create\"",
-        "\"kind\":\"event_subscribe\"",
-        "\"kind\":\"event_subscribe_once\"",
-        "\"kind\":\"event_subscribe_priority\"",
-        "\"kind\":\"event_emit\"",
-        "\"kind\":\"async_event_create\"",
-        "\"kind\":\"event_emit_async\"",
-        "\"kind\":\"event_queued_count\"",
-        "\"kind\":\"event_close\"",
-        "\"kind\":\"event_scope_cancel\"",
-        "\"lifetime\":\"EventScope-owned\"",
-        "\"fact_source\":\"semindex_checked_call\"",
-        "\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"]",
-        "\"semantics\":\"core.event_source_truth\"",
-    ] {
-        assert!(
-            graph.contains(field),
-            "event dispatcher graph missing {field}: {graph}"
-        );
-    }
-    assert_eq!(
-        count_occurrences(&graph, "\"kind\":\"event_subscribe\""),
-        2,
-        "unrelated Resource.on must not become an event fact: {graph}"
-    );
-    assert_eq!(
-        count_occurrences(&graph, "\"kind\":\"event_close\""),
-        1,
-        "unrelated Resource.close must not become an event fact: {graph}"
-    );
-    assert_eq!(
-        count_occurrences(&graph, "\"kind\":\"event_scope_cancel\""),
-        1,
-        "unrelated Resource.cancel must not become an event fact: {graph}"
-    );
+    assert!(graph.contains("\"runtime_events\":null"), "{graph}");
+    assert!(!graph.contains("semindex_checked_call"), "{graph}");
+    assert!(!graph.contains("event_stream_create"), "{graph}");
 }
 
 #[test]

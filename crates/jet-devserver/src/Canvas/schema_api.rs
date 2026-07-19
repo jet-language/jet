@@ -28,7 +28,8 @@ use super::graph_helpers::{
 };
 use super::project_scan::{
     ProjectContext, env_project_json, lock_project_json, packages_project_json,
-    project_context_for_entry, project_file, targets_project_json, workspace_project_json,
+    project_context_for_entry, project_file, project_file_with_runtime, targets_project_json,
+    workspace_project_json,
 };
 use super::project_transactions::{
     apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
@@ -172,6 +173,71 @@ pub fn graph_json_for_entry_source(
             &jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags),
         )
     })
+}
+
+/// Project executed Event/AsyncEvent/DecisionHook facts from the existing
+/// owner-checked, payload-free live snapshot onto a Canvas graph.
+pub fn graph_json_for_entry_source_with_live_pid(
+    entry: &Path,
+    source_id: Option<&str>,
+    pid: u32,
+) -> Result<String, String> {
+    let snapshot =
+        crate::LiveInspect::read(pid).map_err(|message| query_error("live", &message))?;
+    let runtime_events = runtime_events_json(&snapshot)?;
+    let path = resolve_entry_source_path(entry, source_id)?;
+    project_file_with_runtime(&path, Some(&runtime_events))
+        .map(|projection| projection.json)
+        .map_err(|diags| {
+            let src = fs::read_to_string(&path).unwrap_or_default();
+            query_error(
+                "diagnostic",
+                &jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags),
+            )
+        })
+}
+
+fn runtime_events_json(snapshot: &str) -> Result<String, String> {
+    let rendered = jet_debug::render_event_observations(snapshot)
+        .map_err(|message| query_error("live", &message))?;
+    let events = rendered
+        .lines()
+        .map(|line| {
+            let fields = line
+                .split_whitespace()
+                .filter_map(|field| field.split_once('='))
+                .collect::<HashMap<_, _>>();
+            let number = |key| {
+                fields
+                    .get(key)
+                    .copied()
+                    .ok_or_else(|| query_error("live", "runtime event observation is incomplete"))
+            };
+            let text = |key| number(key).map(json_str);
+            Ok(format!(
+                "{{\"sequence\":{},\"source\":{},\"event_id\":{},\"owner_id\":{},\"subscription_id\":{},\"dispatch_id\":{},\"lifecycle\":{},\"queued\":{},\"blocked\":{},\"running\":{},\"capacity\":{},\"overflow\":{},\"priority\":{},\"failure\":{},\"terminal\":{}}}",
+                number("sequence")?,
+                text("source")?,
+                number("event")?,
+                number("owner")?,
+                number("subscription")?,
+                number("dispatch")?,
+                text("lifecycle")?,
+                number("queued")?,
+                number("blocked")?,
+                number("running")?,
+                number("capacity")?,
+                text("overflow")?,
+                number("priority")?,
+                text("failure")?,
+                text("terminal")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(format!(
+        "{{\"source_truth\":\"executed_runtime_observations\",\"events\":[{}]}}",
+        events.join(",")
+    ))
 }
 
 /// Resolve a project-relative source id without escaping the projected source truth.

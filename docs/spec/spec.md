@@ -1447,11 +1447,17 @@ becomes the browser API checker.
 ordinary Core values. There is no `event` declaration syntax in this slice.
 
 - `event.new<T>() -> Event<T>` creates a typed many-subscriber occurrence stream.
-- `event.with_policy<T>(policy) -> Event<T>` creates the same stream with an
-  explicit sync/queued dispatch policy.
+- `event.async_result<T, E>(policy, failures) -> AsyncEvent<T, E> ? String`
+  creates one scheduler-backed bounded queue. `emit_async` returns
+  `Task<DispatchReport<E>>`; queue, running, blocked, failure, cancellation,
+  deadline, close, and overflow outcomes are explicit.
 - `event.hook<T, R>(fallback) -> Hook<T, R>` creates an ordered intervention
   point. `.run(payload, fallback)` returns the last active handler result, or
   the call-site fallback when no handler is active.
+- `event.decision_hook<T, E>(HookPolicy.FirstCancelElseTransform)` creates a
+  typed fold. Handlers return `HookDecision.Continue`, `.Transform(value)`,
+  `.Cancel`, or `.Fail(error)`; `run` returns `HookOutcome.Continue(final)`,
+  `.Cancel`, or `.Fail(error)`.
 - `event.scope() -> EventScope` owns subscriptions. `scope.cancel()` unsubscribes
   all owned subscriptions and permanently closes that owner. Cancellation is
   idempotent; a later subscription attempt through the cancelled scope returns
@@ -1460,8 +1466,9 @@ ordinary Core values. There is no `event` declaration syntax in this slice.
 - `Event<T>.on(scope, handler)`, `.once(scope, handler)`, and
   `.on_priority(scope, priority, handler)` return `Subscription`. Priority sorts
   before source order; `once` auto-unsubscribes after first delivery.
-- `Event<T>.emit(payload)` and `.emit_async(payload)` return `EventTrace`.
-  `EventTrace.summary()` prints delivered/queued/dropped counts.
+- `Event<T>.emit(payload)` returns `EventTrace`; `AsyncEvent.emit_async(payload)`
+  returns a task whose report records the accepted payload's terminal state and
+  ordered trace.
 
 Synchronous emission snapshots active listeners at dispatch start, sorts by
 priority descending then registration order, and invokes that snapshot
@@ -1470,6 +1477,12 @@ delivery affects only a later or explicitly nested emission. A `once` listener
 is deactivated before its handler runs, so reentrant emission cannot deliver it
 twice. D-EVENT2=A keeps this beginner `Event<T>` handler path infallible; typed
 failure aggregation is outside this synchronous API.
+
+With `JET_OBSERVE=1`, the runtime publishes one bounded, payload-free sequence
+for executed Event, AsyncEvent, and DecisionHook transitions. `jet inspect live`
+and Canvas opened with `?pid=<live Jet pid>` consume that same validated source;
+Canvas reports `runtime_events: null` when no live process is attached and never
+turns source-call matches into runtime facts.
 
 ```jet
 use core.event as event

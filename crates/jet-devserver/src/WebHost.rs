@@ -866,7 +866,18 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let source_id = query_param(target, "source_id");
-        return match crate::Canvas::graph_json_for_entry_source(Path::new(canvas_file), source_id.as_deref()) {
+        let graph = match query_param(target, "pid") {
+            Some(pid) => crate::Canvas::graph_json_for_entry_source_with_live_pid(
+                Path::new(canvas_file),
+                source_id.as_deref(),
+                pid.parse().unwrap_or(0),
+            ),
+            None => crate::Canvas::graph_json_for_entry_source(
+                Path::new(canvas_file),
+                source_id.as_deref(),
+            ),
+        };
+        return match graph {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",

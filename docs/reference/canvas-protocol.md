@@ -117,10 +117,14 @@ Top-level fields:
 | `facts` | Semindex schema/version handles used by the projection, plus non-semantic Blueprint-parity facts. |
 
 `facts.blueprint` contains source-derived Canvas affordances that do not change
-program meaning:
+program meaning, plus an optional live Event projection:
 
-- `event_dispatchers`: `core.event` creation, subscription, and emit calls with
-  source spans, `EventScope` lifetime, and EventTrace overlay intent.
+- `runtime_events`: `null` unless Canvas is opened as `/canvas?pid=<live Jet
+  pid>`. With a PID, the graph request uses the same owner/identity/age checks as
+  `jet inspect live` and projects only executed, payload-free
+  `Event`/`AsyncEvent`/`DecisionHook` observations: subscriptions, queue and
+  backpressure counts, priority, failures, and lifecycle. Source calls that did
+  not execute never appear.
 - `interfaces`: trait and trait-impl facts for Canvas interface views and
   create-impl transactions.
 - `task_flows`: `core.tasks` spawn/join/channel/taskgroup facts for async rails.

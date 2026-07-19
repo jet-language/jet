@@ -10,6 +10,13 @@ use super::schema_api::{Projection, source_revision};
 use super::validation_json::{json_optional_str, json_str};
 
 pub(super) fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
+    project_file_with_runtime(path, None)
+}
+
+pub(super) fn project_file_with_runtime(
+    path: &Path,
+    runtime_events: Option<&str>,
+) -> Result<Projection, Vec<Diagnostic>> {
     let path_str = path.to_string_lossy();
     let src = fs::read_to_string(path).unwrap_or_default();
     let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(&path_str, None, true);
@@ -24,7 +31,7 @@ pub(super) fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
     let Some(bundle) = bundle else {
         return Err(diags);
     };
-    Ok(project_checked(path, &src, &bundle, &facts))
+    Ok(project_checked(path, &src, &bundle, &facts, runtime_events))
 }
 
 #[derive(Clone)]

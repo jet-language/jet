@@ -91,6 +91,20 @@ fn debugger_events(pid: u32, terminal: &str) -> (String, String) {
     }
 }
 
+fn canvas_runtime(running: &Running) -> String {
+    let graph = jet::Canvas::graph_json_for_entry_source_with_live_pid(
+        &running.dir.join("main.jet"),
+        None,
+        running.child.id(),
+    )
+    .expect("Canvas should project the validated live Event sequence");
+    graph
+        .split_once("\"runtime_events\":")
+        .and_then(|(_, tail)| tail.split_once(",\"interfaces\""))
+        .map(|(runtime, _)| runtime.to_string())
+        .expect("Canvas runtime event facts")
+}
+
 #[test]
 fn debugger_sees_only_executed_redacted_sync_and_hook_facts() {
     let Some(running) = spawn_observed(
@@ -175,6 +189,32 @@ fn run() {
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(removed_subscriptions.len(), 3, "{rendered}");
     assert_eq!(rendered.matches("lifecycle=DispatchStarted").count(), 4);
+
+    let runtime = canvas_runtime(&running);
+    for fact in [
+        "\"source_truth\":\"executed_runtime_observations\"",
+        "\"source\":\"Event\"",
+        "\"source\":\"DecisionHook\"",
+        "\"lifecycle\":\"Subscribed\"",
+        "\"lifecycle\":\"Removed\"",
+        "\"priority\":17",
+        "\"priority\":9",
+        "\"failure\":\"Handler\"",
+        "\"terminal\":\"Fail\"",
+    ] {
+        assert!(
+            runtime.contains(fact),
+            "Canvas runtime facts missing {fact}: {runtime}"
+        );
+    }
+    assert!(
+        !runtime.contains("source_span"),
+        "static source fact leaked: {runtime}"
+    );
+    assert!(
+        !runtime.contains("UNEXECUTED_SECRET"),
+        "unexecuted payload leaked: {runtime}"
+    );
 }
 
 #[test]
@@ -248,6 +288,26 @@ fn run() {
     assert!(rendered.contains("terminal=HandlerFailed"));
     assert!(rendered.contains("terminal=Closed"));
     assert!(rendered.contains("terminal=Cancelled"), "{rendered}");
+
+    let runtime = canvas_runtime(&running);
+    for fact in [
+        "\"source\":\"AsyncEvent\"",
+        "\"queued\":1",
+        "\"blocked\":1",
+        "\"capacity\":1",
+        "\"overflow\":\"DropNewest\"",
+        "\"priority\":23",
+        "\"failure\":\"Handler\"",
+        "\"terminal\":\"DroppedNewest\"",
+        "\"terminal\":\"HandlerFailed\"",
+        "\"terminal\":\"Closed\"",
+        "\"terminal\":\"Cancelled\"",
+    ] {
+        assert!(
+            runtime.contains(fact),
+            "Canvas runtime facts missing {fact}: {runtime}"
+        );
+    }
 
     let dropped_line = rendered
         .lines()
