@@ -508,8 +508,8 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0925",
                 "`@Task`/`@Every(…)` only mark a top-level function".to_string(),
-                "a task is `jetpack run <name>`'s unit of work — a method has no free-standing \
-                 name to invoke, so it can't be one (D-JPK-TASKRUN1)."
+                "a task needs a free-standing name for `jet run --task <name> <entry>` — a \
+                 method has no such name, so it can't be one (D-JPK-TASKRUN1)."
                     .to_string(),
                 "move this function to the top level, beside `fn run()`.".to_string(),
                 Some(span),

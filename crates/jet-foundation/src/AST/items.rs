@@ -846,8 +846,8 @@ pub struct Func {
     pub is_replayable: bool,
     pub replayable_span: Option<Span>,
     /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `@Task fn` — a top-level
-    /// function jetpack can invoke by name (`jetpack run <name>`). Top-level
-    /// only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
+    /// function Jet can invoke by name (`jet run --task <name> <entry>`).
+    /// Top-level only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
     pub is_task: bool,
     pub task_span: Option<Span>,
     /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `@Every(...)` — a

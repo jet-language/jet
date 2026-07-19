@@ -601,8 +601,8 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `@Task fn` — a top-level
-/// function jetpack can invoke by name (D-JPK-TASKRUN1), living beside
-/// `fn run()`. Bare marker, no arguments.
+/// function Jet can invoke by name with `jet run --task` (D-JPK-TASKRUN1),
+/// living beside `fn run()`. Bare marker, no arguments.
 pub const KW_TASK: &str = "Task";
 
 /// D-JPK-TASKRUN1=A: lifecycle verbs a `@Task fn` must not reuse — they already
