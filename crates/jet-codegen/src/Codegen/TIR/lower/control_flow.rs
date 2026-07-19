@@ -285,6 +285,19 @@ mod borrowed_pattern_tests {
     }
 }
 
+fn and_tir(left: TExpr, right: TExpr) -> TExpr {
+    TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::Binary {
+            op: BinOp::And,
+            overflow: false,
+            line: 0,
+            lhs: Box::new(left),
+            rhs: Box::new(right),
+        },
+    }
+}
+
 pub(crate) fn lower_if_cond(
     cond: &Expr,
     cx: &Cx,
@@ -292,27 +305,58 @@ pub(crate) fn lower_if_cond(
 ) -> (TIfCond, Option<(String, String, Option<Type>)>, Vec<TStmt>) {
     if let Expr::Binary(BinOp::And, left, right, _) = cond {
         let (head, binding, prefix) = lower_if_cond(left, cx, env);
-        if let (
-            TIfCond::IfLet {
-                pat_str,
-                subj,
-                guard: None,
-            },
-            Some((name, place, ty)),
-        ) = (head, binding)
-        {
-            let mut guard_env = clone_env(env);
-            guard_env.bind(&name, place.clone(), ty.clone());
-            let guard = lower_expr(right, cx, &mut guard_env);
-            return (
+        match (head, binding) {
+            (
                 TIfCond::IfLet {
                     pat_str,
                     subj,
-                    guard: Some(Box::new(guard)),
+                    pre_guard,
+                    guard,
                 },
                 Some((name, place, ty)),
-                prefix,
-            );
+            ) => {
+                let mut guard_env = clone_env(env);
+                guard_env.bind(&name, place.clone(), ty.clone());
+                let right = lower_expr(right, cx, &mut guard_env);
+                return (
+                    TIfCond::IfLet {
+                        pat_str,
+                        subj,
+                        pre_guard,
+                        guard: Some(Box::new(match guard {
+                            Some(left) => and_tir(*left, right),
+                            None => right,
+                        })),
+                    },
+                    Some((name, place, ty)),
+                    prefix,
+                );
+            }
+            (TIfCond::Plain(left), _) => {
+                let (right, binding, prefix) = lower_if_cond(right, cx, env);
+                if let TIfCond::IfLet {
+                    pat_str,
+                    subj,
+                    pre_guard,
+                    guard,
+                } = right
+                {
+                    return (
+                        TIfCond::IfLet {
+                            pat_str,
+                            subj,
+                            pre_guard: Some(Box::new(match pre_guard {
+                                Some(right) => and_tir(left, *right),
+                                None => left,
+                            })),
+                            guard,
+                        },
+                        binding,
+                        prefix,
+                    );
+                }
+            }
+            _ => {}
         }
     }
     if let Expr::PatternTest {
@@ -373,14 +417,14 @@ pub(crate) fn lower_if_cond(
                 gc_transferred: false,
                     };
                     return (
-                        TIfCond::IfLet { pat_str, subj, guard: None },
+                        TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
                         Some((name.clone(), place, Some(map_ty))),
                         vec![prefix],
                     );
                 }
                 let pat_str = emit_if_let_pattern(cx, pattern);
                 return (
-                    TIfCond::IfLet { pat_str, subj, guard: None },
+                    TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
                     Some((name.clone(), place, ty)),
                     Vec::new(),
                 );
@@ -397,7 +441,7 @@ pub(crate) fn lower_if_cond(
                 let ty = variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next());
                 let place = mangle(name);
                 return (
-                    TIfCond::IfLet { pat_str, subj, guard: None },
+                    TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
                     Some((name.clone(), place, ty)),
                     Vec::new(),
                 );
@@ -408,7 +452,7 @@ pub(crate) fn lower_if_cond(
             if let Some(PatSlot::Wildcard) = bindings.first() {
                 let subj = lower_if_let_subject(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
-                return (TIfCond::IfLet { pat_str, subj, guard: None }, None, Vec::new());
+                return (TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None }, None, Vec::new());
             }
         }
     }
@@ -451,7 +495,7 @@ pub(crate) fn lower_if_cond(
             let (name, ty) = binding;
             let place = mangle(&name);
             return (
-                TIfCond::IfLet { pat_str, subj, guard: None },
+                TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
                 Some((name, place, ty)),
                 Vec::new(),
             );

@@ -131,11 +131,13 @@ enum Choice {
 fn run() {
     choice :: Choice.A(4)
     if {
-        choice == .A(n) && n > 2 -> print(n)
+        choice == .A(n) && n > 2 && n < 10 -> print(n)
         choice == .B -> print(0)
     }
+    if choice == .A(n) && n > 2 && n < 10 -> print("inline {n}")
+    if true && choice == .A(n) -> print("pre {n}")
     label :: if {
-        choice == .A(n) && n > 2 -> "large {n}"
+        true && choice == .A(n) && n > 2 && n < 10 -> "large {n}"
         else -> "other"
     }
     print(label)
@@ -143,7 +145,7 @@ fn run() {
 "#;
     let (code, stdout) = build_and_run("tir_subjectless_guard_patterns", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "4\nlarge 4\n");
+    assert_eq!(stdout, "4\ninline 4\npre 4\nlarge 4\n");
 }
 
 /// Coexistence: a free function and a method in the same program both route

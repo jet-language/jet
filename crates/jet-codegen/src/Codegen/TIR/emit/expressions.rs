@@ -902,21 +902,37 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             if let TIfCond::IfLet {
                 pat_str,
                 subj,
-                guard: Some(guard),
+                pre_guard,
+                guard,
             } = cond.as_ref()
             {
-                return format!(
-                    "match {} {{ {} if {} => {}, _ => {} }}",
-                    emit_tir_expr(subj, cx),
-                    pat_str,
-                    emit_tir_expr(guard, cx),
-                    emit_tir_value_block(then_body, then_value, cx),
-                    emit_tir_value_block(else_body, else_value, cx),
-                );
+                if pre_guard.is_some() || guard.is_some() {
+                    let guard = guard
+                        .as_ref()
+                        .map(|guard| format!(" if {}", emit_tir_expr(guard, cx)))
+                        .unwrap_or_default();
+                    let matched = format!(
+                        "match {} {{ {}{} => {}, _ => {} }}",
+                        emit_tir_expr(subj, cx),
+                        pat_str,
+                        guard,
+                        emit_tir_value_block(then_body, then_value, cx),
+                        emit_tir_value_block(else_body, else_value, cx),
+                    );
+                    return pre_guard.as_ref().map_or(matched.clone(), |pre_guard| {
+                        format!(
+                            "if {} {{ {} }} else {}",
+                            emit_tir_expr(pre_guard, cx),
+                            matched,
+                            emit_tir_value_block(else_body, else_value, cx),
+                        )
+                    });
+                }
             }
             let c = match cond.as_ref() {
                 TIfCond::Plain(cond) => emit_tir_expr(cond, cx),
-                TIfCond::IfLet { pat_str, subj, guard } => {
+                TIfCond::IfLet { pat_str, subj, pre_guard, guard } => {
+                    debug_assert!(pre_guard.is_none());
                     debug_assert!(guard.is_none());
                     format!("let {} = {}", pat_str, emit_tir_expr(subj, cx))
                 }

@@ -482,24 +482,73 @@ fn emit_tir_stmt(
             if let TIfCond::IfLet {
                 pat_str,
                 subj,
-                guard: Some(guard),
+                pre_guard,
+                guard,
             } = cond
             {
-                out.push_str(&format!(
-                    "{}match {} {{\n{}    {} if {} => {{\n",
-                    pad,
-                    emit_expr_with_cleanups(subj, cx, active_deferred_closes),
-                    pad,
-                    pat_str,
-                    emit_expr_with_cleanups(guard, cx, active_deferred_closes),
-                ));
-                emit_tir_stmts_nested(then_body, cx, out, indent + 2, active_deferred_closes);
-                out.push_str(&format!("{}    }},\n{}    _ => {{\n", pad, pad));
-                if let Some(body) = else_body {
-                    emit_tir_stmts_nested(body, cx, out, indent + 2, active_deferred_closes);
+                if pre_guard.is_some() || guard.is_some() {
+                    let match_indent = indent + usize::from(pre_guard.is_some());
+                    let match_pad = "    ".repeat(match_indent);
+                    if let Some(pre_guard) = pre_guard {
+                        out.push_str(&format!(
+                            "{}if {} {{\n",
+                            pad,
+                            emit_expr_with_cleanups(pre_guard, cx, active_deferred_closes),
+                        ));
+                    }
+                    let guard = guard
+                        .as_ref()
+                        .map(|guard| {
+                            format!(
+                                " if {}",
+                                emit_expr_with_cleanups(guard, cx, active_deferred_closes)
+                            )
+                        })
+                        .unwrap_or_default();
+                    out.push_str(&format!(
+                        "{}match {} {{\n{}    {}{} => {{\n",
+                        match_pad,
+                        emit_expr_with_cleanups(subj, cx, active_deferred_closes),
+                        match_pad,
+                        pat_str,
+                        guard,
+                    ));
+                    emit_tir_stmts_nested(
+                        then_body,
+                        cx,
+                        out,
+                        match_indent + 2,
+                        active_deferred_closes,
+                    );
+                    out.push_str(&format!(
+                        "{}    }},\n{}    _ => {{\n",
+                        match_pad, match_pad
+                    ));
+                    if let Some(body) = else_body {
+                        emit_tir_stmts_nested(
+                            body,
+                            cx,
+                            out,
+                            match_indent + 2,
+                            active_deferred_closes,
+                        );
+                    }
+                    out.push_str(&format!("{}    }},\n{}}}\n", match_pad, match_pad));
+                    if pre_guard.is_some() {
+                        out.push_str(&format!("{}}} else {{\n", pad));
+                        if let Some(body) = else_body {
+                            emit_tir_stmts_nested(
+                                body,
+                                cx,
+                                out,
+                                indent + 1,
+                                active_deferred_closes,
+                            );
+                        }
+                        out.push_str(&format!("{}}}\n", pad));
+                    }
+                    return;
                 }
-                out.push_str(&format!("{}    }},\n{}}}\n", pad, pad));
-                return;
             }
             // c109 Phase 22: render the head per the condition form, byte-for-byte
             // `emit_if` (Source/Codegen/Statement.rs).
@@ -507,7 +556,8 @@ fn emit_tir_stmt(
                 TIfCond::Plain(c) => {
                     out.push_str(&format!("{}if {} {{\n", pad, emit_expr_with_cleanups(c, cx, active_deferred_closes)));
                 }
-                TIfCond::IfLet { pat_str, subj, guard } => {
+                TIfCond::IfLet { pat_str, subj, pre_guard, guard } => {
+                    debug_assert!(pre_guard.is_none());
                     debug_assert!(guard.is_none());
                     out.push_str(&format!(
                         "{}if let {} = {} {{\n",

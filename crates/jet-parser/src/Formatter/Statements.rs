@@ -460,9 +460,17 @@ impl<'a> Fmt<'a> {
         i.else_branch.is_none()
             && i.then_body.len() == 1
             && self
-                .src
-                .get(i.cond.span().end..i.then_body[0].span().start)
-                .is_some_and(|between| between.contains(Syntax::OP_ARM_ARROW))
+                .source_toks
+                .iter()
+                .find(|token| {
+                    token.span.start >= i.cond.span().end
+                        && token.span.start < i.then_body[0].span().start
+                        && !matches!(
+                            &token.kind,
+                            TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi
+                        )
+                })
+                .is_some_and(|token| matches!(&token.kind, TokKind::Arrow))
     }
 
     fn fmt_inline_guard(&mut self, i: &IfStmt) {

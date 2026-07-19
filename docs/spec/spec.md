@@ -82,9 +82,9 @@ assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
 if       = "if" cond block { "else" "if" cond block } [ "else" block ]   // two-arm
          | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}"    // multi-arm dispatch
          | "if" cond "->" guard-stmt-body                                  // inline guard
-         | "if" "{" guard-arm { guard-arm } [ "else" "->" arm-body ] "}" ; // subjectless guards
+         | "if" "{" guard-arm { guard-arm } [ "else" "->" guard-stmt-body ] "}" ; // subjectless guards
 arm      = arm-head "->" arm-body NL ;
-guard-arm = cond "->" arm-body NL ;
+guard-arm = cond "->" guard-stmt-body NL ;
 guard-stmt-body = block | non-if-stmt ; // direct nesting requires braces (E0329)
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)

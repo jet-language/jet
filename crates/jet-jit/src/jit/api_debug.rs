@@ -272,7 +272,10 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
 fn collect_if_cond_ops(cond: &TIfCond, out: &mut Vec<String>) {
     match cond {
         TIfCond::Plain(e) => collect_expr_ops(e, out),
-        TIfCond::IfLet { subj, guard, .. } => {
+        TIfCond::IfLet { subj, pre_guard, guard, .. } => {
+            if let Some(pre_guard) = pre_guard {
+                collect_expr_ops(pre_guard, out);
+            }
             collect_expr_ops(subj, out);
             if let Some(guard) = guard {
                 collect_expr_ops(guard, out);

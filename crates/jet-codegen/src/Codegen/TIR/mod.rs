@@ -650,6 +650,9 @@ pub enum TIfCond {
     IfLet {
         pat_str: String,
         subj: TExpr,
+        /// Boolean work to the left of the binding pattern in a dominating
+        /// conjunction. It must short-circuit before the pattern subject.
+        pre_guard: Option<Box<TExpr>>,
         /// D-IFGUARD1=A/S31: condition to the right of a binding pattern in
         /// `pattern && guard`; lowered with the new binding in scope.
         guard: Option<Box<TExpr>>,

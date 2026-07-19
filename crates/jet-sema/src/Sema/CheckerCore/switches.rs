@@ -5,13 +5,21 @@ use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
-fn leading_guard_pattern_subject(expr: &Expr) -> Option<&str> {
+fn leading_guard_pattern_subject(expr: &Expr) -> Option<&Expr> {
     match expr {
-        Expr::PatternTest { subject, .. } => match subject.as_ref() {
-            Expr::Ident(name, _) => Some(name),
-            _ => None,
-        },
+        Expr::PatternTest { subject, .. } => Some(subject),
         Expr::Binary(BinOp::And, left, _, _) => leading_guard_pattern_subject(left),
+        _ => None,
+    }
+}
+
+fn guard_subject_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, member, _) => {
+            Some(format!("{}.{}", guard_subject_path(base)?, member))
+        }
+        Expr::Copy(inner, _) | Expr::Paren(inner, _) => guard_subject_path(inner),
         _ => None,
     }
 }
@@ -422,17 +430,26 @@ impl<'a> Checker<'a> {
                     .iter()
                     .filter_map(|arm| leading_guard_pattern_subject(&arm.cond))
                     .collect::<Vec<_>>();
+                let subject_paths = subjects
+                    .iter()
+                    .filter_map(|subject| guard_subject_path(subject))
+                    .collect::<Vec<_>>();
                 if subjects.len() == arms.len()
-                    && subjects[1..].iter().all(|subject| *subject == subjects[0])
+                    && subject_paths.len() == arms.len()
+                    && subject_paths[1..]
+                        .iter()
+                        .all(|subject| subject == &subject_paths[0])
                 {
-                    let first = subjects[0];
-                    let enum_name = self.lookup(first).and_then(|local| match &local.ty {
-                        Type::Named(name) if self.registry.enum_variants(name).is_some() => {
-                            Some(name.clone())
+                    let mut first = subjects[0].clone();
+                    self.borrow_ctx = true;
+                    let enum_name = self.infer(&mut first).and_then(|ty| match ty {
+                        Type::Named(name) if self.registry.enum_variants(&name).is_some() => {
+                            Some(name)
                         }
                         _ => None,
                     });
                     if let Some(enum_name) = enum_name {
+                        let first = &subject_paths[0];
                         self.diags.push(Diagnostic::lint(
                             "L0302",
                             format!("these guards all dispatch on `{enum_name}`"),

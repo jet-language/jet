@@ -2435,3 +2435,13 @@ fn overwide_inline_guard_widens_once() {
     );
     assert_eq!(jet::format_source(&out).expect("format guard twice"), out);
 }
+
+#[test]
+fn arrow_in_block_if_comment_does_not_create_inline_guard() {
+    let src = "fn run() {\n    ready :: true\n    if ready { // -> explains the branch\n        print(\"ready\")\n    }\n}\n";
+    let once = jet::format_source(src).expect("format ordinary block if");
+    assert!(once.contains("if ready {"), "{once}");
+    assert!(once.contains("// -> explains the branch"), "{once}");
+    assert!(!once.contains("if ready ->"), "{once}");
+    assert_eq!(jet::format_source(&once).expect("format twice"), once);
+}

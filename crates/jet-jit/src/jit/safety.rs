@@ -769,7 +769,10 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         } => {
             match cond.as_ref() {
                 TIfCond::Plain(e) => count_spawn_sites_expr(e, n),
-                TIfCond::IfLet { subj, guard, .. } => {
+                TIfCond::IfLet { subj, pre_guard, guard, .. } => {
+                    if let Some(pre_guard) = pre_guard {
+                        count_spawn_sites_expr(pre_guard, n);
+                    }
                     count_spawn_sites_expr(subj, n);
                     if let Some(guard) = guard {
                         count_spawn_sites_expr(guard, n);

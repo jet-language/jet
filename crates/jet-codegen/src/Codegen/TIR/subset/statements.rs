@@ -424,6 +424,9 @@ pub(crate) fn if_cond_in_subset(
             right_locals.extend(bindings.iter().cloned());
             return expr_in_subset(right, cx, &right_locals).then_some(bindings);
         }
+        if expr_in_subset(left, cx, locals) {
+            return if_cond_in_subset(right, cx, locals);
+        }
     }
     // The `x == null` (`Pattern::Absent`) form: `if {subj}.is_none()`.
     if let Expr::PatternTest {
