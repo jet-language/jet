@@ -85,11 +85,12 @@ you. Expert unsafe is opt-in via `@Unsafe("reason") { … }`, not the default.
 Jet is statically typed with generics and traits, and stricter error handling —
 you cannot ignore a fallible result. Bindings are `name :: value` (immutable)
 or `name := value` (mutable). Use `core.tasks` channels for concurrency
-(blocking; async is deferred to a later epoch).
+and scoped `taskgroup`s for structured child lifetimes.
 
 **Where is async?**  
-Deferred to a later epoch. Use blocking I/O and `core.tasks` for background
-work today (see [roadmap](docs/spec/roadmap.md)).
+Jet intentionally rejects `async`/`await` syntax (E0040); it is not deferred.
+Taskgroups and channels run on the shipped M:N scheduler, which parks tasks at
+channel, timer, and I/O waits without coloring functions `async`.
 
 **Do I type semicolons?**  
 No. The lexer inserts statement terminators automatically (Go-style). Block
