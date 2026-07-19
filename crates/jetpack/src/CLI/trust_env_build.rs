@@ -273,6 +273,26 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     })
 }
 
+#[cfg(test)]
+pub(crate) fn compose_refs_for_test(roots: &Roots, refs: Vec<RefSpec::RefSpec>) -> Result<Env, i32> {
+    let parsed = super::parse::parse_args_for("", &[]);
+    compose_env(
+        &Theme::resolve(true),
+        roots,
+        &parsed.flags,
+        &RunPlan {
+            refs,
+            adapters: Vec::new(),
+            table: RefSpec::SourceTable::empty(),
+            label: "provider-test".into(),
+            prompt_path: ModuleEval::PromptPathMode::default(),
+            prompt_strip: ModuleEval::PromptStripMode::default(),
+            dev_services: Vec::new(),
+            secrets: Vec::new(),
+        },
+    )
+}
+
 /// The ledger's name-column width for a set of refs (min 8 so a single short
 /// name doesn't collapse the table).
 fn name_column_width(refs: &[RefSpec::RefSpec]) -> usize {

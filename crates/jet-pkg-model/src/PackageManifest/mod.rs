@@ -48,7 +48,7 @@ use crate::Syntax;
 use Helpers::block_body;
 use ParseBlocks::{
     parse_build_allow, parse_deps, parse_effects, parse_grants, parse_lints_policy, parse_package,
-    parse_memory_policy, parse_packages, parse_trust_policy,
+    parse_memory_policy, parse_packages, parse_provider_policy, parse_trust_policy,
 };
 
 /// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
@@ -113,6 +113,15 @@ pub struct TrustPolicy {
     pub default: Option<TrustDecision>,
     pub ci_prompt: Option<TrustDecision>,
     pub services: Vec<(String, TrustDecision)>,
+}
+
+/// One reviewed `policy.providers.<root>` source authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderAuthority {
+    pub provider: String,
+    pub registry: String,
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
 }
 
 /// One trust decision value in `policy.trust`.
@@ -242,6 +251,8 @@ pub struct PackManifest {
     /// D-JPK-GRANTSCHEMA1=A: reviewed trust policy facts for the unified grant
     /// graph.
     pub trust_policy: Option<TrustPolicy>,
+    /// D-JPK-PROVIDERAUTH1=A: explicit provider registry/fetch authorities.
+    pub provider_policy: Vec<ProviderAuthority>,
     /// D-LINTPOLICY1=A (the override law): lint codes from
     /// `policy: { lints: { deny: […] } }` that fail the build when they fire.
     /// `None` when no `policy.lints` block is present at all (warn-never-block
@@ -295,6 +306,8 @@ pub enum ManifestError {
     BadEffectsBlock { detail: String },
     /// D-JPK-GRANTSCHEMA1=A: malformed `policy.trust`.
     BadTrustPolicy { detail: String },
+    /// D-JPK-PROVIDERAUTH1=A: malformed `policy.providers` authority.
+    BadProviderPolicy { detail: String },
     /// D-LINTPOLICY1=A: malformed `policy.lints` — an unknown field, a
     /// non-list `deny:` value, or an entry not shaped like a lint code.
     BadLintsPolicy { detail: String },
@@ -389,6 +402,10 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         Some(body) => parse_trust_policy(&body)?,
         None => None,
     };
+    let provider_policy = match block_body(&text, Syntax::MANIFEST_BLOCK_POLICY, '{', '}') {
+        Some(body) => parse_provider_policy(&body)?,
+        None => Vec::new(),
+    };
 
     // D-LINTPOLICY1=A: `policy: { lints: { deny: […] } }` — absent entirely
     // means warn-never-block stays the default.
@@ -420,6 +437,7 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         effects_deny,
         grants,
         trust_policy,
+        provider_policy,
         lints_deny,
         memory_policy,
     })
@@ -1222,5 +1240,34 @@ build: { fast: Build.{ optimize: full, bogus: true } }
             matches!(err, ManifestError::BadBuildProfile { ref name, .. } if name == "fast"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn provider_policy_parses_explicit_mirror_allow_and_deny() {
+        let manifest = parse(r#"
+payload: { name: "p", version: "0.1.0" }
+policy: {
+    providers: {
+        ruby: {
+            registry: "https://mirror.example.test",
+            allow: ["mirror.example.test", "dist.example.test"],
+            deny: ["blocked.example.test"],
+        },
+    },
+}
+"#).unwrap();
+        assert_eq!(manifest.provider_policy, vec![ProviderAuthority {
+            provider: "ruby".into(),
+            registry: "https://mirror.example.test".into(),
+            allow: vec!["mirror.example.test".into(), "dist.example.test".into()],
+            deny: vec!["blocked.example.test".into()],
+        }]);
+        for malformed in [
+            r#"payload: { name: "p", version: "1" } policy: { providers: { ruby: { allow: ["x"] } } }"#,
+            r#"payload: { name: "p", version: "1" } policy: { providers: { ruby: { registry: mirror.example.test } } }"#,
+            r#"payload: { name: "p", version: "1" } policy: { providers: { ruby: { registry: "https://a", registry: "https://b" } } }"#,
+        ] {
+            assert!(matches!(parse(malformed), Err(ManifestError::BadProviderPolicy { .. })));
+        }
     }
 }

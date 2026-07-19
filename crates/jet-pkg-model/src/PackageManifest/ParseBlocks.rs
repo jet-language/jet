@@ -4,7 +4,7 @@
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
 use super::{
     BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry, PackageMeta,
-    Target, TrustDecision, TrustPolicy,
+    ProviderAuthority, Target, TrustDecision, TrustPolicy,
 };
 use crate::RefSpec;
 use crate::Syntax;
@@ -57,7 +57,7 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
     let mut out = Vec::new();
     for (name, raw) in key_value_entries(body) {
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
-            if matches!(name.as_str(), "trust" | "lints") { continue; }
+            if matches!(name.as_str(), "trust" | "lints" | "providers") { continue; }
             return Err(ManifestError::BadMemoryPolicy { detail: format!("`{name}` is not a registered package policy") });
         };
         let value = match key {
@@ -538,6 +538,72 @@ pub(super) fn parse_trust_policy(body: &str) -> Result<Option<TrustPolicy>, Mani
         }
     }
     Ok(Some(policy))
+}
+
+/// D-JPK-PROVIDERAUTH1=A: parse the minimal reviewed authority surface:
+/// `policy.providers.<root> = { registry, allow, deny }`.
+pub(super) fn parse_provider_policy(body: &str) -> Result<Vec<ProviderAuthority>, ManifestError> {
+    let Some(providers) = super::Helpers::block_body(
+        body,
+        Syntax::POLICY_FIELD_PROVIDERS,
+        '{',
+        '}',
+    ) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    let mut seen_providers = HashSet::new();
+    for (provider, value) in key_value_entries(&providers) {
+        if !seen_providers.insert(provider.clone()) {
+            return Err(ManifestError::BadProviderPolicy {
+                detail: format!("policy.providers.{provider} is declared more than once"),
+            });
+        }
+        let authority = value
+            .trim()
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .ok_or_else(|| ManifestError::BadProviderPolicy {
+                detail: format!("policy.providers.{provider} must be an authority object"),
+            })?;
+        let mut registry = None;
+        let mut allow = Vec::new();
+        let mut deny = Vec::new();
+        let mut seen_fields = HashSet::new();
+        for (field, value) in key_value_entries(authority) {
+            if !seen_fields.insert(field.clone()) {
+                return Err(ManifestError::BadProviderPolicy {
+                    detail: format!("policy.providers.{provider}.{field} is declared more than once"),
+                });
+            }
+            if field == Syntax::PROVIDER_FIELD_REGISTRY {
+                let value = value.trim();
+                if !value.starts_with('"') || !value.ends_with('"') || value.len() < 2 {
+                    return Err(ManifestError::BadProviderPolicy {
+                        detail: format!("policy.providers.{provider}.registry must be a string"),
+                    });
+                }
+                registry = Some(unquote(value));
+            } else if field == Syntax::PROVIDER_FIELD_ALLOW {
+                allow = parse_string_list(&value).map_err(|_| ManifestError::BadProviderPolicy {
+                        detail: format!("policy.providers.{provider}.allow must be a list"),
+                })?;
+            } else if field == Syntax::PROVIDER_FIELD_DENY {
+                deny = parse_string_list(&value).map_err(|_| ManifestError::BadProviderPolicy {
+                        detail: format!("policy.providers.{provider}.deny must be a list"),
+                })?;
+            } else {
+                return Err(ManifestError::BadProviderPolicy {
+                    detail: format!("unknown policy.providers.{provider} field `{field}`"),
+                });
+            }
+        }
+        let registry = registry.ok_or_else(|| ManifestError::BadProviderPolicy {
+            detail: format!("policy.providers.{provider} needs registry"),
+        })?;
+        out.push(ProviderAuthority { provider, registry, allow, deny });
+    }
+    Ok(out)
 }
 
 fn parse_ci_trust_prompt(value: &str) -> Result<TrustDecision, ManifestError> {

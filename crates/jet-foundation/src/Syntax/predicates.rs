@@ -353,6 +353,11 @@ pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
 /// grammar.
 pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-JPK-GRANTSCHEMA1
 pub const POLICY_FIELD_TRUST: &str = "trust"; // D-JPK-GRANTSCHEMA1
+/// D-JPK-PROVIDERAUTH1=A: reviewed registry and fetch authority.
+pub const POLICY_FIELD_PROVIDERS: &str = "providers";
+pub const PROVIDER_FIELD_REGISTRY: &str = "registry";
+pub const PROVIDER_FIELD_ALLOW: &str = "allow";
+pub const PROVIDER_FIELD_DENY: &str = "deny";
 pub const POLICY_TRUST_FIELD_DEFAULT: &str = "default"; // D-JPK-GRANTSCHEMA1
 pub const POLICY_TRUST_FIELD_CI: &str = "ci"; // D-JPK-GRANTSCHEMA1
 pub const POLICY_TRUST_FIELD_PROMPT: &str = "prompt"; // D-JPK-GRANTSCHEMA1

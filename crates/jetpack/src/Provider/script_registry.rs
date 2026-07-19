@@ -52,6 +52,19 @@ impl Kind {
         }
     }
 
+    fn fetch_authorities(self) -> &'static [&'static str] {
+        match self {
+            Self::RubyGems => &["index.rubygems.org"],
+            Self::Cpan => &["fastapi.metacpan.org", "cpan.metacpan.org"],
+            Self::Packagist => &[
+                "repo.packagist.org",
+                "api.github.com",
+                "codeload.github.com",
+                "github.com",
+            ],
+        }
+    }
+
     fn valid_name(self, name: &str) -> bool {
         match self {
             Self::RubyGems => safe_piece(name, "_-.") && !name.contains('/'),
@@ -82,7 +95,10 @@ struct Dependency {
 enum Integrity {
     Sha256(String),
     Sha1(String),
-    ImmutableReference(String),
+    ImmutableGit {
+        repository: String,
+        reference: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +108,7 @@ struct Package {
     url: String,
     integrity: Integrity,
     dependencies: Vec<Dependency>,
-    psr4: BTreeMap<String, String>,
+    psr4: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -120,9 +136,23 @@ impl Provider for ScriptRegistryProvider {
             )));
         }
         let (root_name, root_version) = parse_ref(kind, &spec.package)?;
-        let repository = kind.repository();
+        let authority = super::fetch::Authority::load(
+            ctx,
+            kind.label(),
+            &kind.repository(),
+            kind.fetch_authorities(),
+        )
+        .map_err(|error| fail(kind, error))?;
+        let repository = authority.registry().to_string();
+        let fetch_authority = authority.provenance();
         let scratch = Scratch::new(ctx.store_dir, kind)?;
-        let packages = resolve_closure(kind, &repository, root_name, root_version)?;
+        let packages = resolve_closure(
+            kind,
+            &authority,
+            &scratch,
+            root_name,
+            root_version,
+        )?;
         let mut artifacts = Vec::new();
         for package in packages {
             let path = scratch.path.join(format!(
@@ -131,7 +161,9 @@ impl Provider for ScriptRegistryProvider {
                 safe_filename(&package.version),
                 archive_suffix(kind)
             ));
-            download(kind, &package.url, &path)?;
+            authority
+                .to_path(&package.url, &path, &scratch.path)
+                .map_err(|error| fail(kind, error))?;
             let bytes = std::fs::read(&path)
                 .map_err(|error| fail(kind, format!("could not read fetched source: {error}")))?;
             verify_integrity(kind, &package, &bytes)?;
@@ -189,7 +221,13 @@ impl Provider for ScriptRegistryProvider {
         write_runtime_projection(kind, &artifacts, &out_dir)?;
         std::fs::write(
             out_dir.join(format!("{}.provenance", kind.label())),
-            render_provenance(kind, &repository, &source_hash, &artifacts),
+            render_provenance(
+                kind,
+                &repository,
+                &fetch_authority,
+                &source_hash,
+                &artifacts,
+            ),
         )
         .map_err(|error| fail(kind, format!("could not write provenance: {error}")))?;
         crate::Store::seal_local_output(&out_dir)
@@ -229,6 +267,7 @@ impl Provider for ScriptRegistryProvider {
         let identity = cache_identity(&source_hash, kind.recipe(), ctx);
         let (references, mut facts) = dependency_objects(&root.package.name, &artifacts);
         facts.insert("repository".into(), repository.clone());
+        facts.insert("fetch.authority".into(), fetch_authority.clone());
         let producer = producer_record(
             kind.label(),
             &format!("cas:{source_hash}"),
@@ -236,6 +275,7 @@ impl Provider for ScriptRegistryProvider {
             BTreeMap::from([
                 ("action.kind".into(), format!("{}-install", kind.label())),
                 ("repository".into(), repository),
+                ("fetch.authority".into(), fetch_authority),
                 ("package.version".into(), root.package.version.clone()),
                 ("scripts".into(), "disabled".into()),
                 ("plugins".into(), "disabled".into()),
@@ -289,96 +329,135 @@ fn parse_ref<'a>(kind: Kind, raw: &'a str) -> Result<(&'a str, &'a str), Provide
 
 fn resolve_closure(
     kind: Kind,
-    repository: &str,
+    authority: &super::fetch::Authority,
+    scratch: &Scratch,
     root: &str,
     version: &str,
 ) -> Result<Vec<Package>, ProviderError> {
-    fn visit(
+    fn solve(
         kind: Kind,
-        repository: &str,
-        name: &str,
-        requirement: &str,
-        selected: &mut BTreeMap<String, Package>,
-        active: &mut BTreeSet<String>,
-        order: &mut Vec<String>,
-    ) -> Result<(), ProviderError> {
-        if let Some(existing) = selected.get(name) {
-            if version_satisfies(&existing.version, requirement) {
-                return Ok(());
+        authority: &super::fetch::Authority,
+        scratch: &Scratch,
+        constraints: BTreeMap<String, Vec<String>>,
+        selected: BTreeMap<String, Package>,
+        candidates: &mut BTreeMap<String, Vec<Package>>,
+    ) -> Result<Option<BTreeMap<String, Package>>, ProviderError> {
+        if selected.iter().any(|(name, package)| {
+            constraints
+                .get(name)
+                .is_some_and(|requirements| !requirements.iter().all(|requirement| {
+                    version_satisfies(&package.version, requirement)
+                }))
+        }) {
+            return Ok(None);
+        }
+        let Some(name) = constraints
+            .keys()
+            .find(|name| !selected.contains_key(*name))
+            .cloned()
+        else {
+            return Ok(Some(selected));
+        };
+        if !candidates.contains_key(&name) {
+            let mut fetched = fetch_candidates(kind, authority, scratch, &name)?;
+            fetched.sort_by(|left, right| {
+                compare_versions(&right.version, &left.version)
+                    .then_with(|| left.url.cmp(&right.url))
+            });
+            candidates.insert(name.clone(), fetched);
+        }
+        let requirements = constraints.get(&name).cloned().unwrap_or_default();
+        for package in candidates.get(&name).cloned().unwrap_or_default() {
+            if !requirements
+                .iter()
+                .all(|requirement| version_satisfies(&package.version, requirement))
+            {
+                continue;
             }
-            return Err(fail(
+            let mut next_constraints = constraints.clone();
+            for dependency in &package.dependencies {
+                next_constraints
+                    .entry(dependency.name.clone())
+                    .or_default()
+                    .push(dependency.requirement.clone());
+            }
+            let mut next_selected = selected.clone();
+            next_selected.insert(name.clone(), package);
+            if let Some(solution) = solve(
                 kind,
-                format!(
-                    "dependency `{name}` needs `{requirement}` but closure already selected {}",
-                    existing.version
-                ),
-            ));
+                authority,
+                scratch,
+                next_constraints,
+                next_selected,
+                candidates,
+            )? {
+                return Ok(Some(solution));
+            }
+        }
+        Ok(None)
+    }
+    fn order(
+        kind: Kind,
+        name: &str,
+        selected: &BTreeMap<String, Package>,
+        active: &mut BTreeSet<String>,
+        done: &mut BTreeSet<String>,
+        out: &mut Vec<Package>,
+    ) -> Result<(), ProviderError> {
+        if done.contains(name) {
+            return Ok(());
         }
         if !active.insert(name.to_string()) {
             return Err(fail(kind, format!("dependency cycle includes `{name}`")));
         }
-        let candidates = fetch_candidates(kind, repository, name)?;
-        let package = candidates
-            .into_iter()
-            .filter(|candidate| version_satisfies(&candidate.version, requirement))
-            .max_by(|left, right| compare_versions(&left.version, &right.version))
-            .ok_or_else(|| {
-                fail(
-                    kind,
-                    format!("package `{name}` has no version satisfying `{requirement}`"),
-                )
-            })?;
+        let package = selected
+            .get(name)
+            .ok_or_else(|| fail(kind, format!("resolved package `{name}` disappeared")))?;
         for dependency in &package.dependencies {
-            visit(
-                kind,
-                repository,
-                &dependency.name,
-                &dependency.requirement,
-                selected,
-                active,
-                order,
-            )?;
+            order(kind, &dependency.name, selected, active, done, out)?;
         }
         active.remove(name);
-        order.push(name.to_string());
-        selected.insert(name.to_string(), package);
+        done.insert(name.to_string());
+        out.push(package.clone());
         Ok(())
     }
-    let mut selected = BTreeMap::new();
-    let mut order = Vec::new();
-    visit(
+    let constraints = BTreeMap::from([(root.to_string(), vec![format!("={version}")])]);
+    let selected = solve(kind, authority, scratch, constraints, BTreeMap::new(), &mut BTreeMap::new())?
+        .ok_or_else(|| fail(kind, format!("no complete dependency solution exists for `{root}` {version}")))?;
+    let mut out = Vec::new();
+    order(
         kind,
-        repository,
         root,
-        &format!("={version}"),
-        &mut selected,
+        &selected,
         &mut BTreeSet::new(),
-        &mut order,
+        &mut BTreeSet::new(),
+        &mut out,
     )?;
-    order
-        .into_iter()
-        .map(|name| {
-            selected
-                .remove(&name)
-                .ok_or_else(|| fail(kind, format!("resolved package `{name}` disappeared")))
-        })
-        .collect()
+    Ok(out)
 }
 
 fn fetch_candidates(
     kind: Kind,
-    repository: &str,
+    authority: &super::fetch::Authority,
+    scratch: &Scratch,
     name: &str,
 ) -> Result<Vec<Package>, ProviderError> {
     match kind {
-        Kind::RubyGems => fetch_rubygems(repository, name),
-        Kind::Cpan => fetch_cpan(repository, name),
-        Kind::Packagist => fetch_packagist(repository, name),
+        Kind::RubyGems => fetch_rubygems(authority, scratch, name),
+        Kind::Cpan => fetch_cpan(authority, scratch, name),
+        Kind::Packagist => fetch_packagist(authority, scratch, name),
     }
 }
 
-fn fetch_rubygems(repository: &str, name: &str) -> Result<Vec<Package>, ProviderError> {
-    let raw = fetch_text(Kind::RubyGems, &format!("{repository}/info/{name}"))?;
+fn fetch_rubygems(
+    authority: &super::fetch::Authority,
+    scratch: &Scratch,
+    name: &str,
+) -> Result<Vec<Package>, ProviderError> {
+    let repository = authority.registry();
+    let raw = authority
+        .text(&format!("{repository}/info/{name}"), &scratch.path)
+        .map_err(|error| fail(Kind::RubyGems, error))?;
     let mut out = Vec::new();
     for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
         let (left, attributes) = line
@@ -446,21 +525,54 @@ fn fetch_rubygems(repository: &str, name: &str) -> Result<Vec<Package>, Provider
     }
 }
 
-fn fetch_cpan(repository: &str, name: &str) -> Result<Vec<Package>, ProviderError> {
-    let release_url = format!("{repository}/v1/release/{}", url_piece(name));
-    let raw = fetch_text(Kind::Cpan, &release_url).or_else(|_| {
-        let module = fetch_json(
-            Kind::Cpan,
+fn fetch_cpan(
+    authority: &super::fetch::Authority,
+    scratch: &Scratch,
+    name: &str,
+) -> Result<Vec<Package>, ProviderError> {
+    let repository = authority.registry();
+    let distribution = authority
+        .text(
             &format!("{repository}/v1/module/{}", url_piece(name)),
-        )?;
-        let distribution = json_string(&module, "distribution", Kind::Cpan)?;
-        fetch_text(
-            Kind::Cpan,
-            &format!("{repository}/v1/release/{}", url_piece(distribution)),
+            &scratch.path,
         )
-    })?;
-    let value = crate::JSON::parse(&raw)
-        .map_err(|error| fail(Kind::Cpan, format!("invalid MetaCPAN JSON: {error}")))?;
+        .ok()
+        .and_then(|raw| crate::JSON::parse(&raw).ok())
+        .and_then(|value| value.get("distribution").ok()?.as_str().ok().map(str::to_string))
+        .unwrap_or_else(|| name.to_string());
+    let query = format!(
+        "{repository}/v1/release/_search?q={}&size=500",
+        url_piece(&format!("distribution:{distribution}"))
+    );
+    let value = authority
+        .text(&query, &scratch.path)
+        .map_err(|error| fail(Kind::Cpan, error))
+        .and_then(|raw| {
+            crate::JSON::parse(&raw)
+                .map_err(|error| fail(Kind::Cpan, format!("invalid MetaCPAN JSON: {error}")))
+        })?;
+    let releases = value
+        .get("hits")
+        .and_then(|hits| hits.get("hits"))
+        .and_then(Json::as_array)
+        .map_err(|error| fail(Kind::Cpan, format!("invalid MetaCPAN release search: {error}")))?;
+    let mut out = Vec::new();
+    for hit in releases {
+        let release = hit
+            .get("_source")
+            .map_err(|error| fail(Kind::Cpan, format!("invalid MetaCPAN release hit: {error}")))?;
+        out.push(parse_cpan_release(repository, release)?);
+    }
+    if out.is_empty() {
+        return Err(fail(
+            Kind::Cpan,
+            format!("MetaCPAN has no releases for distribution `{distribution}`"),
+        ));
+    }
+    Ok(out)
+}
+
+fn parse_cpan_release(repository: &str, value: &Json) -> Result<Package, ProviderError> {
     let package_name = json_string(&value, "distribution", Kind::Cpan)?;
     let version = json_string(&value, "version", Kind::Cpan)?;
     let url = json_string(&value, "download_url", Kind::Cpan)?;
@@ -505,18 +617,28 @@ fn fetch_cpan(repository: &str, name: &str) -> Result<Vec<Package>, ProviderErro
             });
         }
     }
-    Ok(vec![Package {
+    Ok(Package {
         name: package_name.to_string(),
         version: version.to_string(),
         url: absolutize(repository, url),
         integrity: Integrity::Sha256(checksum.to_ascii_lowercase()),
         dependencies,
         psr4: BTreeMap::new(),
-    }])
+    })
 }
 
-fn fetch_packagist(repository: &str, name: &str) -> Result<Vec<Package>, ProviderError> {
-    let value = fetch_json(Kind::Packagist, &format!("{repository}/p2/{name}.json"))?;
+fn fetch_packagist(
+    authority: &super::fetch::Authority,
+    scratch: &Scratch,
+    name: &str,
+) -> Result<Vec<Package>, ProviderError> {
+    let repository = authority.registry();
+    let value = fetch_json(
+        Kind::Packagist,
+        authority,
+        scratch,
+        &format!("{repository}/p2/{name}.json"),
+    )?;
     let packages = value
         .get("packages")
         .and_then(Json::as_object)
@@ -579,16 +701,16 @@ fn fetch_packagist(repository: &str, name: &str) -> Result<Vec<Package>, Provide
             64 if valid_hex(shasum, 64) => Integrity::Sha256(shasum.to_ascii_lowercase()),
             0 => {
                 let reference = json_string(dist, "reference", Kind::Packagist)?;
-                if !matches!(reference.len(), 40 | 64)
-                    || !reference.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    || !url.contains(reference)
-                {
-                    return Err(fail(
+                let repository = verified_packagist_git_source(release, url, reference).ok_or_else(|| {
+                    fail(
                         Kind::Packagist,
-                        format!("package `{name}` {version} has neither a checksum nor an immutable dist reference"),
-                    ));
+                        format!("package `{name}` {version} has neither a digest nor a verified immutable GitHub source authority"),
+                    )
+                })?;
+                Integrity::ImmutableGit {
+                    repository,
+                    reference: reference.to_ascii_lowercase(),
                 }
-                Integrity::ImmutableReference(reference.to_ascii_lowercase())
             }
             _ => {
                 return Err(fail(
@@ -632,16 +754,27 @@ fn fetch_packagist(repository: &str, name: &str) -> Result<Vec<Package>, Provide
                 ));
             }
             if let Some(Json::Object(mappings)) = autoload.get("psr-4") {
-                for (prefix, path) in mappings {
-                    let path = path
-                        .as_str()
-                        .map_err(|error| fail(Kind::Packagist, error))?;
-                    if prefix.contains('\0')
-                        || !safe_relative(Path::new(path.trim_end_matches('/')))
-                    {
+                for (prefix, value) in mappings {
+                    let paths = match value {
+                        Json::Str(path) => vec![path.clone()],
+                        Json::Array(paths) => paths
+                            .iter()
+                            .map(|path| {
+                                path.as_str()
+                                    .map(str::to_string)
+                                    .map_err(|error| fail(Kind::Packagist, error))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        _ => return Err(fail(Kind::Packagist, "PSR-4 path must be a string or ordered string array")),
+                    };
+                    if prefix.contains('\0') || paths.is_empty() || paths.iter().any(|path| {
+                        path.contains('\0')
+                            || (!path.trim_matches('/').is_empty()
+                                && !safe_relative(Path::new(path.trim_matches('/'))))
+                    }) {
                         return Err(fail(Kind::Packagist, "unsafe PSR-4 autoload path"));
                     }
-                    psr4.insert(prefix.clone(), path.to_string());
+                    psr4.insert(prefix.clone(), paths);
                 }
             }
         }
@@ -692,7 +825,7 @@ fn expand_packagist_releases(
             )
         })?;
         for (key, value) in changes {
-            if value == &Json::Null {
+            if matches!(value, Json::Str(value) if value == "__unset") {
                 previous.remove(key);
             } else {
                 previous.insert(key.clone(), value.clone());
@@ -703,14 +836,44 @@ fn expand_packagist_releases(
     Ok(expanded)
 }
 
-fn fetch_json(kind: Kind, url: &str) -> Result<Json, ProviderError> {
-    let raw = fetch_text(kind, url)?;
+fn fetch_json(
+    kind: Kind,
+    authority: &super::fetch::Authority,
+    scratch: &Scratch,
+    url: &str,
+) -> Result<Json, ProviderError> {
+    let raw = authority
+        .text(url, &scratch.path)
+        .map_err(|error| fail(kind, error))?;
     crate::JSON::parse(&raw).map_err(|error| {
         fail(
             kind,
             format!("invalid {} metadata JSON: {error}", kind.title()),
         )
     })
+}
+
+fn verified_packagist_git_source(release: &Json, dist_url: &str, reference: &str) -> Option<String> {
+    if !matches!(reference.len(), 40 | 64)
+        || !reference.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let source = release.get("source").ok()?;
+    if json_string(source, "type", Kind::Packagist).ok()? != "git"
+        || json_string(source, "reference", Kind::Packagist).ok()? != reference
+    {
+        return None;
+    }
+    let repository = json_string(source, "url", Kind::Packagist).ok()?;
+    let path = repository.strip_prefix("https://github.com/")?.strip_suffix(".git")?;
+    let mut pieces = path.split('/');
+    let (owner, repo) = (pieces.next()?, pieces.next()?);
+    if pieces.next().is_some() || !safe_piece(owner, "-_.") || !safe_piece(repo, "-_.") {
+        return None;
+    }
+    let expected = format!("https://api.github.com/repos/{owner}/{repo}/zipball/{reference}");
+    (dist_url.split('?').next()? == expected).then(|| repository.to_string())
 }
 
 fn json_string<'a>(value: &'a Json, field: &str, kind: Kind) -> Result<&'a str, ProviderError> {
@@ -780,7 +943,7 @@ fn install_gem(artifact: &Artifact, out: &Path, scratch: &Scratch) -> Result<(),
     reject_tree_features(
         Kind::RubyGems,
         &gem_root,
-        &["extensions", "plugins", "rubygems_plugin.rb"],
+        &["ext", "extensions", "plugins", "rubygems_plugin.rb"],
     )
 }
 
@@ -805,7 +968,7 @@ fn install_cpan(artifact: &Artifact, out: &Path, scratch: &Scratch) -> Result<()
         "unpack CPAN distribution",
     )?;
     let root = archive_root(Kind::Cpan, &unpack)?;
-    reject_tree_features(Kind::Cpan, &root, &[".xs", ".c", ".so"])?;
+    reject_tree_features(Kind::Cpan, &root, &[])?;
     let library = root.join("lib");
     if !library.is_dir() {
         return Err(fail(
@@ -824,7 +987,7 @@ fn install_composer(
     out: &Path,
     scratch: &Scratch,
 ) -> Result<(), ProviderError> {
-    const ZIP_LIST: &str = "$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); for($i=0;$i<$z->numFiles;$i++) echo $z->getNameIndex($i),\"\\n\";";
+    const ZIP_LIST: &str = "$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); for($i=0;$i<$z->numFiles;$i++){ $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),\"\\t\",$z->getNameIndex($i),\"\\n\"; }";
     let listing = Command::new("php")
         .args([
             "-d",
@@ -851,11 +1014,20 @@ fn install_composer(
     }
     let listing = String::from_utf8(listing.stdout)
         .map_err(|_| fail(Kind::Packagist, "Packagist zip paths are not UTF-8"))?;
-    for entry in listing.lines() {
+    for line in listing.lines() {
+        let (mode, entry) = line
+            .split_once('\t')
+            .ok_or_else(|| fail(Kind::Packagist, "Packagist zip type listing is malformed"))?;
         if entry.is_empty() || !safe_relative(Path::new(entry.trim_end_matches('/'))) {
             return Err(fail(
                 Kind::Packagist,
                 format!("Packagist zip contains unsafe path `{entry}`"),
+            ));
+        }
+        if !matches!(mode, "0" | "4000" | "8000") {
+            return Err(fail(
+                Kind::Packagist,
+                format!("Packagist zip contains link or special entry `{entry}`"),
             ));
         }
     }
@@ -941,10 +1113,16 @@ fn write_runtime_projection(
             let autoload = out.join("vendor/autoload.php");
             let mut mappings = Vec::new();
             for artifact in artifacts {
-                for (prefix, relative) in &artifact.package.psr4 {
+                for (prefix, paths) in &artifact.package.psr4 {
                     mappings.push((
                         prefix.clone(),
-                        PathBuf::from(&artifact.package.name).join(relative.trim_end_matches('/')),
+                        paths
+                            .iter()
+                            .map(|relative| {
+                                PathBuf::from(&artifact.package.name)
+                                    .join(relative.trim_matches('/'))
+                            })
+                            .collect::<Vec<_>>(),
                     ));
                 }
             }
@@ -958,13 +1136,19 @@ fn write_runtime_projection(
             let mut php = String::from(
                 "<?php\nspl_autoload_register(static function (string $class): void {\n",
             );
-            for (prefix, directory) in mappings {
+            for (prefix, directories) in mappings {
                 php.push_str(&format!(
-                    "    if (str_starts_with($class, '{}')) {{ $file = __DIR__.'/{}'.str_replace('\\\\', '/', substr($class, {})).'.php'; if (is_file($file)) require $file; return; }}\n",
+                    "    if (str_starts_with($class, '{}')) {{\n",
                     php_quote(&prefix),
-                    php_quote(&format!("{}/", directory.display())),
-                    prefix.len()
                 ));
+                for directory in directories {
+                    php.push_str(&format!(
+                        "        $file = __DIR__.'/{}'.str_replace('\\\\', '/', substr($class, {})).'.php'; if (is_file($file)) {{ require $file; return; }}\n",
+                        php_quote(&format!("{}/", directory.display())),
+                        prefix.len()
+                    ));
+                }
+                php.push_str("    }\n");
             }
             php.push_str("});\nreturn true;\n");
             if let Some(parent) = autoload.parent() {
@@ -1027,10 +1211,10 @@ fn validate_tar(kind: Kind, path: &Path, gzip: bool) -> Result<(), ProviderError
         .map_err(|_| fail(kind, "source archive listing is not UTF-8"))?
         .lines()
     {
-        if matches!(line.as_bytes().first(), Some(b'l' | b'h')) {
+        if !matches!(line.as_bytes().first(), Some(b'-' | b'd')) {
             return Err(fail(
                 kind,
-                "source archives may not contain symbolic or hard links",
+                "source archives may contain only regular files and directories",
             ));
         }
     }
@@ -1068,7 +1252,7 @@ fn reject_tree_features(kind: Kind, root: &Path, forbidden: &[&str]) -> Result<(
                 return Err(fail(kind, "installed source contains a symbolic link"));
             }
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-            if forbidden.iter().any(|item| {
+            if forbidden.iter().chain(native_suffixes(kind)).any(|item| {
                 let item = item.to_ascii_lowercase();
                 name == item || (item.starts_with('.') && name.ends_with(&item))
             }) {
@@ -1086,6 +1270,17 @@ fn reject_tree_features(kind: Kind, root: &Path, forbidden: &[&str]) -> Result<(
         Ok(())
     }
     walk(kind, root, forbidden)
+}
+
+fn native_suffixes(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::RubyGems => &[".so", ".bundle", ".dll", ".dylib", ".o", ".a"],
+        Kind::Cpan => &[
+            ".xs", ".c", ".cc", ".cpp", ".h", ".so", ".bundle", ".dll", ".dylib",
+            ".bs", ".o", ".a",
+        ],
+        Kind::Packagist => &[".so", ".bundle", ".dll", ".dylib", ".phar"],
+    }
 }
 
 fn copy_tree(kind: Kind, source: &Path, destination: &Path) -> Result<(), ProviderError> {
@@ -1134,11 +1329,11 @@ fn verify_integrity(kind: Kind, package: &Package, bytes: &[u8]) -> Result<(), P
     let (algorithm, expected, actual) = match &package.integrity {
         Integrity::Sha256(expected) => ("SHA-256", expected.clone(), SHA256::sha256_hex(bytes)),
         Integrity::Sha1(expected) => ("SHA-1", expected.clone(), sha1_hex(bytes)),
-        Integrity::ImmutableReference(reference) => {
+        Integrity::ImmutableGit { repository, reference } => {
             if bytes.is_empty() {
                 return Err(fail(
                     kind,
-                    format!("empty source fetched for immutable reference `{reference}`"),
+                    format!("empty source fetched for immutable `{repository}` reference `{reference}`"),
                 ));
             }
             return Ok(());
@@ -1202,11 +1397,12 @@ fn closure_hash(kind: Kind, artifacts: &[Artifact]) -> String {
 fn render_provenance(
     kind: Kind,
     repository: &str,
+    fetch_authority: &str,
     source_hash: &str,
     artifacts: &[Artifact],
 ) -> String {
     let mut out = format!(
-        "schema=jet-{}-provider-v1\nrepository={repository}\nsource_hash={source_hash}\nscripts=disabled\nplugins=disabled\n",
+        "schema=jet-{}-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nscripts=disabled\nplugins=disabled\n",
         kind.label()
     );
     for artifact in artifacts {
@@ -1216,48 +1412,6 @@ fn render_provenance(
         ));
     }
     out
-}
-
-fn fetch_text(kind: Kind, url: &str) -> Result<String, ProviderError> {
-    let output = Command::new("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "60",
-        ])
-        .arg(url)
-        .output()
-        .map_err(|error| fail(kind, format!("could not start provisioned curl: {error}")))?;
-    if !output.status.success() {
-        return Err(fail(kind, format!("could not fetch `{url}`")));
-    }
-    String::from_utf8(output.stdout)
-        .map_err(|_| fail(kind, format!("metadata from `{url}` is not UTF-8")))
-}
-
-fn download(kind: Kind, url: &str, path: &Path) -> Result<(), ProviderError> {
-    let status = Command::new("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "60",
-            "--output",
-        ])
-        .arg(path)
-        .arg(url)
-        .status()
-        .map_err(|error| fail(kind, format!("could not start provisioned curl: {error}")))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(fail(kind, format!("could not fetch `{url}`")))
-    }
 }
 
 fn archive_suffix(kind: Kind) -> &'static str {
@@ -1592,13 +1746,17 @@ mod tests {
         );
         assert!(parse_cpan_fixture(r#"{"distribution":"Jet-App","version":"2.0","download_url":"/Jet-App.tar.gz","checksum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependency":[{"module":"Jet-Dep","phase":"runtime","relationship":"requires","version":">= 1.0"}]}"#).is_ok());
         assert!(parse_packagist_fixture("jet/app", r#"{"packages":{"jet/app":[{"version":"2.0.0","type":"library","dist":{"type":"zip","url":"/jet-app.zip","shasum":"a9993e364706816aba3e25717850c26c9cd0d89d"},"require":{"jet/dep":"^1.0"},"autoload":{"psr-4":{"Jet\\App\\":"src/"}}}]}}"#).is_ok());
-        let minified = parse_packagist_fixture("jet/app", r#"{"minified":"composer/2.0","packages":{"jet/app":[{"name":"jet/app","version":"2.0.0","type":"library","dist":{"type":"zip","url":"https://example.test/aabbccddeeff00112233445566778899aabbccdd.zip","shasum":"","reference":"aabbccddeeff00112233445566778899aabbccdd"},"require":{"jet/dep":"^1.0"},"autoload":{"psr-4":{"Jet\\App\\":"src/"}}},{"version":"1.9.0","dist":{"type":"zip","url":"https://example.test/00112233445566778899aabbccddeeff00112233.zip","shasum":"","reference":"00112233445566778899aabbccddeeff00112233"},"require":null} ]}}"#).unwrap();
+        let minified = parse_packagist_fixture("jet/app", r#"{"minified":"composer/2.0","packages":{"jet/app":[{"name":"jet/app","version":"2.0.0","type":"library","dist":{"type":"zip","url":"/jet-app.zip","shasum":"a9993e364706816aba3e25717850c26c9cd0d89d"},"require":{"jet/dep":"^1.0"},"autoload":{"psr-4":{"Jet\\App\\":["missing/","src/"],"":["fallback/"]}}},{"version":"1.9.0","dist":{"type":"zip","url":"/jet-app-old.zip","shasum":"a9993e364706816aba3e25717850c26c9cd0d89d"},"require":"__unset"} ]}}"#).unwrap();
         assert_eq!(minified.len(), 2);
         assert!(minified[1].dependencies.is_empty());
         assert_eq!(
             minified[1].psr4.get("Jet\\App\\"),
-            Some(&"src/".to_string())
+            Some(&vec!["missing/".to_string(), "src/".to_string()])
         );
+        let reference = "0123456789abcdef0123456789abcdef01234567";
+        let immutable = parse_packagist_fixture("jet/app", &format!(r#"{{"packages":{{"jet/app":[{{"version":"2.0.0","type":"library","source":{{"type":"git","url":"https://github.com/jet/app.git","reference":"{reference}"}},"dist":{{"type":"zip","url":"https://api.github.com/repos/jet/app/zipball/{reference}","reference":"{reference}","shasum":""}},"autoload":{{"psr-4":{{"Jet\\App\\":"src/"}}}}}}]}}}}"#)).unwrap();
+        assert!(matches!(&immutable[0].integrity, Integrity::ImmutableGit { repository, reference: locked } if repository == "https://github.com/jet/app.git" && locked == reference));
+        assert!(parse_packagist_fixture("jet/app", &format!(r#"{{"packages":{{"jet/app":[{{"version":"2.0.0","type":"library","source":{{"type":"git","url":"https://github.com/attacker/jet-app.git","reference":"{reference}"}},"dist":{{"type":"zip","url":"https://api.github.com/repos/jet/app/zipball/{reference}?source=https://github.com/attacker/jet-app.git","reference":"{reference}","shasum":""}}}}]}}}}"#)).is_err());
 
         let tampered = Package {
             name: "jetapp".into(),
@@ -1612,25 +1770,44 @@ mod tests {
     }
 
     #[test]
+    fn solver_backtracks_across_diamond_and_cpan_enumerates_older_releases() {
+        let dir = std::env::temp_dir().join(format!("jet-registry-solver-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("info")).unwrap();
+        let hash = "a".repeat(64);
+        fs::write(dir.join("info/root"), format!("1.0 a:>= 1&< 3,b:= 1|checksum:{hash}\n")).unwrap();
+        fs::write(dir.join("info/a"), format!("2.0 c:>= 2|checksum:{hash}\n1.0 c:< 2|checksum:{hash}\n")).unwrap();
+        fs::write(dir.join("info/b"), format!("1.0 c:< 2|checksum:{hash}\n")).unwrap();
+        fs::write(dir.join("info/c"), format!("2.0 |checksum:{hash}\n1.0 |checksum:{hash}\n")).unwrap();
+        let scratch = Scratch::new(&dir, Kind::RubyGems).unwrap();
+        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let authority = super::super::fetch::Authority::load(
+            &ctx,
+            "ruby",
+            &format!("file://{}", dir.display()),
+            Kind::RubyGems.fetch_authorities(),
+        ).unwrap();
+        let closure = resolve_closure(Kind::RubyGems, &authority, &scratch, "root", "1.0").unwrap();
+        let selected = closure.iter().map(|package| (package.name.as_str(), package.version.as_str())).collect::<BTreeMap<_, _>>();
+        assert_eq!(selected.get("a"), Some(&"1.0"));
+        assert_eq!(selected.get("c"), Some(&"1.0"));
+
+        let cpan = parse_cpan_search_fixture(r#"{"hits":{"hits":[{"_source":{"distribution":"Jet-App","version":"2.0","download_url":"/Jet-App-2.tar.gz","checksum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependency":[]}},{"_source":{"distribution":"Jet-App","version":"1.0","download_url":"/Jet-App-1.tar.gz","checksum_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","dependency":[]}}]}}"#).unwrap();
+        assert_eq!(cpan.iter().map(|package| package.version.as_str()).collect::<Vec<_>>(), vec!["2.0", "1.0"]);
+        assert!(cpan.iter().any(|package| version_satisfies(&package.version, "=1.0")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     #[cfg(unix)]
     fn real_registry_closures_execute_lock_replay_offline_and_reject_tamper() {
-        if ["curl", "tar", "gzip", "ruby", "perl", "php"]
-            .into_iter()
-            .any(|tool| which(tool).is_none())
-        {
-            eprintln!(
-                "note: skipping scripting registry vertical; full FFI tool shell unavailable"
-            );
-            return;
+        for tool in ["curl", "tar", "gzip", "ruby", "perl", "php"] {
+            assert!(which(tool).is_some(), "Nix dev shell must provision {tool}");
         }
-        let php_zip = Command::new("php")
+        assert!(Command::new("php")
             .args(["-r", "exit(class_exists('ZipArchive') ? 0 : 1);"])
             .status()
-            .is_ok_and(|status| status.success());
-        if !php_zip {
-            eprintln!("note: skipping scripting registry vertical; PHP ZipArchive unavailable");
-            return;
-        }
+            .is_ok_and(|status| status.success()), "Nix dev shell PHP must provide ZipArchive");
         let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let base = std::env::temp_dir().join(format!("jet-script-registry-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
@@ -1736,9 +1913,96 @@ mod tests {
             ],
         );
 
+        let original_dir = std::env::current_dir().unwrap();
+        let compose_project = base.join("compose-project");
+        fs::create_dir_all(&compose_project).unwrap();
+        std::env::set_current_dir(&compose_project).unwrap();
+        let compose_roots = Store::Roots {
+            root: base.join("compose-hangar"),
+            dev_mode: true,
+        };
+        let table = SourceTable::empty();
+        let refs = [
+            "ruby:jetapp#version=2.0.0",
+            "perl:Jet-App#version=2.0",
+            "php:jet/app#version=2.0.0",
+        ]
+        .into_iter()
+        .map(|reference| crate::RefSpec::classify_in(reference, &table).unwrap())
+        .collect();
+        let env = crate::CLI::compose_refs_for_test(&compose_roots, refs).unwrap();
+        for variable in ["GEM_HOME", "GEM_PATH", "RUBYLIB", "PERL5LIB", "COMPOSER_AUTOLOAD"] {
+            let value = env.vars.get(variable).unwrap_or_else(|| panic!("compose_env omitted {variable}"));
+            assert!(value.split(crate::Platform::path_separator()).all(|path| Path::new(path).is_absolute()), "{variable} was not canonical: {value}");
+        }
+        for (runtime, variable, args) in [
+            ("ruby", "RUBYLIB", &["-e", "require 'jetapp'; print JetApp.value"][..]),
+            ("perl", "PERL5LIB", &["-MJetApp", "-e", "print JetApp::value()"][..]),
+            ("php", "COMPOSER_AUTOLOAD", &["-r", "require getenv('COMPOSER_AUTOLOAD'); echo Jet\\App\\Value::get();"][..]),
+        ] {
+            let output = Command::new(runtime).args(args).env(variable, &env.vars[variable]).output().unwrap();
+            assert!(output.status.success(), "{runtime}: {}", String::from_utf8_lossy(&output.stderr));
+            assert_eq!(String::from_utf8_lossy(&output.stdout), "42");
+        }
+        std::env::set_current_dir(original_dir).unwrap();
+
         *TEST_REPOSITORIES.write().unwrap() = BTreeMap::new();
         let _ = make_writable(&base);
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn hostile_archives_reject_runtime_native_extensions() {
+        for tool in ["tar", "gzip", "php"] {
+            assert!(which(tool).is_some(), "Nix dev shell must provision {tool}");
+        }
+        assert!(Command::new("php")
+            .args(["-r", "exit(class_exists('ZipArchive') ? 0 : 1);"])
+            .status()
+            .is_ok_and(|status| status.success()), "Nix dev shell PHP must provide ZipArchive");
+
+        let base = std::env::temp_dir().join(format!("jet-script-native-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+
+        let ruby_repo = base.join("rubygems");
+        write_gem_file(&base, &ruby_repo, "badgem", "1.0", "lib/bad.so", b"native");
+        let ruby_archive = ruby_repo.join("gems/badgem-1.0.gem");
+        let ruby = test_artifact(Kind::RubyGems, "badgem", "1.0", ruby_archive);
+        let ruby_scratch = Scratch::new(&base, Kind::RubyGems).unwrap();
+        assert!(install_gem(&ruby, &base.join("ruby-out"), &ruby_scratch).is_err());
+
+        let cpan_repo = base.join("cpan");
+        write_cpan(&base, &cpan_repo, "Bad-Cpan", "1.0", "Bad.so", "native");
+        let cpan_archive = cpan_repo.join("authors/Bad-Cpan-1.0.tar.gz");
+        let cpan = test_artifact(Kind::Cpan, "Bad-Cpan", "1.0", cpan_archive);
+        let cpan_scratch = Scratch::new(&base, Kind::Cpan).unwrap();
+        assert!(install_cpan(&cpan, &base.join("cpan-out"), &cpan_scratch).is_err());
+
+        let php_repo = base.join("packagist");
+        write_zip(&base, &php_repo, "bad-php", "ext/bad.so", "native");
+        let php_archive = php_repo.join("dist/bad-php.zip");
+        let php = test_artifact(Kind::Packagist, "bad/php", "1.0", php_archive);
+        let php_scratch = Scratch::new(&base, Kind::Packagist).unwrap();
+        assert!(install_composer(&php, &base.join("php-out"), &php_scratch).is_err());
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    fn test_artifact(_kind: Kind, name: &str, version: &str, path: PathBuf) -> Artifact {
+        Artifact {
+            sha256: SHA256::sha256_hex(&fs::read(&path).unwrap()),
+            path,
+            package: Package {
+                name: name.into(),
+                version: version.into(),
+                url: String::new(),
+                integrity: Integrity::Sha256("0".repeat(64)),
+                dependencies: Vec::new(),
+                psr4: BTreeMap::new(),
+            },
+        }
     }
 
     fn exercise_provider(
@@ -1869,17 +2133,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("info")).unwrap();
         std::fs::write(dir.join("info").join(name), raw).unwrap();
-        let result = fetch_rubygems(&format!("file://{}", dir.display()), name);
+        let scratch = Scratch::new(&dir, Kind::RubyGems).unwrap();
+        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let authority = super::super::fetch::Authority::load(
+            &ctx,
+            Kind::RubyGems.label(),
+            &format!("file://{}", dir.display()),
+            Kind::RubyGems.fetch_authorities(),
+        ).unwrap();
+        let result = fetch_rubygems(&authority, &scratch, name);
         let _ = std::fs::remove_dir_all(dir);
         result
     }
 
     fn parse_cpan_fixture(raw: &str) -> Result<Vec<Package>, ProviderError> {
+        parse_cpan_search_fixture(&format!(r#"{{"hits":{{"hits":[{{"_source":{raw}}}]}}}}"#))
+    }
+
+    fn parse_cpan_search_fixture(raw: &str) -> Result<Vec<Package>, ProviderError> {
         let dir = std::env::temp_dir().join(format!("jet-cpan-info-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("v1/release")).unwrap();
-        std::fs::write(dir.join("v1/release/Jet-App"), raw).unwrap();
-        let result = fetch_cpan(&format!("file://{}", dir.display()), "Jet-App");
+        std::fs::write(
+            dir.join("v1/release/_search-Jet-App"),
+            raw,
+        ).unwrap();
+        let scratch = Scratch::new(&dir, Kind::Cpan).unwrap();
+        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let authority = super::super::fetch::Authority::load(
+            &ctx,
+            Kind::Cpan.label(),
+            &format!("file://{}", dir.display()),
+            Kind::Cpan.fetch_authorities(),
+        ).unwrap();
+        let result = fetch_cpan(&authority, &scratch, "Jet-App");
         let _ = std::fs::remove_dir_all(dir);
         result
     }
@@ -1887,9 +2174,18 @@ mod tests {
     fn parse_packagist_fixture(name: &str, raw: &str) -> Result<Vec<Package>, ProviderError> {
         let dir = std::env::temp_dir().join(format!("jet-php-info-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("p2/jet")).unwrap();
-        std::fs::write(dir.join("p2/jet/app.json"), raw).unwrap();
-        let result = fetch_packagist(&format!("file://{}", dir.display()), name);
+        let path = dir.join("p2").join(format!("{name}.json"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, raw).unwrap();
+        let scratch = Scratch::new(&dir, Kind::Packagist).unwrap();
+        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let authority = super::super::fetch::Authority::load(
+            &ctx,
+            Kind::Packagist.label(),
+            &format!("file://{}", dir.display()),
+            Kind::Packagist.fetch_authorities(),
+        ).unwrap();
+        let result = fetch_packagist(&authority, &scratch, name);
         let _ = std::fs::remove_dir_all(dir);
         result
     }
@@ -1901,12 +2197,31 @@ mod tests {
     }
 
     fn write_gem(base: &Path, repo: &Path, name: &str, version: &str, code: &str) -> String {
+        write_gem_file(
+            base,
+            repo,
+            name,
+            version,
+            &format!("lib/{name}.rb"),
+            code.as_bytes(),
+        )
+    }
+
+    fn write_gem_file(
+        base: &Path,
+        repo: &Path,
+        name: &str,
+        version: &str,
+        relative: &str,
+        contents: &[u8],
+    ) -> String {
         let source = base.join(format!("gem-source-{name}"));
         let payload = base.join(format!("gem-payload-{name}.tar.gz"));
         let archive = repo.join("gems").join(format!("{name}-{version}.gem"));
-        fs::create_dir_all(source.join("lib")).unwrap();
+        let file = source.join(relative);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::create_dir_all(archive.parent().unwrap()).unwrap();
-        fs::write(source.join("lib").join(format!("{name}.rb")), code).unwrap();
+        fs::write(file, contents).unwrap();
         assert!(Command::new("tar")
             .args(["-czf"])
             .arg(&payload)
@@ -1977,9 +2292,9 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         fs::write(
-            repo.join("v1/release").join(name),
+            repo.join("v1/release").join(format!("_search-{name}")),
             format!(
-                "{{\"distribution\":\"{name}\",\"version\":\"{version}\",\"download_url\":\"/authors/{name}-{version}.tar.gz\",\"checksum_sha256\":\"{sha256}\",\"dependency\":[{deps}]}}"
+                "{{\"hits\":{{\"hits\":[{{\"_source\":{{\"distribution\":\"{name}\",\"version\":\"{version}\",\"download_url\":\"/authors/{name}-{version}.tar.gz\",\"checksum_sha256\":\"{sha256}\",\"dependency\":[{deps}]}}}}]}}}}"
             ),
         )
         .unwrap();
@@ -2021,7 +2336,7 @@ mod tests {
         fs::write(
             path,
             format!(
-                "{{\"packages\":{{\"{name}\":[{{\"version\":\"{version}\",\"type\":\"library\",\"dist\":{{\"type\":\"zip\",\"url\":\"/dist/{archive}.zip\",\"shasum\":\"{sha1}\"}}{require},\"autoload\":{{\"psr-4\":{{\"{escaped_prefix}\":\"src/\"}}}}}}]}}}}",
+                "{{\"packages\":{{\"{name}\":[{{\"version\":\"{version}\",\"type\":\"library\",\"dist\":{{\"type\":\"zip\",\"url\":\"/dist/{archive}.zip\",\"shasum\":\"{sha1}\"}}{require},\"autoload\":{{\"psr-4\":{{\"{escaped_prefix}\":[\"missing/\",\"src/\"]}}}}}}]}}}}",
                 escaped_prefix = prefix.replace('\\', "\\\\")
             ),
         )

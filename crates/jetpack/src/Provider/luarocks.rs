@@ -69,11 +69,30 @@ impl Provider for LuaRocksProvider {
                 spec.raw
             )));
         }
-        let repository = repository();
+        let authority = super::fetch::Authority::load(
+            ctx,
+            "luarocks",
+            &repository(),
+            &[
+                "luarocks.org",
+                "github.com",
+                "codeload.github.com",
+                "raw.githubusercontent.com",
+            ],
+        )
+        .map_err(error)?;
+        let repository = authority.registry().to_string();
+        let fetch_authority = authority.provenance();
         let (root_name, root_version) = parse_ref(&spec.package)?;
         let scratch = Scratch::new(ctx.store_dir)?;
         let manifest_path = scratch.path.join("manifest-5.4");
-        download(&format!("{repository}/manifest-5.4"), &manifest_path)?;
+        authority
+            .to_path(
+                &format!("{repository}/manifest-5.4"),
+                &manifest_path,
+                &scratch.path,
+            )
+            .map_err(error)?;
         let manifest = std::fs::read_to_string(&manifest_path)
             .map_err(|e| error(format!("could not read LuaRocks manifest: {e}")))?;
         require_manifest_version(&manifest, root_name, root_version)?;
@@ -83,6 +102,7 @@ impl Provider for LuaRocksProvider {
             root_name,
             root_version,
             &repository,
+            &authority,
             &manifest,
             &scratch,
             &mut specs,
@@ -106,7 +126,9 @@ impl Provider for LuaRocksProvider {
                 .map_err(|e| error(format!("could not reread rockspec: {e}")))?;
             let source_name = safe_url_basename(&rockspec.source_url)?;
             let source_path = scratch.path.join(format!("{}-{source_name}", rockspec.name));
-            download(&rockspec.source_url, &source_path)?;
+            authority
+                .to_path(&rockspec.source_url, &source_path, &scratch.path)
+                .map_err(error)?;
             let source_bytes = std::fs::read(&source_path)
                 .map_err(|e| error(format!("could not read LuaRocks source: {e}")))?;
             let source_hash = SHA256::sha256_hex(&source_bytes);
@@ -170,7 +192,7 @@ impl Provider for LuaRocksProvider {
         write_runtime_files(&out_dir, &lua_dir, &c_dir)?;
         std::fs::write(
             out_dir.join("luarocks.provenance"),
-            render_provenance(&repository, &source_hash, &artifacts),
+            render_provenance(&repository, &fetch_authority, &source_hash, &artifacts),
         )
         .map_err(|e| error(format!("could not write LuaRocks provenance: {e}")))?;
         crate::Store::seal_local_output(&out_dir)
@@ -207,6 +229,7 @@ impl Provider for LuaRocksProvider {
         let identity = cache_identity(&source_hash, RECIPE_ID, ctx);
         let (references, mut dependency_facts) = dependency_objects(&root.name, &artifacts);
         dependency_facts.insert("repository".into(), repository.clone());
+        dependency_facts.insert("fetch.authority".into(), fetch_authority.clone());
         let producer = producer_record(
             "luarocks",
             &format!("cas:{source_hash}"),
@@ -214,6 +237,7 @@ impl Provider for LuaRocksProvider {
             BTreeMap::from([
                 ("action.kind".into(), "luarocks-install".into()),
                 ("repository".into(), repository.clone()),
+                ("fetch.authority".into(), fetch_authority),
                 ("package.version".into(), root.version.clone()),
             ]),
             "luarocks-provider-v1",
@@ -283,6 +307,7 @@ fn resolve_rockspec(
     name: &str,
     version: &str,
     repository: &str,
+    authority: &super::fetch::Authority,
     manifest: &str,
     scratch: &Scratch,
     specs: &mut BTreeMap<String, Rockspec>,
@@ -302,7 +327,13 @@ fn resolve_rockspec(
     }
     require_manifest_version(manifest, name, version)?;
     let path = scratch.path.join(format!("{name}-{version}.rockspec"));
-    download(&format!("{repository}/{name}-{version}.rockspec"), &path)?;
+    authority
+        .to_path(
+            &format!("{repository}/{name}-{version}.rockspec"),
+            &path,
+            &scratch.path,
+        )
+        .map_err(error)?;
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| error(format!("could not read `{name}` rockspec: {e}")))?;
     let spec = parse_rockspec(&raw)?;
@@ -334,6 +365,7 @@ fn resolve_rockspec(
             &dep.name,
             &selected,
             repository,
+            authority,
             manifest,
             scratch,
             specs,
@@ -579,16 +611,6 @@ fn which(tool: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn download(url: &str, path: &Path) -> Result<(), ProviderError> {
-    let status = Command::new("curl")
-        .args(["--fail", "--location", "--silent", "--show-error", "--max-time", "60", "--output"])
-        .arg(path)
-        .arg(url)
-        .status()
-        .map_err(|e| error(format!("could not start provisioned curl: {e}")))?;
-    if status.success() { Ok(()) } else { Err(error(format!("could not fetch `{url}`"))) }
-}
-
 fn safe_url_basename(url: &str) -> Result<String, ProviderError> {
     let value = url.split('?').next().unwrap_or(url).rsplit('/').next().unwrap_or("");
     if !valid_component(value) && !value.ends_with(".tar.gz") {
@@ -616,8 +638,8 @@ fn closure_hash(artifacts: &[Artifact]) -> String {
     SHA256::sha256_hex(&identity)
 }
 
-fn render_provenance(repository: &str, source_hash: &str, artifacts: &[Artifact]) -> String {
-    let mut out = format!("schema=jet-luarocks-provider-v1\nrepository={repository}\nsource_hash={source_hash}\nplatform={}\n", crate::Envelope::host_platform());
+fn render_provenance(repository: &str, fetch_authority: &str, source_hash: &str, artifacts: &[Artifact]) -> String {
+    let mut out = format!("schema=jet-luarocks-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nplatform={}\n", crate::Envelope::host_platform());
     for artifact in artifacts {
         out.push_str(&format!(
             "package={}:{}:rockspec={}:source={}\n",

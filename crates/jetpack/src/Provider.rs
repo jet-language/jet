@@ -21,6 +21,7 @@ use std::process::Command;
 
 mod remote;
 mod cran;
+mod fetch;
 mod luarocks;
 mod script_registry;
 use cran::CranProvider;

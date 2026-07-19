@@ -63,14 +63,25 @@ impl Provider for CranProvider {
                 spec.raw
             )));
         }
-        let repository = repository();
+        let authority = super::fetch::Authority::load(
+            ctx,
+            "cran",
+            &repository(),
+            &["cran.r-project.org", "cloud.r-project.org"],
+        )
+        .map_err(ProviderError::Cran)?;
+        let repository = authority.registry().to_string();
+        let fetch_authority = authority.provenance();
         let (root_name, wanted_version) = parse_ref(&spec.package)?;
         let scratch = Scratch::new(ctx.store_dir)?;
         let metadata_path = scratch.path.join("PACKAGES");
-        download(
-            &format!("{repository}/src/contrib/PACKAGES"),
-            &metadata_path,
-        )?;
+        authority
+            .to_path(
+                &format!("{repository}/src/contrib/PACKAGES"),
+                &metadata_path,
+                &scratch.path,
+            )
+            .map_err(ProviderError::Cran)?;
         let metadata = std::fs::read_to_string(&metadata_path)
             .map_err(|e| ProviderError::Cran(format!("could not read CRAN metadata: {e}")))?;
         let records = parse_packages(&metadata)?;
@@ -98,7 +109,13 @@ impl Provider for CranProvider {
                 .clone();
             let filename = format!("{}_{}.tar.gz", record.name, record.version);
             let path = scratch.path.join(&filename);
-            download(&format!("{repository}/src/contrib/{filename}"), &path)?;
+            authority
+                .to_path(
+                    &format!("{repository}/src/contrib/{filename}"),
+                    &path,
+                    &scratch.path,
+                )
+                .map_err(ProviderError::Cran)?;
             let bytes = std::fs::read(&path)
                 .map_err(|e| ProviderError::Cran(format!("could not read `{filename}`: {e}")))?;
             artifacts.push(SourceArtifact {
@@ -145,7 +162,7 @@ impl Provider for CranProvider {
             install(&target, &library)?;
         }
         write_runtime_wrapper(&out_dir, &library)?;
-        let provenance = render_provenance(&repository, &source_hash, &artifacts);
+        let provenance = render_provenance(&repository, &fetch_authority, &source_hash, &artifacts);
         std::fs::write(out_dir.join("cran.provenance"), &provenance)
             .map_err(|e| ProviderError::Cran(format!("could not write CRAN provenance: {e}")))?;
         crate::Store::seal_local_output(&out_dir)
@@ -178,6 +195,7 @@ impl Provider for CranProvider {
         let identity = cache_identity(&source_hash, RECIPE_ID, ctx);
         let (references, mut dependency_facts) = dependency_objects(&root.name, &artifacts);
         dependency_facts.insert("repository".into(), repository.clone());
+        dependency_facts.insert("fetch.authority".into(), fetch_authority.clone());
         let producer = producer_record(
             "cran",
             &format!("cas:{source_hash}"),
@@ -185,6 +203,7 @@ impl Provider for CranProvider {
             BTreeMap::from([
                 ("action.kind".into(), "cran-install".into()),
                 ("repository".into(), repository.clone()),
+                ("fetch.authority".into(), fetch_authority),
                 ("package.version".into(), root.version.clone()),
             ]),
             "cran-provider-v1",
@@ -441,28 +460,6 @@ fn closure_hash(artifacts: &[SourceArtifact]) -> String {
     SHA256::sha256_hex(&identity)
 }
 
-fn download(url: &str, path: &Path) -> Result<(), ProviderError> {
-    let status = Command::new("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "60",
-            "--output",
-        ])
-        .arg(path)
-        .arg(url)
-        .status()
-        .map_err(|e| ProviderError::Cran(format!("could not start provisioned curl: {e}")))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(ProviderError::Cran(format!("could not fetch `{url}`")))
-    }
-}
-
 fn install(source: &Path, library: &Path) -> Result<(), ProviderError> {
     let status = Command::new("R")
         .args(["CMD", "INSTALL", "--no-multiarch", "--no-test-load"])
@@ -520,9 +517,9 @@ fn which(tool: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn render_provenance(repository: &str, source_hash: &str, artifacts: &[SourceArtifact]) -> String {
+fn render_provenance(repository: &str, fetch_authority: &str, source_hash: &str, artifacts: &[SourceArtifact]) -> String {
     let mut out = format!(
-        "schema=jet-cran-provider-v1\nrepository={repository}\nsource_hash={source_hash}\n"
+        "schema=jet-cran-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\n"
     );
     for artifact in artifacts {
         out.push_str(&format!(

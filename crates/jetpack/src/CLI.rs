@@ -28,6 +28,8 @@ use parse::Parsed;
 
 pub use parse::main;
 pub(crate) use realize::report_provider_error;
+#[cfg(test)]
+pub(crate) use trust_env_build::compose_refs_for_test;
 
 fn cmd_doctor(_theme: &Theme, parsed: &Parsed) -> i32 {
     if !parsed.positional.is_empty() || parsed.command.is_some() {

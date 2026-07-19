@@ -354,9 +354,56 @@ class Hidden { function method($input) {} }
     }
     #[test]
     fn worker_loads_projected_composer_autoload_before_user_source() {
-        let worker=super::render_worker(&["run".into()]);
-        let autoload=worker.find("getenv('COMPOSER_AUTOLOAD')").unwrap();
-        let source=worker.find("require_once $argv[1]").unwrap();
-        assert!(autoload < source);
+        use std::io::{Read, Write};
+        use std::process::{Command, Stdio};
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let php = super::tool_path("php").expect("Nix dev shell provisions PHP");
+        let dir = std::env::temp_dir().join(format!(
+            "jet_php_worker_{}_{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let worker_path = dir.join("worker.php");
+        let source_path = dir.join("source.php");
+        let autoload_path = dir.join("autoload.php");
+        std::fs::write(&worker_path, super::render_worker(&["run".into()])).unwrap();
+        std::fs::write(&source_path, "<?php\n").unwrap();
+        std::fs::write(&autoload_path, "<?php function run($input) { return $input + 1; }\n").unwrap();
+
+        let mut child = Command::new(php)
+            .arg(&worker_path)
+            .arg(&source_path)
+            .env("COMPOSER_AUTOLOAD", &autoload_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let mut ready = [0u8; 9];
+        stdout.read_exact(&mut ready).unwrap();
+        assert_eq!(&ready, b"\x05\0\0\0READY");
+
+        let request = br#"{"op":"invoke","command":"run","input":41,"id":7}"#;
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(&(request.len() as u32).to_le_bytes()).unwrap();
+        stdin.write_all(request).unwrap();
+        stdin.flush().unwrap();
+        let mut header = [0u8; 12];
+        stdout.read_exact(&mut header).unwrap();
+        let length = u32::from_le_bytes(header[..4].try_into().unwrap()) as usize;
+        assert_eq!(u64::from_le_bytes(header[4..].try_into().unwrap()), 7);
+        let mut response = vec![0; length];
+        stdout.read_exact(&mut response).unwrap();
+        assert_eq!(std::str::from_utf8(&response).unwrap(), r#"{"id":7,"ok":true,"value":42}"#);
+
+        let shutdown = br#"{"op":"shutdown"}"#;
+        stdin.write_all(&(shutdown.len() as u32).to_le_bytes()).unwrap();
+        stdin.write_all(shutdown).unwrap();
+        drop(stdin);
+        assert!(child.wait().unwrap().success());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
