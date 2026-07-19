@@ -187,6 +187,7 @@ pub struct JetSocketAddr {
 pub struct JetUdpSocket {
     inner: std::net::UdpSocket,
     timeout_ms: std::sync::Mutex<Option<i64>>,
+    closed: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone, Debug)]
@@ -1334,7 +1335,7 @@ fn jet_net_udp_bind(addr: &String) -> Result<JetUdpSocket, JetNetError> {
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
-    Ok(JetUdpSocket { inner, timeout_ms: std::sync::Mutex::new(None) })
+    Ok(JetUdpSocket { inner, timeout_ms: std::sync::Mutex::new(None), closed: std::sync::atomic::AtomicBool::new(false) })
 }
 
 fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUdpSocket, JetNetError> {
@@ -1342,15 +1343,25 @@ fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUdpSocket, JetNetErr
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
-    Ok(JetUdpSocket { inner, timeout_ms: std::sync::Mutex::new(None) })
+    Ok(JetUdpSocket { inner, timeout_ms: std::sync::Mutex::new(None), closed: std::sync::atomic::AtomicBool::new(false) })
+}
+
+fn jet_net_udp_open(socket: &JetUdpSocket, operation: &str) -> Result<(), JetNetError> {
+    if socket.closed.load(std::sync::atomic::Ordering::Acquire) {
+        Err(jet_net_closed(operation))
+    } else {
+        Ok(())
+    }
 }
 
 fn jet_net_udp_local_addr(socket: &JetUdpSocket) -> Result<JetSocketAddr, JetNetError> {
+    jet_net_udp_open(socket, "udp local address")?;
     socket.inner.local_addr().map(|inner| JetSocketAddr { inner })
         .map_err(|e| jet_net_io_error("udp local address", None, e))
 }
 
 fn jet_net_udp_set_timeout(socket: &JetUdpSocket, ms: i64) -> Result<(), JetNetError> {
+    jet_net_udp_open(socket, "set udp timeout")?;
     let _ = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set udp timeout", None, None, m, None)))?;
     *socket.timeout_ms.lock().unwrap() = Some(ms);
     Ok(())
@@ -1365,6 +1376,7 @@ fn jet_net_udp_send_to(
 }
 
 fn jet_net_udp_recv_from(socket: &JetUdpSocket, limit: i64) -> Result<JetUdpPacket, JetNetError> {
+    jet_net_udp_open(socket, "udp receive")?;
     if limit <= 0 {
         return Err(JetNetError::InvalidInput(jet_net_detail("udp receive", None, None, "udp receive limit must be positive".to_string(), None)));
     }
@@ -1412,6 +1424,7 @@ fn jet_net_udp_send_slice(
     data: &[u8],
     addr: &JetSocketAddr,
 ) -> Result<i64, JetNetError> {
+    jet_net_udp_open(socket, "udp send")?;
     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
     loop {
         match socket.inner.send_to(data, addr.inner) {
@@ -1429,6 +1442,7 @@ fn jet_net_udp_send_slice(
 }
 
 fn jet_net_udp_receive(socket: &JetUdpSocket, limit: i64) -> Result<JetUdpPacket, JetNetError> {
+    jet_net_udp_open(socket, "udp receive")?;
     if limit < 0 {
         return Err(JetNetError::InvalidInput(jet_net_detail(
             "udp receive", None, None, "udp receive limit must be non-negative".to_string(), None,
@@ -1453,6 +1467,49 @@ fn jet_net_udp_receive(socket: &JetUdpSocket, limit: i64) -> Result<JetUdpPacket
         original_len: original_len as i64,
         truncated: original_len > cap,
     })
+}
+
+fn jet_net_udp_close(socket: &JetUdpSocket) -> Result<(), JetNetError> {
+    socket.closed.store(true, std::sync::atomic::Ordering::Release);
+    Ok(())
+}
+
+fn jet_net_udp_ready(
+    socket: &JetUdpSocket,
+    interest: JetNetReadyInterest,
+    deadline: &jet_std::Duration,
+) -> Result<JetNetReady, JetNetError> {
+    jet_net_udp_open(socket, "udp ready")?;
+    jet_net_timeout(deadline.ms).map_err(|message| {
+        JetNetError::InvalidInput(jet_net_detail("udp ready", None, None, message, None))
+    })?;
+    let _deadline = jet_net_operation_deadline(Some(deadline.ms));
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout("udp ready"));
+    }
+    #[cfg(not(unix))]
+    return Err(JetNetError::Unsupported(jet_net_detail(
+        "udp ready", None, None, "udp readiness backend is unavailable on this target".to_string(), None,
+    )));
+    #[cfg(unix)]
+    loop {
+        let readable = if matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite) {
+            let mut byte = [0u8; 1];
+            match socket.inner.peek_from(&mut byte) {
+                Ok(_) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
+                Err(error) => return Err(jet_net_io_error("udp ready", None, error)),
+            }
+        } else { false };
+        if readable {
+            return Ok(JetNetReady { readable: true, writable: false });
+        }
+        let want_write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
+        jet_net_udp_scheduler_wait(&socket.inner, !want_write, want_write, "udp ready")?;
+        if want_write {
+            return Ok(JetNetReady { readable: false, writable: true });
+        }
+    }
 }
 
 fn jet_net_udp_packet_bytes(packet: &JetUdpPacket) -> Vec<u8> {

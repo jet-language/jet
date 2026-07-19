@@ -1601,6 +1601,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::TcpStreamReady => format!(
                     "{}jet_net_tcp_ready_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1)
                 ),
+                THandleOp::UdpSocketReady => format!(
+                    "{}jet_net_udp_ready(&({}), {}, &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::UdpSocketClose => {
+                    format!("{}jet_net_udp_close(&({}))", root, recv)
+                }
                 // c109 Phase 19: arena allocator methods (byte-for-byte the AST arms).
                 THandleOp::AllocAlloc => {
                     let a0 = emit_tir_expr(&args[0], cx);

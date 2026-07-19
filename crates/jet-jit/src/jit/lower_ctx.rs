@@ -2516,7 +2516,9 @@ impl LowerCtx<'_, '_> {
             | THandleOp::TcpStreamWriteAllBytes
             | THandleOp::TcpStreamWriteText
             | THandleOp::TcpStreamShutdown
-            | THandleOp::TcpStreamReady => Err("jit handle method unsupported".to_string()),
+            | THandleOp::TcpStreamReady
+            | THandleOp::UdpSocketReady
+            | THandleOp::UdpSocketClose => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocAlloc => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocReset => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqField(..) => Err("jit handle method unsupported".to_string()),

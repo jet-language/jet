@@ -72,6 +72,14 @@ pub fn net_method_return(
         ("TcpStream", "peer_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
         ("TcpStream", "local_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
         ("TcpStream", "close") => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UdpSocket", "ready") if n_args == 2 => Some(Some(result_ty(
+            Type::Named("NetReady".to_string()),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UdpSocket", "close") if n_args == 0 => Some(Some(result_ty(
             unit,
             Type::Named("NetError".to_string()),
         ))),

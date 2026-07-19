@@ -3494,6 +3494,55 @@ fn run() {
 }
 
 #[test]
+fn core_net_udp_same_handle_readiness_cancels_and_close_is_idempotent() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_udp_ready_close_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_udp_ready_close",
+        r#"
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
+    interest: NetReadyInterest :: .Read
+    (ready_tx, ready_rx) :: tasks.channel<Int>()
+    waiter :: tasks.spawn(take(socket, ready_tx) () => {
+        ready_tx.send(1)
+        if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
+            Ok(_) -> panic("udp unexpectedly ready")
+            Err(error) -> print(net.error_message(error))
+        }
+    })
+    _ready :: ready_rx.receive() ?? panic("ready")
+    time.sleep(10)
+    waiter.cancel()
+    waiter.join()
+
+    closed :: net.udp_bind("127.0.0.1:0") ?? panic("closed bind")
+    closed.close() ?? panic("close")
+    closed.close() ?? panic("second close")
+    if net.udp_receive(closed, 1) == {
+        Ok(_) -> panic("closed receive succeeded")
+        Err(error) -> print(net.error_message(error))
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "udp ready cancelled\nudp receive failed: socket is closed\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn core_net_happy_eyeballs_uses_one_deadline_and_live_loopback() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_net_happy_eyeballs_{}",

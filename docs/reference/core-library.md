@@ -2409,6 +2409,7 @@ Beginner calls accept strings; expert calls accept typed
 | `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? NetError` | Datagram sockets |
 | `udp_local_addr(socket)` | `SocketAddr ? NetError` | Typed local address |
 | `udp_set_timeout(socket, ms)` | `() ? NetError` | Persistent read/write deadline budget; earliest ambient deadline wins |
+| `socket.ready(.Read/.Write/.ReadWrite, deadline: Duration)` / `socket.close()` | `NetReady ? NetError` / `() ? NetError` | Same UDP handle readiness and idempotent lifecycle |
 | `udp_send_bytes_to(socket, bytes, addr)` | `Int ? NetError` | Send one arbitrary-byte datagram |
 | `udp_receive(socket, limit)` | `UdpPacket ? NetError` | Full datagram receive with bounded returned payload |
 | `udp_packet_bytes/address/original_len/truncated(packet)` | `[U8]` / `SocketAddr` / `Int` / `Bool` | Packet data, source, wire length, and truncation fact |
