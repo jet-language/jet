@@ -19,7 +19,10 @@ use super::Position::{
     range_json, LspPos, LspRange,
 };
 use super::SymbolDB::{build_symbol_db, InlayHint, SymKind, SymbolDB};
-use jet_foundation::JSON::{json_escape, json_get, json_str, json_u32, parse_json, JsonValue};
+use jet_foundation::JSON::{
+    json_escape, json_get, json_str, json_u32, parse_json, JsonValue,
+    MAX_PROTOCOL_MESSAGE_BYTES,
+};
 
 // ── Document state ────────────────────────────────────────────────────────────
 
@@ -257,9 +260,17 @@ fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
         Some(l) => l,
         None => return Ok(None),
     };
+    if len > MAX_PROTOCOL_MESSAGE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "protocol message exceeds the 1048576-byte limit",
+        ));
+    }
     let mut body = vec![0u8; len];
     reader.read_exact(&mut body)?;
-    Ok(Some(String::from_utf8_lossy(&body).into_owned()))
+    String::from_utf8(body)
+        .map(Some)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "protocol message is not UTF-8"))
 }
 
 fn write_message<W: Write>(w: &mut W, json: &str) -> io::Result<()> {
@@ -1929,6 +1940,17 @@ mod project_part_tests {
         ] {
             assert_eq!(parse_rpc_message(raw).unwrap_err().0, code, "{raw}");
         }
+    }
+
+    #[test]
+    fn lsp_rejects_oversized_frame_before_reading_a_body() {
+        let frame = format!("Content-Length: {}\r\n\r\n", MAX_PROTOCOL_MESSAGE_BYTES + 1);
+        let error = read_message(&mut std::io::Cursor::new(frame)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "protocol message exceeds the 1048576-byte limit"
+        );
     }
 
     #[test]

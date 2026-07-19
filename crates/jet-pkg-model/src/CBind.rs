@@ -198,10 +198,6 @@ fn parse_prototype(decl: &str) -> Option<Proto> {
         None => 0,
     };
     let name = &before[name_start..];
-    let first = name.chars().next()?;
-    if !first.is_ascii_alphabetic() && name != "_" {
-        return None;
-    }
     if !is_ident(name) {
         return None;
     }
@@ -392,6 +388,12 @@ mod tests {
         assert!(valid
             .source
             .contains("fn foo(value: Int) -> Int = \"foo\";"));
+
+        let leading_underscore = generate("int _foo(int value);", "underscore").unwrap();
+        assert_eq!(leading_underscore.bound, vec!["_foo"]);
+        assert!(leading_underscore
+            .source
+            .contains("fn _foo(value: Int) -> Int = \"_foo\";"));
     }
 
     #[test]

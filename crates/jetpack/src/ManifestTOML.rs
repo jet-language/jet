@@ -146,6 +146,8 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
     let mut manifest = JetpackToml::default();
     let mut errors: Vec<TomlError> = Vec::new();
     let mut assigned = HashSet::new();
+    let mut declared_tables = HashSet::new();
+    let mut dotted_tables = HashSet::new();
 
     let (items, syntax_errors) = TOML::parse(raw);
     for e in syntax_errors {
@@ -171,6 +173,17 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                     continue;
                 }
                 let name = path.join(".");
+                if !declared_tables.insert(name.clone())
+                    || dotted_tables.contains(&name)
+                    || assigned.contains(&name)
+                {
+                    errors.push(TomlError::e1214(
+                        *line,
+                        &format!("The table `{name}` is defined more than once."),
+                    ));
+                    table = Table::Unknown;
+                    continue;
+                }
                 table = match path.as_slice() {
                     [t] if t == Syntax::JTOML_TABLE_REPO => Table::Repo,
                     [t] if t == Syntax::JTOML_TABLE_SOURCES => Table::Sources,
@@ -190,6 +203,23 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                 };
             }
             TOML::Item::KeyVal { path, value, line } => {
+                if table == Table::None && path.len() >= 2 {
+                    let full = path.join(".");
+                    let prefixes: Vec<String> = (1..path.len())
+                        .map(|end| path[..end].join("."))
+                        .collect();
+                    if dotted_tables.contains(&full)
+                        || declared_tables.contains(&full)
+                        || prefixes.iter().any(|prefix| assigned.contains(prefix))
+                    {
+                        errors.push(TomlError::e1214(
+                            *line,
+                            &format!("The dotted key `{full}` collides with an existing value or table."),
+                        ));
+                        continue;
+                    }
+                    dotted_tables.extend(prefixes);
+                }
                 // Resolve the effective table and key. A dotted top-level key
                 // (`repo.name = …`) selects a table by its first segment.
                 let (target, key_parts): (Table, &[String]) =
@@ -549,5 +579,20 @@ Check the allowed names for this table.\n";
         assert_eq!(manifest.sources, vec![("core".into(), "a".into())]);
         assert_eq!(errors.len(), 2);
         assert!(errors.iter().all(|error| error.code == "E1214"));
+    }
+
+    #[test]
+    fn duplicate_tables_and_dotted_table_collisions_are_rejected() {
+        for raw in [
+            "[repo]\nname = \"first\"\n[repo]\nversion = \"1.0.0\"\n",
+            "repo.name = \"first\"\n[repo]\nversion = \"1.0.0\"\n",
+            "repo.meta.value = \"first\"\nrepo.meta = \"second\"\n",
+        ] {
+            let errors = errs(raw);
+            assert!(
+                errors.iter().any(|error| error.code == "E1214"),
+                "accepted table collision: {raw}"
+            );
+        }
     }
 }

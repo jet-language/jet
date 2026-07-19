@@ -168,6 +168,13 @@ mod tests {
             "^18446744073709551615",
             "~1.18446744073709551615",
             "18446744073709551615.x",
+            ">=",
+            ">",
+            "<",
+            "=",
+            "^",
+            "~",
+            "~>",
         ] {
             assert!(VersionReq::parse(range).is_none(), "accepted hostile range: {range}");
         }

@@ -26,6 +26,9 @@ pub fn parse_json(text: &str) -> Result<JsonValue, ()> {
 /// Protocol JSON is bounded so hostile LSP/DAP input cannot exhaust the stack.
 pub const MAX_JSON_DEPTH: usize = 64;
 
+/// Maximum decoded LSP/DAP message body accepted from a `Content-Length` frame.
+pub const MAX_PROTOCOL_MESSAGE_BYTES: usize = 1024 * 1024;
+
 struct JsonParser<'a> {
     s: &'a str,
     i: usize,

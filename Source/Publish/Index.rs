@@ -66,6 +66,18 @@ impl IndexEntry {
         let JsonValue::Object(fields) = parse_json(line).ok()? else {
             return None;
         };
+        const KEYS: &[&str] = &[
+            "name",
+            "version",
+            "content_hash",
+            "fingerprint",
+            "yanked",
+            "public_key",
+            "signature",
+        ];
+        if fields.keys().any(|key| !KEYS.contains(&key.as_str())) {
+            return None;
+        }
         Some(IndexEntry {
             name: required_string(&fields, "name")?,
             version: required_string(&fields, "version")?,
@@ -336,6 +348,7 @@ mod tests {
             r#"{"name":"x","version":1,"yanked":false}"#,
             r#"{"name":"x","version":"1.0.0","yanked":"false"}"#,
             r#"{"name":"x","version":"1.0.0","signature":"\q"}"#,
+            r#"{"name":"x","version":"1.0.0","future_field":true}"#,
         ] {
             assert!(IndexEntry::parse_line(line).is_none(), "accepted: {line}");
         }

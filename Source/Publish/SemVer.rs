@@ -425,11 +425,17 @@ fn split_simples(range: &str) -> Vec<String> {
 fn parse_simple(s: &str) -> Option<Vec<Comparator>> {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix('^') {
+        if rest.trim().is_empty() {
+            return None;
+        }
         return expand_caret(parse_partial(rest)?);
     }
     if let Some(rest) = s.strip_prefix('~') {
         // `~>1.2` is accepted as an alias for `~1.2`.
         let rest = rest.strip_prefix('>').unwrap_or(rest);
+        if rest.trim().is_empty() {
+            return None;
+        }
         return expand_tilde(parse_partial(rest)?);
     }
     let (op, rest) = if let Some(r) = s.strip_prefix(">=") {
@@ -445,6 +451,9 @@ fn parse_simple(s: &str) -> Option<Vec<Comparator>> {
     } else {
         (Op::Eq, s)
     };
+    if rest.trim().is_empty() {
+        return None;
+    }
     expand_op(op, parse_partial(rest)?)
 }
 

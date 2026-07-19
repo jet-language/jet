@@ -2082,6 +2082,30 @@ fn explain_golden() {
 }
 
 #[test]
+fn malformed_advisory_database_is_e2607_snapshot() {
+    let dir = isolated_cwd("audit_e2607");
+    fs::write(dir.join("pkg.jet"), "package app 0.1.0\n").unwrap();
+    fs::create_dir(dir.join(".jet")).unwrap();
+    fs::write(dir.join(".jet/lock"), "version = 1\n").unwrap();
+    let advisory_db = dir.join("advisories.txt");
+    fs::write(&advisory_db, "missing|fields|only\n").unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "audit", "--advisory-db"])
+        .arg(&advisory_db)
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    check_snapshot(
+        "audit_malformed_e2607.txt",
+        &String::from_utf8(output.stderr).unwrap(),
+    );
+}
+
+#[test]
 fn jetpack_missing_build_log_golden() {
     let cwd = isolated_cwd(&line!().to_string());
     let root = cwd.join("jetpack-root");

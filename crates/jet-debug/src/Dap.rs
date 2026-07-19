@@ -15,12 +15,15 @@
 //! but this sandbox has no editor to drive it against live — verify against a
 //! real VS Code/Zed session before wiring it into `editors/` launch configs.
 
-use std::io::{BufRead, Write};
+use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 use super::Inferior::{Inferior, ResumeResult};
 use super::LineMap::LineMap;
-use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
+use jet_foundation::JSON::{
+    json_escape, json_get, json_str, json_u32, parse_json, JsonValue,
+    MAX_PROTOCOL_MESSAGE_BYTES,
+};
 
 pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_src: &str) -> i32 {
     let map = LineMap::build(rust_src);
@@ -39,10 +42,13 @@ pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_s
     let mut reader = std::io::BufReader::new(stdin.lock());
     let mut stdout = std::io::stdout();
     loop {
-        let Some(body) = read_message(&mut reader) else {
-            break;
+        let body = match read_message(&mut reader) {
+            Ok(Some(body)) => body,
+            Ok(None) | Err(_) => break,
         };
-        let Ok(msg) = parse_json(&body) else { continue };
+        let Ok(msg) = parse_dap_request(&body) else {
+            continue;
+        };
         if server.handle(&msg, &mut stdout).is_none() {
             break;
         }
@@ -79,7 +85,7 @@ impl DapServer {
     /// stop (a `disconnect`/`terminate` request, or an unrecoverable error).
     fn handle(&mut self, msg: &JsonValue, out: &mut impl Write) -> Option<()> {
         let command = json_get(msg, "command").and_then(json_str)?;
-        let request_seq = json_get(msg, "seq").and_then(json_int).unwrap_or(0);
+        let request_seq = i64::from(json_get(msg, "seq").and_then(json_u32)?);
         let args = json_get(msg, "arguments");
         match command {
             "initialize" => {
@@ -107,19 +113,13 @@ impl DapServer {
                 Some(())
             }
             "setBreakpoints" => {
-                let lines: Vec<usize> = args
-                    .and_then(|a| json_get(a, "breakpoints"))
-                    .and_then(|v| match v {
-                        JsonValue::Array(items) => Some(
-                            items
-                                .iter()
-                                .filter_map(|it| json_get(it, "line").and_then(json_int))
-                                .map(|n| n as usize)
-                                .collect(),
-                        ),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
+                let lines = match breakpoint_lines(args) {
+                    Ok(lines) => lines,
+                    Err(message) => {
+                        self.respond_err(out, request_seq, command, message);
+                        return Some(());
+                    }
+                };
                 self.pending_breakpoints = lines.clone();
                 if let Some(inf) = &mut self.inf {
                     for jline in &lines {
@@ -374,15 +374,60 @@ impl DapServer {
     }
 }
 
+fn parse_dap_request(body: &str) -> Result<JsonValue, &'static str> {
+    let message = parse_json(body).map_err(|()| "invalid JSON")?;
+    let JsonValue::Object(_) = &message else {
+        return Err("request must be an object");
+    };
+    if json_get(&message, "type").and_then(json_str) != Some("request") {
+        return Err("type must be request");
+    }
+    let seq = json_get(&message, "seq")
+        .and_then(json_u32)
+        .ok_or("seq must be a nonnegative integer")?;
+    if seq == 0 {
+        return Err("seq must be positive");
+    }
+    let command = json_get(&message, "command")
+        .and_then(json_str)
+        .ok_or("command must be a string")?;
+    if command.is_empty() {
+        return Err("command must not be empty");
+    }
+    if !matches!(json_get(&message, "arguments"), None | Some(JsonValue::Object(_))) {
+        return Err("arguments must be an object");
+    }
+    Ok(message)
+}
+
+fn breakpoint_lines(args: Option<&JsonValue>) -> Result<Vec<usize>, &'static str> {
+    let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
+        return Ok(Vec::new());
+    };
+    let JsonValue::Array(items) = value else {
+        return Err("breakpoints must be an array");
+    };
+    items
+        .iter()
+        .map(|item| {
+            let line = json_get(item, "line")
+                .and_then(json_u32)
+                .filter(|line| *line > 0)
+                .ok_or("breakpoint line must be a positive integer")?;
+            usize::try_from(line).map_err(|_| "breakpoint line is too large")
+        })
+        .collect()
+}
+
 /// Content-Length framed read, the same convention `Source/LSP/Server.rs` uses
 /// for LSP (DAP shares the exact same header-framing rule).
-fn read_message(reader: &mut impl BufRead) -> Option<String> {
+fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     let mut content_length: Option<usize> = None;
     loop {
         let mut line = String::new();
-        let n = reader.read_line(&mut line).ok()?;
+        let n = reader.read_line(&mut line)?;
         if n == 0 {
-            return None;
+            return Ok(None);
         }
         if line == "\r\n" || line == "\n" {
             break;
@@ -391,13 +436,74 @@ fn read_message(reader: &mut impl BufRead) -> Option<String> {
             content_length = rest.trim().parse().ok();
         }
     }
-    let len = content_length?;
+    let Some(len) = content_length else {
+        return Ok(None);
+    };
+    if len > MAX_PROTOCOL_MESSAGE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "protocol message exceeds the 1048576-byte limit",
+        ));
+    }
     let mut body = vec![0u8; len];
-    reader.read_exact(&mut body).ok()?;
-    Some(String::from_utf8_lossy(&body).into_owned())
+    reader.read_exact(&mut body)?;
+    String::from_utf8(body)
+        .map(Some)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "protocol message is not UTF-8"))
 }
 
 fn write_message<W: Write>(w: &mut W, json: &str) -> std::io::Result<()> {
     write!(w, "Content-Length: {}\r\n\r\n{}", json.len(), json)?;
     w.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dap_request_envelope_rejects_wrong_shapes_and_numbers() {
+        assert!(parse_dap_request(
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#
+        )
+        .is_ok());
+        for raw in [
+            r#"{"seq":1,"type":"event","command":"initialize"}"#,
+            r#"{"seq":1.5,"type":"request","command":"initialize"}"#,
+            r#"{"seq":-1,"type":"request","command":"initialize"}"#,
+            r#"{"seq":0,"type":"request","command":"initialize"}"#,
+            r#"{"seq":1,"type":"request","command":""}"#,
+            r#"{"seq":1,"type":"request","command":2}"#,
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":[]}"#,
+            r#"["not","a","request"]"#,
+        ] {
+            assert!(parse_dap_request(raw).is_err(), "accepted hostile DAP: {raw}");
+        }
+    }
+
+    #[test]
+    fn dap_breakpoint_lines_require_positive_integers() {
+        for raw in [
+            r#"{"breakpoints":[{"line":-1}]}"#,
+            r#"{"breakpoints":[{"line":1.5}]}"#,
+            r#"{"breakpoints":[{"line":0}]}"#,
+            r#"{"breakpoints":[{"line":"2"}]}"#,
+        ] {
+            let args = parse_json(raw).unwrap();
+            assert!(breakpoint_lines(Some(&args)).is_err(), "accepted hostile line: {raw}");
+        }
+        let args = parse_json(r#"{"breakpoints":[{"line":2},{"line":9}]}"#).unwrap();
+        assert_eq!(breakpoint_lines(Some(&args)).unwrap(), vec![2, 9]);
+    }
+
+    #[test]
+    fn dap_rejects_oversized_frame_before_reading_a_body() {
+        let frame = format!("Content-Length: {}\r\n\r\n", MAX_PROTOCOL_MESSAGE_BYTES + 1);
+        let error = read_message(&mut std::io::Cursor::new(frame)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "protocol message exceeds the 1048576-byte limit"
+        );
+    }
 }

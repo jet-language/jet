@@ -570,14 +570,9 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             let result = match crate::CBind::generate(&header_src, &lib) {
                 Ok(r) => r,
                 Err(_) => {
-                    // Bind failed — if there's a stale cache, use it silently.
-                    if cache_path.is_file() {
-                        let source = match std::fs::read_to_string(&cache_path) {
-                            Ok(s) => s,
-                            Err(_) => continue,
-                        };
-                        load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
-                    }
+                    // A changed header that no longer parses must never revive
+                    // bindings from the old hash generation.
+                    diags.push(e3208(header_path, &lib));
                     continue;
                 }
             };
@@ -616,6 +611,18 @@ fn resolve_header_path(header_path: &str, project_root: &std::path::Path) -> std
     } else {
         project_root.join(header_path)
     }
+}
+
+fn e3208(header: &str, lib: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E3208",
+        format!("Could not generate bindings from `{header}`."),
+        "Header parsing or translation failed in the bind backend.".to_string(),
+        format!(
+            "fix the header, run `jet inspect bind` manually for details, or hand-write `@Extern module c.{lib}`."
+        ),
+        None,
+    )
 }
 
 /// Parse a cache source string and push a `LoadedModule` into `modules`.
