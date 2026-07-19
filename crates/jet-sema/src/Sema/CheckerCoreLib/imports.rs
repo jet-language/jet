@@ -168,12 +168,46 @@ impl<'a> Checker<'a> {
                 let sig = target.funcs.get(name).unwrap().clone();
                 let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();
                 let mut subst = HashMap::new();
+                let mut pre_inferred = Vec::new();
                 if !type_params.is_empty() && !type_args.is_empty() {
                     if type_args.len() != type_params.len() {
                         self.diags.push(crate::Generics::e0904(span, &type_params[0].name));
                     } else {
                         for (param, actual) in type_params.iter().zip(type_args) {
                             subst.insert(param.name.clone(), actual.clone());
+                        }
+                    }
+                } else if !type_params.is_empty() {
+                    for arg in args.iter_mut() {
+                        pre_inferred.push(self.infer(&mut arg.expr));
+                    }
+                    let arg_types = pre_inferred.iter().filter_map(|ty| ty.clone()).collect::<Vec<_>>();
+                    if arg_types.len() == args.len() {
+                        match target.trait_reg.infer_fn_subst_without_bounds(
+                            &sig,
+                            &arg_types,
+                            &type_params,
+                            self.expected_type.as_ref(),
+                        ) {
+                            Ok(inferred) => {
+                                if let Some((ty, bound)) = type_params.iter().find_map(|param| {
+                                    let ty = inferred.get(&param.name)?;
+                                    param
+                                        .bounds
+                                        .iter()
+                                        .find(|bound| !self.type_satisfies_bound(ty, bound))
+                                        .map(|bound| (ty, bound))
+                                }) {
+                                    self.diags.push(crate::Generics::e0905(
+                                        &ty.name(),
+                                        bound,
+                                        span,
+                                        false,
+                                    ));
+                                }
+                                subst = inferred;
+                            }
+                            Err(param) => self.diags.push(crate::Generics::e0904(span, &param)),
                         }
                     }
                 }
@@ -203,7 +237,7 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                for (arg, (pconv, pty)) in args.iter_mut().zip(effective_params.iter()) {
+                for (index, (arg, (pconv, pty))) in args.iter_mut().zip(effective_params.iter()).enumerate() {
                     if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                         self.borrow_ctx = true;
                     }
@@ -231,7 +265,10 @@ impl<'a> Checker<'a> {
                     // D-SG9: a fixed-width literal argument adopts the parameter's width.
                     let saved = self.expected_type.clone();
                     self.expected_type = Some(pty.clone());
-                    let aty = self.infer(&mut arg.expr);
+                    let aty = pre_inferred
+                        .get(index)
+                        .cloned()
+                        .unwrap_or_else(|| self.infer(&mut arg.expr));
                     self.expected_type = saved;
                     if crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, pty) {
                         let safe = match &arg.expr {

@@ -390,7 +390,10 @@ impl<'a> Checker<'a> {
         let rdim = self.quantity_dimension(&rt);
         if ldim.is_some() || rdim.is_some() {
             if let (Some((lname, lfact)), Some((rname, rfact))) = (&lunit, &runit) {
-                if lfact.dimension == rfact.dimension && lfact.family == rfact.family {
+                if lfact.package == rfact.package
+                    && lfact.dimension == rfact.dimension
+                    && lfact.family == rfact.family
+                {
                     use QuantityKind::{Delta, Linear, Point};
                     match (op, lfact.kind, rfact.kind) {
                         (BinOp::Add | BinOp::Sub, Linear, Linear)

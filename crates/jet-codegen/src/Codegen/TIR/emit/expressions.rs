@@ -225,6 +225,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 _ => unreachable!("sema/TIR distinct conversion fallibility drift"),
             }
         }
+        TExprKind::UnitConvert {
+            destination,
+            arg,
+            scale,
+            offset,
+            rounded,
+        } => {
+            let destination = cx.rust_type(&Type::Named(destination.clone()));
+            let value = format!("({}).0", emit_tir_expr(arg, cx));
+            let converted = format!("({value} * {scale:?}_f64 + {offset:?}_f64)");
+            if *rounded {
+                format!("{destination}(({converted}).round_ties_even())")
+            } else {
+                format!(
+                    "{{ let converted = {converted}; if converted.is_finite() && converted.fract() == 0.0 {{ Ok({destination}(converted)) }} else {{ Err(\"unit conversion would round\".to_string()) }} }}"
+                )
+            }
+        }
         // D-SIMD2 / D-LINALG1: a math constructor / static method → the prelude free
         // function `{root}jet_math_<T>_<func>(args)`. Args are plain values (floats or
         // a `[T#N]` array) — no borrow/clone decisions.

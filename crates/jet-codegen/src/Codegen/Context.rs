@@ -8,6 +8,61 @@ use crate::AST::{
     VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
+
+#[derive(Clone)]
+pub(crate) struct UnitFact {
+    pub(crate) family: String,
+    pub(crate) dimension: crate::AST::Dimension,
+    pub(crate) kind: crate::AST::QuantityKind,
+    pub(crate) scale: f64,
+    pub(crate) offset: f64,
+}
+
+fn unit_ratio_f64(ratio: &crate::AST::UnitRatio) -> f64 {
+    ratio.num.to_string().parse::<f64>().unwrap_or_else(|_| {
+        if ratio.num.is_negative() {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        }
+    }) / ratio.den.to_string().parse::<f64>().unwrap_or(f64::INFINITY)
+}
+
+fn unit_family_member_for_type<'a>(
+    family: &'a crate::AST::UnitFamilyDef,
+    type_name: &str,
+    kind: crate::AST::QuantityKind,
+) -> Option<&'a crate::AST::UnitFamilyMember> {
+    family.members.iter().find(|member| {
+        let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
+        type_name
+            == match kind {
+                crate::AST::QuantityKind::Linear => stem,
+                crate::AST::QuantityKind::Point => format!("{stem}Point"),
+                crate::AST::QuantityKind::Delta => format!("{stem}Delta"),
+            }
+    })
+}
+
+fn unit_fact(
+    family: &crate::AST::UnitFamilyDef,
+    member: &crate::AST::UnitFamilyMember,
+    dimension: crate::AST::Dimension,
+    kind: crate::AST::QuantityKind,
+) -> UnitFact {
+    UnitFact {
+        family: family.family.clone(),
+        dimension,
+        kind,
+        scale: unit_ratio_f64(&member.scale),
+        offset: if kind == crate::AST::QuantityKind::Point {
+            unit_ratio_f64(&member.offset)
+        } else {
+            0.0
+        },
+    }
+}
+
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
     pub(crate) sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
@@ -30,9 +85,9 @@ pub(crate) struct Cx {
     pub(crate) distinct_types: HashMap<String, (Type, bool)>,
     /// D-RANGETYPE1: range-constrained distinct type name -> inclusive bounds.
     pub(crate) distinct_ranges: HashMap<String, (i64, i64)>,
-    /// D-SHAPE-QUANTITY1=A: physical unit member -> normalized dimension.
-    /// Consulted only while lowering; dimensions erase from emitted Rust.
-    pub(crate) unit_dimensions: HashMap<String, crate::AST::Dimension>,
+    /// D-SHAPE-QUANTITY1=A: the one backend registry for physical unit facts.
+    /// Consulted only while lowering; facts erase from emitted Rust.
+    pub(crate) unit_facts: HashMap<String, UnitFact>,
     /// D-TYPEALIAS1: transparent generic alias name -> (params, target).
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
@@ -460,7 +515,7 @@ impl Cx {
                 let Type::Named(name) = ty else {
                     return None;
                 };
-                self.unit_dimensions.get(name).copied()
+                self.unit_facts.get(name).map(|fact| fact.dimension)
             })
     }
 
@@ -1626,11 +1681,16 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
                 if let Some(dimension) = crate::AST::Dimension::for_family(&family.family) {
                     for member in family.distinct_defs() {
                         let name = if target == module_idx {
-                            member.name
+                            member.name.clone()
                         } else {
                             format!("{}.{}", module.alias, member.name)
                         };
-                        cx.unit_dimensions.insert(name, dimension);
+                        let Some((_, kind)) = member.quantity else { continue };
+                        let Some(source) = unit_family_member_for_type(family, &member.name, kind)
+                        else {
+                            continue;
+                        };
+                        cx.unit_facts.insert(name, unit_fact(family, source, dimension, kind));
                     }
                 }
             }
@@ -1861,7 +1921,7 @@ pub(crate) fn build_cx_items(
         type_names: HashSet::new(),
         distinct_types: HashMap::new(),
         distinct_ranges: HashMap::new(),
-        unit_dimensions: HashMap::new(),
+        unit_facts: HashMap::new(),
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
@@ -2155,8 +2215,13 @@ pub(crate) fn build_cx_items(
                     cx.type_names.insert(d.name.clone());
                     cx.distinct_types
                         .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
-                    if let Some(dimension) = dimension {
-                        cx.unit_dimensions.insert(d.name.clone(), dimension);
+                    if let (Some(dimension), Some((_, kind))) = (dimension, d.quantity) {
+                        if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
+                            cx.unit_facts.insert(
+                                d.name.clone(),
+                                unit_fact(uf, member, dimension, kind),
+                            );
+                        }
                     }
                 }
             }

@@ -1878,6 +1878,25 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[converted, lo, hi]);
                 Ok(self.b.inst_results(call)[0])
             }
+            TExprKind::UnitConvert {
+                arg,
+                scale,
+                offset,
+                rounded,
+                ..
+            } => {
+                let value = self.lower_expr(arg)?;
+                let scale = self.b.ins().f64const(*scale);
+                let offset = self.b.ins().f64const(*offset);
+                let host = if *rounded {
+                    self.host.unit_convert_rounded
+                } else {
+                    self.host.unit_convert_exact
+                };
+                let host = self.module.declare_func_in_func(host, self.b.func);
+                let call = self.b.ins().call(host, &[value, scale, offset]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TExprKind::OverflowOpt { .. } => {
                 Err("jit overflow opt-out expression unsupported".to_string())
             }

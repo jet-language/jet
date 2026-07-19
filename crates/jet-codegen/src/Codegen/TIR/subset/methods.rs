@@ -1062,6 +1062,12 @@ pub(crate) fn static_method_call_in_subset(
             return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
         }
     }
+    if cx.unit_facts.contains_key(type_name)
+        && method.starts_with("from_")
+        && args.len() == 1
+    {
+        return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+    }
     if matches!(
         (type_name, method, args.len()),
         ("Secret", "from_text" | "from_bytes", 1)

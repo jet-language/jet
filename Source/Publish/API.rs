@@ -193,6 +193,7 @@ fn format_fn_sig(
     inferred: Option<&crate::Sema::EffectSet>,
     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
 ) -> String {
+    let type_params = crate::Sema::ApiFreeze::canonical_type_params(&f.type_params);
     let params: Vec<String> = f
         .params
         .iter()
@@ -228,7 +229,7 @@ fn format_fn_sig(
             .map(|t| format!(" -> {}", format_type(t, dimensions)))
             .unwrap_or_default(),
     };
-    format!("fn {}({}){}", f.name, params.join(", "), ret)
+    format!("fn {}{}({}){}", f.name, type_params, params.join(", "), ret)
 }
 
 fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions) -> String {

@@ -106,6 +106,8 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
 pub const TYPE_QUANTITY: &str = "\0Quantity";
 /// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
 pub const BOUND_QUANTITY: &str = "Quantity";
+/// D-QUANTITY-CONVERT1=B: the first closed explicit unit-rounding policy.
+pub const ROUND_NEAREST_EVEN: &str = "NearestEven";
 
 /// Canonical `(Length, Time, Temperature)` exponent vectors for physical
 /// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is

@@ -252,6 +252,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {
             resident_safe_expr(arg, callees)
         }
+        TExprKind::UnitConvert { arg, .. } => resident_safe_expr(arg, callees),
         TExprKind::PreciseBuiltin {
             type_name,
             func,

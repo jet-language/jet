@@ -87,18 +87,20 @@ impl<'a> Checker<'a> {
     /// rewritten to `.clone()` so the generated Rust never moves a field out
     /// of its struct.
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
-        // D-QUANTITY-CONVERT1=B: explicit destination-owned unit conversion
-        // elaborates to the same raw/scale/offset/from_float expression used
-        // by implicit conversion.
+        // D-QUANTITY-CONVERT1=B: destination-owned exact conversion is
+        // fallible at runtime; the explicit `_rounded` spelling names the one
+        // ratified nearest-even policy. Codegen emits these real methods on the
+        // concrete destination type from the same UnitFact coefficients.
         let conversion_span = e.span();
         let explicit_unit_conversion = if let Expr::MethodCall {
             receiver,
             method,
             args,
+            resolved_ret,
             ..
         } = &mut *e
         {
-            if args.len() == 1 {
+            if matches!(args.len(), 1 | 2) {
                 if let Expr::Ident(destination_name, _) = receiver.as_ref() {
                     if let Some((destination_name, destination_fact)) = self
                         .unit_fact_for_type(&Type::Named(destination_name.clone()))
@@ -111,7 +113,18 @@ impl<'a> Checker<'a> {
                             let source_leaf =
                                 source_name.rsplit('.').next().unwrap_or(&source_name);
                             let expected = Syntax::conversion_method_for_source(source_leaf);
-                            if method == &expected
+                            let exact = args.len() == 1 && method == &expected;
+                            let rounded = args.len() == 2
+                                && method == &format!("{expected}_rounded")
+                                && matches!(
+                                    &args[1].expr,
+                                    Expr::EnumLit { type_name, variant, args, .. }
+                                        if type_name.is_empty()
+                                            && variant == Syntax::ROUND_NEAREST_EVEN
+                                            && args.is_empty()
+                                );
+                            if (exact || rounded)
+                                && source_fact.package == destination_fact.package
                                 && source_fact.family == destination_fact.family
                                 && source_fact.dimension == destination_fact.dimension
                                 && source_fact.kind == destination_fact.kind
@@ -122,22 +135,18 @@ impl<'a> Checker<'a> {
                                     );
                                     return Some(Type::Named(destination_name));
                                 }
-                                let source_span = args[0].span;
-                                let source_expr = std::mem::replace(
-                                    &mut args[0].expr,
-                                    Expr::Absent(source_span),
-                                );
-                                Some((
-                                    self.unit_conversion_expr(
-                                        source_expr,
-                                        &source_name,
-                                        &source_fact,
-                                        &destination_name,
-                                        &destination_fact,
-                                        conversion_span,
-                                    ),
-                                    Type::Named(destination_name),
-                                ))
+                                let destination = Type::Named(destination_name);
+                                let ty = if rounded {
+                                    args.pop();
+                                    destination
+                                } else {
+                                    Type::Result {
+                                        ok: Box::new(destination),
+                                        err: Box::new(Type::String),
+                                    }
+                                };
+                                *resolved_ret = Some(ty.clone());
+                                Some(ty)
                             } else {
                                 None
                             }
@@ -156,8 +165,7 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
-        if let Some((replacement, ty)) = explicit_unit_conversion {
-            *e = replacement;
+        if let Some(ty) = explicit_unit_conversion {
             return Some(ty);
         }
 

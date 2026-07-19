@@ -2732,6 +2732,30 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         "physics",
     );
     assert_eq!(diff_public_api(&affine_api, &shifted_api).len(), 1);
+
+    let length_generic =
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n";
+    let time_generic =
+        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }\n";
+    let length_path = dir.join("length_generic.jet");
+    let time_path = dir.join("time_generic.jet");
+    fs::write(&length_path, length_generic).unwrap();
+    fs::write(&time_path, time_generic).unwrap();
+    let length_api = jet::Publish::extract_public_api_for_package(
+        length_generic,
+        length_path.to_str().unwrap(),
+        "physics",
+    );
+    let time_api = jet::Publish::extract_public_api_for_package(
+        time_generic,
+        time_path.to_str().unwrap(),
+        "physics",
+    );
+    assert_eq!(
+        length_api[0].signature,
+        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) --[]-> Q"
+    );
+    assert_eq!(diff_public_api(&length_api, &time_api).len(), 1);
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -2344,6 +2344,50 @@ pub(crate) fn lower_method_call(
                 };
             }
         }
+        if let (Some(destination), Some(arg)) = (cx.unit_facts.get(&type_name), args.first()) {
+            let rounded = method.ends_with("_rounded");
+            let exact_method = method.strip_suffix("_rounded").unwrap_or(method);
+            let lowered = lower_expr(&arg.expr, cx, env);
+            let source = match &lowered.ty {
+                Type::Named(name) => cx.unit_facts.get(name),
+                _ => None,
+            }
+            .or_else(|| {
+                let destination_scope = type_name.rsplit_once('.').map(|(scope, _)| scope);
+                cx.unit_facts.iter().find_map(|(name, fact)| {
+                    let leaf = name.rsplit('.').next().unwrap_or(name);
+                    let source_scope = name.rsplit_once('.').map(|(scope, _)| scope);
+                    (source_scope == destination_scope
+                        && fact.family == destination.family
+                        && fact.kind == destination.kind
+                        && Syntax::conversion_method_for_source(leaf) == exact_method)
+                        .then_some(fact)
+                })
+            });
+            if args.len() == 1 {
+                if let Some(source) = source {
+                    let scale = source.scale / destination.scale;
+                    let offset = (source.offset - destination.offset) / destination.scale;
+                    return TExpr {
+                        ty: if rounded {
+                            Type::Float
+                        } else {
+                            Type::Result {
+                                ok: Box::new(Type::Float),
+                                err: Box::new(Type::String),
+                            }
+                        },
+                        kind: TExprKind::UnitConvert {
+                            destination: type_name,
+                            arg: Box::new(lowered),
+                            scale,
+                            offset,
+                            rounded,
+                        },
+                    };
+                }
+            }
+        }
         // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
         // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
         // `Path` itself (a type-name ident) has no value.
@@ -2733,13 +2777,14 @@ pub(crate) fn lower_method_call(
             .cloned()
             .unwrap_or_default();
         let targs = lower_method_args(args, &sig, env, cx);
-        let ret_ty = cx
-            .method_rets
-            .get(&(type_name.clone(), method.to_string()))
-            .cloned()
-            .flatten()
-            .map(|t| resolve_self_ty(&t, &type_name))
-            .unwrap_or_else(unit_type);
+        let ret_ty = resolved_ret.cloned().unwrap_or_else(|| {
+            cx.method_rets
+                .get(&(type_name.clone(), method.to_string()))
+                .cloned()
+                .flatten()
+                .map(|t| resolve_self_ty(&t, &type_name))
+                .unwrap_or_else(unit_type)
+        });
         return TExpr {
             ty: ret_ty,
             kind: TExprKind::StaticCall {

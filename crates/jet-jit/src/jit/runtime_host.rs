@@ -580,6 +580,22 @@ extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
 }
 
+extern "C" fn jet_jit_unit_convert_exact(value: f64, scale: f64, offset: f64) -> i64 {
+    let converted = value * scale + offset;
+    Concurrency::with_runtime_mut(|rt| {
+        if converted.is_finite() && converted.fract() == 0.0 {
+            alloc_jit_result(rt, true, converted.to_bits())
+        } else {
+            let error = rt.heap.alloc_string("unit conversion would round");
+            alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+extern "C" fn jet_jit_unit_convert_rounded(value: f64, scale: f64, offset: f64) -> f64 {
+    (value * scale + offset).round_ties_even()
+}
+
 extern "C" fn jet_jit_result_new_i8(ok: i8, value: i8) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value as u8 as u64))
 }
@@ -684,6 +700,8 @@ pub(crate) struct HostFns {
     pub(crate) result_new_f64: FuncId,
     pub(crate) result_new_i8: FuncId,
     pub(crate) result_new_i32: FuncId,
+    pub(crate) unit_convert_exact: FuncId,
+    pub(crate) unit_convert_rounded: FuncId,
     pub(crate) result_is_ok: FuncId,
     pub(crate) result_get_i64: FuncId,
     pub(crate) result_get_f64: FuncId,
@@ -782,6 +800,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_result_new_f64", jet_jit_result_new_f64 as *const u8);
     builder.symbol("jet_jit_result_new_i8", jet_jit_result_new_i8 as *const u8);
     builder.symbol("jet_jit_result_new_i32", jet_jit_result_new_i32 as *const u8);
+    builder.symbol("jet_jit_unit_convert_exact", jet_jit_unit_convert_exact as *const u8);
+    builder.symbol("jet_jit_unit_convert_rounded", jet_jit_unit_convert_rounded as *const u8);
     builder.symbol("jet_jit_result_is_ok", jet_jit_result_is_ok as *const u8);
     builder.symbol("jet_jit_result_get_i64", jet_jit_result_get_i64 as *const u8);
     builder.symbol("jet_jit_result_get_f64", jet_jit_result_get_f64 as *const u8);
@@ -941,6 +961,12 @@ fn declare_host_fns(
     sig_result_new_i32.params.push(AbiParam::new(types::I8));
     sig_result_new_i32.params.push(AbiParam::new(types::I32));
     sig_result_new_i32.returns.push(AbiParam::new(types::I64));
+    let mut sig_unit_convert_exact = Signature::new(cc);
+    sig_unit_convert_exact.params.extend([AbiParam::new(types::F64); 3]);
+    sig_unit_convert_exact.returns.push(AbiParam::new(types::I64));
+    let mut sig_unit_convert_rounded = Signature::new(cc);
+    sig_unit_convert_rounded.params.extend([AbiParam::new(types::F64); 3]);
+    sig_unit_convert_rounded.returns.push(AbiParam::new(types::F64));
     let mut sig_result_query_i8 = Signature::new(cc);
     sig_result_query_i8.params.push(AbiParam::new(types::I64));
     sig_result_query_i8.returns.push(AbiParam::new(types::I8));
@@ -1021,6 +1047,8 @@ fn declare_host_fns(
         result_new_f64: import("jet_jit_result_new_f64", &sig_result_new_f64)?,
         result_new_i8: import("jet_jit_result_new_i8", &sig_result_new_i8)?,
         result_new_i32: import("jet_jit_result_new_i32", &sig_result_new_i32)?,
+        unit_convert_exact: import("jet_jit_unit_convert_exact", &sig_unit_convert_exact)?,
+        unit_convert_rounded: import("jet_jit_unit_convert_rounded", &sig_unit_convert_rounded)?,
         result_is_ok: import("jet_jit_result_is_ok", &sig_result_query_i8)?,
         result_get_i64: import("jet_jit_result_get_i64", &sig_result_query_i64)?,
         result_get_f64: import("jet_jit_result_get_f64", &sig_result_query_f64)?,

@@ -101,6 +101,7 @@ pub(crate) enum TypeDef {
 
 #[derive(Debug, Clone)]
 pub(crate) struct UnitFact {
+    package: std::path::PathBuf,
     family: String,
     member: String,
     dimension: crate::AST::Dimension,
@@ -146,15 +147,22 @@ impl UnitFact {
             })
         })
     }
+
+    fn converted_value_to(&self, destination: &Self, value: f64) -> Option<f64> {
+        let (scale, offset) = self.conversion_parts_to(destination)?;
+        let ratio = |value: &crate::AST::UnitRatio| {
+            Some(value.num.to_string().parse::<f64>().ok()?
+                / value.den.to_string().parse::<f64>().ok()?)
+        };
+        let converted = value * ratio(&scale)? + ratio(&offset)?;
+        converted.is_finite().then_some(converted)
+    }
 }
 
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
-    /// D-SHAPE-QUANTITY1=A: unit-family member type -> normalized physical
-    /// dimension. Currency and unknown families are intentionally absent.
-    unit_dimensions: HashMap<String, crate::AST::Dimension>,
     /// #603: the one normalized source of truth for concrete unit conversion,
-    /// affine kind, and algebra facts.
+    /// package identity, dimension, affine kind, and algebra facts.
     unit_facts: HashMap<String, UnitFact>,
     /// D-FIELDPOL1: struct name → computed field name → (span, declared
     /// type). A computed field never appears in `TypeDef::Struct::fields`
@@ -170,7 +178,7 @@ impl TypeRegistry {
     }
 
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
-        self.unit_dimensions.get(name).copied()
+        self.unit_facts.get(name).map(|fact| fact.dimension)
     }
 
     pub(crate) fn unit_fact(&self, name: &str) -> Option<&UnitFact> {
@@ -1249,6 +1257,17 @@ pub(crate) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    fn concrete_unit_value(expr: &Expr) -> Option<f64> {
+        let Expr::MethodCall { method, args, .. } = expr else { return None };
+        if method != crate::Syntax::numeric_conversion_method("Float")? || args.len() != 1 {
+            return None;
+        }
+        match &args[0].expr {
+            Expr::Float(value, _, _) => Some(*value),
+            _ => None,
+        }
+    }
+
     pub(crate) fn unit_fact_for_type(&self, ty: &Type) -> Option<(String, UnitFact)> {
         let Type::Named(name) = ty else { return None };
         if let Some(fact) = self.registry.unit_fact(name) {
@@ -1282,14 +1301,16 @@ impl<'a> Checker<'a> {
             .split_once('.')
             .map_or_else(|| leaf.clone(), |(module, _)| format!("{module}.{leaf}"));
         self.unit_fact_for_type(&Type::Named(candidate.clone()))
-            .filter(|(_, other)| other.family == fact.family && other.kind == kind)
+            .filter(|(_, other)| {
+                other.package == fact.package && other.family == fact.family && other.kind == kind
+            })
             .map(|_| candidate)
     }
 
     pub(crate) fn type_satisfies_bound(&self, ty: &Type, bound: &str) -> bool {
         if let Some((dimension, kind)) = crate::Generics::parse_quantity_bound(bound) {
             return self.unit_fact_for_type(ty).is_some_and(|(_, fact)| {
-                fact.family == dimension && fact.kind.name() == kind
+                fact.dimension.family_name() == Some(dimension) && fact.kind.name() == kind
             });
         }
         self.trait_reg.type_implements_trait(ty, bound)
@@ -1318,7 +1339,8 @@ impl<'a> Checker<'a> {
         let Some((source_name, source_fact)) = self.unit_fact_for_type(source_ty) else {
             return false;
         };
-        if destination_fact.family != source_fact.family
+        if destination_fact.package != source_fact.package
+            || destination_fact.family != source_fact.family
             || destination_fact.dimension != source_fact.dimension
             || destination_fact.kind != source_fact.kind
         {
@@ -1329,7 +1351,11 @@ impl<'a> Checker<'a> {
                 .push(self.unit_conversion_overflow_diagnostic(expr.span()));
             return true;
         }
-        if !source_fact.conversion_is_exact_to(&destination_fact) {
+        let exact = source_fact.conversion_is_exact_to(&destination_fact)
+            || Self::concrete_unit_value(expr)
+                .and_then(|value| source_fact.converted_value_to(&destination_fact, value))
+                .is_some_and(|value| value.fract() == 0.0);
+        if !exact {
             self.diags.push(self.inexact_unit_diagnostic(
                 &destination_name,
                 &source_name,

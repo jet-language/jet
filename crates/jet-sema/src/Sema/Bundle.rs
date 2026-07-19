@@ -36,13 +36,14 @@ fn builtin_type_registry() -> TypeRegistry {
         groups: HashMap::new(), methods: HashMap::new(), single_use: false,
         must_use: false, c_layout_tag: None,
     });
-    TypeRegistry { types, unit_dimensions: HashMap::new(), unit_facts: HashMap::new(), computed_fields: HashMap::new() }
+    TypeRegistry { types, unit_facts: HashMap::new(), computed_fields: HashMap::new() }
 }
 
 fn unit_fact(
     family: &crate::AST::UnitFamilyDef,
     type_name: &str,
     dimension: crate::AST::Dimension,
+    package: PathBuf,
 ) -> Option<UnitFact> {
     let affine = family.base.is_some()
         && family
@@ -65,6 +66,7 @@ fn unit_fact(
             return None;
         };
         Some(UnitFact {
+            package: package.clone(),
             family: family.family.clone(),
             member: member.name.clone(),
             dimension,
@@ -1209,8 +1211,12 @@ fn check_bundle_opts_for_output(
                     for d in uf.distinct_defs() {
                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                         if let Some(dimension) = dimension {
-                            st.registry.unit_dimensions.insert(d.name.clone(), dimension);
-                            if let Some(fact) = unit_fact(uf, &d.name, dimension) {
+                            if let Some(fact) = unit_fact(
+                                uf,
+                                &d.name,
+                                dimension,
+                                st.package_scope.clone(),
+                            ) {
                                 st.registry.unit_facts.insert(d.name.clone(), fact);
                             }
                         }
@@ -1261,7 +1267,6 @@ fn check_bundle_opts_for_output(
                         }
                         TypeRegistry {
                             types,
-                            unit_dimensions: st.registry.unit_dimensions.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
                             computed_fields: st.registry.computed_fields.clone(),
                         }

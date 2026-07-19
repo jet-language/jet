@@ -218,6 +218,7 @@ pub fn canonical_fn_signature_with_effects(
     inferred: Option<&EffectSet>,
     dimensions: &ApiUnitDimensions,
 ) -> String {
+    let type_params = canonical_type_params(&f.type_params);
     let params: Vec<String> = f
         .params
         .iter()
@@ -252,7 +253,23 @@ pub fn canonical_fn_signature_with_effects(
             )
         }
     });
-    format!("fn {}({}){}{}", f.name, params.join(", "), ret, provenance)
+    format!("fn {}{}({}){}{}", f.name, type_params, params.join(", "), ret, provenance)
+}
+
+pub fn canonical_type_params(params: &[crate::AST::TypeParam]) -> String {
+    if params.is_empty() {
+        return String::new();
+    }
+    let params = params
+        .iter()
+        .map(|param| match param.bounds.as_slice() {
+            [] => param.name.clone(),
+            [bound] => format!("{}: {bound}", param.name),
+            bounds => format!("{}: [{}]", param.name, bounds.join(", ")),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("<{params}>")
 }
 
 /// D-EFF3's public dynamic-dispatch contract. Unlike ordinary functions, a

@@ -1174,6 +1174,16 @@ pub enum TExprKind {
         /// distinct range check, but never a conversion declared fallible.
         fallible: bool,
     },
+    /// D-QUANTITY-CONVERT1=B: a checked or explicitly rounded conversion
+    /// between two members of one package-owned unit family. The backend sees
+    /// only erased Float values and resolved conversion coefficients.
+    UnitConvert {
+        destination: String,
+        arg: Box<TExpr>,
+        scale: f64,
+        offset: f64,
+        rounded: bool,
+    },
     /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
     /// `Vec3(x,y,z)` / `Mat3(…)`, or a static method `F32x4.splat(x)` /
     /// `Vec3.from_array(a)`. Emits the prelude free function `{root}jet_math_<T>_<fn>(…)`

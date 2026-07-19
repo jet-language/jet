@@ -279,7 +279,7 @@ pub fn rust_type_param_list(
                 .iter()
                 .filter_map(|b| {
                     if is_quantity_bound(b) {
-                        Some("JetQuantity".to_string())
+                        Some("crate::JetQuantity".to_string())
                     } else if matches!(b.as_str(), IO_READER | IO_WRITER) {
                         rust_trait_bound(b).map(str::to_string)
                     } else if is_builtin_trait(b) {

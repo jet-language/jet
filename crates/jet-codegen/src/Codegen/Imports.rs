@@ -484,6 +484,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
                 for d in uf.distinct_defs() {
                     emit_distinct(cx, &d, out);
                 }
+                emit_unit_conversions(uf, out);
             }
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)

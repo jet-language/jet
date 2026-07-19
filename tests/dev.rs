@@ -2402,18 +2402,39 @@ fn run() {
 fn physical_quantities_run_in_resident_jit_without_fallback() {
     if skip_if_cranelift_host_unsupported() { return; }
     let out = run_cranelift_without_fallback(r#"
-@UnitFamily(Length) { meter }
+@UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+    thirdish(scale: 2/3)
+}
 @UnitFamily(Time) { second }
-fn run() {
+fn run() -> Void ? {
     distance :: 12meter
     elapsed :: 3second
     speed :: distance / elapsed
     recovered :: speed * elapsed
     ratio :: recovered / distance
     print(ratio)
+    exact :: Meter.from_millimeter(3000millimeter)?
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven)
+    print("{(exact.raw())} {(rounded.raw())}")
 }
 "#, "physical_quantity");
-    assert_eq!(out.stdout, "1.0\n");
+    assert_eq!(out.stdout, "1.0\n3.0 1.0\n");
+
+    let failed = run_cranelift_without_fallback(r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    thirdish(scale: 2/3)
+}
+fn run() -> Void ? {
+    Meter.from_thirdish(1thirdish)?
+}
+"#, "physical_quantity_inexact");
+    assert_eq!(
+        failed,
+        ProgramOutput::ran("".into(), "unit conversion would round\n".into(), 1)
+    );
 }
 
 #[test]

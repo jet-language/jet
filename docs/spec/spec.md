@@ -3411,8 +3411,12 @@ receive only that numeric base: dimensions have no runtime representation.
 Currency remains nominal D-QUAL3 behavior. D-QUANTITY-DECL1 extends a closed
 family with `base`, exact rational `scale`/`offset`, and stable package-owned API
 identity. A family with any nonzero offset mints separate `Point` and `Delta`
-named types for every member; conversion and the closed affine algebra remain
-owned by the later #603 slices.
+named types for every member. Sema owns the closed affine algebra and exactness:
+implicit conversion is value-aware and never rounds, destination-owned exact
+conversion returns `Result`, and `_rounded(..., .NearestEven)` is the explicit
+rounding path. Imported `Quantity<Dimension, Kind>` bounds preserve their
+concrete unit through checking, API freeze, semantic inspection, Codable, AOT,
+and resident JIT lowering.
 
 ## Semantic source import
 

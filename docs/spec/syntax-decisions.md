@@ -488,12 +488,13 @@ same-spelled member in another family is a distinct type, never silently
 unified. API snapshots record dimension, base, scale, offset, and package
 provenance so conflicts fail and changes are semver-visible.
 
-Implementation checkpoint (2026-07-19): the declaration parser normalizes exact
-ratios, validates the canonical base, preserves metadata through formatting,
-mints the ratified Point/Delta names for affine families, and includes package,
-family, base, dimension, scale, and offset in public API identity. The remaining
-algebra, conversion, policy, generic-bound, inspect, and tier-parity work stays
-on card #603.
+Implementation checkpoint (2026-07-19): the compiler normalizes exact ratios,
+validates the canonical base, and keeps one package-owned unit fact registry for
+dimension, kind, scale, and offset. Scaled and affine families implement the
+closed Point/Delta algebra, value-aware exact implicit conversion, fallible
+destination-owned exact conversion, `.NearestEven` rounded conversion,
+`explicit_units`, imported `Quantity<Dimension, Kind>` generics, concrete
+Codable identity, semantic inspection, API/SemVer identity, and AOT/JIT parity.
 
 ```jet
 @UnitFamily(Length, base: meter) {

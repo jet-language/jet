@@ -147,8 +147,8 @@ fn run() {
     warmer :: freezing + step
     drift :: warmer - freezing
     total :: drift + step
-    absolute :: KelvinPoint.from_celsius_point(warmer)
-    relative :: KelvinDelta.from_celsius_delta(total)
+    absolute :: KelvinPoint.from_celsius_point_rounded(warmer, .NearestEven)
+    relative :: KelvinDelta.from_celsius_delta(total) ?? panic("exact delta conversion")
     print("{(absolute.raw())} {(relative.raw())}")
 }
 "#;
@@ -175,6 +175,20 @@ fn run() {
 "#;
     let codes = codes_of(src);
     assert!(codes.is_empty(), "exact implicit conversions must share one path: {codes:?}");
+}
+
+#[test]
+fn exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator() {
+    let src = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+}
+fn takes_meter(value: Meter) { print("{(value.raw())}") }
+fn run() { takes_meter(3000millimeter) }
+"#;
+    let codes = codes_of(src);
+    assert!(codes.is_empty(), "3000 millimeters is exactly 3 meters: {codes:?}");
 }
 
 #[test]
@@ -220,14 +234,14 @@ fn imported_quantity_generic_preserves_concrete_type() {
     let units = r#"
 pub @UnitFamily(Length) { meter }
 pub fn sample() -> Meter { return 2meter }
+pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
 pub fn raw_meter(value: Meter) -> Float { return value.raw() }
 "#;
     let main = r#"
 use "units" as units
-fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
 fn run() {
     source :: units.sample()
-    same :: keep(^source)
+    same :: units.keep(^source)
     print(units.raw_meter(same))
 }
 "#;
@@ -238,6 +252,51 @@ fn run() {
     );
     assert_eq!(code, 0);
     assert_eq!(stdout, "2.0\n");
+}
+
+#[test]
+fn quantity_bounds_reject_unknown_dimensions_and_kinds_at_parse_time() {
+    for src in [
+        "fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) -> Q { return value }",
+        "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) -> Q { return value }",
+    ] {
+        let (tokens, lex) = jet::Lexer::lex(src);
+        assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
+        assert!(jet::Parser::parse(&tokens).is_err(), "invalid Quantity bound parsed: {src}");
+    }
+}
+
+#[test]
+fn quantity_generic_bounds_are_frozen_into_public_api_identity() {
+    let parse = |src: &str| {
+        let (tokens, diagnostics) = jet::Lexer::lex(src);
+        assert!(diagnostics.is_empty());
+        jet::Parser::parse(&tokens).expect("public Quantity generic should parse")
+    };
+    let length = parse(
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }",
+    );
+    let time = parse(
+        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }",
+    );
+    let length = jet::Publish::ApiFreeze::snapshot_from_items(&length.items, "units", "1.0.0");
+    let time = jet::Publish::ApiFreeze::snapshot_from_items(&time.items, "units", "1.0.0");
+    assert_eq!(
+        length.funcs[0].signature,
+        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q"
+    );
+    assert_ne!(length.funcs[0].signature, time.funcs[0].signature);
+    let old = vec![jet::Publish::ApiItem {
+        kind: "fn".into(),
+        name: "keep".into(),
+        signature: length.funcs[0].signature.clone(),
+    }];
+    let new = vec![jet::Publish::ApiItem {
+        kind: "fn".into(),
+        name: "keep".into(),
+        signature: time.funcs[0].signature.clone(),
+    }];
+    assert_eq!(jet::Publish::diff_public_api(&old, &new).len(), 1);
 }
 
 #[test]
@@ -262,7 +321,8 @@ fn run() {
 }
 @Policy(explicit_units)
 fn run() {
-    total :: 1meter + Meter.from_millimeter(1millimeter)
+    converted :: Meter.from_millimeter(1000millimeter) ?? panic("exact conversion")
+    total :: 1meter + converted
     print("{(total.raw())}")
 }
 "#;
@@ -309,6 +369,44 @@ fn run() { value :: 1meter + 1thirdish; print("{(value.raw())}") }
         "9".repeat(400)
     );
     assert_eq!(codes_of(&explicit_overflow), vec!["E0127"]);
+}
+
+#[test]
+fn explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real() {
+    if !tir_support::have_rustc() {
+        return;
+    }
+    let src = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+    thirdish(scale: 2/3)
+}
+fn run() {
+    exact :: Meter.from_millimeter(3000millimeter) ?? panic("exact conversion failed")
+    inexact :: Meter.from_thirdish(1thirdish) ?? Meter.from_float(-1.0)
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven)
+    print("{(exact.raw())} {(inexact.raw())} {(rounded.raw())}")
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run("quantity_explicit_exact_rounded", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3.0 -1.0 1.0\n");
+
+    let unchecked = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    thirdish(scale: 2/3)
+}
+fn run() {
+    converted :: Meter.from_thirdish(1thirdish)
+    print(converted.raw())
+}
+"#;
+    assert!(
+        !codes_of(unchecked).is_empty(),
+        "an exact conversion result must be handled before use"
+    );
 }
 
 #[test]
@@ -529,6 +627,49 @@ fn run() { bad :: length.first(length.sample()) + time.first(time.sample()) }
     let _ = std::fs::remove_dir_all(&dir);
     let codes: Vec<_> = result.unwrap_err().into_iter().map(|d| d.code.to_string()).collect();
     assert_eq!(codes, vec!["E0359"]);
+}
+
+#[test]
+fn same_named_unit_families_from_different_packages_do_not_convert() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_quantity_package_identity_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let unit = r#"
+pub @UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
+pub fn sample() -> Meter { return 1meter }
+"#;
+    std::fs::write(dir.join("left.jet"), unit).unwrap();
+    std::fs::write(dir.join("right.jet"), unit).unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(
+        &entry,
+        r#"
+use "left" as left
+use "right" as right
+fn run() { bad :: left.sample() + right.sample(); print(bad.raw()) }
+"#,
+    )
+    .unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    for module in &mut bundle.modules {
+        if matches!(module.alias.as_str(), "left" | "right") {
+            module.path = dir
+                .parent()
+                .unwrap()
+                .join(format!("foreign-{}/module.jet", module.alias));
+        }
+    }
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0109" | "E0127" | "E0359")),
+        "package-owned families must not unify: {diagnostics:?}"
+    );
 }
 
 #[test]
