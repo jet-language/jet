@@ -365,7 +365,7 @@ impl<'a> Checker<'a> {
                 *args = call.args;
                 Some(payload)
             }
-            // D-ORRETURN-ERG1=B: `?? break` / `?? continue` — loop-only.
+            // D-ORRETURN-ERG1=B: `?? break` / `?? next` — loop-only.
             OrFallback::Break(kw_span) => {
                 if self.loop_depth == 0 {
                     self.diags
@@ -376,7 +376,7 @@ impl<'a> Checker<'a> {
             OrFallback::Continue(kw_span) => {
                 if self.loop_depth == 0 {
                     self.diags
-                        .push(loop_control_outside(Syntax::KW_CONTINUE, *kw_span));
+                        .push(loop_control_outside(Syntax::KW_NEXT, *kw_span));
                 }
                 Some(payload)
             }

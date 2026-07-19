@@ -16,7 +16,7 @@ fn run() --[R, Io]-> {
     print(json.canonical(ops.double_values(session, DataTree.Array([DataTree.Int(2), DataTree.Int(4)]), 5000) ?? panic("vector call failed")))
     scores :: data.table([Score.{ label: "a", score: 1.5 }, Score.{ label: "b", score: 2.0 }])
     scaled :: ops.scale_table_table<Score>(session, scores, 5000) ?? panic("table call failed")
-    loop row in data.rows(scaled) {
+    loop row; data.rows(scaled) {
         print("{row.label}:{row.score}")
     }
     svg :: ops.plot_scores_plot(session, DataTree.Object(["values": DataTree.Array([DataTree.Int(2), DataTree.Int(5), DataTree.Int(3)])]), 5000) ?? panic("plot call failed")

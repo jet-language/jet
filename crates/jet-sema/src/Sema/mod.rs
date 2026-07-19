@@ -997,7 +997,7 @@ pub(crate) struct Checker<'a> {
     /// name -> span of the use that gave the value away.
     moved: HashMap<String, Span>,
     loop_depth: usize,
-    /// D-LABEL1: stack of `@name` loop labels in scope, innermost last.
+    /// D-LABEL1: stack of `@name` loop labels; scope, innermost last.
     loop_labels: Vec<String>,
     /// D-EFF1: effects this function body reaches directly (Core calls, impure
     /// builtins). Accumulated during the walk; rolled into the per-function

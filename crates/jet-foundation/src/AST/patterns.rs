@@ -255,7 +255,7 @@ pub enum OrFallback {
     },
     /// D-ORRETURN-ERG1=B: `expr ?? break` — loop-only, sema-gated.
     Break(Span),
-    /// D-ORRETURN-ERG1=B: `expr ?? continue` — loop-only, sema-gated.
+    /// D-ORRETURN-ERG1=B: `expr ?? next` — loop-only, sema-gated.
     Continue(Span),
 }
 

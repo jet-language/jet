@@ -43,7 +43,6 @@ fn ends_statement(kind: &TokKind) -> bool {
             | TokKind::KwSelf
             | TokKind::KwNull
             | TokKind::KwBreak
-            | TokKind::KwContinue
             | TokKind::KwReturn
             | TokKind::RParen
             | TokKind::RBracket

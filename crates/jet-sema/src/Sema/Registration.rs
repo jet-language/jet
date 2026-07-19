@@ -261,7 +261,7 @@ impl<'a> Checker<'a> {
         self.in_unsafe = prev_unsafe;
         // D-ANY-JAI1: a trait-bounded variadic has no zero-cost representation
         // for arbitrary use (heterogeneous elements, no boxing allowed) — codegen
-        // only covers one shape, a direct `loop x in parts { … }` loop, unrolled
+        // only covers one shape, a direct `loop x; parts { … }` loop, unrolled
         // per call site's arity. Reject anything else here (E1314) so codegen
         // never has to guess.
         self.check_variadic_bound_body_shape(f);
@@ -299,7 +299,7 @@ impl<'a> Checker<'a> {
     }
 
     /// D-ANY-JAI1 (c7jaiany): validate that a trait-bounded variadic parameter
-    /// is used *only* as the collection of a single top-level `loop x in parts {
+    /// is used *only* as the collection of a single top-level `loop x; parts {
     /// … }` loop — the one shape `crates/jet-codegen/src/Codegen/VariadicBound.rs`
     /// unrolls per call-site arity. `parts` has no zero-cost Rust representation
     /// outside that loop (heterogeneous elements, boxing is disallowed), so any
@@ -333,7 +333,7 @@ impl<'a> Checker<'a> {
 }
 
 /// D-ANY-JAI1: E1314 — a trait-bounded variadic parameter used outside the
-/// one supported shape (a direct `loop x in name { … }` loop).
+/// one supported shape (a direct `loop x; name { … }` loop).
 fn e1314(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1314",
@@ -343,7 +343,7 @@ fn e1314(name: &str, span: Span) -> Diagnostic {
              have different concrete types, so there's no single Rust type to give `{name}` \
              outside a loop that visits each argument once"
         ),
-        format!("iterate it with `loop x in {name} {{ … }}` — that's the only supported use"),
+        format!("iterate it with `loop x; {name} {{ … }}` — that's the only supported use"),
         Some(span),
     )
 }
@@ -351,7 +351,7 @@ fn e1314(name: &str, span: Span) -> Diagnostic {
 /// Walk one statement looking for uses of `name` (a trait-bounded variadic
 /// parameter). `top_level` is true only for statements directly in the
 /// function body (not nested in `if`/`while`/`loop`/`switch`/…) — the blessed
-/// `loop x in name { … }` shape is only recognized there; `for_hits` counts how
+/// `loop x; name { … }` shape is only recognized there; `for_hits` counts how
 /// many times it's seen; every other reference to `name` lands in `other`.
 fn scan_stmt_for_variadic_uses(
     s: &Stmt,
@@ -363,7 +363,7 @@ fn scan_stmt_for_variadic_uses(
     match s {
         Stmt::For {
             var2: None,
-            kind: crate::AST::ForKind::In { collection },
+            kind: crate::AST::ForKind::In { collection, step: None },
             body,
             label: None,
             ..
@@ -410,11 +410,14 @@ fn scan_stmt_for_variadic_uses(
                         expr_uses(s, name, other);
                     }
                 }
-                crate::AST::ForKind::In { collection } => {
+                crate::AST::ForKind::In { collection, step } => {
                     if matches!(collection, Expr::Ident(n, _) if n == name) {
                         other.push(*span);
                     } else {
                         expr_uses(collection, name, other);
+                    }
+                    if let Some(step) = step {
+                        expr_uses(step, name, other);
                     }
                 }
             }

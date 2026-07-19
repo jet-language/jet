@@ -385,13 +385,13 @@ fn mk() {
 
     #[test]
     fn covers_range_loop() {
-        let src = "fn f() {\n loop n in 1..3 {\n print(n)\n }\n}\n";
+        let src = "fn f() {\n loop n; 1..3 {\n print(n)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_range_loop_with_step() {
-        let src = "fn f() {\n loop n in 0..10 step 2 {\n print(n)\n }\n}\n";
+        let src = "fn f() {\n loop n; 0..10; 2 {\n print(n)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -409,15 +409,15 @@ fn mk() {
 
     #[test]
     fn covers_labeled_loops() {
-        let src = "fn f() {\n outer@ loop {\n loop n in 1..3 {\n if (n == 2) {\n break outer@\n }\n }\n break\n }\n}\n";
+        let src = "fn f() {\n outer@ loop {\n loop n; 1..3 {\n if (n == 2) {\n break outer@\n }\n }\n break\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_collection_loop_over_literal() {
-        // c109 Phase 5: `loop x in [list literal]` (ForKind::In) is now covered
+        // c109 Phase 5: `loop x; [list literal]` (ForKind::In) is now covered
         // (was deferred to this phase through Phase 4).
-        let src = "fn f() {\n loop x in [1, 2, 3] {\n print(x)\n }\n}\n";
+        let src = "fn f() {\n loop x; [1, 2, 3] {\n print(x)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -555,26 +555,26 @@ fn mk() {
 
     #[test]
     fn covers_single_binding_iteration() {
-        // `loop x in <list>` over a list-typed param is now covered (Phase 5).
-        let src = "fn f(xs: [Int]) {\n loop x in xs {\n print(x)\n }\n}\n";
+        // `loop x; <list>` over a list-typed param is now covered (Phase 5).
+        let src = "fn f(xs: [Int]) {\n loop x; xs {\n print(x)\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_two_binding_map_iteration() {
-        // `loop k, v in <map>` (the two-binding map form) is covered.
-        let src = "fn f(m: [String: Int]) {\n loop k, v in m {\n print(\"{k}={v}\")\n }\n}\n";
+        // `loop k, v; <map>` (the two-binding map form) is covered.
+        let src = "fn f(m: [String: Int]) {\n loop k, v; m {\n print(\"{k}={v}\")\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_method_call_collection_iteration() {
-        // c109 Phase 22: `loop c in s.chars()` (char iteration) and `loop x in
+        // c109 Phase 22: `loop c; s.chars()` (char iteration) and `loop x in
         // s.split(…)` (the `.iter().cloned()` default) are now reproduced from
         // `emit_for_in`'s method-call branches.
-        let chars = "fn f(s: String) {\n loop c in s.chars() {\n print(c)\n }\n}\n";
+        let chars = "fn f(s: String) {\n loop c; s.chars() {\n print(c)\n }\n}\n";
         assert!(covers(chars, "f"));
-        let split = "fn f(s: String) {\n loop w in s.split(\",\") {\n print(w)\n }\n}\n";
+        let split = "fn f(s: String) {\n loop w; s.split(\",\") {\n print(w)\n }\n}\n";
         assert!(covers(split, "f"));
     }
 
@@ -1564,7 +1564,7 @@ fn wrap(s: String) -> String {
         let src = "\
 fn build() -> [Int] {
     xs: [Int] := []
-    loop i in 1..3 {
+    loop i; 1..3 {
         xs.push(i * 10)
     }
     return xs

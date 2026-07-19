@@ -446,7 +446,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         .or_else(|| {
             // D-ANY-JAI1 (c7jaiany §6): `Value`/`Field` (`reflect.of(x)`) —
             // needed so `.fields()`'s element type (`[Field]`) is total for a
-            // chained/looped access (`loop f in v.fields() { f.name() }`).
+            // chained/looped access (`loop f; v.fields() { f.name() }`).
             if crate::Sema::is_reflect_type_name(handle) {
                 Some(crate::Sema::reflect_method_return(handle, method, nargs))
             } else {

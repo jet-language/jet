@@ -75,8 +75,8 @@ fn flatten(v: View) -> [String] {
         .Text(text) -> { return [text] }
         .Box(children) -> {
             out: [String] := []
-            loop c in children {
-                loop t in flatten(c) {
+            loop c; children {
+                loop t; flatten(c) {
                     out.push(t)
                 }
             }
@@ -91,7 +91,7 @@ fn run() {
     name_input := input("type here…")
     save_button := button("Save")
     form := container([label_view(name_label), input_view(name_input), button_view(save_button)])
-    loop line in flatten(form) {
+    loop line; flatten(form) {
         print(line)
     }
     // Editing the input and pressing the button both return updated values
@@ -101,7 +101,7 @@ fn run() {
     name_input = type_char(name_input, "a")
     save_button = press(save_button)
     updated := container([label_view(name_label), input_view(name_input), button_view(save_button)])
-    loop line in flatten(updated) {
+    loop line; flatten(updated) {
         print(line)
     }
 }

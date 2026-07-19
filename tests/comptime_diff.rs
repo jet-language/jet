@@ -576,7 +576,7 @@ fn local_comptime_is_literal_data() {
         r#"
 fn build() -> [Int] {
     xs: [Int] := []
-    loop i in 1..3 {
+    loop i; 1..3 {
         xs.push(i * 10)
     }
     return xs

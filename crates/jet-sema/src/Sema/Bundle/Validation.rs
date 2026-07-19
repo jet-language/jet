@@ -480,8 +480,11 @@ pub(crate) fn collect_core_stmts(
                             collect_core_expr(step, imports, used, spans, ffi_cb);
                         }
                     }
-                    ForKind::In { collection } => {
-                        collect_core_expr(collection, imports, used, spans, ffi_cb)
+                    ForKind::In { collection, step } => {
+                        collect_core_expr(collection, imports, used, spans, ffi_cb);
+                        if let Some(step) = step {
+                            collect_core_expr(step, imports, used, spans, ffi_cb);
+                        }
                     }
                 }
                 collect_core_stmts(body, imports, used, spans, ffi_cb);

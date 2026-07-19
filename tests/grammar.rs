@@ -492,7 +492,7 @@ fn dot_zero_in_statement_lexes_as_dot_then_int() {
 fn parse_option_fn() {
     let src = r#"
 fn find_even(limit: Int) -> (Int?) {
-    loop i in 1..limit {
+    loop i; 1..limit {
         if i % 2 == 0 {
             return Val(i);
         }

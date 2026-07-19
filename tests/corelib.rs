@@ -1764,7 +1764,7 @@ fn run() {{
     output :: files.create("{success}") ?? panic("create")
     writer := cbor.writer(^output, roomy) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("start")
-    loop _ in 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
+    loop _; 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
     close_array(&writer)
     writer.finish() ?? panic("finish")
 
@@ -1773,7 +1773,7 @@ fn run() {{
     rejected_output :: files.create("{rejected}") ?? panic("create rejected")
     rejected_writer := cbor.writer(^rejected_output, tight) ?? panic("rejected writer")
     rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
-    loop _ in 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
+    loop _; 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
     if rejected_writer.write(encoding.DataEvent.Null) == {{
         Err(first) -> {{
             print(first.reason == "max_item_bytes 7 exceeded")
@@ -2041,7 +2041,7 @@ use core.encoding.cbor as cbor
 
 fn wire(values: [Int]) -> [U8] {
     bytes: [U8] := []
-    loop value in values {
+    loop value; values {
         bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
     }
     return bytes
@@ -3136,7 +3136,7 @@ fn core_net_dns_transaction_ids_are_not_a_fixed_sequence() {
 use core.net as net
 
 fn run() {{
-    loop _i in 0..8 {{
+    loop _i; 0..8 {{
         _ :: net.dns_txt_at("{}", "service.example.test", 1000) ?? panic("dns")
     }}
 }}
@@ -4194,7 +4194,7 @@ fn run() {{
     print(piped.output)
 
     child :: process.cmd(["{lines}"]).stdout(.Stream).spawn() ?? panic("spawn failed")
-    loop line in child.stdout.lines() {{
+    loop line; child.stdout.lines() {{
         print(line)
     }}
     waited :: child.wait() ?? panic("wait failed")
@@ -4555,7 +4555,7 @@ fn run() {
     print(data.count(planned))
     print(data.count(data.rows(collected)))
     print(data.plan(planned)[2])
-    loop ticket in data.rows(collected) {
+    loop ticket; data.rows(collected) {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
     none: Float? :: None
@@ -4564,18 +4564,18 @@ fn run() {
     print(data.count(series))
     print(data.missing_count(series))
     groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes)
-    loop g in groups {
+    loop g; groups {
         print("{g.key}:{g.count}:{g.sum}:{g.mean}")
     }
     values :: [2.0, 4.0, 6.0]
     print(data.sum(values))
     print(data.mean(values))
     joined :: data.inner_join(rows, budgets, (t) => t.team, (b) => b.team)
-    loop pair in joined {
+    loop pair; joined {
         print("{pair.left.team}:{pair.right.owner}")
     }
     left :: data.left_join(rows, [budgets[0]], (t) => t.team, (b) => b.team)
-    loop pair in left {
+    loop pair; left {
         if pair.right == {
             Val(budget) -> print("{pair.left.team}:{budget.owner}")
             None -> print("{pair.left.team}:none")
@@ -4829,7 +4829,7 @@ use core.files as files
 fn run() {{
     paths: [String] :: [{boundary_paths}]
     passed := 0
-    loop path in paths {{
+    loop path; paths {{
         input :: files.open(path) ?? panic("open boundary")
         reader :: xml.reader(^input) ?? panic("reader defaults")
         document_start := false
@@ -5584,13 +5584,13 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) : tasks.channel<Int>()
     producer :: tasks.spawn(take(sender) () => {
-        loop i in 1..1000 {
+        loop i; 1..1000 {
             sender.send(i)
         }
     })
     producer.join()
     total: Int = 0
-    loop i in 1..1000 {
+    loop i; 1..1000 {
         total = total + (ch.receive() ?? panic("channel closed"))
     }
     print(total)
@@ -5622,14 +5622,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    loop i in 1..1000 {
+    loop i; 1..1000 {
         dup :: ~sender
         tasks.spawn(take(dup) () => {
             dup.send(1)
         })
     }
     total: Int := 0
-    loop i in 1..1000 {
+    loop i; 1..1000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)
@@ -5661,14 +5661,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    loop i in 1..10000 {
+    loop i; 1..10000 {
         dup :: ~sender
         tasks.spawn(take(dup) () => {
             dup.send(1)
         })
     }
     total: Int := 0
-    loop i in 1..10000 {
+    loop i; 1..10000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)
@@ -5701,14 +5701,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    loop i in 1..100000 {
+    loop i; 1..100000 {
         dup :: ~sender
         tasks.spawn(take(dup) () => {
             dup.send(1)
         })
     }
     total: Int := 0
-    loop i in 1..100000 {
+    loop i; 1..100000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)

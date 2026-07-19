@@ -31,7 +31,7 @@ fn run() {
         addr :: listener.local_addr() ?? panic("address failed")
         sender.send(~addr)
         // Serve exactly 4 connections then let the task exit.
-        loop i in [0, 1, 2, 3] {
+        loop i; [0, 1, 2, 3] {
             stream :: listener.accept() ?? panic("accept failed")
             raw :: stream.read_text(8192) ?? panic("read failed")
             req :: http.parse(raw)

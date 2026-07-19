@@ -260,7 +260,7 @@ Baseline **(b)**–**(f)** as they read today:
 // (c)  Deque.new()   Set.from([1,2,3])   time.clock(42)   Wrap.{…}   BigInt(100)   Ok(v)/Val(x)
 // (d)  struct Point { x: Int, y: Int }   alias Pair<T> = (T,T)
 //      UserId :: distinct Int            state Door { Open, Closed }
-// (e)  if x == { .A -> …, .B -> … }       loop i in 0..10 step 2 { … }
+// (e)  if x == { .A -> …, .B -> … }       loop i; 0..10; 2 { … }
 // (f)  ops.transform(pool, copy input, 5000)   consume(handle)   result.drop("reason")
 ```
 
@@ -448,7 +448,7 @@ distinct UserId = Int             // was `UserId :: distinct Int` — same `=` r
 
 ```jet
 if x == { .A -> …, .B -> … }
-loop i in 0..10 step 2 { … }
+loop i; 0..10; 2 { … }
 ```
 
 **(f) value-lifecycle — the plane law moves the *ungated* verbs to methods, and

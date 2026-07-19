@@ -23,7 +23,7 @@ guaranteeing accuracy.
 | `if cond { … } else { … }` | `TExprKind::If` |
 | `if subject == { arm -> … }` dispatch | `TExprKind::Match` |
 | `expr?` / `expr?? fallback` | `TExprKind::Propagate` / `TExprKind::WithDefault` |
-| `loop x in iter { … }` | `TExprKind::ForIn` → iterator protocol |
+| `loop x; iter { … }` | `TExprKind::ForIn` → iterator protocol |
 | `loop { … }` | `TExprKind::Loop` |
 | `@MustUse` / `@SingleUse` markers | `TMarker::MustUse` / `TMarker::SingleUse` |
 | `consume(x)` (D-DROP-WORD1=A) | `TExprKind::Drop` |

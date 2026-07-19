@@ -1162,7 +1162,7 @@ impl Cx {
             }
             // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
             // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
-            // which is exactly `loop x in stream { }`'s pull-one-block-until-ready
+            // which is exactly `loop x; stream { }`'s pull-one-block-until-ready
             // shape (no coroutine machinery needed).
             Type::Apply { name, args } if name == "Stream" && !args.is_empty() => {
                 format!("std::sync::mpsc::Receiver<{}>", self.rust_type(&args[0]))

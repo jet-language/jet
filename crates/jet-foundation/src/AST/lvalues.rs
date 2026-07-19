@@ -142,6 +142,8 @@ pub enum ForKind {
     },
     In {
         collection: Expr,
+        /// D-LOOP-ADVANCE2=A: positive source stride, evaluated once.
+        step: Option<Expr>,
     },
 }
 

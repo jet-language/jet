@@ -798,7 +798,7 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             OrFallback::Break(_) => self.write("break"),
-            OrFallback::Continue(_) => self.write("continue"),
+            OrFallback::Continue(_) => self.write(Syntax::KW_NEXT),
         }
     }
 

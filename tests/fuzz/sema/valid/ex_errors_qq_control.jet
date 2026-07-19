@@ -1,15 +1,15 @@
-// 150 — `?? break` and `?? continue` (D-ORRETURN-ERG1=B).
-// All fallback exits live under `??`: value fallback, return, break, continue.
+// 150 — `?? break` and `?? next` (D-ORRETURN-ERG1=B).
+// All fallback exits live under `??`: value fallback, return, break, next.
 fn run() {
     lines :: ["42", "bad", "7", "oops", "13"]
     total := 0
-    loop line in lines {
-        n :: Int.parse(line) ?? continue
+    loop line; lines {
+        n :: Int.parse(line) ?? next
         total = total + n
     }
     print(total)
     // `?? break` exits the loop on first failure.
-    loop line in lines {
+    loop line; lines {
         n :: Int.parse(line) ?? break
         total = total + n
     }

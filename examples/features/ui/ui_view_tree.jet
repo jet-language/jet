@@ -16,8 +16,8 @@ fn flatten(v: View) -> [String] {
         .Text(text) -> { return [text] }
         .Box(children) -> {
             out: [String] := []
-            loop c in children {
-                loop t in flatten(c) {
+            loop c; children {
+                loop t; flatten(c) {
                     out.push(t)
                 }
             }
@@ -31,7 +31,7 @@ fn flatten(v: View) -> [String] {
 fn repaint(old: [String], updated: [String]) -> Int {
     n := 0
     i := 0
-    loop leaf in updated {
+    loop leaf; updated {
         same := false
         if i < old.len() {
             if leaf == old[i] {

@@ -2188,6 +2188,42 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
+    if !have_rustc() {
+        return;
+    }
+
+    let counted = "fn run() {\n    loop i := 0; i < 4; i += 1 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
+    if !skip_if_cranelift_host_unsupported() {
+        let native = run_cranelift_without_fallback(counted, "counted_next");
+        assert_eq!(native.stdout, "0\n2\n3\n");
+    }
+
+    let stride = "fn run() {\n    loop x; [0, 1, 2, 3, 4]; 2 {\n        print(x)\n    }\n}\n";
+    let dir = std::env::temp_dir().join(format!("jet_loop_stride_fallback_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("stride.jet");
+    fs::write(&file, stride).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    assert_eq!(
+        jet_jit::resident_jit_safe_bundle_detail(&bundle),
+        "run not resident-safe: source stride uses semantic fallback"
+    );
+    let expected = compiled_binary_output(&dir, "stride", 0, "stride", &shown);
+    let got = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("source-stride fallback failed: {diags:?}"),
+    };
+    assert_eq!(got, expected);
+    assert_eq!(got.stdout, "0\n2\n4\n");
+}
+
+#[test]
 fn subjectless_guards_match_aot_in_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
@@ -3175,7 +3211,7 @@ fn cranelift_covers_while_loop() {
 #[test]
 fn cranelift_covers_range_loop() {
     assert_cranelift_matches_interpreter(
-        "fn run() {\n    loop n in 1..3 {\n        print(n)\n    }\n}\n",
+        "fn run() {\n    loop n; 1..3 {\n        print(n)\n    }\n}\n",
         "range_loop",
     );
 }

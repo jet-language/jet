@@ -56,17 +56,14 @@
 (named_arg name: (identifier) @property)
 
 ; BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-; keyword.control: break continue defer else if in loop return step
+; keyword.control: break defer else if loop next return
 [
   "break"
-  "continue"
   "defer"
   "else"
   "if"
-  "in"
   "loop"
   "return"
-  "step"
 ] @keyword.control
 
 ; keyword.declaration: Bench Context Impure Pure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as change client comptime const derive distinct enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via

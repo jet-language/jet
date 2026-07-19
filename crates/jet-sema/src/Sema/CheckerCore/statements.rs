@@ -626,7 +626,7 @@ impl<'a> Checker<'a> {
                                     "E0503",
                                     "strings aren't indexed with `[ ]`".to_string(),
                                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                                    "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
+                                    "e.g. `loop c; s.chars() { }` or `s.slice(0..2)`".to_string(),
                                     Some(*span),
                                 ));
                             }
@@ -1238,20 +1238,20 @@ impl<'a> Checker<'a> {
                                 }
                             }
                             if let Some(step) = step {
-                                // S22 (D-SG8): the stride must be a positive Int.
+                                // D-LOOP-ADVANCE2=A: the stride must be a positive Int.
                                 let t = self.infer(step);
                                 if let Some(t) = t {
                                     if t != Type::Int {
                                         self.diags.push(Diagnostic::error(
                                         "E0123",
                                         format!(
-                                            "a `for` range `step` must be {}, not {}",
+                                            "a range loop stride must be {}, not {}",
                                             Type::Int.show(),
                                             t.show()
                                         ),
-                                        "`step` is how far to count each turn, so it's a whole number (S22)"
+                                        "the stride is how far to count each turn, so it must be a whole number"
                                             .to_string(),
-                                        "use an Int step, like `0..10 step 2`".to_string(),
+                                        "use an Int stride, like `loop i; 0..10; 2 { ... }`".to_string(),
                                         Some(step.span()),
                                     ));
                                     }
@@ -1260,10 +1260,10 @@ impl<'a> Checker<'a> {
                                     if *n <= 0 {
                                         self.diags.push(Diagnostic::error(
                                             "E0123",
-                                            format!("a `for` range `step` must be positive, not {}", n),
-                                            "a zero or negative step would never reach the end (S22)"
+                                            format!("a range loop stride must be positive, not {}", n),
+                                            "a zero or negative stride would never reach the end"
                                                 .to_string(),
-                                            "use a step of 1 or more, like `0..10 step 2`".to_string(),
+                                            "use a stride of 1 or more, like `loop i; 0..10; 2 { ... }`".to_string(),
                                             Some(*sp),
                                         ));
                                     }
@@ -1296,7 +1296,29 @@ impl<'a> Checker<'a> {
                             self.pop_scope();
                             self.loop_depth -= 1;
                         }
-                        ForKind::In { collection } => {
+                        ForKind::In { collection, step } => {
+                            if let Some(step) = step {
+                                if let Some(ty) = self.infer(step) {
+                                    if ty != Type::Int {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0123",
+                                            format!("a source loop stride must be {}, not {}", Type::Int.show(), ty.show()),
+                                            "the stride counts source pulls, so it must be a positive whole number".to_string(),
+                                            "use an Int stride of 1 or more".to_string(),
+                                            Some(step.span()),
+                                        ));
+                                    }
+                                }
+                                if matches!(step, Expr::Int(n, ..) if *n <= 0) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0123",
+                                        "a source loop stride must be positive".to_string(),
+                                        "zero or a negative value cannot select a later source item".to_string(),
+                                        "use a stride of 1 or more".to_string(),
+                                        Some(step.span()),
+                                    ));
+                                }
+                            }
                             let coll_ty = self.infer(collection);
                             let borrowed = collection_root_name(collection);
                             self.loop_depth += 1;
@@ -1330,15 +1352,15 @@ impl<'a> Checker<'a> {
                                         self.declare_loop_var(v2.clone(), *v2s, value);
                                     }
                                 }
-                                // E2-M7: `loop line in handle.lines()` — streaming line iterator.
+                                // E2-M7: `loop line; handle.lines()` — streaming line iterator.
                                 Some(Type::Named(n)) if n == "FileLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
-                                // D-STDIN1=A: `loop line in io.stdin().lines()` — streaming stdin iterator.
+                                // D-STDIN1=A: `loop line; io.stdin().lines()` — streaming stdin iterator.
                                 Some(Type::Named(n)) if n == "StdinLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
-                                // D-PROCESS1=A: `loop line in child.stdout.lines()` /
+                                // D-PROCESS1=A: `loop line; child.stdout.lines()` /
                                 // `child.stderr.lines()` — streaming subprocess output.
                                 Some(Type::Named(n)) if n == "ProcessLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
@@ -1367,7 +1389,7 @@ impl<'a> Checker<'a> {
                                         self.declare_loop_var(var.clone(), *var_span, &item_ty);
                                     }
                                 }
-                                // D-STREAMYIELD1: `loop x in a_stream { }` — pull one value
+                                // D-STREAMYIELD1: `loop x; a_stream { }` — pull one value
                                 // at a time from a generator's `Stream<T>`, blocking until
                                 // the producer yields (or ends the stream by returning).
                                 Some(Type::Apply { name, args })
@@ -1375,8 +1397,8 @@ impl<'a> Checker<'a> {
                                 {
                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
                                 }
-                                // D-DYNARRAY1: `loop x in window` — a `View<T>` iterates its
-                                // elements read-only, same shape as `loop x in a_list`.
+                                // D-DYNARRAY1: `loop x; window` — a `View<T>` iterates its
+                                // elements read-only, same shape as `loop x; a_list`.
                                 Some(Type::Apply { name, args })
                                     if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
                                 {
@@ -1389,7 +1411,7 @@ impl<'a> Checker<'a> {
                                             "`for x in` needs a list or map, not {}",
                                             other.show()
                                         ),
-                                        "walk items with `loop item in items { }` or characters with `loop c in s.chars() { }`".to_string(),
+                                        "walk items with `loop item; items { }` or characters with `loop c; s.chars() { }`".to_string(),
                                         "use a `List`, `Map`, or `s.chars()`".to_string(),
                                         Some(collection.span()),
                                     ));
@@ -1434,7 +1456,7 @@ impl<'a> Checker<'a> {
                 Stmt::Continue(span) => {
                     if self.loop_depth == 0 {
                         self.diags
-                            .push(loop_control_outside(Syntax::KW_CONTINUE, *span));
+                            .push(loop_control_outside(Syntax::KW_NEXT, *span));
                     }
                 }
                 // D-LABEL1: `break @name` / `continue @name`.
@@ -1450,7 +1472,7 @@ impl<'a> Checker<'a> {
                 Stmt::ContinueLabel(name, span) => {
                     if self.loop_depth == 0 {
                         self.diags
-                            .push(loop_control_outside(Syntax::KW_CONTINUE, *span));
+                            .push(loop_control_outside(Syntax::KW_NEXT, *span));
                     } else if !self.loop_labels.iter().any(|l| l == name) {
                         self.diags
                             .push(undefined_loop_label(name, &self.loop_labels, *span));
@@ -2044,7 +2066,7 @@ fn statically_bounded_for_iterations(kind: &ForKind) -> Option<u64> {
             let iterations = ((*end as i128 - *start as i128) / step) + 1;
             u64::try_from(iterations).ok()
         }
-        ForKind::In { collection: Expr::ListLit(items, _) } => {
+        ForKind::In { collection: Expr::ListLit(items, _), .. } => {
             u64::try_from(items.len()).ok()
         }
         ForKind::In { .. } => None,

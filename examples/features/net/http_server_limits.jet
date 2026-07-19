@@ -16,8 +16,8 @@ fn run() {
 
     smuggling :: net.tcp_connect(addr) ?? panic("connect smuggling")
     smuggling_request := "".bytes()
-    loop line in ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
-        loop byte in line.bytes() { smuggling_request.push(byte) }
+    loop line; ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
+        loop byte; line.bytes() { smuggling_request.push(byte) }
         smuggling_request.push(13)
         smuggling_request.push(10)
     }
@@ -28,8 +28,8 @@ fn run() {
 
     oversized :: net.tcp_connect(addr) ?? panic("connect oversized")
     oversized_request := "".bytes()
-    loop line in ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
-        loop byte in line.bytes() { oversized_request.push(byte) }
+    loop line; ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
+        loop byte; line.bytes() { oversized_request.push(byte) }
         oversized_request.push(13)
         oversized_request.push(10)
     }

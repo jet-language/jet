@@ -321,8 +321,11 @@ fn collect_mmio_for_kind(
                 collect_mmio_expr(step, core_aliases, ptrs, unsafe_reason, out);
             }
         }
-        crate::AST::ForKind::In { collection } => {
+        crate::AST::ForKind::In { collection, step } => {
             collect_mmio_expr(collection, core_aliases, ptrs, unsafe_reason, out);
+            if let Some(step) = step {
+                collect_mmio_expr(step, core_aliases, ptrs, unsafe_reason, out);
+            }
         }
     }
 }

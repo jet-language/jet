@@ -296,7 +296,10 @@ fn substitute_stmts(
                             substitute_expr(step, types, values);
                         }
                     }
-                    ForKind::In { collection } => substitute_expr(collection, types, values),
+                    ForKind::In { collection, step } => {
+                        substitute_expr(collection, types, values);
+                        if let Some(step) = step { substitute_expr(step, types, values); }
+                    }
                 }
                 substitute_stmts(body, types, values);
             }

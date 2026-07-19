@@ -379,7 +379,7 @@ fn make_db_client(schema: String) -> String {
     tables :: parse_tables(schema)
     out := "module db_client {\n"
 
-    loop table in tables {
+    loop table; tables {
         out += make_table_api(table)
     }
 
@@ -424,7 +424,7 @@ fn build(b: BuildContext) -> BuildPlan ? {
 }
 
 fn require_timeouts(p: ProgramInfo) {
-    loop f in p.functions() {
+    loop f; p.functions() {
         if f.effects.has("Net") and not f.params.has("timeout") {
             f.error(code: "ORG_NET01",
                 what: "network function has no timeout",
@@ -445,7 +445,7 @@ fn run() -> Unit ? {
     parsed :: jc.parse(source)?
     checked :: jc.check(parsed)?
 
-    loop f in checked.functions() {
+    loop f; checked.functions() {
         if f.effects.has("Net") {
             print("{f.name} touches the network")
         }

@@ -42,8 +42,8 @@ fn describe(v: View) -> [String] {
         }
         .Box(children) -> {
             out: [String] := []
-            loop c in children {
-                loop line in describe(c) {
+            loop c; children {
+                loop line; describe(c) {
                     out.push(line)
                 }
             }
@@ -58,7 +58,7 @@ fn total_width(v: View) -> Float {
         .Text(text, style) -> { return style.width.raw() }
         .Box(children) -> {
             sum := 0.0
-            loop c in children {
+            loop c; children {
                 sum += total_width(c)
             }
             return sum
@@ -73,7 +73,7 @@ fn run() {
     a: View :: .Text.{text: "a", style: Style.{color: red, width: 10px, height: 4px}}
     b: View :: .Text.{text: "b", style: Style.{color: blue, width: 20px, height: 4px}}
     tree: View :: .Box.{children: [a, b]}
-    loop line in describe(tree) {
+    loop line; describe(tree) {
         print(line)
     }
     print("total width {(total_width(tree))}")

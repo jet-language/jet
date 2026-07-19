@@ -613,16 +613,14 @@ impl<'a> Parser<'a> {
                                      // S19-amend: `loop` handles all three loop forms by header.
                                      //   loop { }               → infinite
                                      //   loop cond { }          → conditional (was `while`)
-                                     //   loop x in ... { }      → iteration (was `for`)
-                                     //   loop k, v in ... { }   → key-value iteration
+                                     //   loop x; ... { }      → iteration (was `for`)
+                                     //   loop k, v; ... { }   → key-value iteration
         if matches!(self.peek().kind, TokKind::LBrace) {
             // Infinite loop
             self.bump();
             let body = self.block_stmts();
             Ok(Stmt::Loop { body, span, label })
-        } else if matches!(&self.peek().kind, TokKind::Ident(_))
-            && matches!(&self.peek2().kind, TokKind::ColonEq)
-        {
+        } else if self.looks_like_sigil_binding() {
             // D-LOOP-SEMICOLON1=A: counted loop `loop i := 0; i < 10; i += 1 { … }`.
             // Detected by `Ident :=` at the start of the header.
             let init = self.sigil_binding()?;
@@ -664,23 +662,22 @@ impl<'a> Parser<'a> {
                 label,
             })
         } else if matches!(&self.peek().kind, TokKind::Ident(_))
-            && matches!(&self.peek2().kind, TokKind::KwIn | TokKind::Comma)
+            && matches!(&self.peek2().kind, TokKind::Semi | TokKind::Comma)
         {
-            // Iteration: loop x in ... { } or loop k, v in ... { }
+            // D-LOOP-HEADER2=A: `loop x; source [; stride]` (or map k,v).
             let (var, var_span) = self.expect_ident("as the loop variable")?;
             let mut var2 = None;
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
-                let (v2, s2) = self.expect_ident("after `,` in `loop key, value in`")?;
+                let (v2, s2) = self.expect_ident("after `,` in `loop key, value; source`")?;
                 var2 = Some((v2, s2));
             }
-            self.expect_kw(TokKind::KwIn, "after the loop variable")?;
+            self.expect(TokKind::Semi, "after the loop source binding")?;
             let first = self.expr_no_struct_lit()?;
             let kind = if matches!(self.peek().kind, TokKind::DotDot) {
                 self.bump();
                 let end = self.expr_no_struct_lit()?;
-                let step = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP)
-                {
+                let step = if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                     Some(self.expr_no_struct_lit()?)
                 } else {
@@ -692,7 +689,13 @@ impl<'a> Parser<'a> {
                     step,
                 }
             } else {
-                ForKind::In { collection: first }
+                let step = if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                    Some(self.expr_no_struct_lit()?)
+                } else {
+                    None
+                };
+                ForKind::In { collection: first, step }
             };
             self.expect(TokKind::LBrace, "to open the loop body")?;
             let body = self.block_stmts();
@@ -978,12 +981,12 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0051",
                     format!(
-                        "`{}` is not a keyword; write `{} x in collection {{ }}` instead",
+                        "`{}` is not a keyword; write `{} x; collection {{ }}` instead",
                         Syntax::FOREIGN_FOR,
                         Syntax::KW_LOOP,
                     ),
                     format!(
-                        "`{}` has a single loop keyword: `loop x in list {{ }}` for iteration",
+                        "`{}` has a single loop keyword: `loop x; list {{ }}` for iteration",
                         Syntax::LANG_NAME,
                     ),
                     format!(
@@ -997,16 +1000,15 @@ impl<'a> Parser<'a> {
                 let mut var2 = None;
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
-                    let (v2, s2) = self.expect_ident("after `,` in `loop key, value in`")?;
+                    let (v2, s2) = self.expect_ident("after `,` in the loop binding")?;
                     var2 = Some((v2, s2));
                 }
-                self.expect_kw(TokKind::KwIn, "after the loop name")?;
+                self.expect(TokKind::Semi, "after the loop binding")?;
                 let first = self.expr_no_struct_lit()?;
                 let kind = if matches!(self.peek().kind, TokKind::DotDot) {
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
-                    let step = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP)
-                    {
+                    let step = if matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
                         Some(self.expr_no_struct_lit()?)
                     } else {
@@ -1018,7 +1020,7 @@ impl<'a> Parser<'a> {
                         step,
                     }
                 } else {
-                    ForKind::In { collection: first }
+                    ForKind::In { collection: first, step: None }
                 };
                 self.expect(TokKind::LBrace, "to open the loop body")?;
                 let body = self.block_stmts();
@@ -1088,9 +1090,14 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Break(span))
             }
-            TokKind::KwContinue => {
+            TokKind::Ident(name)
+                if name == Syntax::KW_NEXT
+                    && (matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace)
+                        || matches!(self.peek2().kind, TokKind::Ident(_))
+                            && matches!(self.peek3().kind, TokKind::At)) =>
+            {
                 let span = self.bump().span;
-                // D-LOOPLABEL2=A: `continue name@` suffix form.
+                // D-LOOP-CONTROLWORD1=B: contextual `next name@` suffix form.
                 if let TokKind::Ident(_) = &self.peek().kind {
                     if matches!(self.peek2().kind, TokKind::At) {
                         let (name, _) = self.expect_ident("for the loop label")?;
@@ -1107,7 +1114,7 @@ impl<'a> Parser<'a> {
                         "E0988",
                         "loop label is a suffix, not a prefix".to_string(),
                         "the label `@` moved to the suffix position (D-LOOPLABEL2)".to_string(),
-                        format!("write `continue {}@`", name),
+                        format!("write `next {}@`", name),
                         Some(Span::new(at_span.start, name_span.end)),
                     ));
                     self.finish_stmt()?;

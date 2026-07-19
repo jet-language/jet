@@ -145,15 +145,15 @@ fn control() {
 
     // iteration; ranges are inclusive (S22), optional `step` (S72)
     sum := 0
-    loop i in 1..5 {
+    loop i; 1..5 {
         sum = sum + i
     }
-    loop i in 0..10 step 2 {
+    loop i; 0..10; 2 {
         // 0, 2, 4, 6, 8, 10
     }
 
     // loop head may be any iterable expression (S79)
-    loop word in "the quick brown".split(" ") {
+    loop word; "the quick brown".split(" ") {
         print(word)
     }
 
@@ -166,14 +166,14 @@ fn control() {
     // labeled loops + labeled break/continue (D-LABEL1; labels keep `@`, D-ATTR3)
     //<<< Owner Labeled Loops: Modify syntax for consistency.
     // HAVE:
-    @outer loop row in [1, 2, 3] {
-        loop col in [1, 2, 3] {
+    @outer loop row; [1, 2, 3] {
+        loop col; [1, 2, 3] {
             break @outer
         }
     }
     // WANT:
-    outer@ loop row in [1, 2, 3] {
-        loop col in [1, 2, 3] {
+    outer@ loop row; [1, 2, 3] {
+        loop col; [1, 2, 3] {
             break outer@
         }
     }
@@ -341,12 +341,12 @@ impl FileErr.Fallible {
 // }
 
 // # RATIFIED, NOT YET IMPLEMENTED (S81)
-// `?? continue` — inside a loop, skip this turn when the value is failed/empty,
+// `?? next` — inside a loop, skip this turn when the value is failed/empty,
 // else bind the success value. (`KW_QUESTION_CONTINUE` exists in Syntax.rs but
 // has no parser/sema support yet.)
 // fn skip_bad(lines: [String]) {
-//     loop raw in lines {
-//         line :: next(raw)?? continue
+//     loop raw; lines {
+//         line :: next(raw)?? next
 //         print(line)
 //     }
 // }
@@ -411,7 +411,7 @@ fn collections() {
     got :: fruits.get("limes")                  // safe access -> V? (S39)
 
     // map entry iteration yields a named entry value (S66)
-    loop e in fruits {
+    loop e; fruits {
         print("{e.key}: {e.value}")
     }
 
@@ -431,7 +431,7 @@ fn fixed() -> [Int#3] {
 fn strings() {
     parts :: "a,b,c".split(",")
     trimmed :: "  hi  ".trim()
-    loop c in "héllo".chars() { }              // Char iteration; no s[i] (S41)
+    loop c; "héllo".chars() { }              // Char iteration; no s[i] (S41)
     block :: """
         multi-line string
         with {trimmed} interpolation

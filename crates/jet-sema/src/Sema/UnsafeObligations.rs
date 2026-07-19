@@ -227,7 +227,10 @@ fn collect_shallow_operations(statement: &Stmt, out: &mut Vec<(&'static str, Spa
         Stmt::CountedLoop { init, cond, step, .. } => { collect_expr_operations(&init.init, out); collect_expr_operations(cond, out); collect_shallow_operations(step, out); }
         Stmt::For { kind, .. } => match kind {
             crate::AST::ForKind::Range { start, end, step } => { collect_expr_operations(start, out); collect_expr_operations(end, out); if let Some(step) = step { collect_expr_operations(step, out); } }
-            crate::AST::ForKind::In { collection } => collect_expr_operations(collection, out),
+            crate::AST::ForKind::In { collection, step } => {
+                collect_expr_operations(collection, out);
+                if let Some(step) = step { collect_expr_operations(step, out); }
+            }
         },
         Stmt::Switch { subject, .. } => collect_expr_operations(subject, out),
         Stmt::ComptimeIf { cond, .. } => collect_expr_operations(cond, out),

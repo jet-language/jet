@@ -123,13 +123,6 @@ impl<'a> Parser<'a> {
                 self.bump();
                 return Ok((Syntax::KW_COPY.to_string(), span));
             }
-            // D-SHAPE-DURATIONCONVERT1=A: `duration.in(.Milliseconds)` reuses
-            // `in` in member position; it remains a keyword elsewhere.
-            if matches!(self.peek().kind, TokKind::KwIn) {
-                let span = self.peek().span;
-                self.bump();
-                return Ok((Syntax::KW_IN.to_string(), span));
-            }
             self.expect_ident("after `.`")
         }
     

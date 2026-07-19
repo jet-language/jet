@@ -34,7 +34,7 @@ struct P {
 }
 fn total(ps: [P]) -> Float {
     s := 0.0
-    loop p in ps {
+    loop p; ps {
         s = s + p.mass
     }
     return s

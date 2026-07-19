@@ -13,7 +13,7 @@ fn run() {
     print(piped.output.trim())
 
     child :: process.cmd(["echo", "spawn-api"]).stdout(.Stream).spawn() ?? panic("spawn failed")
-    loop line in child.stdout.lines() {
+    loop line; child.stdout.lines() {
         print(line.trim())
     }
     waited :: child.wait() ?? panic("wait failed")

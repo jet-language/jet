@@ -321,8 +321,9 @@ impl<'a> StateCtx<'a> {
                     if let Some(s) = step {
                         self.check_expr(s);
                     }
-                } else if let crate::AST::ForKind::In { collection } = kind {
+                } else if let crate::AST::ForKind::In { collection, step } = kind {
                     self.check_expr(collection);
+                    if let Some(step) = step { self.check_expr(step); }
                 }
                 self.check_block(body);
             }

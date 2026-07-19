@@ -563,6 +563,7 @@ impl LowerCtx<'_, '_> {
                 self.lower_stmt(init)?;
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
+                let step_block = self.b.create_block();
                 let exit = self.b.create_block();
                 self.b.ins().jump(header, &[]);
 
@@ -572,21 +573,24 @@ impl LowerCtx<'_, '_> {
 
                 self.loop_stack.push(LoopTargets {
                     label: label.clone(),
-                    continue_block: header,
+                    continue_block: step_block,
                     break_block: exit,
                     shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
                 self.lower_stmts_scoped(body)?;
-                if !self.dead {
-                    self.lower_stmt(step)?;
-                }
                 self.loop_stack.pop();
                 if !self.dead {
-                    self.b.ins().jump(header, &[]);
-                    self.b.seal_block(header);
+                    self.b.ins().jump(step_block, &[]);
                 }
+
+                self.b.switch_to_block(step_block);
+                self.b.seal_block(step_block);
+                self.dead = false;
+                self.lower_stmt(step)?;
+                if !self.dead { self.b.ins().jump(header, &[]); }
+                self.b.seal_block(header);
 
                 self.b.switch_to_block(exit);
                 self.b.seal_block(exit);
@@ -717,9 +721,13 @@ impl LowerCtx<'_, '_> {
                 label,
                 var,
                 collection_str,
+                step,
                 body,
                 ..
             } => {
+                if step.is_some() {
+                    return Err("jit source stride uses semantic fallback".to_string());
+                }
                 let coll_place = collection_str.trim().to_string();
                 let coll_ty = self
                     .var_tys

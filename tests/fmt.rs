@@ -757,7 +757,7 @@ fn fmt_preserves_single_line_loops_and_fn() {
     let while_src = "fn run() {\n    n :: 0\n    loop n < 3 { n += 1 }\n}\n";
     assert_fmt_stable(while_src, "single-line while/loop");
 
-    let for_src = "fn run() {\n    loop i in 0..3 { print(\"{i}\") }\n}\n";
+    let for_src = "fn run() {\n    loop i; 0..3 { print(\"{i}\") }\n}\n";
     assert_fmt_stable(for_src, "single-line for/loop");
 
     let fn_src = "fn one() -> Int { return 1 }\n";
@@ -1511,8 +1511,8 @@ fn fmt_loop_label_d_looplabel2_stability() {
     // D-LOOPLABEL2=A: `outer@ loop { break outer@ }` must survive fmt unchanged.
     let src = "\
 fn run() {
-    outer@ loop i in [1, 2] {
-        loop j in [1, 2] {
+    outer@ loop i; [1, 2] {
+        loop j; [1, 2] {
             if i == j {
                 break outer@
             }
@@ -1543,6 +1543,38 @@ fn run() {
     let once = jet::format_source(src).expect("fmt should accept counted loop");
     let twice = jet::format_source(&once).expect("second fmt of counted loop must succeed");
     assert_eq!(once, twice, "counted loop fmt must be idempotent");
+}
+
+#[test]
+fn fmt_unified_loop_headers_and_next_stability() {
+    let src = "fn next() -> Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item; [1, 2, 3]; 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
+    assert_fmt_keeps(
+        src,
+        &[
+            "fn next()",
+            "next()",
+            ".next()",
+            "?? (next)",
+            "loop item; [1, 2, 3]; 2",
+            "?? next",
+            "{ next }",
+        ],
+        "unified loop header",
+    );
+    let once = jet::format_source(src).expect("fmt should accept unified loop syntax");
+    let twice = jet::format_source(&once).expect("formatted unified loop must parse");
+    assert_eq!(once, twice, "unified loop formatting must be stable");
+
+    for retired in [
+        "fn run() { loop x in [1] {} }\n",
+        "fn run() { loop i; 0..2 step 1 {} }\n",
+        "fn run() { loop { continue } }\n",
+    ] {
+        assert!(
+            jet::format_source(retired).is_err(),
+            "retired loop spelling must take the ordinary parse-error path: {retired}"
+        );
+    }
 }
 
 #[test]
@@ -1806,7 +1838,7 @@ fn count(n: Int) -> Stream<Int> {
 }
 
 fn run() {
-    loop x in count(3) {
+    loop x; count(3) {
         print(\"{x}\")
     }
 }
@@ -1889,7 +1921,7 @@ fn fmt_preserves_variadic_trait_bound_bare() {
     // bound sugar — must survive byte-for-byte.
     let src = "\
 fn log_all(parts: ...Renderable) {
-    loop p in parts {
+    loop p; parts {
         print(\"{p}\")
     }
 }
@@ -1909,7 +1941,7 @@ fn fmt_preserves_variadic_trait_bound_list() {
     let src = "\
 fn log_all(prefix: String, parts: ...[Renderable]) {
     print(prefix)
-    loop p in parts {
+    loop p; parts {
         print(\"{p}\")
     }
 }

@@ -172,7 +172,7 @@ fn is_fallible_void_return(ret: &Option<Type>) -> bool {
 /// D-STREAMYIELD1: a generator (`-> Stream<T>`) spawns its body on its own
 /// thread and hands the caller the channel receiver immediately — `yield`
 /// (lowered to `__jet_yield_tx.send(...)`) blocks on the rendezvous channel
-/// until the consumer's `loop x in stream { }` pulls the next value. No
+/// until the consumer's `loop x; stream { }` pulls the next value. No
 /// coroutine/async machinery: a real OS thread IS the suspended generator.
 fn emit_generator_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     let pad = "    ".repeat(indent);

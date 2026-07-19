@@ -12,7 +12,7 @@
 // wasm via editors/zed/install.sh (FORCE=1).
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "continue", "defer", "else", "if", "in", "loop", "return", "step"];
+const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "defer", "else", "if", "loop", "next", "return"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Pure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "const", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];

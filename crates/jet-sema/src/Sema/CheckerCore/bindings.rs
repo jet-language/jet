@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
     
             // E2502 (E2-M7): a line stream — `FileReader.lines()` / `StdinHandle
             // .lines()` — is a loop-source-only value. It may only be consumed
-            // directly by `loop line in handle.lines()`; binding it to a name lets it
+            // directly by `loop line; handle.lines()`; binding it to a name lets it
             // escape loop position, where there is no meaningful lowering. (Codegen
             // previously emitted a placeholder that rustc rejected — an I2 hole. This
             // moves the guarantee into sema, c109/I3.)

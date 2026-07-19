@@ -167,7 +167,10 @@ impl<'a> InlineAlwaysScan<'a> {
                             self.scan_expr(step);
                         }
                     }
-                    crate::AST::ForKind::In { collection } => self.scan_expr(collection),
+                    crate::AST::ForKind::In { collection, step } => {
+                        self.scan_expr(collection);
+                        if let Some(step) = step { self.scan_expr(step); }
+                    }
                 }
                 self.scan_stmts(body);
             }

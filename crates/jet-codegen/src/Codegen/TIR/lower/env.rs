@@ -12,7 +12,7 @@ use std::rc::Rc;
 ///
 /// The type is `Option<Type>`: a binding can carry a *resolved* type, or `None`
 /// when the AST path's slot had `jet_ty: None` and we must reproduce that
-/// partiality. The load-bearing case (c109 Phase 5) is a `loop x in coll`
+/// partiality. The load-bearing case (c109 Phase 5) is a `loop x; coll`
 /// iteration variable: `emit_for_in` binds its slot with `jet_ty: None`, so
 /// `operand_is_integer`/`expr_jet_ty` resolve the var to `None` and it never
 /// enables the overflow trap. Carrying `Some(elem_ty)` here would diverge —

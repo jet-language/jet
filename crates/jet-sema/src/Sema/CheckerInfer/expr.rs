@@ -2064,7 +2064,7 @@ impl<'a> Checker<'a> {
                     "E0503",
                     "strings aren't indexed with `[ ]`".to_string(),
                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                    "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
+                    "e.g. `loop c; s.chars() { }` or `s.slice(0..2)`".to_string(),
                     Some(*span),
                 ));
                 None

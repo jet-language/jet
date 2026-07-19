@@ -352,7 +352,7 @@ fn comptime_local_is_literal_data() {
     let src = "\
 fn build() -> [Int] {
     xs: [Int] := []
-    loop i in 1..3 {
+    loop i; 1..3 {
         xs.push(i * 10)
     }
     return xs
@@ -652,11 +652,11 @@ fn run() {
     print(bad)
     lines :: \"a\\nb\\nc\".lines()
     print(lines.len())
-    loop line in lines {
+    loop line; lines {
         print(line)
     }
     total := 0
-    loop row in \"10\\n20\\n30\".lines() {
+    loop row; \"10\\n20\\n30\".lines() {
         total += (Int.parse(row) ?? 0)
     }
     print(total)

@@ -90,11 +90,12 @@ impl<'a> Parser<'a> {
                 }
                 return Ok(OrFallback::Return(None, span));
             }
-            // D-ORRETURN-ERG1=B: `?? break` and `?? continue` unify loop exits under `??`.
+            // D-LOOP-CONTROLWORD1=B: bare `?? next` is contextual control;
+            // `?? (next)` remains an ordinary value fallback.
             if matches!(self.peek().kind, TokKind::KwBreak) {
                 return Ok(OrFallback::Break(self.bump().span));
             }
-            if matches!(self.peek().kind, TokKind::KwContinue) {
+            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT) {
                 return Ok(OrFallback::Continue(self.bump().span));
             }
             let e = self.expr_or(allow_struct_lit)?;

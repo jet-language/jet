@@ -1,7 +1,8 @@
 // loop_forms — the shapes of the single `loop` keyword (S19).
 // `loop { }` infinite (leave with `break`); `loop cond { }` conditional
-// (replaces `while`); `loop x in iter { }` iteration (replaces `for x in`);
-// `loop key, value in map { }` two-name iteration over a map's pairs.
+// (replaces `while`); `loop x; iter { }` iteration (replaces `for x in`);
+// `loop key, value; map { }` two-name iteration over a map's pairs. Semicolons
+// separate jobs only inside a multi-clause loop header.
 fn run() {
     // 1. Infinite loop, left with `break` (S23).
     n := 0
@@ -20,7 +21,7 @@ fn run() {
     print("conditional ran to {c}")
     // 3. Iterator loop over a list.
     sum := 0
-    loop x in [10, 20, 30] {
+    loop x; [10, 20, 30] {
         sum += x
     }
     print("iterator sum {sum}")
@@ -28,7 +29,13 @@ fn run() {
     scores: [String: Int] := []
     scores["ana"] = 1
     scores["bo"] = 2
-    loop name, s in scores {
+    loop name, s; scores {
         print("{name} = {s}")
+    }
+    // 5. Explicit state: initializer; condition; afterthought. `next` still
+    // runs the afterthought before testing again.
+    loop i := 0; i < 3; i += 1 {
+        if i == 1 { next }
+        print("counted {i}")
     }
 }

@@ -14,7 +14,7 @@ fn run() {
     _ins1 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DbValue.Text(evil)]) ?? panic("insert failed")
     _ins2 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DbValue.Text("hello, jet.db!")]) ?? panic("insert failed")
     rows :: conn.query("SELECT msg FROM greet ORDER BY id", []) ?? panic("query failed")
-    loop row in rows {
+    loop row; rows {
         msg_val :: row.get("msg") ?? panic("missing msg")
         msg :: msg_val.text() ?? panic("msg is not text")
         print(msg)

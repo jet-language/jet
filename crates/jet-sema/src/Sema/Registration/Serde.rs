@@ -53,7 +53,7 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
                 let key = serde_source_field_key(&s.serde_markers, f);
                 if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN) {
                     source.push_str(&format!(
-                        "nested :: self.{}.encode()\nif nested == .Object(entries) {{ loop key, value in entries {{ out[key] = value }} }}\n",
+                        "nested :: self.{}.encode()\nif nested == .Object(entries) {{ loop key, value; entries {{ out[key] = value }} }}\n",
                         f.name
                     ));
                 } else if matches!(f.ty, Type::Option(_)) {
@@ -85,7 +85,7 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
                     .collect::<Vec<_>>()
                     .join(", ");
                 source.push_str(&format!(
-                    "if (~tree) == .Object(entries) {{ loop key, value in entries {{ if ![{keys}].contains(key) {{ return Err(DecodeError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
+                    "if (~tree) == .Object(entries) {{ loop key, value; entries {{ if ![{keys}].contains(key) {{ return Err(DecodeError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
                 ));
             }
             source.push_str(&format!("return Ok({target}.{{\n"));

@@ -105,8 +105,8 @@ fn flatten(v: View) -> [String] {
         .Text(text) -> { return [text] }
         .Box(children) -> {
             out: [String] := []
-            loop c in children {
-                loop t in flatten(c) {
+            loop c; children {
+                loop t; flatten(c) {
                     out.push(t)
                 }
             }
@@ -263,7 +263,7 @@ fn dev() {
 
 fn run() {
     tree := dashboard_view([stat_line("Altitude", "12,400 ft"), stat_line("Airspeed", "410 kt"), stat_line("Fuel", "40%")])
-    loop line in flatten(tree) {
+    loop line; flatten(tree) {
         print(line)
     }
     boosts :: reactive.signal(0)

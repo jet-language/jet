@@ -115,19 +115,23 @@ impl<'a> Fmt<'a> {
                     self.write(", ");
                     self.write(v2);
                 }
-                self.write(" in ");
+                self.write("; ");
                 match kind {
                     ForKind::Range { start, end, step } => {
                         self.fmt_expr(start, Prec::OrFallback);
                         self.write("..");
                         self.fmt_expr(end, Prec::OrFallback);
                         if let Some(step) = step {
-                            self.write(&format!(" {} ", Syntax::KW_RANGE_STEP));
+                            self.write("; ");
                             self.fmt_expr(step, Prec::OrFallback);
                         }
                     }
-                    ForKind::In { collection } => {
+                    ForKind::In { collection, step } => {
                         self.fmt_expr(collection, Prec::OrFallback);
+                        if let Some(step) = step {
+                            self.write("; ");
+                            self.fmt_expr(step, Prec::OrFallback);
+                        }
                     }
                 }
                 self.write(" {");
@@ -151,9 +155,9 @@ impl<'a> Fmt<'a> {
                 }
             }
             Stmt::Break(_) => self.write("break"),
-            Stmt::Continue(_) => self.write("continue"),
+            Stmt::Continue(_) => self.write(Syntax::KW_NEXT),
             Stmt::BreakLabel(name, _) => self.write(&format!("break {}@", name)),
-            Stmt::ContinueLabel(name, _) => self.write(&format!("continue {}@", name)),
+            Stmt::ContinueLabel(name, _) => self.write(&format!("next {}@", name)),
             // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — emit verbatim.
             Stmt::CountedLoop {
                 init,

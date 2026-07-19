@@ -197,7 +197,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             body,
             ..
         } => match kind {
-            // `loop i in start..end [step k]` — start/end/step must be in-subset
+            // `loop i; start..end [step k]` — start/end/step must be in-subset
             // integer expressions; the loop var `i` is an Int local in the body.
             // The two-binding `key, value` form is map iteration (a collection),
             // outside this phase.
@@ -214,15 +214,18 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 body_locals.insert(var.clone());
                 body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
             }
-            // c109 Phase 5/22: `loop x in coll` / `loop k, v in map` (ForKind::In).
+            // c109 Phase 5/22: `loop x; coll` / `loop k, v; map` (ForKind::In).
             // A method-call collection (`.chars()`/`.lines()`/`.split(…)`) takes a
             // distinct `emit_for_in` branch; Phase 22 reproduces each (`forin_method_
             // collection_in_subset`). A non-method-call collection is the plain
             // `.iter()` form (single- or two-binding map). The loop var(s) bind in the
             // body scope with an *unresolved* type (matching the AST slot's `jet_ty:
             // None`, so they never enable the overflow trap).
-            ForKind::In { collection } => {
-                // The TWO-BINDING map form (`loop k, v in map`) ALWAYS emits
+            ForKind::In { collection, step } => {
+                if step.as_ref().is_some_and(|step| !expr_in_subset(step, cx, locals)) {
+                    return false;
+                }
+                // The TWO-BINDING map form (`loop k, v; map`) ALWAYS emits
                 // `({coll}).iter()` (the `var2` branch of `emit_for_in` fires first,
                 // before the `.chars()`/`.lines()` method-call branches). So a method-call
                 // collection in the two-binding position (notably an owning-field-read
@@ -255,7 +258,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             // construct; stay on the AST path defensively.
             _ => false,
         },
-        // `break`/`continue`, labeled or not, carry no sub-expressions to check.
+        // `break`/`next`, labeled or not, carry no sub-expressions to check.
         // The parser only admits them inside a loop body, so they are always valid
         // where they appear; the label name is reproduced verbatim at lowering.
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => true,
@@ -374,7 +377,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
     }
 }
 
-/// c109 Phase 22: is a method-call collection iteration (`loop x in <coll>` where
+/// c109 Phase 22: is a method-call collection iteration (`loop x; <coll>` where
 /// `<coll>` is an `Expr::MethodCall`) in-subset? Mirrors `emit_for_in`'s
 /// `Expr::MethodCall` branches (Source/Codegen/Statement.rs):
 ///  - `.chars()` — char iteration; only the *receiver* (a string) is emitted, so it

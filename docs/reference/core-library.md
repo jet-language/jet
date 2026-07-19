@@ -246,7 +246,7 @@ use core.files as files
 fn count_lines(path: String) -> Int ? IOError {
     handle :: files.open(copy path)?
     n := 0
-    loop line in handle.lines() {
+    loop line; handle.lines() {
         n = (n + 1)
     }
     return Ok(n)
@@ -259,7 +259,7 @@ fn count_lines(path: String) -> Int ? IOError {
 | `create(path)` | `FileWriter ? IOError` | Create/overwrite a file for buffered writing |
 | `append(path)` | `FileWriter ? IOError` | Open a file for buffered appending |
 | `reader.read_line()` | `String? ? IOError` | One line (no newline), `None` at EOF |
-| `reader.lines()` | iterator of `String` | `loop line in handle.lines()` |
+| `reader.lines()` | iterator of `String` | `loop line; handle.lines()` |
 | `writer.write_line(text)` | `() ? IOError` | Write `text` plus a trailing newline |
 | `writer.flush()` | `() ? IOError` | Force buffered bytes to disk |
 
@@ -557,7 +557,7 @@ fn run() {
     scope :: event.scope()
     files :: watcher.files("src") ?? return
     files.on(scope, (ev) => { print("{ev.kind}: {ev.path}") })
-    loop ev in files.poll() {
+    loop ev; files.poll() {
         print(ev.kind)
     }
 }
@@ -722,7 +722,7 @@ fn run() {
     v :: reflect.of(p)
     print(v.type_name())    // "Point"
     print(v.display())      // "(3, 4)" — exactly what "{p}" would print
-    loop f in v.fields() {
+    loop f; v.fields() {
         print("{f.name()} = {f.value()}")
     }
 }
@@ -865,7 +865,7 @@ fn run() {
         .timeout(Duration.seconds(30)?)
 
     child :: spec.spawn() ?? return
-    loop line in child.stdout.lines() {
+    loop line; child.stdout.lines() {
         print(line)
     }
     status :: child.wait() ?? return
@@ -902,7 +902,7 @@ child gets no stdin at all, never the parent's terminal by accident).
 `ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`,
 `interrupt()`, a `.stdin` writer (`child.stdin.write(text)`), and `.stdout`/
 `.stderr` streaming readers consumed only via
-`loop line in child.stdout.lines() { ... }` (same loop-source-only shape as
+`loop line; child.stdout.lines() { ... }` (same loop-source-only shape as
 `FileReader.lines()`/`io.stdin().lines()` — storing the reader or the line
 stream in a name is E2502).
 
@@ -1734,7 +1734,7 @@ use core.tasks as tasks
 
 fn sum_range(first: Int, last: Int) -> Int {
     total := 0
-    loop n in first..last {
+    loop n; first..last {
         total += n
     }
     return total
@@ -2176,7 +2176,7 @@ fn run() {
     bad :: Int.parse("oops") ?? -1             // -1 (parse failed → fallback)
     print(n + bad)
 
-    loop line in "first\nsecond".lines() {   // ["first", "second"]
+    loop line; "first\nsecond".lines() {   // ["first", "second"]
         print(line)
     }
 }

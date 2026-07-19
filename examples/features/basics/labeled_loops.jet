@@ -1,10 +1,10 @@
 // labeled_loops — D-LOOPLABEL2. A loop can carry a `name@` label; `break name@`
-// and `continue name@` target that loop from inside a nested one.
+// and `next name@` target that loop from inside a nested one.
 fn run() {
     // `break outer@` leaves both loops at once on the first match.
     found := ""
-    outer@ loop row in [1, 2, 3] {
-        loop col in [1, 2, 3] {
+    outer@ loop row; [1, 2, 3] {
+        loop col; [1, 2, 3] {
             if (row * col) == 6 {
                 found = "{row}x{col}"
                 break outer@
@@ -12,12 +12,12 @@ fn run() {
         }
     }
     print("first product 6 at {found}")
-    // `continue rows@` skips to the next outer iteration.
+    // `next rows@` skips to the next outer iteration.
     count := 0
-    rows@ loop r in [1, 2, 3] {
-        loop c in [1, 2, 3] {
+    rows@ loop r; [1, 2, 3] {
+        loop c; [1, 2, 3] {
             if c == 2 {
-                continue rows@
+                next rows@
             }
             count += 1
         }

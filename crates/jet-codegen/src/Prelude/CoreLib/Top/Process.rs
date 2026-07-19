@@ -257,7 +257,7 @@ fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_
 }
 // D-PROCESS1=A: `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
 // `child.stderr` are streaming reader handles consumed only via
-// `loop line in child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
+// `loop line; child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
 // — sema restricts the field access + `.lines()` result to that position, E2502).
 fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<std::process::ChildStdin>>>,

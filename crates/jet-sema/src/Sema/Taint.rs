@@ -518,8 +518,9 @@ impl<'a> TaintCtx<'a> {
                         }
                         (false, false)
                     }
-                    ForKind::In { collection } => {
+                    ForKind::In { collection, step } => {
                         self.check_expr(collection);
+                        if let Some(step) = step { self.check_expr(step); }
                         (self.is_tainted(collection), self.is_credential_tainted(collection))
                     }
                 };

@@ -3,14 +3,14 @@ use core.tasks as tasks
 
 fn run() {
     (sender, ch) :: tasks.channel<Int>()
-    loop i in 1..1000 {
+    loop i; 1..1000 {
         dup :: ~sender
         dup2 :: ~sender
         h :: tasks.spawn(take(dup) () => dup.send(1))
         h.join()
     }
     total: Int := 0
-    loop i in 1..1000 {
+    loop i; 1..1000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)

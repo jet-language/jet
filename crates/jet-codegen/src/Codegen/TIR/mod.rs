@@ -605,31 +605,31 @@ pub enum TFuncKind {
     },
 }
 
-/// c109 Phase 22: the method-call-collection iteration form on a `loop x in <coll>`,
+/// c109 Phase 22: the method-call-collection iteration form on a `loop x; <coll>`,
 /// resolved at lowering from `emit_for_in`'s `Expr::MethodCall` branches
 /// (Source/Codegen/Statement.rs). Each carries the receiver's emitted Rust string;
 /// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
 /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
 /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
 pub enum TForInMethod {
-    /// `loop c in s.chars()` — char iteration: `for _jet_c in ({recv}).chars()`,
+    /// `loop c; s.chars()` — char iteration: `for _jet_c in ({recv}).chars()`,
     /// binding `let <var> = _jet_c;`.
     Chars,
-    /// `loop line in reader.lines()` on a `FileReader` — streaming `BufRead::lines`
+    /// `loop line; reader.lines()` on a `FileReader` — streaming `BufRead::lines`
     /// over the reader's `inner`, with a mid-stream-error panic (line `0`, `cx.file`).
     LinesFile,
-    /// `loop line in io.stdin().lines()` / a `StdinHandle` — the same streaming read,
+    /// `loop line; io.stdin().lines()` / a `StdinHandle` — the same streaming read,
     /// but the receiver is materialised into a `_jet_stdin_h` local inside an extra
     /// block (so the `io.stdin()` temporary outlives the loop body), with a matching
     /// extra closing brace.
     LinesStdin,
-    /// D-PROCESS1=A: `loop line in child.stdout.lines()` / `child.stderr.lines()` —
+    /// D-PROCESS1=A: `loop line; child.stdout.lines()` / `child.stderr.lines()` —
     /// a `ProcessChild`'s streaming reader. The receiver string is the plain field
     /// access (`(child).stdout`); each iteration polls
     /// `jet_process_stream_next_line(&recv)` via a `let Some(x) = … else { break }`,
     /// so (unlike `LinesFile`/`LinesStdin`) no extra wrapper block is needed.
     LinesProcessStream,
-    /// D-ITER-HOOK: `loop x in mytype` when `mytype` implements `Iterable`.
+    /// D-ITER-HOOK: `loop x; mytype` when `mytype` implements `Iterable`.
     Iterable {
         coll_type: String,
         iter_type: String,
@@ -844,7 +844,7 @@ pub enum TStmt {
         step: Box<TStmt>,
         body: Vec<TStmt>,
     },
-    /// `loop i in start..end [step k]` — a numeric range loop (`ForKind::Range`).
+    /// `loop i; start..end [step k]` — a numeric range loop (`ForKind::Range`).
     /// Jet's `..` is inclusive (S22 / D-SG8), so this lowers to `start..=end`,
     /// optionally `.step_by((k) as usize)`. The loop variable `var` is an `Int`
     /// local bound inside the body; its type is resolved here, not in emit.
@@ -858,7 +858,7 @@ pub enum TStmt {
     },
     /// `break` / `break @name` (label resolved at lowering).
     Break(Option<String>),
-    /// `continue` / `continue @name`.
+    /// Source `next` / `next name@`; internally retained as Continue.
     Continue(Option<String>),
     /// c109 Phase 4: an exhaustive `when`/match on an enum subject (`Stmt::Switch`
     /// whose arms are all variant patterns). Lowers to a Rust `match`, mirroring
@@ -923,7 +923,7 @@ pub enum TStmt {
         value: TExpr,
         clone_value: bool,
     },
-    /// c109 Phase 5/22: collection iteration `loop x in coll` / `loop k, v in map`
+    /// c109 Phase 5/22: collection iteration `loop x; coll` / `loop k, v; map`
     /// (`Stmt::For` with `ForKind::In`). The collection's emitted Rust string is
     /// resolved at lowering. `var2` distinguishes the two-binding map form (which
     /// iterates `(coll).iter()` and clones each key/value) from the single-binding
@@ -942,6 +942,8 @@ pub enum TStmt {
         collection_str: String,
         /// Target-neutral collection expression for non-Rust backends.
         collection: TExpr,
+        /// D-LOOP-ADVANCE2=A source stride, evaluated once before the first pull.
+        step: Option<TExpr>,
         method_kind: Option<TForInMethod>,
         /// D-SOA1: the collection is a `#layout(columnar)` list — iterate via
         /// `({coll}).iter_aos()` (yields owned gathered `S`) instead of
@@ -1993,7 +1995,7 @@ pub enum TOrFallback {
     Panic(String),
     /// D-ORRETURN-ERG1=B: `?? break` — loop exit.
     Break,
-    /// D-ORRETURN-ERG1=B: `?? continue` — loop skip.
+    /// D-ORRETURN-ERG1=B: `?? next` — loop skip.
     Continue,
 }
 

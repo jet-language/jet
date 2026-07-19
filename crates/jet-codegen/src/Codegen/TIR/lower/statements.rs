@@ -1024,11 +1024,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     body: lowered_body,
                 }
             }
-            // c109 Phase 5: collection iteration `loop x in coll` / `loop k, v in map`.
+            // c109 Phase 5: collection iteration `loop x; coll` / `loop k, v; map`.
             // The collection string is resolved once. The loop var(s) bind in the body
             // scope with an *unresolved* type (`None`) — matching the AST slot's
             // `jet_ty: None`, so they never enable the overflow trap (parity).
-            ForKind::In { collection } => {
+            ForKind::In { collection, step } => {
                 // c109 Phase 22: classify a method-call collection into the matching
                 // `emit_for_in` branch (`chars`/`lines`/the `.iter().cloned()` default),
                 // resolving the receiver/collection string off the SAME node shape the
@@ -1048,7 +1048,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     Type::Apply { name, args } if name == "Stream" && args.len() == 1 => {
                         Some(args[0].clone())
                     }
-                    // D-DYNARRAY1: `loop x in window` — a `View<T>`'s element type.
+                    // D-DYNARRAY1: `loop x; window` — a `View<T>`'s element type.
                     Type::Apply { name, args }
                         if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 => {
                         Some(args[0].clone())
@@ -1094,6 +1094,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     var2: var2.as_ref().map(|(n, _)| n.clone()),
                     collection_str,
                     collection: lowered_coll,
+                    step: step.as_ref().map(|step| lower_expr(step, cx, env)),
                     method_kind,
                     columnar,
                     by_value,

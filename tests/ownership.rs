@@ -660,7 +660,7 @@ fn place_write_window_is_scoped_per_loop_iteration() {
     let src = r#"
 fn run() {
     xs := [1, 2]
-    loop i in 0..1 {
+    loop i; 0..1 {
         edit :: &xs[0]
         edit = edit + 1
     }

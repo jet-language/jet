@@ -1620,8 +1620,11 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
                         structural_slot(ctx, "range_step", StructuralSlotKind::Scalar, |ctx| collect_expr(step, mp, ctx));
                     }
                 }
-                AST::ForKind::In { collection } => {
+                AST::ForKind::In { collection, step } => {
                     structural_slot(ctx, "collection", StructuralSlotKind::Scalar, |ctx| collect_expr(collection, mp, ctx));
+                    if let Some(step) = step {
+                        structural_slot(ctx, "source_stride", StructuralSlotKind::Scalar, |ctx| collect_expr(step, mp, ctx));
+                    }
                 }
             }
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));

@@ -267,7 +267,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 // `lo .. hi step n ->` (6 tokens: lo, .., hi, step, n, ->)  — E0319 porting hazard
-                if matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(s)) if s == Syntax::KW_RANGE_STEP)
+                if matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(s)) if s == Syntax::RETIRED_LOOP_STEP)
                 {
                     if let Some(tok_after_step_n) = self.toks.get(self.pos + 5) {
                         if matches!(tok_after_step_n.kind, TokKind::Arrow) {
@@ -394,12 +394,12 @@ impl<'a> Parser<'a> {
                                 let pat_span = Span::new(range_start.start, range_end.end);
                                 // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
                                 // Push the error and skip `step N` so the arm can still be parsed.
-                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP)
+                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::RETIRED_LOOP_STEP)
                                 {
                                     self.diags.push(Diagnostic::error(
                                         "E0319",
                                         "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
-                                        "`step` belongs in a loop (`loop i in lo..hi step n`); a range arm just checks if the subject falls between the two ends".to_string(),
+                                        "`step` is a retired loop spelling; a range arm just checks if the subject falls between the two ends".to_string(),
                                         format!("remove `step …`, or use a full condition: `subject >= {} && subject <= {} && subject % n == 0 ->`", lo, hi),
                                         Some(pat_span),
                                     ));
@@ -1084,12 +1084,12 @@ impl<'a> Parser<'a> {
                                 let pat_span = Span::new(range_start.start, range_end.end);
                                 // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
                                 // Push the error and skip `step N` so the arm can still be parsed.
-                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP)
+                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::RETIRED_LOOP_STEP)
                                 {
                                     self.diags.push(Diagnostic::error(
                                         "E0319",
                                         "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
-                                        "`step` belongs in a loop (`loop i in lo..hi step n`); a range arm just checks if the subject falls between the two ends".to_string(),
+                                        "`step` is a retired loop spelling; a range arm just checks if the subject falls between the two ends".to_string(),
                                         format!("remove `step …`, or use a full condition: `subject >= {} && subject <= {} && subject % n == 0 ->`", lo, hi),
                                         Some(pat_span),
                                     ));

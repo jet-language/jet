@@ -366,7 +366,7 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
 }
 @Bench("parse") {
     total := 0
-    loop value in 0..100 { total = total + value }
+    loop value; 0..100 { total = total + value }
     require_eq(total, 4950)
 }
 fn run() {}

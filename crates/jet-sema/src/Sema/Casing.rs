@@ -230,7 +230,10 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
                         expr_names(start, out); expr_names(end, out);
                         if let Some(step) = step { expr_names(step, out); }
                     }
-                    ForKind::In { collection } => expr_names(collection, out),
+                    ForKind::In { collection, step } => {
+                        expr_names(collection, out);
+                        if let Some(step) = step { expr_names(step, out); }
+                    }
                 }
                 if let Some((name, span)) = label { snake(name, *span, "loop label", out); }
                 stmt_names(body, out);

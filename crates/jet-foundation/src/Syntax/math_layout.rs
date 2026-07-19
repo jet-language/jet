@@ -208,22 +208,17 @@ pub const TYPE_SHARED: &str = "Shared";
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
 
-/// S19 (ratified): loop keywords. `loop` is the one true loop keyword.
-/// `in` is a contextual keyword inside `loop x in …`.
-/// D-LOOP-SEMICOLON1=A (ratified 2026-06-29): `loop init; cond; step { }` three-part
-/// counted loop — semicolons are the separators in the header, nowhere else.
-pub const KW_IN: &str = "in";
-
 /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
 pub const OP_RANGE: &str = "..";
 
-/// S22 (amended 2026-06-15, D-SG8): contextual `step n` range stride —
-/// `0..10 step 2`. Only meaningful inside a range; an ordinary name elsewhere.
-pub const KW_RANGE_STEP: &str = "step";
+/// D-LOOP-HEADER2: retired loop-header spelling. It is an ordinary identifier;
+/// retained only so the range-arm porting diagnostic can recognize it.
+pub const RETIRED_LOOP_STEP: &str = "step";
 
 /// S23 (ratified): loop control.
 pub const KW_BREAK: &str = "break";
-pub const KW_CONTINUE: &str = "continue";
+/// D-LOOP-CONTROLWORD1=B: contextual statement/fallback control.
+pub const KW_NEXT: &str = "next";
 
 /// S24 / D-IF1 (ratified 2026-06-18): `if` is the one branching keyword.
 pub const KW_SWITCH: &str = "if";
@@ -326,8 +321,7 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 
 // D-RANGE2 (c25, ratified): porting-hazard teaching errors for constructs Jet does NOT use.
 // E0318: `..=` (Rust inclusive range) — Jet's `..` is already inclusive; `0..=9` → teach `0..9`.
-// E0319: `step` in an arm head — `step` is a loop modifier (S22/S72), not an arm construct.
-// These use `..` (OP_RANGE) and `step` (KW_RANGE_STEP) which are already registered above.
+// E0319: the retired loop `step` spelling in an arm head remains a porting hazard.
 
 /// S13 (ratified): word forms recognized only for S14 teaching errors.
 pub const FOREIGN_AND: &str = "and";
@@ -438,7 +432,7 @@ pub const ASM_LANG: &str = "asm"; // D-FFI-ASM1
 /// only to emit the E0055 teaching error.
 pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
                                       // D-LOOPLABEL2=A (ratified 2026-06-26): loop label `@` is a SUFFIX on the name.
-                                      // `outer@ loop { … }` / `break outer@` / `continue outer@`. Reverses D-LABEL1
+                                      // `outer@ loop { … }` / `break outer@` / `next outer@`. Reverses D-LABEL1
                                       // (which had `@outer loop`). Old prefix form emits E0988 teaching error.
                                       // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
                                       // D-QUAL4=A (ratified 2026-06-26): `@Marker T` is a value-tag qualifier in type

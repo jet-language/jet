@@ -78,7 +78,7 @@ pub(crate) fn label_name(label: &Option<(String, Span)>) -> Option<String> {
     label.as_ref().map(|(n, _)| n.clone())
 }
 
-/// c109 Phase 22: resolve a `loop x in <coll>` collection into its emitted Rust
+/// c109 Phase 22: resolve a `loop x; <coll>` collection into its emitted Rust
 /// string + (for a method-call collection) the iteration form, reproducing
 /// `emit_for_in`'s branch selection (Source/Codegen/Statement.rs) byte-for-byte.
 /// For `chars`/`lines` the returned string is the *receiver* (the form emits

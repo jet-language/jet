@@ -67,7 +67,7 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 // suppresses insertion (continuation). `-> Type` / `{` must stay on the `)`
 // line (E0986). `NL` below denotes that synthetic terminator.
 stmt     = binding | assign | if | loop
-         | "break" NL | "continue" NL | "return" [ expr ] NL
+         | "break" NL | next | "return" [ expr ] NL
          | expr NL ;
 binding  = [ "@Track" ] ( ident "::" expr     // inferred immutable
          | ident ":=" expr                    // inferred mutable
@@ -92,9 +92,11 @@ arm-body = block | stmt ;        // `{ … }` block or one braceless statement (
 loop     = [ ident "@" ] loop-body ;            // D-LABEL1: optional `name@` label
 loop-body= "loop" block
          | "loop" cond block
-         | "loop" ident "in" expr [ ".." expr [ "step" expr ] ] block ;
+         | "loop" ident [ "," ident ] ";" source [ ";" expr ] block
+         | "loop" ident [ ":" type ] ":=" expr ";" cond [ ";" expr ] block ;
+source   = expr [ ".." expr ] ;
 break    = "break" [ ident "@" ] NL ;           // D-LABEL1: `break name@` targets a label
-continue = "continue" [ ident "@" ] NL ;        // D-LABEL1: `continue name@`
+next     = "next" [ ident "@" ] NL ;            // contextual: calls/declarations keep `next`
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block )
          | "if" "{" value-guard-arm { value-guard-arm } "else" "->" value-arm-body "}" ;
@@ -131,13 +133,22 @@ expr     = precedence climbing over:
   `Bool`; `&& || !` operate on `Bool` (E0110).
 - `&&` and `||` combine `Bool` expressions only (D-S25-RETIRE1). Value
   alternatives in arm heads use single `|`.
-- `if`/`else if`/`else` (conditions must be `Bool`); `loop` in three forms:
-  `loop { }` (infinite), `loop cond { }` (conditional), `loop x in a..b { }`
-  (iterates a through b **inclusive**, S22; S19-amend); `break`/`continue`
+- `if`/`else if`/`else` (conditions must be `Bool`); `loop` has infinite,
+  conditional, source (`loop x; source [; stride]`), map-pair, and explicit-state
+  (`loop i := init; cond [; afterthought]`) headers. Range sources are inclusive.
+  Source/bounds/stride evaluate once left-to-right; stride must be positive `Int`
+  and is checked before the first pull. `break`/`next`
   inside loops only (E0115, S23). A loop may
   carry a suffix `name@` label (D-LABEL1) — `outer@ loop … { }` — and
-  `break outer@` / `continue outer@` target it from a nested loop (E0987 names
+  `break outer@` / `next outer@` target it from a nested loop (E0987 names
   an out-of-scope label; E0988 flags a retired prefix label).
+  Normal explicit-state fallthrough and targeted `next` run the afterthought
+  exactly once, then retest; normal source fallthrough and targeted `next` pull
+  stride items and use the final pull. `break`, `return`, propagated failure,
+  and panic skip the target afterthought. Abandoned inner loops run no edge.
+  Bare `next` is control only as a complete statement or `??` fallback;
+  `next()`, `.next()`, and `fn next` are ordinary identifier uses, while a value
+  named `next` after `??` needs parentheses: `value ?? (next)`.
 - `if subject == { head -> { ... } else -> { ... } }` (D-IF1/D-IF3) tests arm
   heads top to bottom. Bare values and ranges compare against the subject;
   predicate heads are `Bool`; `else` is mandatory unless enum/option

@@ -248,7 +248,10 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
                         collect_tuple_shapes_from_expr(s, out);
                     }
                 }
-                ForKind::In { collection } => collect_tuple_shapes_from_expr(collection, out),
+                ForKind::In { collection, step } => {
+                    collect_tuple_shapes_from_expr(collection, out);
+                    if let Some(step) = step { collect_tuple_shapes_from_expr(step, out); }
+                }
             }
             for s in body {
                 collect_tuple_shapes_from_stmt(s, out);

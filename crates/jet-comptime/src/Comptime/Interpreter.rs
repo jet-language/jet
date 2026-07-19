@@ -678,7 +678,19 @@ impl<'a> Interp<'a> {
                 // S22 (D-SG8): `a..b` is inclusive; `step n` strides by n
                 // (sema guarantees a positive Int).
                 let stride = match step {
-                    Some(step) => as_int(&self.eval(step, scope)?, step.span())?.max(1),
+                    Some(step) => {
+                        let value = as_int(&self.eval(step, scope)?, step.span())?;
+                        if value <= 0 {
+                            return Err(Diagnostic::error(
+                                "E0123",
+                                "a source loop stride must be positive".to_string(),
+                                "the stride is checked before the first source item is pulled".to_string(),
+                                "use a stride of 1 or more".to_string(),
+                                Some(step.span()),
+                            ));
+                        }
+                        value
+                    }
                     None => 1,
                 };
                 let mut i = a;
@@ -695,11 +707,27 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            crate::AST::ForKind::In { collection } => {
+            crate::AST::ForKind::In { collection, step } => {
                 let c = self.eval(collection, scope)?;
+                let stride = match step {
+                    Some(step) => {
+                        let value = as_int(&self.eval(step, scope)?, step.span())?;
+                        if value <= 0 {
+                            return Err(Diagnostic::error(
+                                "E0123",
+                                "a source loop stride must be positive".to_string(),
+                                "the stride is checked before the first source item is pulled".to_string(),
+                                "use a stride of 1 or more".to_string(),
+                                Some(step.span()),
+                            ));
+                        }
+                        value as usize
+                    }
+                    None => 1,
+                };
                 match c {
                     CtValue::List(items) => {
-                        for item in items {
+                        for item in items.into_iter().step_by(stride) {
                             self.burn(span)?;
                             scope.insert(var.to_string(), item);
                             match loop_step(self.exec_block(body, scope)?, label) {
@@ -712,7 +740,7 @@ impl<'a> Interp<'a> {
                         Ok(Flow::Normal)
                     }
                     CtValue::Bytes(bs) => {
-                        for byte in bs {
+                        for byte in bs.into_iter().step_by(stride) {
                             self.burn(span)?;
                             scope.insert(var.to_string(), CtValue::Int(byte as i64));
                             match loop_step(self.exec_block(body, scope)?, label) {
@@ -725,7 +753,7 @@ impl<'a> Interp<'a> {
                         Ok(Flow::Normal)
                     }
                     CtValue::Map(m) => {
-                        for (k, v) in m {
+                        for (k, v) in m.into_iter().step_by(stride) {
                             self.burn(span)?;
                             if let Some((v2name, _)) = var2 {
                                 scope.insert(var.to_string(), k.to_value());
@@ -744,7 +772,7 @@ impl<'a> Interp<'a> {
                     }
                     CtValue::Str(s) => {
                         // `for c in s.chars()` lowers the receiver to the string.
-                        for ch in s.chars() {
+                        for ch in s.chars().step_by(stride) {
                             self.burn(span)?;
                             scope.insert(var.to_string(), CtValue::Char(ch));
                             match loop_step(self.exec_block(body, scope)?, label) {
@@ -1243,10 +1271,10 @@ impl<'a> Interp<'a> {
                             };
                             Err(comptime_panic(&msg, *name_span))
                         }
-                        // `?? break` / `?? continue` are runtime loop controls and
+                        // `?? break` / `?? next` are runtime loop controls and
                         // are not evaluable at comptime.
                         FallbackKind::Break(span) | FallbackKind::Continue(span) => {
-                            Err(unsupported("loop control in `??`", *span))
+                            Err(unsupported("loop control; `??`", *span))
                         }
                     }
                 } else {

@@ -623,19 +623,26 @@ fn emit_tir_stmt(
             let mut counted_deferred = active_deferred_closes.clone();
             emit_tir_stmt(init, cx, out, indent + 1, &mut counted_deferred);
             let inner_pad = "    ".repeat(indent + 1);
+            out.push_str(&format!("{}let mut _jet_loop_first = true;\n", inner_pad));
             out.push_str(&format!(
                 "{}{}loop {{\n",
                 inner_pad,
                 tir_label_prefix(label),
             ));
             let body_pad = "    ".repeat(indent + 2);
+            // D-LOOP-CONTINUE2=A: both normal fallthrough and every `continue`
+            // re-enter at the top. Skip the afterthought only on the first entry;
+            // thereafter run it before retesting. Break/return/failure/panic leave
+            // the loop and therefore never execute it.
+            out.push_str(&format!("{}if _jet_loop_first {{ _jet_loop_first = false; }} else {{\n", body_pad));
+            emit_tir_stmt(step, cx, out, indent + 3, &mut counted_deferred);
+            out.push_str(&format!("{}}}\n", body_pad));
             out.push_str(&format!(
                 "{}if !({}) {{ break; }}\n",
                 body_pad,
                 emit_expr_with_cleanups(cond, cx, active_deferred_closes)
             ));
             emit_tir_stmts_nested(body, cx, out, indent + 2, &counted_deferred);
-            emit_tir_stmt(step, cx, out, indent + 2, &mut counted_deferred);
             out.push_str(&format!("{}}}\n", inner_pad));
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -654,14 +661,15 @@ fn emit_tir_stmt(
             match step {
                 Some(step) => {
                     let st = emit_expr_with_cleanups(step, cx, active_deferred_closes);
+                    out.push_str(&format!("{}{{ let _jet_loop_start = {};\n", pad, s));
+                    out.push_str(&format!("{}    let _jet_loop_end = {};\n", pad, e));
+                    out.push_str(&format!("{}    let _jet_loop_stride = {};\n", pad, st));
+                    out.push_str(&format!("{}    if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
                     out.push_str(&format!(
-                        "{}{}for {} in (({})..=({})).step_by(({}) as usize) {{\n",
+                        "{}{}for {} in (_jet_loop_start..=_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n",
                         pad,
                         lbl,
-                        mangle(var),
-                        s,
-                        e,
-                        st
+                        mangle(var)
                     ));
                 }
                 None => {
@@ -677,6 +685,7 @@ fn emit_tir_stmt(
             }
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
+            if step.is_some() { out.push_str(&format!("{}}}\n", pad)); }
         }
         TStmt::Break(label) => match label {
             Some(name) => out.push_str(&format!("{}break 'jet_{};\n", pad, name)),
@@ -840,12 +849,29 @@ fn emit_tir_stmt(
             var2,
             collection_str,
             collection: _,
+            step,
             method_kind,
             columnar,
             by_value,
             body,
         } => {
             let lbl = tir_label_prefix(label);
+            let mut stride_wrapper = false;
+            let source_storage;
+            let stride_suffix;
+            let collection_str = if let Some(step) = step {
+                stride_wrapper = true;
+                let stride = emit_expr_with_cleanups(step, cx, active_deferred_closes);
+                out.push_str(&format!("{}{{ let _jet_loop_source = {};\n", pad, collection_str));
+                out.push_str(&format!("{}    let _jet_loop_stride = {};\n", pad, stride));
+                out.push_str(&format!("{}    if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
+                source_storage = "_jet_loop_source".to_string();
+                stride_suffix = ".step_by(_jet_loop_stride as usize)".to_string();
+                source_storage.as_str()
+            } else {
+                stride_suffix = String::new();
+                collection_str.as_str()
+            };
             // c109 Phase 22: a method-call collection takes a distinct `emit_for_in`
             // branch (`collection_str` holds the RECEIVER for chars/lines). Only the
             // stdin form opens an extra block that needs an extra closing brace.
@@ -853,9 +879,10 @@ fn emit_tir_stmt(
             match method_kind {
                 Some(TForInMethod::Chars) => {
                     out.push_str(&format!(
-                        "{}{}for _jet_c in ({recv}).chars() {{\n    {}let {} = _jet_c;\n",
+                        "{}{}for _jet_c in ({recv}).chars(){} {{\n    {}let {} = _jet_c;\n",
                         pad,
                         lbl,
+                        stride_suffix,
                         pad,
                         mangle(var),
                         recv = collection_str
@@ -863,8 +890,8 @@ fn emit_tir_stmt(
                 }
                 Some(TForInMethod::LinesFile) => {
                     out.push_str(&format!(
-                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner) {{\n",
-                        pad, lbl, collection_str
+                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner){} {{\n",
+                        pad, lbl, collection_str, stride_suffix
                     ));
                     out.push_str(&format!(
                         "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
@@ -882,8 +909,8 @@ fn emit_tir_stmt(
                     ));
                     needs_extra_close = true;
                     out.push_str(&format!(
-                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut _jet_stdin_h.inner) {{\n",
-                        pad, lbl
+                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut _jet_stdin_h.inner){} {{\n",
+                        pad, lbl, stride_suffix
                     ));
                     out.push_str(&format!(
                         "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
@@ -895,28 +922,23 @@ fn emit_tir_stmt(
                     ));
                 }
                 Some(TForInMethod::LinesProcessStream) => {
-                    // D-PROCESS1=A: poll `jet_process_stream_next_line`, panicking on a
-                    // read error (mirrors the `LinesFile`/`LinesStdin` mid-stream-error
-                    // panic), `break`ing at EOF. One open brace (the `for`-equivalent
-                    // `loop`), closed by the generic tail below — no extra block needed.
-                    out.push_str(&format!("{}{}loop {{\n", pad, lbl));
+                    // D-PROCESS1=A: adapt Result<Option<Line>> into an iterator so
+                    // `.step_by` owns pull counting and `next` cannot skip stride pulls.
                     out.push_str(&format!(
-                        "{}    let _jet_line_opt = {}jet_process_stream_next_line(&({})).unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
+                        "{}{}for _jet_line_result in std::iter::from_fn(|| {}jet_process_stream_next_line(&({})).transpose()){} {{\n",
                         pad,
+                        lbl,
                         cx.root_prefix,
                         collection_str,
+                        stride_suffix,
+                    ));
+                    out.push_str(&format!(
+                        "{}    let {} = _jet_line_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
+                        pad,
+                        mangle(var),
                         cx.root_prefix,
                         cx.file,
                         0
-                    ));
-                    out.push_str(&format!(
-                        "{}    let Some(_jet_raw_line) = _jet_line_opt else {{ break; }};\n",
-                        pad
-                    ));
-                    out.push_str(&format!(
-                        "{}    let {} = _jet_raw_line;\n",
-                        pad,
-                        mangle(var)
                     ));
                 }
                 Some(TForInMethod::Iterable {
@@ -926,12 +948,12 @@ fn emit_tir_stmt(
                     let coll_rust = user_type_rust(coll_type);
                     let iter_rust = user_type_rust(iter_type);
                     out.push_str(&format!(
-                        "{}{}{{ let mut _jet_it = <{coll_rust} as user_Iterable>::iter(({collection_str}));\n",
-                        pad, lbl,
+                        "{}{{ let mut _jet_it = <{coll_rust} as user_Iterable>::iter(({collection_str}));\n",
+                        pad,
                     ));
                     out.push_str(&format!(
-                        "{}    while let Some(_jet_item) = <{iter_rust} as user_Iterator>::next(&mut _jet_it) {{\n",
-                        pad,
+                        "{}    {}for _jet_item in std::iter::from_fn(|| <{iter_rust} as user_Iterator>::next(&mut _jet_it)){} {{\n",
+                        pad, lbl, stride_suffix,
                     ));
                     out.push_str(&format!(
                         "{}        let {} = _jet_item;\n",
@@ -943,8 +965,8 @@ fn emit_tir_stmt(
                 None => match var2 {
                     Some(v2) => {
                         out.push_str(&format!(
-                            "{}{}for (_jet_k, _jet_v) in ({}).iter() {{\n",
-                            pad, lbl, collection_str
+                            "{}{}for (_jet_k, _jet_v) in ({}).iter(){} {{\n",
+                            pad, lbl, collection_str, stride_suffix
                         ));
                         out.push_str(&format!(
                             "{}    let {} = _jet_k.clone();\n",
@@ -973,7 +995,7 @@ fn emit_tir_stmt(
                             "{}{}for _jet_item in {} {{\n    {}let {} = _jet_item;\n",
                             pad,
                             lbl,
-                            iter_form,
+                            format!("{}{}", iter_form, stride_suffix),
                             pad,
                             mangle(var)
                         ));
@@ -984,6 +1006,9 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}}}\n", pad));
             // D-STDIN1=A: close the outer block holding the JetStdinReader local.
             if needs_extra_close {
+                out.push_str(&format!("{}}}\n", pad));
+            }
+            if stride_wrapper {
                 out.push_str(&format!("{}}}\n", pad));
             }
         }

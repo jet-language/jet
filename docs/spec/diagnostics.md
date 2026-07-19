@@ -184,8 +184,8 @@ renumbered, and no new `W` code may be allocated.
 | E0112 | sema  | value doesn't fit where it's used (argument/print/interpolation) |
 | E0113 | sema  | `return` value mismatch (wrong/missing/unexpected) |
 | E0114 | sema  | a path reaches the end without `return`   |
-| E0115 | sema  | `break`/`continue` outside a loop         |
-| E0987 | sema  | `break name@`/`continue name@` names a loop label not in scope (D-LOOPLABEL2) |
+| E0115 | sema  | `break`/`next` outside a loop             |
+| E0987 | sema  | `break name@`/`next name@` names a loop label not in scope (D-LOOPLABEL2) |
 | E0988 | parse | teaching: old prefix `@name loop` / `break @name` → suffix `name@ loop` / `break name@` (D-LOOPLABEL2) |
 | E0989 | sema  | `comptime if` condition is not a comptime expression (D-WHEN1) |
 | E0990 | parse | *retired by D-MARKER-CANON1* (was: `@` marker-prefix teaching) |
@@ -195,7 +195,7 @@ renumbered, and no new `W` code may be allocated.
 | E0120 | sema  | moving/returning a parameter without move (`^`) access |
 | E0121 | sema  | value used after it was given away        |
 | E0122 | sema  | `run` returns something other than nothing or `Void ?` in run mode |
-| E0123 | sema  | `for` range `step` must be a positive Int (S22, D-SG8) |
+| E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
@@ -528,7 +528,7 @@ renumbered, and no new `W` code may be allocated.
 | E1311 | sema  | spread operand is not a list (D-VARIADIC1) |
 | E1312 | sema  | call spread at a callee without a variadic rest parameter (D-VARIADIC1) |
 | E1313 | sema  | trait-bounded variadic call-site argument doesn't implement the bound trait (D-ANY-JAI1) |
-| E1314 | sema  | trait-bounded variadic parameter used outside a `loop x in name { … }` loop (D-ANY-JAI1) |
+| E1314 | sema  | trait-bounded variadic parameter used outside a `loop x; name { … }` loop (D-ANY-JAI1) |
 | E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
 | E0967 | jetpack | §6 merge conflict: a named source or scalar setting got irreconcilable values |
 | E0968 | jetpack | a module `sources:` entry isn't a `provider@target` ref (U6/U8) |
@@ -793,7 +793,7 @@ parse error.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0318 | `` `..=` `` is not a Jet operator — Jet's `..` is already inclusive. | In Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` always includes both ends, so there is no `..=`. | Write `lo..hi` — it already means "lo through hi inclusive." |
-| E0319 | `` `step` `` is not allowed in a range arm — range arms test a band, not a sequence. | `step` modifies a loop range to skip values (`loop i in 0..10 step 2`); an arm head like `1..10` just checks whether the subject is between 1 and 10. A stepped range is not a contiguous band and can't be used for membership testing. | Remove `step …`; to match only multiples of N, use a full condition: `subject >= lo && subject <= hi && subject % n == 0 ->`. |
+| E0319 | `` `step` `` is not allowed in a range arm — range arms test a band, not a sequence. | `step` modifies a loop range to skip values (`loop i; 0..10; 2`); an arm head like `1..10` just checks whether the subject is between 1 and 10. A stepped range is not a contiguous band and can't be used for membership testing. | Remove `step …`; to match only multiples of N, use a full condition: `subject >= lo && subject <= hi && subject % n == 0 ->`. |
 
 ## Fan-out and fixed-size list diagnostics
 
@@ -813,7 +813,7 @@ parse error.
 | E1311 | A spread operand is not a list. | List spread `[...xs]` and call spread `f(...xs)` expand a list's elements — the operand must be `[T]`. | Spread a list value, or build the list without spread. |
 | E1312 | A call uses spread at a function with no variadic rest parameter. | `f(...xs)` only applies when the callee's final parameter is variadic (`name: ...T`). | Pass arguments individually, or call a function whose last parameter is variadic. |
 | E1313 | `` `{arg}` doesn't implement `{Trait}` `` — a trait-bounded variadic call-site argument fails one of the bound trait(s) (D-ANY-JAI1). | `{param}: ...{Trait}` (or `...[A, B]`) checks every argument against the bound trait(s) — that's how a function like this accepts a mix of types safely, with each argument monomorphized to its own concrete type (zero boxing). | Implement `{Trait}` for the argument's type, or drop the value from this call. |
-| E1314 | `` `{name}` can only be used in a `loop … in {name}` loop here `` — a trait-bounded variadic parameter referenced outside its one supported shape (D-ANY-JAI1). | A trait-bounded variadic's elements can have different concrete types, so there's no single Rust type to give the whole parameter (`.len()`, indexing, passing it on, a second loop, …) outside a loop that visits each argument once. | Iterate it with `loop x in {name} { … }` — that's the only supported use in v1. |
+| E1314 | `` `{name}` can only be used in a `loop … in {name}` loop here `` — a trait-bounded variadic parameter referenced outside its one supported shape (D-ANY-JAI1). | A trait-bounded variadic's elements can have different concrete types, so there's no single Rust type to give the whole parameter (`.len()`, indexing, passing it on, a second loop, …) outside a loop that visits each argument once. | Iterate it with `loop x; {name} { … }` — that's the only supported use in v1. |
 
 ## Module evaluation diagnostics (jetpack)
 
@@ -926,8 +926,8 @@ is fixed).
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2501 | `{method}` is not available on a {direction} file handle. | `files.open` returns a read-only handle; `files.create`/`files.append` return a write-only handle. Calling a write method on a reader (or a read method on a writer) is a type error. | Use the correct handle type for the operation: `files.open` to read, `files.create`/`files.append` to write. |
-| E2502 | A line stream can only be used directly in a loop. | `.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream — c109/I3.) | Iterate it directly: `loop line in handle.lines() { … }`. |
-| L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line in handle.lines() { … }` to stream line-by-line. Not emitted yet. |
+| E2502 | A line stream can only be used directly in a loop. | `.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream — c109/I3.) | Iterate it directly: `loop line; handle.lines() { … }`. |
+| L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line; handle.lines() { … }` to stream line-by-line. Not emitted yet. |
 | E2510 | `#{op}` isn't a reduce operation (or a reduce marker used outside `.reduce`). | A SIMD lane reduction (D-SIMD2) folds the lanes with one of a fixed set of operations, named by a marker so the fold is explicit; only `@Add`/`@Mul`/`@Min`/`@Max` are reduce operations, and the marker is meaningful only as the sole argument to `.reduce(…)`. | Use `v.reduce(@Add)` / `@Mul` / `@Min` / `@Max`, or the named reductions `v.sum()` / `v.product()` / `v.min()` / `v.max()`. |
 | E2511 | operator `{op}` isn't defined between `{lhs}` and `{rhs}`. | Operator overloading is blessed on the closed built-in math family ONLY (D-SIMD2/D-LINALG1): element-wise `+`/`-` (and `/` for lanes), `*` (element-wise, or matrix×vector), and `==`/`!=` — both sides must be the same lane/vector type (or a matrix and its matching vector). | Match the operand types, or use a named method like `.dot()`/`.cross()`/`.matmul()`. |
 | E3110 | lane `{lane}` isn't valid on `{type}`. | Swizzle members name lanes with `x`/`y`/`z`/`w`; each type exposes only its lane count (`Vec2`: x/y, `Vec3`: x/y/z, …). | Use only the lanes defined for `{type}`. |

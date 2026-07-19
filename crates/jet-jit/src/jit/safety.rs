@@ -545,10 +545,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         } => {
             matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
-                && step.as_ref().is_none_or(|s| matches!(&s.ty, Type::Int))
+                && step.is_none()
                 && resident_safe_expr(start, callees)
                 && resident_safe_expr(end, callees)
-                && step.as_ref().is_none_or(|s| resident_safe_expr(s, callees))
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::Break(_) | TStmt::Continue(_) => true,
@@ -570,12 +569,16 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             var2,
             method_kind,
             columnar,
+            step,
             body,
             ..
         } => {
             var2.is_none()
                 && method_kind.is_none()
                 && !columnar
+                // Dynamic source-stride validation currently uses the semantic
+                // fallback tier; resident native code must never skip it.
+                && step.is_none()
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::EnumMatch {
@@ -636,6 +639,9 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
         }
     }
     for (i, s) in tir.body.iter().enumerate() {
+        if matches!(s, TStmt::ForIn { step: Some(_), .. }) {
+            return Some("source stride uses semantic fallback".into());
+        }
         if !resident_safe_stmt(s, callees) {
             return Some(format!("body stmt {i}"));
         }

@@ -170,7 +170,10 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
                         f(step);
                     }
                 }
-                crate::AST::ForKind::In { collection } => f(collection),
+                crate::AST::ForKind::In { collection, step } => {
+                    f(collection);
+                    if let Some(step) = step { f(step); }
+                }
             }
             body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }

@@ -32,7 +32,7 @@ const LOOPS: &str = "\
 fn run() {
     n := 3
     total := 0
-    loop i in 1..n {
+    loop i; 1..n {
         total += i
     }
     print(\"total is {total}\")

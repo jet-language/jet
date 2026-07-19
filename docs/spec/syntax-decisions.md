@@ -192,27 +192,36 @@ separately ratified `|=` compound assignment keep their existing meanings.
 
 **S3 — Blocks**: curly braces `{ }`, always required.
 
-**S19 — Loops** *(one keyword; header picks the mode; D-LOOP-SEMICOLON1)*:
+**S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A)*:
 
 ```jet
 loop { … }                        // infinite
 loop n > 0 { … }                  // conditional (no `while`)
-loop i in 1..5 { … }              // iteration (no `for`)
-loop i := 0; i < n; i++ { … }     // counted (C-style header, semicolons kept)
+loop i; 1..5 { … }                 // source iteration (no `for`)
+loop key, value; map { … }         // map pairs
+loop i; 0..10; 2 { … }             // positive source stride
+loop i := 0; i < n; i++ { … }      // explicit state
 ```
 
-`while`/`for` are not keywords. Iteration head may be any iterable expression
-(`loop p in shape.points()`), evaluated once (**S79**).
+`while`/`for` are not keywords. A source and optional stride evaluate once,
+left to right; a dynamic nonpositive stride raises E0123 before the first pull.
+Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
+Only loop headers use visible semicolons, and formatters wrap them only after one.
 
-**S22 / S72 — Ranges**: `1..10` is **inclusive**. Optional `step n`
-(`0..10 step 2`); `step` is contextual; non-positive literal step E0123.
+**S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
+optional third clause (`loop i; 0..10; 2`); `step` has no loop role.
 
-**S23 — Loop control**: `break`, `continue`. Labels are **suffix `@`**
+**S23 — Loop control** *(D-LOOP-CONTROLWORD1=B, D-LOOP-CONTINUE2=A)*:
+`break` and contextual `next`. Labels are **suffix `@`**
 (**D-LABEL1 + D-LOOPLABEL2**): `outer@ loop { … break outer@ }` /
-`continue outer@`; prefix `@outer` → E0988; unknown label E_UNDEFINED_LABEL.
+`next outer@`; prefix `@outer` → E0988; unknown label E_UNDEFINED_LABEL.
+`next` enters the target's continuation edge: explicit state runs its
+afterthought then retests; source advances; condition retests; infinite restarts.
+`next()`, `.next()`, and `fn next` remain ordinary uses. After `??`, bare `next`
+is control; write `?? (next)` for a same-named fallback value.
 
 **D-ORRETURN-CANON1 — Early-exit fallbacks**: `expr ?? return`,
-`expr ?? continue`, `expr ?? break` are the only spellings (`?return` etc.
+`expr ?? next`, `expr ?? break` are the only spellings (`?return` etc.
 removed; E0115).
 
 **S68 — `if`: two-arm, expression, dispatch, and subjectless guards** *(D-IF1 +
@@ -626,7 +635,7 @@ parse error (E0003), no special-cased teaching text.
 
 **S64 — Map shorthand & entry iteration**: `[K: V]` is the canonical map-type
 spelling. One-binding map iteration yields `.key`/`.value` entries;
-two-binding `loop name, amount in fruits` also supported.
+two-binding `loop name, amount; fruits` also supported.
 
 **S39 — Indexing**: `xs[i]` / `m[k]` stop with a friendly report on
 OOB/missing key; `xs.get(i) -> (T?)` safe access; `m[k] = v` inserts.
@@ -660,7 +669,7 @@ are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 **S20 — Escapes**: `\n` `\t` `\"` `\\`; literal braces `{{` `}}`.
 
 **S41 — Char & string length**: `Char` built-in, `'a'` literals; `s.len()`
-counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).
+counts Unicode scalars; `loop c; s.chars()`; no `s[i]` (E0503).
 Grapheme clusters + NFC/NFD live in opt-in `core.text.unicode` (D-GRAPHEME1).
 
 **D-STR-AFTER1 — `String.after`/`.before`** *(ratified/implemented
@@ -945,7 +954,7 @@ auto-derived; `{value@Debug}` selects it; `@[Redact]` on a field renders
 
 **D-ITER-HOOK / D-INDEX-HOOK — Extensibility hooks**: beginners use
 `.each`/`.to_list()` and `.get`/`.set`; experts implement
-`Iterable`+`Iterator` for `loop x in mytype` and `Index`/`IndexMut` for
+`Iterable`+`Iterator` for `loop x; mytype` and `Index`/`IndexMut` for
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) ->
@@ -1496,7 +1505,7 @@ malformed block E1221.
 **D-STREAMYIELD1 — Generators**: `fn f() -> Stream<T>` uses `yield expr` to
 hand a value to the consumer and suspend until the next pull; falling off
 the end (or a bare `return;`) ends the stream; `return value;` is E0806.
-Consumers are ordinary `loop x in f() { }` loops — one keyword, one type, no
+Consumers are ordinary `loop x; f() { }` loops — one keyword, one type, no
 async/await coloring. Implemented on a real OS thread + a rendezvous
 channel (`std::sync::mpsc::sync_channel(0)`): `yield` blocks the producer
 thread until the consumer's loop pulls, exactly reproducing suspend/resume
@@ -4564,7 +4573,7 @@ Control flow).
 **S35 — `or` fallback**: superseded by `??` (S71).
 **S43 — `test` blocks**: superseded by `@Test("name")` (see Testing).
 **S53 — concurrency**: deferred past v1.0 (see Capabilities & memory).
-**S81 — `?continue`**: superseded by `expr ?? continue` (D-ORRETURN-CANON1).
+**S81 — `?continue`**: superseded by `expr ?? next` (D-LOOP-CONTROLWORD1=B).
 **U1 / U10 filenames, D-JPK3/8/13, D-BIND1/2, D-ATTR1/3, D-CAP1/2-words,
 D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling, the bare-brace constructor
 spelling superseded by D-DOTCTOR2**: all
@@ -4634,3 +4643,9 @@ comparison symbols may dispatch through ordinary hook traits: `Add.add`,
 symbols, precedence, overload sets, or side-effect meanings. `+=` reuses `Add`.
 Beginner `@Numeric`/`@Comparable` and auto equality remain front doors to the
 same capabilities; built-in numeric, lane, and linalg behavior is unchanged.
+
+**2026-07-17 — D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
+D-LOOP-CONTINUE2=A, D-LOOP-CONTROLWORD1=B**: loop-only `in`, loop-only `step`,
+and source `continue` retired. Semicolon clauses now name every multi-part loop
+header; controller-specific advancement is the third clause; `next` enters that
+edge before retesting. Implemented end to end on card #681.

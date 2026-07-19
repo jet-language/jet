@@ -16,12 +16,12 @@
 //!
 //! The one open problem a plain per-arity generic function doesn't solve on
 //! its own: the *body*. `parts` was written as a single name the source
-//! iterates (`loop p in parts { … }`), but there is no zero-cost Rust value
+//! iterates (`loop p; parts { … }`), but there is no zero-cost Rust value
 //! that stands for "N values of N different (trait-bounded) types" — a real
 //! `Vec`/tuple can't express it without boxing or macros. So sema restricts a
 //! trait-bounded variadic's body to exactly one shape it CAN compile away for
 //! free (`Sema/Registration.rs::check_variadic_bound_body_shape`, E1314): a
-//! single top-level `loop x in parts { … }` loop. Here, that loop is unrolled
+//! single top-level `loop x; parts { … }` loop. Here, that loop is unrolled
 //! into `arity` copies, the loop variable rebound to each synthetic parameter
 //! in turn — after which the synthesized function is an entirely ordinary
 //! generic Jet function, run through the *unmodified* `emit_func` /
@@ -133,7 +133,7 @@ pub(crate) fn emit_variadic_bound_specializations(cx: &Cx, items: &[Item], out: 
 /// trait-bounded variadic function) at one call-site `arity` — `arity` fresh
 /// generic type parameters (each bound to `bounds`) replace the trailing
 /// variadic parameter, one per call-site argument, and the body's one legal
-/// `loop x in <variadic> { … }` loop is unrolled to match.
+/// `loop x; <variadic> { … }` loop is unrolled to match.
 fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usize) -> Func {
     let last = f
         .params
@@ -164,7 +164,7 @@ fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usize) -> Func 
         Err(msg) => jet_foundation::ice!(
             None,
             "trait-bounded variadic `{}` — {} — codegen only covers a \
-             single top-level `loop x in {}` loop; sema's E1314 (Sema/Registration.rs::\
+             single top-level `loop x; {}` loop; sema's E1314 (Sema/Registration.rs::\
              check_variadic_bound_body_shape) should have rejected this body already (D-ANY-JAI1)",
             f.name, msg, last.name
         ),
@@ -198,7 +198,7 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                 var,
                 var_span,
                 var2: None,
-                kind: ForKind::In { collection },
+                kind: ForKind::In { collection, .. },
                 body,
                 label: None,
                 ..
@@ -233,7 +233,7 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
             _ => {
                 if stmt_references_ident(s, target) {
                     return Err(format!(
-                        "`{target}` used outside a `loop x in {target} {{ … }}` loop"
+                        "`{target}` used outside a `loop x; {target} {{ … }}` loop"
                     ));
                 }
                 out.push(s.clone());
@@ -285,7 +285,8 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
                             .as_ref()
                             .is_some_and(|s| expr_references_ident(s, name))
                 }
-                ForKind::In { collection } => expr_references_ident(collection, name),
+                ForKind::In { collection, step } => expr_references_ident(collection, name)
+                    || step.as_ref().is_some_and(|s| expr_references_ident(s, name)),
             };
             kind_hit || body.iter().any(|s| stmt_references_ident(s, name))
         }

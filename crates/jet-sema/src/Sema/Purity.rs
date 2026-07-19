@@ -163,9 +163,14 @@ pub(crate) fn check_pure_stmt(
                         }
                     }
                 }
-                ForKind::In { collection } => {
+                ForKind::In { collection, step } => {
                     if let Some(d) = check_pure_expr(collection, pure_fn, funcs) {
                         return Some(d);
+                    }
+                    if let Some(step) = step {
+                        if let Some(d) = check_pure_expr(step, pure_fn, funcs) {
+                            return Some(d);
+                        }
                     }
                 }
             }
@@ -590,9 +595,14 @@ fn check_pure_stmt_with_path(
                         }
                     }
                 }
-                ForKind::In { collection } => {
+                ForKind::In { collection, step } => {
                     if let Some(d) = rec!(collection) {
                         return Some(d);
+                    }
+                    if let Some(step) = step {
+                        if let Some(d) = rec!(step) {
+                            return Some(d);
+                        }
                     }
                 }
             }
@@ -1129,10 +1139,17 @@ fn walk_stmt_for_calls(
                         }
                     }
                 }
-                ForKind::In { collection } => {
+                ForKind::In { collection, step } => {
                     walk_expr_for_calls(
                         collection, root_fn, funcs_sig, ast_funcs, path, visited, diags,
                     );
+                    if diags.is_empty() {
+                        if let Some(step) = step {
+                            walk_expr_for_calls(
+                                step, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                            );
+                        }
+                    }
                 }
             }
             if diags.is_empty() {

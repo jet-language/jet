@@ -38,7 +38,7 @@ fn flatten_overlay(o: ^Overlay) -> [Package] {
     out: [Package] = []
     names :: o.packages
     source :: o.source
-    loop name in names {
+    loop name; names {
         out.push(pack_item(~source, ^name))
     }
     return out
@@ -46,9 +46,9 @@ fn flatten_overlay(o: ^Overlay) -> [Package] {
 fn packages(pack: ^Pack) -> [Package] {
     out: [Package] = []
     overlays :: pack.overlays
-    loop o in overlays {
+    loop o; overlays {
         grouped :: flatten_overlay(^o)
-        loop p in grouped {
+        loop p; grouped {
             out.push(p)
         }
     }
@@ -59,21 +59,21 @@ fn source_ref(p: ^Package) -> String {
 }
 fn package_refs(pack: ^Pack) -> [String] {
     out: [String] = []
-    loop p in packages(^pack) {
+    loop p; packages(^pack) {
         out.push(source_ref(^p))
     }
     return out
 }
 fn source_directives(sources: ^[Source]) -> [Json] {
     out: [Json] = []
-    loop s in sources {
+    loop s; sources {
         out.push(source_json(^s))
     }
     return out
 }
 fn text_array(items: ^[String]) -> [Json] {
     out: [Json] = []
-    loop item in items {
+    loop item; items {
         out.push(Json.Text(item))
     }
     return out

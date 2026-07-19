@@ -38,7 +38,7 @@ fn bare_lambda_to_fn_typed_param_emits_param_type() {
     // expected fn-type back onto the AST so codegen emits it.
     let src = r#"
 fn run_each(xs: [Int], f: fn(Int)) {
-    loop x in xs {
+    loop x; xs {
         f(x)
     }
 }

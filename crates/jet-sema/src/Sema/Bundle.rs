@@ -192,8 +192,11 @@ pub(crate) fn rewrite_inline_calls_stmts(
                             rewrite_inline_calls_expr(step, siblings, modname);
                         }
                     }
-                    ForKind::In { collection } => {
+                    ForKind::In { collection, step } => {
                         rewrite_inline_calls_expr(collection, siblings, modname);
+                        if let Some(step) = step {
+                            rewrite_inline_calls_expr(step, siblings, modname);
+                        }
                     }
                 }
                 rewrite_inline_calls_stmts(body, siblings, modname);

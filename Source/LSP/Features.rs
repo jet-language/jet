@@ -355,9 +355,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::KwPub
         | TokKind::KwIf
         | TokKind::KwElse
-        | TokKind::KwIn
         | TokKind::KwBreak
-        | TokKind::KwContinue
         | TokKind::KwReturn
         | TokKind::KwStruct
         | TokKind::KwEnum

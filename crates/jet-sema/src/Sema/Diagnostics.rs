@@ -109,7 +109,7 @@ pub(crate) fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
         format!(
             "`{}` and `{}` steer the nearest `{}` loop",
             Syntax::KW_BREAK,
-            Syntax::KW_CONTINUE,
+            Syntax::KW_NEXT,
             Syntax::KW_LOOP,
         ),
         "move this inside a loop, or remove it".to_string(),
@@ -117,7 +117,7 @@ pub(crate) fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LOOPLABEL2 (E0987): `break name@` / `continue name@` names a loop label that is
+/// D-LOOPLABEL2 (E0987): `break name@` / `next name@` names a loop label that is
 /// not in scope. The fix lists the labels that *are* reachable here.
 pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) -> Diagnostic {
     let fix = if in_scope.is_empty() {
@@ -133,7 +133,7 @@ pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) 
     Diagnostic::error(
         "E0987",
         format!("no loop labeled `{name}@` is in scope"),
-        "a labeled `break`/`continue` must name an enclosing `name@ loop` (D-LOOPLABEL2)"
+        "a labeled `break`/`next` must name an enclosing `name@ loop` (D-LOOPLABEL2)"
             .to_string(),
         fix,
         Some(span),
@@ -855,7 +855,7 @@ pub(crate) fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
         ),
         "a `loop` borrows the whole collection until the body finishes".to_string(),
         format!(
-            "collect changes into a second list, or loop over indices: `loop i in 0..{}.len()-1 {{ }}`",
+            "collect changes into a second list, or loop over indices: `loop i; 0..{}.len()-1 {{ }}`",
             name
         ),
         Some(span),

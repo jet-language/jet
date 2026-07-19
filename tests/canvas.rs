@@ -99,7 +99,7 @@ const CANVAS_COVERAGE_FIXTURE: &str = r#"fn coverage(limit: Int) -> Int {
     total := 0
     loop i := 0; i < limit; i++ {
         if i == 2 {
-            continue
+            next
         }
         total += i
     }

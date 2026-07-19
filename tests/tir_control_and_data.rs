@@ -3,7 +3,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{build_and_run, build_and_run_full, have_rustc};
 
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
 /// are both fully covered, so both route through the TIR.
@@ -245,11 +245,11 @@ fn range_loops_inclusive_and_step() {
     let src = "\
 fn run() {
     total := 0
-    loop n in 1..5 {
+    loop n; 1..5 {
         total = (total + n)
     }
     print(total)
-    loop k in 0..10 step 2 {
+    loop k; 0..10; 2 {
         print(k)
     }
 }
@@ -260,7 +260,7 @@ fn run() {
     assert_eq!(stdout, "15\n0\n2\n4\n6\n8\n10\n");
 }
 
-/// Labeled loops: a `continue outer@` and a `break outer@` driving a nested
+/// Labeled loops: a `next outer@` and a `break outer@` driving a nested
 /// range loop. The `'jet_<name>:` labels are resolved at lowering.
 #[test]
 fn labeled_break_and_continue() {
@@ -269,10 +269,10 @@ fn labeled_break_and_continue() {
     }
     let src = "\
 fn run() {
-    outer@ loop i in 1..3 {
-        loop j in 1..3 {
+    outer@ loop i; 1..3 {
+        loop j; 1..3 {
             if (j == 2) {
-                continue outer@
+                next outer@
             }
             print(\"{i}-{j}\")
             if (i == 2) {
@@ -285,9 +285,72 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_labeled", src);
     assert_eq!(code, 0);
-    // i=1: j=1 prints 1-1, i!=2 so j=2 -> continue outer@.
+    // i=1: j=1 prints 1-1, i!=2 so j=2 -> next outer@.
     // i=2: j=1 prints 2-1, i==2 -> break outer@.
     assert_eq!(stdout, "1-1\n2-1\ndone\n");
+}
+
+/// D-LOOP-HEADER2/D-LOOP-ADVANCE2/D-LOOP-CONTROLWORD1: every loop header uses
+/// semicolon clauses; source/stride expressions run once and `next` enters the
+/// target loop's advancement edge.
+#[test]
+fn unified_loop_headers_stride_and_next_edges() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn source() -> [Int] {
+    print("source")
+    return [0, 1, 2, 3, 4, 5, 6]
+}
+
+fn stride() -> Int {
+    print("stride")
+    return 3
+}
+
+fn run() {
+    loop item; source(); stride() {
+        print(item)
+        if item == 0 { next }
+    }
+
+    outer@ loop i := 0; i < 3; i += 1 {
+        loop {
+            if i < 2 { next outer@ }
+            break
+        }
+        print("state {i}")
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("tir_unified_loops", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "source\nstride\n0\n3\n6\nstate 2\n");
+
+    let invalid = r#"
+fn source() -> [Int] {
+    print("source")
+    return [1]
+}
+fn stride() -> Int {
+    print("stride")
+    return 0
+}
+fn run() {
+    loop item; source(); stride() {
+        print(item)
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_full(
+        "jet_tir_test",
+        "tir_unified_loop_invalid_stride",
+        invalid,
+    );
+    assert_eq!(code, 70);
+    assert_eq!(stdout, "source\nstride\n", "no source item may be pulled");
+    assert!(stderr.contains("E0123: loop stride must be positive"));
 }
 
 // --- c109 Phase 3: structs --------------------------------------------------

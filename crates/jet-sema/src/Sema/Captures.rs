@@ -32,8 +32,11 @@ pub(crate) fn walk_stmts_for_const_refs(
                             walk_expr_for_const_refs(step, const_names, taken);
                         }
                     }
-                    ForKind::In { collection } => {
+                    ForKind::In { collection, step } => {
                         walk_expr_for_const_refs(collection, const_names, taken);
+                        if let Some(step) = step {
+                            walk_expr_for_const_refs(step, const_names, taken);
+                        }
                     }
                 }
                 walk_stmts_for_const_refs(body, const_names, taken);
@@ -439,7 +442,8 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                         || expr_refs_name(end, name)
                         || step.as_ref().is_some_and(|s| expr_refs_name(s, name))
                 }
-                ForKind::In { collection } => expr_refs_name(collection, name),
+                ForKind::In { collection, step } => expr_refs_name(collection, name)
+                    || step.as_ref().is_some_and(|s| expr_refs_name(s, name)),
             };
             coll || body.iter().any(|s| stmt_refs_name(s, name))
         }
@@ -768,8 +772,11 @@ pub(crate) fn stmt_collect_captures(
                         expr_collect_captures(step, bound, read, mut_cap);
                     }
                 }
-                ForKind::In { collection } => {
+                ForKind::In { collection, step } => {
                     expr_collect_captures(collection, bound, read, mut_cap);
+                    if let Some(step) = step {
+                        expr_collect_captures(step, bound, read, mut_cap);
+                    }
                 }
             }
             let mut body_bound = bound.clone();
