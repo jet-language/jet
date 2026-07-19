@@ -252,7 +252,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
 /// Entry point. Returns a process exit code.
 pub fn main(args: Vec<String>) -> i32 {
     let Some((verb, rest)) = args.split_first() else {
-        let theme = Theme::resolve(ColorChoice::Auto);
+        let theme = Theme::resolve_choice(ColorChoice::Auto);
         eprintln!("{}", super::usage_tests::usage_with_color(theme.color));
         return 2;
     };
@@ -263,11 +263,11 @@ pub fn main(args: Vec<String>) -> i32 {
         parsed.flags.color
     };
     if let Some(diag) = crate::MemberSelect::reject_filter_dsl(rest) {
-        let theme = Theme::resolve(color);
+        let theme = Theme::resolve_choice(color);
         theme.error_coded(&diag.code, &diag.what, &diag.why, &diag.fix);
         return 2;
     }
-    let theme = Theme::resolve(color);
+    let theme = Theme::resolve_choice(color);
     // Doctor must observe state without repairing or migrating it.
     if verb != "doctor" {
         if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {

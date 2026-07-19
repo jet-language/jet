@@ -35,8 +35,18 @@ impl PlanMark {
 }
 
 impl Theme {
+    /// Compatibility entry point: `true` is the historical no-color flag.
+    pub fn resolve(no_color: bool) -> Theme {
+        let choice = if no_color {
+            ColorChoice::Never
+        } else {
+            ColorChoice::Auto
+        };
+        Self::resolve_choice(choice)
+    }
+
     /// Resolve the shared explicit > NO_COLOR > FORCE_COLOR > TTY policy.
-    pub fn resolve(choice: ColorChoice) -> Theme {
+    pub fn resolve_choice(choice: ColorChoice) -> Theme {
         Self::resolve_for(choice, std::io::stderr().is_terminal())
     }
 
@@ -694,7 +704,7 @@ mod tests {
         // Explicit `--no-color` is the deterministic floor (also covers the
         // NO_COLOR path's `color: false` branch without mutating process env
         // under parallel cargo test).
-        let theme = Theme::resolve(ColorChoice::Never);
+        let theme = Theme::resolve_choice(ColorChoice::Never);
         assert!(!theme.color, "--no-color flag must force color=false");
     }
 

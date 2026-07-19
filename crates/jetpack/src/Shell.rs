@@ -107,7 +107,7 @@ impl Env {
 /// Run `cmd_args` inside the composed env and return its exit code. The parent
 /// process env is untouched (we mutate only the child's `Command`).
 pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
-    if !env.validate_cache(&Theme::resolve(jet_foundation::Terminal::ColorChoice::Never)) {
+    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
         return 126;
     }
     let Some((program, rest)) = cmd_args.split_first() else {
@@ -131,7 +131,7 @@ pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
             127
         }
     };
-    if !env.validate_cache(&Theme::resolve(jet_foundation::Terminal::ColorChoice::Never)) {
+    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
         return 126;
     }
     code
@@ -744,17 +744,36 @@ mod tests {
 
     #[test]
     fn bash_prompt_receipts_are_colored_in_a_real_pty() {
+        const LABEL: &str = "JETPACK_BASH_GENERATED";
+        let home = write_temp_dir("jetpack-prompt-color-bash-home");
+        std::fs::write(home.join(".bashrc"), "# isolated test startup\n").unwrap();
         let bash_rc = write_temp(
             "jetpack-prompt-color-bashrc",
-            &bash_rc("web-api", PromptPathMode::Short, PromptStripMode::Off),
+            &bash_rc(LABEL, PromptPathMode::Short, PromptStripMode::Off),
         );
+        assert!(bash_rc.is_file(), "generated bash rc was not written");
+        let path = std::env::var("PATH").unwrap_or_default();
         let bash = pty(
-            &format!("bash --noprofile --rcfile {} -i", bash_rc.display()),
-            "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() { [ \"$1\" = build ]; }\njet build\njet test\nexit 0\n",
+            &format!(
+                "env -i HOME={} PATH={} TERM=xterm-256color SHELL=/bin/bash HISTFILE=/dev/null bash --noprofile --rcfile {} -i",
+                shell_single_quote(&home.display().to_string()),
+                shell_single_quote(&path),
+                shell_single_quote(&bash_rc.display().to_string()),
+            ),
+            "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() { sleep .1; [ \"$1\" = build ]; }\njet build\njet test\nexit 0\n",
             false,
         );
         let _ = std::fs::remove_file(bash_rc);
+        let _ = std::fs::remove_dir_all(home);
         assert_receipt_colors_after_marker(&bash);
+        let captured = bash.rsplit_once("JETPACK_CAPTURE_START").unwrap().1;
+        assert!(
+            captured.contains(&format!(
+                "\x1b[{}m{LABEL}\x1b[0m",
+                SharedTheme::ACCENT_SGR
+            )),
+            "generated bash prompt sentinel missing: {captured:?}"
+        );
     }
 
     #[test]
