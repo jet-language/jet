@@ -69,10 +69,7 @@ fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process
     cmd.output().expect("jet binary should run")
 }
 
-#[cfg(unix)]
-fn install_closed_status_crypto_helper(home: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-
+fn isolated_crypto_helper_paths(home: &Path) -> (PathBuf, PathBuf) {
     let helper = jetpack::FFI::cached_crypto_helper_path();
     let cache_key = helper
         .parent()
@@ -85,13 +82,20 @@ fn install_closed_status_crypto_helper(home: &Path) {
         .join(".cache/jet/ffi")
         .join(cache_key)
         .join("target/release");
-    let helper = release.join("jet-crypto-helper");
-    fs::create_dir_all(&release).unwrap();
-    fs::write(
+    (
         release.join(format!("libjet_ffi_{cache_key}.rlib")),
-        b"test cache sentinel",
+        release.join("jet-crypto-helper"),
     )
-    .unwrap();
+}
+
+#[cfg(unix)]
+fn install_closed_status_crypto_helper(home: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (rlib, helper) = isolated_crypto_helper_paths(home);
+    let release = helper.parent().unwrap();
+    fs::create_dir_all(&release).unwrap();
+    fs::write(rlib, b"test cache sentinel").unwrap();
     let signature = "00".repeat(64);
     fs::write(
         &helper,
@@ -101,6 +105,14 @@ fn install_closed_status_crypto_helper(home: &Path) {
     )
     .unwrap();
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+fn install_cached_crypto_helper(home: &Path) {
+    let source = jet::Publish::Sign::ensure_bridge_helper().unwrap();
+    let (rlib, helper) = isolated_crypto_helper_paths(home);
+    fs::create_dir_all(helper.parent().unwrap()).unwrap();
+    fs::write(rlib, b"test cache sentinel").unwrap();
+    fs::copy(source, helper).unwrap();
 }
 
 /// Init an empty bare git repo standing in for a registry index. Returns its
@@ -4030,11 +4042,10 @@ fn key_rotation_warns_not_errors() {
         eprintln!("note: skipping key_rotation (cargo not found)");
         return;
     }
-    let tmp = tmp_dir("key_rotate");
-    let keys = tmp.join("keys");
 
-    with_keys(&keys, || {
+    if std::env::var_os("JET_PKG_KEY_ROTATION_CHILD").is_some() {
         let (seed_a, _pa, pub_a) = jet::Publish::Sign::keygen("jet", false).unwrap();
+        let original_seed = fs::read(&seed_a).unwrap();
         let (_seed_b, _pb, pub_b) = jet::Publish::Sign::keygen("other", false).unwrap();
         assert_ne!(pub_a, pub_b, "the two keys must differ");
 
@@ -4057,9 +4068,37 @@ fn key_rotation_warns_not_errors() {
             !warnings.is_empty() && warnings[0].contains("rotation"),
             "rotation must produce a key-rotation warning, got {warnings:?}"
         );
-    });
+        assert_eq!(fs::read(seed_a).unwrap(), original_seed);
+        println!("JET_PKG_KEY_ROTATION_OK");
+        return;
+    }
 
-    let _ = fs::remove_dir_all(&tmp);
+    let tmp = tmp_dir("key_rotate");
+    let home = tmp.join("home");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&home).unwrap();
+    install_cached_crypto_helper(&home);
+
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "key_rotation_warns_not_errors", "--nocapture"])
+        .env("JET_PKG_KEY_ROTATION_CHILD", "1")
+        .env("HOME", &home)
+        .env("JET_KEYS_DIR", &keys)
+        .output()
+        .unwrap();
+
+    fs::remove_dir_all(&tmp).unwrap();
+    assert!(
+        output.status.success(),
+        "rotation child failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("JET_PKG_KEY_ROTATION_OK"),
+        "rotation child omitted success marker:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 #[test]
