@@ -12,9 +12,18 @@
     }
 
     pub fn parse_json(text: &str) -> Result<Json, JsonError> {
+        parse_json_with(text, false)
+    }
+
+    pub fn parse_json_strict(text: &str) -> Result<Json, JsonError> {
+        parse_json_with(text, true)
+    }
+
+    fn parse_json_with(text: &str, reject_duplicate_keys: bool) -> Result<Json, JsonError> {
         let mut p = JsonParser {
             chars: text.chars().collect(),
             pos: 0,
+            reject_duplicate_keys,
         };
         let v = p.value()?;
         p.ws();
@@ -214,6 +223,7 @@
     struct JsonParser {
         chars: Vec<char>,
         pos: usize,
+        reject_duplicate_keys: bool,
     }
 
     impl JsonParser {
@@ -427,6 +437,9 @@
                 }
                 self.pos += 1;
                 let value = self.value()?;
+                if self.reject_duplicate_keys && out.contains_key(&key) {
+                    return Err(self.err("duplicate JSON object key"));
+                }
                 out.insert(key, value);
                 self.ws();
                 match self.peek() {

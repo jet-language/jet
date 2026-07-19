@@ -24,6 +24,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
     let is_io = etype.map(|t| matches!(t, "IOError" | "IOOperation")).unwrap_or(false);
     let is_email = etype.is_some_and(|t| matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError"));
+    let is_auth = etype == Some("AuthError");
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
     let is_key = {
         let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
@@ -47,6 +48,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             } else if matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError") {
                 let rust = if t == "EmailError" { "Error" } else { t };
                 format!("{}jet_email::{rust}", cx.root_prefix)
+            } else if t == "AuthError" {
+                format!("{}JetAuthError", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
                 format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
             } else {
@@ -65,7 +68,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON and Key variants keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_email {
+        if is_json || is_key || is_io || is_email || is_auth {
             v.to_string()
         } else {
             mangle_variant(v)
@@ -114,7 +117,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 // definition codegen in Items.rs) rather than always assuming a
                 // tuple variant. `VariantPayload::Single` is the only real tuple case.
                 let real_names = variant_field_names(cx, variant).map(|names| {
-                    if is_email {
+                    if is_email || is_auth {
                         names.into_iter().map(|name| name.strip_prefix("user_").unwrap_or(&name).to_string()).collect()
                     } else {
                         names
@@ -231,7 +234,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
             variant, bindings, ..
         } => {
             let prefix = enum_type_prefix(cx, variant);
-            let rv = variant_rust_name(variant);
+            let rv = variant_rust_name(cx, variant);
             if bindings.is_empty() {
                 // D-TAG1: a group name matches its whole subtree.
                 let owner = cx.variant_owner.get(variant).map(String::as_str);
@@ -240,7 +243,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     return leaves
                         .iter()
                         .map(|(n, p)| {
-                            let head = format!("{}::{}", prefix, variant_rust_name(n));
+                            let head = format!("{}::{}", prefix, variant_rust_name(cx, n));
                             match p {
                                 VariantPayload::Unit => head,
                                 VariantPayload::Single(..) => format!("{head}(_)"),
@@ -261,7 +264,20 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                         PatSlot::Range { .. } => format!("__jet_range_{}", i),
                     })
                     .collect();
-                if slot_pats.len() == 1 {
+                if let Some(names) = variant_field_names(cx, variant) {
+                    let plain = cx.variant_owner.get(variant).is_some_and(|owner| {
+                        matches!(owner.as_str(), "EmailError" | "SmtpAuth" | "TlsTrust" | "AuthError")
+                    });
+                    let fields = names
+                        .iter()
+                        .zip(&slot_pats)
+                        .map(|(name, pattern)| {
+                            let name = if plain { name.strip_prefix("user_").unwrap_or(name) } else { name };
+                            format!("{name}: {pattern}")
+                        })
+                        .collect::<Vec<_>>();
+                    format!("{}::{} {{ {} }}", prefix, rv, fields.join(", "))
+                } else if slot_pats.len() == 1 {
                     format!("{}::{}({})", prefix, rv, slot_pats[0])
                 } else {
                     let fields: Vec<String> = slot_pats

@@ -529,18 +529,36 @@ Examples: `examples/features/crypto/crypto_suite.jet`,
 `examples/features/crypto/crypto_envelope.jet`, and
 `examples/features/crypto/crypto_sign.jet`.
 
-### `core.auth` — HS256 JWT verification
+### `core.auth` — strict JWT and PASETO verification
 
-`core.auth` exports one verifier: `verify_jwt(token: String, key: [U8]) ->
-Claims ? AuthError`. It requires a three-part JWT whose header selects HS256,
-checks the HMAC-SHA256 signature, decodes the header and payload as UTF-8, and
-rejects an expired `exp` timestamp. `Claims` carries the parsed `sub`, `aud`,
-`exp`, and `iat` claims. The current function returns `aud` as claim data; it
-does not take an expected audience or apply application audience policy.
+`core.auth` exports two standalone verifiers:
 
-Malformed tokens, invalid signatures, expired tokens, and decoding failures
-return `AuthError`. The implementation is compiler-embedded, std-only, and adds
-no external dependency.
+```jet
+verify_jwt(token, key:, audience:, issuer:, clock_skew:) -> Claims ? AuthError
+verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) -> Claims ? AuthError
+```
+
+`issuer` and `clock_skew` are optional for both functions; `footer` and
+`implicit` are optional for PASETO. JWT accepts only HS256 and keys of at least
+32 bytes. PASETO accepts only `v4.public`, requires a 32-byte Ed25519 public
+key, and verifies the PAE input including the supplied footer and implicit
+assertion. Unknown algorithms, versions, and purposes fail closed.
+
+Both formats require integer `exp` and matching `aud` claims. An optional
+expected issuer must match `iss`. Expiry is compared in milliseconds, equality
+is expired, subsecond skew is preserved, and arithmetic overflow is rejected.
+Token JSON rejects duplicate object keys after escape decoding, including
+duplicates in headers and claims. Base64url input must be unpadded and
+canonical.
+
+`Claims` exposes `subject: String?`, the validated `audience: String`,
+`issuer: String?`, `expires_at: Int`, and `issued_at: Int?`. `AuthError` is an
+inspectable enum with `MalformedToken`, `UnsupportedToken`, `InvalidSignature`,
+`WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`, `TokenExpired`, and
+`DecodeError` variants. The implementation is compiler-embedded, reuses Jet's
+JSON and crypto mechanisms, and adds no external dependency.
+
+Example: `examples/features/web/auth_tokens.jet`.
 
 ### `core.watcher` — file/process/port change events
 

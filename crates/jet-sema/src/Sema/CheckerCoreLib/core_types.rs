@@ -1141,3 +1141,57 @@ pub(crate) fn core_encoding_variants(
     }
     Some(variants)
 }
+
+/// D-AUTH-TOKENPOLICY1=A: inspectable verifier failures.
+pub(crate) fn core_auth_variants(
+    enum_name: &str,
+) -> Option<
+    std::collections::HashMap<
+        String,
+        (crate::Diagnostics::Span, crate::AST::VariantPayload),
+    >,
+> {
+    use crate::AST::{VariantField, VariantPayload};
+    use crate::Diagnostics::Span;
+    if enum_name != "AuthError" {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    let field = |name: &str, ty: Type| VariantField {
+        name: name.to_string(),
+        name_span: zero,
+        ty,
+        ty_span: zero,
+    };
+    let mut variants = std::collections::HashMap::new();
+    for name in ["InvalidSignature", "WeakKey", "TokenExpired"] {
+        variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+    }
+    for name in ["MalformedToken", "UnsupportedToken", "MissingClaim", "DecodeError"] {
+        variants.insert(
+            name.to_string(),
+            (zero, VariantPayload::Single(Type::String, zero)),
+        );
+    }
+    variants.insert(
+        "WrongAudience".to_string(),
+        (
+            zero,
+            VariantPayload::Named(vec![
+                field("expected", Type::String),
+                field("actual", Type::String),
+            ]),
+        ),
+    );
+    variants.insert(
+        "WrongIssuer".to_string(),
+        (
+            zero,
+            VariantPayload::Named(vec![
+                field("expected", Type::String),
+                field("actual", Type::Option(Box::new(Type::String))),
+            ]),
+        ),
+    );
+    Some(variants)
+}

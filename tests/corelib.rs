@@ -8229,37 +8229,160 @@ fn run() {
     missing_exp := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkifQ.w3V9KixrW5iIdce6fH3-kTGBF1BoIAVN9jlaASUZyo8"
     missing_aud := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImV4cCI6NDEwMjQ0NDgwMH0.DvdDttFvdgTOXtC2L5P1zfs2bIMtiEwN3al4EAHYyf8"
     wrong_alg := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJleHAiOjQxMDI0NDQ4MDB9.Nq0tUwRS8BvslH3fvzVydHKrce-EcFBuLy7OpgQ2ICk"
+    duplicate_header := "eyJhbGciOiJIUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo0MTAyNDQ0ODAwfQ.MVJzUJG0exT9xheHOk7OpVqtfue7C_625krxtNm99qw"
+    escaped_duplicate_header := "eyJhbGciOiJIUzI1NiIsIlx1MDA2MWxnIjoiUlMyNTYifQ.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo0MTAyNDQ0ODAwfQ.z6ZtYWs143-PSZdfZSqrtX1lZOOb5KiXh_J-H6nr5gs"
+    duplicate_audience := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiYXVkIjoiYmlsbGluZyIsImV4cCI6NDEwMjQ0NDgwMH0.OVeIFJjjIN6Py2ZsvNiOFERv0Syt2nDTF2ZUZwWQkS0"
+    escaped_duplicate_audience := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiXHUwMDYxdWQiOiJiaWxsaW5nIiwiZXhwIjo0MTAyNDQ0ODAwfQ.-RJABGbCML2FgyJx4iWT4NsklKovltcY_lyVzDNTec4"
+    object_audience := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOnsieCI6ImdhdGV3YXkifSwiZXhwIjo0MTAyNDQ0ODAwfQ.BNUK56f_MGWL-7vRscOjDZGWtXZA18muouezh3BFg-Q"
+    object_expiry := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjp7Im4iOjQxMDI0NDQ4MDB9fQ.X1BTPgGav4pUqxQVq2uMYt4_VYEHfMRGP1aI5V50k2g"
+    wrong_issuer := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiaXNzIjoib3RoZXIiLCJleHAiOjQxMDI0NDQ4MDB9.ZVsh0LK7bvsylhpzu4i8TrgthCbSaelpKaoxWqF5-G4"
+    expired := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo5NDY2ODQ4MDB9.P-GYVR6Tc1zwSdZCEX6kbv4eSryvnxlevXfHU0MJMEg"
+    overflow_expiry := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo5MjIzMzcyMDM2ODU0Nzc1MDAwfQ.jHiJ1xzrrSVPwIEX-EujI-xiDDdgc7AvP6HsMWrb_L8"
+    noncanonical_base64 := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrZ"
     if auth.verify_jwt(valid_jwt, key: jwt_key, audience: "gateway", issuer: "partner", clock_skew: no_skew) == {
         .Ok(claims) -> { print("ok:{claims.audience}") }
         .Err(_) -> { print("rejected") }
     }
-    if auth.verify_jwt(wrong_aud, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
+    if auth.verify_jwt(wrong_aud, key: jwt_key, audience: "gateway") == {
+        .Ok(_) -> { print("accepted") }
+        .Err(error) -> {
+            if error == {
+                .WrongAudience(expected, actual) -> { print("aud:{expected}:{actual}") }
+                else -> { print("wrong-error") }
+            }
+        }
+    }
     if auth.verify_jwt(missing_exp, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
     if auth.verify_jwt(missing_aud, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
     if auth.verify_jwt(wrong_alg, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
     if auth.verify_jwt("{valid_jwt}x", key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
+    if auth.verify_jwt(duplicate_header, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("duplicate-header-accepted") } .Err(_) -> { print("duplicate-header-rejected") } }
+    if auth.verify_jwt(escaped_duplicate_header, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("escaped-duplicate-header-accepted") } .Err(_) -> { print("escaped-duplicate-header-rejected") } }
+    if auth.verify_jwt(duplicate_audience, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("duplicate-audience-accepted") } .Err(_) -> { print("duplicate-audience-rejected") } }
+    if auth.verify_jwt(escaped_duplicate_audience, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("escaped-duplicate-audience-accepted") } .Err(_) -> { print("escaped-duplicate-audience-rejected") } }
+    if auth.verify_jwt(object_audience, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("object-audience-accepted") } .Err(_) -> { print("object-audience-rejected") } }
+    if auth.verify_jwt(object_expiry, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("object-expiry-accepted") } .Err(_) -> { print("object-expiry-rejected") } }
+    if auth.verify_jwt(wrong_issuer, key: jwt_key, audience: "gateway", issuer: "partner") == { .Ok(_) -> { print("issuer-accepted") } .Err(_) -> { print("issuer-rejected") } }
+    if auth.verify_jwt(expired, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("expired-accepted") } .Err(_) -> { print("expired-rejected") } }
+    if auth.verify_jwt(overflow_expiry, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("overflow-accepted") } .Err(_) -> { print("overflow-rejected") } }
+    if auth.verify_jwt(noncanonical_base64, key: jwt_key, audience: "gateway", issuer: "partner") == { .Ok(_) -> { print("noncanonical-accepted") } .Err(_) -> { print("noncanonical-rejected") } }
+    weak_key: [U8] :: [115, 104, 111, 114, 116]
+    if auth.verify_jwt(valid_jwt, key: weak_key, audience: "gateway") == { .Ok(_) -> { print("weak-key-accepted") } .Err(error) -> { if error == { .WeakKey -> { print("weak-key-rejected") } else -> { print("weak-key-wrong-error") } } } }
 
     public_key: [U8] :: [198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45]
     footer: [U8] :: [107, 105, 100, 45, 49]
     implicit: [U8] :: [116, 101, 110, 97, 110, 116, 45, 97]
     paseto := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
+    bad_signature := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAg.a2lkLTE"
+    wrong_purpose := "v4.local.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
+    wrong_version := "v3.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
     bad: [U8] :: [98, 97, 100]
+    zero_key: [U8] :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
         .Ok(claims) -> { print("ok:{claims.audience}") }
         .Err(_) -> { print("rejected") }
     }
     if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: bad, implicit: implicit) == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
     if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: bad) == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
-    if auth.verify_paseto("v3.public.{paseto}", key: public_key, audience: "gateway") == { .Ok(_) -> { print("accepted") } .Err(_) -> { print("rejected") } }
+    if auth.verify_paseto(wrong_version, key: public_key, audience: "gateway") == { .Ok(_) -> { print("wrong-version-accepted") } .Err(_) -> { print("wrong-version-rejected") } }
+    if auth.verify_paseto(wrong_purpose, key: public_key, audience: "gateway") == { .Ok(_) -> { print("wrong-purpose-accepted") } .Err(_) -> { print("wrong-purpose-rejected") } }
+    if auth.verify_paseto(paseto, key: bad, audience: "gateway") == { .Ok(_) -> { print("short-paseto-key-accepted") } .Err(_) -> { print("short-paseto-key-rejected") } }
+    if auth.verify_paseto(paseto, key: zero_key, audience: "gateway") == { .Ok(_) -> { print("zero-paseto-key-accepted") } .Err(_) -> { print("zero-paseto-key-rejected") } }
+    if auth.verify_paseto(bad_signature, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == { .Ok(_) -> { print("bad-signature-accepted") } .Err(_) -> { print("bad-signature-rejected") } }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "strict_tokens", source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "ok:gateway\nrejected\nrejected\nrejected\nrejected\nrejected\nok:gateway\nrejected\nrejected\nrejected\n"
+        "ok:gateway\naud:gateway:billing\nrejected\nrejected\nrejected\nrejected\nduplicate-header-rejected\nescaped-duplicate-header-rejected\nduplicate-audience-rejected\nescaped-duplicate-audience-rejected\nobject-audience-rejected\nobject-expiry-rejected\nissuer-rejected\nexpired-rejected\noverflow-rejected\nnoncanonical-rejected\nweak-key-rejected\nok:gateway\nrejected\nrejected\nwrong-version-rejected\nwrong-purpose-rejected\nshort-paseto-key-rejected\nzero-paseto-key-rejected\nbad-signature-rejected\n"
     );
     assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+fn auth_test_b64url(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let a = chunk[0] as u32;
+        let b = chunk.get(1).copied().unwrap_or(0) as u32;
+        let c = chunk.get(2).copied().unwrap_or(0) as u32;
+        let bits = (a << 16) | (b << 8) | c;
+        out.push(TABLE[((bits >> 18) & 63) as usize] as char);
+        out.push(TABLE[((bits >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 { out.push(TABLE[((bits >> 6) & 63) as usize] as char); }
+        if chunk.len() > 2 { out.push(TABLE[(bits & 63) as usize] as char); }
+    }
+    out
+}
+
+fn auth_test_jwt(payload: &str) -> String {
+    let key = b"0123456789abcdef0123456789abcdef";
+    let header = auth_test_b64url(br#"{"alg":"HS256"}"#);
+    let payload = auth_test_b64url(payload.as_bytes());
+    let signed = format!("{header}.{payload}");
+    let mut block = [0u8; 64];
+    block[..key.len()].copy_from_slice(key);
+    let mut inner = Vec::with_capacity(64 + signed.len());
+    inner.extend(block.iter().map(|byte| byte ^ 0x36));
+    inner.extend_from_slice(signed.as_bytes());
+    let inner = jet::SHA256::sha256(&inner);
+    let mut outer = Vec::with_capacity(96);
+    outer.extend(block.iter().map(|byte| byte ^ 0x5c));
+    outer.extend_from_slice(&inner);
+    format!("{signed}.{}", auth_test_b64url(&jet::SHA256::sha256(&outer)))
+}
+
+#[test]
+fn core_auth_expiry_equality_and_subsecond_skew() {
+    let dir = std::env::temp_dir().join(format!("jet_core_auth_clock_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.auth as auth
+use core.env as env
+
+fn run() {
+    key: [U8] :: [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]
+    token := env.get("JET_AUTH_CLOCK_TOKEN") ?? panic("token")
+    zero :: Duration.milliseconds(0) ?? panic("zero")
+    skew :: Duration.milliseconds(1500) ?? panic("skew")
+    if auth.verify_jwt(token, key: key, audience: "gateway", issuer: "clock", clock_skew: zero) == {
+        .Ok(_) -> { print("equality-accepted") }
+        .Err(error) -> { if error == { .TokenExpired -> { print("equality-expired") } else -> { print("wrong-error") } } }
+    }
+    if auth.verify_jwt(token, key: key, audience: "gateway", issuer: "clock", clock_skew: skew) == {
+        .Ok(_) -> { print("subsecond-skew-accepted") }
+        .Err(_) -> { print("subsecond-skew-rejected") }
+    }
+}
+"#;
+    let shown = dir.join("clock.jet");
+    fs::write(&shown, src).unwrap();
+    let compiled = jet::compile_with_path(src, shown.to_str().unwrap()).unwrap();
+    let rs = dir.join("clock.rs");
+    let bin = dir.join("clock");
+    fs::write(&rs, compiled.rust).unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin);
+    if let Some(link) = compiled.ffi {
+        rustc.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        if link.deps_dir.is_dir() { rustc.arg("-L").arg(format!("dependency={}", link.deps_dir.display())); }
+    }
+    let built = rustc.output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+    let expires_at = now.as_secs() + 2;
+    let token = auth_test_jwt(&format!(r#"{{"aud":"gateway","iss":"clock","exp":{expires_at}}}"#));
+    let boundary_ms = u128::from(expires_at) * 1_000;
+    while std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() < boundary_ms {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let run = Command::new(&bin).env("JET_AUTH_CLOCK_TOKEN", token).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "equality-expired\nsubsecond-skew-accepted\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

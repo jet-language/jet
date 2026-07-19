@@ -1662,7 +1662,14 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         EnumLitArg::Named { label, expr } => {
                             let edge = format!("{}.{}", variant, label);
                             (
-                                if matches!(resolved_type, "EmailError" | "SmtpAuth" | "TlsTrust") { label.clone() } else { mangle(label) },
+                                if matches!(
+                                    resolved_type,
+                                    "EmailError" | "SmtpAuth" | "TlsTrust" | "AuthError"
+                                ) {
+                                    label.clone()
+                                } else {
+                                    mangle(label)
+                                },
                                 lower_enum_arg(resolved_type, variant, &edge, expr, cx, env),
                             )
                         }

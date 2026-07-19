@@ -92,7 +92,7 @@ fn jet_auth_ct_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 fn jet_auth_object(text: &str) -> Result<std::collections::BTreeMap<String, jet_std::Json>, JetAuthError> {
-    match jet_std::parse_json(text) {
+    match jet_std::parse_json_strict(text) {
         Ok(jet_std::Json::Object(fields)) => Ok(fields),
         Ok(_) => Err(JetAuthError::MalformedToken("token JSON must be an object".to_string())),
         Err(error) => Err(JetAuthError::DecodeError(error.message)),
@@ -189,11 +189,18 @@ fn jet_auth_claims(
     if clock_skew_ms < 0 {
         return Err(JetAuthError::MalformedToken("clock_skew cannot be negative".to_string()));
     }
-    let now = std::time::SystemTime::now()
+    let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0);
-    if now > expires_at.saturating_add(clock_skew_ms / 1000) {
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or(i64::MAX);
+    let expires_at_ms = expires_at
+        .checked_mul(1_000)
+        .ok_or_else(|| JetAuthError::MalformedToken("claim `exp` is outside the supported millisecond range".to_string()))?;
+    let valid_until_ms = expires_at_ms
+        .checked_add(clock_skew_ms)
+        .ok_or_else(|| JetAuthError::MalformedToken("clock_skew overflows the token expiry".to_string()))?;
+    if now_ms >= valid_until_ms {
         return Err(JetAuthError::TokenExpired);
     }
     Ok(JetAuthClaims {

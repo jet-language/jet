@@ -1596,6 +1596,44 @@ fn register_core_close_types(cx: &mut Cx) {
 
 /// Populate value-shape tables that depend on bundle-resolved Core imports.
 pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
+    if cx.core_imports.values().any(|module| module == "core.auth") {
+        let zero = Span::new(0, 0);
+        let field = |name: &str, ty: Type| VariantField {
+            name: name.to_string(),
+            name_span: zero,
+            ty,
+            ty_span: zero,
+        };
+        let mut variants = vec![
+            ("InvalidSignature".to_string(), VariantPayload::Unit),
+            ("WeakKey".to_string(), VariantPayload::Unit),
+            ("TokenExpired".to_string(), VariantPayload::Unit),
+        ];
+        variants.extend(
+            ["MalformedToken", "UnsupportedToken", "MissingClaim", "DecodeError"]
+                .into_iter()
+                .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
+        );
+        variants.push((
+            "WrongAudience".to_string(),
+            VariantPayload::Named(vec![
+                field("expected", Type::String),
+                field("actual", Type::String),
+            ]),
+        ));
+        variants.push((
+            "WrongIssuer".to_string(),
+            VariantPayload::Named(vec![
+                field("expected", Type::String),
+                field("actual", Type::Option(Box::new(Type::String))),
+            ]),
+        ));
+        for (variant, _) in &variants {
+            cx.variant_owner.insert(variant.clone(), "AuthError".to_string());
+        }
+        cx.enum_variants.insert("AuthError".to_string(), variants);
+        cx.cloneable.insert("AuthError".to_string());
+    }
     if !cx.core_imports.values().any(|module| module == Syntax::CORE_EMAIL_MODULE) {
         return;
     }
