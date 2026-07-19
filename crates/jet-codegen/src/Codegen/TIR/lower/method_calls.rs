@@ -2366,8 +2366,11 @@ pub(crate) fn lower_method_call(
             });
             if args.len() == 1 {
                 if let Some(source) = source {
-                    let scale = source.scale / destination.scale;
-                    let offset = (source.offset - destination.offset) / destination.scale;
+                    let scale = source.scale.div(&destination.scale)
+                        .expect("sema validated unit scale");
+                    let offset = source.offset.sub(&destination.offset)
+                        .and_then(|value| value.div(&destination.scale))
+                        .expect("sema validated unit offset");
                     return TExpr {
                         ty: if rounded {
                             Type::Float

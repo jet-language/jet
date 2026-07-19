@@ -1180,8 +1180,8 @@ pub enum TExprKind {
     UnitConvert {
         destination: String,
         arg: Box<TExpr>,
-        scale: f64,
-        offset: f64,
+        scale: crate::AST::UnitRatio,
+        offset: crate::AST::UnitRatio,
         rounded: bool,
     },
     /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /

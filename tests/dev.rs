@@ -2435,6 +2435,20 @@ fn run() -> Void ? {
         failed,
         ProgramOutput::ran("".into(), "unit conversion would round\n".into(), 1)
     );
+
+    let beyond_f64 = run_cranelift_without_fallback(r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+}
+fn run() -> Void ? {
+    Meter.from_almost(1almost)?
+}
+"#, "physical_quantity_exact_rational_edge");
+    assert_eq!(
+        beyond_f64,
+        ProgramOutput::ran("".into(), "unit conversion would round\n".into(), 1)
+    );
 }
 
 #[test]

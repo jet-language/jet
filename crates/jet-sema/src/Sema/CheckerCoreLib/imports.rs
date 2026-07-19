@@ -174,6 +174,16 @@ impl<'a> Checker<'a> {
                         self.diags.push(crate::Generics::e0904(span, &type_params[0].name));
                     } else {
                         for (param, actual) in type_params.iter().zip(type_args) {
+                            for bound in &param.bounds {
+                                if !self.type_satisfies_bound(actual, bound) {
+                                    self.diags.push(crate::Generics::e0905(
+                                        &actual.name(),
+                                        bound,
+                                        span,
+                                        false,
+                                    ));
+                                }
+                            }
                             subst.insert(param.name.clone(), actual.clone());
                         }
                     }

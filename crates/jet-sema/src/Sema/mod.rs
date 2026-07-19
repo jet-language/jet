@@ -148,14 +148,18 @@ impl UnitFact {
         })
     }
 
-    fn converted_value_to(&self, destination: &Self, value: f64) -> Option<f64> {
-        let (scale, offset) = self.conversion_parts_to(destination)?;
-        let ratio = |value: &crate::AST::UnitRatio| {
-            Some(value.num.to_string().parse::<f64>().ok()?
-                / value.den.to_string().parse::<f64>().ok()?)
+    fn converted_value_is_exact_to(&self, destination: &Self, value: f64) -> bool {
+        let Some((scale, offset)) = self.conversion_parts_to(destination) else {
+            return false;
         };
-        let converted = value * ratio(&scale)? + ratio(&offset)?;
-        converted.is_finite().then_some(converted)
+        jet_foundation::jet_unit_conversion_exact(
+            value,
+            &scale.num.to_string(),
+            &scale.den.to_string(),
+            &offset.num.to_string(),
+            &offset.den.to_string(),
+        )
+        .is_some()
     }
 }
 
@@ -1353,8 +1357,7 @@ impl<'a> Checker<'a> {
         }
         let exact = source_fact.conversion_is_exact_to(&destination_fact)
             || Self::concrete_unit_value(expr)
-                .and_then(|value| source_fact.converted_value_to(&destination_fact, value))
-                .is_some_and(|value| value.fract() == 0.0);
+                .is_some_and(|value| source_fact.converted_value_is_exact_to(&destination_fact, value));
         if !exact {
             self.diags.push(self.inexact_unit_diagnostic(
                 &destination_name,

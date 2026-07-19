@@ -234,12 +234,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let destination = cx.rust_type(&Type::Named(destination.clone()));
             let value = format!("({}).0", emit_tir_expr(arg, cx));
-            let converted = format!("({value} * {scale:?}_f64 + {offset:?}_f64)");
+            let args = format!(
+                "{value}, {:?}, {:?}, {:?}, {:?}",
+                scale.num.to_string(),
+                scale.den.to_string(),
+                offset.num.to_string(),
+                offset.den.to_string(),
+            );
             if *rounded {
-                format!("{destination}(({converted}).round_ties_even())")
+                format!("{destination}(jet_unit_conversion_rounded({args}).expect(\"validated finite unit conversion\"))")
             } else {
                 format!(
-                    "{{ let converted = {converted}; if converted.is_finite() && converted.fract() == 0.0 {{ Ok({destination}(converted)) }} else {{ Err(\"unit conversion would round\".to_string()) }} }}"
+                    "match jet_unit_conversion_exact({args}) {{ Some(converted) => Ok({destination}(converted)), None => Err(\"unit conversion would round\".to_string()) }}"
                 )
             }
         }

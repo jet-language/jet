@@ -192,6 +192,29 @@ fn run() { takes_meter(3000millimeter) }
 }
 
 #[test]
+fn exactness_uses_rational_math_beyond_f64_integer_precision() {
+    let family = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+}
+"#;
+    let implicit = format!(
+        "{family}\nfn takes_meter(value: Meter) {{ print(value.raw()) }}\nfn run() {{ takes_meter(1almost) }}\n"
+    );
+    assert_eq!(codes_of(&implicit), vec!["E0127"]);
+
+    if tir_support::have_rustc() {
+        let explicit = format!(
+            "{family}\nfn run() {{ value :: Meter.from_almost(1almost) ?? Meter.from_float(-1.0); print(value.raw()) }}\n"
+        );
+        let (code, stdout) = tir_support::build_and_run("quantity_exact_rational_edge", &explicit);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "-1.0\n");
+    }
+}
+
+#[test]
 fn quantity_generic_bound_preserves_concrete_unit_and_kind() {
     let src = r#"
 @UnitFamily(Length, base: meter) { meter }
@@ -252,6 +275,42 @@ fn run() {
     );
     assert_eq!(code, 0);
     assert_eq!(stdout, "2.0\n");
+}
+
+#[test]
+fn imported_explicit_quantity_argument_checks_its_bound() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_quantity_imported_explicit_bound_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("units.jet"),
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(
+        &entry,
+        r#"
+use "units" as units
+@UnitFamily(Time) { second }
+fn run() {
+    source :: 1second
+    bad :: units.keep<Second>(^source)
+    print(bad.raw())
+}
+"#,
+    )
+    .unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0905"),
+        "explicit imported type arguments must satisfy Quantity bounds: {diagnostics:?}"
+    );
 }
 
 #[test]
@@ -389,6 +448,11 @@ fn run() {
     print("{(exact.raw())} {(inexact.raw())} {(rounded.raw())}")
 }
 "#;
+    let generated = jet::compile(src).expect("explicit unit conversions should compile").rust;
+    assert!(
+        !generated.contains("fn user_from_"),
+        "unit conversion behavior belongs to TIR, not generated destination methods"
+    );
     let (code, stdout) = tir_support::build_and_run("quantity_explicit_exact_rounded", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "3.0 -1.0 1.0\n");

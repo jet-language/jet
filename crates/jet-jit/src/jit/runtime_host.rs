@@ -580,10 +580,29 @@ extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
 }
 
-extern "C" fn jet_jit_unit_convert_exact(value: f64, scale: f64, offset: f64) -> i64 {
-    let converted = value * scale + offset;
+extern "C" fn jet_jit_unit_convert_exact(
+    value: f64,
+    scale_num: i64,
+    scale_den: i64,
+    offset_num: i64,
+    offset_den: i64,
+) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        if converted.is_finite() && converted.fract() == 0.0 {
+        let ratios = [scale_num, scale_den, offset_num, offset_den]
+            .map(|id| rt.heap.get_string(id).map(str::to_owned));
+        let converted = match &ratios {
+            [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] => {
+                jet_foundation::jet_unit_conversion_exact(
+                    value,
+                    scale_num,
+                    scale_den,
+                    offset_num,
+                    offset_den,
+                )
+            }
+            _ => None,
+        };
+        if let Some(converted) = converted {
             alloc_jit_result(rt, true, converted.to_bits())
         } else {
             let error = rt.heap.alloc_string("unit conversion would round");
@@ -592,8 +611,30 @@ extern "C" fn jet_jit_unit_convert_exact(value: f64, scale: f64, offset: f64) ->
     })
 }
 
-extern "C" fn jet_jit_unit_convert_rounded(value: f64, scale: f64, offset: f64) -> f64 {
-    (value * scale + offset).round_ties_even()
+extern "C" fn jet_jit_unit_convert_rounded(
+    value: f64,
+    scale_num: i64,
+    scale_den: i64,
+    offset_num: i64,
+    offset_den: i64,
+) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let ratios = [scale_num, scale_den, offset_num, offset_den]
+            .map(|id| rt.heap.get_string(id).map(str::to_owned));
+        match &ratios {
+            [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] => {
+                jet_foundation::jet_unit_conversion_rounded(
+                    value,
+                    scale_num,
+                    scale_den,
+                    offset_num,
+                    offset_den,
+                )
+                .unwrap_or(f64::NAN)
+            }
+            _ => f64::NAN,
+        }
+    })
 }
 
 extern "C" fn jet_jit_result_new_i8(ok: i8, value: i8) -> i64 {
@@ -962,10 +1003,12 @@ fn declare_host_fns(
     sig_result_new_i32.params.push(AbiParam::new(types::I32));
     sig_result_new_i32.returns.push(AbiParam::new(types::I64));
     let mut sig_unit_convert_exact = Signature::new(cc);
-    sig_unit_convert_exact.params.extend([AbiParam::new(types::F64); 3]);
+    sig_unit_convert_exact.params.push(AbiParam::new(types::F64));
+    sig_unit_convert_exact.params.extend([AbiParam::new(types::I64); 4]);
     sig_unit_convert_exact.returns.push(AbiParam::new(types::I64));
     let mut sig_unit_convert_rounded = Signature::new(cc);
-    sig_unit_convert_rounded.params.extend([AbiParam::new(types::F64); 3]);
+    sig_unit_convert_rounded.params.push(AbiParam::new(types::F64));
+    sig_unit_convert_rounded.params.extend([AbiParam::new(types::I64); 4]);
     sig_unit_convert_rounded.returns.push(AbiParam::new(types::F64));
     let mut sig_result_query_i8 = Signature::new(cc);
     sig_result_query_i8.params.push(AbiParam::new(types::I64));

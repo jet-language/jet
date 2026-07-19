@@ -1886,15 +1886,24 @@ impl LowerCtx<'_, '_> {
                 ..
             } => {
                 let value = self.lower_expr(arg)?;
-                let scale = self.b.ins().f64const(*scale);
-                let offset = self.b.ins().f64const(*offset);
+                let ratios = [
+                    scale.num.to_string(),
+                    scale.den.to_string(),
+                    offset.num.to_string(),
+                    offset.den.to_string(),
+                ]
+                .map(|ratio| self.runtime.heap.alloc_string(ratio))
+                .map(|id| self.b.ins().iconst(types::I64, id));
                 let host = if *rounded {
                     self.host.unit_convert_rounded
                 } else {
                     self.host.unit_convert_exact
                 };
                 let host = self.module.declare_func_in_func(host, self.b.func);
-                let call = self.b.ins().call(host, &[value, scale, offset]);
+                let call = self.b.ins().call(
+                    host,
+                    &[value, ratios[0], ratios[1], ratios[2], ratios[3]],
+                );
                 Ok(self.b.inst_results(call)[0])
             }
             TExprKind::OverflowOpt { .. } => {

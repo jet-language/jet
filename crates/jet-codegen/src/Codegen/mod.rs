@@ -49,6 +49,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/Observe.rs"),
+    include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
 ];
 
 fn push_prelude(out: &mut String) {
@@ -1201,7 +1202,6 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
                 for d in uf.distinct_defs() {
                     emit_distinct(&cx, &d, &mut out);
                 }
-                emit_unit_conversions(uf, &mut out);
             }
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
@@ -1555,7 +1555,6 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
                 for d in uf.distinct_defs() {
                     emit_distinct(&cx, &d, &mut out);
                 }
-                emit_unit_conversions(uf, &mut out);
             }
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),

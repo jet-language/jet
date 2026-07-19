@@ -14,18 +14,8 @@ pub(crate) struct UnitFact {
     pub(crate) family: String,
     pub(crate) dimension: crate::AST::Dimension,
     pub(crate) kind: crate::AST::QuantityKind,
-    pub(crate) scale: f64,
-    pub(crate) offset: f64,
-}
-
-fn unit_ratio_f64(ratio: &crate::AST::UnitRatio) -> f64 {
-    ratio.num.to_string().parse::<f64>().unwrap_or_else(|_| {
-        if ratio.num.is_negative() {
-            f64::NEG_INFINITY
-        } else {
-            f64::INFINITY
-        }
-    }) / ratio.den.to_string().parse::<f64>().unwrap_or(f64::INFINITY)
+    pub(crate) scale: crate::AST::UnitRatio,
+    pub(crate) offset: crate::AST::UnitRatio,
 }
 
 fn unit_family_member_for_type<'a>(
@@ -54,11 +44,11 @@ fn unit_fact(
         family: family.family.clone(),
         dimension,
         kind,
-        scale: unit_ratio_f64(&member.scale),
+        scale: member.scale.clone(),
         offset: if kind == crate::AST::QuantityKind::Point {
-            unit_ratio_f64(&member.offset)
+            member.offset.clone()
         } else {
-            0.0
+            crate::AST::UnitRatio::zero()
         },
     }
 }
