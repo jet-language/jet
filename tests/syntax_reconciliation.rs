@@ -509,6 +509,17 @@ fn marker_plane_matrix_covers_current_marker_families() {
     let decisions =
         fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
+    // Deleting or hiding either export fails to compile; respelling one fails here.
+    assert_eq!(jet::Syntax::EFFECT_ARROW_OPEN, "--[");
+    assert_eq!(jet::Syntax::EFFECT_ARROW_CLOSE, "]->");
+    assert!(
+        decisions.contains(
+            "**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,\n\
+             owner-amended; implemented 2026-07-17, card #543)*:"
+        ),
+        "syntax decisions must keep D-SHAPE8=A ratified and implemented"
+    );
+
     for (row, spellings) in MARKER_PLANE_ROWS {
         let row_text = marker_plane_row(&matrix, row);
         for spelling in *spellings {
@@ -533,8 +544,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "ATTR_LAYOUT",
         "ATTR_CODABLE",
         "APPLIED_RULES",
-        "EFFECT_ARROW_OPEN",
-        "EFFECT_ARROW_CLOSE",
         "KW_CAPS",
         "KW_GRANT",
         "KW_COMPTIME",
@@ -555,7 +564,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "D-BENCH1",
         "D-CAPBUNDLE1",
         "D-CTMARKER1",
-        "D-SHAPE8",
     ] {
         assert!(
             matrix.contains(decision_anchor) && decisions.contains(decision_anchor),
