@@ -40,7 +40,10 @@ fn trait_names(item: &Item, out: &mut HashSet<String>) {
 fn check(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
     // Compiler-reserved names have their own D-SHAPE-DUNDER2 diagnostic.
     let case = Syntax::name_case_for_category(category)
-        .unwrap_or_else(|| panic!("identifier category `{category}` is missing from Syntax::NAME_CASE_CATEGORIES"));
+        .unwrap_or_else(|| jet_foundation::ice!(
+            Some(span),
+            "identifier category `{category}` is missing from Syntax::NAME_CASE_CATEGORIES"
+        ));
     if name.is_empty() || name.starts_with("__") || Syntax::name_has_case(name, case) { return; }
     let expected = match case { NameCase::Pascal => "PascalCase", NameCase::Snake => "snake_case" };
     let fixed = Syntax::canonical_name_case(name, case);

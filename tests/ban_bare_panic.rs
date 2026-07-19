@@ -41,6 +41,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "#[cfg(test)] XML event/tree shape assertion fixtures",
     ),
     (
+        "crates/jet-foundation/src/Terminal.rs",
+        1,
+        "#[cfg(test)] isolated child-process case assertion fixture",
+    ),
+    (
         "crates/jet-codegen/src/Prelude/Core.rs",
         4,
         "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code",
@@ -129,6 +134,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "Source/Interpreter.rs",
         1,
         "#[test]-only assertion fixture",
+    ),
+    (
+        "Source/LSP/mod.rs",
+        1,
+        "#[cfg(test)] bundle-presence assertion fixture",
     ),
 ];
 
