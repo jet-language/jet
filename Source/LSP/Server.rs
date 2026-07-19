@@ -29,6 +29,7 @@ use jet_foundation::JSON::{
 struct Document {
     path: String,
     text: String,
+    version: i32,
 }
 
 #[derive(Clone)]
@@ -39,22 +40,36 @@ struct CheckedBundle {
 }
 
 impl Document {
-    fn new(path: String, text: String) -> Self {
-        Document { path, text }
+    fn new(path: String, text: String, version: i32) -> Self {
+        Document {
+            path,
+            text,
+            version,
+        }
     }
 
     fn replace_text(&mut self, text: String) {
         self.text = text;
     }
 
-    fn apply_range_edit(&mut self, range: LspRange, text: &str) {
-        self.text = apply_lsp_edit(&self.text, range, text);
+    fn apply_range_edit(
+        &mut self,
+        range: LspRange,
+        range_length: Option<u32>,
+        text: &str,
+    ) -> bool {
+        let Some(text) = apply_lsp_edit(&self.text, range, range_length, text) else {
+            return false;
+        };
+        self.text = text;
+        true
     }
 }
 
 struct Server {
     docs: HashMap<String, Document>,
     workspace_roots: Vec<String>,
+    workspace_folders: bool,
     /// URIs of documents that changed since last diagnostic publish (D-LSP3).
     dirty: std::collections::HashSet<String>,
     /// D-LSP1 stage 1: shared query engine for memoized document facts.
@@ -67,6 +82,7 @@ impl Server {
         Server {
             docs: HashMap::new(),
             workspace_roots: Vec::new(),
+            workspace_folders: false,
             dirty: std::collections::HashSet::new(),
             queries: std::cell::RefCell::new(QueryEngine::new()),
             shutdown: false,
@@ -362,17 +378,20 @@ fn record_lsp_latency(method: &str, us: u128) {
 fn configure_workspace_roots(server: &mut Server, params: Option<&JsonValue>) {
     let mut roots = Vec::new();
     if let Some(params) = params {
-        if let Some(JsonValue::Array(folders)) = json_get(params, "workspaceFolders") {
-            for folder in folders {
-                if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
-                    push_workspace_root(&mut roots, uri_to_path(uri));
+        server.workspace_folders = json_get(params, "workspaceFolders").is_some();
+        if let Some(folders) = json_get(params, "workspaceFolders") {
+            if let JsonValue::Array(folders) = folders {
+                for folder in folders {
+                    if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
+                        push_workspace_root(&mut roots, uri_to_path(uri));
+                    }
                 }
             }
-        }
-        if let Some(uri) = json_get(params, "rootUri").and_then(json_str) {
-            push_workspace_root(&mut roots, uri_to_path(uri));
-        }
-        if let Some(path) = json_get(params, "rootPath").and_then(json_str) {
+        } else if let Some(root_uri) = json_get(params, "rootUri") {
+            if let Some(uri) = json_str(root_uri) {
+                push_workspace_root(&mut roots, uri_to_path(uri));
+            }
+        } else if let Some(path) = json_get(params, "rootPath").and_then(json_str) {
             push_workspace_root(&mut roots, path.to_string());
         }
     }
@@ -383,6 +402,29 @@ fn push_workspace_root(roots: &mut Vec<String>, path: String) {
     let path = normalize_path(&path);
     if !path.is_empty() && !roots.iter().any(|root| root == &path) {
         roots.push(path);
+    }
+}
+
+fn update_workspace_roots(server: &mut Server, params: Option<&JsonValue>) {
+    let Some(event) = params.and_then(|params| json_get(params, "event")) else {
+        return;
+    };
+    server.workspace_folders = true;
+    if let Some(JsonValue::Array(removed)) = json_get(event, "removed") {
+        for folder in removed {
+            let Some(uri) = json_get(folder, "uri").and_then(json_str) else {
+                continue;
+            };
+            let path = normalize_path(&uri_to_path(uri));
+            server.workspace_roots.retain(|root| root != &path);
+        }
+    }
+    if let Some(JsonValue::Array(added)) = json_get(event, "added") {
+        for folder in added {
+            if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
+                push_workspace_root(&mut server.workspace_roots, uri_to_path(uri));
+            }
+        }
     }
 }
 
@@ -400,6 +442,10 @@ fn handle_notification(
         }
         "textDocument/didOpen" => publish_after_open(server, params, stdout),
         "textDocument/didChange" => publish_after_change(server, params, stdout),
+        "workspace/didChangeWorkspaceFolders" => {
+            update_workspace_roots(server, params);
+            Ok(())
+        }
         "textDocument/didClose" => {
             if let Some(uri) = params
                 .and_then(|p| json_get(p, "textDocument"))
@@ -464,6 +510,12 @@ fn initialize_response(id: &JsonValue) -> String {
     "inlayHintProvider": true,
     "callHierarchyProvider": true,
     "typeHierarchyProvider": true,
+    "workspace": {
+      "workspaceFolders": {
+        "supported": true,
+        "changeNotifications": true
+      }
+    },
     "executeCommandProvider": {
       "commands": ["jet.impact", "jet.budgetReports"]
     }
@@ -536,22 +588,39 @@ fn publish_after_change_impl(
         Some(u) => u.to_string(),
         None => return Ok(()),
     };
-    let path = uri_to_path(&uri);
+    let Some(version) = json_get(td, "version").and_then(|value| match value {
+        JsonValue::Number(version) => i32::try_from(*version).ok(),
+        _ => None,
+    }) else {
+        return Ok(());
+    };
 
-    if let Some(text) = json_get(td, "text").and_then(json_str) {
-        server
-            .docs
-            .insert(uri.clone(), Document::new(path, text.to_string()));
-    } else if let Some(changes) = json_get(params, "contentChanges") {
-        if let JsonValue::Array(arr) = changes {
-            let doc = server
-                .docs
-                .entry(uri.clone())
-                .or_insert_with(|| Document::new(path, String::new()));
-            for change in arr {
-                apply_content_change(doc, change);
-            }
+    if is_open {
+        let Some(text) = json_get(td, "text").and_then(json_str) else {
+            return Ok(());
+        };
+        server.docs.insert(
+            uri.clone(),
+            Document::new(uri_to_path(&uri), text.to_string(), version),
+        );
+    } else {
+        let Some(JsonValue::Array(changes)) = json_get(params, "contentChanges") else {
+            return Ok(());
+        };
+        let Some(current) = server.docs.get(&uri) else {
+            return Ok(());
+        };
+        if version <= current.version {
+            return Ok(());
         }
+        let mut updated = Document::new(current.path.clone(), current.text.clone(), version);
+        if !changes
+            .iter()
+            .all(|change| apply_content_change(&mut updated, change))
+        {
+            return Ok(());
+        }
+        server.docs.insert(uri.clone(), updated);
     }
     if let Some(doc) = server.docs.get(&uri) {
         server.sync_doc_input(doc);
@@ -561,7 +630,7 @@ fn publish_after_change_impl(
         // Always publish on open — client expects initial diagnostics.
         if let Some(doc) = server.docs.get(&uri) {
             let diags = server.check(doc);
-            let notif = publish_diagnostics(&uri, &doc.text, &diags);
+            let notif = publish_diagnostics(&uri, &doc.text, doc.version, &diags);
             write_message(stdout, &notif)?;
         }
         server.dirty.remove(&uri);
@@ -572,19 +641,32 @@ fn publish_after_change_impl(
     Ok(())
 }
 
-fn apply_content_change(doc: &mut Document, change: &JsonValue) {
+fn apply_content_change(doc: &mut Document, change: &JsonValue) -> bool {
     let obj = match change {
         JsonValue::Object(obj) => obj,
-        _ => return,
+        _ => return false,
     };
     let text = match obj.get("text").and_then(json_str) {
         Some(text) => text,
-        None => return,
+        None => return false,
     };
-    if let Some(range) = obj.get("range").and_then(range_from_json) {
-        doc.apply_range_edit(range, text);
-    } else {
-        doc.replace_text(text.to_string());
+    let range_length = match obj.get("rangeLength") {
+        Some(value) => match lsp_uinteger(value) {
+            Some(length) => Some(length),
+            None => return false,
+        },
+        None => None,
+    };
+    match obj.get("range") {
+        Some(value) => match range_from_json(value) {
+            Some(range) => doc.apply_range_edit(range, range_length, text),
+            None => false,
+        },
+        None if range_length.is_some() => false,
+        None => {
+            doc.replace_text(text.to_string());
+            true
+        }
     }
 }
 
@@ -599,9 +681,13 @@ fn range_from_json(value: &JsonValue) -> Option<LspRange> {
 
 fn pos_from_json(value: &JsonValue) -> Option<LspPos> {
     Some(LspPos {
-        line: json_u32(json_get(value, "line")?)?,
-        character: json_u32(json_get(value, "character")?)?,
+        line: lsp_uinteger(json_get(value, "line")?)?,
+        character: lsp_uinteger(json_get(value, "character")?)?,
     })
+}
+
+fn lsp_uinteger(value: &JsonValue) -> Option<u32> {
+    json_u32(value).filter(|value| *value <= i32::MAX as u32)
 }
 
 /// Flush any pending dirty-document diagnostics before handling a request (D-LSP3).
@@ -611,14 +697,14 @@ fn flush_dirty(server: &mut Server, stdout: &mut impl Write) -> io::Result<()> {
         if let Some(doc) = server.docs.get(&uri) {
             let text = doc.text.clone();
             let diags = server.check(doc);
-            let notif = publish_diagnostics(&uri, &text, &diags);
+            let notif = publish_diagnostics(&uri, &text, doc.version, &diags);
             write_message(stdout, &notif)?;
         }
     }
     Ok(())
 }
 
-fn publish_diagnostics(uri: &str, src: &str, diags: &[Diagnostic]) -> String {
+fn publish_diagnostics(uri: &str, src: &str, version: i32, diags: &[Diagnostic]) -> String {
     let mut items = String::new();
     for (i, d) in diags.iter().enumerate() {
         if i > 0 {
@@ -627,8 +713,9 @@ fn publish_diagnostics(uri: &str, src: &str, diags: &[Diagnostic]) -> String {
         items.push_str(&diagnostic_json(d, src));
     }
     format!(
-        r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","diagnostics":[{}]}}}}"#,
+        r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","version":{},"diagnostics":[{}]}}}}"#,
         json_escape(uri),
+        version,
         items
     )
 }
@@ -877,8 +964,7 @@ fn workspace_symbol_response(
         .to_ascii_lowercase();
     let mut items = String::new();
     let mut first = true;
-    let root_hint = server.docs.values().next().map(|doc| doc.path.as_str());
-    let mut docs = workspace_sources(server, root_hint);
+    let mut docs = workspace_sources(server, None);
     docs.sort_by(|a, b| a.0.cmp(&b.0));
     for (path, text) in docs {
         let db = if let Some(doc) = server.docs.values().find(|doc| doc.path == path) {
@@ -1846,43 +1932,54 @@ fn merge_workspace_defs(server: &Server, current: &Document, db: &mut SymbolDB) 
 fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut roots = server.workspace_roots.clone();
+    if roots.is_empty() {
+        if let Some(path) = root_hint {
+            roots.push(workspace_root_for_path(server, path).unwrap_or_else(|| {
+                normalize_path_buf(
+                    std::path::Path::new(path)
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new(".")),
+                )
+            }));
+        }
+    }
     for doc in server.docs.values() {
-        if seen.insert(doc.path.clone()) {
+        let in_workspace = roots
+            .iter()
+            .any(|root| std::path::Path::new(&doc.path).starts_with(root));
+        if (root_hint.is_some()
+            || (!server.workspace_folders && roots.is_empty())
+            || in_workspace)
+            && seen.insert(doc.path.clone())
+        {
             out.push((doc.path.clone(), doc.text.clone()));
         }
     }
-    let Some(path) = root_hint else {
-        return out;
-    };
-    let root = workspace_root_for_path(server, path).unwrap_or_else(|| {
-        normalize_path_buf(
-            std::path::Path::new(path)
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new(".")),
-        )
-    });
     let overlays = server
         .docs
         .values()
         .map(|doc| (std::path::PathBuf::from(&doc.path), doc.text.clone()))
         .collect::<Vec<_>>();
-    let project_parts =
-        crate::ProjectParts::scan_with_overlays(std::path::Path::new(&root), &overlays);
-    let mut files = Vec::new();
-    collect_jet_files(std::path::Path::new(&root), &mut files);
-    files.sort();
-    for path in files
-        .into_iter()
-        .filter(|path| project_parts.should_index(path))
-        .take(256)
-    {
-        let display = path.to_string_lossy().to_string();
-        if seen.contains(&display) {
-            continue;
-        }
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            seen.insert(display.clone());
-            out.push((display, text));
+    for root in roots {
+        let root = std::path::Path::new(&root);
+        let project_parts = crate::ProjectParts::scan_with_overlays(root, &overlays);
+        let mut files = Vec::new();
+        collect_jet_files(root, &mut files);
+        files.sort();
+        for path in files
+            .into_iter()
+            .filter(|path| project_parts.should_index(path))
+            .take(256)
+        {
+            let display = path.to_string_lossy().to_string();
+            if seen.contains(&display) {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                seen.insert(display.clone());
+                out.push((display, text));
+            }
         }
     }
     out
@@ -1940,6 +2037,31 @@ mod project_part_tests {
     }
 
     #[test]
+    fn workspace_root_initialization_uses_protocol_precedence() {
+        let mut server = Server::new();
+        let params = parse_json(
+            r#"{"workspaceFolders":[{"uri":"file:///tmp/folder","name":"folder"}],"rootUri":"file:///tmp/uri","rootPath":"/tmp/path"}"#,
+        )
+        .unwrap();
+        configure_workspace_roots(&mut server, Some(&params));
+        assert_eq!(server.workspace_roots, vec![normalize_path("/tmp/folder")]);
+
+        let params = parse_json(r#"{"rootUri":"file:///tmp/uri","rootPath":"/tmp/path"}"#)
+            .unwrap();
+        configure_workspace_roots(&mut server, Some(&params));
+        assert_eq!(server.workspace_roots, vec![normalize_path("/tmp/uri")]);
+    }
+
+    #[test]
+    fn file_uri_percent_encoding_rejects_hostile_escapes() {
+        assert_eq!(uri_to_path("file:///tmp/a%20b"), "/tmp/a b");
+        assert_eq!(path_to_uri("/tmp/a b#c%"), "file:///tmp/a%20b%23c%25");
+        for uri in ["file:///tmp/%", "file:///tmp/%GG", "file:///tmp/%FF"] {
+            assert_eq!(uri_to_path(uri), "", "malformed URI must be rejected: {uri}");
+        }
+    }
+
+    #[test]
     fn workspace_index_skips_internal_parts_until_explicit_import() {
         let root = std::env::temp_dir().join(format!(
             "jet-lsp-project-parts-{}",
@@ -1961,7 +2083,11 @@ mod project_part_tests {
         let uri = path_to_uri(&entry);
         server.docs.insert(
             uri,
-            Document::new(entry.to_string(), "use project._bench;\nfn run() {}\n".to_string()),
+            Document::new(
+                entry.to_string(),
+                "use project._bench;\nfn run() {}\n".to_string(),
+                1,
+            ),
         );
         let sources = workspace_sources(&server, Some(&entry));
         assert!(sources.iter().any(|(path, _)| path.ends_with("bench.jet")));
@@ -2402,10 +2528,13 @@ fn code_lens_json(
 
 fn uri_to_path(uri: &str) -> String {
     if let Some(rest) = uri.strip_prefix("file://") {
+        let Some(rest) = percent_decode(rest) else {
+            return String::new();
+        };
         if cfg!(windows) {
             rest.trim_start_matches('/').replace('/', "\\")
         } else {
-            rest.to_string()
+            rest
         }
     } else {
         uri.to_string()
@@ -2413,10 +2542,44 @@ fn uri_to_path(uri: &str) -> String {
 }
 
 fn path_to_uri(path: &str) -> String {
-    if path.starts_with('/') || (cfg!(windows) && path.contains(':')) {
-        format!("file://{}", path)
-    } else {
-        format!("file://{}", path)
+    let mut encoded = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/' | b':') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    format!("file://{encoded}")
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(high), Some(low)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2])) {
+                out.push(high << 4 | low);
+                i += 3;
+                continue;
+            }
+        }
+        if bytes[i] == b'%' {
+            return None;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).ok()
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 

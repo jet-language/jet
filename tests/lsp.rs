@@ -213,6 +213,10 @@ const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
     ),
     ("typeHierarchyProvider", "lsp_type_hierarchy_trait_impls"),
     (
+        "workspace",
+        "lsp_workspace_symbols_follow_all_roots_and_folder_changes",
+    ),
+    (
         "executeCommandProvider",
         "lsp_execute_command_impact_returns_report",
     ),
@@ -877,6 +881,243 @@ fn lsp_incremental_sync_range_edit_updates_document() {
     );
     drop(stdin);
     let _ = child.wait();
+}
+
+#[test]
+fn lsp_incremental_sync_rejects_stale_and_malformed_edits() {
+    let _guard = lock_lsp_process();
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+    let uri = "file:///tmp/lsp_validated_sync.jet";
+    let source = "// 😀\nfn kept() {}\n";
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":10,"text":{}}}}}}}"#,
+            uri,
+            json_string(source)
+        ),
+    );
+    let _ = read_msg(&mut stdout);
+
+    let change = |version: i32, body: &str| {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":{}}},"contentChanges":[{}]}}}}"#,
+            uri, version, body
+        )
+    };
+    send_msg(
+        &mut stdin,
+        &change(
+            11,
+            r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":7}},"rangeLength":4,"text":"fresh"}"#,
+        ),
+    );
+    send_msg(
+        &mut stdin,
+        &format!(r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, uri),
+    );
+    let first_diagnostics = read_msg(&mut stdout);
+    assert!(
+        first_diagnostics.contains(r#""version":11"#),
+        "diagnostics must identify the document revision: {first_diagnostics}"
+    );
+    let first = read_msg(&mut stdout);
+    assert!(first.contains("fn fresh"), "valid edit was not applied: {first}");
+
+    send_msg(
+        &mut stdin,
+        &change(11, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":5,"text":"stale"}"#),
+    );
+    send_msg(
+        &mut stdin,
+        &format!(r#"{{"jsonrpc":"2.0","id":20,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, uri),
+    );
+    let stale_probe = read_msg(&mut stdout);
+    assert!(
+        stale_probe.contains(r#""id":20"#)
+            && stale_probe.contains("fn fresh")
+            && !stale_probe.contains("stale"),
+        "stale revision changed the document: {stale_probe}"
+    );
+
+    for invalid in [
+        change(12, r#"{"range":{"start":{"line":0,"character":4},"end":{"line":0,"character":5}},"rangeLength":1,"text":"X"}"#),
+        change(12, r#"{"range":{"start":{"line":1,"character":8},"end":{"line":1,"character":3}},"rangeLength":5,"text":"backward"}"#),
+        change(12, r#"{"range":{"start":{"line":99,"character":0},"end":{"line":99,"character":0}},"rangeLength":0,"text":"outside"}"#),
+        change(12, "1"),
+        format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":12.5}},"contentChanges":[{{"text":"float"}}]}}}}"#, uri),
+        format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2147483648}},"contentChanges":[{{"text":"wide"}}]}}}}"#, uri),
+        change(12, r#"{"range":{"start":{"line":1,"character":2147483648},"end":{"line":1,"character":2147483648}},"rangeLength":0,"text":"wide_position"}"#),
+        change(12, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":2147483648,"text":"wide_length"}"#),
+        change(12, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":"5","text":"bad_type"}"#),
+        change(12, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":4,"text":"bad_length"}"#),
+    ] {
+        send_msg(&mut stdin, &invalid);
+    }
+    send_msg(
+        &mut stdin,
+        &change(
+            12,
+            r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":5,"text":"final"}"#,
+        ),
+    );
+    send_msg(
+        &mut stdin,
+        &format!(r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, uri),
+    );
+    let final_diagnostics = read_msg(&mut stdout);
+    assert!(
+        final_diagnostics.contains(r#""version":12"#),
+        "diagnostics must identify the accepted revision: {final_diagnostics}"
+    );
+    let final_text = read_msg(&mut stdout);
+    assert!(
+        final_text.contains("fn final") && final_text.contains('😀'),
+        "invalid edits changed the document or consumed its version: {final_text}"
+    );
+    for rejected in [
+        "fresh",
+        "stale",
+        "backward",
+        "outside",
+        "float",
+        "wide",
+        "wide_position",
+        "wide_length",
+        "bad_type",
+        "bad_length",
+    ] {
+        assert!(!final_text.contains(rejected), "rejected edit leaked into document: {final_text}");
+    }
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn lsp_workspace_symbols_follow_all_roots_and_folder_changes() {
+    let _guard = lock_lsp_process();
+    let root = std::env::temp_dir().join(format!("lsp multi root {}", std::process::id()));
+    let first = root.join("first");
+    let second = root.join("second");
+    let third = root.join("third");
+    let _ = std::fs::remove_dir_all(&root);
+    for dir in [&first, &second, &third] {
+        std::fs::create_dir_all(dir).expect("create workspace root");
+    }
+    std::fs::write(first.join("closed.jet"), "fn ClosedFirst() {}\n").unwrap();
+    std::fs::write(second.join("open.jet"), "fn DiskSecond() {}\n").unwrap();
+    std::fs::write(third.join("added.jet"), "fn AddedThird() {}\n").unwrap();
+
+    let first_uri = format!("file://{}", first.display()).replace(' ', "%20");
+    let second_uri = format!("file://{}", second.display()).replace(' ', "%20");
+    let third_uri = format!("file://{}", third.display()).replace(' ', "%20");
+    let open_uri = format!("file://{}", second.join("open.jet").display()).replace(' ', "%20");
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"workspaceFolders":[{{"uri":"{}","name":"first"}},{{"uri":"{}","name":"second"}}],"capabilities":{{}}}}}}"#,
+            first_uri, second_uri
+        ),
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":"fn OpenSecond() {{}}\n"}}}}}}"#,
+            open_uri
+        ),
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":""}}"#,
+    );
+    let before = read_msg(&mut stdout);
+    assert!(before.contains("ClosedFirst") && before.contains("OpenSecond"), "all initial roots and overlays must be indexed: {before}");
+    assert!(!before.contains("DiskSecond") && !before.contains("AddedThird"), "closed disk text must not replace an overlay and unconfigured roots must stay out: {before}");
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{{"event":{{"removed":[{{"uri":"{}","name":"first"}}],"added":[{{"uri":"{}","name":"third"}}]}}}}}}"#,
+            first_uri, third_uri
+        ),
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"workspace/symbol","params":{"query":""}}"#,
+    );
+    let after = read_msg(&mut stdout);
+    assert!(after.contains("OpenSecond") && after.contains("AddedThird"), "kept and added roots must be indexed: {after}");
+    assert!(!after.contains("ClosedFirst"), "removed closed root remained indexed: {after}");
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{{"event":{{"removed":[{{"uri":"{}","name":"second"}}],"added":[]}}}}}}"#,
+            second_uri
+        ),
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":4,"method":"workspace/symbol","params":{"query":""}}"#,
+    );
+    let removed_open = read_msg(&mut stdout);
+    assert!(removed_open.contains("AddedThird"), "remaining root disappeared: {removed_open}");
+    assert!(!removed_open.contains("OpenSecond"), "open overlay from removed root remained indexed: {removed_open}");
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{{"event":{{"removed":[{{"uri":"{}","name":"third"}}],"added":[]}}}}}}"#,
+            third_uri
+        ),
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":5,"method":"workspace/symbol","params":{"query":""}}"#,
+    );
+    let empty_workspace = read_msg(&mut stdout);
+    assert!(empty_workspace.contains(r#""result":[]"#), "removing the final workspace root must not expose open overlays: {empty_workspace}");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
