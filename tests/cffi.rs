@@ -965,7 +965,21 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
     fs::write(root.join("strret.c"),"const char* good(void){return \"caf\\xC3\\xA9\";} const char* null_s(void){return 0;} const char* bad(void){static const char s[]={ (char)0xff,0 };return s;}\n").unwrap();
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("strret.c")).arg("-o").arg(root.join("strret.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libstrret.a")).arg(root.join("strret.o")).status().unwrap().success());
     for (name, expected, success) in [("good","café\n",true),("null_s","returned a null pointer",false),("bad","not valid UTF-8",false)] {
-        let src=format!("use c.strret as c\n@Extern module c.strret {{ fn get() -> String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d))); assert!(!out.rust.contains("to_string_lossy")); assert!(!out.rust.contains("/* unsupported:"));
+        let src=format!("use c.strret as c\n@Extern module c.strret {{ fn get() -> String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
+        let wrapper = out.rust
+            .split_once("pub fn user_get() -> String {\n")
+            .unwrap_or_else(|| panic!("missing generated C wrapper for {name}"))
+            .1
+            .split_once("\n}\n")
+            .unwrap_or_else(|| panic!("unterminated generated C wrapper for {name}"))
+            .0;
+        assert!(wrapper.contains(&format!("let p = unsafe {{ {name}() }};")));
+        assert!(wrapper.contains("if p.is_null()"));
+        assert!(wrapper.contains("std::ffi::CStr::from_ptr(p)"));
+        assert!(wrapper.contains("bytes.to_str()"));
+        assert!(wrapper.contains(".to_owned()"));
+        assert!(!wrapper.contains("to_string_lossy"));
+        assert!(!wrapper.contains("/* unsupported:"));
         let rs=root.join(format!("{name}.rs")); let bin=root.join(format!("{name}_bin")); fs::write(&rs,out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg(format!("native={}",root.display())).arg("-lstrret").output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(bin).output().unwrap(); assert_eq!(run.status.success(),success); let text=format!("{}{}",String::from_utf8_lossy(&run.stdout),String::from_utf8_lossy(&run.stderr)); assert!(text.contains(expected),"{name}: {text}");
     }
     let _=fs::remove_dir_all(root);
