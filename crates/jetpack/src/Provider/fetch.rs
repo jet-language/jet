@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::io::{BufRead, Read};
 use std::path::Component;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 
 pub(super) const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
 pub(super) const MAX_ARCHIVE_ENTRIES: u64 = 4096;
@@ -287,7 +287,8 @@ fn preflight_tar_stream(path: &Path, gzip: bool) -> Result<(), String> {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|error| format!("could not start archive preflight: {error}"))?;
-        let result = inspect_tar_stream(child.stdout.take().unwrap());
+        let stdout = take_child_stdout(&mut child, "source is not a readable gzip tar archive")?;
+        let result = inspect_tar_stream(stdout);
         if result.is_err() {
             let _ = child.kill();
         }
@@ -300,6 +301,15 @@ fn preflight_tar_stream(path: &Path, gzip: bool) -> Result<(), String> {
     } else {
         inspect_tar_stream(std::fs::File::open(path).map_err(|error| format!("could not open archive: {error}"))?)
     }
+}
+
+fn take_child_stdout(child: &mut Child, error: &str) -> Result<ChildStdout, String> {
+    if let Some(stdout) = child.stdout.take() {
+        return Ok(stdout);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    Err(error.to_string())
 }
 
 fn inspect_tar_stream(mut input: impl Read) -> Result<(), String> {
@@ -389,7 +399,8 @@ fn stream_tar_listing(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("could not inspect source archive: {error}"))?;
-    let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+    let stdout = take_child_stdout(&mut child, "source is not a readable tar archive")?;
+    let mut reader = std::io::BufReader::new(stdout);
     let mut line = Vec::new();
     loop {
         line.clear();
@@ -550,6 +561,20 @@ fn which(tool: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_archive_pipe_kills_and_reaps_child() {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--list")
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let error = take_child_stdout(&mut child, "missing archive pipe")
+            .err()
+            .expect("missing stdout must fail");
+        assert_eq!(error, "missing archive pipe");
+        assert!(child.try_wait().unwrap().is_some(), "child must be reaped");
+    }
 
     #[test]
     fn authority_rejects_denied_redirects_and_credentials() {
