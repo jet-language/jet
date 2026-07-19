@@ -206,6 +206,16 @@ impl<'a> Checker<'a> {
             if let Expr::Field(base, leaf, _) = &**receiver {
                 if let Expr::Ident(alias, _) = &**base {
                     if let Some(ns) = self.core_imports.get(alias).cloned() {
+                        if ns == "core.tls" && leaf == "ClientConfig" && method == "default" {
+                            if !args.is_empty() {
+                                self.diags.push(wrong_core_arity("ClientConfig.default", 0, args.len(), span));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                            }
+                            *recv_type_out = Some("TlsClientConfigType".to_string());
+                            return Some(Type::Named("TlsClientConfig".to_string()));
+                        }
                         if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
                             let type_name = leaf.clone();
                             **receiver = Expr::Ident(type_name.clone(), span);
@@ -1455,8 +1465,19 @@ impl<'a> Checker<'a> {
                 if let Some(ret) =
                     net_method_return(handle_ty, method, args.len(), span, &mut self.diags)
                 {
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
+                    if handle_ty == "TlsClientConfig" && method == "with_alpn" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg(
+                                "with_alpn",
+                                0,
+                                &Type::List(Box::new(Type::String)),
+                                arg,
+                            );
+                        }
+                    } else {
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
                     }
                     *recv_type_out = Some(handle_ty.clone());
                     return ret;

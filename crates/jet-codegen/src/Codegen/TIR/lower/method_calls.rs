@@ -74,6 +74,7 @@ use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::tir_enum_lit_prefix;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::tir_src_line_at;
+use crate::Codegen::TIR::tls_config_static_default;
 use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
@@ -817,6 +818,19 @@ pub(crate) fn lower_method_call(
                     recv: Box::new(recv),
                     op,
                     args: rest,
+                },
+            };
+        }
+        if tls_config_static_default(receiver, method, cx, &locals) {
+            return TExpr {
+                ty: Type::Named("TlsClientConfig".to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::ConstInline("()".to_string()),
+                    }),
+                    op: THandleOp::TlsClientConfigDefault,
+                    args: vec![],
                 },
             };
         }

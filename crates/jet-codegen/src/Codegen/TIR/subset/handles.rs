@@ -117,6 +117,24 @@ pub(crate) fn game_static_type<'a>(
     }
 }
 
+pub(crate) fn tls_config_static_default(
+    receiver: &Expr,
+    method: &str,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    let Expr::Field(inner, static_type, _) = receiver else {
+        return false;
+    };
+    let Expr::Ident(alias, _) = &**inner else {
+        return false;
+    };
+    !locals.contains(alias)
+        && cx.core_imports.get(alias).map(String::as_str) == Some("core.tls")
+        && static_type == "ClientConfig"
+        && method == "default"
+}
+
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
 /// the subset? Reproduces `emit_router_handler` (Source/Codegen/Expression.rs): the
 /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
@@ -260,6 +278,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("TlsStream", "write_all", 2) => THandleOp::TlsStreamWriteAllDeadline,
         ("TlsStream", "ready", 2) => THandleOp::TlsStreamReady,
         ("TlsStream", "close", 0) => THandleOp::TlsStreamClose,
+        ("TlsClientConfig", "with_alpn", 1) => THandleOp::TlsClientConfigWithAlpn,
         // c109 Phase 19: the four arena allocators (`alloc`/`reset`). Sema sets
         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`

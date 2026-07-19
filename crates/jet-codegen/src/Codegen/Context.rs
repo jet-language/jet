@@ -425,6 +425,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "UnixListener" => Some("JetUnixListener"),
         "UnixStream" => Some("JetUnixStream"),
         "TlsStream" => Some("JetTlsStream"),
+        "TlsClientConfig" => Some("JetTlsClientConfig"),
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
         "NetDnsError" => Some("JetNetDnsError"),

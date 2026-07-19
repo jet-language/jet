@@ -2418,10 +2418,14 @@ index, not a substitute for that law.
   #306's shared cancellation/runtime prerequisite is complete.
 - **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
   returns a `TlsStream` with the same byte and close law. Safe defaults verify the server name
-  with system roots; advanced roots, ALPN, identity, protocol bounds, peer
+  with system roots; advanced roots, identity, protocol bounds, peer
   identity, and advanced close-notify controls remain implementation work under
   #300. The stream itself uses shared socket readiness, deadlines, cancellation,
   explicit close-notify, underlying write half-close, and idempotent close.
+  `ClientConfig.default().with_alpn(protocols)` and the ratified labeled
+  `client(..., server_name:, config:, deadline:)` path are implemented; roots,
+  identity, protocol bounds, peer identity, and advanced close-notify controls
+  remain gated on exact owner-approved spellings.
 - **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
   and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support

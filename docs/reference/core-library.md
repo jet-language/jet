@@ -2446,7 +2446,9 @@ The built module exposes only this byte/text stream surface:
 
 | Function | Returns | Notes |
 |----------|---------|-------|
+| `ClientConfig.default().with_alpn(protocols)` | `TlsClientConfig` | Start from verified system-root defaults and offer ALPN protocols without disabling verification |
 | `client(stream, server_name)` | `TlsStream ? NetError` | Consume the `TcpStream`; verify the server name with system roots; preserve its deadline budgets |
+| `client(stream, server_name: name, config: config, deadline: duration)` | `TlsStream ? NetError` | Use the explicit client configuration and earliest handshake deadline on the same consumed stream |
 | `read(stream, limit)` / `read_text(stream)` | `[U8] ? NetError` / `String ? NetError` | Scheduler-aware byte or checked-text read; empty bytes mean clean EOF |
 | `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? NetError` / `() ? NetError` | Scheduler-aware partial or complete byte write |
 | `write_text(stream, text)` | `() ? NetError` | Write the complete text payload |

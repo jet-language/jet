@@ -1494,6 +1494,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_game_replay_record(&({}))", root, recv)
                 }
                 THandleOp::GameBackendHeadless => format!("{}jet_game_backend_headless()", root),
+                THandleOp::TlsClientConfigDefault => {
+                    format!("{}jet_tls_client_config_default()", root)
+                }
+                THandleOp::TlsClientConfigWithAlpn => format!(
+                    "{}jet_tls_client_config_with_alpn(({}).clone(), &({}))",
+                    root,
+                    recv,
+                    a(0)
+                ),
                 THandleOp::GameSceneOnFrame => {
                     format!("{}jet_game_scene_on_frame(&mut ({}), {})", root, recv, a(0))
                 }

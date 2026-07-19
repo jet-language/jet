@@ -158,7 +158,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "BitSet" | "ByteBuffer"
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "IpAddr" | "SocketAddr" | "UdpSocket" | "UdpPacket"
-        | "DnsSrv" | "UnixListener" | "UnixStream" | "TlsStream"
+        | "DnsSrv" | "UnixListener" | "UnixStream" | "TlsStream" | "TlsClientConfig" | "TlsClientConfigType"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values

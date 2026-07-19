@@ -537,7 +537,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "tls_write",
             "tls_close",
         ],
-        "core.tls" => &["client", "read", "read_text", "write", "write_all", "write_text", "close"],
+        "core.tls" => &["ClientConfig", "client", "read", "read_text", "write", "write_all", "write_text", "close"],
         "jet.http" => &["get", "post", "serve"],
         // D-REGEXENGINE1=A: std-only linear regex package.
         "jet.regex" => &[

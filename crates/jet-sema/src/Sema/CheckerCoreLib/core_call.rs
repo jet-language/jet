@@ -134,7 +134,20 @@ impl<'a> Checker<'a> {
             if module == "core.ui" && name == "node_role" {
                 self.check_a11y_node_role_label(args, span);
             }
-            let sig = if module == "core.tls" && name == "client" && args.len() == 3 {
+            let sig = if module == "core.tls" && name == "client" && args.len() == 4 {
+                Some((
+                    vec![
+                        (AccessConvention::Move, Type::Named("TcpStream".to_string())),
+                        (AccessConvention::Read, Type::String),
+                        (AccessConvention::Read, Type::Named("TlsClientConfig".to_string())),
+                        (AccessConvention::Read, Type::Named("Duration".to_string())),
+                    ],
+                    Some(result_ty(
+                        Type::Named("TlsStream".to_string()),
+                        Type::Named("NetError".to_string()),
+                    )),
+                ))
+            } else if module == "core.tls" && name == "client" && args.len() == 3 {
                 Some((
                     vec![
                         (AccessConvention::Move, Type::Named("TcpStream".to_string())),

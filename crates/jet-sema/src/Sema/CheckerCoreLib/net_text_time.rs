@@ -115,6 +115,9 @@ pub fn net_method_return(
             unit,
             Type::Named("NetError".to_string()),
         ))),
+        ("TlsClientConfig", "with_alpn") if n_args == 1 => {
+            Some(Some(Type::Named("TlsClientConfig".to_string())))
+        }
         _ => None,
     }
 }

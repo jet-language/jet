@@ -165,6 +165,13 @@ pub(super) fn core_call_args_in_subset(
     cx: &Cx,
     locals: &std::collections::HashSet<String>,
 ) -> bool {
+    if module == "core.tls" && method == "client" && args.len() == 4 {
+        let labels = [None, Some("server_name"), Some("config"), Some("deadline")];
+        return args.iter().zip(labels).all(|(arg, expected)| {
+            arg.label.as_ref().map(|(label, _)| label.as_str()) == expected
+                && expr_in_subset(&arg.expr, cx, locals)
+        });
+    }
     if module == "core.tls" && method == "client" && args.len() == 3 {
         return args.iter().enumerate().all(|(idx, arg)| {
             let label_ok = if idx == 2 {

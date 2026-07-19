@@ -25,7 +25,10 @@ fn jet_net_tls_closed() -> &'static Mutex<std::collections::BTreeSet<i64>> {
     JET_NET_TLS_CLOSED.get_or_init(|| Mutex::new(std::collections::BTreeSet::new()))
 }
 
-fn jet_net_tls_config(custom_ca_pem: Option<&[u8]>) -> Result<Arc<rustls::ClientConfig>, String> {
+fn jet_net_tls_config(
+    custom_ca_pem: Option<&[u8]>,
+    alpn: &[String],
+) -> Result<Arc<rustls::ClientConfig>, String> {
     let mut roots = rustls::RootCertStore::empty();
     let certs = rustls_native_certs::load_native_certs()
         .map_err(|e| format!("TLS could not load system certificate roots: {}", e))?;
@@ -52,11 +55,19 @@ fn jet_net_tls_config(custom_ca_pem: Option<&[u8]>) -> Result<Arc<rustls::Client
             return Err("TLS custom CA PEM did not contain a certificate".to_string());
         }
     }
-    Ok(Arc::new(
-        rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth(),
-    ))
+    let mut config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = alpn
+        .iter()
+        .map(|protocol| {
+            if protocol.is_empty() || protocol.len() > u8::MAX as usize {
+                return Err("TLS ALPN protocols must contain 1 to 255 bytes".to_string());
+            }
+            Ok(protocol.as_bytes().to_vec())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Arc::new(config))
 }
 
 fn jet_net_tls_pem_certificates(
@@ -127,6 +138,7 @@ fn jet_net_tls_begin_inner(
     stream: TcpStream,
     server_name: &String,
     custom_ca_pem: Option<&[u8]>,
+    alpn: &[String],
 ) -> Result<i64, String> {
     static RUSTLS_PROVIDER: std::sync::Once = std::sync::Once::new();
     RUSTLS_PROVIDER.call_once(|| {
@@ -137,7 +149,7 @@ fn jet_net_tls_begin_inner(
     stream
         .set_nonblocking(true)
         .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
-    let conn = rustls::ClientConnection::new(jet_net_tls_config(custom_ca_pem)?, name)
+    let conn = rustls::ClientConnection::new(jet_net_tls_config(custom_ca_pem, alpn)?, name)
         .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
     let tls = rustls::StreamOwned::new(conn, stream);
     let id = JET_NET_TLS_NEXT.fetch_add(1, Ordering::Relaxed);
@@ -156,7 +168,15 @@ fn jet_net_tls_begin_inner(
 /// Email runtime handshake seam: caller polls this between ambient cancellation
 /// and deadline checks. No bridge worker or hidden retry exists.
 pub fn jet_net_tls_begin_impl(stream: TcpStream, server_name: &String) -> Result<i64, String> {
-    jet_net_tls_begin_inner(stream, server_name, None)
+    jet_net_tls_begin_inner(stream, server_name, None, &[])
+}
+
+pub fn jet_net_tls_begin_config_impl(
+    stream: TcpStream,
+    server_name: &String,
+    alpn: &Vec<String>,
+) -> Result<i64, String> {
+    jet_net_tls_begin_inner(stream, server_name, None, alpn)
 }
 
 pub fn jet_net_tls_begin_with_ca_impl(
@@ -164,7 +184,7 @@ pub fn jet_net_tls_begin_with_ca_impl(
     server_name: &String,
     custom_ca_pem: &Vec<u8>,
 ) -> Result<i64, String> {
-    jet_net_tls_begin_inner(stream, server_name, Some(custom_ca_pem))
+    jet_net_tls_begin_inner(stream, server_name, Some(custom_ca_pem), &[])
 }
 
 pub fn jet_net_tls_handshake_step_impl(id: i64) -> Result<bool, String> {

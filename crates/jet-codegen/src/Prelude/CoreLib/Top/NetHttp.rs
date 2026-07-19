@@ -239,6 +239,23 @@ pub struct JetTlsStream {
 }
 
 #[derive(Clone)]
+pub struct JetTlsClientConfig {
+    alpn: Vec<String>,
+}
+
+fn jet_tls_client_config_default() -> JetTlsClientConfig {
+    JetTlsClientConfig { alpn: Vec::new() }
+}
+
+fn jet_tls_client_config_with_alpn(
+    mut config: JetTlsClientConfig,
+    protocols: &Vec<String>,
+) -> JetTlsClientConfig {
+    config.alpn = protocols.clone();
+    config
+}
+
+#[derive(Clone)]
 pub struct JetHttpRequest {
     pub method: String,
     pub path: String,
@@ -719,6 +736,31 @@ fn jet_net_tls_client_scheduler(
     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
     close_step: fn(i64) -> Result<bool, String>,
 ) -> Result<JetTlsStream, JetNetError> {
+    jet_net_tls_client_scheduler_with_begin(
+        stream,
+        |inner| begin(inner, server_name),
+        handshake_step,
+        abort,
+        wants,
+        read_step,
+        write_step,
+        close_step,
+    )
+}
+
+fn jet_net_tls_client_scheduler_with_begin<F>(
+    stream: JetTcpStream,
+    begin: F,
+    handshake_step: fn(i64) -> Result<bool, String>,
+    abort: fn(i64),
+    wants: fn(i64) -> Result<(bool, bool), String>,
+    read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
+    write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
+    close_step: fn(i64) -> Result<bool, String>,
+) -> Result<JetTlsStream, JetNetError>
+where
+    F: FnOnce(std::net::TcpStream) -> Result<i64, String>,
+{
     let socket = stream
         .inner
         .try_clone()
@@ -729,7 +771,7 @@ fn jet_net_tls_client_scheduler(
         (Some(read), Some(write)) => Some(read.min(write)),
         (read, write) => read.or(write),
     };
-    let id = jet_net_tls_result(begin(stream.inner, server_name), "tls handshake")?;
+    let id = jet_net_tls_result(begin(stream.inner), "tls handshake")?;
     let tls = JetTlsStream {
         id,
         socket,
@@ -770,6 +812,32 @@ fn jet_net_tls_client_scheduler_deadline(
     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
     jet_net_tls_client_scheduler(
         stream, server_name, begin, handshake_step, abort, wants, read_step, write_step, close_step,
+    )
+}
+
+fn jet_net_tls_client_scheduler_config_deadline(
+    stream: JetTcpStream,
+    server_name: &String,
+    config: &JetTlsClientConfig,
+    deadline: &jet_std::Duration,
+    begin: fn(std::net::TcpStream, &String, &Vec<String>) -> Result<i64, String>,
+    handshake_step: fn(i64) -> Result<bool, String>,
+    abort: fn(i64),
+    wants: fn(i64) -> Result<(bool, bool), String>,
+    read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
+    write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
+    close_step: fn(i64) -> Result<bool, String>,
+) -> Result<JetTlsStream, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
+    jet_net_tls_client_scheduler_with_begin(
+        stream,
+        |inner| begin(inner, server_name, &config.alpn),
+        handshake_step,
+        abort,
+        wants,
+        read_step,
+        write_step,
+        close_step,
     )
 }
 

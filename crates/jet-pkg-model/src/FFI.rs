@@ -316,6 +316,20 @@ mod net_tls_close_tests {
         server.join().unwrap();
     }
 
+    #[test]
+    fn tls_config_encodes_and_validates_alpn_protocols() {
+        let pem = include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem");
+        let config = jet_net_tls_config(Some(pem), &["h2".to_string(), "http/1.1".to_string()])
+            .expect("valid ALPN protocols");
+        assert_eq!(config.alpn_protocols, vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
+
+        let error = match jet_net_tls_config(Some(pem), &[String::new()]) {
+            Ok(_) => panic!("empty ALPN protocol accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "TLS ALPN protocols must contain 1 to 255 bytes");
+    }
+
     mod smtp_adapter {
         fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
             let mut out = [0u8; 32];

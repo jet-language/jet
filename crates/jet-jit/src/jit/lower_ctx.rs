@@ -2530,7 +2530,11 @@ impl LowerCtx<'_, '_> {
             | THandleOp::TlsStreamReadDeadline
             | THandleOp::TlsStreamWriteAllDeadline
             | THandleOp::TlsStreamReady
-            | THandleOp::TlsStreamClose => Err("jit handle method unsupported".to_string()),
+            | THandleOp::TlsStreamClose
+            | THandleOp::TlsClientConfigDefault
+            | THandleOp::TlsClientConfigWithAlpn => {
+                Err("jit handle method unsupported".to_string())
+            }
             THandleOp::AllocAlloc => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocReset => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqField(..) => Err("jit handle method unsupported".to_string()),

@@ -1665,18 +1665,30 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_net_tls_close"), arg(0))
         }
         ("core.tls", "client") => {
-            let (helper_name, deadline) = if args.len() == 3 {
-                ("jet_net_tls_client_scheduler_deadline", format!(", &({})", arg(2)))
-            } else {
-                ("jet_net_tls_client_scheduler", String::new())
+            let (helper_name, extra_args, begin_name) = match args.len() {
+                4 => (
+                    "jet_net_tls_client_scheduler_config_deadline",
+                    format!(", &({}), &({})", arg(2), arg(3)),
+                    "jet_net_tls_begin_config_impl",
+                ),
+                3 => (
+                    "jet_net_tls_client_scheduler_deadline",
+                    format!(", &({})", arg(2)),
+                    "jet_net_tls_begin_impl",
+                ),
+                _ => (
+                    "jet_net_tls_client_scheduler",
+                    String::new(),
+                    "jet_net_tls_begin_impl",
+                ),
             };
             format!(
                 "{}({}, &({}){}, {}, {}, {}, {}, {}, {}, {})",
                 helper(helper_name),
                 arg(0),
                 arg(1),
-                deadline,
-                regex_fn("jet_net_tls_begin_impl"),
+                extra_args,
+                regex_fn(begin_name),
                 regex_fn("jet_net_tls_handshake_step_impl"),
                 regex_fn("jet_net_tls_abort_impl"),
                 regex_fn("jet_net_tls_wants_impl"),

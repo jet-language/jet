@@ -4168,7 +4168,7 @@ fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
         .arg("-in").arg(&csr).arg("-out").arg(&cert).output().unwrap();
     assert!(sign.status.success(), "{}", String::from_utf8_lossy(&sign.stderr));
     let mut server = Command::new("openssl")
-        .args(["s_server", "-quiet", "-www", "-accept", &port.to_string(), "-cert"])
+        .args(["s_server", "-quiet", "-www", "-alpn", "http/1.0", "-accept", &port.to_string(), "-cert"])
         .arg(&cert)
         .arg("-key")
         .arg(&key)
@@ -4207,7 +4207,8 @@ fn zero_rejected<T: Reader>(&stream: T) -> Bool {
 fn run() {
     tcp :: net.tcp_connect("127.0.0.1:$PORT") ?? panic("tcp")
     budget :: Duration.seconds(1) ?? panic("deadline")
-    secure := tls.client(^tcp, "localhost", deadline: budget) ?? panic("tls handshake")
+    cfg :: tls.ClientConfig.default().with_alpn(["http/1.0"])
+    secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("tls handshake")
     request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
     interest: NetReadyInterest :: .Write
     readiness :: secure.ready(interest, deadline: budget) ?? panic("ready")
