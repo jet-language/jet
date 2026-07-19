@@ -410,11 +410,11 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // ratification (or cite an ID that was never ratified).
     const EXEMPTIONS: &[(&str, &[&str])] = &[
         ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
-        ("jet-net", &["D-NETDEP1", "D-TLS1"]),
+        ("jet-net", &["D-DEP1"]),
         ("jetpack", &["D-DEP-CRYPTO1=A"]),
         // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
         // loopback peer) moved from `jetpack` to `jet-pkg-model`.
-        ("jet-pkg-model", &["D-TLS1", "D-EMAIL-DKIM-CONFIG1"]),
+        ("jet-pkg-model", &["D-DEP1", "D-EMAIL-DKIM-CONFIG1"]),
     ];
 
     let root = root();
@@ -557,7 +557,18 @@ fn section_between_pub(docs: &str) -> &str {
 }
 
 fn ratified_decision_exists(ratified_doc: &str, tower: &str, authority: &str) -> bool {
-    if exact_decision_token(section_between_pub(ratified_doc), authority) {
+    if section_between_pub(ratified_doc)
+        .lines()
+        .filter_map(|line| {
+            line.trim_start()
+                .strip_prefix("- ")
+                .unwrap_or(line.trim_start())
+                .strip_prefix("**")?
+                .split_once("**")
+                .map(|(heading, _)| heading)
+        })
+        .any(|heading| exact_decision_token(heading, authority))
+    {
         return true;
     }
     let (id, outcome) = authority
@@ -591,7 +602,7 @@ fn decision_id_char(ch: char) -> bool {
 #[test]
 fn ratified_decision_lookup_requires_exact_id_and_ratified_status() {
     let docs = "## Proposed\n**D-PENDING=A**: not law. See D-LIVE and D-CITED.\n\
-                ## Ratified\n**D-LIVE=A**: law.\n\
+                ## Ratified\n**D-LIVE=A**: supersedes D-CITED.\n\
                 ## Declined\n**D-NOPE=A**: declined.\n";
     assert!(ratified_decision_exists(docs, "", "D-LIVE"));
     assert!(!ratified_decision_exists(docs, "", "D-LIV"));
@@ -602,17 +613,23 @@ fn ratified_decision_lookup_requires_exact_id_and_ratified_status() {
 
 /// Finds both ordinary Cargo dependency entries and valid dependency subtables.
 fn dependency_lines_with_context(text: &str) -> Vec<(String, String, bool)> {
+    let lines: Vec<_> = text.lines().collect();
     let mut out = Vec::new();
-    for section in text.split("\n[") {
-        let section = section.strip_prefix('[').unwrap_or(section);
-        let Some((header, body)) = section.split_once("]\n") else {
+    let mut index = 0;
+    while index < lines.len() {
+        let Some(header) = table_header(lines[index]) else {
+            index += 1;
             continue;
         };
+        let end = lines[index + 1..]
+            .iter()
+            .position(|line| table_header(line).is_some())
+            .map_or(lines.len(), |offset| index + 1 + offset);
         match dependency_table(header) {
-            None => continue,
+            None => {}
             Some(DependencyTable::Entries) => {
                 let mut context = String::new();
-                for line in body.lines().map(str::trim) {
+                for line in lines[index + 1..end].iter().map(|line| line.trim()) {
                     if line.is_empty() {
                         context.clear();
                         continue;
@@ -633,20 +650,28 @@ fn dependency_lines_with_context(text: &str) -> Vec<(String, String, bool)> {
                 }
             }
             Some(DependencyTable::Detail(name)) => {
-                let mut context = String::new();
-                let mut fields = Vec::new();
-                for line in body.lines().map(str::trim) {
-                    if fields.is_empty() && line.starts_with('#') {
-                        context.push_str(line);
-                        context.push('\n');
-                    } else if !line.is_empty() && !line.starts_with('#') {
-                        fields.push(line);
-                    }
-                }
+                let fields: Vec<_> = lines[index + 1..end]
+                    .iter()
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                    .collect();
                 if !fields.is_empty() {
+                    let first = lines[index + 1..end]
+                        .iter()
+                        .position(|line| {
+                            let line = line.trim();
+                            !line.is_empty() && !line.starts_with('#')
+                        })
+                        .map(|offset| index + 1 + offset)
+                        .unwrap();
+                    let context = preceding_comments(&lines, index);
                     out.push((
                         format!("{name}: {}", fields.join(", ")),
-                        context,
+                        if context.is_empty() {
+                            preceding_comments(&lines, first)
+                        } else {
+                            context
+                        },
                         fields.iter().any(|field| {
                             field
                                 .split_once('=')
@@ -656,8 +681,13 @@ fn dependency_lines_with_context(text: &str) -> Vec<(String, String, bool)> {
                 }
             }
         }
+        index = end;
     }
     out
+}
+
+fn table_header(line: &str) -> Option<&str> {
+    line.trim().strip_prefix('[')?.strip_suffix(']')
 }
 
 enum DependencyTable<'a> {
@@ -683,15 +713,26 @@ fn dependency_table(line: &str) -> Option<DependencyTable<'_>> {
     None
 }
 
+fn preceding_comments(lines: &[&str], index: usize) -> String {
+    let mut comments: Vec<_> = lines[..index]
+        .iter()
+        .rev()
+        .map(|line| line.trim())
+        .take_while(|line| line.starts_with('#'))
+        .collect();
+    comments.reverse();
+    comments.into_iter().map(|line| format!("{line}\n")).collect()
+}
+
 fn inline_table_has_key(value: &str, wanted: &str) -> bool {
-    let Some(body) = value.strip_prefix('{').and_then(|value| value.strip_suffix('}')) else {
+    let Some(body) = value.strip_prefix('{') else {
         return false;
     };
     let mut start = 0;
     let mut quote = None;
     let mut escaped = false;
     let mut depth = 0usize;
-    for (index, ch) in body.char_indices().chain(std::iter::once((body.len(), ','))) {
+    for (index, ch) in body.char_indices() {
         if let Some(delimiter) = quote {
             if delimiter == '"' && ch == '\\' && !escaped {
                 escaped = true;
@@ -706,6 +747,11 @@ fn inline_table_has_key(value: &str, wanted: &str) -> bool {
         match ch {
             '"' | '\'' => quote = Some(ch),
             '[' | '{' => depth += 1,
+            '}' if depth == 0 => {
+                return body[start..index]
+                    .split_once('=')
+                    .is_some_and(|(key, _)| key.trim() == wanted);
+            }
             ']' | '}' if depth > 0 => depth -= 1,
             ',' if depth == 0 => {
                 if body[start..index]
@@ -734,12 +780,12 @@ fn dependency_scanner_covers_target_tables_and_one_dependency_per_comment() {
                     [target.x86_64-unknown-linux-gnu.build-dependencies]\n\
                     # D-THREE=C\n\
                     fourth = \"4\"\n\
-                    [dependencies.local]\n\
                     # D-FOUR=D\n\
+                    \t[dependencies.local]\n\
                     path = \"../local\"\n\
                     version = \"1\"\n\
-                    [dev-dependencies.remote]\n\
                     # D-FIVE=E\n\
+                    [dev-dependencies.remote]\n\
                     git = \"https://example.test/repo\"\n\
                     [target.'cfg(unix)'.dependencies.target_remote]\n\
                     version = \"2\"\n\
@@ -770,8 +816,8 @@ fn dependency_scanner_covers_target_tables_and_one_dependency_per_comment() {
 #[test]
 fn dependency_scanner_does_not_confuse_values_with_path_keys() {
     let manifest = "[dependencies]\n\
-                    remote = { version = \"1\", package = \"not path = metadata\" }\n\
-                    local = { version = \"1\", path = \"../local\" }\n";
+                    remote = { version = \"1\", package = \"not, path = metadata\" } # external\n\
+                    local = { version = \"1\", path = \"../local\" } # local\n";
     let dependencies = dependency_lines_with_context(manifest);
     assert!(!dependencies[0].2, "{dependencies:#?}");
     assert!(dependencies[1].2, "{dependencies:#?}");
