@@ -419,17 +419,17 @@ pub const ATTR_BINDGEN_RETIRED: &str = "bindgen";
 pub const ATTR_EXTERN_MODULE_RETIRED: &str = "extern";
 
 /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): the inline foreign tier
-/// directive marker — `@FFI(<lang>) fn name(sig) { """<foreign source>""" }`.
+/// directive marker — `#FFI(<lang>) fn name(sig) { """<foreign source>""" }`.
 /// The Jet signature is the checked contract; the body is one string of
 /// foreign source the per-language binder compiles on cache miss. Unsafe
 /// languages (`c`, `cpp`, `asm`) additionally require the enclosing
 /// `@Unsafe("reason")` gate (I1/S58). Spelled fully capitalized (S66).
 pub const ATTR_FFI: &str = "FFI"; // D-FFI-INLINE1
 /// D-FFI-CPP1=A (ratified 2026-07-11, card #501): C++ foreign root — the
-/// `cpp.<lib>` namespace binder and the `@FFI(cpp)` inline-tier language name.
+/// `cpp.<lib>` namespace binder and the `#FFI(cpp)` inline-tier language name.
 pub const CPP_MODULE_ROOT: &str = "cpp"; // D-FFI-CPP1 / D-FFI-UNIFY1
 /// D-FFI-ASM1=A (ratified 2026-07-11, card #501): the assembly inline-tier
-/// language name — `@FFI(asm) fn`. Assembly has no library namespace (it is
+/// language name — `#FFI(asm) fn`. Assembly has no library namespace (it is
 /// inline-only); it never appears as a `<lang>.<lib>` mount.
 pub const ASM_LANG: &str = "asm"; // D-FFI-ASM1
 /// D-UNSAFE2 (retired marker): `@Audit("…")` is the old two-line form;

@@ -35,6 +35,19 @@ fn lex_raw_with_policy(src: &str, allow_reserved_identifiers: bool) -> (Vec<Toke
 }
 
 impl<'a> Lexer<'a> {
+    fn starts_inline_foreign_body(toks: &[Token]) -> bool {
+        if !matches!(toks.last().map(|t| &t.kind), Some(TokKind::LBrace)) {
+            return false;
+        }
+        let Some(fn_pos) = toks.iter().rposition(|t| matches!(t.kind, TokKind::KwFn)) else {
+            return false;
+        };
+        toks[..fn_pos].windows(2).any(|pair| {
+            matches!(pair[0].kind, TokKind::Hash)
+                && matches!(&pair[1].kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
+        })
+    }
+
     pub(super) fn at(&self, i: usize) -> char {
         if i < self.chars.len() {
             self.chars[i].1
@@ -203,7 +216,11 @@ impl<'a> Lexer<'a> {
                 }
                 '"' => {
                     let tok = if next == '"' && next2 == '"' {
-                        self.triple_string(start)
+                        if Self::starts_inline_foreign_body(&toks) {
+                            self.raw_foreign_string(start)
+                        } else {
+                            self.triple_string(start)
+                        }
                     } else {
                         self.string(start)
                     };

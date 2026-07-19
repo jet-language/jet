@@ -188,6 +188,15 @@ become dependencies of the compiler workspace crates.
    generated `Cargo.toml` owns foreign dependencies, `cargo build` produces an
    rlib, and `FfiLink` records the crate name, rlib, and dependency directory.
    Do not put the dependency in the root or compiler-seam `Cargo.toml` files.
+   Inline `#FFI(c|cpp|asm)` bodies use the same `FFI.rs` bridge and include the
+   exact raw body, checked signature, target, and bridge schema in their cache
+   identity. C/C++ bodies compile behind generated C-ABI wrappers; asm lowers
+   only after sema has proved its named operands, return anchor, clobbers, and
+   target contract.
+   `jet inspect bind cpp` is owned by `CppBind.rs`: clang AST discovery produces
+   a deterministic Jet module plus C-linkage shim/archive under
+   `.jet/bindings/cpp/`, with a provenance record hashing the header, clang
+   version/AST, generated sources, and schema.
 4. Thread the prepared `FfiLink` through `crates/jet-driver/src/Driver/mod.rs` and
    `CompileOutput`. `Source/CmdCompile.rs::build` is the real native link edge: it
    passes `--extern`/`-L dependency` to rustc and keeps missing-tool/library
@@ -198,7 +207,8 @@ become dependencies of the compiler workspace crates.
 6. Add focused tests for front-end rejection, generated wrapper/link arguments,
    cache reuse, and a real end-to-end bridge call. Add the diagnostic snapshot
    and docs for every new error. Run
-   `scripts/agent/jet-env full cargo test --test cffi` for the bridge matrix and
+   `scripts/agent/jet-env full cargo test --test cffi` for the C bridge matrix,
+   the scoped `polyglot_systems` C++ compile/link/run proof, and
    `scripts/agent/jet-env full cargo test --test golden` for real generated calls,
    then run the project verification workflow. `tests/cffi.rs` and
    `tests/golden.rs` are the executable proof.

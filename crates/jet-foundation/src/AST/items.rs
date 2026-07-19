@@ -884,7 +884,7 @@ pub struct Func {
     /// D-PREPOST1: `@Post(cond, "msg")` clauses — a claim about `result` (the
     /// return value), checked before each return. Repeatable; empty when none.
     pub post: Vec<ContractClause>,
-    /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `@FFI(<lang>) fn` inline
+    /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `#FFI(<lang>) fn` inline
     /// foreign tier. `None` = an ordinary Jet function (`body` holds its
     /// statements). `Some` = the function's body is one string of foreign source
     /// the per-language binder compiles; `body` is empty and the Jet signature is
@@ -894,16 +894,16 @@ pub struct Func {
 }
 
 /// D-FFI-INLINE1=A (card #501): the inline foreign tier payload on a
-/// `@FFI(<lang>) fn`. `lang` is the raw language name written in `@FFI(<lang>)`
+/// `#FFI(<lang>) fn`. `lang` is the raw language name written in `#FFI(<lang>)`
 /// (validated in sema, not the parser — same convention as effect names);
 /// `source` is the single `"""…"""` string body of foreign source.
 #[derive(Debug, Clone)]
 pub struct InlineForeign {
-    /// The language name inside `@FFI(<lang>)`, e.g. `c`, `cpp`, `asm`.
+    /// The language name inside `#FFI(<lang>)`, e.g. `c`, `cpp`, `asm`.
     pub lang: String,
     /// Span of the language name, for diagnostics.
     pub lang_span: Span,
-    /// Span of the `@FFI(...)` marker as a whole.
+    /// Span of the `#FFI(...)` marker as a whole.
     pub marker_span: Span,
     /// The verbatim foreign source from the `"""…"""` body.
     pub source: String,

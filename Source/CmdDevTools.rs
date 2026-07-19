@@ -1431,6 +1431,10 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `@Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::CPP_MODULE_ROOT) {
+        run_cpp_bind(&args[1..]);
+        return;
+    }
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::COM_MODULE_ROOT){run_com_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::COBOL_MODULE_ROOT){run_cobol_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PERL_MODULE_ROOT){run_perl_bind(&args[1..]);return;}
@@ -1575,6 +1579,40 @@ pub(crate) fn run_bind(args: &[&String]) {
             println!("  - {} — {}", name, why);
         }
     }
+}
+
+fn run_cpp_bind(args: &[&String]) {
+    let usage = || eprintln!("usage: {} inspect bind cpp <header.hpp> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
+        usage();
+        exit(if args.is_empty() { ExitCodes::USAGE } else { 0 });
+    }
+    let header = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--pkg" => { pkg = args.get(index + 1).map(|v| v.to_string()); if pkg.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
+            "-o" | "--out" => { out = args.get(index + 1).map(|v| v.to_string()); if out.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
+            flag => { eprintln!("error: unknown `bind cpp` flag `{flag}`"); usage(); exit(ExitCodes::USAGE); }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| { let base = header.rsplit('/').next().unwrap_or(header); base.rsplit_once('.').map(|v| v.0).unwrap_or(base).to_ascii_lowercase() });
+    let source = std::fs::read_to_string(header).unwrap_or_else(|error| cpp_bind_error(header, &format!("the header could not be read ({error})")));
+    let out_path = out.unwrap_or_else(|| format!(".jet/bindings/{}/{}.{}", jet::Syntax::CPP_MODULE_ROOT, lib, jet::Syntax::FILE_EXT));
+    let cache = std::path::Path::new(&out_path).parent().unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::CppBind::bind(std::path::Path::new(header), &source, &lib, cache).unwrap_or_else(|error| cpp_bind_error(header, &error.to_string()));
+    if let Err(error) = std::fs::write(&out_path, &result.source) { cpp_bind_error(header, &format!("the generated cache could not be written ({error})")); }
+    if let Err(error) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) { cpp_bind_error(header, &format!("the provenance could not be written ({error})")); }
+    println!("bound {} C++ member{} from `{header}` → {out_path}", result.bound.len(), if result.bound.len() == 1 { "" } else { "s" });
+}
+
+fn cpp_bind_error(path: &str, why: &str) -> ! {
+    eprintln!("Error [E3208]: Could not generate C++ bindings from `{path}`.");
+    eprintln!(" Why: {why}.");
+    eprintln!(" Fix: expose public scalar classes/functions, explicit template instantiations, or int32_t callbacks, then rerun `jet inspect bind cpp`.");
+    exit(ExitCodes::USER_ERROR)
 }
 
 fn run_tcl_bind(args:&[&String]){let usage=||eprintln!("usage: {} inspect bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);if args.is_empty()||args[0]=="--help"||args[0]=="-h"{usage();exit(if args.is_empty(){ExitCodes::USAGE}else{0})}let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{eprintln!("error: unknown `bind tcl` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}let lib=pkg.unwrap_or_else(||{let b=path.rsplit('/').next().unwrap_or(path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_string()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|tcl_bind_error(path,&format!("the script could not be read ({e})")));let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::TCL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::TclBind::bind(&source,&lib,cache).unwrap_or_else(|e|tcl_bind_error(path,&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){tcl_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.tcl-path")),format!("{}\n",result.lib_dir.display())){tcl_bind_error(path,&format!("the Tcl runtime identity could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){tcl_bind_error(path,&format!("the binding provenance could not be written ({e})"))}println!("bound in-process Tcl session from `{path}` → {out_path}")}

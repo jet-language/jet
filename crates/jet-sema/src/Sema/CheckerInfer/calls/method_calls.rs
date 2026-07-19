@@ -2980,7 +2980,9 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_method_args(&type_name, method, &msig, args, span, None)?;
-            msig.return_type.clone().map(|t| self.resolve_type(t))
+            let ret = msig.return_type.clone().map(|t| self.resolve_type(t));
+            *resolved_ret_out = ret.clone();
+            ret
         }
     
 }

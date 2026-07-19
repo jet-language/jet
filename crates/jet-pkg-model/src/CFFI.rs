@@ -318,6 +318,11 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 function.effect_root = Some("Java".to_string());
             }
         }
+        if lib.starts_with("jet_cpp_") {
+            for function in &mut merged {
+                function.effect_root = Some("Cpp".to_string());
+            }
+        }
         if lib.starts_with("jet_cs_") {
             for function in &mut merged { function.effect_root=Some("DotNet".to_string()); }
         }
@@ -665,6 +670,20 @@ fn load_cache_source(
 ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
 ///   3. Else E3201.
 pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+    if let Some(actual) = lib.strip_prefix("jet_cpp_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Cpp.bindings_subdir());
+        let archive = dir.join(format!("libjet_cpp_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_cpp_{actual}"), "stdc++".into()],
+                ..Default::default()
+            });
+        }
+        return Err(e3201(lib));
+    }
     if let Some(actual) = lib.strip_prefix("jet_go_") {
         let archive = project_root
             .join(Syntax::SOURCE_ROOT_DIR)

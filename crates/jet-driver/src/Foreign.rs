@@ -27,6 +27,7 @@ pub enum BinderStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinderRuntime {
     DirectCAbi,
+    ClangCppShim,
     LegacyRustExtern,
     SupervisedPythonSidecar,
     TargetDispatchedJs,
@@ -52,6 +53,7 @@ pub enum BinderRuntime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BindingStubKind {
     CHeader,
+    CppHeader,
     RustExternBlock,
     PythonIntrospection,
     TypeScriptDeclarations,
@@ -92,6 +94,7 @@ pub enum ForeignTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForeignHost {
     DirectCAbi,
+    ClangCppShim,
     BrowserJsEngine,
     NativeJsWasmComponent,
     SupervisedPythonSidecar,
@@ -132,6 +135,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         status: BinderStatus::Active,
         runtime: BinderRuntime::DirectCAbi,
         stub_kind: BindingStubKind::CHeader,
+    },
+    BinderDescriptor {
+        language: ForeignLanguage::Cpp,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::ClangCppShim,
+        stub_kind: BindingStubKind::CppHeader,
     },
     BinderDescriptor {
         language: ForeignLanguage::Rust,
@@ -311,6 +321,7 @@ pub fn provenance_file(project_root: &Path, language: ForeignLanguage, lib: &str
 pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost {
     match language {
         ForeignLanguage::C => ForeignHost::DirectCAbi,
+        ForeignLanguage::Cpp => ForeignHost::ClangCppShim,
         ForeignLanguage::Rust => ForeignHost::LegacyRustExtern,
         ForeignLanguage::Py => ForeignHost::SupervisedPythonSidecar,
         ForeignLanguage::Js => match target {

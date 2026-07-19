@@ -5,6 +5,7 @@ use crate::Codegen::is_db_value_variant;
 use crate::Codegen::is_json_type_name;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
+use crate::Codegen::foreign_binding_method_key;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::core_call_covered;
 use crate::Codegen::TIR::core_closure_call_in_subset;
@@ -17,6 +18,7 @@ use crate::Codegen::TIR::is_civil_time_method_name;
 use crate::Codegen::TIR::is_concurrency_method_name;
 use crate::Codegen::TIR::is_covered_builtin_name;
 use crate::Codegen::TIR::is_covered_enum_ty;
+use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_numeric_method;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::is_devserver_method_name;
@@ -875,13 +877,17 @@ pub(crate) fn method_call_in_subset(
     // `emit_builtin_method` whenever `recv_type == Some(T)` and `(T, method) ∈ method_sigs`
     // (the builtin-name-collision fix), so a user method SHADOWING a builtin name
     // (`get`/`len`/…) routes here, not through the name-keyed builtin path.
-    let Some(sig) = cx.method_sigs.get(&(ty.clone(), method.to_string())) else {
+    let binding_method = cx
+        .extern_funcs
+        .contains_key(&foreign_binding_method_key(ty, method));
+    let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()));
+    if sig.is_none() && !binding_method {
         // No user method: a name a core/stdlib/builtin/special lowering would intercept
         // *before* the user dispatch (`emit_builtin_method`, the `.raw()`/`.snapshot()`/
         // alloc special cases) has bespoke name-keyed lowering — exclude it (those are
         // covered by their own shapes, not the user-method TIR).
         return false;
-    };
+    }
     // A builtin-name method with NO `method_sigs` entry was already excluded above. With a
     // real user method present, the intercepted-name check (`is_intercepted_method_name`,
     // still used by the static-call shape) no longer applies — the AST path dispatches to
@@ -892,7 +898,10 @@ pub(crate) fn method_call_in_subset(
     // The receiver type must be a covered struct or enum (so the receiver place
     // emits exactly as the AST path does, and the method is a plain user method).
     let recv_ty = Type::Named(ty.clone());
-    if !is_covered_struct_ty(&recv_ty, cx) && !is_covered_enum_ty(&recv_ty, cx) {
+    if !is_covered_struct_ty(&recv_ty, cx)
+        && !is_covered_enum_ty(&recv_ty, cx)
+        && !is_covered_foreign_value_ty(&recv_ty, cx)
+    {
         return false;
     }
     // The receiver expression must itself be in-subset (a covered local/param/field).
@@ -900,7 +909,7 @@ pub(crate) fn method_call_in_subset(
         return false;
     }
     // Arity must match the resolved signature (sema guaranteed it, but be defensive).
-    if args.len() != sig.len() {
+    if sig.is_some_and(|sig| args.len() != sig.len()) {
         return false;
     }
     // Every argument must be in-subset. Unlike a plain call, a method arg MAY use any
@@ -910,9 +919,7 @@ pub(crate) fn method_call_in_subset(
     // c109 Phase 23: a call-site LABEL (`r.scale(factor: 0.5)`, D-NARG1) is allowed —
     // labels are sema-validated documentation that never reorder (D-NARG-D4) and codegen
     // never reads `CallArg.label`, so a labeled arg emits identically.
-    args.iter()
-        .zip(sig.iter())
-        .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))
+    args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
 pub(super) fn core_module_path_from_receiver(

@@ -158,7 +158,7 @@ renumbered, and no new `W` code may be allocated.
 | E0060 | parse | teaching: retired C FFI marker spelling → `@Extern` / `@Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
 | E0063 | retired | former two-plane wrong-sigil diagnostic; D-SHAPE2 makes `@` canonical for every applied rule |
-| E0064 | parse | `@FFI(<lang>) fn` body is not a single foreign-source string literal (D-FFI-INLINE1) |
+| E0064 | parse | `#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1) |
 | E0066 | parse | retired `@Pure`, `#(Effects)`, or ballot `-[Effects]->` function effect syntax; use exact `--[Effects]->` (D-SHAPE8=A) |
 | E0067 | lex | source-written `__name` is reserved for Jet and generated tooling (D-SHAPE-DUNDER2=A) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
@@ -444,9 +444,10 @@ renumbered, and no new `W` code may be allocated.
 | E3212 | parse/sema | `@Abi` on `extern rust` (Rust FFI has no C calling convention to pick), or `@Abi(name)` names an unknown C calling convention |
 | E3213 | sema  | named C calling convention exists but isn't available on this target's OS/architecture |
 | E3214 | sema  | variadic C function used with a calling convention other than the default C ABI (or `cdecl` on Windows x86) |
-| E3215 | sema  | `@FFI(<lang>)` inline foreign fn in an unsafe language (`c`/`cpp`/`asm`) lacks the enclosing `@Unsafe("reason")` gate (D-FFI-INLINE1/ASM1/CPP1) |
-| E3220 | sema  | `@FFI(<lang>)` names a language with no inline foreign binder yet (systems floor ships `c`/`cpp`/`asm`, card #501) |
-| E3221 | sema  | `@FFI(<lang>)` inline foreign body isn't lowerable yet — front end live, body codegen pending (card #501) |
+| E3215 | sema  | `#FFI(<lang>)` inline foreign fn in an unsafe language (`c`/`cpp`/`asm`) lacks the enclosing `@Unsafe("reason")` gate (D-FFI-INLINE1/ASM1/CPP1) |
+| E3220 | sema  | `#FFI(<lang>)` names a language with no inline foreign binder yet (systems floor ships `c`/`cpp`/`asm`, card #501) |
+| E3222 | sema/build | inline C/C++ body cannot satisfy its declared scalar Jet ABI, or inline asm uses a non-integer/unsupported signature; native tool output stays hidden (D-FFI-INLINE1/ASM1, I2) |
+| E3223 | sema | inline asm operands do not match the Jet signature: missing/unknown named input, duplicate or missing `; -> return`, or unaudited clobber/target register (D-FFI-ASM1) |
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |

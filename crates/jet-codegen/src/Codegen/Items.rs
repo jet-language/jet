@@ -1675,6 +1675,11 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
 }
 
 pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
+    // D-FFI-INLINE1: the executable definition lives in the hidden bridge;
+    // calls are already routed through `extern_funcs`.
+    if f.inline_foreign.is_some() {
+        return;
+    }
     // c148: expose the current function's type-parameter names so `rust_type` and
     // `rust_param_type` can recognize multi-char params (e.g. `Kind`) in addition
     // to the single-letter heuristic. Cleared on exit (normal or panic).

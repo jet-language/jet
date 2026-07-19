@@ -25,7 +25,7 @@ pub use jet_codegen::{
 // every internal call site in this crate (`crate::PackageManifest`,
 // `super::RefSpec`, `crate::EffectBudget`, etc.) is unchanged.
 pub use jet_pkg_model::{
-    AdaBind, CBind, CFFI, ComBind, DartBind, DotNetBind, EffectBudget, Envelope, FFI, FortranBind,
+    AdaBind, CBind, CFFI, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FFI, FortranBind,
     JavaBind, JSON, LintPolicy, Lock, Manifest, PackageManifest, PascalBind, Platform,
     PowerShellBind, RefSpec, ScriptDeps, TclBind, Variant,
 };

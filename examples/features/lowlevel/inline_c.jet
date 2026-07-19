@@ -1,0 +1,10 @@
+@Unsafe("the scalar ABI contract matches the C definition")
+#FFI(c) fn add(a: Int, b: Int) -> Int {
+    """int64_t add(int64_t a, int64_t b) { return a + b; }"""
+}
+
+fn run() {
+    @Unsafe("call the audited inline C contract") {
+        print(add(20, 22))
+    }
+}

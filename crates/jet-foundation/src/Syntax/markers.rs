@@ -163,7 +163,7 @@ pub const APPLIED_RULES: &[&str] = &[
     // ATTR_UNINIT/ATTR_REF above.
     ATTR_EXTERN_MODULE,
     ATTR_BINDGEN,
-    // D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `@FFI(<lang>) fn`
+    // D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `#FFI(<lang>) fn`
     // inline foreign tier marker.
     ATTR_FFI,
     // `#Caller()` is a compile-time value, not an applied rule.

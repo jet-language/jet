@@ -566,16 +566,12 @@ mod s61_tests {
         }
     }
 
-    /// D-FFI-INLINE1=A (card #501): `@FFI(c) fn` parses into an inline foreign
+    /// D-FFI-INLINE1=A / D-FFI-RAWBODY1=A (card #501): `#FFI(c) fn` parses into an inline foreign
     /// tier function — the signature is an ordinary Jet signature, the body is
     /// captured as foreign source and the statement body is empty.
     #[test]
     fn ffi_c_inline_tier_parses() {
-        // NOTE: the foreign body is a `"""…"""` string, which currently
-        // interpolates `{expr}` (S8), so a brace-heavy C body must double its
-        // braces (`{{`/`}}`) until a raw foreign-body form is ratified. The
-        // captured source has the un-doubled single braces.
-        let src = "@FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"\nlong add(long a, long b) {{ return a + b; }}\n\"\"\"\n}\n";
+        let src = "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -587,16 +583,22 @@ mod s61_tests {
             .expect("add function");
         let inl = func.inline_foreign.as_ref().expect("inline_foreign set");
         assert_eq!(inl.lang, "c");
-        assert!(inl.source.contains("long add(long a, long b) { return a + b; }"), "source: {:?}", inl.source);
-        assert!(func.body.is_empty(), "statement body cleared for inline foreign");
+        assert_eq!(
+            inl.source,
+            "long add(long a, long b) { return a + b; }\\n\"quoted\"\n"
+        );
+        assert!(
+            func.body.is_empty(),
+            "statement body cleared for inline foreign"
+        );
         assert_eq!(func.params.len(), 2);
     }
 
-    /// D-FFI-ASM1=A (card #501): the gated `@Unsafe("…") @FFI(asm) fn` form
+    /// D-FFI-ASM1=A (card #501): the gated `@Unsafe("…") #FFI(asm) fn` form
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "@Unsafe(\"cycle counter\")\n@FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\nrdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n\"\"\"\n}\n";
+        let src = "use core.mem\n@Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -610,22 +612,26 @@ mod s61_tests {
         assert_eq!(func.unsafe_reason.as_deref(), Some("cycle counter"));
         let inl = func.inline_foreign.as_ref().expect("inline_foreign set");
         assert_eq!(inl.lang, "asm");
-        assert!(inl.source.contains("; -> return"), "source: {:?}", inl.source);
+        assert!(
+            inl.source.contains("; -> return"),
+            "source: {:?}",
+            inl.source
+        );
     }
 
-    /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `@FFI` fns idempotently
+    /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `#FFI` fns idempotently
     /// (formatter-roundtrip-required-for-new-syntax).
     #[test]
     fn ffi_inline_tier_formats_idempotently() {
         use crate::Formatter::format_source;
         for src in [
-            "@FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"\nlong add(long a, long b) {{ return a + b; }}\n\"\"\"\n}\n",
-            "@Unsafe(\"cycle counter\")\n@FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\nrdtsc\n\"\"\"\n}\n",
+            "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
+            "use core.mem\n@Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
-            assert!(once.contains("@FFI("), "formatted output keeps the @FFI marker: {once}");
+            assert!(once.contains("#FFI("), "formatted output keeps the #FFI marker: {once}");
             let twice = format_source(&once).expect("format twice");
-            assert_eq!(once, twice, "jet fmt is idempotent for @FFI fns");
+            assert_eq!(once, twice, "jet fmt is idempotent for #FFI fns");
         }
     }
 
@@ -682,6 +688,8 @@ fn run() {
             pub_file_default: false,
             in_layout_body: 0,
             module_arg_expr_depth: None,
+            policy_declarations: Vec::new(),
+            block_spans: Vec::new(),
         };
         let _prog = p.program();
         assert!(

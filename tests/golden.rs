@@ -262,6 +262,8 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
 
     if stem == "lowlevel/lowlevel"
         || stem == "lowlevel/pointer_cast_deref"
+        || stem == "lowlevel/inline_c"
+        || stem == "lowlevel/inline_asm"
         || stem == "memory/rawptr"
         || stem == "effects/single_use_discard"
         || stem == "memory/uninit"

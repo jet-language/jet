@@ -217,6 +217,7 @@ fn unified_foreign_namespace_model_recognizes_every_registered_root() {
 
     let roots = [
         ("c", ForeignLanguage::C),
+        ("cpp", ForeignLanguage::Cpp),
         ("rust", ForeignLanguage::Rust),
         ("py", ForeignLanguage::Py),
         ("js", ForeignLanguage::Js),

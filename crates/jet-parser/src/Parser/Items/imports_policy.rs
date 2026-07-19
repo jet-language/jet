@@ -961,10 +961,11 @@ impl<'a> Parser<'a> {
                     TokKind::At if self.at_retired_at_c_module() => {
                         self.retired_at_c_module().map(Item::CModule)
                     }
-                    // D-FFI-INLINE1=A (card #501): `@FFI(<lang>) fn` inline
-                    // foreign tier, incl. the `@Unsafe("…") @FFI(asm) fn` gated
+                    // D-FFI-INLINE1=A (card #501): `#FFI(<lang>) fn` inline
+                    // foreign tier, incl. the `@Unsafe("…") #FFI(asm) fn` gated
                     // form. Checked before the unsafe arm so the gated form routes
                     // here rather than to the plain `@Unsafe fn` path.
+                    TokKind::Hash if self.at_ffi_fn() => self.ffi_fn().map(Item::Func),
                     TokKind::At if self.at_ffi_fn() => self.ffi_fn().map(Item::Func),
                     TokKind::At if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                     TokKind::At if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),

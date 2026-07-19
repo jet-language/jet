@@ -122,6 +122,7 @@ impl ImportDecl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ForeignLanguage {
     C,
+    Cpp,
     Rust,
     Py,
     Js,
@@ -145,8 +146,9 @@ pub enum ForeignLanguage {
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 21] = [
+    pub const ALL: [ForeignLanguage; 22] = [
         ForeignLanguage::C,
+        ForeignLanguage::Cpp,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
         ForeignLanguage::Js,
@@ -172,6 +174,7 @@ impl ForeignLanguage {
     pub fn from_root(root: &str) -> Option<Self> {
         match root {
             Syntax::C_MODULE_ROOT => Some(ForeignLanguage::C),
+            Syntax::CPP_MODULE_ROOT => Some(ForeignLanguage::Cpp),
             Syntax::KW_RUST => Some(ForeignLanguage::Rust),
             Syntax::PY_MODULE_ROOT => Some(ForeignLanguage::Py),
             Syntax::JS_MODULE_ROOT => Some(ForeignLanguage::Js),
@@ -199,6 +202,7 @@ impl ForeignLanguage {
     pub fn root(self) -> &'static str {
         match self {
             ForeignLanguage::C => Syntax::C_MODULE_ROOT,
+            ForeignLanguage::Cpp => Syntax::CPP_MODULE_ROOT,
             ForeignLanguage::Rust => Syntax::KW_RUST,
             ForeignLanguage::Py => Syntax::PY_MODULE_ROOT,
             ForeignLanguage::Js => Syntax::JS_MODULE_ROOT,

@@ -483,12 +483,12 @@ impl<'a> Fmt<'a> {
             }
             self.newline();
         }
-        // D-FFI-INLINE1=A (card #501): the `@FFI(<lang>)` inline foreign tier
+        // D-FFI-INLINE1=A (card #501): the `#FFI(<lang>)` inline foreign tier
         // marker sits on its own line before `fn`, directly after any `@Unsafe`
         // gate (matching the ratified rdtsc example: `@Unsafe(…)` then
-        // `@FFI(asm)`).
+        // `#FFI(asm)`).
         if let Some(inl) = &f.inline_foreign {
-            self.write(&format!("@{}({})", Syntax::ATTR_FFI, inl.lang));
+            self.write(&format!("#{}({})", Syntax::ATTR_FFI, inl.lang));
             self.newline();
         }
         // D-WASM1: `@Wasm` / `@Js` / `@WasmExport` per-function web partition
@@ -637,11 +637,9 @@ impl<'a> Fmt<'a> {
             self.write(" {");
             self.indent += 1;
             self.newline();
-            let expr = crate::AST::Expr::Str(
-                vec![crate::AST::StrPart::Lit(inl.source.clone())],
-                inl.source_span,
-            );
-            self.fmt_expr(&expr, Prec::OrFallback);
+            self.write("\"\"\"");
+            self.write(&inl.source);
+            self.write("\"\"\"");
             self.indent -= 1;
             self.newline();
             self.write("}");

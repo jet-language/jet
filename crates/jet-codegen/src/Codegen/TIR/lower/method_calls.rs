@@ -2820,6 +2820,7 @@ pub(crate) fn lower_method_call(
         .get(&(ty_name.clone(), method.to_string()))
         .cloned()
         .flatten()
+        .or_else(|| resolved_ret.cloned())
         .unwrap_or_else(unit_type);
     TExpr {
         ty: ret_ty,

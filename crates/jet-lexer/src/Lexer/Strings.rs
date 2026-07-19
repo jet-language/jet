@@ -9,6 +9,40 @@ use super::Scan::{lex_raw, lex_raw_generated};
 use super::Tokens::{StrTokPart, TokKind, Token};
 
 impl<'a> Lexer<'a> {
+    /// D-FFI-RAWBODY1=A: unlike every ordinary Jet string, the triple-quoted
+    /// payload of `#FFI(<lang>) fn` is an opaque byte-for-byte foreign-source
+    /// carrier. Braces, backslashes, quotes, and indentation have no Jet
+    /// meaning here.
+    pub(super) fn raw_foreign_string(&mut self, start: usize) -> Option<Token> {
+        let content_start = self.i + 3;
+        let mut close = content_start;
+        while close < self.chars.len()
+            && !(self.at(close) == '"' && self.at(close + 1) == '"' && self.at(close + 2) == '"')
+        {
+            close += 1;
+        }
+        if close >= self.chars.len() {
+            self.diags.push(Diagnostic::error(
+                "E0002",
+                "this raw foreign body never gets a closing `\"\"\"`".to_string(),
+                "a `#FFI` body preserves everything between its opening and closing `\"\"\"`"
+                    .to_string(),
+                "add a closing `\"\"\"` after the foreign source".to_string(),
+                Some(Span::new(start, self.end)),
+            ));
+            self.i = self.chars.len();
+            return None;
+        }
+        let begin_byte = self.pos(content_start);
+        let close_byte = self.pos(close);
+        let source = self.src[begin_byte..close_byte].to_string();
+        self.i = close + 3;
+        Some(Token {
+            kind: TokKind::Str(vec![StrTokPart::Lit(source)]),
+            span: Span::new(start, self.pos(self.i)),
+        })
+    }
+
     /// Lex a string literal: escapes (S20), `{{`/`}}` literal braces (S20),
     /// and `{expr}` interpolation (S8). Interpolated expressions are lexed
     /// in place so their tokens carry real source spans.

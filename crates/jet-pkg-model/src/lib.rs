@@ -32,6 +32,7 @@ pub mod CBind;
 pub mod CFFI;
 pub mod CobolBind;
 pub mod ComBind;
+pub mod CppBind;
 pub mod DotNetBind;
 pub mod FortranBind;
 pub mod GoBind;

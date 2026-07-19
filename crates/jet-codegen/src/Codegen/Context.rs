@@ -1541,6 +1541,10 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
             for ef in &block.functions {
                 map.insert(ef.name.clone(), format!("jet_ffi_{}", ef.name));
             }
+        } else if let Item::Func(func) = item {
+            if func.inline_foreign.is_some() {
+                map.insert(func.name.clone(), format!("jet_ffi_{}", func.name));
+            }
         }
     }
     map
@@ -1550,8 +1554,24 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
     let mut map = HashMap::new();
     for module in &bundle.modules {
         map.extend(extern_func_map(&module.items));
+        if module.display.starts_with("cpp.") {
+            for item in &module.items {
+                if let Item::Impl(def) = item {
+                    for method in def.methods.iter().filter(|method| method.is_pub) {
+                        map.insert(
+                            foreign_binding_method_key(&def.type_name, &method.name),
+                            String::new(),
+                        );
+                    }
+                }
+            }
+        }
     }
     map
+}
+
+pub(crate) fn foreign_binding_method_key(owner: &str, method: &str) -> String {
+    format!("__jet_foreign_method__{owner}__{method}")
 }
 
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
@@ -1600,9 +1620,42 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
             }
         }
     }
+    register_imported_methods(cx, bundle, module_idx);
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+}
+
+fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    let imported = bundle.modules[module_idx]
+        .imports
+        .iter()
+        .filter_map(|import| bundle.import_targets.get(&(module_idx, import.span)).copied());
+    for target in imported {
+        for item in &bundle.modules[target].items {
+            let (owner, methods) = match item {
+                Item::Struct(def) => (&def.name, &def.methods),
+                Item::Enum(def) => (&def.name, &def.methods),
+                Item::Impl(def) => (&def.type_name, &def.methods),
+                _ => continue,
+            };
+            for method in methods.iter().filter(|method| method.is_pub) {
+                let key = (owner.clone(), method.name.clone());
+                if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF)
+                {
+                    cx.method_self_convs
+                        .entry(key.clone())
+                        .or_insert(self_param.convention);
+                }
+                cx.method_sigs
+                    .entry(key.clone())
+                    .or_insert_with(|| method_sig_params(method));
+                cx.method_rets
+                    .entry(key)
+                    .or_insert_with(|| method.return_type.clone());
+            }
+        }
+    }
 }
 
 fn register_core_close_types(cx: &mut Cx) {

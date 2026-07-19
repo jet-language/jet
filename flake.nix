@@ -22,6 +22,8 @@
         jetRuntimePath = pkgs.lib.makeBinPath [
           pkgs.rustc
           pkgs.stdenv.cc
+          # D-FFI-CPP1=A: AST discovery and deterministic C++ shim compilation.
+          pkgs.clang
           pkgs.lld
           # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
           pkgs.ruby
@@ -111,6 +113,7 @@
             pkgs.clippy
             pkgs.rustc
             pkgs.gcc
+            pkgs.clang
             pkgs.lld
             pkgs.nodejs_22
             pkgs.nixfmt
@@ -153,6 +156,7 @@
             pkgs.clippy
             pkgs.rustc
             pkgs.gcc
+            pkgs.clang
             # D-FFI-ADA1=A: provision GNAT for C-ABI Ada binder compilation.
             pkgs.gnat
             # D-FFI-PASCAL1=A: provision FreePascal for cdecl estate bindings.

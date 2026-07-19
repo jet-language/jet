@@ -1814,11 +1814,13 @@ taken as values. Bindgen records both portable declared `system` and the
 resolved target ABI.
 
 **D-FFI-INLINE1=A — inline foreign tier** *(ratified 2026-07-11, card
-#501; owner ratification comment renames the marker: **`@FFI(<lang>)`**,
+#501; owner ratification comment renames the marker: **`#FFI(<lang>)`**,
 not `#Foreign` — FFI fully capitalized per S66)*: the fourth D-FFI-UNIFY1
-tier. `@FFI(<lang>) fn` declares an
-ordinary Jet signature whose body is one multi-line string of foreign
-source. Sema checks every call site against the signature; the language's
+tier. `#FFI(<lang>) fn` declares an ordinary Jet signature whose body is one
+triple-quoted raw foreign-source string. Per D-FFI-RAWBODY1, the bytes between
+the delimiters are passed to the binder exactly as written: no escapes,
+interpolation, indentation stripping, or newline normalization. Sema checks
+every call site against the signature; the language's
 binder compiles the body on cache miss through the same machinery as the
 script tier; a body/signature mismatch is a Jet diagnostic naming both
 sides (I2). Effects declare like any extern; unsafe-language bodies
@@ -1827,10 +1829,13 @@ sides (I2). Effects declare like any extern; unsafe-language bodies
 
 **D-FFI-ASM1=A — inline assembly** *(ratified 2026-07-11, card #501; the
 `asm` instance of the D-FFI-INLINE1 tier, whose ratification cleared this
-entry's gate; owner comment: spelled **`@FFI(asm)`**)*: `@FFI(asm) fn`
+entry's gate; owner comment: spelled **`#FFI(asm)`**)*: `#FFI(asm) fn`
 bodies are per-target assembly with the Jet
-signature as the operand contract (parameters map to inputs, the return
-value to outputs, named `; -> return` anchors). Requires `use core.mem`
+signature as the operand contract. Integer parameters are named register
+inputs (`{parameter}`), the single integer return is anchored by
+`; -> return`, and audited registers are declared by `; clobbers ...`.
+Every declared parameter must be referenced and exactly one return anchor is
+required. Requires `use core.mem`
 plus an enclosing `@Unsafe("reason")` (S58); outside the gate is E0208-class.
 Target variants select via the existing `comptime if build.os ==` /
 `@Target` machinery. Lowering emits Rust `asm!` so rustc verifies
@@ -1840,8 +1845,8 @@ functions on top — beginners meet only the named functions.
 
 **D-FFI-CPP1=A — C++ binder depth** *(ratified 2026-07-11, card #501)*:
 `cpp.*` binds at full depth via a clang-based binder emitting a generated,
-cached C shim crate per library. Classes become opaque owned handles with
-RAII mapped to scope cleanup (S63); methods become ordinary Jet methods;
+cached C shim archive per library. Classes become opaque `@SingleUse` owned
+handles with consuming cleanup (S63); methods become ordinary Jet methods;
 exceptions are caught at the shim and surface as `T ? CppError` (fallible
 at every call site); templates instantiate on demand (`cpp.vector<Int>`);
 overloads collapse to argument labels (S61); operator overloads become

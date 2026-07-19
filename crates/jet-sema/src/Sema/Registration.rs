@@ -30,7 +30,7 @@ fn is_fallible_void_return(ty: &Type) -> bool {
 
 impl<'a> Checker<'a> {
     /// D-FFI-INLINE1=A / D-FFI-ASM1=A / D-FFI-CPP1=A (card #501): validate an
-    /// inline foreign tier function (`@FFI(<lang>) fn`). The systems floor ships
+    /// inline foreign tier function (`#FFI(<lang>) fn`). The systems floor ships
     /// `c`, `cpp`, and `asm`; every one is an unsafe foreign language, so an
     /// inline body requires the enclosing `@Unsafe("reason")` gate (I1/S58).
     /// Any other language name has no inline binder yet (E3220).
@@ -49,7 +49,7 @@ impl<'a> Checker<'a> {
                 "E3220",
                 format!("no inline foreign binder for `{}` yet", inl.lang),
                 "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards".to_string(),
-                "use `@FFI(c)`, `@FFI(cpp)`, or `@FFI(asm)`".to_string(),
+                "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`".to_string(),
                 Some(inl.lang_span),
             ));
             return;
@@ -59,30 +59,96 @@ impl<'a> Checker<'a> {
         if !f.is_unsafe {
             self.diags.push(Diagnostic::error(
                 "E3215",
-                format!("`@FFI({})` needs an `@Unsafe(\"reason\")` gate", inl.lang),
+                format!("`#FFI({})` needs an `@Unsafe(\"reason\")` gate", inl.lang),
                 format!(
                     "`{}` is an unsafe foreign language — an inline `{}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)",
                     inl.lang, inl.lang
                 ),
-                format!("add the gate: `@Unsafe(\"…\") @FFI({}) fn …`", inl.lang),
+                format!("add the gate: `@Unsafe(\"…\") #FFI({}) fn …`", inl.lang),
                 Some(inl.marker_span),
             ));
             return;
         }
-        // D-FFI-INLINE1/ASM1/CPP1 (card #501): the front end (parse, contract
-        // checking, `@Unsafe` gate, formatter, grammars) is live, but body
-        // lowering is not yet wired for any language. Reject at sema so a valid
-        // program never reaches codegen and emits uncompilable Rust (I2). This
-        // gate lifts per language as its binder lands — asm awaits the ratified
-        // operand/clobber model, C awaits a raw (non-interpolating) body form,
-        // cpp awaits the clang shim toolchain.
-        self.diags.push(Diagnostic::error(
-            "E3221",
-            format!("`@FFI({})` inline foreign body can't be compiled yet", inl.lang),
-            "the inline foreign tier is parsed, contract-checked, and `@Unsafe`-gated, but body lowering for this language is still pending (card #501 systems floor)".to_string(),
-            "track card #501 for when the inline binder for this language lands".to_string(),
-            Some(inl.marker_span),
-        ));
+        if !f.type_params.is_empty()
+            || f.params.iter().any(|p| !inline_ffi_scalar(&p.ty))
+            || f.return_type.as_ref().is_some_and(|ty| !inline_ffi_scalar(ty))
+        {
+            self.diags.push(Diagnostic::error(
+                "E3222",
+                format!("`#FFI({})` has a signature its binder can't represent", inl.lang),
+                "inline foreign contracts are ABI boundaries; this systems tier accepts concrete integer, float, and Bool values only".to_string(),
+                "replace generic, collection, String, callback, or user-defined values with an explicit scalar ABI contract".to_string(),
+                Some(f.name_span),
+            ));
+            return;
+        }
+        if inl.lang == Syntax::ASM_LANG {
+            self.check_inline_asm(f, inl);
+        }
+    }
+
+    fn check_inline_asm(&mut self, f: &Func, inl: &crate::AST::InlineForeign) {
+        if f.params.iter().any(|p| !inline_asm_integer(&p.ty))
+            || f.return_type.as_ref().is_some_and(|ty| !inline_asm_integer_or_void(ty))
+        {
+            self.diags.push(Diagnostic::error(
+                "E3222",
+                "`#FFI(asm)` has a signature its register binder can't represent".to_string(),
+                "the audited assembly bridge uses general-purpose integer registers; floats and Bool need explicit conversion in Jet before the boundary".to_string(),
+                "use Int or I8/I16/I32/I64/U8/U16/U32/U64 parameters and return values".to_string(),
+                Some(f.name_span),
+            ));
+            return;
+        }
+        if !self.core_imports.values().any(|path| path == Syntax::CORE_MEM_MODULE) {
+            self.diags.push(Diagnostic::error(
+                "E3102",
+                "inline assembly is part of the low-level memory tier".to_string(),
+                "assembly can read registers and memory outside Jet's safe value model, so discovery requires the explicit `core.mem` opt-in".to_string(),
+                "add `use core.mem` at the top of this file".to_string(),
+                Some(inl.marker_span),
+            ));
+            return;
+        }
+        let params: HashSet<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+        let mut used = HashSet::new();
+        let mut return_anchors = 0usize;
+        let mut bad = None;
+        for line in inl.source.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("; clobbers ") {
+                for reg in rest.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()) {
+                    if !asm_register_allowed(reg) {
+                        bad = Some(format!("`{reg}` isn't an audited register on this target"));
+                    }
+                }
+                continue;
+            }
+            if line.contains("; -> return") { return_anchors += 1; }
+            let mut rest = line;
+            while let Some(open) = rest.find('{') {
+                let Some(close) = rest[open + 1..].find('}') else { bad = Some("an assembly operand has an unmatched `{`".to_string()); break; };
+                let name = &rest[open + 1..open + 1 + close];
+                if !params.contains(name) { bad = Some(format!("`{{{name}}}` doesn't name a Jet parameter")); } else { used.insert(name); }
+                rest = &rest[open + close + 2..];
+            }
+        }
+        if let Some(name) = params.iter().find(|name| !used.contains(**name)) {
+            bad = Some(format!("parameter `{name}` has no named `{{{name}}}` operand"));
+        }
+        let returns_value = f.return_type.as_ref().is_some_and(|ty| !matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit"));
+        if return_anchors != usize::from(returns_value) {
+            bad = Some(if returns_value { "a value-returning assembly body needs exactly one `; -> return` anchor".to_string() } else { "a void assembly body can't declare a `; -> return` anchor".to_string() });
+        }
+        if let Some(problem) = bad {
+            self.diags.push(Diagnostic::error(
+                "E3223",
+                "this inline assembly operand contract is incomplete".to_string(),
+                problem,
+                "bind each Jet parameter as `{name}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`".to_string(),
+                Some(inl.source_span),
+            ));
+        }
     }
 
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
@@ -173,7 +239,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        // D-FFI-INLINE1=A (card #501): an inline foreign tier fn (`@FFI(<lang>)
+        // D-FFI-INLINE1=A (card #501): an inline foreign tier fn (`#FFI(<lang>)
         // fn`) has a foreign-source body, not Jet statements. Its parameters are
         // in scope above (the Jet signature is a real, checked contract at call
         // sites); validate the tier gate and skip the ordinary body/return
@@ -330,6 +396,25 @@ impl<'a> Checker<'a> {
             self.diags.push(e1314(&name, span));
         }
     }
+}
+
+fn inline_ffi_scalar(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::Float | Type::IntN { bits: 8 | 16 | 32 | 64, .. } | Type::Float32 | Type::Bool)
+        || matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit")
+}
+
+fn inline_asm_integer(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::IntN { bits: 8 | 16 | 32 | 64, .. })
+}
+
+fn inline_asm_integer_or_void(ty: &Type) -> bool {
+    inline_asm_integer(ty)
+        || matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit")
+}
+
+fn asm_register_allowed(reg: &str) -> bool {
+    if std::env::consts::ARCH != "x86_64" { return false; }
+    matches!(reg.to_ascii_lowercase().as_str(), "rax" | "rbx" | "rcx" | "rdx" | "rsi" | "rdi" | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15")
 }
 
 /// D-ANY-JAI1: E1314 — a trait-bounded variadic parameter used outside the
