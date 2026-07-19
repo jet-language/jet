@@ -174,11 +174,14 @@ The reviewer does not implement. They check missing paths, semantic and safety b
 false-green tests, stale decisions, accidental scope, duplicate mechanisms, and
 orphaned work. A green build never waives review.
 
-Technical verification is agent-owned: the implementer runs the machine checks and
-the independent reviewer validates their evidence. Do not create owner-acceptance
-cards or `needsAcceptance` gates for technical correctness. Reserve owner
-acceptance for an explicit human judgment of UX, DX, visual presentation, copy, or
-other taste, and state exactly what experience the owner should inspect.
+Technical verification is agent-owned: the implementer runs every machine-verifiable
+requirement, however many there are, and the independent reviewer validates the
+evidence. Do not create owner-acceptance cards or `needsAcceptance` gates for
+technical correctness. Reserve owner acceptance for unavailable hardware,
+platforms, or real environments; visual confirmation the harness cannot perform;
+or genuine UI, UX, or DX taste and design judgment. Tell the owner only what to
+observe and why human inspection is needed, as a brief checklist; omit the machine
+verification details agents already own.
 
 Use targeted tests during implementation and review. The verification skill owns when to run
 `scripts/agent/jet-env full scripts/agent/verify-full.sh`; CI runs it again. Keep normal parallelism unless reproducing

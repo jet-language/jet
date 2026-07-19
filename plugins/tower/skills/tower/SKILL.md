@@ -74,9 +74,12 @@ everything as JSON; `tower status` is the human summary.
    who is also the builder (`E_CRITERIA_SELF`). Cards flagged
    `needsAcceptance` mint an owner accept/bounce ballot once the checklist is
    clean; the card waits in `verify` for that ratification, not `done`. Do not
-   set it for technical correctness: agents own machine verification and the
-   independent review. Use it only for an explicit owner judgment of UX, DX,
-   visual presentation, copy, or taste, and name what the owner should inspect.
+   set it for technical correctness: agents own every machine-verifiable
+   requirement, however many there are, plus the independent review. Use it only
+   for unavailable hardware, platforms, or real environments; visual confirmation
+   the harness cannot perform; or genuine UI, UX, or DX taste and design judgment.
+   Give the owner only a brief observable checklist and why human inspection is
+   needed; omit machine-verification details.
 5. Report through the board itself: a `--log` entry on each card you advanced
    and a question/ballot for anything newly blocked on the owner — those are
    what the owner sees (live SSE UI — web push removed).

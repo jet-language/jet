@@ -40,11 +40,14 @@ not completion evidence; the orchestrator checks the integrated result.
 
 ## Owner acceptance boundary
 
-Technical correctness belongs to agents: run and record the machine checks, then
-have the independent reviewer validate that evidence. Do not create a manual owner
-acceptance gate for tests, diagnostics, safety, compatibility, or other technical
-claims. Use owner acceptance only when an explicit decision needs human judgment of
-UX, DX, visual presentation, copy, or taste; name the exact experience to inspect.
+Technical correctness belongs to agents: run and record every machine-verifiable
+requirement, however many there are, then have the independent reviewer validate
+that evidence. Do not create a manual owner acceptance gate for tests, diagnostics,
+safety, compatibility, or other technical claims. Use owner acceptance only for
+unavailable hardware, platforms, or real environments; visual confirmation the
+harness cannot perform; or genuine UI, UX, or DX taste and design judgment. Give
+the owner only a brief observable checklist and why human inspection is needed;
+omit the machine-verification details agents already own.
 
 ## Blessing snapshots and generated docs
 
