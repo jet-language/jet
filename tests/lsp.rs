@@ -2228,6 +2228,9 @@ fn run() {
     cursor.next()
     loop {
         value :: maybe() ?? next
+        nested :: (maybe() ?? next)
+        consume(maybe() ?? next, 1)
+        escaped :: maybe() ?? (next)
         next
     }
     outer@ loop { next outer@ }
@@ -2320,16 +2323,16 @@ fn next() -> Int { return 1 }
             .iter()
             .filter(|token| token.text == "next" && token.token_type == TOKEN_KEYWORD)
             .count()
-            == 3,
-        "standalone, labeled, and bare `?? next` should be contextual keyword tokens: {tokens:?}"
+            == 5,
+        "standalone, labeled, nested, comma-delimited, and bare `?? next` should be contextual keyword tokens: {tokens:?}"
     );
     assert!(
         tokens
             .iter()
             .filter(|token| token.text == "next" && token.token_type == TOKEN_VARIABLE)
             .count()
-            == 3,
-        "`fn next`, `.next`, and statement-start `next()` must remain variables: {tokens:?}"
+            == 4,
+        "`fn next`, `.next`, statement-start `next()`, and `?? (next)` must remain variables: {tokens:?}"
     );
 
     for retired in ["val", "mut", "take", "view"] {

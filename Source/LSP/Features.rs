@@ -514,7 +514,7 @@ fn is_contextual_next(tokens: &[Token], idx: usize) -> bool {
     let next_idx = next_significant(tokens, idx);
     let next = next_idx.map(|idx| &tokens[idx].kind);
     if matches!(previous, Some(TokKind::QuestionQuestion)) {
-        return matches!(next, Some(TokKind::Semi | TokKind::RBrace));
+        return true;
     }
     if !matches!(previous, Some(TokKind::LBrace | TokKind::Semi)) {
         return false;
