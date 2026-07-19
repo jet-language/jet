@@ -1980,6 +1980,43 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 mod project_part_tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[derive(Debug)]
+    struct ShortTestDir(std::path::PathBuf);
+
+    #[cfg(unix)]
+    impl ShortTestDir {
+        fn reserve(base: &std::path::Path, prefix: &str, attempts: usize) -> io::Result<Self> {
+            for attempt in 0..attempts {
+                let path = base.join(format!("{prefix}-{attempt}"));
+                match std::fs::create_dir(&path) {
+                    Ok(()) => return Ok(Self(path)),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => {
+                        return Err(io::Error::new(
+                            error.kind(),
+                            format!("failed to create {}: {error}", path.display()),
+                        ));
+                    }
+                }
+            }
+            Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "failed to reserve a unique {prefix} directory under {} after {attempts} attempts",
+                    base.display()
+                ),
+            ))
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for ShortTestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn json_rpc_envelope_rejects_malformed_or_ambiguous_requests() {
         assert!(parse_rpc_message(
@@ -2072,23 +2109,42 @@ mod project_part_tests {
 
     #[cfg(unix)]
     #[test]
+    fn short_socket_directory_reservation_is_bounded_and_skips_collisions() {
+        let root = ShortTestDir::reserve(
+            std::path::Path::new("/tmp"),
+            &format!("jet-lsp-reservation-{}", std::process::id()),
+            64,
+        )
+        .expect("failed to reserve collision-test directory");
+        std::fs::create_dir(root.0.join("slot-0")).unwrap();
+        let reserved = ShortTestDir::reserve(&root.0, "slot", 2).unwrap();
+        assert_eq!(reserved.0.file_name().unwrap(), "slot-1");
+
+        std::fs::create_dir(root.0.join("full-0")).unwrap();
+        let error = ShortTestDir::reserve(&root.0, "full", 1).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert!(error.to_string().contains("after 1 attempts"));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn workspace_scan_ignores_non_regular_jet_entries() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-lsp-non-regular-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let source = root.join("main.jet");
+        let root = ShortTestDir::reserve(
+            std::path::Path::new("/tmp"),
+            &format!("jet-lsp-{}", std::process::id()),
+            64,
+        )
+        .expect("failed to reserve short Unix socket test directory");
+        let source = root.0.join("main.jet");
         std::fs::write(&source, "fn run() {}\n").unwrap();
-        let socket = std::os::unix::net::UnixListener::bind(root.join("blocked.jet")).unwrap();
+        let socket =
+            std::os::unix::net::UnixListener::bind(root.0.join("blocked.jet")).unwrap();
 
         let mut files = Vec::new();
-        collect_jet_files(&root, &mut files);
+        collect_jet_files(&root.0, &mut files);
         assert_eq!(files, vec![source]);
 
         drop(socket);
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
