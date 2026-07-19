@@ -399,6 +399,9 @@ mod tests {
             every: None,
             inline_foreign: None,
             inline_span: None,
+            return_view_provenance: None,
+            gc_return: false,
+            gc_scope: false,
             body: Vec::new(),
         }
     }
