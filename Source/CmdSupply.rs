@@ -321,8 +321,8 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // Version immutability (D-VERSION1): refuse to overwrite a published,
     // non-yanked version. This is the enforcement point the decision promised
     // but couldn't land without a real push target.
-    if let Some(existing) = jet::Publish::find_published(&repo, name, version) {
-        if !existing.yanked {
+    match jet::Publish::find_published(&repo, name, version) {
+        Ok(Some(existing)) if !existing.yanked => {
             eprint!(
                 "{}",
                 jet::render_diagnostics(
@@ -330,6 +330,14 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                     "",
                     &[jet::Publish::e1234(name, version)]
                 )
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+        Ok(_) => {}
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -366,9 +374,18 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             }
         };
         // TOFU: record the public key only if this package has none pinned yet.
-        let already_pinned =
-            jet::Publish::Index::pinned_public_key(&jet::Publish::Index::read_entries(&repo, name))
-                .is_some();
+        let entries = match jet::Publish::Index::read_entries(&repo, name) {
+            Ok(entries) => entries,
+            Err(error) => {
+                let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+        let already_pinned = jet::Publish::Index::pinned_public_key(&entries).is_some();
         let pub_field = if already_pinned {
             String::new()
         } else {
@@ -600,7 +617,20 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         String::new()
     };
 
-    let advisories = jet::Publish::parse_advisory_db(&db_text);
+    let advisories = match jet::Publish::parse_advisory_db(&db_text) {
+        Ok(advisories) => advisories,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(
+                    db_path.unwrap_or("advisory database"),
+                    &db_text,
+                    &[diagnostic]
+                )
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
 
     if advisories.is_empty() && db_path.is_none() {
         println!(

@@ -3079,7 +3079,7 @@ fn audit_e2603_on_vulnerable_dep() {
     let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
     // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
     let db = "JET-2026-SEC-001|crypto-lib|^0|0.9.5|Timing side-channel in AES-GCM|critical\n";
-    let advisories = parse_advisory_db(db);
+    let advisories = parse_advisory_db(db).unwrap();
     let matches = audit_lockfile(&lock, &advisories);
 
     assert_eq!(matches.len(), 1, "one advisory match expected");
@@ -3103,7 +3103,7 @@ fn audit_non_critical_is_advisory() {
 
     let lock = make_test_lock("util-lib", "1.0.0", "sha256-ccdd");
     let db = "JET-2026-INFO-1|util-lib|^1|1.0.2|Minor info leak in debug logs|low\n";
-    let advisories = parse_advisory_db(db);
+    let advisories = parse_advisory_db(db).unwrap();
     let matches = audit_lockfile(&lock, &advisories);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].severity, Severity::Low);

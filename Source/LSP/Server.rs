@@ -19,7 +19,7 @@ use super::Position::{
     range_json, LspPos, LspRange,
 };
 use super::SymbolDB::{build_symbol_db, InlayHint, SymKind, SymbolDB};
-use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
+use jet_foundation::JSON::{json_escape, json_get, json_str, json_u32, parse_json, JsonValue};
 
 // ── Document state ────────────────────────────────────────────────────────────
 
@@ -139,9 +139,15 @@ pub fn run_stdio() -> io::Result<()> {
             Some(b) => b,
             None => break,
         };
-        let msg = match parse_json(&body) {
+        let msg = match parse_rpc_message(&body) {
             Ok(v) => v,
-            Err(()) => continue,
+            Err((code, message)) => {
+                write_message(
+                    &mut stdout,
+                    &error_response(&JsonValue::Null, code, message),
+                )?;
+                continue;
+            }
         };
         let method = json_get(&msg, "method").and_then(json_str);
         let id = json_get(&msg, "id").cloned();
@@ -169,6 +175,27 @@ pub fn run_stdio() -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn parse_rpc_message(body: &str) -> Result<JsonValue, (i64, &'static str)> {
+    let message = parse_json(body).map_err(|()| (-32700, "Parse error"))?;
+    let JsonValue::Object(_) = &message else {
+        return Err((-32600, "Invalid Request"));
+    };
+    if json_get(&message, "jsonrpc").and_then(json_str) != Some("2.0")
+        || json_get(&message, "method").and_then(json_str).is_none()
+        || !matches!(
+            json_get(&message, "id"),
+            None | Some(JsonValue::Null | JsonValue::Number(_) | JsonValue::String(_))
+        )
+        || !matches!(
+            json_get(&message, "params"),
+            None | Some(JsonValue::Array(_) | JsonValue::Object(_))
+        )
+    {
+        return Err((-32600, "Invalid Request"));
+    }
+    Ok(message)
 }
 
 /// Catch panics in a handler; on panic, log and return None (LSP-I2).
@@ -575,8 +602,8 @@ fn range_from_json(value: &JsonValue) -> Option<LspRange> {
 
 fn pos_from_json(value: &JsonValue) -> Option<LspPos> {
     Some(LspPos {
-        line: json_int(json_get(value, "line")?)? as u32,
-        character: json_int(json_get(value, "character")?)? as u32,
+        line: json_u32(json_get(value, "line")?)?,
+        character: json_u32(json_get(value, "character")?)?,
     })
 }
 
@@ -689,8 +716,8 @@ fn completion_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let lsp_pos = LspPos { line, character };
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
@@ -734,8 +761,8 @@ fn signature_help_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
     let call = match active_call(&doc.text, offset) {
         Some(call) => call,
@@ -927,8 +954,8 @@ fn document_highlight_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
 
     let tokens = server.lex(doc);
@@ -995,12 +1022,12 @@ fn selection_range_response(
         if i > 0 {
             out.push(',');
         }
-        let line = match json_get(pos, "line").and_then(json_int) {
-            Some(line) => line as u32,
+        let line = match json_get(pos, "line").and_then(json_u32) {
+            Some(line) => line,
             None => continue,
         };
-        let character = match json_get(pos, "character").and_then(json_int) {
-            Some(character) => character as u32,
+        let character = match json_get(pos, "character").and_then(json_u32) {
+            Some(character) => character,
             None => continue,
         };
         let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
@@ -1047,8 +1074,8 @@ fn prepare_call_hierarchy_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
     let tokens = server.lex(doc);
     let name = match ident_at(&tokens, offset) {
@@ -1182,8 +1209,8 @@ fn prepare_type_hierarchy_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
 
     let checked = server.check_with_bundle(doc);
@@ -1262,8 +1289,8 @@ fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let lsp_pos = LspPos { line, character };
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
@@ -1296,8 +1323,8 @@ fn definition_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let lsp_pos = LspPos { line, character };
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
@@ -1393,10 +1420,10 @@ fn execute_command_response(
     });
     let depth = args
         .get(2)
-        .and_then(json_int)
+        .and_then(json_u32)
         .map(|n| n as usize)
         .unwrap_or(3)
-        .max(1);
+        .clamp(1, 64);
 
     let (uri, symbol) = match (uri, symbol) {
         (Some(u), Some(s)) => (u, s),
@@ -1442,8 +1469,8 @@ fn references_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let lsp_pos = LspPos { line, character };
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
@@ -1498,8 +1525,8 @@ fn prepare_rename_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
     let tokens = server.lex(doc);
     let tok = match token_at(&tokens, offset) {
@@ -1534,8 +1561,8 @@ fn rename_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let pos = json_get(params, "position")?;
-    let line = json_int(json_get(pos, "line")?)? as u32;
-    let character = json_int(json_get(pos, "character")?)? as u32;
+    let line = json_u32(json_get(pos, "line")?)?;
+    let character = json_u32(json_get(pos, "character")?)?;
     let lsp_pos = LspPos { line, character };
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
     let new_name = json_get(params, "newName").and_then(json_str)?;
@@ -1886,6 +1913,23 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 #[cfg(test)]
 mod project_part_tests {
     use super::*;
+
+    #[test]
+    fn json_rpc_envelope_rejects_malformed_or_ambiguous_requests() {
+        assert!(parse_rpc_message(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#
+        )
+        .is_ok());
+        for (raw, code) in [
+            (r#"{"jsonrpc":"2.0","method":"x","method":"y"}"#, -32700),
+            (r#"{"jsonrpc":"1.0","method":"x"}"#, -32600),
+            (r#"{"jsonrpc":"2.0","id":1.5,"method":"x"}"#, -32600),
+            (r#"{"jsonrpc":"2.0","method":"x","params":1}"#, -32600),
+            (r#"["not","a","request"]"#, -32600),
+        ] {
+            assert_eq!(parse_rpc_message(raw).unwrap_err().0, code, "{raw}");
+        }
+    }
 
     #[test]
     fn workspace_index_skips_internal_parts_until_explicit_import() {

@@ -15,13 +15,16 @@ pub enum JsonValue {
 
 pub fn parse_json(text: &str) -> Result<JsonValue, ()> {
     let mut p = JsonParser { s: text, i: 0 };
-    let v = p.value()?;
+    let v = p.value(0)?;
     p.skip_ws();
     if p.i < p.s.len() {
         return Err(());
     }
     Ok(v)
 }
+
+/// Protocol JSON is bounded so hostile LSP/DAP input cannot exhaust the stack.
+pub const MAX_JSON_DEPTH: usize = 64;
 
 struct JsonParser<'a> {
     s: &'a str,
@@ -45,7 +48,7 @@ impl<'a> JsonParser<'a> {
         }
     }
 
-    fn value(&mut self) -> Result<JsonValue, ()> {
+    fn value(&mut self, depth: usize) -> Result<JsonValue, ()> {
         self.skip_ws();
         match self.peek() {
             Some('n') => {
@@ -62,6 +65,9 @@ impl<'a> JsonParser<'a> {
             }
             Some('"') => Ok(JsonValue::String(self.string()?)),
             Some('[') => {
+                if depth >= MAX_JSON_DEPTH {
+                    return Err(());
+                }
                 self.bump();
                 let mut arr = Vec::new();
                 self.skip_ws();
@@ -70,7 +76,7 @@ impl<'a> JsonParser<'a> {
                     return Ok(JsonValue::Array(arr));
                 }
                 loop {
-                    arr.push(self.value()?);
+                    arr.push(self.value(depth + 1)?);
                     self.skip_ws();
                     match self.bump() {
                         Some(',') => continue,
@@ -81,6 +87,9 @@ impl<'a> JsonParser<'a> {
                 Ok(JsonValue::Array(arr))
             }
             Some('{') => {
+                if depth >= MAX_JSON_DEPTH {
+                    return Err(());
+                }
                 self.bump();
                 let mut obj = HashMap::new();
                 self.skip_ws();
@@ -95,7 +104,10 @@ impl<'a> JsonParser<'a> {
                     if self.bump() != Some(':') {
                         return Err(());
                     }
-                    obj.insert(key, self.value()?);
+                    let value = self.value(depth + 1)?;
+                    if obj.insert(key, value).is_some() {
+                        return Err(());
+                    }
                     self.skip_ws();
                     match self.bump() {
                         Some(',') => continue,
@@ -105,40 +117,65 @@ impl<'a> JsonParser<'a> {
                 }
                 Ok(JsonValue::Object(obj))
             }
-            Some(c) if c == '-' || c.is_ascii_digit() => {
-                let start = self.i;
-                if self.peek() == Some('-') {
-                    self.bump();
+            Some(c) if c == '-' || c.is_ascii_digit() => self.number(),
+            _ => Err(()),
+        }
+    }
+
+    fn number(&mut self) -> Result<JsonValue, ()> {
+        let start = self.i;
+        if self.peek() == Some('-') {
+            self.bump();
+        }
+        match self.peek() {
+            Some('0') => {
+                self.bump();
+                if matches!(self.peek(), Some('0'..='9')) {
+                    return Err(());
                 }
+            }
+            Some('1'..='9') => {
                 while matches!(self.peek(), Some('0'..='9')) {
                     self.bump();
                 }
-                let is_float = matches!(self.peek(), Some('.') | Some('e') | Some('E'));
-                if is_float {
-                    if self.peek() == Some('.') {
-                        self.bump();
-                        while matches!(self.peek(), Some('0'..='9')) {
-                            self.bump();
-                        }
-                    }
-                    if matches!(self.peek(), Some('e') | Some('E')) {
-                        self.bump();
-                        if matches!(self.peek(), Some('+') | Some('-')) {
-                            self.bump();
-                        }
-                        while matches!(self.peek(), Some('0'..='9')) {
-                            self.bump();
-                        }
-                    }
-                    let s = &self.s[start..self.i];
-                    Ok(JsonValue::Flt(s.parse().map_err(|_| ())?))
-                } else {
-                    Ok(JsonValue::Number(
-                        self.s[start..self.i].parse().map_err(|_| ())?,
-                    ))
-                }
             }
-            _ => Err(()),
+            _ => return Err(()),
+        }
+
+        let mut float = false;
+        if self.peek() == Some('.') {
+            float = true;
+            self.bump();
+            if !matches!(self.peek(), Some('0'..='9')) {
+                return Err(());
+            }
+            while matches!(self.peek(), Some('0'..='9')) {
+                self.bump();
+            }
+        }
+        if matches!(self.peek(), Some('e') | Some('E')) {
+            float = true;
+            self.bump();
+            if matches!(self.peek(), Some('+') | Some('-')) {
+                self.bump();
+            }
+            if !matches!(self.peek(), Some('0'..='9')) {
+                return Err(());
+            }
+            while matches!(self.peek(), Some('0'..='9')) {
+                self.bump();
+            }
+        }
+
+        let raw = &self.s[start..self.i];
+        if float {
+            let value = raw.parse::<f64>().map_err(|_| ())?;
+            if !value.is_finite() {
+                return Err(());
+            }
+            Ok(JsonValue::Flt(value))
+        } else {
+            Ok(JsonValue::Number(raw.parse().map_err(|_| ())?))
         }
     }
 
@@ -176,6 +213,8 @@ impl<'a> JsonParser<'a> {
                     'u' => self.unicode_escape()?,
                     _ => return Err(()),
                 });
+            } else if c <= '\u{001f}' {
+                return Err(());
             } else {
                 self.bump();
                 out.push(c);
@@ -237,6 +276,13 @@ pub fn json_int(v: &JsonValue) -> Option<i64> {
     }
 }
 
+pub fn json_u32(v: &JsonValue) -> Option<u32> {
+    match v {
+        JsonValue::Number(n) => u32::try_from(*n).ok(),
+        _ => None,
+    }
+}
+
 pub fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -251,4 +297,45 @@ pub fn json_escape(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protocol_json_accepts_rfc_escapes_unicode_and_bounded_nesting() {
+        let parsed = parse_json(r#"{"text":"caf\u00e9 \ud83d\ude80","n":-1.25e+2}"#);
+        assert!(parsed.is_ok());
+
+        let deepest = format!("{}0{}", "[".repeat(MAX_JSON_DEPTH), "]".repeat(MAX_JSON_DEPTH));
+        assert!(parse_json(&deepest).is_ok());
+        let too_deep = format!("{}0{}", "[".repeat(MAX_JSON_DEPTH + 1), "]".repeat(MAX_JSON_DEPTH + 1));
+        assert!(parse_json(&too_deep).is_err());
+    }
+
+    #[test]
+    fn protocol_json_rejects_ambiguous_or_malformed_input_without_panic() {
+        for raw in [
+            r#"{"a":1,"a":2}"#,
+            "{\"text\":\"line\nfeed\"}",
+            "01",
+            "-",
+            "1.",
+            "1e",
+            "1e9999",
+            r#""\ud800""#,
+            r#"{"nested":{"method":"fake"}"#,
+        ] {
+            assert!(parse_json(raw).is_err(), "accepted hostile JSON: {raw:?}");
+        }
+    }
+
+    #[test]
+    fn protocol_positions_require_nonnegative_integer_u32_values() {
+        assert_eq!(json_u32(&JsonValue::Number(42)), Some(42));
+        assert_eq!(json_u32(&JsonValue::Number(-1)), None);
+        assert_eq!(json_u32(&JsonValue::Flt(1.5)), None);
+        assert_eq!(json_u32(&JsonValue::Number(i64::MAX)), None);
+    }
 }

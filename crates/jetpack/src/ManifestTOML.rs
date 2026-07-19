@@ -24,6 +24,7 @@
 use crate::TOML;
 use crate::Syntax;
 use crate::Syntax::edit_distance;
+use std::collections::HashSet;
 use std::path::Path;
 
 // ──────────────────────────────────────────────
@@ -144,6 +145,7 @@ enum Table {
 pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
     let mut manifest = JetpackToml::default();
     let mut errors: Vec<TomlError> = Vec::new();
+    let mut assigned = HashSet::new();
 
     let (items, syntax_errors) = TOML::parse(raw);
     for e in syntax_errors {
@@ -205,6 +207,22 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                         (table, &path[..])
                     };
                 let key = key_parts.join(".");
+
+                let qualified = match target {
+                    Table::Repo => Some(format!("repo.{key}")),
+                    Table::Sources => Some(format!("sources.{key}")),
+                    Table::Packages => Some(format!("packages.{key}")),
+                    Table::None | Table::Unknown => None,
+                };
+                if let Some(qualified) = qualified {
+                    if !assigned.insert(qualified.clone()) {
+                        errors.push(TomlError::e1214(
+                            *line,
+                            &format!("The key `{qualified}` is assigned more than once."),
+                        ));
+                        continue;
+                    }
+                }
 
                 match target {
                     Table::Unknown => {} // header error already reported
@@ -520,5 +538,16 @@ Check the allowed names for this table.\n";
             "{}",
             es[0].message
         );
+    }
+
+    #[test]
+    fn duplicate_keys_are_rejected_instead_of_silently_overwritten() {
+        let (manifest, errors) = parse(
+            "[repo]\nname = \"first\"\nname = \"second\"\n[sources]\ncore = \"a\"\ncore = \"b\"\n",
+        );
+        assert_eq!(manifest.repo.name.as_deref(), Some("first"));
+        assert_eq!(manifest.sources, vec![("core".into(), "a".into())]);
+        assert_eq!(errors.len(), 2);
+        assert!(errors.iter().all(|error| error.code == "E1214"));
     }
 }

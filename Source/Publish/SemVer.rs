@@ -155,7 +155,10 @@ fn cmp_pre_ids(a: &str, b: &str) -> Ordering {
                 let xn = x.bytes().all(|c| c.is_ascii_digit());
                 let yn = y.bytes().all(|c| c.is_ascii_digit());
                 let ord = match (xn, yn) {
-                    (true, true) => x.parse::<u64>().unwrap().cmp(&y.parse::<u64>().unwrap()),
+                    // SemVer numeric pre-release identifiers are unbounded.
+                    // Leading zeroes are already rejected, so length then
+                    // lexical order compares them without integer overflow.
+                    (true, true) => x.len().cmp(&y.len()).then_with(|| x.cmp(y)),
                     (true, false) => Ordering::Less, // numeric < alphanumeric
                     (false, true) => Ordering::Greater,
                     (false, false) => x.cmp(y),
@@ -269,6 +272,9 @@ impl VersionReq {
     /// the set is malformed.
     pub fn parse(s: &str) -> Option<Self> {
         let raw = s.trim().to_string();
+        if !raw.is_empty() && raw.split("||").any(|range| range.trim().is_empty()) {
+            return None;
+        }
         let mut sets = Vec::new();
         for range in raw.split("||") {
             sets.push(parse_range(range)?);
@@ -377,6 +383,10 @@ fn ver(major: u64, minor: u64, patch: u64) -> SemVer {
     }
 }
 
+fn successor(value: u64) -> Option<u64> {
+    value.checked_add(1)
+}
+
 /// Parse one range (whitespace-AND of simples, or a hyphen range).
 fn parse_range(range: &str) -> Option<Vec<Comparator>> {
     let range = range.trim();
@@ -461,7 +471,7 @@ fn expand_op(op: Op, p: Partial) -> Option<Vec<Comparator>> {
                 },
                 Comparator {
                     op: Op::Lt,
-                    version: ver(major + 1, 0, 0),
+                    version: ver(successor(major)?, 0, 0),
                 },
             ],
             (Some(mi), None) => vec![
@@ -471,7 +481,7 @@ fn expand_op(op: Op, p: Partial) -> Option<Vec<Comparator>> {
                 },
                 Comparator {
                     op: Op::Lt,
-                    version: ver(major, mi + 1, 0),
+                    version: ver(major, successor(mi)?, 0),
                 },
             ],
             (Some(_), Some(_)) => {
@@ -485,11 +495,11 @@ fn expand_op(op: Op, p: Partial) -> Option<Vec<Comparator>> {
             let c = match (p.minor, p.patch) {
                 (None, _) => Comparator {
                     op: Op::Gte,
-                    version: ver(major + 1, 0, 0),
+                    version: ver(successor(major)?, 0, 0),
                 },
                 (Some(mi), None) => Comparator {
                     op: Op::Gte,
-                    version: ver(major, mi + 1, 0),
+                    version: ver(major, successor(mi)?, 0),
                 },
                 (Some(mi), Some(pa)) => Comparator {
                     op: Op::Gt,
@@ -535,11 +545,11 @@ fn expand_op(op: Op, p: Partial) -> Option<Vec<Comparator>> {
             let c = match (p.minor, p.patch) {
                 (None, _) => Comparator {
                     op: Op::Lt,
-                    version: ver(major + 1, 0, 0),
+                    version: ver(successor(major)?, 0, 0),
                 },
                 (Some(mi), None) => Comparator {
                     op: Op::Lt,
-                    version: ver(major, mi + 1, 0),
+                    version: ver(major, successor(mi)?, 0),
                 },
                 (Some(mi), Some(pa)) => Comparator {
                     op: Op::Lte,
@@ -571,15 +581,15 @@ fn expand_caret(p: Partial) -> Option<Vec<Comparator>> {
         build: None,
     };
     let upper = if major > 0 {
-        ver(major + 1, 0, 0)
+        ver(successor(major)?, 0, 0)
     } else {
         // major == 0
         match p.minor {
             None => ver(1, 0, 0),                    // ^0
-            Some(mi) if mi > 0 => ver(0, mi + 1, 0), // ^0.2 / ^0.2.3
+            Some(mi) if mi > 0 => ver(0, successor(mi)?, 0), // ^0.2 / ^0.2.3
             Some(mi) => match p.patch {
-                Some(pa) => ver(0, mi, pa + 1), // ^0.0.3
-                None => ver(0, mi + 1, 0),      // ^0.0
+                Some(pa) => ver(0, mi, successor(pa)?), // ^0.0.3
+                None => ver(0, successor(mi)?, 0),      // ^0.0
             },
         }
     };
@@ -608,8 +618,8 @@ fn expand_tilde(p: Partial) -> Option<Vec<Comparator>> {
         build: None,
     };
     let upper = match p.minor {
-        Some(mi) => ver(major, mi + 1, 0), // ~1.2 / ~1.2.3 → <1.3.0
-        None => ver(major + 1, 0, 0),      // ~1 → <2.0.0
+        Some(mi) => ver(major, successor(mi)?, 0), // ~1.2 / ~1.2.3 → <1.3.0
+        None => ver(successor(major)?, 0, 0),      // ~1 → <2.0.0
     };
     Some(vec![
         Comparator {
@@ -644,11 +654,11 @@ fn expand_hyphen(lo: &str, hi: &str) -> Option<Vec<Comparator>> {
     let upper = match (hp.minor, hp.patch) {
         (None, _) => Comparator {
             op: Op::Lt,
-            version: ver(hmajor + 1, 0, 0),
+            version: ver(successor(hmajor)?, 0, 0),
         },
         (Some(mi), None) => Comparator {
             op: Op::Lt,
-            version: ver(hmajor, mi + 1, 0),
+            version: ver(hmajor, successor(mi)?, 0),
         },
         (Some(mi), Some(pa)) => Comparator {
             op: Op::Lte,

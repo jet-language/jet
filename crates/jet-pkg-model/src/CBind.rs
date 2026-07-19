@@ -180,7 +180,7 @@ fn parse_prototype(decl: &str) -> Option<Proto> {
     }
     let open = decl.find('(')?;
     let close = decl.rfind(')')?;
-    if close < open {
+    if close < open || !decl[close + 1..].trim().is_empty() {
         return None;
     }
     let before = decl[..open].trim();
@@ -211,7 +211,7 @@ fn parse_prototype(decl: &str) -> Option<Proto> {
         return None;
     }
 
-    let params = split_params(params_src);
+    let params = split_params(params_src)?;
     Some(Proto {
         ret,
         name: name.to_string(),
@@ -220,10 +220,10 @@ fn parse_prototype(decl: &str) -> Option<Proto> {
 }
 
 /// Split a parameter list on top-level commas (no nested parens in this subset).
-fn split_params(src: &str) -> Vec<String> {
+fn split_params(src: &str) -> Option<Vec<String>> {
     let s = src.trim();
     if s.is_empty() || s == "void" {
-        return Vec::new();
+        return Some(Vec::new());
     }
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -236,16 +236,25 @@ fn split_params(src: &str) -> Vec<String> {
             }
             ')' => {
                 depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
                 cur.push(ch);
             }
-            ',' if depth == 0 => out.push(std::mem::take(&mut cur)),
+            ',' if depth == 0 => {
+                if cur.trim().is_empty() {
+                    return None;
+                }
+                out.push(std::mem::take(&mut cur));
+            }
             _ => cur.push(ch),
         }
     }
-    if !cur.trim().is_empty() {
-        out.push(cur);
+    if depth != 0 || cur.trim().is_empty() {
+        return None;
     }
-    out
+    out.push(cur);
+    Some(out)
 }
 
 /// Render one prototype as a Jet `@Bindgen` line, or Err(reason) if a type in it
@@ -383,6 +392,22 @@ mod tests {
         assert!(valid
             .source
             .contains("fn foo(value: Int) -> Int = \"foo\";"));
+    }
+
+    #[test]
+    fn malformed_or_unsupported_declarators_are_rejected_without_guessing() {
+        let header = r#"
+            int trailing_comma(int value,);
+            int trailing_junk(int value) garbage;
+            int unbalanced(int (*callback)(int);
+            int valid(int value);
+        "#;
+        let result = generate(header, "hostile").unwrap();
+        assert_eq!(result.bound, vec!["valid"]);
+        assert!(result.source.contains("fn valid(value: Int) -> Int"));
+        assert!(!result.source.contains("trailing_comma"));
+        assert!(!result.source.contains("trailing_junk"));
+        assert!(!result.source.contains("unbalanced"));
     }
 
     #[test]

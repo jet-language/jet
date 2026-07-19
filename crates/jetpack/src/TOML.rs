@@ -667,11 +667,17 @@ impl Parser {
             }
         }
         let clean: String = tok.chars().filter(|c| *c != '_').collect();
+        if !valid_digit_separators(&tok) || has_forbidden_decimal_leading_zero(&clean) {
+            return Err(self.err(format!("invalid number `{tok}`")));
+        }
         if is_float {
-            clean
+            let value = clean
                 .parse::<f64>()
-                .map(Value::Float)
-                .map_err(|_| self.err(format!("invalid number `{tok}`")))
+                .map_err(|_| self.err(format!("invalid number `{tok}`")))?;
+            if !value.is_finite() {
+                return Err(self.err(format!("invalid number `{tok}`")));
+            }
+            Ok(Value::Float(value))
         } else {
             clean
                 .parse::<i64>()
@@ -682,24 +688,57 @@ impl Parser {
 
     fn radix_integer(&mut self, radix: u32) -> Result<Value, ParseError> {
         self.pos += 2; // caller proved a complete 0x / 0o / 0b prefix
-        let mut tok = String::new();
+        let mut raw = String::new();
         while let Some(c) = self.peek() {
-            if c == '_' {
-                self.pos += 1;
-            } else if c.is_digit(radix) {
-                tok.push(c);
+            if c == '_' || c.is_digit(radix) {
+                raw.push(c);
                 self.pos += 1;
             } else {
                 break;
             }
         }
-        if tok.is_empty() {
+        if raw.is_empty() {
             return Err(self.err("expected digits after numeric base prefix"));
         }
+        if !valid_radix_separators(&raw, radix) {
+            return Err(self.err(format!("invalid base-{radix} integer `{raw}`")));
+        }
+        let tok: String = raw.chars().filter(|c| *c != '_').collect();
         i64::from_str_radix(&tok, radix)
             .map(Value::Integer)
             .map_err(|_| self.err(format!("invalid base-{radix} integer `{tok}`")))
     }
+}
+
+fn valid_digit_separators(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    bytes.iter().enumerate().all(|(i, byte)| {
+        *byte != b'_'
+            || (i > 0
+                && i + 1 < bytes.len()
+                && bytes[i - 1].is_ascii_digit()
+                && bytes[i + 1].is_ascii_digit())
+    })
+}
+
+fn valid_radix_separators(raw: &str, radix: u32) -> bool {
+    let chars: Vec<char> = raw.chars().collect();
+    chars.iter().enumerate().all(|(i, c)| {
+        *c != '_'
+            || (i > 0
+                && i + 1 < chars.len()
+                && chars[i - 1].is_digit(radix)
+                && chars[i + 1].is_digit(radix))
+    })
+}
+
+fn has_forbidden_decimal_leading_zero(raw: &str) -> bool {
+    let unsigned = raw
+        .strip_prefix('+')
+        .or_else(|| raw.strip_prefix('-'))
+        .unwrap_or(raw);
+    let integer = unsigned.split(['.', 'e', 'E']).next().unwrap_or(unsigned);
+    integer.len() > 1 && integer.starts_with('0')
 }
 
 fn is_bare_key_char(c: char) -> bool {
@@ -762,6 +801,15 @@ mod tests {
         );
         assert_eq!(kv(&items, "valid"), Value::Integer(-7));
         assert_eq!(kv(&items, "hex"), Value::Integer(255));
+    }
+
+    #[test]
+    fn malformed_numeric_lexemes_and_overflow_recover_without_panic() {
+        let (items, errors) = parse(
+            "leading = 01\nleft = _1\nright = 1_\ndouble = 1__0\nradix = 0x_FF\nover = 1e9999\nvalid = 1_000\n",
+        );
+        assert_eq!(errors.len(), 6, "{errors:?}");
+        assert_eq!(kv(&items, "valid"), Value::Integer(1000));
     }
 
     #[test]

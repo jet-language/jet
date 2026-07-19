@@ -67,37 +67,81 @@ impl Advisory {
 /// `id|package|affected_req|fixed_version_or_empty|title[|severity]`
 /// The trailing `severity` field (low|medium|high|critical) is optional; a
 /// missing or unknown severity is treated as `medium` (advisory, not fatal).
-pub fn parse_advisory_db(text: &str) -> Vec<Advisory> {
-    text.lines()
-        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(6, '|').collect();
-            if parts.len() < 5 {
-                return None;
-            }
-            let id = parts[0].trim().to_string();
-            let package = parts[1].trim().to_string();
-            let affected = VersionReq::parse(parts[2].trim())?;
-            let fixed = if parts[3].trim().is_empty() {
-                None
-            } else {
-                SemVer::parse(parts[3].trim())
-            };
-            let title = parts[4].trim().to_string();
-            let severity = parts
+pub fn parse_advisory_db(text: &str) -> Result<Vec<Advisory>, Diagnostic> {
+    let mut advisories = Vec::new();
+    for (line_index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('|').collect();
+        if !matches!(parts.len(), 5 | 6) {
+            return Err(e2607(
+                "advisory database",
+                &format!(
+                    "line {} must contain five or six `|`-separated fields",
+                    line_index + 1
+                ),
+            ));
+        }
+        let id = parts[0].trim();
+        let package = parts[1].trim();
+        let title = parts[4].trim();
+        if id.is_empty() || package.is_empty() || title.is_empty() {
+            return Err(e2607(
+                "advisory database",
+                &format!(
+                    "line {} has an empty id, package, or title",
+                    line_index + 1
+                ),
+            ));
+        }
+        let affected = VersionReq::parse(parts[2].trim()).ok_or_else(|| {
+            e2607(
+                "advisory database",
+                &format!(
+                    "line {} has an invalid affected version range",
+                    line_index + 1
+                ),
+            )
+        })?;
+        let fixed = if parts[3].trim().is_empty() {
+            None
+        } else {
+            Some(SemVer::parse(parts[3].trim()).ok_or_else(|| {
+                e2607(
+                    "advisory database",
+                    &format!("line {} has an invalid fixed version", line_index + 1),
+                )
+            })?)
+        };
+        advisories.push(Advisory {
+            id: id.to_string(),
+            package: package.to_string(),
+            affected,
+            fixed,
+            title: title.to_string(),
+            severity: parts
                 .get(5)
-                .map(|s| Severity::parse(s))
-                .unwrap_or(Severity::Medium);
-            Some(Advisory {
-                id,
-                package,
-                affected,
-                fixed,
-                title,
-                severity,
-            })
-        })
-        .collect()
+                .map(|severity| Severity::parse(severity))
+                .unwrap_or(Severity::Medium),
+        });
+    }
+    Ok(advisories)
+}
+
+/// E2607 — a supply-chain metadata parser rejected malformed input.
+pub fn e2607(source: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E2607",
+        format!("{source} is malformed: {detail}"),
+        "supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them."
+            .to_string(),
+        format!(
+            "fix the malformed {source} record and retry; use the documented parser contract and UTF-8 text."
+        ),
+        None,
+    )
 }
 
 /// One advisory that matched a locked package, paired with its severity so the

@@ -171,8 +171,13 @@ pub fn push_index(registry: &RegistryConfig, repo: &Path, message: &str) -> Resu
 /// D-VERSION1=A: the version already sits in the index and is not yanked —
 /// republishing it is refused. Reads the local clone; the caller must
 /// `ensure_index_clone` first.
-pub fn find_published(repo: &Path, name: &str, version: &str) -> Option<IndexEntry> {
+pub fn find_published(
+    repo: &Path,
+    name: &str,
+    version: &str,
+) -> Result<Option<IndexEntry>, Diagnostic> {
     Index::find_entry(repo, name, version)
+        .map_err(|error| super::Advisory::e2607("registry index", &error.to_string()))
 }
 
 /// Fetch-side resolution: clone/pull the registry index and return the versions
@@ -182,7 +187,8 @@ pub fn resolve_from_index(
     name: &str,
 ) -> Result<Vec<IndexEntry>, Diagnostic> {
     let repo = ensure_index_clone(registry)?;
-    Ok(Index::non_yanked_entries(&repo, name))
+    Index::non_yanked_entries(&repo, name)
+        .map_err(|error| super::Advisory::e2607("registry index", &error.to_string()))
 }
 
 // ──────────────────────────────────────────────
@@ -249,7 +255,8 @@ pub fn resolve_and_verify(
     name: &str,
 ) -> Result<(Vec<IndexEntry>, Vec<String>), Diagnostic> {
     let repo = ensure_index_clone(registry)?;
-    let all = Index::read_entries(&repo, name);
+    let all = Index::read_entries(&repo, name)
+        .map_err(|error| super::Advisory::e2607("registry index", &error.to_string()))?;
     let live: Vec<IndexEntry> = all.iter().filter(|e| !e.yanked).cloned().collect();
     let mut warnings = Vec::new();
     for e in &live {

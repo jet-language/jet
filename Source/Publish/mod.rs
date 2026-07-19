@@ -156,6 +156,24 @@ mod tests {
     }
 
     #[test]
+    fn semver_hostile_numbers_and_ambiguous_ranges_never_panic_or_match() {
+        let huge_pre = format!("1.0.0-{}", "9".repeat(200));
+        let parsed = SemVer::SemVer::parse(&huge_pre).expect("SemVer permits unbounded pre ids");
+        assert!(parsed > sv("1.0.0-2"));
+
+        for range in [
+            "1 ||",
+            "|| 1",
+            "1 || || 2",
+            "^18446744073709551615",
+            "~1.18446744073709551615",
+            "18446744073709551615.x",
+        ] {
+            assert!(VersionReq::parse(range).is_none(), "accepted hostile range: {range}");
+        }
+    }
+
+    #[test]
     fn semver_prerelease_precedence() {
         // Spec example chain: alpha < alpha.1 < alpha.beta < beta < beta.2 < beta.11 < rc.1 < release.
         let chain = [
@@ -301,7 +319,7 @@ mod tests {
     #[test]
     fn advisory_parse_and_match() {
         let db = "JET-2026-0001|mylib|^1.0|1.0.5|Remote code execution via parse\n";
-        let advisories = parse_advisory_db(db);
+        let advisories = parse_advisory_db(db).unwrap();
         assert_eq!(advisories.len(), 1);
         let adv = &advisories[0];
         assert_eq!(adv.id, "JET-2026-0001");
@@ -343,7 +361,7 @@ mod tests {
     fn audit_lockfile_emits_e2603() {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
         let db = "ADV-001|mylib|^1.0|1.0.5|XSS in template engine\n";
-        let advisories = parse_advisory_db(db);
+        let advisories = parse_advisory_db(db).unwrap();
         let matches = audit_lockfile(&lock, &advisories);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].diagnostic.code, "E2603");
@@ -355,11 +373,43 @@ mod tests {
     fn audit_severity_parsed_from_db() {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
         let db = "ADV-002|mylib|^1.0||Heap overflow|critical\n";
-        let advisories = parse_advisory_db(db);
+        let advisories = parse_advisory_db(db).unwrap();
         assert_eq!(advisories[0].severity, Severity::Critical);
         let matches = audit_lockfile(&lock, &advisories);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].severity, Severity::Critical);
+    }
+
+    #[test]
+    fn advisory_parser_rejects_partial_ambiguous_and_invalid_records() {
+        for db in [
+            "missing|fields|only\n",
+            "ADV||^1.0||title\n",
+            "ADV|pkg|1 ||||title\n",
+            "ADV|pkg|^1.0|not-a-version|title\n",
+            "ADV|pkg|^1.0||title|critical|extra\n",
+        ] {
+            let diagnostic = parse_advisory_db(db).unwrap_err();
+            assert_eq!(diagnostic.code, "E2607");
+        }
+    }
+
+    #[test]
+    fn malformed_supply_metadata_diagnostic_is_pinned() {
+        let diagnostic = e2607("advisory database", "line 2 has an invalid fixed version");
+        assert_eq!(diagnostic.code, "E2607");
+        assert_eq!(
+            diagnostic.what,
+            "advisory database is malformed: line 2 has an invalid fixed version"
+        );
+        assert_eq!(
+            diagnostic.why,
+            "supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them."
+        );
+        assert_eq!(
+            diagnostic.fix,
+            "fix the malformed advisory database record and retry; use the documented parser contract and UTF-8 text."
+        );
     }
 
     #[test]

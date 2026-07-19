@@ -4,7 +4,8 @@
 //! The registry is an ordinary git repo. Each package gets one append-only
 //! `index/<name>/<name>.jsonl` file, one JSON line per published version —
 //! the same sparse-index shape cargo/crates.io proved. No serde (I6): the
-//! line is a fixed five-field object we hand-write and hand-parse.
+//! line is a fixed seven-field object parsed by Jet's shared std-only JSON
+//! parser; the two signing fields may be absent on legacy lines.
 //!
 //! ```text
 //! <registry>/index/<name>/<name>.jsonl
@@ -16,6 +17,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use jet_foundation::JSON::{json_escape, parse_json, JsonValue};
 
 /// One published-version line in the sparse index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,18 +58,22 @@ impl IndexEntry {
         )
     }
 
-    /// Parse one index line. Returns `None` for a line missing `name`/`version`.
+    /// Parse one index line. Returns `None` for malformed JSON, wrong field
+    /// types, duplicate keys, or a line missing `name`/`version`.
     /// `public_key`/`signature` default to empty (backward-compatible with
     /// index lines written before c146).
     pub fn parse_line(line: &str) -> Option<IndexEntry> {
+        let JsonValue::Object(fields) = parse_json(line).ok()? else {
+            return None;
+        };
         Some(IndexEntry {
-            name: str_field(line, "name")?,
-            version: str_field(line, "version")?,
-            content_hash: str_field(line, "content_hash").unwrap_or_default(),
-            fingerprint: str_field(line, "fingerprint").unwrap_or_default(),
-            yanked: bool_field(line, "yanked"),
-            public_key: str_field(line, "public_key").unwrap_or_default(),
-            signature: str_field(line, "signature").unwrap_or_default(),
+            name: required_string(&fields, "name")?,
+            version: required_string(&fields, "version")?,
+            content_hash: optional_string(&fields, "content_hash")?,
+            fingerprint: optional_string(&fields, "fingerprint")?,
+            yanked: optional_bool(&fields, "yanked")?,
+            public_key: optional_string(&fields, "public_key")?,
+            signature: optional_string(&fields, "signature")?,
         })
     }
 }
@@ -88,22 +94,32 @@ pub fn index_entry_path(repo: &Path, name: &str) -> PathBuf {
 }
 
 /// Read every version line recorded for `name` (empty if the file is absent).
-pub fn read_entries(repo: &Path, name: &str) -> Vec<IndexEntry> {
+pub fn read_entries(repo: &Path, name: &str) -> io::Result<Vec<IndexEntry>> {
     let path = index_entry_path(repo, name);
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
     };
     text.lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(IndexEntry::parse_line)
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(line, raw)| {
+            IndexEntry::parse_line(raw).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("malformed registry index record at line {}", line + 1),
+                )
+            })
+        })
         .collect()
 }
 
 /// Find the recorded line for one exact `name`+`version`, if any.
-pub fn find_entry(repo: &Path, name: &str, version: &str) -> Option<IndexEntry> {
-    read_entries(repo, name)
+pub fn find_entry(repo: &Path, name: &str, version: &str) -> io::Result<Option<IndexEntry>> {
+    Ok(read_entries(repo, name)?
         .into_iter()
-        .find(|e| e.version == version)
+        .find(|e| e.version == version))
 }
 
 /// Append one version line, creating `index/<name>/<name>.jsonl` if missing.
@@ -141,8 +157,13 @@ pub fn mark_yanked(repo: &Path, name: &str, version: &str) -> io::Result<bool> {
                 found = true;
                 out.push_str(&e.to_jsonl());
             }
-            // Non-matching (or already-yanked) lines keep their original bytes.
-            _ => out.push_str(line),
+            Some(_) => out.push_str(line),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "malformed registry index record",
+                ))
+            }
         }
         out.push('\n');
     }
@@ -155,11 +176,11 @@ pub fn mark_yanked(repo: &Path, name: &str, version: &str) -> io::Result<bool> {
 /// Fetch-side view: the versions of `name` that a resolver may still pick — the
 /// recorded lines minus the yanked ones (D-VERSION1=A: a yank hides a version
 /// from new resolution without freeing its number).
-pub fn non_yanked_entries(repo: &Path, name: &str) -> Vec<IndexEntry> {
-    read_entries(repo, name)
+pub fn non_yanked_entries(repo: &Path, name: &str) -> io::Result<Vec<IndexEntry>> {
+    Ok(read_entries(repo, name)?
         .into_iter()
         .filter(|e| !e.yanked)
-        .collect()
+        .collect())
 }
 
 // ──────────────────────────────────────────────
@@ -168,52 +189,39 @@ pub fn non_yanked_entries(repo: &Path, name: &str) -> Vec<IndexEntry> {
 
 /// Quote + escape a string as a JSON string literal.
 fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            _ => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+    format!("\"{}\"", json_escape(s))
 }
 
-/// Read `"key":"value"` from a flat one-line object, honouring `\"`/`\\` escapes.
-fn str_field(line: &str, key: &str) -> Option<String> {
-    let pat = format!("\"{key}\":\"");
-    let start = line.find(&pat)? + pat.len();
-    let mut out = String::new();
-    let mut chars = line[start..].chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' => match chars.next() {
-                Some('n') => out.push('\n'),
-                Some('r') => out.push('\r'),
-                Some('t') => out.push('\t'),
-                Some('"') => out.push('"'),
-                Some('\\') => out.push('\\'),
-                Some(other) => out.push(other),
-                None => break,
-            },
-            '"' => return Some(out),
-            _ => out.push(c),
-        }
+fn required_string(
+    fields: &std::collections::HashMap<String, JsonValue>,
+    key: &str,
+) -> Option<String> {
+    match fields.get(key)? {
+        JsonValue::String(value) if !value.is_empty() => Some(value.clone()),
+        _ => None,
     }
-    None
 }
 
-/// Read a `"key":true|false` field (defaults to `false` if absent/unset).
-fn bool_field(line: &str, key: &str) -> bool {
-    let pat = format!("\"{key}\":");
-    line.find(&pat)
-        .map(|i| line[i + pat.len()..].trim_start().starts_with("true"))
-        .unwrap_or(false)
+fn optional_string(
+    fields: &std::collections::HashMap<String, JsonValue>,
+    key: &str,
+) -> Option<String> {
+    match fields.get(key) {
+        None => Some(String::new()),
+        Some(JsonValue::String(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn optional_bool(
+    fields: &std::collections::HashMap<String, JsonValue>,
+    key: &str,
+) -> Option<bool> {
+    match fields.get(key) {
+        None => Some(false),
+        Some(JsonValue::Bool(value)) => Some(*value),
+        _ => None,
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -274,7 +282,7 @@ mod tests {
         let repo = scratch("append");
         write_index_entry(&repo, &entry("textkit", "1.0.0", false)).unwrap();
         write_index_entry(&repo, &entry("textkit", "1.1.0", false)).unwrap();
-        let all = read_entries(&repo, "textkit");
+        let all = read_entries(&repo, "textkit").unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].version, "1.0.0");
         assert_eq!(all[1].version, "1.1.0");
@@ -285,8 +293,8 @@ mod tests {
     fn find_entry_matches_exact_version() {
         let repo = scratch("find");
         write_index_entry(&repo, &entry("textkit", "1.0.0", false)).unwrap();
-        assert!(find_entry(&repo, "textkit", "1.0.0").is_some());
-        assert!(find_entry(&repo, "textkit", "9.9.9").is_none());
+        assert!(find_entry(&repo, "textkit", "1.0.0").unwrap().is_some());
+        assert!(find_entry(&repo, "textkit", "9.9.9").unwrap().is_none());
         std::fs::remove_dir_all(&repo).ok();
     }
 
@@ -300,13 +308,13 @@ mod tests {
         assert!(flipped, "an existing version must flip");
 
         // Line count unchanged — a yank rewrites, never removes.
-        let all = read_entries(&repo, "textkit");
+        let all = read_entries(&repo, "textkit").unwrap();
         assert_eq!(all.len(), 2);
         assert!(all.iter().find(|e| e.version == "1.0.0").unwrap().yanked);
         assert!(!all.iter().find(|e| e.version == "1.1.0").unwrap().yanked);
 
         // A resolver now skips the yanked version.
-        let live = non_yanked_entries(&repo, "textkit");
+        let live = non_yanked_entries(&repo, "textkit").unwrap();
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].version, "1.1.0");
         std::fs::remove_dir_all(&repo).ok();
@@ -317,6 +325,35 @@ mod tests {
         let repo = scratch("yank_missing");
         write_index_entry(&repo, &entry("textkit", "1.0.0", false)).unwrap();
         assert!(!mark_yanked(&repo, "textkit", "2.0.0").unwrap());
+        std::fs::remove_dir_all(&repo).ok();
+    }
+
+    #[test]
+    fn hostile_jsonl_is_rejected_and_never_treated_as_an_absent_version() {
+        for line in [
+            r#"{"outer":{"name":"fake"},"version":"1.0.0"}"#,
+            r#"{"name":"x","name":"y","version":"1.0.0"}"#,
+            r#"{"name":"x","version":1,"yanked":false}"#,
+            r#"{"name":"x","version":"1.0.0","yanked":"false"}"#,
+            r#"{"name":"x","version":"1.0.0","signature":"\q"}"#,
+        ] {
+            assert!(IndexEntry::parse_line(line).is_none(), "accepted: {line}");
+        }
+
+        let repo = scratch("malformed");
+        let path = index_entry_path(&repo, "textkit");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{malformed}\n").unwrap();
+        assert_eq!(
+            read_entries(&repo, "textkit").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            mark_yanked(&repo, "textkit", "1.0.0")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
         std::fs::remove_dir_all(&repo).ok();
     }
 }
