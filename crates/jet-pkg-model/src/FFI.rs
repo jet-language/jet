@@ -319,17 +319,51 @@ mod net_tls_close_tests {
     }
 
     #[test]
+    fn raw_eof_after_verified_handshake_is_protocol_truncation() {
+        let pem = include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec();
+        let (address, server) = tls_fixture();
+        let socket = std::net::TcpStream::connect(address).unwrap();
+        let id = connect_with_ca_for_test(socket, "localhost", &pem).unwrap();
+        server.join().unwrap();
+
+        let error = jet_net_tls_read_bytes_impl(id, 1).unwrap_err();
+        assert!(error.starts_with("TLS protocol truncation:"), "{error}");
+        jet_net_tls_abort_impl(id);
+    }
+
+    #[test]
     fn tls_config_encodes_and_validates_alpn_protocols() {
         let pem = include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem");
-        let config = jet_net_tls_config(Some(pem), &["h2".to_string(), "http/1.1".to_string()])
+        let config = jet_net_tls_config(
+            1, Some(pem), None, 12, 13, &["h2".to_string(), "http/1.1".to_string()],
+        )
             .expect("valid ALPN protocols");
         assert_eq!(config.alpn_protocols, vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
 
-        let error = match jet_net_tls_config(Some(pem), &[String::new()]) {
+        let error = match jet_net_tls_config(1, Some(pem), None, 12, 13, &[String::new()]) {
             Ok(_) => panic!("empty ALPN protocol accepted"),
             Err(error) => error,
         };
         assert_eq!(error, "TLS ALPN protocols must contain 1 to 255 bytes");
+    }
+
+    #[test]
+    fn tls_expert_inputs_validate_before_network_use() {
+        let roots = include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec();
+        let chain = include_bytes!("../../../tests/fixtures/tls/smtp.server.cert.pem").to_vec();
+        let key = include_bytes!("../../../tests/fixtures/tls/smtp.server.key.pem").to_vec();
+        jet_net_tls_validate_roots_impl(&roots).unwrap();
+        jet_net_tls_validate_identity_impl(&chain, &key).unwrap();
+
+        assert!(jet_net_tls_validate_roots_impl(&b"not pem".to_vec()).is_err());
+        assert!(jet_net_tls_validate_identity_impl(&chain, &b"not pem".to_vec()).is_err());
+        let other_key = include_bytes!("../../../tests/fixtures/tls/localhost.key.pem").to_vec();
+        let mismatch = jet_net_tls_validate_identity_impl(&chain, &other_key).unwrap_err();
+        assert!(mismatch.contains("does not match"), "{mismatch}");
+
+        let versions = jet_net_tls_config(2, Some(&roots), Some((&chain, &key)), 13, 12, &[])
+            .unwrap_err();
+        assert!(versions.contains("version bounds"), "{versions}");
     }
 
     mod smtp_adapter {

@@ -789,6 +789,9 @@ impl<'a> Checker<'a> {
         if let Some(v) = core_email_variants(enum_name) {
             return Some(v);
         }
+        if let Some(v) = core_tls_variants(enum_name) {
+            return Some(v);
+        }
         if let Some(v) = core_auth_variants(enum_name) {
             return Some(v);
         }

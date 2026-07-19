@@ -1654,7 +1654,7 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_net_dns_srv_weight"), arg(0))
         }
         ("core.net", "tls_connect") => format!(
-            "{}({}, &({}), {}, {}, {}, {}, {}, {}, {}, {})",
+            "{}({}, &({}), {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
             helper("jet_net_tls_client_scheduler"),
             arg(0),
             arg(1),
@@ -1665,7 +1665,9 @@ pub(crate) fn emit_tir_core_call(
             regex_fn("jet_net_tls_read_ready_impl"),
             regex_fn("jet_net_tls_read_step_impl"),
             regex_fn("jet_net_tls_write_step_impl"),
-            regex_fn("jet_net_tls_close_step_impl")
+            regex_fn("jet_net_tls_close_step_impl"),
+            regex_fn("jet_net_tls_close_write_step_impl"),
+            regex_fn("jet_net_tls_peer_identity_impl")
         ),
         ("core.net", "tls_read") => {
             format!("{}(&mut ({}))", helper("jet_net_tls_read_text"), arg(0))
@@ -1698,7 +1700,7 @@ pub(crate) fn emit_tir_core_call(
                 ),
             };
             format!(
-                "{}({}, &({}){}, {}, {}, {}, {}, {}, {}, {}, {})",
+                "{}({}, &({}){}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
                 helper(helper_name),
                 arg(0),
                 arg(1),
@@ -1710,7 +1712,9 @@ pub(crate) fn emit_tir_core_call(
                 regex_fn("jet_net_tls_read_ready_impl"),
                 regex_fn("jet_net_tls_read_step_impl"),
                 regex_fn("jet_net_tls_write_step_impl"),
-                regex_fn("jet_net_tls_close_step_impl")
+                regex_fn("jet_net_tls_close_step_impl"),
+                regex_fn("jet_net_tls_close_write_step_impl"),
+                regex_fn("jet_net_tls_peer_identity_impl")
             )
         },
         ("core.tls", "read") => format!(

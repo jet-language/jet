@@ -216,6 +216,36 @@ impl<'a> Checker<'a> {
                             *recv_type_out = Some("TlsClientConfigType".to_string());
                             return Some(Type::Named("TlsClientConfig".to_string()));
                         }
+                        if ns == "core.tls" && leaf == "RootCertificates" && method == "from_pem" {
+                            if args.len() != 1 {
+                                self.diags.push(wrong_core_arity("RootCertificates.from_pem", 1, args.len(), span));
+                            }
+                            if let Some(arg) = args.first_mut() {
+                                self.expect_core_arg("RootCertificates.from_pem", 0, &Type::List(Box::new(u8_ty())), arg);
+                            }
+                            *recv_type_out = Some("TlsRootCertificatesType".to_string());
+                            return Some(result_ty(
+                                Type::Named("TlsRootCertificates".to_string()),
+                                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+                            ));
+                        }
+                        if ns == "core.tls" && leaf == "ClientIdentity" && method == "from_pem" {
+                            if args.len() != 2 {
+                                self.diags.push(wrong_core_arity("ClientIdentity.from_pem", 2, args.len(), span));
+                            }
+                            crate::Sema::CheckerCoreLib::require_exact_labels(
+                                "ClientIdentity.from_pem", args,
+                                &[(0, "cert_chain"), (1, "private_key")], span, &mut self.diags,
+                            );
+                            for (index, arg) in args.iter_mut().enumerate() {
+                                self.expect_core_arg("ClientIdentity.from_pem", index, &Type::List(Box::new(u8_ty())), arg);
+                            }
+                            *recv_type_out = Some("TlsClientIdentityType".to_string());
+                            return Some(result_ty(
+                                Type::Named("TlsClientIdentity".to_string()),
+                                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+                            ));
+                        }
                         if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
                             let type_name = leaf.clone();
                             **receiver = Expr::Ident(type_name.clone(), span);
@@ -1474,6 +1504,22 @@ impl<'a> Checker<'a> {
                                 &Type::List(Box::new(Type::String)),
                                 arg,
                             );
+                        }
+                    } else if handle_ty == "TlsClientConfig" && method == "with_trust" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg("with_trust", 0, &Type::Named("TlsClientTrust".to_string()), arg);
+                        }
+                    } else if handle_ty == "TlsClientConfig" && method == "with_client_identity" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg("with_client_identity", 0, &Type::Named("TlsClientIdentity".to_string()), arg);
+                        }
+                    } else if handle_ty == "TlsClientConfig" && method == "with_version_bounds" {
+                        for (index, arg) in args.iter_mut().enumerate() {
+                            self.expect_core_arg("with_version_bounds", index, &Type::Named("TlsVersion".to_string()), arg);
+                        }
+                    } else if handle_ty == "TlsStream" && method == "close_write" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg("close_write", 0, &Type::Named("Duration".to_string()), arg);
                         }
                     } else {
                         for a in args.iter_mut() {

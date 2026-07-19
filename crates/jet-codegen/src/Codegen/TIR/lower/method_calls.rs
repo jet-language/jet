@@ -74,7 +74,7 @@ use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::tir_enum_lit_prefix;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::tir_src_line_at;
-use crate::Codegen::TIR::tls_config_static_default;
+use crate::Codegen::TIR::tls_static_op;
 use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
@@ -821,16 +821,28 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
-        if tls_config_static_default(receiver, method, cx, &locals) {
+        if let Some(op) = tls_static_op(receiver, method, cx, &locals) {
+            let ty = match op {
+                THandleOp::TlsClientConfigDefault => Type::Named("TlsClientConfig".to_string()),
+                THandleOp::TlsRootCertificatesFromPem => Type::Result {
+                    ok: Box::new(Type::Named("TlsRootCertificates".to_string())),
+                    err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                },
+                THandleOp::TlsClientIdentityFromPem => Type::Result {
+                    ok: Box::new(Type::Named("TlsClientIdentity".to_string())),
+                    err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                },
+                _ => unit_type(),
+            };
             return TExpr {
-                ty: Type::Named("TlsClientConfig".to_string()),
+                ty,
                 kind: TExprKind::HandleMethod {
                     recv: Box::new(TExpr {
                         ty: unit_type(),
                         kind: TExprKind::ConstInline("()".to_string()),
                     }),
-                    op: THandleOp::TlsClientConfigDefault,
-                    args: vec![],
+                    op,
+                    args: args.iter().map(|arg| lower_expr(&arg.expr, cx, env)).collect(),
                 },
             };
         }

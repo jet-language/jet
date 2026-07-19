@@ -141,6 +141,20 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "HttpRequest" | "HttpResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
         }
+        "TlsPeerIdentity" => {
+            matches!(member, "verified_server_name" | "leaf" | "certificate_chain")
+        }
+        "TlsCertificate" => matches!(
+            member,
+            "der"
+                | "sha256"
+                | "spki_sha256"
+                | "dns_names"
+                | "valid_from_unix_ms"
+                | "valid_until_unix_ms"
+                | "subject"
+                | "issuer"
+        ),
         "GameScene" => matches!(member, "assets" | "input"),
         "GameFrame" => matches!(member, "index" | "input"),
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
@@ -226,6 +240,28 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "audience" => Some(Type::String),
             "expires_at" => Some(Type::Int),
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if name == "TlsPeerIdentity" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "verified_server_name" => Some(Type::String),
+            "leaf" => Some(Type::Named("TlsCertificate".to_string())),
+            "certificate_chain" => Some(Type::List(Box::new(Type::Named(
+                "TlsCertificate".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if name == "TlsCertificate" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            }))),
+            "dns_names" => Some(Type::List(Box::new(Type::String))),
+            "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
+            "subject" | "issuer" => Some(Type::String),
             _ => None,
         };
     }

@@ -537,7 +537,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "tls_write",
             "tls_close",
         ],
-        "core.tls" => &["ClientConfig", "client", "read", "read_text", "write", "write_all", "write_text", "close"],
+        "core.tls" => &[
+            "ClientConfig", "RootCertificates", "ClientIdentity", "TlsVersion",
+            "client", "read", "read_text", "write", "write_all", "write_text", "close",
+        ],
         "jet.http" => &["get", "post", "serve"],
         // D-REGEXENGINE1=A: std-only linear regex package.
         "jet.regex" => &[
@@ -701,5 +704,6 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
         | ("core.auth", "Claims" | "AuthError")
+        | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TlsVersion")
     )
 }

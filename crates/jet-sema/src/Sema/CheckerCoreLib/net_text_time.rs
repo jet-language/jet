@@ -111,12 +111,31 @@ pub fn net_method_return(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),
+        ("TlsStream", "close_write") if n_args == 1 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("TlsStream", "peer_identity") if n_args == 0 => {
+            Some(Some(Type::Named("TlsPeerIdentity".to_string())))
+        }
         ("UnixStream", "set_timeout") if n_args == 1 => Some(Some(result_ty(
             unit,
             Type::Named("NetError".to_string()),
         ))),
         ("TlsClientConfig", "with_alpn") if n_args == 1 => {
             Some(Some(Type::Named("TlsClientConfig".to_string())))
+        }
+        ("TlsClientConfig", "with_trust" | "with_client_identity") if n_args == 1 => {
+            Some(Some(result_ty(
+                Type::Named("TlsClientConfig".to_string()),
+                Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+            )))
+        }
+        ("TlsClientConfig", "with_version_bounds") if n_args == 2 => {
+            Some(Some(result_ty(
+                Type::Named("TlsClientConfig".to_string()),
+                Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+            )))
         }
         _ => None,
     }
@@ -136,6 +155,8 @@ pub fn require_net_method_labels(
         | ("TcpStream" | "UdpSocket" | "UnixStream" | "TlsStream", "ready", 2)
         | ("UdpSocket", "receive", 2) => &[(1, "deadline")][..],
         ("UdpSocket", "send_to", 3) => &[(2, "deadline")][..],
+        ("TlsStream", "close_write", 1) => &[(0, "deadline")][..],
+        ("TlsClientConfig", "with_version_bounds", 2) => &[(0, "min"), (1, "max")][..],
         _ => &[],
     };
     require_exact_labels(&format!("{type_name}.{method}"), args, required, span, diags);

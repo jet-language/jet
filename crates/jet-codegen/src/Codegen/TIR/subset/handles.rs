@@ -117,22 +117,27 @@ pub(crate) fn game_static_type<'a>(
     }
 }
 
-pub(crate) fn tls_config_static_default(
+pub(crate) fn tls_static_op(
     receiver: &Expr,
     method: &str,
     cx: &Cx,
     locals: &HashSet<String>,
-) -> bool {
+) -> Option<THandleOp> {
     let Expr::Field(inner, static_type, _) = receiver else {
-        return false;
+        return None;
     };
     let Expr::Ident(alias, _) = &**inner else {
-        return false;
+        return None;
     };
-    !locals.contains(alias)
-        && cx.core_imports.get(alias).map(String::as_str) == Some("core.tls")
-        && static_type == "ClientConfig"
-        && method == "default"
+    if locals.contains(alias) || cx.core_imports.get(alias).map(String::as_str) != Some("core.tls") {
+        return None;
+    }
+    match (static_type.as_str(), method) {
+        ("ClientConfig", "default") => Some(THandleOp::TlsClientConfigDefault),
+        ("RootCertificates", "from_pem") => Some(THandleOp::TlsRootCertificatesFromPem),
+        ("ClientIdentity", "from_pem") => Some(THandleOp::TlsClientIdentityFromPem),
+        _ => None,
+    }
 }
 
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
@@ -278,7 +283,12 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("TlsStream", "write_all", 2) => THandleOp::TlsStreamWriteAllDeadline,
         ("TlsStream", "ready", 2) => THandleOp::TlsStreamReady,
         ("TlsStream", "close", 0) => THandleOp::TlsStreamClose,
+        ("TlsStream", "close_write", 1) => THandleOp::TlsStreamCloseWrite,
+        ("TlsStream", "peer_identity", 0) => THandleOp::TlsStreamPeerIdentity,
         ("TlsClientConfig", "with_alpn", 1) => THandleOp::TlsClientConfigWithAlpn,
+        ("TlsClientConfig", "with_trust", 1) => THandleOp::TlsClientConfigWithTrust,
+        ("TlsClientConfig", "with_client_identity", 1) => THandleOp::TlsClientConfigWithIdentity,
+        ("TlsClientConfig", "with_version_bounds", 2) => THandleOp::TlsClientConfigWithVersionBounds,
         // c109 Phase 19: the four arena allocators (`alloc`/`reset`). Sema sets
         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`

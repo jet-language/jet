@@ -29,6 +29,9 @@ impl<'a> Checker<'a> {
                 ("core.game", "Replay") => Some(Type::Named("GameReplayType".to_string())),
                 ("core.game", "Backend") => Some(Type::Named("GameBackendType".to_string())),
                 ("core.tls", "ClientConfig") => Some(Type::Named("TlsClientConfigType".to_string())),
+                ("core.tls", "RootCertificates") => Some(Type::Named("TlsRootCertificatesType".to_string())),
+                ("core.tls", "ClientIdentity") => Some(Type::Named("TlsClientIdentityType".to_string())),
+                ("core.tls", "TlsVersion") => Some(Type::Named("TlsVersion".to_string())),
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
                 ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
                 ("core.encoding", "DataEvent") => Some(Type::Named("DataEvent".to_string())),

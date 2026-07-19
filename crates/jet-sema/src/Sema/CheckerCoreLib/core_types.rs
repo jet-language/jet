@@ -160,6 +160,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "IpAddr" | "SocketAddr" | "UdpSocket" | "UdpPacket"
         | "DnsSrv" | "UnixListener" | "UnixStream" | "TlsStream" | "TlsClientConfig" | "TlsClientConfigType"
+        | "TlsRootCertificates" | "TlsRootCertificatesType" | "TlsClientIdentity" | "TlsClientIdentityType"
+        | "TlsClientTrust" | "TlsVersion" | "TlsPeerIdentity" | "TlsCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
@@ -256,6 +258,23 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == "TlsPeerIdentity" {
+        return match field {
+            "verified_server_name" => Some(Type::String),
+            "leaf" => Some(Type::Named("TlsCertificate".to_string())),
+            "certificate_chain" => Some(Type::List(Box::new(Type::Named("TlsCertificate".to_string())))),
+            _ => None,
+        };
+    }
+    if type_name == "TlsCertificate" {
+        return match field {
+            "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+            "dns_names" => Some(Type::List(Box::new(Type::String))),
+            "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
+            "subject" | "issuer" => Some(Type::String),
+            _ => None,
+        };
+    }
     if type_name == "Claims" {
         return match field {
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
@@ -1098,6 +1117,27 @@ pub(crate) fn core_email_variants(
             VariantField { name: "pem".to_string(), name_span: zero,
                 ty: Type::List(Box::new(Type::IntN { signed: false, bits: 8 })), ty_span: zero },
         ])));
+    }
+    Some(variants)
+}
+
+pub(crate) fn core_tls_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    let zero = Span::new(0, 0);
+    let roots = Type::Named("TlsRootCertificates".to_string());
+    let mut variants = std::collections::HashMap::new();
+    match enum_name {
+        "TlsVersion" => {
+            variants.insert("Tls12".to_string(), (zero, VariantPayload::Unit));
+            variants.insert("Tls13".to_string(), (zero, VariantPayload::Unit));
+        }
+        "TlsClientTrust" => {
+            variants.insert("System".to_string(), (zero, VariantPayload::Unit));
+            variants.insert("SystemPlus".to_string(), (zero, VariantPayload::Single(roots.clone(), zero)));
+            variants.insert("CustomOnly".to_string(), (zero, VariantPayload::Single(roots, zero)));
+        }
+        _ => return None,
     }
     Some(variants)
 }

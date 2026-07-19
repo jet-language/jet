@@ -2529,8 +2529,15 @@ impl LowerCtx<'_, '_> {
             | THandleOp::TlsStreamWriteAllDeadline
             | THandleOp::TlsStreamReady
             | THandleOp::TlsStreamClose
+            | THandleOp::TlsStreamCloseWrite
+            | THandleOp::TlsStreamPeerIdentity
             | THandleOp::TlsClientConfigDefault
-            | THandleOp::TlsClientConfigWithAlpn => {
+            | THandleOp::TlsClientConfigWithAlpn
+            | THandleOp::TlsRootCertificatesFromPem
+            | THandleOp::TlsClientIdentityFromPem
+            | THandleOp::TlsClientConfigWithTrust
+            | THandleOp::TlsClientConfigWithIdentity
+            | THandleOp::TlsClientConfigWithVersionBounds => {
                 Err("jit handle method unsupported".to_string())
             }
             THandleOp::AllocAlloc => Err("jit handle method unsupported".to_string()),

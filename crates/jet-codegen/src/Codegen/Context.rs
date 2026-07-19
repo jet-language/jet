@@ -426,6 +426,12 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "UnixStream" => Some("JetUnixStream"),
         "TlsStream" => Some("JetTlsStream"),
         "TlsClientConfig" => Some("JetTlsClientConfig"),
+        "TlsRootCertificates" => Some("JetTlsRootCertificates"),
+        "TlsClientIdentity" => Some("JetTlsClientIdentity"),
+        "TlsClientTrust" => Some("JetTlsTrust"),
+        "TlsVersion" => Some("JetTlsVersion"),
+        "TlsPeerIdentity" => Some("JetTlsPeerIdentity"),
+        "TlsCertificate" => Some("JetTlsCertificate"),
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
         "NetDnsError" => Some("JetNetDnsError"),
@@ -462,6 +468,9 @@ impl Cx {
         match (self.core_imports.get(alias).map(String::as_str), leaf) {
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
+            (Some("core.tls"), "TlsVersion") => Some("TlsVersion"),
+            (Some("core.tls"), "RootCertificates") => Some("TlsRootCertificates"),
+            (Some("core.tls"), "ClientIdentity") => Some("TlsClientIdentity"),
             (Some("core.env"), "EnvError") => Some("EnvError"),
             (Some("core.encoding"), "DataTree") => Some("DataTree"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
@@ -1633,6 +1642,25 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         }
         cx.enum_variants.insert("AuthError".to_string(), variants);
         cx.cloneable.insert("AuthError".to_string());
+    }
+    if cx.core_imports.values().any(|module| module == "core.tls") {
+        let zero = Span::new(0, 0);
+        let versions = vec![
+            ("Tls12".to_string(), VariantPayload::Unit),
+            ("Tls13".to_string(), VariantPayload::Unit),
+        ];
+        for (variant, _) in &versions { cx.variant_owner.insert(variant.clone(), "TlsVersion".to_string()); }
+        cx.enum_variants.insert("TlsVersion".to_string(), versions);
+        cx.cloneable.insert("TlsVersion".to_string());
+        let roots = Type::Named("TlsRootCertificates".to_string());
+        let trust = vec![
+            ("System".to_string(), VariantPayload::Unit),
+            ("SystemPlus".to_string(), VariantPayload::Single(roots.clone(), zero)),
+            ("CustomOnly".to_string(), VariantPayload::Single(roots, zero)),
+        ];
+        for (variant, _) in &trust { cx.variant_owner.insert(variant.clone(), "TlsClientTrust".to_string()); }
+        cx.enum_variants.insert("TlsClientTrust".to_string(), trust);
+        cx.cloneable.insert("TlsClientTrust".to_string());
     }
     if !cx.core_imports.values().any(|module| module == Syntax::CORE_EMAIL_MODULE) {
         return;

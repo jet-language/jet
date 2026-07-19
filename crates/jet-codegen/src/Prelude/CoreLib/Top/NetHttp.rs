@@ -237,15 +237,74 @@ pub struct JetTlsStream {
     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
     close_step: fn(i64) -> Result<bool, String>,
+    close_write_step: fn(i64) -> Result<bool, String>,
+    peer_snapshot: fn(i64) -> Result<JetTlsPeerSnapshot, String>,
+    peer_identity: Option<JetTlsPeerIdentity>,
+}
+
+type JetTlsPeerSnapshot = (
+    String,
+    Vec<Vec<u8>>,
+    Vec<Vec<u8>>,
+    Vec<Vec<String>>,
+    Vec<i64>,
+    Vec<i64>,
+    Vec<String>,
+    Vec<String>,
+);
+
+#[derive(Clone)]
+pub struct JetTlsRootCertificates {
+    pem: Vec<u8>,
+}
+
+pub struct JetTlsClientIdentity {
+    cert_chain: Vec<u8>,
+    private_key: Vec<u8>,
+}
+
+impl Clone for JetTlsClientIdentity {
+    fn clone(&self) -> Self {
+        Self { cert_chain: self.cert_chain.clone(), private_key: self.private_key.clone() }
+    }
+}
+
+impl Drop for JetTlsClientIdentity {
+    fn drop(&mut self) {
+        self.private_key.fill(0);
+    }
+}
+
+#[derive(Clone)]
+pub enum JetTlsTrust {
+    System,
+    SystemPlus(JetTlsRootCertificates),
+    CustomOnly(JetTlsRootCertificates),
+}
+
+#[derive(Clone, Copy)]
+pub enum JetTlsVersion {
+    Tls12,
+    Tls13,
 }
 
 #[derive(Clone)]
 pub struct JetTlsClientConfig {
+    trust: JetTlsTrust,
+    identity: Option<JetTlsClientIdentity>,
+    min_version: JetTlsVersion,
+    max_version: JetTlsVersion,
     alpn: Vec<String>,
 }
 
 fn jet_tls_client_config_default() -> JetTlsClientConfig {
-    JetTlsClientConfig { alpn: Vec::new() }
+    JetTlsClientConfig {
+        trust: JetTlsTrust::System,
+        identity: None,
+        min_version: JetTlsVersion::Tls12,
+        max_version: JetTlsVersion::Tls13,
+        alpn: Vec::new(),
+    }
 }
 
 fn jet_tls_client_config_with_alpn(
@@ -254,6 +313,85 @@ fn jet_tls_client_config_with_alpn(
 ) -> JetTlsClientConfig {
     config.alpn = protocols.clone();
     config
+}
+
+fn jet_tls_config_error(operation: &str, message: String) -> jet_std::IoError {
+    jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+        jet_std::IoOperation::Connect,
+        Some("tls client configuration".to_string()),
+        None,
+        Some(format!("{} failed: {}", operation, message)),
+    ))
+}
+
+fn jet_tls_root_certificates_from_pem(
+    pem: &Vec<u8>,
+    validate: fn(&Vec<u8>) -> Result<(), String>,
+) -> Result<JetTlsRootCertificates, jet_std::IoError> {
+    validate(pem).map_err(|message| jet_tls_config_error("RootCertificates.from_pem", message))?;
+    Ok(JetTlsRootCertificates { pem: pem.clone() })
+}
+
+fn jet_tls_client_identity_from_pem(
+    cert_chain: &Vec<u8>,
+    private_key: &Vec<u8>,
+    validate: fn(&Vec<u8>, &Vec<u8>) -> Result<(), String>,
+) -> Result<JetTlsClientIdentity, jet_std::IoError> {
+    validate(cert_chain, private_key)
+        .map_err(|message| jet_tls_config_error("ClientIdentity.from_pem", message))?;
+    Ok(JetTlsClientIdentity { cert_chain: cert_chain.clone(), private_key: private_key.clone() })
+}
+
+fn jet_tls_client_config_with_trust(
+    mut config: JetTlsClientConfig,
+    trust: JetTlsTrust,
+) -> Result<JetTlsClientConfig, jet_std::IoError> {
+    config.trust = trust;
+    Ok(config)
+}
+
+fn jet_tls_client_config_with_client_identity(
+    mut config: JetTlsClientConfig,
+    identity: &JetTlsClientIdentity,
+) -> Result<JetTlsClientConfig, jet_std::IoError> {
+    config.identity = Some(identity.clone());
+    Ok(config)
+}
+
+fn jet_tls_client_config_with_version_bounds(
+    mut config: JetTlsClientConfig,
+    min: JetTlsVersion,
+    max: JetTlsVersion,
+) -> Result<JetTlsClientConfig, jet_std::IoError> {
+    let value = |version| match version { JetTlsVersion::Tls12 => 12, JetTlsVersion::Tls13 => 13 };
+    if value(min) > value(max) {
+        return Err(jet_tls_config_error(
+            "ClientConfig.with_version_bounds",
+            "minimum TLS version exceeds maximum".to_string(),
+        ));
+    }
+    config.min_version = min;
+    config.max_version = max;
+    Ok(config)
+}
+
+#[derive(Clone)]
+pub struct JetTlsCertificate {
+    pub der: Vec<u8>,
+    pub sha256: Vec<u8>,
+    pub spki_sha256: Vec<u8>,
+    pub dns_names: Vec<String>,
+    pub valid_from_unix_ms: i64,
+    pub valid_until_unix_ms: i64,
+    pub subject: String,
+    pub issuer: String,
+}
+
+#[derive(Clone)]
+pub struct JetTlsPeerIdentity {
+    pub verified_server_name: String,
+    pub leaf: JetTlsCertificate,
+    pub certificate_chain: Vec<JetTlsCertificate>,
 }
 
 #[derive(Clone)]
@@ -445,7 +583,9 @@ fn jet_net_closed(operation: &str) -> JetNetError {
 fn jet_net_tls_result<T>(result: Result<T, String>, operation: &str) -> Result<T, JetNetError> {
     result.map_err(|message| {
         let detail = jet_net_detail(operation, None, None, message.clone(), None);
-        if message.contains("closed") {
+        if message.starts_with("TLS protocol truncation:") {
+            JetNetError::Protocol(detail)
+        } else if message.contains("closed") {
             JetNetError::Closed(detail)
         } else if message.contains("timed out") || message.contains("deadline") {
             JetNetError::Timeout(detail)
@@ -795,6 +935,8 @@ fn jet_net_tls_client_scheduler(
     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
     close_step: fn(i64) -> Result<bool, String>,
+    close_write_step: fn(i64) -> Result<bool, String>,
+    peer_snapshot: fn(i64) -> Result<JetTlsPeerSnapshot, String>,
 ) -> Result<JetTlsStream, JetNetError> {
     jet_net_tls_client_scheduler_with_begin(
         stream,
@@ -806,6 +948,8 @@ fn jet_net_tls_client_scheduler(
         read_step,
         write_step,
         close_step,
+        close_write_step,
+        peer_snapshot,
     )
 }
 
@@ -819,6 +963,8 @@ fn jet_net_tls_client_scheduler_with_begin<F>(
     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
     close_step: fn(i64) -> Result<bool, String>,
+    close_write_step: fn(i64) -> Result<bool, String>,
+    peer_snapshot: fn(i64) -> Result<JetTlsPeerSnapshot, String>,
 ) -> Result<JetTlsStream, JetNetError>
 where
     F: FnOnce(std::net::TcpStream) -> Result<i64, String>,
@@ -834,7 +980,7 @@ where
         (read, write) => read.or(write),
     };
     let id = jet_net_tls_result(begin(stream.inner), "tls handshake")?;
-    let tls = JetTlsStream {
+    let mut tls = JetTlsStream {
         id,
         socket,
         read_timeout_ms,
@@ -844,11 +990,18 @@ where
         read_step,
         write_step,
         close_step,
+        close_write_step,
+        peer_snapshot,
+        peer_identity: None,
     };
     let result = (|| {
         let _deadline = jet_net_operation_deadline(handshake_timeout_ms);
         loop {
             if jet_net_tls_result(handshake_step(id), "tls handshake")? {
+                let peer = jet_net_tls_peer_identity_from_snapshot(jet_net_tls_result(
+                    (tls.peer_snapshot)(id), "tls peer identity",
+                )?)?;
+                tls.peer_identity = Some(peer);
                 return Ok(tls);
             }
             jet_net_tls_scheduler_wait(&tls, true, true, "tls handshake")?;
@@ -872,10 +1025,13 @@ fn jet_net_tls_client_scheduler_deadline(
     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
     close_step: fn(i64) -> Result<bool, String>,
+    close_write_step: fn(i64) -> Result<bool, String>,
+    peer_snapshot: fn(i64) -> Result<JetTlsPeerSnapshot, String>,
 ) -> Result<JetTlsStream, JetNetError> {
     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
     jet_net_tls_client_scheduler(
-        stream, server_name, begin, handshake_step, abort, wants, read_ready, read_step, write_step, close_step,
+        stream, server_name, begin, handshake_step, abort, wants, read_ready, read_step, write_step,
+        close_step, close_write_step, peer_snapshot,
     )
 }
 
@@ -884,7 +1040,9 @@ fn jet_net_tls_client_scheduler_config_deadline(
     server_name: &String,
     config: &JetTlsClientConfig,
     deadline: &jet_std::Duration,
-    begin: fn(std::net::TcpStream, &String, &Vec<String>) -> Result<i64, String>,
+    begin: fn(
+        std::net::TcpStream, &String, i64, &Vec<u8>, &Vec<u8>, &Vec<u8>, i64, i64, &Vec<String>,
+    ) -> Result<i64, String>,
     handshake_step: fn(i64) -> Result<bool, String>,
     abort: fn(i64),
     wants: fn(i64) -> Result<(bool, bool), String>,
@@ -892,11 +1050,34 @@ fn jet_net_tls_client_scheduler_config_deadline(
     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
     close_step: fn(i64) -> Result<bool, String>,
+    close_write_step: fn(i64) -> Result<bool, String>,
+    peer_snapshot: fn(i64) -> Result<JetTlsPeerSnapshot, String>,
 ) -> Result<JetTlsStream, JetNetError> {
     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
+    for protocol in &config.alpn {
+        if protocol.is_empty() || protocol.len() > u8::MAX as usize {
+            return Err(JetNetError::InvalidInput(jet_net_detail(
+                "tls handshake", None, None,
+                "TLS ALPN protocols must contain 1 to 255 bytes".to_string(), None,
+            )));
+        }
+    }
+    let (trust_mode, roots) = match &config.trust {
+        JetTlsTrust::System => (0, Vec::new()),
+        JetTlsTrust::SystemPlus(roots) => (1, roots.pem.clone()),
+        JetTlsTrust::CustomOnly(roots) => (2, roots.pem.clone()),
+    };
+    let empty = Vec::new();
+    let (cert_chain, private_key) = config.identity.as_ref()
+        .map(|identity| (&identity.cert_chain, &identity.private_key))
+        .unwrap_or((&empty, &empty));
+    let version = |version| match version { JetTlsVersion::Tls12 => 12, JetTlsVersion::Tls13 => 13 };
     jet_net_tls_client_scheduler_with_begin(
         stream,
-        |inner| begin(inner, server_name, &config.alpn),
+        |inner| begin(
+            inner, server_name, trust_mode, &roots, cert_chain, private_key,
+            version(config.min_version), version(config.max_version), &config.alpn,
+        ),
         handshake_step,
         abort,
         wants,
@@ -904,6 +1085,8 @@ fn jet_net_tls_client_scheduler_config_deadline(
         read_step,
         write_step,
         close_step,
+        close_write_step,
+        peer_snapshot,
     )
 }
 
@@ -984,6 +1167,47 @@ fn jet_net_tls_close(stream: &mut JetTlsStream) -> Result<(), JetNetError> {
         }
         jet_net_tls_scheduler_wait(stream, false, true, "tls close")?;
     }
+}
+
+fn jet_net_tls_close_write(
+    stream: &mut JetTlsStream,
+    deadline: &jet_std::Duration,
+) -> Result<(), JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls close write")?;
+    loop {
+        if jet_net_tls_result((stream.close_write_step)(stream.id), "tls close write")? {
+            return Ok(());
+        }
+        jet_net_tls_scheduler_wait(stream, false, true, "tls close write")?;
+    }
+}
+
+fn jet_net_tls_peer_identity_from_snapshot(
+    snapshot: JetTlsPeerSnapshot,
+) -> Result<JetTlsPeerIdentity, JetNetError> {
+    let (verified_server_name, ders, spkis, dns_names, valid_from, valid_until, subjects, issuers) = snapshot;
+    let mut certificate_chain = Vec::with_capacity(ders.len());
+    for index in 0..ders.len() {
+        let der = ders[index].clone();
+        certificate_chain.push(JetTlsCertificate {
+            sha256: jet_sha256_raw(&der).to_vec(),
+            spki_sha256: jet_sha256_raw(&spkis[index]).to_vec(),
+            der,
+            dns_names: dns_names[index].clone(),
+            valid_from_unix_ms: valid_from[index],
+            valid_until_unix_ms: valid_until[index],
+            subject: subjects[index].clone(),
+            issuer: issuers[index].clone(),
+        });
+    }
+    let leaf = certificate_chain.first().cloned().ok_or_else(|| JetNetError::Tls(jet_net_detail(
+        "tls peer identity", None, None, "verified TLS peer chain is empty".to_string(), None,
+    )))?;
+    Ok(JetTlsPeerIdentity { verified_server_name, leaf, certificate_chain })
+}
+
+fn jet_net_tls_peer_identity(stream: &JetTlsStream) -> JetTlsPeerIdentity {
+    stream.peer_identity.clone().expect("verified TLS stream always retains peer identity")
 }
 
 fn jet_net_tls_ready(

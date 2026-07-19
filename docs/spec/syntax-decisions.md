@@ -2418,14 +2418,24 @@ index, not a substitute for that law.
   #306's shared cancellation/runtime prerequisite is complete.
 - **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
   returns a `TlsStream` with the same byte and close law. Safe defaults verify the server name
-  with system roots; advanced roots, identity, protocol bounds, peer
-  identity, and advanced close-notify controls remain implementation work under
-  #300. The stream itself uses shared socket readiness, deadlines, cancellation,
+  with system roots. The stream uses shared socket readiness, deadlines, cancellation,
   explicit close-notify, underlying write half-close, and idempotent close.
   `ClientConfig.default().with_alpn(protocols)` and the ratified labeled
-  `client(..., server_name:, config:, deadline:)` path are implemented; roots,
-  identity, protocol bounds, peer identity, and advanced close-notify controls
-  remain gated on exact owner-approved spellings.
+  `client(..., server_name:, config:, deadline:)` path are implemented.
+- **D-NETTLSCONFIG1=A**: validated opaque `RootCertificates` and secret
+  `ClientIdentity` values configure `.System`, `.SystemPlus(roots)`, or
+  `.CustomOnly(roots)` trust, optional mTLS identity, and inclusive `.Tls12` /
+  `.Tls13` bounds on immutable `ClientConfig` values. Invalid PEM, mismatched
+  keys, reversed bounds, and invalid ALPN fail before network use; private key
+  storage is wiped on drop and never appears in errors.
+- **D-NETTLSPEER1=A**: a verified handshake retains immutable peer identity.
+  `stream.peer_identity()` exposes the verified server name, the complete
+  certificate chain as exact DER in wire order, leaf certificate/SPKI SHA-256,
+  DNS SANs, validity bounds, subject, and issuer without re-handshaking.
+- **D-NETTLSCLOSE1=A**: `stream.close_write(deadline:)` sends and flushes
+  close-notify, then closes only the transport write side. Repetition is
+  harmless, later writes return `.Closed`, reads continue, empty bytes mean a
+  verified peer close-notify, and raw EOF is `.Protocol` truncation.
 - **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
   and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support

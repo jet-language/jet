@@ -2376,8 +2376,15 @@ pub enum THandleOp {
     TlsStreamWriteAllDeadline,
     TlsStreamReady,
     TlsStreamClose,
+    TlsStreamCloseWrite,
+    TlsStreamPeerIdentity,
     TlsClientConfigDefault,
     TlsClientConfigWithAlpn,
+    TlsRootCertificatesFromPem,
+    TlsClientIdentityFromPem,
+    TlsClientConfigWithTrust,
+    TlsClientConfigWithIdentity,
+    TlsClientConfigWithVersionBounds,
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `alloc(v)` → `(recv).alloc(a0)` (hands back a
     /// `&mut T` view into the allocator's storage). The arg is emitted plainly.
     AllocAlloc,

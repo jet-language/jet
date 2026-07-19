@@ -3377,6 +3377,9 @@ fn core_net_ratified_named_forms_require_exact_labels() {
         ("tls read", "fn check(stream: TlsStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline:"),
         ("tls write", "fn check(stream: TlsStream, d: Duration) { result :: stream.write_all([1], d) }", "deadline:"),
         ("tls ready", "fn check(stream: TlsStream, d: Duration) { result :: stream.ready(.Read, potato: d) }", "deadline:"),
+        ("tls close write", "fn check(stream: TlsStream, d: Duration) { result :: stream.close_write(d) }", "deadline:"),
+        ("tls version bounds", "fn check() { result :: tls.ClientConfig.default().with_version_bounds(.Tls12, .Tls13) }", "min:"),
+        ("tls client identity", "fn check() { result :: tls.ClientIdentity.from_pem([], []) }", "cert_chain:"),
         (
             "tls client",
             "fn check(stream: TcpStream, d: Duration) { cfg :: tls.ClientConfig.default(); result :: tls.client(^stream, banana: \"localhost\", potato: cfg, turnip: d) }",
@@ -3395,6 +3398,22 @@ fn core_net_ratified_named_forms_require_exact_labels() {
                 assert!(
                     diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(label)),
                     "tls.client accepted or misreported `{label}`: {diags:?}",
+                );
+            }
+        }
+        if name == "tls version bounds" {
+            for label in ["min:", "max:"] {
+                assert!(
+                    diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(label)),
+                    "with_version_bounds accepted or misreported `{label}`: {diags:?}",
+                );
+            }
+        }
+        if name == "tls client identity" {
+            for label in ["cert_chain:", "private_key:"] {
+                assert!(
+                    diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(label)),
+                    "ClientIdentity.from_pem accepted or misreported `{label}`: {diags:?}",
                 );
             }
         }
@@ -4238,6 +4257,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
     return stream.read(limit)
 }
 
+
 fn send<T: Writer>(&stream: T, bytes: [U8]) -> Int ? IOError {
     empty_count :: stream.write([])?
     stream.write_all(bytes)?
@@ -4296,6 +4316,133 @@ fn run() {
     let _ = server.wait();
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "false\ntrue\ntrue\n0\ntrue\ntrue\nclosed\n");
+}
+#[test]
+fn core_tls_expert_config_peer_identity_and_directional_close_are_real() {
+    let dir = std::env::temp_dir().join(format!("jet_core_tls_expert_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let ca_cert = root.join("tests/fixtures/tls/localhost.cert.pem");
+    let ca_key = root.join("tests/fixtures/tls/localhost.key.pem");
+    let serial = dir.join("ca.srl");
+    let make_cert = |name: &str, usage: &str| {
+        let cert = dir.join(format!("{name}.cert.pem"));
+        let key = dir.join(format!("{name}.key.pem"));
+        let csr = dir.join(format!("{name}.csr.pem"));
+        let ext = dir.join(format!("{name}.ext"));
+        fs::write(
+            &ext,
+            format!("basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:localhost\nextendedKeyUsage={usage}\n"),
+        ).unwrap();
+        let req = Command::new("openssl")
+            .args(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", &format!("/CN={name}"), "-keyout"])
+            .arg(&key).arg("-out").arg(&csr).output().unwrap();
+        assert!(req.status.success(), "{}", String::from_utf8_lossy(&req.stderr));
+        let sign = Command::new("openssl")
+            .args(["x509", "-req", "-days", "1", "-CAcreateserial", "-CAserial"])
+            .arg(&serial).arg("-CA")
+            .arg(&ca_cert).arg("-CAkey").arg(&ca_key).arg("-extfile").arg(&ext)
+            .arg("-in").arg(&csr).arg("-out").arg(&cert).output().unwrap();
+        assert!(sign.status.success(), "{}", String::from_utf8_lossy(&sign.stderr));
+        (cert, key)
+    };
+    let (server_cert, server_key) = make_cert("localhost", "serverAuth");
+    let (client_cert, client_key) = make_cert("jet-client", "clientAuth");
+    let mut server = Command::new("openssl")
+        .args(["s_server", "-quiet", "-www", "-alpn", "http/1.0", "-Verify", "1", "-verify_return_error", "-accept", &port.to_string(), "-CAfile"])
+        .arg(&ca_cert).arg("-cert").arg(&server_cert).arg("-key").arg(&server_key)
+        .arg("-cert_chain").arg(&ca_cert)
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let jet_bytes = |path: &std::path::Path| {
+        fs::read(path)
+            .unwrap()
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let source = format!(r#"
+use core.net as net
+use core.tls as tls
+
+fn run() {{
+    ca: [U8] :: [{}]
+    client_cert: [U8] :: [{}]
+    client_key: [U8] :: [{}]
+    wrong_key: [U8] :: [{}]
+    roots :: tls.RootCertificates.from_pem(ca) ?? panic("root validation")
+    identity :: tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: client_key) ?? panic("identity validation")
+    if tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: wrong_key) == {{
+        Ok(_) -> panic("mismatched identity accepted")
+        Err(_) -> print("mismatch-rejected")
+    }}
+    if tls.ClientConfig.default().with_version_bounds(min: .Tls13, max: .Tls12) == {{
+        Ok(_) -> panic("reversed TLS versions accepted")
+        Err(_) -> print("bounds-rejected")
+    }}
+    _plus :: tls.ClientConfig.default().with_trust(.SystemPlus(roots)) ?? panic("system plus")
+    cfg0 :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("custom trust")
+    cfg1 :: cfg0.with_client_identity(identity) ?? panic("client identity")
+    cfg2 :: cfg1.with_version_bounds(min: .Tls12, max: .Tls13) ?? panic("version bounds")
+    cfg :: cfg2.with_alpn(["http/1.0"])
+    tcp :: net.tcp_connect("127.0.0.1:{}") ?? panic("tcp")
+    budget :: Duration.seconds(2) ?? panic("budget")
+    secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("mTLS")
+    peer :: secure.peer_identity()
+    print(peer.verified_server_name)
+    print(peer.certificate_chain.len() == 2)
+    print(peer.leaf.der == peer.certificate_chain[0].der)
+    print(peer.leaf.der.len() > 0)
+    print(peer.leaf.sha256.len())
+    print(peer.leaf.spki_sha256.len())
+    print(peer.leaf.dns_names.contains("localhost"))
+    print(peer.leaf.valid_from_unix_ms < peer.leaf.valid_until_unix_ms)
+    print(peer.leaf.subject.contains("CN=localhost"))
+    print(peer.leaf.issuer.len() > 0)
+    request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
+    secure.write_all(request, deadline: budget) ?? panic("request")
+    secure.close_write(deadline: budget) ?? panic("close write")
+    secure.close_write(deadline: budget) ?? panic("repeat close write")
+    one: [U8] :: [1]
+    if secure.write_all(one, deadline: budget) == {{
+        Ok(_) -> panic("write after close_write succeeded")
+        Err(error) -> if net.error_operation(error).contains("write") && net.error_message(error).contains("closed") {{
+            print("write-closed")
+        }} else {{
+            panic("wrong post-close error")
+        }}
+    }}
+    total := 0
+    loop {{
+        chunk :: secure.read(4096, deadline: budget) ?? panic("response read")
+        if chunk.is_empty() {{ break }}
+        total += chunk.len()
+    }}
+    print(total > 0)
+    secure.close() ?? panic("close")
+    print(secure.peer_identity().verified_server_name)
+}}
+"#,
+        jet_bytes(&ca_cert),
+        jet_bytes(&client_cert),
+        jet_bytes(&client_key),
+        jet_bytes(&server_key),
+        port,
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "tls_expert_surface", &source, &[], None);
+    let _ = server.kill();
+    let _ = server.wait();
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        "mismatch-rejected\nbounds-rejected\nlocalhost\ntrue\ntrue\ntrue\n32\n32\ntrue\ntrue\ntrue\ntrue\nwrite-closed\ntrue\nlocalhost\n",
+    );
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]

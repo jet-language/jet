@@ -1503,6 +1503,32 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     recv,
                     a(0)
                 ),
+                THandleOp::TlsRootCertificatesFromPem => {
+                    let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    format!(
+                        "{}jet_tls_root_certificates_from_pem(&({}), {}::jet_net_tls_validate_roots_impl)",
+                        root, a(0), ffi,
+                    )
+                }
+                THandleOp::TlsClientIdentityFromPem => {
+                    let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    format!(
+                        "{}jet_tls_client_identity_from_pem(&({}), &({}), {}::jet_net_tls_validate_identity_impl)",
+                        root, a(0), a(1), ffi,
+                    )
+                }
+                THandleOp::TlsClientConfigWithTrust => format!(
+                    "{}jet_tls_client_config_with_trust(({}).clone(), ({}).clone())",
+                    root, recv, a(0),
+                ),
+                THandleOp::TlsClientConfigWithIdentity => format!(
+                    "{}jet_tls_client_config_with_client_identity(({}).clone(), &({}))",
+                    root, recv, a(0),
+                ),
+                THandleOp::TlsClientConfigWithVersionBounds => format!(
+                    "{}jet_tls_client_config_with_version_bounds(({}).clone(), ({}).clone(), ({}).clone())",
+                    root, recv, a(0), a(1),
+                ),
                 THandleOp::GameSceneOnFrame => {
                     format!("{}jet_game_scene_on_frame(&mut ({}), {})", root, recv, a(0))
                 }
@@ -1651,6 +1677,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 THandleOp::TlsStreamClose => format!(
                     "{}jet_net_tls_close(&mut ({}))", root, recv
+                ),
+                THandleOp::TlsStreamCloseWrite => format!(
+                    "{}jet_net_tls_close_write(&mut ({}), &({}))", root, recv, a(0)
+                ),
+                THandleOp::TlsStreamPeerIdentity => format!(
+                    "{}jet_net_tls_peer_identity(&({}))", root, recv
                 ),
                 // c109 Phase 19: arena allocator methods (byte-for-byte the AST arms).
                 THandleOp::AllocAlloc => {

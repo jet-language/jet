@@ -33,7 +33,8 @@ use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
-use crate::Codegen::TIR::tls_config_static_default;
+use crate::Codegen::TIR::tls_static_op;
+use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::lambda_in_subset;
 use crate::Codegen::TIR::router_register_in_subset;
 use crate::Codegen::TIR::solve_new_type;
@@ -336,8 +337,14 @@ pub(crate) fn method_call_in_subset(
         };
         return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
-    if tls_config_static_default(receiver, method, cx, locals) {
-        return args.is_empty();
+    if let Some(op) = tls_static_op(receiver, method, cx, locals) {
+        let want = match op {
+            THandleOp::TlsClientConfigDefault => 0,
+            THandleOp::TlsRootCertificatesFromPem => 1,
+            THandleOp::TlsClientIdentityFromPem => 2,
+            _ => return false,
+        };
+        return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d) [c109 Phase 9]: a built-in collection/string method
     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
