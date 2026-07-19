@@ -345,7 +345,7 @@ pub(crate) fn run_compile_cmd(
                 }
                 // S59 (E2-M14): resolve native C link flags at build time; E3201
                 // (unresolved C lib) surfaces here, not during front-end checking.
-                let clinks = match jet::resolve_c_links(file) {
+                let clinks = match jet::resolve_c_links_for_target(file, cross_target) {
                     Ok(args) => args,
                     Err(diags) => {
                         report_problems(mode, file, &src, &diags);

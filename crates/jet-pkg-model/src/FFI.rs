@@ -15,7 +15,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v1";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v2";
 
 /// One foreign function collected from the import graph.
 #[derive(Debug, Clone)]
@@ -38,6 +38,49 @@ pub struct InlineEntry {
     pub lang: String,
     pub source: String,
     pub param_names: Vec<String>,
+}
+
+#[derive(Clone)]
+struct NativeTool {
+    path: PathBuf,
+    identity: String,
+    target_arg: Option<String>,
+}
+
+#[derive(Clone)]
+struct InlineNativeToolchain {
+    target: String,
+    cc: Option<NativeTool>,
+    cxx: Option<NativeTool>,
+    ar: NativeTool,
+}
+
+pub(crate) fn cxx_runtime_for_target(target: &str) -> &'static str {
+    if target.contains("apple") || target.contains("darwin") {
+        "c++"
+    } else if target.contains("windows-msvc") {
+        "msvcprt"
+    } else {
+        "stdc++"
+    }
+}
+
+pub(crate) fn proof_suffix_for_target(target: &str) -> &'static str {
+    if target.contains("windows") {
+        "dll"
+    } else if target.contains("apple") || target.contains("darwin") {
+        "dylib"
+    } else {
+        "so"
+    }
+}
+
+pub(crate) fn undefined_symbol_flag_for_target(target: &str) -> &'static str {
+    if target.contains("apple") || target.contains("darwin") {
+        "-Wl,-undefined,error"
+    } else {
+        "-Wl,--no-undefined"
+    }
 }
 
 /// Gather every `extern rust` function across all modules.
@@ -1043,6 +1086,7 @@ pub fn cached_crypto_helper_path() -> PathBuf {
         false,
         false,
         &target,
+        None,
     );
     cache_dir()
         .join(format!("{key:016x}"))
@@ -1066,6 +1110,7 @@ fn build_bridge_full(
     selected_target: &str,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
+    let native_toolchain = inline_native_toolchain(entries, selected_target)?;
     if needs_archive {
         deps.insert(ZIP_CRATE_SPEC.0.to_string(), ZIP_CRATE_SPEC.1.to_string());
         deps.insert(TAR_CRATE_SPEC.0.to_string(), TAR_CRATE_SPEC.1.to_string());
@@ -1169,6 +1214,7 @@ fn build_bridge_full(
         needs_plugin,
         needs_secrets,
         selected_target,
+        native_toolchain.as_ref(),
     );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
@@ -1264,7 +1310,16 @@ fn build_bridge_full(
     fs::write(&manifest, emit_cargo_toml(&crate_name, &deps, has_native))
         .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
     if has_native {
-        fs::write(cache_root.join("build.rs"), emit_inline_build_rs(entries)).map_err(|e| {
+        fs::write(
+            cache_root.join("build.rs"),
+            emit_inline_build_rs(
+                entries,
+                native_toolchain
+                    .as_ref()
+                    .expect("native entries resolve a native toolchain"),
+            ),
+        )
+        .map_err(|e| {
             tool_error(&format!(
                 "couldn't write the inline FFI build script: {}",
                 e
@@ -1727,11 +1782,16 @@ fn cache_key_full(
     needs_plugin: bool,
     needs_secrets: bool,
     selected_target: &str,
+    native_toolchain: Option<&InlineNativeToolchain>,
 ) -> u64 {
     let mut h = DefaultHasher::new();
     INLINE_BRIDGE_SCHEMA.hash(&mut h);
     selected_target.hash(&mut h);
     native_toolchain_identity().hash(&mut h);
+    if let Some(toolchain) = native_toolchain {
+        inline_toolchain_identity(toolchain).hash(&mut h);
+        emit_inline_build_rs(entries, toolchain).hash(&mut h);
+    }
     // Only perturb the key when a ring module is actually needed, so programs
     // without those modules keep their historical cache key. The dep is already
     // in `deps`; the flag guards the (currently impossible) empty-deps case.
@@ -1859,6 +1919,93 @@ fn command_exists(cmd: &str) -> bool {
     Command::new(cmd).arg("--version").output().is_ok()
 }
 
+fn inline_native_toolchain(
+    entries: &[ExternEntry],
+    target: &str,
+) -> Result<Option<InlineNativeToolchain>, Vec<Diagnostic>> {
+    let has_c = entries
+        .iter()
+        .any(|entry| entry.inline.as_ref().is_some_and(|inline| inline.lang == "c"));
+    let has_cpp = entries
+        .iter()
+        .any(|entry| entry.inline.as_ref().is_some_and(|inline| inline.lang == "cpp"));
+    if !has_c && !has_cpp {
+        return Ok(None);
+    }
+    let host = host_target();
+    Ok(Some(InlineNativeToolchain {
+        target: target.to_string(),
+        cc: has_c.then(|| resolve_native_tool("CC", target, &host, "clang")).transpose()?,
+        cxx: has_cpp
+            .then(|| resolve_native_tool("CXX", target, &host, "clang++"))
+            .transpose()?,
+        ar: resolve_native_tool("AR", target, &host, if target == host { "ar" } else { "llvm-ar" })?,
+    }))
+}
+
+fn resolve_native_tool(
+    variable: &str,
+    target: &str,
+    host: &str,
+    fallback: &str,
+) -> Result<NativeTool, Vec<Diagnostic>> {
+    let target_key = target.replace('-', "_");
+    let selected = std::env::var_os(format!("{variable}_{target_key}"))
+        .or_else(|| (target == host).then(|| std::env::var_os(variable)).flatten())
+        .unwrap_or_else(|| fallback.into());
+    let requested = PathBuf::from(&selected);
+    let path = if requested.components().count() > 1 {
+        fs::canonicalize(&requested).ok()
+    } else {
+        std::env::var_os("PATH").and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| dir.join(&requested))
+                .find(|candidate| candidate.is_file())
+                .and_then(|candidate| fs::canonicalize(candidate).ok())
+        })
+    }
+    .ok_or_else(|| tool_error(&format!("selected native tool `{}` was not found", requested.display())))?;
+    let output = Command::new(&path)
+        .arg("--version")
+        .output()
+        .map_err(|error| tool_error(&format!("couldn't inspect native tool `{}`: {error}", path.display())))?;
+    if !output.status.success() {
+        return Err(tool_error(&format!(
+            "selected native tool `{}` rejected `--version`",
+            path.display()
+        )));
+    }
+    let version = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let target_arg = (variable != "AR" && version.to_ascii_lowercase().contains("clang"))
+        .then(|| format!("--target={target}"));
+    Ok(NativeTool {
+        identity: format!("{}\n{version}", path.display()),
+        path,
+        target_arg,
+    })
+}
+
+fn inline_toolchain_identity(toolchain: &InlineNativeToolchain) -> String {
+    let mut value = format!(
+        "target={}\nruntime={}\nproof-suffix={}\nundefined={}\n",
+        toolchain.target,
+        cxx_runtime_for_target(&toolchain.target),
+        proof_suffix_for_target(&toolchain.target),
+        undefined_symbol_flag_for_target(&toolchain.target)
+    );
+    for (name, tool) in [("cc", toolchain.cc.as_ref()), ("cxx", toolchain.cxx.as_ref())] {
+        if let Some(tool) = tool {
+            value.push_str(&format!("{name}={}\ntarget-arg={:?}\n", tool.identity, tool.target_arg));
+        }
+    }
+    value.push_str(&format!("ar={}\narchive-flags=rcs\n", toolchain.ar.identity));
+    value
+}
+
 fn native_toolchain_identity() -> String {
     let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
     let version = Command::new(&rustc)
@@ -1871,7 +2018,7 @@ fn native_toolchain_identity() -> String {
     format!("{}\n{version}", PathBuf::from(rustc).display())
 }
 
-fn host_target() -> String {
+pub(crate) fn host_target() -> String {
     if let Ok(target) = std::env::var("JET_BUILD_TARGET") {
         if !target.trim().is_empty() {
             return target;
@@ -2224,7 +2371,7 @@ fn emit_native_inline_source(entry: &ExternEntry, index: usize) -> String {
     )
 }
 
-fn emit_inline_build_rs(entries: &[ExternEntry]) -> String {
+fn emit_inline_build_rs(entries: &[ExternEntry], toolchain: &InlineNativeToolchain) -> String {
     let mut files = Vec::new();
     let mut has_cpp = false;
     for (index, entry) in entries.iter().enumerate() {
@@ -2232,10 +2379,24 @@ fn emit_inline_build_rs(entries: &[ExternEntry]) -> String {
             continue;
         };
         match inline.lang.as_str() {
-            "c" => files.push(format!("(\"inline_{index}.c\", \"cc\")")),
+            "c" => {
+                let tool = toolchain.cc.as_ref().expect("C entry has a C compiler");
+                files.push(format!(
+                    "({:?}, {:?}, false, {:?})",
+                    format!("inline_{index}.c"),
+                    tool.path.to_string_lossy(),
+                    tool.target_arg.as_deref().unwrap_or("")
+                ));
+            }
             "cpp" => {
                 has_cpp = true;
-                files.push(format!("(\"inline_{index}.cpp\", \"clang++\")"));
+                let tool = toolchain.cxx.as_ref().expect("C++ entry has a C++ compiler");
+                files.push(format!(
+                    "({:?}, {:?}, true, {:?})",
+                    format!("inline_{index}.cpp"),
+                    tool.path.to_string_lossy(),
+                    tool.target_arg.as_deref().unwrap_or("")
+                ));
             }
             _ => {}
         }
@@ -2249,31 +2410,51 @@ fn checked(command: &mut Command) {{
 }}
 
 fn main() {{
+    const TARGET: &str = {target:?};
+    const PROOF_SUFFIX: &str = {proof_suffix:?};
+    const UNDEFINED_SYMBOLS: &str = {undefined:?};
+    const ARCHIVER: &str = {archiver:?};
+    let cargo_target = env::var("TARGET").expect("Cargo omitted TARGET for a selected target");
+    assert_eq!(cargo_target, TARGET, "Cargo TARGET differs from Jet's selected target");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let mut objects = Vec::new();
-    for (index, (source, compiler)) in [{}].iter().enumerate() {{
+    for (index, (source, compiler, cpp, target_arg)) in [{files}].iter().enumerate() {{
         println!("cargo:rerun-if-changed={{source}}");
         let object = out.join(format!("inline_{{index}}.o"));
-        checked(Command::new(compiler).args(["-std=c++17", "-fPIC", "-c", source, "-o"]).arg(&object));
-        let proof = out.join(format!("inline_{{index}}.so"));
-        checked(Command::new(compiler).args(["-shared", "-Wl,--no-undefined"]).arg(&object).arg("-o").arg(&proof));
+        let mut compile = Command::new(compiler);
+        if !target_arg.is_empty() {{ compile.arg(target_arg); }}
+        if *cpp {{ compile.arg("-std=c++17"); }}
+        compile.args(["-fPIC", "-c", source, "-o"]).arg(&object);
+        checked(&mut compile);
+        let proof = out.join(format!("inline_{{index}}.{{PROOF_SUFFIX}}"));
+        let mut link = Command::new(compiler);
+        if !target_arg.is_empty() {{ link.arg(target_arg); }}
+        link.args(["-shared", UNDEFINED_SYMBOLS]).arg(&object).arg("-o").arg(&proof);
+        checked(&mut link);
         objects.push(object);
     }}
     let archive = out.join("libjet_inline_native.a");
-    let mut ar = Command::new("ar");
-    ar.arg("crus").arg(&archive);
+    let mut ar = Command::new(ARCHIVER);
+    ar.arg("rcs").arg(&archive);
     for object in &objects {{ ar.arg(object); }}
     checked(&mut ar);
     println!("cargo:rustc-link-search=native={{}}", out.display());
     println!("cargo:rustc-link-lib=static=jet_inline_native");
-    {}
+    {runtime}
 }}
 "#,
-        files.join(", "),
-        if has_cpp {
-            "println!(\"cargo:rustc-link-lib=dylib=stdc++\");"
+        target = toolchain.target,
+        proof_suffix = proof_suffix_for_target(&toolchain.target),
+        undefined = undefined_symbol_flag_for_target(&toolchain.target),
+        archiver = toolchain.ar.path.to_string_lossy(),
+        files = files.join(", "),
+        runtime = if has_cpp {
+            format!(
+                "println!(\"cargo:rustc-link-lib=dylib={}\");",
+                cxx_runtime_for_target(&toolchain.target)
+            )
         } else {
-            ""
+            String::new()
         },
     )
 }
@@ -2475,7 +2656,7 @@ fn tool_error(msg: &str) -> Vec<Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AST::Type;
+    use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
 
     #[test]
@@ -2554,5 +2735,81 @@ mod tests {
         assert_eq!(rust_type(&Type::Int, &empty), "i64");
         assert_eq!(rust_type(&Type::Float, &empty), "f64");
         assert_eq!(rust_type(&Type::Float32, &empty), "f32");
+    }
+
+    #[test]
+    fn inline_build_script_has_no_ambient_host_tool_literals() {
+        let entry = ExternEntry {
+            jet_name: "probe".into(),
+            rust_path: String::new(),
+            wrapper_name: "jet_ffi_probe".into(),
+            params: vec![(AccessConvention::Read, Type::Int)],
+            return_type: Some(Type::Int),
+            crate_spec: "std".into(),
+            line_hint: "`#FFI(c) fn probe`".into(),
+            inline: Some(InlineEntry {
+                lang: "c".into(),
+                source: "int64_t probe(int64_t value) { return value; }".into(),
+                param_names: vec!["value".into()],
+            }),
+        };
+        let mut cpp_entry = entry.clone();
+        cpp_entry.jet_name = "cpp_probe".into();
+        cpp_entry.inline.as_mut().unwrap().lang = "cpp".into();
+        let entries = [entry, cpp_entry];
+        let toolchain = InlineNativeToolchain {
+            target: "aarch64-apple-darwin".into(),
+            cc: Some(NativeTool {
+                path: "/audited/clang".into(),
+                identity: "/audited/clang\nfake clang 1".into(),
+                target_arg: Some("--target=aarch64-apple-darwin".into()),
+            }),
+            cxx: Some(NativeTool {
+                path: "/audited/clang++".into(),
+                identity: "/audited/clang++\nfake clang 1".into(),
+                target_arg: Some("--target=aarch64-apple-darwin".into()),
+            }),
+            ar: NativeTool {
+                path: "/audited/llvm-ar".into(),
+                identity: "/audited/llvm-ar\nfake ar 1".into(),
+                target_arg: None,
+            },
+        };
+        let generated = emit_inline_build_rs(&entries, &toolchain);
+        assert!(generated.contains("TARGET"));
+        assert!(generated.contains("a selected target"));
+        assert!(generated.contains("aarch64-apple-darwin"));
+        assert!(generated.contains("/audited/clang\""));
+        assert!(generated.contains("/audited/clang++"));
+        assert!(generated.contains("/audited/llvm-ar"));
+        assert!(generated.contains("cargo:rustc-link-lib=dylib=c++"));
+        assert!(!generated.contains("Command::new(\"cc\")"));
+        assert!(!generated.contains("Command::new(\"ar\")"));
+
+        let key = |toolchain: &InlineNativeToolchain| {
+            cache_key_full(
+                &entries,
+                &BTreeMap::new(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                &toolchain.target,
+                Some(toolchain),
+            )
+        };
+        let first = key(&toolchain);
+        let mut changed_tool = toolchain.clone();
+        changed_tool.ar.identity.push_str("\nfake ar 2");
+        assert_ne!(first, key(&changed_tool));
+        let mut changed_target = toolchain.clone();
+        changed_target.target = "aarch64-unknown-linux-gnu".into();
+        assert_ne!(first, key(&changed_target));
     }
 }

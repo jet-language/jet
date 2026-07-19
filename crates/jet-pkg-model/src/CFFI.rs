@@ -167,10 +167,18 @@ fn e3204(lib: &str, header: &str, span: Span) -> Diagnostic {
 /// uses (D-CFFI2). On any unresolved lib, returns the E3201 diagnostics.
 /// The returned strings are ready to append to a `rustc`/`cc` command.
 pub fn rustc_link_args(cffi: &CFfi, project_root: &Path) -> Result<Vec<String>, Vec<Diagnostic>> {
+    rustc_link_args_for_target(cffi, project_root, &crate::FFI::host_target())
+}
+
+pub fn rustc_link_args_for_target(
+    cffi: &CFfi,
+    project_root: &Path,
+    target: &str,
+) -> Result<Vec<String>, Vec<Diagnostic>> {
     let mut args = Vec::new();
     let mut diags = Vec::new();
     for lib in &cffi.libs {
-        match resolve_link(&lib.lib, project_root) {
+        match resolve_link_for_target(&lib.lib, project_root, target) {
             Ok(flags) => {
                 for dir in &flags.lib_dirs {
                     args.push("-L".to_string());
@@ -670,6 +678,14 @@ fn load_cache_source(
 ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
 ///   3. Else E3201.
 pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+    resolve_link_for_target(lib, project_root, &crate::FFI::host_target())
+}
+
+pub fn resolve_link_for_target(
+    lib: &str,
+    project_root: &Path,
+    target: &str,
+) -> Result<LinkFlags, Diagnostic> {
     if let Some(actual) = lib.strip_prefix("jet_cpp_") {
         let dir = project_root
             .join(Syntax::SOURCE_ROOT_DIR)
@@ -682,21 +698,33 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
                 ..Default::default()
             };
             let metadata = dir.join(format!("{actual}.link"));
+            let mut bound_target = None;
+            let mut has_runtime = false;
             if let Ok(source) = std::fs::read_to_string(metadata) {
                 for line in source.lines() {
-                    if let Some(value) = line.strip_prefix("L\t") {
+                    if let Some(value) = line.strip_prefix("target\t") {
+                        bound_target = Some(value.to_string());
+                    } else if let Some(value) = line.strip_prefix("L\t") {
                         if std::path::Path::new(value).is_absolute() {
                             flags.lib_dirs.push(value.to_string());
                             flags.rpath_dirs.push(value.to_string());
                         }
                     } else if let Some(value) = line.strip_prefix("l\t") {
                         if value.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                            has_runtime |= value == crate::FFI::cxx_runtime_for_target(target);
                             flags.link_names.push(value.to_string());
                         }
                     }
                 }
             }
-            flags.link_names.push("stdc++".into());
+            if bound_target.as_deref().is_some_and(|bound| bound != target) {
+                return Err(e3201(lib));
+            }
+            if !has_runtime {
+                flags
+                    .link_names
+                    .push(crate::FFI::cxx_runtime_for_target(target).into());
+            }
             return Ok(flags);
         }
         return Err(e3201(lib));

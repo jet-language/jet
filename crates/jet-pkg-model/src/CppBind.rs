@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const SCHEMA: &str = "jet-cpp-bind-v2";
+const SCHEMA: &str = "jet-cpp-bind-v3";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateInstantiation {
@@ -131,6 +131,14 @@ struct Surface {
 
 pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindResult, BindError> {
     validate_options(options)?;
+    let mut resolved = options.clone();
+    resolved.clang = std::fs::canonicalize(&options.clang).map_err(|e| {
+        BindError::Io(format!("could not resolve `{}`: {e}", options.clang.display()))
+    })?;
+    resolved.archiver = std::fs::canonicalize(&options.archiver).map_err(|e| {
+        BindError::Io(format!("could not resolve `{}`: {e}", options.archiver.display()))
+    })?;
+    let options = &resolved;
     let canonical = std::fs::canonicalize(header)
         .map_err(|e| BindError::Io(format!("could not resolve `{}`: {e}", header.display())))?;
     let header_bytes = std::fs::read(&canonical)
@@ -161,19 +169,14 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
 
     let shim = render_cpp(&canonical, &options.lib, &surface);
     let jet = render_jet(&options.lib, &surface);
-    let version = supervised(
-        Command::new(&options.clang).arg("--version"),
-        Duration::from_secs(10),
-        "clang++",
-    )?;
-    if !version.status.success() {
-        return Err(BindError::ToolFailed(launder(&version.stderr)));
-    }
+    let clang_version = tool_version(&options.clang, "clang++")?;
+    let archiver_version = tool_version(&options.archiver, "ar")?;
     let identity = binding_identity(
         &canonical,
         &header_bytes,
         &ast_identity,
-        &version.stdout,
+        &clang_version,
+        &archiver_version,
         &shim,
         &jet,
         options,
@@ -190,7 +193,14 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     }
     materialize_projection(cache, &archive, options)?;
 
-    let provenance = render_provenance(&canonical, &digest, &surface, options);
+    let provenance = render_provenance(
+        &canonical,
+        &digest,
+        &surface,
+        options,
+        &clang_version,
+        &archiver_version,
+    );
     let bound = surface
         .classes
         .iter()
@@ -215,10 +225,21 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
 #[doc(hidden)]
 pub fn cache_identity_for_test(header: &Path, options: &BindOptions, target: &str) -> String {
     let bytes = std::fs::read(header).unwrap_or_default();
+    let mut resolved = options.clone();
+    if let Ok(path) = std::fs::canonicalize(&options.clang) {
+        resolved.clang = path;
+    }
+    if let Ok(path) = std::fs::canonicalize(&options.archiver) {
+        resolved.archiver = path;
+    }
+    let options = &resolved;
+    let clang_version = tool_version(&options.clang, "clang++").unwrap_or_default();
+    let archiver_version = tool_version(&options.archiver, "ar").unwrap_or_default();
     crate::SHA256::sha256_hex(&binding_identity(
         header,
         &bytes,
-        &[],
+        &clang_version,
+        &archiver_version,
         &[],
         "",
         "",
@@ -294,7 +315,8 @@ fn binding_identity(
     header: &Path,
     header_bytes: &[u8],
     ast: &[u8],
-    version: &[u8],
+    clang_version: &[u8],
+    archiver_version: &[u8],
     shim: &str,
     jet: &str,
     options: &BindOptions,
@@ -306,12 +328,17 @@ fn binding_identity(
         header.to_string_lossy().as_bytes(),
         header_bytes,
         ast,
-        version,
+        clang_version,
+        archiver_version,
         shim.as_bytes(),
         jet.as_bytes(),
         target.as_bytes(),
         options.clang.to_string_lossy().as_bytes(),
         options.archiver.to_string_lossy().as_bytes(),
+        crate::FFI::proof_suffix_for_target(target).as_bytes(),
+        crate::FFI::undefined_symbol_flag_for_target(target).as_bytes(),
+        crate::FFI::cxx_runtime_for_target(target).as_bytes(),
+        b"-std=c++17\0-fPIC\0-c\0-target\0-shared\0rcs",
     ] {
         identity.extend_from_slice(value);
         identity.push(0);
@@ -727,11 +754,10 @@ fn build_archive(
         .map_err(|e| BindError::Io(format!("could not create the C++ build directory: {e}")))?;
     let cpp = build.join("shim.cpp");
     let object = build.join("shim.o");
-    let proof = build.join(if cfg!(target_os = "macos") {
-        "proof.dylib"
-    } else {
-        "proof.so"
-    });
+    let proof = build.join(format!(
+        "proof.{}",
+        crate::FFI::proof_suffix_for_target(&options.target)
+    ));
     std::fs::write(&cpp, shim)
         .map_err(|e| BindError::Io(format!("could not write the C++ shim: {e}")))?;
 
@@ -747,11 +773,7 @@ fn build_archive(
 
     let mut link = Command::new(&options.clang);
     link.arg("-target").arg(&options.target).arg("-shared");
-    if cfg!(target_os = "macos") {
-        link.arg("-Wl,-undefined,error");
-    } else {
-        link.arg("-Wl,--no-undefined");
-    }
+    link.arg(crate::FFI::undefined_symbol_flag_for_target(&options.target));
     link.arg(&object);
     add_link_inputs(&mut link, options);
     link.arg("-o").arg(&proof);
@@ -784,6 +806,9 @@ fn materialize_projection(
     std::fs::copy(archive, cache.join(format!("libjet_cpp_{}.a", options.lib)))
         .map_err(|e| BindError::Io(format!("could not materialize the C++ archive: {e}")))?;
     let mut links = String::new();
+    links.push_str("target\t");
+    links.push_str(&options.target);
+    links.push('\n');
     for dir in &options.library_dirs {
         links.push_str("L\t");
         links.push_str(&dir.to_string_lossy());
@@ -794,6 +819,9 @@ fn materialize_projection(
         links.push_str(library);
         links.push('\n');
     }
+    links.push_str("l\t");
+    links.push_str(crate::FFI::cxx_runtime_for_target(&options.target));
+    links.push('\n');
     std::fs::write(cache.join(format!("{}.link", options.lib)), links)
         .map_err(|e| BindError::Io(format!("could not write C++ link provenance: {e}")))
 }
@@ -803,6 +831,8 @@ fn render_provenance(
     digest: &str,
     surface: &Surface,
     options: &BindOptions,
+    clang_version: &[u8],
+    archiver_version: &[u8],
 ) -> String {
     let mut value = format!(
         "schema={SCHEMA}\nsha256={digest}\nheader={}\ntarget={}\nclang={}\narchiver={}\nclasses={}\nfunctions={}\n",
@@ -813,6 +843,11 @@ fn render_provenance(
         surface.classes.len(),
         surface.functions.len()
     );
+    value.push_str(&format!(
+        "clang_version={}\narchiver_version={}\n",
+        String::from_utf8_lossy(clang_version).lines().collect::<Vec<_>>().join(" | "),
+        String::from_utf8_lossy(archiver_version).lines().collect::<Vec<_>>().join(" | ")
+    ));
     for namespace in &options.namespaces {
         value.push_str(&format!("namespace={namespace}\n"));
     }
@@ -1061,6 +1096,20 @@ fn run(command: &mut Command, tool: &str) -> Result<(), BindError> {
     } else {
         Err(BindError::ToolFailed(format!("{tool}: {}", launder(&output.stderr))))
     }
+}
+
+fn tool_version(path: &Path, tool: &str) -> Result<Vec<u8>, BindError> {
+    let output = supervised(
+        Command::new(path).arg("--version"),
+        Duration::from_secs(10),
+        tool,
+    )?;
+    if !output.status.success() {
+        return Err(BindError::ToolFailed(launder(&output.stderr)));
+    }
+    let mut identity = output.stdout;
+    identity.extend_from_slice(&output.stderr);
+    Ok(identity)
 }
 
 fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {

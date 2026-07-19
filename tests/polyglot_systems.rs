@@ -2,6 +2,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 fn tool(name: &str) -> Option<PathBuf> {
     std::env::var_os("PATH")
         .into_iter()
@@ -111,7 +114,7 @@ int64_t apply(int64_t (*callback)(int64_t), int64_t input) {
     assert!(result.archive.is_file());
     assert_ne!(result.archive.parent(), Some(cache.as_path()));
     assert!(cache.join("libjet_cpp_counter.a").is_file());
-    assert!(result.provenance.contains("schema=jet-cpp-bind-v2"));
+    assert!(result.provenance.contains("schema=jet-cpp-bind-v3"));
     assert!(result.provenance.contains(&format!("target={target}")));
     assert!(result.provenance.contains(&format!("clang={}", clang.display())));
     assert!(result.provenance.contains("namespace=acme"));
@@ -177,6 +180,111 @@ fn run() {
         !boundary.is_empty() && boundary.to_ascii_lowercase().contains("foreign"),
         "resident JIT must name its C++ boundary instead of silently falling back: {boundary}"
     );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn cpp_binder_uses_selected_target_tools_runtime_and_cache_identity() {
+    let target = "aarch64-apple-darwin";
+    let root = std::env::temp_dir().join(format!(
+        "jet_cpp_target_tools_{}_{}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let header = root.join("probe.hpp");
+    fs::write(&header, "long probe(long value);\n").unwrap();
+    let canonical = fs::canonicalize(&header).unwrap();
+    let clang_log = root.join("clang.log");
+    let ar_log = root.join("ar.log");
+    let clang = root.join("fake-clang++");
+    let ar = root.join("fake-ar");
+    fs::write(
+        &clang,
+        format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+if [ "$1" = "--version" ]; then printf '%s\n' 'fake clang 1'; exit 0; fi
+case "$*" in
+  *-ast-dump=json*) printf '%s\n' '{}'; exit 0 ;;
+esac
+previous=''
+output=''
+for argument in "$@"; do
+  if [ "$previous" = "-o" ]; then output="$argument"; fi
+  previous="$argument"
+done
+: > "$output"
+"#,
+            clang_log.display(),
+            format!(
+                r#"{{"kind":"TranslationUnitDecl","inner":[{{"kind":"FunctionDecl","name":"probe","loc":{{"file":"{}"}},"type":{{"qualType":"long (long)"}},"inner":[{{"kind":"ParmVarDecl","name":"value","type":{{"qualType":"long"}}}}]}}]}}"#,
+                canonical.display()
+            )
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &ar,
+        format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 1'; exit 0; fi
+: > "$2"
+"#,
+            ar_log.display()
+        ),
+    )
+    .unwrap();
+    for tool in [&clang, &ar] {
+        let mut permissions = fs::metadata(tool).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(tool, permissions).unwrap();
+    }
+
+    let cache = root.join(".jet/bindings/cpp");
+    let options = jet::CppBind::BindOptions {
+        lib: "probe".into(),
+        target: target.into(),
+        clang: clang.clone(),
+        archiver: ar.clone(),
+        include_dirs: vec![],
+        library_dirs: vec![],
+        libraries: vec![],
+        namespaces: vec![],
+        templates: vec![],
+    };
+    jet::CppBind::bind(&header, &cache, &options).unwrap();
+    let clang_commands = fs::read_to_string(&clang_log).unwrap();
+    assert!(clang_commands.contains("-target aarch64-apple-darwin"));
+    assert!(clang_commands.contains("-Wl,-undefined,error"));
+    assert!(clang_commands.contains("proof.dylib"));
+    assert!(fs::read_to_string(&ar_log).unwrap().contains("rcs"));
+    let link = fs::read_to_string(cache.join("probe.link")).unwrap();
+    assert!(link.contains("target\taarch64-apple-darwin"));
+    assert!(link.contains("l\tc++"));
+    let flags = jet::CFFI::resolve_link_for_target("jet_cpp_probe", &root, target).unwrap();
+    assert!(flags.link_names.contains(&"c++".to_string()));
+    assert!(!flags.link_names.contains(&"stdc++".to_string()));
+
+    let first_identity = jet::CppBind::cache_identity_for_test(&header, &options, target);
+    fs::write(
+        &ar,
+        format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 2'; exit 0; fi
+: > "$2"
+"#,
+            ar_log.display()
+        ),
+    )
+    .unwrap();
+    let second_identity = jet::CppBind::cache_identity_for_test(&header, &options, target);
+    assert_ne!(first_identity, second_identity);
 
     let _ = fs::remove_dir_all(root);
 }

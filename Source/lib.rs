@@ -361,11 +361,23 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
 /// Build/run paths call this AFTER a successful compile; codegen and front-end
 /// checks do not, keeping link discovery out of semantic checking (I3).
 pub fn resolve_c_links(file: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
+    resolve_c_links_for_target(file, None)
+}
+
+pub fn resolve_c_links_for_target(
+    file: &str,
+    target: Option<&str>,
+) -> Result<Vec<String>, Vec<Diagnostic>> {
     let bundle = Loader::load_entry_with_overlay(file, None, false)?;
     if !bundle.cffi.links_c() {
         return Ok(Vec::new());
     }
-    crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root)
+    match target {
+        Some(target) => {
+            crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)
+        }
+        None => crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root),
+    }
 }
 
 /// Compile for `jet test`: optional `main`, at least one test block required.
