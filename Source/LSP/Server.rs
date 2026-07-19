@@ -1963,9 +1963,14 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         if name.starts_with('.') || matches!(name.as_ref(), "target" | "node_modules") {
             continue;
         }
-        if path.is_dir() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             collect_jet_files(&path, out);
-        } else if path.extension().and_then(|s| s.to_str()) == Some("jet") {
+        } else if file_type.is_file()
+            && path.extension().and_then(|s| s.to_str()) == Some("jet")
+        {
             out.push(path);
         }
     }
@@ -2030,9 +2035,14 @@ mod project_part_tests {
 
     #[test]
     fn shared_queries_report_hits_and_conservative_invalidation() {
+        let root = std::env::temp_dir().join(format!("jet-lsp-queries-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let a_path = root.join("query-a.jet").to_string_lossy().into_owned();
+        let b_path = root.join("query-b.jet").to_string_lossy().into_owned();
         let server = Server::new();
-        let mut a = Document::new("/tmp/query-a.jet".into(), "fn run() {}\n".into(), 1);
-        let b = Document::new("/tmp/query-b.jet".into(), "fn helper() {}\n".into(), 1);
+        let mut a = Document::new(a_path, "fn run() {}\n".into(), 1);
+        let b = Document::new(b_path.clone(), "fn helper() {}\n".into(), 1);
 
         assert!(server.check(&a).is_empty());
         assert!(server.check(&a).is_empty());
@@ -2051,11 +2061,34 @@ mod project_part_tests {
         assert_eq!(
             queries.recompute_count(&QueryKey::for_file(
                 "checked.lsp",
-                FileKey::new("/tmp/query-b.jet")
+                FileKey::new(b_path)
             )),
             2,
             "conservatively invalidated roots recompute on demand"
         );
+        drop(queries);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_scan_ignores_non_regular_jet_entries() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-non-regular-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("main.jet");
+        std::fs::write(&source, "fn run() {}\n").unwrap();
+        let socket = std::os::unix::net::UnixListener::bind(root.join("blocked.jet")).unwrap();
+
+        let mut files = Vec::new();
+        collect_jet_files(&root, &mut files);
+        assert_eq!(files, vec![source]);
+
+        drop(socket);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

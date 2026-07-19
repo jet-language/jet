@@ -258,9 +258,13 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
         if name.starts_with('.') || matches!(name.as_ref(), "target" | "build" | "node_modules") {
             continue;
         }
-        if path.is_dir() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             collect_jet_files(&path, out);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
+        } else if file_type.is_file()
+            && path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
             && path.file_name().and_then(|name| name.to_str()) != Some(Syntax::PAYLOAD_FILE)
         {
             out.push(path);
@@ -315,5 +319,44 @@ mod tests {
         assert_eq!(report.conflicts.len(), 1);
         assert_eq!(report.conflicts[0].name, "_bench");
         assert_eq!(report.conflicts[0].paths.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_ignores_non_regular_jet_entries() {
+        let root = tempdir("non-regular");
+        std::fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+        let fifo = root.join("blocked.jet");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+
+        let (opened, observed) = std::sync::mpsc::channel();
+        let writer_fifo = fifo.clone();
+        let writer = std::thread::spawn(move || {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(writer_fifo)
+                .unwrap();
+            opened.send(()).unwrap();
+            drop(file);
+        });
+
+        let report = scan(&root);
+        let scanned_fifo = observed.try_recv().is_ok();
+        if !scanned_fifo {
+            drop(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .open(&fifo)
+                    .unwrap(),
+            );
+        }
+        writer.join().unwrap();
+        assert!(!scanned_fifo, "project scans must not open a FIFO as source");
+        assert!(report.parts.is_empty());
+        let _ = std::fs::remove_dir_all(root);
     }
 }
