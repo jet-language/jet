@@ -469,7 +469,8 @@ no general type-level programming; declaration and spelling are the
 D-QUANTITY-DECL1/TYPE1/POINT1/CONVERT1 family below.
 
 Implementation identity is a normalized compiler-only exponent vector. The
-initial closed table recognizes `Length`, `Time`, `Speed`, and `Area`; inferred
+initial closed table recognizes `Length`, `Time`, `Speed`, and `Area`;
+D-QUANTITY-DECL1 extends it with `Temperature` for affine family identity. Inferred
 types serialize the canonical family name, numeric base, and exponent identity
 (for example `Quantity<Speed, Float; L1T-1>`) for semantic inspection and API
 freeze checks, then erase to the numeric base before backend emission. Currency
@@ -486,6 +487,13 @@ downstream reopening syntax; duplicate bases or members are errors, and a
 same-spelled member in another family is a distinct type, never silently
 unified. API snapshots record dimension, base, scale, offset, and package
 provenance so conflicts fail and changes are semver-visible.
+
+Implementation checkpoint (2026-07-19): the declaration parser normalizes exact
+ratios, validates the canonical base, preserves metadata through formatting,
+mints the ratified Point/Delta names for affine families, and includes package,
+family, base, dimension, scale, and offset in public API identity. The remaining
+algebra, conversion, policy, generic-bound, inspect, and tier-parity work stays
+on card #603.
 
 ```jet
 @UnitFamily(Length, base: meter) {

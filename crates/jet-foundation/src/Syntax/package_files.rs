@@ -131,6 +131,10 @@ pub const ATTR_NUMERIC: &str = "Numeric";
 /// "upgrade to D-DIST2" framing of D-UNIT1: sugar over the distinct-type
 /// machinery (D-DIST1/D-DIST3). PascalCase tag per D-CASING1.
 pub const ATTR_UNIT_FAMILY: &str = "UnitFamily";
+/// D-QUANTITY-DECL1=A (card #603): contextual fields in `@UnitFamily`.
+pub const UNIT_FAMILY_BASE_FIELD: &str = "base";
+pub const UNIT_FAMILY_SCALE_FIELD: &str = "scale";
+pub const UNIT_FAMILY_OFFSET_FIELD: &str = "offset";
 
 /// D-MIGRATE1 (ratified 2026-06-22): `@PublishedSchema` — marks a struct whose
 /// field layout is snapshotted at release time. A breaking field change without

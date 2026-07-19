@@ -148,6 +148,24 @@ fn run() {}
 }
 
 #[test]
+fn affine_unit_point_and_delta_members_are_cataloged() {
+    let src = r#"
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+
+fn run() {}
+"#;
+    let path = temp_fixture("source_affine_unit_members.jet", src);
+    let symbols = open_symbols(&path).expect("source semantic symbols");
+
+    assert!(symbols.lookup_qualified("CelsiusPoint.from_float").is_some());
+    assert!(symbols.lookup_qualified("CelsiusDelta.from_float").is_some());
+    assert!(symbols.lookup_qualified("Celsius.from_float").is_none());
+}
+
+#[test]
 fn semantic_visibility_orders_items_imports_and_builtins() {
     let builtin = fact(
         "builtin:keyword:answer", "answer", "answer", SemanticSymbolKind::Keyword,

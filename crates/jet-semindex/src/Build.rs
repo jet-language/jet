@@ -1443,19 +1443,20 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 kind: SymKind::Type,
             });
-            for (name, span) in &value.members {
-                let type_name = jet_foundation::AST::UnitFamilyDef::type_name(name);
+            for def in value.distinct_defs() {
                 ctx.db.defs.push(SymDef {
-                    identity: format!("type:{}::{}", ctx.scope_identity, type_name),
-                    name: type_name,
-                    def_span: *span,
+                    identity: format!("type:{}::{}", ctx.scope_identity, def.name),
+                    name: def.name,
+                    def_span: def.name_span,
                     module_path: mp.to_string(),
                     kind: SymKind::Type,
                 });
+            }
+            for member in &value.members {
                 ctx.db.defs.push(SymDef {
-                    identity: format!("unit:{}::{}", ctx.scope_identity, name),
-                    name: name.clone(),
-                    def_span: *span,
+                    identity: format!("unit:{}::{}", ctx.scope_identity, member.name),
+                    name: member.name.clone(),
+                    def_span: member.name_span,
                     module_path: mp.to_string(),
                     kind: SymKind::Const,
                 });

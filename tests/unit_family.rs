@@ -23,6 +23,86 @@ fn codes_of(src: &str) -> Vec<String> {
     }
 }
 
+fn parse_family(src: &str) -> jet::AST::UnitFamilyDef {
+    let (tokens, diagnostics) = jet::Lexer::lex(src);
+    assert!(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}");
+    let program = jet::Parser::parse(&tokens).expect("unit family should parse");
+    let jet::AST::Item::UnitFamily(family) = program.items.into_iter().next().unwrap() else {
+        panic!("expected a unit family")
+    };
+    family
+}
+
+#[test]
+fn scaled_and_affine_metadata_is_exact_and_normalized() {
+    let family = parse_family(
+        r#"@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 2/2, offset: 54630/200)
+}"#,
+    );
+    assert_eq!(family.base.as_ref().map(|base| base.0.as_str()), Some("kelvin"));
+    let celsius = family
+        .members
+        .iter()
+        .find(|member| member.name == "celsius")
+        .unwrap();
+    assert_eq!(celsius.scale.to_string(), "1");
+    assert_eq!(celsius.offset.to_string(), "5463/20");
+}
+
+#[test]
+fn affine_family_mints_point_and_delta_types_only() {
+    let family = parse_family(
+        r#"@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}"#,
+    );
+    let names: Vec<_> = family.distinct_defs().into_iter().map(|def| def.name).collect();
+    assert_eq!(
+        names,
+        ["KelvinPoint", "KelvinDelta", "CelsiusPoint", "CelsiusDelta"]
+    );
+}
+
+#[test]
+fn scaled_family_metadata_is_public_api_identity() {
+    let src = r#"pub @UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 2/2000)
+}
+pub fn length() -> Millimeter { return Millimeter.from_float(1.0)? }
+"#;
+    let (tokens, diagnostics) = jet::Lexer::lex(src);
+    assert!(diagnostics.is_empty());
+    let program = jet::Parser::parse(&tokens).expect("scaled family should parse");
+    let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "geometry", "1.0.0");
+    assert_eq!(
+        snapshot.funcs[0].signature,
+        "fn length() -> Millimeter{package=geometry; family=Length; base=Meter; dimension=L1T0; scale=1/1000; offset=0}"
+    );
+}
+
+#[test]
+fn affine_point_and_delta_have_distinct_public_identities() {
+    let src = r#"pub @UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+pub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }
+pub fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
+"#;
+    let (tokens, diagnostics) = jet::Lexer::lex(src);
+    assert!(diagnostics.is_empty());
+    let program = jet::Parser::parse(&tokens).expect("affine family should parse");
+    let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "climate", "1.0.0");
+    assert!(snapshot.funcs.iter().any(|func| func.signature ==
+        "fn target() -> CelsiusPoint{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=5463/20}"));
+    assert!(snapshot.funcs.iter().any(|func| func.signature ==
+        "fn tolerance() -> CelsiusDelta{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=0}"));
+}
+
 /// A member name is usable as a distinct type in a signature; construction,
 /// same-unit arithmetic and `.raw()` all compile cleanly.
 #[test]

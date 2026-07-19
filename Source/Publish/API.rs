@@ -36,7 +36,7 @@ pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
     // Entry file items (the main module).
     let entry = &bundle.modules[bundle.entry];
     let mut dimensions = crate::Sema::ApiFreeze::ApiUnitDimensions::new();
-    crate::Sema::ApiFreeze::collect_api_unit_dimensions(&entry.items, &mut dimensions);
+    crate::Sema::ApiFreeze::collect_api_unit_dimensions(&entry.items, &entry.alias, &mut dimensions);
     collect_public_api(
         &entry.items,
         &entry.alias,

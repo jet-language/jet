@@ -3340,7 +3340,8 @@ root signature validation and the same static graph facts, including E3501.
 
 ## Physical dimension algebra
 
-D-SHAPE-QUANTITY1 makes the `Length`, `Time`, `Speed`, and `Area` unit-family
+D-SHAPE-QUANTITY1 makes the `Length`, `Time`, `Speed`, `Area`, and
+`Temperature` unit-family
 identities compiler-known. Addition, subtraction, and comparison require equal
 dimensions; E0359 reports a mismatch before codegen. Multiplication adds and
 division subtracts normalized exponents, so `Length / Time` is `Speed`,
@@ -3348,9 +3349,11 @@ division subtracts normalized exponents, so `Length / Time` is `Speed`,
 and API snapshots serialize the normalized identity and numeric base. Backends
 receive only that numeric base: dimensions have no runtime representation.
 
-Currency remains nominal D-QUAL3 behavior. Unit declaration metadata, affine
-points, conversion spelling, and scaled conversion remain owned by #603 and are
-not introduced by this algebra.
+Currency remains nominal D-QUAL3 behavior. D-QUANTITY-DECL1 extends a closed
+family with `base`, exact rational `scale`/`offset`, and stable package-owned API
+identity. A family with any nonzero offset mints separate `Point` and `Delta`
+named types for every member; conversion and the closed affine algebra remain
+owned by the later #603 slices.
 
 ## Semantic source import
 

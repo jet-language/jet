@@ -2,13 +2,13 @@ use crate::Diagnostics::Span;
 
 /// D-SHAPE-QUANTITY1=A: a normalized compiler-known physical dimension.
 /// Runtime values carry no dimension metadata; this value exists only in the
-/// front-end/TIR type facts. The initial closed table has Length and Time as
+/// front-end/TIR type facts. The closed table has Length, Time, and Temperature
 /// bases, which is sufficient to derive Speed, Area, and arbitrary products.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Dimension([i32; 2]);
+pub struct Dimension([i32; 3]);
 
 impl Dimension {
-    pub const SCALAR: Self = Self([0, 0]);
+    pub const SCALAR: Self = Self([0, 0, 0]);
 
     pub fn for_family(name: &str) -> Option<Self> {
         crate::Syntax::PHYSICAL_DIMENSIONS
@@ -20,6 +20,7 @@ impl Dimension {
         Some(Self([
             self.0[0].checked_add(rhs.0[0])?,
             self.0[1].checked_add(rhs.0[1])?,
+            self.0[2].checked_add(rhs.0[2])?,
         ]))
     }
 
@@ -27,6 +28,7 @@ impl Dimension {
         Some(Self([
             self.0[0].checked_sub(rhs.0[0])?,
             self.0[1].checked_sub(rhs.0[1])?,
+            self.0[2].checked_sub(rhs.0[2])?,
         ]))
     }
 
@@ -34,6 +36,7 @@ impl Dimension {
         Some(Self([
             self.0[0].checked_mul(exponent)?,
             self.0[1].checked_mul(exponent)?,
+            self.0[2].checked_mul(exponent)?,
         ]))
     }
 
@@ -45,13 +48,22 @@ impl Dimension {
 
     /// Stable, package-independent identity used by API/type serialization.
     pub fn identity(self) -> String {
-        format!("L{}T{}", self.0[0], self.0[1])
+        if self.0[2] == 0 {
+            format!("L{}T{}", self.0[0], self.0[1])
+        } else {
+            format!("L{}T{}H{}", self.0[0], self.0[1], self.0[2])
+        }
     }
 
     pub fn from_identity(identity: &str) -> Option<Self> {
         let rest = identity.strip_prefix('L')?;
-        let (length, time) = rest.split_once('T')?;
-        Some(Self([length.parse().ok()?, time.parse().ok()?]))
+        let (length, rest) = rest.split_once('T')?;
+        let (time, temperature) = rest.split_once('H').map_or((rest, "0"), |parts| parts);
+        Some(Self([
+            length.parse().ok()?,
+            time.parse().ok()?,
+            temperature.parse().ok()?,
+        ]))
     }
 
     pub fn display_name(self) -> String {
@@ -59,7 +71,11 @@ impl Dimension {
             return name.to_string();
         }
         let mut parts = Vec::new();
-        for (name, exponent) in [("Length", self.0[0]), ("Time", self.0[1])] {
+        for (name, exponent) in [
+            ("Length", self.0[0]),
+            ("Time", self.0[1]),
+            ("Temperature", self.0[2]),
+        ] {
             if exponent == 1 {
                 parts.push(name.to_string());
             } else if exponent != 0 {

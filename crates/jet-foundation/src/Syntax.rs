@@ -105,14 +105,15 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
 // unwriteable internal type marker and the compiler-owned identity table below.
 pub const TYPE_QUANTITY: &str = "\0Quantity";
 
-/// Canonical `(Length, Time)` exponent vectors for the first physical
+/// Canonical `(Length, Time, Temperature)` exponent vectors for physical
 /// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is
 /// deliberately absent: D-QUAL3 currency units remain nominal quantities.
-pub const PHYSICAL_DIMENSIONS: &[(&str, [i32; 2])] = &[
-    ("Length", [1, 0]),
-    ("Time", [0, 1]),
-    ("Speed", [1, -1]),
-    ("Area", [2, 0]),
+pub const PHYSICAL_DIMENSIONS: &[(&str, [i32; 3])] = &[
+    ("Length", [1, 0, 0]),
+    ("Time", [0, 1, 0]),
+    ("Speed", [1, -1, 0]),
+    ("Area", [2, 0, 0]),
+    ("Temperature", [0, 0, 1]),
 ];
 
 /// The two identifier tiers fixed by D-SHAPE-CASE1=C.

@@ -162,15 +162,13 @@ pub fn fn_signature_with_effects(f: &Func, inferred: Option<&EffectSet>) -> Stri
     canonical_fn_signature_with_effects(f, inferred, &HashMap::new())
 }
 
-pub type ApiUnitDimensions = HashMap<String, (String, Dimension)>;
+pub type ApiUnitDimensions = HashMap<String, String>;
 
 pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> String {
     match ty {
         Type::Named(name) => dimensions.get(name).map_or_else(
             || ty.name(),
-            |(family, dimension)| {
-                format!("{name}{{family={family}; base=Float; dimension={}}}", dimension.identity())
-            },
+            |identity| format!("{name}{identity}"),
         ),
         Type::List(inner) => format!("[{}]", canonical_api_type_name(inner, dimensions)),
         Type::Map { key, value, .. } => format!(
@@ -378,7 +376,7 @@ pub fn snapshot_from_items_with_effects(
 ) -> ApiSnapshot {
     let mut funcs = Vec::new();
     let mut dimensions = HashMap::new();
-    collect_api_unit_dimensions(items, &mut dimensions);
+    collect_api_unit_dimensions(items, package, &mut dimensions);
     collect_pub_fns(
         items,
         solved,
@@ -409,20 +407,72 @@ pub fn snapshot_from_items_with_effects(
 /// the `pub` on the *function* that puts it on the contract.
 pub fn collect_api_unit_dimensions(
     items: &[Item],
-    out: &mut HashMap<String, (String, Dimension)>,
+    package: &str,
+    out: &mut ApiUnitDimensions,
 ) {
     for item in items {
         match item {
             Item::UnitFamily(family) => {
                 if let Some(dimension) = Dimension::for_family(&family.family) {
-                    for member in family.distinct_defs() {
-                        out.insert(member.name, (family.family.clone(), dimension));
+                    let base = family
+                        .base
+                        .as_ref()
+                        .map(|base| crate::AST::UnitFamilyDef::type_name(&base.0));
+                    let affine = family.base.is_some()
+                        && family
+                            .members
+                            .iter()
+                            .any(|member| member.offset != crate::AST::UnitRatio::zero());
+                    for member in &family.members {
+                        let names = if affine {
+                            vec![
+                                (
+                                    format!(
+                                        "{}Point",
+                                        crate::AST::UnitFamilyDef::type_name(&member.name)
+                                    ),
+                                    member.offset.to_string(),
+                                ),
+                                (
+                                    format!(
+                                        "{}Delta",
+                                        crate::AST::UnitFamilyDef::type_name(&member.name)
+                                    ),
+                                    "0".to_string(),
+                                ),
+                            ]
+                        } else {
+                            vec![(
+                                crate::AST::UnitFamilyDef::type_name(&member.name),
+                                member.offset.to_string(),
+                            )]
+                        };
+                        for (name, offset) in names {
+                            let identity = base.as_ref().map_or_else(
+                                || {
+                                    format!(
+                                        "{{family={}; base=Float; dimension={}}}",
+                                        family.family,
+                                        dimension.identity()
+                                    )
+                                },
+                                |base| {
+                                    format!(
+                                        "{{package={package}; family={}; base={base}; dimension={}; scale={}; offset={offset}}}",
+                                        family.family,
+                                        dimension.identity(),
+                                        member.scale
+                                    )
+                                },
+                            );
+                            out.insert(name, identity);
+                        }
                     }
                 }
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
-                    collect_api_unit_dimensions(body, out);
+                    collect_api_unit_dimensions(body, package, out);
                 }
             }
             _ => {}
@@ -435,7 +485,7 @@ fn collect_pub_fns(
     solved: Option<&std::collections::HashMap<String, EffectSet>>,
     module_alias: Option<&str>,
     code_module: Option<&str>,
-    dimensions: &HashMap<String, (String, Dimension)>,
+    dimensions: &ApiUnitDimensions,
     out: &mut Vec<FrozenFn>,
 ) {
     let empty_effects = EffectSet::new();
@@ -570,7 +620,7 @@ pub fn project_capability_digest(project_root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::Diagnostics::Span;
-    use crate::AST::{AccessConvention, Func, Param, Type, UnitFamilyDef};
+    use crate::AST::{AccessConvention, Func, Param, Type, UnitFamilyDef, UnitFamilyMember, UnitRatio};
 
     fn zero() -> Span {
         Span::new(0, 0)
@@ -752,7 +802,13 @@ mod tests {
             is_package_pub: false,
             family: "Length".into(),
             family_span: zero(),
-            members: vec![("meter".into(), zero())],
+            base: None,
+            members: vec![UnitFamilyMember {
+                name: "meter".into(),
+                name_span: zero(),
+                scale: UnitRatio::integer(1),
+                offset: UnitRatio::zero(),
+            }],
             span: zero(),
         };
         let api = snapshot_from_items(

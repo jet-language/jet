@@ -1267,10 +1267,23 @@ pub struct UnitFamilyDef {
     /// The family label, e.g. `currency` — documentation only; not a type name.
     pub family: String,
     pub family_span: Span,
-    /// Each member's source spelling and span (e.g. `("usd", span)`).
-    pub members: Vec<(String, Span)>,
+    /// D-QUANTITY-DECL1=A: canonical member whose scale is one and offset zero.
+    /// Absent on legacy nominal D-QUAL3 families such as Currency.
+    pub base: Option<(String, Span)>,
+    pub members: Vec<UnitFamilyMember>,
     pub span: Span,
 }
+
+/// One closed `@UnitFamily` member and its exact normalized conversion facts.
+#[derive(Debug, Clone)]
+pub struct UnitFamilyMember {
+    pub name: String,
+    pub name_span: Span,
+    pub scale: UnitRatio,
+    pub offset: UnitRatio,
+}
+
+pub type UnitRatio = crate::PerformanceBudget::Rational;
 
 impl UnitFamilyDef {
     /// PascalCase the member spelling to its minted distinct-type name:
@@ -1295,24 +1308,41 @@ impl UnitFamilyDef {
     /// The minted `DistinctDef` for each member (`@Numeric`, base `Float`).
     /// Used by sema registration and codegen to lower the family.
     pub fn distinct_defs(&self) -> Vec<DistinctDef> {
+        let affine = self.base.is_some()
+            && self
+                .members
+                .iter()
+                .any(|member| member.offset != UnitRatio::zero());
         self.members
             .iter()
-            .map(|(member, span)| DistinctDef {
-                is_pub: self.is_pub,
-                is_package_pub: self.is_package_pub,
-                is_numeric: true,
-                is_comparable: false,
-                comparable_span: None,
-                is_printable: false,
-                printable_span: None,
-                is_codable_as_base: false,
-                codable_as_base_span: None,
-                name: Self::type_name(member),
-                name_span: *span,
-                base: Type::Float,
-                base_span: *span,
-                range: None,
-                span: *span,
+            .flat_map(|member| {
+                let names = if affine {
+                    vec![
+                        (format!("{}Point", Self::type_name(&member.name)), true),
+                        (format!("{}Delta", Self::type_name(&member.name)), false),
+                    ]
+                } else {
+                    vec![(Self::type_name(&member.name), false)]
+                };
+                names.into_iter().map(move |(name, is_point)| DistinctDef {
+                    is_pub: self.is_pub,
+                    is_package_pub: self.is_package_pub,
+                    // Affine points deliberately do not inherit point+point arithmetic;
+                    // the closed Point/Delta algebra is added by sema, never by this sugar.
+                    is_numeric: !is_point,
+                    is_comparable: is_point,
+                    comparable_span: None,
+                    is_printable: false,
+                    printable_span: None,
+                    is_codable_as_base: false,
+                    codable_as_base_span: None,
+                    name,
+                    name_span: member.name_span,
+                    base: Type::Float,
+                    base_span: member.name_span,
+                    range: None,
+                    span: member.name_span,
+                })
             })
             .collect()
     }

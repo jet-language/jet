@@ -113,7 +113,7 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         }
         Item::UnitFamily(u) => {
             pascal(&u.family, u.family_span, "unit family", out);
-            for (name, span) in &u.members { snake(name, *span, "unit member", out); }
+            for member in &u.members { snake(&member.name, member.name_span, "unit member", out); }
         }
         Item::Trait(t) => {
             pascal(&t.name, t.name_span, "trait", out);

@@ -384,19 +384,128 @@ impl<'a> Parser<'a> {
             debug_assert_eq!(marker, Syntax::ATTR_UNIT_FAMILY);
             self.expect(TokKind::LParen, "after `@UnitFamily`")?;
             let (family, family_span) = self.expect_ident("as the unit family name")?;
+            let base = if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                let (field, field_span) = self.expect_ident("after the family name")?;
+                if field != Syntax::UNIT_FAMILY_BASE_FIELD {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("unknown unit-family field `{field}`"),
+                        "scaled and affine families name one canonical base".to_string(),
+                        "write `base: member_name`".to_string(),
+                        Some(field_span),
+                    ));
+                }
+                self.expect(TokKind::Colon, "after `base`")?;
+                Some(self.expect_ident("as the canonical base member")?)
+            } else {
+                None
+            };
             self.expect(TokKind::RParen, "after the unit family name")?;
             self.expect(TokKind::LBrace, "to open the unit family member list")?;
-            let mut members: Vec<(String, Span)> = Vec::new();
+            let mut members = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                 let (member, member_span) = self.expect_ident("as a unit family member")?;
-                members.push((member, member_span));
-                if matches!(self.peek().kind, TokKind::Comma) {
+                let mut scale = crate::AST::UnitRatio::integer(1);
+                let mut offset = crate::AST::UnitRatio::zero();
+                let mut saw_scale = false;
+                let mut saw_offset = false;
+                if matches!(self.peek().kind, TokKind::LParen) {
                     self.bump();
-                } else {
-                    break;
+                    while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                        let (field, field_span) = self.expect_ident("as unit metadata")?;
+                        self.expect(TokKind::Colon, "after unit metadata")?;
+                        let value = self.unit_family_ratio()?;
+                        match field.as_str() {
+                            Syntax::UNIT_FAMILY_SCALE_FIELD if !saw_scale => {
+                                scale = value;
+                                saw_scale = true;
+                            }
+                            Syntax::UNIT_FAMILY_OFFSET_FIELD if !saw_offset => {
+                                offset = value;
+                                saw_offset = true;
+                            }
+                            Syntax::UNIT_FAMILY_SCALE_FIELD | Syntax::UNIT_FAMILY_OFFSET_FIELD => {
+                                return Err(Diagnostic::error(
+                                    "E0003",
+                                    format!("unit metadata `{field}` appears twice"),
+                                    "each conversion fact has one exact value".to_string(),
+                                    format!("keep one `{field}: ...` entry"),
+                                    Some(field_span),
+                                ));
+                            }
+                            _ => {
+                                return Err(Diagnostic::error(
+                                    "E0003",
+                                    format!("unknown unit metadata `{field}`"),
+                                    "unit members accept exact `scale` and `offset` facts"
+                                        .to_string(),
+                                    "use `scale: numerator/denominator` or `offset: numerator/denominator`"
+                                        .to_string(),
+                                    Some(field_span),
+                                ));
+                            }
+                        }
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(TokKind::RParen, "after unit metadata")?;
+                }
+                if scale == crate::AST::UnitRatio::zero() {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("unit `{member}` has a zero scale"),
+                        "a unit conversion must be invertible".to_string(),
+                        "use a nonzero exact ratio for `scale`".to_string(),
+                        Some(member_span),
+                    ));
+                }
+                if base.is_none() && (saw_scale || saw_offset) {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("unit `{member}` has conversion metadata but its family has no base"),
+                        "scale and offset are defined relative to one canonical family member"
+                            .to_string(),
+                        format!("write `@UnitFamily({family}, base: member_name)`"),
+                        Some(member_span),
+                    ));
+                }
+                members.push(crate::AST::UnitFamilyMember {
+                    name: member,
+                    name_span: member_span,
+                    scale,
+                    offset,
+                });
+                while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                    self.bump();
                 }
             }
             self.expect(TokKind::RBrace, "to close the unit family member list")?;
+            if let Some((base_name, base_span)) = &base {
+                let Some(member) = members.iter().find(|member| member.name == *base_name) else {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("base `{base_name}` is not a member of `{family}`"),
+                        "the canonical base is one member of its closed unit family".to_string(),
+                        format!("add `{base_name}` to the family or name an existing member"),
+                        Some(*base_span),
+                    ));
+                };
+                if member.scale != crate::AST::UnitRatio::integer(1)
+                    || member.offset != crate::AST::UnitRatio::zero()
+                {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("base `{base_name}` changes its own scale or offset"),
+                        "the canonical base always has scale 1 and offset 0".to_string(),
+                        "remove metadata from the base member".to_string(),
+                        Some(member.name_span),
+                    ));
+                }
+            }
             // The closing `}` ends the item; the lexer inserts a synthetic `;`.
             let end = self.toks[self.pos - 1].span.end;
             Ok(crate::AST::UnitFamilyDef {
@@ -404,8 +513,56 @@ impl<'a> Parser<'a> {
                 is_package_pub,
                 family,
                 family_span,
+                base,
                 members,
                 span: Span::new(start.start, end),
+            })
+        }
+
+        fn unit_family_ratio(&mut self) -> Result<crate::AST::UnitRatio, Diagnostic> {
+            let negative = matches!(self.peek().kind, TokKind::Minus);
+            if negative {
+                self.bump();
+            }
+            let token = self.bump();
+            let TokKind::Int(value, _) = token.kind else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "unit conversion metadata must be an exact integer or ratio".to_string(),
+                    "floating-point metadata would make package identity and conversion unstable".to_string(),
+                    "write an integer or `numerator/denominator`".to_string(),
+                    Some(token.span),
+                ));
+            };
+            let numerator = if negative {
+                -i128::from(value)
+            } else {
+                i128::from(value)
+            };
+            let denominator = if matches!(self.peek().kind, TokKind::Slash) {
+                self.bump();
+                let token = self.bump();
+                let TokKind::Int(value, _) = token.kind else {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "expected a ratio denominator".to_string(),
+                        "exact ratios have an integer denominator".to_string(),
+                        "write `numerator/denominator`".to_string(),
+                        Some(token.span),
+                    ));
+                };
+                i128::from(value)
+            } else {
+                1
+            };
+            crate::AST::UnitRatio::new(numerator, denominator).map_err(|reason| {
+                Diagnostic::error(
+                    "E0003",
+                    format!("invalid unit conversion ratio: {reason}"),
+                    "unit conversion metadata must be a finite exact ratio".to_string(),
+                    "use a nonzero integer denominator".to_string(),
+                    Some(token.span),
+                )
             })
         }
     

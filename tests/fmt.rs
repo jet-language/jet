@@ -1791,6 +1791,19 @@ fn run() {
 }
 
 #[test]
+fn fmt_preserves_scaled_affine_unit_declaration() {
+    // D-QUANTITY-DECL1=A: STABILITY must retain every base/scale/offset token;
+    // idempotence alone could bless a first pass that discarded conversion law.
+    let src = "\
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+";
+    assert_fmt_stable(src, "scaled affine @UnitFamily declaration");
+}
+
+#[test]
 fn fmt_preserves_range_constraint() {
     // D-RANGETYPE1: `distinct Int(0..10)` — distinct declarations are emitted
     // verbatim, so the `(0..10)` clause survives structurally; this pins it
