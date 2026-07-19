@@ -39,6 +39,7 @@ pub const MAX_PROTOCOL_HEADER_COUNT: usize = 64;
 /// can grow its destination.
 pub fn read_protocol_content_length(reader: &mut impl BufRead) -> io::Result<Option<usize>> {
     let mut content_length = None;
+    let mut saw_content_length = false;
     let mut total = 0;
     let mut count = 0;
     loop {
@@ -67,6 +68,13 @@ pub fn read_protocol_content_length(reader: &mut impl BufRead) -> io::Result<Opt
             ));
         }
         if let Some(rest) = line.strip_prefix("Content-Length:") {
+            if saw_content_length {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "protocol frame has duplicate Content-Length headers",
+                ));
+            }
+            saw_content_length = true;
             content_length = rest.trim().parse().ok();
         }
     }
@@ -402,5 +410,16 @@ mod tests {
         let error = read_protocol_content_length(&mut std::io::Cursor::new(frame)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(error.to_string(), "protocol headers exceed the 64-field limit");
+    }
+
+    #[test]
+    fn protocol_headers_reject_duplicate_content_length() {
+        let frame = "Content-Length: 2\r\nContent-Length: 3\r\n\r\n";
+        let error = read_protocol_content_length(&mut std::io::Cursor::new(frame)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "protocol frame has duplicate Content-Length headers"
+        );
     }
 }

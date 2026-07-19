@@ -1378,6 +1378,53 @@ fn missing_declared_header_rejects_stale_cffi_cache() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn absent_or_malformed_hash_regenerates_declared_header_cache() {
+    for (case, sidecar) in [("absent", None), ("malformed", Some("not-a-sha256"))] {
+        let root = std::env::temp_dir().join(format!(
+            "jet_cbind_hash_{case}_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let cache_dir = root.join(".jet/bindings/c");
+        let header_dir = root.join("include");
+        fs::create_dir_all(&cache_dir).unwrap();
+        fs::create_dir_all(&header_dir).unwrap();
+        let header = "int fresh_value(void);\n";
+        fs::write(header_dir.join("rebind.h"), header).unwrap();
+
+        let cache_file = cache_dir.join("rebind.jet");
+        let stale = jet::CBind::generate("int stale_value(void);\n", "rebind")
+            .unwrap()
+            .source;
+        fs::write(&cache_file, stale).unwrap();
+        if let Some(sidecar) = sidecar {
+            fs::write(jet::CBind::hash_sidecar_path(&cache_file), sidecar).unwrap();
+        }
+        let main = root.join("main.jet");
+        fs::write(
+            &main,
+            "use \"include/rebind.h\" as rebind;\nfn run() { print(rebind.fresh_value()); }\n",
+        )
+        .unwrap();
+        let src = fs::read_to_string(&main).unwrap();
+        let result = jet::compile_with_path(&src, main.to_str().unwrap());
+
+        assert!(result.is_ok(), "{case} hash did not trigger rebind: {result:?}");
+        assert!(
+            fs::read_to_string(&cache_file)
+                .unwrap()
+                .contains("fresh_value"),
+            "{case} hash left stale cache bytes"
+        );
+        assert_eq!(
+            jet::CBind::read_stored_hash(&cache_file).as_deref(),
+            Some(jet::CBind::compute_bind_hash(header, "").as_str())
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
 /// Probe 3 — unchanged header + present cache → NO re-bind (fast path: the
 /// cache is loaded as-is, hash stays the same).
 #[test]

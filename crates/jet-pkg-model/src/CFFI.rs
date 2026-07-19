@@ -533,7 +533,7 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             if let Some(header_src) = &header_src {
                 let current_hash = crate::CBind::compute_bind_hash(header_src, "");
                 let stored = crate::CBind::read_stored_hash(&cache_path);
-                stored.map(|s| s != current_hash).unwrap_or(false)
+                stored.as_deref() != Some(current_hash.as_str())
             } else {
                 false
             }
