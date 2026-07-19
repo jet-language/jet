@@ -39,9 +39,12 @@ pub use jet_driver::{AST, Comptime, Diagnostics, Loader, Sema, Syntax};
 pub use jet_foundation::ExitCodes;
 
 mod Dap;
+mod EventObservation;
 mod Inferior;
 mod LineMap;
 mod Native;
+
+pub use EventObservation::render as render_event_observations;
 
 use std::collections::{HashMap, HashSet};
 

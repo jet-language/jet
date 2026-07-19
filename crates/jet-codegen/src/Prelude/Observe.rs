@@ -20,11 +20,34 @@ struct JetObserveChannel {
     closed: bool,
 }
 
+#[derive(Clone)]
+struct JetObserveEvent {
+    sequence: u64,
+    source: &'static str,
+    event_id: u64,
+    owner_id: u64,
+    subscription_id: u64,
+    dispatch_id: u64,
+    lifecycle: &'static str,
+    queued: i64,
+    blocked: i64,
+    running: i64,
+    capacity: i64,
+    overflow: &'static str,
+    priority: i64,
+    failure: &'static str,
+    terminal: &'static str,
+}
+
+const JET_OBSERVE_EVENT_LIMIT: usize = 256;
+
 struct JetObserveRegistry {
     next_task: std::sync::atomic::AtomicUsize,
     next_channel: std::sync::atomic::AtomicUsize,
+    next_event_sequence: std::sync::atomic::AtomicU64,
     tasks: std::sync::Mutex<std::collections::HashMap<usize, JetObserveTask>>,
     channels: std::sync::Mutex<std::collections::HashMap<usize, JetObserveChannel>>,
+    events: std::sync::Mutex<std::collections::VecDeque<JetObserveEvent>>,
 }
 
 static JET_OBSERVE: std::sync::OnceLock<Option<std::sync::Arc<JetObserveRegistry>>> =
@@ -63,8 +86,10 @@ fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>>
                 std::sync::Arc::new(JetObserveRegistry {
                     next_task: std::sync::atomic::AtomicUsize::new(2),
                     next_channel: std::sync::atomic::AtomicUsize::new(1),
+                    next_event_sequence: std::sync::atomic::AtomicU64::new(1),
                     tasks: std::sync::Mutex::new(std::collections::HashMap::new()),
                     channels: std::sync::Mutex::new(std::collections::HashMap::new()),
+                    events: std::sync::Mutex::new(std::collections::VecDeque::new()),
                 })
             })
         })
@@ -106,6 +131,7 @@ fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String
     let mut channels: Vec<_> = registry.channels.lock().unwrap().iter()
         .map(|(id, channel)| (*id, channel.clone())).collect();
     channels.sort_by_key(|(id, _)| *id);
+    let events = registry.events.lock().unwrap().iter().cloned().collect::<Vec<_>>();
     tasks.truncate(4096);
     channels.truncate(4096);
 
@@ -121,6 +147,13 @@ fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String
         channel.capacity.map(|v| v.to_string()).unwrap_or_else(|| "null".to_string()),
         channel.send_waiters, channel.recv_waiters, channel.closed
     )).collect::<Vec<_>>().join(",");
+    let event_json = events.iter().map(|event| format!(
+        "{{\"sequence\":{},\"source\":\"{}\",\"event_id\":{},\"owner_id\":{},\"subscription_id\":{},\"dispatch_id\":{},\"lifecycle\":\"{}\",\"queued\":{},\"blocked\":{},\"running\":{},\"capacity\":{},\"overflow\":\"{}\",\"priority\":{},\"failure\":\"{}\",\"terminal\":\"{}\"}}",
+        event.sequence, event.source, event.event_id, event.owner_id,
+        event.subscription_id, event.dispatch_id, event.lifecycle, event.queued,
+        event.blocked, event.running, event.capacity, event.overflow,
+        event.priority, event.failure, event.terminal
+    )).collect::<Vec<_>>().join(",");
     let blocked = tasks.iter().filter(|(_, task)| task.state == "blocked").count();
     let channel_waits = tasks.iter().filter(|(_, task)|
         task.state == "blocked" && task.wait.starts_with("channel ")).count();
@@ -133,12 +166,12 @@ fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String
     let running = tasks.iter().filter(|(_, task)| task.state == "running").count();
 
     format!(
-        "{{\"schema_version\":1,\"pid\":{},\"start_id\":\"{}\",\"captured_ms\":{},\"tasks\":[{}],\"channels\":[{}],\"effects\":{{\"compute\":{},\"waiting\":{},\"channel\":{},\"time\":{},\"io\":{}}},\"resources\":{{\"workers\":{},\"running\":{},\"queued\":{},\"cancelled\":{},\"arenas\":{},\"arena_allocations\":{},\"arena_bytes\":{}}}}}",
+        "{{\"schema_version\":1,\"pid\":{},\"start_id\":\"{}\",\"captured_ms\":{},\"tasks\":[{}],\"channels\":[{}],\"event_observations\":[{}],\"effects\":{{\"compute\":{},\"waiting\":{},\"channel\":{},\"time\":{},\"io\":{}}},\"resources\":{{\"workers\":{},\"running\":{},\"queued\":{},\"cancelled\":{},\"arenas\":{},\"arena_allocations\":{},\"arena_bytes\":{}}}}}",
         std::process::id(),
         start_id,
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default().as_millis(),
-        task_json, channel_json,
+        task_json, channel_json, event_json,
         tasks.len().saturating_sub(blocked), blocked, channel_waits, time_waits, io_waits,
         JET_OBSERVE_WORKERS.load(Ordering::Relaxed),
         running, JET_OBSERVE_QUEUED.load(Ordering::Relaxed), cancelled,
@@ -146,6 +179,17 @@ fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String
         JET_OBSERVE_ARENA_ALLOCS.load(Ordering::Relaxed),
         JET_OBSERVE_ARENA_BYTES.load(Ordering::Relaxed)
     )
+}
+
+fn jet_observe_event(mut event: JetObserveEvent) {
+    use std::sync::atomic::Ordering;
+    let Some(registry) = jet_observe_registry() else { return };
+    event.sequence = registry.next_event_sequence.fetch_add(1, Ordering::Relaxed);
+    let mut events = registry.events.lock().unwrap();
+    if events.len() == JET_OBSERVE_EVENT_LIMIT {
+        events.pop_front();
+    }
+    events.push_back(event);
 }
 
 fn jet_observe_runtime_start() {

@@ -166,6 +166,41 @@
 
     static JET_EVENT_NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+    fn jet_event_observe(
+        source: &'static str,
+        event_id: u64,
+        owner_id: u64,
+        subscription_id: u64,
+        dispatch_id: u64,
+        lifecycle: &'static str,
+        queued: i64,
+        blocked: i64,
+        running: i64,
+        capacity: i64,
+        overflow: &'static str,
+        priority: i64,
+        failure: &'static str,
+        terminal: &'static str,
+    ) {
+        super::jet_observe_event(super::JetObserveEvent {
+            sequence: 0,
+            source,
+            event_id,
+            owner_id,
+            subscription_id,
+            dispatch_id,
+            lifecycle,
+            queued,
+            blocked,
+            running,
+            capacity,
+            overflow,
+            priority,
+            failure,
+            terminal,
+        });
+    }
+
     #[derive(Clone)]
     pub struct JetEventPolicy {
         reentrancy: JetEventReentrancy,
@@ -254,6 +289,7 @@
 
     #[derive(Clone)]
     pub struct JetEventScope {
+        id: u64,
         subs: Rc<RefCell<Vec<JetSubscription>>>,
         cancelled: Rc<Cell<bool>>,
         hard_cancellers: Rc<RefCell<Vec<(u64, Rc<dyn Fn()>)>>>,
@@ -262,6 +298,7 @@
     impl JetEventScope {
         pub fn new() -> Self {
             JetEventScope {
+                id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
                 subs: Rc::new(RefCell::new(Vec::new())),
                 cancelled: Rc::new(Cell::new(false)),
                 hard_cancellers: Rc::new(RefCell::new(Vec::new())),
@@ -319,6 +356,7 @@
 
     struct JetListener<T> {
         id: u64,
+        owner_id: u64,
         priority: i64,
         once: bool,
         sub: JetSubscription,
@@ -326,6 +364,7 @@
     }
 
     pub struct JetEvent<T: Clone + 'static> {
+        id: u64,
         policy: JetEventPolicy,
         listeners: Rc<RefCell<Vec<JetListener<T>>>>,
     }
@@ -333,6 +372,7 @@
     impl<T: Clone + 'static> Clone for JetEvent<T> {
         fn clone(&self) -> Self {
             JetEvent {
+                id: self.id,
                 policy: self.policy.clone(),
                 listeners: self.listeners.clone(),
             }
@@ -345,6 +385,7 @@
         }
         pub fn with_policy(policy: JetEventPolicy) -> Self {
             JetEvent {
+                id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
                 policy,
                 listeners: Rc::new(RefCell::new(Vec::new())),
             }
@@ -375,15 +416,20 @@
             handler: F,
         ) -> JetSubscription {
             let sub = JetSubscription::new();
+            let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.listeners.borrow_mut().push(JetListener {
-                id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                id,
+                owner_id: scope.id,
                 priority,
                 once,
                 sub: sub.clone(),
                 handler: Rc::new(handler),
             });
             let listeners = Rc::downgrade(&self.listeners);
-            let id = self.listeners.borrow().last().expect("event listener").id;
+            jet_event_observe(
+                "Event", self.id, scope.id, id, 0, "Subscribed",
+                0, 0, 0, 0, "None", priority, "None", "None",
+            );
             sub.set_cleanup(move || {
                 if let Some(listeners) = listeners.upgrade() {
                     listeners.borrow_mut().retain(|listener| listener.id != id);
@@ -398,27 +444,44 @@
             match self.policy.reentrancy {
                 JetEventReentrancy::AllowDepthFirst => {}
             }
-            let mut entries: Vec<(i64, u64, bool, JetSubscription, Rc<dyn Fn(T)>)> = self
+            let dispatch_id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            jet_event_observe(
+                "Event", self.id, 0, 0, dispatch_id, "DispatchStarted",
+                0, 0, 0, 0, "None", 0, "None", "None",
+            );
+            let mut entries: Vec<(i64, u64, u64, bool, JetSubscription, Rc<dyn Fn(T)>)> = self
                 .listeners
                 .borrow()
                 .iter()
                 .filter(|l| l.sub.active())
-                .map(|l| (l.priority, l.id, l.once, l.sub.clone(), l.handler.clone()))
+                .map(|l| (l.priority, l.id, l.owner_id, l.once, l.sub.clone(), l.handler.clone()))
                 .collect();
             entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
             let mut delivered = 0;
-            for (_, _, once, sub, handler) in entries {
+            for (priority, id, owner_id, once, sub, handler) in entries {
                 if sub.active() {
                     // Consume once before invoking: a nested emit from this
                     // handler must not deliver it twice.
                     if once {
                         sub.unsubscribe();
                     }
+                    jet_event_observe(
+                        "Event", self.id, owner_id, id, dispatch_id, "HandlerStarted",
+                        0, 0, 0, 0, "None", priority, "None", "None",
+                    );
                     handler(payload.clone());
                     delivered += 1;
+                    jet_event_observe(
+                        "Event", self.id, owner_id, id, dispatch_id, "HandlerDelivered",
+                        0, 0, 0, 0, "None", priority, "None", "None",
+                    );
                 }
             }
             self.listeners.borrow_mut().retain(|l| l.sub.active());
+            jet_event_observe(
+                "Event", self.id, 0, 0, dispatch_id, "Terminal",
+                0, 0, 0, 0, "None", 0, "None", "Delivered",
+            );
             JetEventTrace {
                 delivered,
                 queued: 0,
@@ -445,6 +508,16 @@
         Block,
         DropNewest,
         DropOldest,
+    }
+
+    impl JetEventOverflow {
+        fn observation(self) -> &'static str {
+            match self {
+                JetEventOverflow::Block => "Block",
+                JetEventOverflow::DropNewest => "DropNewest",
+                JetEventOverflow::DropOldest => "DropOldest",
+            }
+        }
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -497,6 +570,20 @@
         DeadlineExceeded,
     }
 
+    impl JetDispatchState {
+        fn observation(self) -> &'static str {
+            match self {
+                JetDispatchState::Delivered => "Delivered",
+                JetDispatchState::HandlerFailed => "HandlerFailed",
+                JetDispatchState::DroppedNewest => "DroppedNewest",
+                JetDispatchState::DroppedOldest => "DroppedOldest",
+                JetDispatchState::Closed => "Closed",
+                JetDispatchState::Cancelled => "Cancelled",
+                JetDispatchState::DeadlineExceeded => "DeadlineExceeded",
+            }
+        }
+    }
+
     #[derive(Clone)]
     pub struct JetDispatchReport<E: Clone + Send + 'static> {
         accepted: bool,
@@ -546,6 +633,7 @@
 
     struct JetAsyncListener<T, E> {
         id: u64,
+        owner_id: u64,
         priority: i64,
         once: bool,
         active: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -554,6 +642,9 @@
 
     struct JetAsyncEntry<T, E: Clone + Send + 'static> {
         id: u64,
+        event_id: u64,
+        capacity: i64,
+        overflow: JetEventOverflow,
         phase: std::sync::atomic::AtomicU8,
         accepted: std::sync::atomic::AtomicBool,
         payload: std::sync::Mutex<Option<T>>,
@@ -647,8 +738,17 @@
             }
             let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.state.lock().unwrap().listeners.push(JetAsyncListener {
-                id, priority, once, active: active.clone(), handler: std::sync::Arc::new(move |payload| handler(payload).into_dispatch_result()),
+                id, owner_id: scope.id, priority, once, active: active.clone(), handler: std::sync::Arc::new(move |payload| handler(payload).into_dispatch_result()),
             });
+            let (queued, blocked, running) = {
+                let state = self.state.lock().unwrap();
+                (state.queued.len(), state.blocked.len(), state.running)
+            };
+            jet_event_observe(
+                "AsyncEvent", self.owner_id, scope.id, id, 0, "Subscribed",
+                queued as i64, blocked as i64, running as i64, self.policy.capacity,
+                self.policy.overflow.observation(), priority, "None", "None",
+            );
             let cancel_state = std::sync::Arc::downgrade(&self.state);
             scope.track_hard_cancel(self.owner_id, move || {
                 if let Some(state) = cancel_state.upgrade() {
@@ -669,6 +769,9 @@
             let control = super::JetTaskControl::new();
             let entry = std::sync::Arc::new(JetAsyncEntry {
                 id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                event_id: self.owner_id,
+                capacity: self.policy.capacity,
+                overflow: self.policy.overflow,
                 phase: std::sync::atomic::AtomicU8::new(JET_EVENT_PENDING),
                 accepted: std::sync::atomic::AtomicBool::new(false),
                 payload: std::sync::Mutex::new(Some(payload)),
@@ -694,11 +797,23 @@
                     entry.accepted.store(true, std::sync::atomic::Ordering::Release);
                     entry.trace.lock().unwrap().push("queued".to_string());
                     state.queued.push_back(entry.clone());
+                    jet_event_observe(
+                        "AsyncEvent", self.owner_id, 0, 0, entry.id, "Queued",
+                        state.queued.len() as i64, state.blocked.len() as i64, state.running as i64,
+                        self.policy.capacity, self.policy.overflow.observation(),
+                        0, "None", "None",
+                    );
                 } else {
                     match self.policy.overflow {
                         JetEventOverflow::Block => {
                             entry.trace.lock().unwrap().push("pending".to_string());
                             state.blocked.push_back(entry.clone());
+                            jet_event_observe(
+                                "AsyncEvent", self.owner_id, 0, 0, entry.id, "Backpressured",
+                                state.queued.len() as i64, state.blocked.len() as i64, state.running as i64,
+                                self.policy.capacity, self.policy.overflow.observation(),
+                                0, "None", "None",
+                            );
                         }
                         JetEventOverflow::DropNewest => {
                             Self::complete_entry(&entry, JET_EVENT_PENDING, false, JetDispatchState::DroppedNewest);
@@ -717,6 +832,12 @@
                             entry.accepted.store(true, std::sync::atomic::Ordering::Release);
                             entry.trace.lock().unwrap().push("queued".to_string());
                             state.queued.push_back(entry.clone());
+                            jet_event_observe(
+                                "AsyncEvent", self.owner_id, 0, 0, entry.id, "Queued",
+                                state.queued.len() as i64, state.blocked.len() as i64, state.running as i64,
+                                self.policy.capacity, self.policy.overflow.observation(),
+                                0, "None", "None",
+                            );
                         }
                     }
                 }
@@ -767,6 +888,11 @@
             // Payload ownership ends at the same winning terminal transition.
             // A competing lifecycle path cannot drop or deliver it again.
             entry.payload.lock().unwrap().take();
+            jet_event_observe(
+                "AsyncEvent", entry.event_id, 0, 0, entry.id, "Terminal",
+                -1, -1, -1, entry.capacity, entry.overflow.observation(),
+                0, "None", state.observation(),
+            );
             entry.wake.wake();
             true
         }
@@ -784,6 +910,18 @@
             ).is_err() {
                 return false;
             }
+            let failure = if report.failures.iter().any(|failure| matches!(failure, JetDispatchFailure::Panic(_))) {
+                "Panic"
+            } else if report.failures.is_empty() {
+                "None"
+            } else {
+                "Handler"
+            };
+            jet_event_observe(
+                "AsyncEvent", entry.event_id, 0, 0, entry.id, "Terminal",
+                -1, -1, -1, entry.capacity, entry.overflow.observation(),
+                0, failure, report.state.observation(),
+            );
             *terminal = Some(report);
             entry.payload.lock().unwrap().take();
             entry.wake.wake();
@@ -893,6 +1031,12 @@
                                 entry.accepted.store(true, std::sync::atomic::Ordering::Release);
                                 entry.trace.lock().unwrap().push("queued".to_string());
                                 state.queued.push_back(entry.clone());
+                                jet_event_observe(
+                                    "AsyncEvent", self.owner_id, 0, 0, entry.id, "Queued",
+                                    state.queued.len() as i64, state.blocked.len() as i64,
+                                    state.running as i64, self.policy.capacity,
+                                    self.policy.overflow.observation(), 0, "None", "None",
+                                );
                             }
                         }
                     }
@@ -911,6 +1055,12 @@
                         state.running += 1;
                         state.running_entries.push(entry.clone());
                         entry.trace.lock().unwrap().push("running".to_string());
+                        jet_event_observe(
+                            "AsyncEvent", self.owner_id, 0, 0, entry.id, "Running",
+                            state.queued.len() as i64, state.blocked.len() as i64,
+                            state.running as i64, self.policy.capacity,
+                            self.policy.overflow.observation(), 0, "None", "None",
+                        );
                         let mut listeners = state.listeners.iter()
                             .filter_map(|listener| {
                                 if !listener.active.load(std::sync::atomic::Ordering::Acquire) {
@@ -924,7 +1074,7 @@
                                 ).is_err() {
                                     return None;
                                 }
-                                Some((listener.priority, listener.id, listener.once, listener.active.clone(), listener.handler.clone()))
+                                Some((listener.priority, listener.id, listener.owner_id, listener.once, listener.active.clone(), listener.handler.clone()))
                             })
                             .collect::<Vec<_>>();
                         listeners.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -953,16 +1103,35 @@
                         failures: Vec::new(),
                         trace: entry.trace.lock().unwrap().clone(),
                     };
-                    for (handler_index, (_, _, once, active, handler)) in listeners.into_iter().enumerate() {
+                    for (handler_index, (priority, subscription_id, owner_id, once, active, handler)) in listeners.into_iter().enumerate() {
                         // A once listener is reserved by clearing `active` while
                         // the async state lock is held. Its owning snapshot must
                         // still invoke it; later snapshots cannot reserve it.
                         if !once && !active.load(std::sync::atomic::Ordering::Acquire) { continue; }
                         report.delivered_handlers += 1;
+                        jet_event_observe(
+                            "AsyncEvent", self.owner_id, owner_id, subscription_id, entry.id,
+                            "HandlerStarted", -1, -1, -1, self.policy.capacity,
+                            self.policy.overflow.observation(), priority, "None", "None",
+                        );
                         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(payload.clone())));
                         match outcome {
-                            Ok(Ok(())) => report.trace.push(format!("handler:{handler_index}:delivered")),
+                            Ok(Ok(())) => {
+                                report.trace.push(format!("handler:{handler_index}:delivered"));
+                                jet_event_observe(
+                                    "AsyncEvent", self.owner_id, owner_id, subscription_id,
+                                    entry.id, "HandlerDelivered", -1, -1, -1,
+                                    self.policy.capacity, self.policy.overflow.observation(),
+                                    priority, "None", "None",
+                                );
+                            }
                             Ok(Err(error)) => {
+                                jet_event_observe(
+                                    "AsyncEvent", self.owner_id, owner_id, subscription_id,
+                                    entry.id, "HandlerFailed", -1, -1, -1,
+                                    self.policy.capacity, self.policy.overflow.observation(),
+                                    priority, "Handler", "None",
+                                );
                                 match self.failure_policy {
                                     JetFailurePolicy::StopFirst => {
                                         report.state = JetDispatchState::HandlerFailed;
@@ -992,6 +1161,12 @@
                                     .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
                                     .unwrap_or_else(|| "event handler panicked".to_string());
                                 report.state = JetDispatchState::HandlerFailed;
+                                jet_event_observe(
+                                    "AsyncEvent", self.owner_id, owner_id, subscription_id,
+                                    entry.id, "HandlerFailed", -1, -1, -1,
+                                    self.policy.capacity, self.policy.overflow.observation(),
+                                    priority, "Panic", "None",
+                                );
                                 report.failures.push(JetDispatchFailure::Panic(message.clone()));
                                 report.trace.push(format!("handler:{handler_index}:panic:{message}"));
                                 break;
@@ -1184,6 +1359,7 @@
 
     struct JetDecisionHookListener<T, E> {
         id: u64,
+        owner_id: u64,
         priority: i64,
         once: bool,
         sub: JetSubscription,
@@ -1191,6 +1367,7 @@
     }
 
     pub struct JetDecisionHook<T: Clone + 'static, E: Clone + 'static> {
+        id: u64,
         policy: JetHookPolicy,
         listeners: Rc<RefCell<Vec<JetDecisionHookListener<T, E>>>>,
     }
@@ -1198,6 +1375,7 @@
     impl<T: Clone + 'static, E: Clone + 'static> Clone for JetDecisionHook<T, E> {
         fn clone(&self) -> Self {
             JetDecisionHook {
+                id: self.id,
                 policy: self.policy,
                 listeners: self.listeners.clone(),
             }
@@ -1206,7 +1384,11 @@
 
     impl<T: Clone + 'static, E: Clone + 'static> JetDecisionHook<T, E> {
         pub fn new(policy: JetHookPolicy) -> Self {
-            JetDecisionHook { policy, listeners: Rc::new(RefCell::new(Vec::new())) }
+            JetDecisionHook {
+                id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                policy,
+                listeners: Rc::new(RefCell::new(Vec::new())),
+            }
         }
         pub fn on<F: Fn(T) -> JetHookDecision<T, E> + 'static>(
             &self,
@@ -1241,12 +1423,17 @@
             let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.listeners.borrow_mut().push(JetDecisionHookListener {
                 id,
+                owner_id: scope.id,
                 priority,
                 once,
                 sub: sub.clone(),
                 handler: Rc::new(handler),
             });
             let listeners = Rc::downgrade(&self.listeners);
+            jet_event_observe(
+                "DecisionHook", self.id, scope.id, id, 0, "Subscribed",
+                0, 0, 0, 0, "None", priority, "None", "None",
+            );
             sub.set_cleanup(move || {
                 if let Some(listeners) = listeners.upgrade() {
                     listeners.borrow_mut().retain(|listener| listener.id != id);
@@ -1258,8 +1445,14 @@
             match self.policy {
                 JetHookPolicy::FirstCancelElseTransform => {}
             }
+            let dispatch_id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            jet_event_observe(
+                "DecisionHook", self.id, 0, 0, dispatch_id, "DispatchStarted",
+                0, 0, 0, 0, "None", 0, "None", "None",
+            );
             let mut entries: Vec<(
                 i64,
+                u64,
                 u64,
                 bool,
                 JetSubscription,
@@ -1269,6 +1462,7 @@
                 .map(|listener| (
                     listener.priority,
                     listener.id,
+                    listener.owner_id,
                     listener.once,
                     listener.sub.clone(),
                     listener.handler.clone(),
@@ -1276,17 +1470,54 @@
                 .collect();
             entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
             let mut current = payload;
-            for (_, _, once, sub, handler) in entries {
+            for (priority, subscription_id, owner_id, once, sub, handler) in entries {
                 if !sub.active() { continue; }
                 if once { sub.unsubscribe(); }
+                jet_event_observe(
+                    "DecisionHook", self.id, owner_id, subscription_id, dispatch_id,
+                    "HandlerStarted", 0, 0, 0, 0, "None", priority, "None", "None",
+                );
                 match handler(current.clone()) {
-                    JetHookDecision::Continue => {}
-                    JetHookDecision::Transform(value) => current = value,
-                    JetHookDecision::Cancel => return JetHookOutcome::Cancel,
-                    JetHookDecision::Fail(error) => return JetHookOutcome::Fail(error),
+                    JetHookDecision::Continue => jet_event_observe(
+                        "DecisionHook", self.id, owner_id, subscription_id, dispatch_id,
+                        "HandlerContinue", 0, 0, 0, 0, "None", priority, "None", "None",
+                    ),
+                    JetHookDecision::Transform(value) => {
+                        current = value;
+                        jet_event_observe(
+                            "DecisionHook", self.id, owner_id, subscription_id, dispatch_id,
+                            "HandlerTransform", 0, 0, 0, 0, "None", priority, "None", "None",
+                        );
+                    }
+                    JetHookDecision::Cancel => {
+                        jet_event_observe(
+                            "DecisionHook", self.id, owner_id, subscription_id, dispatch_id,
+                            "HandlerCancel", 0, 0, 0, 0, "None", priority, "None", "None",
+                        );
+                        jet_event_observe(
+                            "DecisionHook", self.id, 0, 0, dispatch_id, "Terminal",
+                            0, 0, 0, 0, "None", 0, "None", "Cancel",
+                        );
+                        return JetHookOutcome::Cancel;
+                    }
+                    JetHookDecision::Fail(error) => {
+                        jet_event_observe(
+                            "DecisionHook", self.id, owner_id, subscription_id, dispatch_id,
+                            "HandlerFail", 0, 0, 0, 0, "None", priority, "Handler", "None",
+                        );
+                        jet_event_observe(
+                            "DecisionHook", self.id, 0, 0, dispatch_id, "Terminal",
+                            0, 0, 0, 0, "None", 0, "Handler", "Fail",
+                        );
+                        return JetHookOutcome::Fail(error);
+                    }
                 }
             }
             self.listeners.borrow_mut().retain(|listener| listener.sub.active());
+            jet_event_observe(
+                "DecisionHook", self.id, 0, 0, dispatch_id, "Terminal",
+                0, 0, 0, 0, "None", 0, "None", "Continue",
+            );
             JetHookOutcome::Continue(current)
         }
         pub fn listener_count(&self) -> i64 {

@@ -67,12 +67,15 @@ pub fn read(pid: u32) -> Result<String, String> {
         || !snapshot.contains(&format!("\"pid\":{pid},"))
         || !snapshot.contains("\"tasks\":[")
         || !snapshot.contains("\"channels\":[")
+        || !snapshot.contains("\"event_observations\":[")
         || snapshot.contains("\"payload\"")
         || snapshot.contains("\"locals\"")
         || snapshot.contains("\"environment\"")
     {
         return Err("live runtime snapshot has an invalid or unsafe schema".to_string());
     }
+    jet_debug::render_event_observations(&snapshot)
+        .map_err(|error| format!("live runtime event observations are invalid: {error}"))?;
     let captured_ms = number(&snapshot, "captured_ms")
         .and_then(|value| value.parse::<u128>().ok())
         .ok_or_else(|| "live runtime snapshot has no capture time".to_string())?;
@@ -172,6 +175,18 @@ pub fn render(snapshot: &str) -> String {
         .map(|(_, tail)| tail.trim_end_matches('}'))
         .unwrap_or("{}");
     out.push_str(&format!("\neffects: {effects}}}\nresources: {resources}\n"));
+    if let Ok(events) = jet_debug::render_event_observations(snapshot) {
+        out.push_str("\nevents\n");
+        if events.is_empty() {
+            out.push_str("  (no runtime event observations)\n");
+        } else {
+            for event in events.lines() {
+                out.push_str("  ");
+                out.push_str(event);
+                out.push('\n');
+            }
+        }
+    }
     out
 }
 
