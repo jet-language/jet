@@ -12,7 +12,7 @@ use crate::Sema::CheckerCoreLib::{
     is_polymorphic_core_special, is_reflect_type_name, is_simd_lane_type, json_ty,
     layout_method_arg_ty, layout_method_return, loadable_method_return, math_method_arg_ty,
     math_method_return, math_scalar_ty, math_static_arg_ty, math_static_return,
-    net_method_return, parsed_args_method_return, path_method_return,
+    net_method_return, parsed_args_method_return, path_method_return, require_net_method_labels,
     process_child_method_return, process_spec_method_return, process_stdin_method_return,
     process_stream_method_return, reflect_method_return, regex_method_return, result_ty,
     rotting_method_return, simd_reduce_markers, sketch_method_return, sketch_type_name,
@@ -1465,6 +1465,7 @@ impl<'a> Checker<'a> {
                 if let Some(ret) =
                     net_method_return(handle_ty, method, args.len(), span, &mut self.diags)
                 {
+                    require_net_method_labels(handle_ty, method, args, span, &mut self.diags);
                     if handle_ty == "TlsClientConfig" && method == "with_alpn" {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg(

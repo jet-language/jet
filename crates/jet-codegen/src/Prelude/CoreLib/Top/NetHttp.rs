@@ -628,6 +628,43 @@ fn jet_net_scheduler_wait(
 }
 
 #[cfg(unix)]
+fn jet_net_tcp_scheduler_ready_wait(
+    stream: &std::net::TcpStream,
+    read: bool,
+    write: bool,
+    operation: &str,
+) -> Result<(bool, bool), JetNetError> {
+    match jet_scheduler_wait_without_unwind(|| {
+        jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation)
+    }) {
+        JetSchedulerWait::Ready(observed) => Ok(observed),
+        JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
+            operation, None, None, format!("{} cancelled", operation), None,
+        ))),
+        JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
+        JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
+            operation, None, None, format!("{} scheduler wait failed: {}", operation, message), None,
+        ))),
+    }
+}
+
+#[cfg(not(unix))]
+fn jet_net_tcp_scheduler_ready_wait(
+    _stream: &std::net::TcpStream,
+    _read: bool,
+    _write: bool,
+    operation: &str,
+) -> Result<(bool, bool), JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail(
+        operation,
+        None,
+        None,
+        "observed TCP readiness is not available on this platform".to_string(),
+        None,
+    )))
+}
+
+#[cfg(unix)]
 fn jet_net_unix_scheduler_wait(
     stream: &std::os::unix::net::UnixStream,
     read: bool,
@@ -962,21 +999,22 @@ fn jet_net_tls_ready(
     let want_write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
     loop {
         let readable = want_read && jet_net_tls_result((stream.read_ready)(stream.id), "tls ready")?;
-        let writable = if want_write {
-            use std::io::Write;
-            let mut socket = &stream.socket;
-            match socket.write(&[]) {
-                Ok(_) => true,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
-                Err(error) => return Err(jet_net_io_error("tls ready", None, error)),
-            }
-        } else {
-            false
-        };
+        if readable {
+            return Ok(JetNetReady { readable: true, writable: false });
+        }
+        let (tls_read, tls_write) = jet_net_tls_result((stream.wants)(stream.id), "tls ready")?;
+        let (raw_readable, raw_writable) = jet_net_tcp_scheduler_ready_wait(
+            &stream.socket,
+            want_read || tls_read,
+            want_write || tls_write,
+            "tls ready",
+        )?;
+        let readable = want_read && raw_readable
+            && jet_net_tls_result((stream.read_ready)(stream.id), "tls ready")?;
+        let writable = want_write && raw_writable;
         if readable || writable {
             return Ok(JetNetReady { readable, writable });
         }
-        jet_net_scheduler_wait(&stream.socket, want_read, want_write, "tls ready")?;
     }
 }
 
@@ -1407,38 +1445,11 @@ fn jet_net_tcp_ready(
         JetNetError::InvalidInput(jet_net_detail("tcp ready", None, None, message, None))
     })?;
     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
-    loop {
-        let readable = if matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite) {
-            let mut byte = [0u8; 1];
-            match stream.inner.peek(&mut byte) {
-                Ok(_) => true,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
-                Err(e) => return Err(jet_net_io_error("tcp ready", None, e)),
-            }
-        } else { false };
-        let writable = if matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite) {
-            use std::io::Write;
-            match stream.inner.write(&[]) {
-                Ok(_) => true,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
-                Err(e) => return Err(jet_net_io_error("tcp ready", None, e)),
-            }
-        } else { false };
-        let satisfied = match interest {
-            JetNetReadyInterest::Read => readable,
-            JetNetReadyInterest::Write => writable,
-            JetNetReadyInterest::ReadWrite => readable || writable,
-        };
-        if satisfied {
-            return Ok(JetNetReady { readable, writable });
-        }
-        jet_net_scheduler_wait(
-            &stream.inner,
-            matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite),
-            matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite),
-            "tcp ready",
-        )?;
-    }
+    let read = matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite);
+    let write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
+    let (readable, writable) =
+        jet_net_tcp_scheduler_ready_wait(&stream.inner, read, write, "tcp ready")?;
+    Ok(JetNetReady { readable, writable })
 }
 
 fn jet_net_tcp_ready_deadline(

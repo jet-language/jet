@@ -122,6 +122,56 @@ pub fn net_method_return(
     }
 }
 
+pub fn require_net_method_labels(
+    type_name: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let required = match (type_name, method, args.len()) {
+        ("TcpListener", "accept", 1) | ("UnixListener", "accept", 1) => &[(0, "deadline")][..],
+        ("TcpStream", "read" | "read_text" | "write" | "write_all" | "write_text", 2)
+        | ("UnixStream" | "TlsStream", "read" | "write_all", 2)
+        | ("TcpStream" | "UdpSocket" | "UnixStream" | "TlsStream", "ready", 2)
+        | ("UdpSocket", "receive", 2) => &[(1, "deadline")][..],
+        ("UdpSocket", "send_to", 3) => &[(2, "deadline")][..],
+        _ => &[],
+    };
+    require_exact_labels(&format!("{type_name}.{method}"), args, required, span, diags);
+}
+
+/// Ratified named forms are syntax, not arity-only overloads. S61 labels remain
+/// positional, but these positions require their documented spelling.
+pub fn require_exact_labels(
+    api: &str,
+    args: &[crate::AST::CallArg],
+    required: &[(usize, &str)],
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for &(index, expected) in required {
+        let Some(arg) = args.get(index) else { continue };
+        match &arg.label {
+            Some((actual, _)) if actual == expected => {}
+            Some((actual, label_span)) => diags.push(Diagnostic::error(
+                "E0125",
+                format!("`{api}` has no `{actual}:` option at argument {}", index + 1),
+                format!("the ratified named form requires `{expected}:` at this position; labels never reorder arguments"),
+                format!("write `{expected}:` here"),
+                Some(*label_span),
+            )),
+            None => diags.push(Diagnostic::error(
+                "E0125",
+                format!("`{api}` requires `{expected}:` at argument {}", index + 1),
+                "this is a ratified named form, so its label is part of the public syntax".to_string(),
+                format!("write `{expected}:` before this value"),
+                Some(span),
+            )),
+        }
+    }
+}
+
 /// D-REGEXENGINE1=A: method return types for std-only regex values.
 pub fn regex_method_return(
     ty: &Type,

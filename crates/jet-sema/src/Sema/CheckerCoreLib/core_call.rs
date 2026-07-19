@@ -134,6 +134,20 @@ impl<'a> Checker<'a> {
             if module == "core.ui" && name == "node_role" {
                 self.check_a11y_node_role_label(args, span);
             }
+            if module == "core.tls" && name == "client" {
+                let required = match args.len() {
+                    3 => &[(1, "server_name"), (2, "deadline")][..],
+                    4 => &[(1, "server_name"), (2, "config"), (3, "deadline")][..],
+                    _ => &[],
+                };
+                super::net_text_time::require_exact_labels(
+                    "tls.client", args, required, span, &mut self.diags,
+                );
+            } else if module == "core.net" && name == "unix_connect" && args.len() == 2 {
+                super::net_text_time::require_exact_labels(
+                    "net.unix_connect", args, &[(1, "deadline")], span, &mut self.diags,
+                );
+            }
             let sig = if module == "core.tls" && name == "client" && args.len() == 4 {
                 Some((
                     vec![

@@ -3357,6 +3357,51 @@ fn core_net_dns_nxdomain_is_an_error() {
 }
 
 #[test]
+fn core_net_ratified_named_forms_require_exact_labels() {
+    let cases = [
+        ("tcp accept", "fn check(listener: TcpListener, d: Duration) { result :: listener.accept(d) }", "deadline:"),
+        ("tcp read", "fn check(stream: TcpStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline:"),
+        ("tcp read text", "fn check(stream: TcpStream, d: Duration) { result :: stream.read_text(1, d) }", "deadline:"),
+        ("tcp write", "fn check(stream: TcpStream, d: Duration) { result :: stream.write([1], potato: d) }", "deadline:"),
+        ("tcp write all", "fn check(stream: TcpStream, d: Duration) { result :: stream.write_all([1], d) }", "deadline:"),
+        ("tcp write text", "fn check(stream: TcpStream, d: Duration) { result :: stream.write_text(\"x\", turnip: d) }", "deadline:"),
+        ("tcp ready", "fn check(stream: TcpStream, d: Duration) { result :: stream.ready(.Read, d) }", "deadline:"),
+        ("udp send", "fn check(socket: UdpSocket, address: SocketAddr, d: Duration) { result :: socket.send_to([1], address, banana: d) }", "deadline:"),
+        ("udp receive", "fn check(socket: UdpSocket, d: Duration) { result :: socket.receive(1, d) }", "deadline:"),
+        ("udp ready", "fn check(socket: UdpSocket, d: Duration) { result :: socket.ready(.Read, potato: d) }", "deadline:"),
+        ("unix connect", "fn check(d: Duration) { result :: net.unix_connect(\"/tmp/jet-label-test\", d) }", "deadline:"),
+        ("unix accept", "fn check(listener: UnixListener, d: Duration) { result :: listener.accept(banana: d) }", "deadline:"),
+        ("unix read", "fn check(stream: UnixStream, d: Duration) { result :: stream.read(1, d) }", "deadline:"),
+        ("unix write", "fn check(stream: UnixStream, d: Duration) { result :: stream.write_all([1], potato: d) }", "deadline:"),
+        ("unix ready", "fn check(stream: UnixStream, d: Duration) { result :: stream.ready(.Write, d) }", "deadline:"),
+        ("tls read", "fn check(stream: TlsStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline:"),
+        ("tls write", "fn check(stream: TlsStream, d: Duration) { result :: stream.write_all([1], d) }", "deadline:"),
+        ("tls ready", "fn check(stream: TlsStream, d: Duration) { result :: stream.ready(.Read, potato: d) }", "deadline:"),
+        (
+            "tls client",
+            "fn check(stream: TcpStream, d: Duration) { cfg :: tls.ClientConfig.default(); result :: tls.client(^stream, banana: \"localhost\", potato: cfg, turnip: d) }",
+            "server_name:",
+        ),
+    ];
+    for (name, body, expected_fix) in cases {
+        let source = format!("use core.net as net\nuse core.tls as tls\n{body}\n");
+        let diags = jet::compile(&source).expect_err(name);
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(expected_fix)),
+            "{name} did not reject its missing/wrong label precisely: {diags:?}",
+        );
+        if name == "tls client" {
+            for label in ["server_name:", "config:", "deadline:"] {
+                assert!(
+                    diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(label)),
+                    "tls.client accepted or misreported `{label}`: {diags:?}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn core_net_tcp_read_uses_scheduler_and_returns_typed_cancellation() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_net_task_cancel_{}",
@@ -3438,6 +3483,10 @@ fn run() {
     ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
     ready_client :: net.tcp_connect(ready_address) ?? panic("ready connect")
     ready_server := net.tcp_accept(ready_listener) ?? panic("ready accept")
+    write_interest: NetReadyInterest :: .Write
+    write_ready :: ready_server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
+    print(net.ready_readable(write_ready))
+    print(net.ready_writable(write_ready))
     interest: NetReadyInterest :: .Read
     (wait_tx, wait_rx) :: tasks.channel<Int>()
     ready_wait :: tasks.spawn(take(ready_server, wait_tx) () => {
@@ -3458,7 +3507,7 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "tcp accept cancelled\ntcp ready cancelled\n");
+    assert_eq!(stdout, "tcp accept cancelled\nfalse\ntrue\ntcp ready cancelled\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -4214,7 +4263,7 @@ fn run() {
     cfg :: tls.ClientConfig.default().with_alpn(["http/1.0"])
     secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("tls handshake")
     request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
-    interest: NetReadyInterest :: .ReadWrite
+    interest: NetReadyInterest :: .Write
     readiness :: secure.ready(interest, deadline: budget) ?? panic("ready")
     print(net.ready_readable(readiness))
     print(net.ready_writable(readiness))

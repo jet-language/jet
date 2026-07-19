@@ -1266,6 +1266,7 @@ impl IoPoller {
 // One process-wide poller owns all raw-descriptor readiness registrations.
 #[cfg(unix)]
 enum JetRawIoHandle {
+    TcpStream(std::net::TcpStream),
     TcpListener(std::net::TcpListener),
     UnixStream(std::os::unix::net::UnixStream),
     UnixListener(std::os::unix::net::UnixListener),
@@ -1277,6 +1278,7 @@ impl JetRawIoHandle {
     fn fd(&self) -> i32 {
         use std::os::fd::AsRawFd;
         match self {
+            JetRawIoHandle::TcpStream(handle) => handle.as_raw_fd(),
             JetRawIoHandle::TcpListener(handle) => handle.as_raw_fd(),
             JetRawIoHandle::UnixStream(handle) => handle.as_raw_fd(),
             JetRawIoHandle::UnixListener(handle) => handle.as_raw_fd(),
@@ -1466,6 +1468,19 @@ pub fn jet_scheduler_unix_stream_ready_wait(
         .try_clone()
         .unwrap_or_else(|_| jet_scheduler_fatal("unix stream clone failed"));
     jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind)
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_tcp_stream_ready_wait(
+    stream: &std::net::TcpStream,
+    read: bool,
+    write: bool,
+    wait_kind: &str,
+) -> (bool, bool) {
+    let handle = stream
+        .try_clone()
+        .unwrap_or_else(|_| jet_scheduler_fatal("tcp stream clone failed"));
+    jet_scheduler_raw_io_wait(JetRawIoHandle::TcpStream(handle), read, write, wait_kind)
 }
 
 #[cfg(unix)]
