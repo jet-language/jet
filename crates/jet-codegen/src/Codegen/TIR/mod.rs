@@ -1182,7 +1182,7 @@ pub enum TExprKind {
         arg: Box<TExpr>,
         scale: crate::AST::UnitRatio,
         offset: crate::AST::UnitRatio,
-        rounded: bool,
+        rounding: Option<(jet_foundation::UnitRoundingMode, Box<TExpr>)>,
         fallible: bool,
         file: String,
         line: u32,

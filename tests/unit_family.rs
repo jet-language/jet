@@ -159,7 +159,7 @@ fn run() {
     warmer :: freezing + step
     drift :: warmer - freezing
     total :: drift + step
-    absolute :: KelvinPoint.from_celsius_point_rounded(warmer, .NearestEven)
+    absolute :: KelvinPoint.from_celsius_point_rounded(warmer, .NearestEven, digits: 0) ?? panic("rounded point conversion")
     relative :: KelvinDelta.from_celsius_delta(total) ?? panic("exact delta conversion")
     print("{(absolute.raw())} {(relative.raw())}")
 }
@@ -307,12 +307,12 @@ fn exactness_uses_rational_math_beyond_f64_integer_precision() {
 }
 fn run() {
     exact :: Meter.from_almost(Almost.from_float(9007199254740992.0)) ?? Meter.from_float(-1.0)
-    tie :: Meter.from_half_rounded(Half.from_float(1.0), .NearestEven)
-    above :: Meter.from_above_half_rounded(AboveHalf.from_float(1.0), .NearestEven)
-    negative :: Meter.from_three_halves_rounded(ThreeHalves.from_float(-1.0), .NearestEven)
-    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(TieOffsetPoint.from_float(0.0), .NearestEven)
-    affine_above :: KelvinPoint.from_above_offset_point_rounded(AboveOffsetPoint.from_float(0.0), .NearestEven)
-    affine_below :: KelvinPoint.from_below_offset_point_rounded(BelowOffsetPoint.from_float(0.0), .NearestEven)
+    tie :: Meter.from_half_rounded(Half.from_float(1.0), .NearestEven, digits: 0) ?? panic("tie")
+    above :: Meter.from_above_half_rounded(AboveHalf.from_float(1.0), .NearestEven, digits: 0) ?? panic("above")
+    negative :: Meter.from_three_halves_rounded(ThreeHalves.from_float(-1.0), .NearestEven, digits: 0) ?? panic("negative")
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(TieOffsetPoint.from_float(0.0), .NearestEven, digits: 0) ?? panic("affine tie")
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(AboveOffsetPoint.from_float(0.0), .NearestEven, digits: 0) ?? panic("affine above")
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(BelowOffsetPoint.from_float(0.0), .NearestEven, digits: 0) ?? panic("affine below")
     print("{(exact.raw())} {(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
 }
 "#;
@@ -325,7 +325,7 @@ fn run() {
 @UnitFamily(Length, base: meter) { meter double(scale: 2) }
 fn run() {
     source :: Double.from_float(1.7976931348623157e308)
-    value :: Meter.from_double_rounded(source, .NearestEven)
+    value :: Meter.from_double_rounded(source, .NearestEven, digits: 0) ?? Meter.from_float(-1.0)
     print(value.raw())
 }
 "#;
@@ -334,21 +334,101 @@ fn run() {
             "rounded_overflow",
             overflow,
         );
-        assert_eq!(code, 70);
-        assert!(stdout.is_empty());
-        assert!(
-            stderr.contains("unit conversion overflows its runtime representation"),
-            "unexpected stderr: {stderr}"
-        );
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "-1.0\n");
+        assert!(stderr.is_empty(), "unexpected stderr: {stderr}");
     }
 
     assert_eq!(
-        jet_foundation::jet_unit_conversion_rounded(f64::MAX, "2", "1", "0", "1"),
-        None,
+        jet_foundation::jet_unit_conversion_rounded(
+            f64::MAX,
+            "2",
+            "1",
+            "0",
+            "1",
+            jet_foundation::UnitRoundingMode::NearestEven,
+            0,
+        ),
+        Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
     );
     assert_eq!(
-        jet_foundation::jet_unit_conversion_rounded(f64::INFINITY, "1", "1", "0", "1"),
-        None,
+        jet_foundation::jet_unit_conversion_rounded(
+            f64::INFINITY,
+            "1",
+            "1",
+            "0",
+            "1",
+            jet_foundation::UnitRoundingMode::NearestEven,
+            0,
+        ),
+        Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
+    );
+}
+
+#[test]
+fn rounded_conversion_honors_mode_digits_affinity_and_fallibility() {
+    if !tir_support::have_rustc() {
+        return;
+    }
+    let src = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+    eighth(scale: 1/8)
+    three_eighths(scale: 3/8)
+    double(scale: 2)
+}
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    shifted(scale: 1, offset: 1/8)
+}
+fn run() {
+    positive :: Half.from_float(5.0)
+    negative :: Half.from_float(-5.0)
+    positive_odd_tie :: Half.from_float(7.0)
+    negative_odd_tie :: Half.from_float(-7.0)
+    toward_zero_positive :: Meter.from_half_rounded(positive, .TowardZero, digits: 0) ?? panic("toward zero positive")
+    floor_positive :: Meter.from_half_rounded(positive, .Floor, digits: 0) ?? panic("floor positive")
+    ceiling_positive :: Meter.from_half_rounded(positive, .Ceiling, digits: 0) ?? panic("ceiling positive")
+    nearest_positive :: Meter.from_half_rounded(positive, .NearestEven, digits: 0) ?? panic("nearest positive")
+    toward_zero_negative :: Meter.from_half_rounded(negative, .TowardZero, digits: 0) ?? panic("toward zero negative")
+    floor_negative :: Meter.from_half_rounded(negative, .Floor, digits: 0) ?? panic("floor negative")
+    ceiling_negative :: Meter.from_half_rounded(negative, .Ceiling, digits: 0) ?? panic("ceiling negative")
+    nearest_negative :: Meter.from_half_rounded(negative, .NearestEven, digits: 0) ?? panic("nearest negative")
+    nearest_positive_odd :: Meter.from_half_rounded(positive_odd_tie, .NearestEven, digits: 0) ?? panic("nearest positive odd")
+    nearest_negative_odd :: Meter.from_half_rounded(negative_odd_tie, .NearestEven, digits: 0) ?? panic("nearest negative odd")
+    nearest_even_hundredth :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2) ?? panic("nearest hundredth")
+    nearest_odd_hundredth :: Meter.from_three_eighths_rounded(1three_eighths, .NearestEven, digits: 2) ?? panic("nearest odd hundredth")
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(0.0), .Ceiling, digits: 2) ?? panic("point")
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(0.0), .Ceiling, digits: 2) ?? panic("delta")
+    overflow :: Meter.from_double_rounded(Double.from_float(1.7976931348623157e308), .NearestEven, digits: 0) ?? Meter.from_float(-1.0)
+    print("{(toward_zero_positive.raw())} {(floor_positive.raw())} {(ceiling_positive.raw())} {(nearest_positive.raw())} {(toward_zero_negative.raw())} {(floor_negative.raw())} {(ceiling_negative.raw())} {(nearest_negative.raw())} {(nearest_positive_odd.raw())} {(nearest_negative_odd.raw())} {(nearest_even_hundredth.raw())} {(nearest_odd_hundredth.raw())} {(point.raw())} {(delta.raw())} {(overflow.raw())}")
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run("quantity_rounded_contract", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "2.0 2.0 3.0 2.0 -2.0 -3.0 -2.0 -2.0 4.0 -4.0 0.12 0.38 0.13 0.0 -1.0\n"
+    );
+
+    let negative_digits = r#"
+@UnitFamily(Length, base: meter) { meter half(scale: 1/2) }
+fn run() -> Void ? {
+    digits: Int :: -1
+    Meter.from_half_rounded(1half, .NearestEven, digits: digits)?
+}
+"#;
+    let (code, stdout, stderr) = tir_support::build_and_run_full(
+        "quantity_unit_conversion",
+        "rounded_negative_digits",
+        negative_digits,
+    );
+    assert_eq!(code, 1);
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.ends_with("rounded unit conversion needs nonnegative digits\n"),
+        "unexpected stderr: {stderr}"
     );
 }
 
@@ -582,7 +662,7 @@ fn explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real() {
 fn run() {
     exact :: Meter.from_millimeter(3000millimeter) ?? panic("exact conversion failed")
     inexact :: Meter.from_thirdish(1thirdish) ?? Meter.from_float(-1.0)
-    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven)
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0) ?? panic("rounded conversion failed")
     print("{(exact.raw())} {(inexact.raw())} {(rounded.raw())}")
 }
 "#;

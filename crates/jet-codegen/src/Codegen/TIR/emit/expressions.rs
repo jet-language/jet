@@ -230,7 +230,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             arg,
             scale,
             offset,
-            rounded,
+            rounding,
             fallible,
             file,
             line,
@@ -244,8 +244,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 offset.num.to_string(),
                 offset.den.to_string(),
             );
-            if *rounded {
-                format!("{destination}(match jet_unit_conversion_rounded({args}) {{ Some(converted) => converted, None => jet_panic({file:?}, {line}, \"unit conversion overflows its runtime representation\") }})")
+            if let Some((mode, digits)) = rounding {
+                let digits = emit_tir_expr(digits, cx);
+                format!(
+                    "match jet_unit_conversion_rounded({args}, UnitRoundingMode::{mode:?}, {digits}) {{ Ok(converted) => Ok({destination}(converted)), Err(error) => Err(error.to_string()) }}"
+                )
             } else if *fallible {
                 format!(
                     "match jet_unit_conversion_exact({args}) {{ Some(converted) => Ok({destination}(converted)), None => Err(\"unit conversion would round\".to_string()) }}"

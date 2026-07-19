@@ -25,4 +25,7 @@ pub mod Traits;
 pub mod WebPartition;
 pub mod XmlPull;
 pub use BuildEffects::BuildEffect;
-pub use ExactUnitConversion::{jet_unit_conversion_exact, jet_unit_conversion_rounded};
+pub use ExactUnitConversion::{
+    UnitRoundingMode, UNIT_ROUNDING_NEGATIVE_DIGITS, UNIT_ROUNDING_UNREPRESENTABLE,
+    jet_unit_conversion_exact, jet_unit_conversion_rounded,
+};

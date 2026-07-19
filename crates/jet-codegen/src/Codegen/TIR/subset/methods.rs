@@ -1062,11 +1062,29 @@ pub(crate) fn static_method_call_in_subset(
             return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
         }
     }
-    if cx.unit_facts.contains_key(type_name)
-        && method.starts_with("from_")
-        && args.len() == 1
-    {
-        return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+    if cx.unit_facts.contains_key(type_name) && method.starts_with("from_") {
+        if args.len() == 1 {
+            return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+        }
+        if method.ends_with("_rounded") && args.len() == 3 {
+            let mode = matches!(
+                &args[1].expr,
+                Expr::EnumLit { type_name, variant, args, .. }
+                    if type_name.is_empty()
+                        && args.is_empty()
+                        && Syntax::unit_rounding_mode(variant).is_some()
+            );
+            return args[0].label.is_none()
+                && args[1].label.is_none()
+                && args[2]
+                    .label
+                    .as_ref()
+                    .map(|(label, _)| label.as_str())
+                    == Some("digits")
+                && mode
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && expr_in_subset(&args[2].expr, cx, locals);
+        }
     }
     if matches!(
         (type_name, method, args.len()),

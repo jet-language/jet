@@ -1804,6 +1804,24 @@ fn fmt_preserves_scaled_affine_unit_declaration() {
 }
 
 #[test]
+fn fmt_preserves_rounded_unit_conversion_contract() {
+    let src = r#"@UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+}
+
+fn run() {
+    source :: 5half
+    Meter.from_half_rounded(source, .TowardZero, digits: 0).drop("mode")
+    Meter.from_half_rounded(source, .Floor, digits: 1).drop("mode")
+    Meter.from_half_rounded(source, .Ceiling, digits: 2).drop("mode")
+    Meter.from_half_rounded(source, .NearestEven, digits: 3).drop("mode")
+}
+"#;
+    assert_fmt_stable(src, "D-QUANTITY-CONVERT1 rounded conversion");
+}
+
+#[test]
 fn fmt_preserves_range_constraint() {
     // D-RANGETYPE1: `distinct Int(0..10)` — distinct declarations are emitted
     // verbatim, so the `(0..10)` clause survives structurally; this pins it

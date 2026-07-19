@@ -88,9 +88,10 @@ impl<'a> Checker<'a> {
     /// of its struct.
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
         // D-QUANTITY-CONVERT1=B: destination-owned exact conversion is
-        // fallible at runtime; the explicit `_rounded` spelling names the one
-        // ratified nearest-even policy. Codegen emits these real methods on the
-        // concrete destination type from the same UnitFact coefficients.
+        // fallible at runtime; the explicit `_rounded` spelling carries the
+        // ratified mode and destination decimal precision. Codegen emits these
+        // real methods on the concrete destination type from the same UnitFact
+        // coefficients.
         let conversion_span = e.span();
         let explicit_unit_conversion = if let Expr::MethodCall {
             receiver,
@@ -100,7 +101,7 @@ impl<'a> Checker<'a> {
             ..
         } = &mut *e
         {
-            if matches!(args.len(), 1 | 2) {
+            if matches!(args.len(), 1 | 3) {
                 if let Expr::Ident(destination_name, _) = receiver.as_ref() {
                     if let Some((destination_name, destination_fact)) = self
                         .unit_fact_for_type(&Type::Named(destination_name.clone()))
@@ -114,14 +115,18 @@ impl<'a> Checker<'a> {
                                 source_name.rsplit('.').next().unwrap_or(&source_name);
                             let expected = Syntax::conversion_method_for_source(source_leaf);
                             let exact = args.len() == 1 && method == &expected;
-                            let rounded = args.len() == 2
+                            let rounded = args.len() == 3
                                 && method == &format!("{expected}_rounded")
                                 && matches!(
                                     &args[1].expr,
                                     Expr::EnumLit { type_name, variant, args, .. }
                                         if type_name.is_empty()
-                                            && variant == Syntax::ROUND_NEAREST_EVEN
+                                            && Syntax::unit_rounding_mode(variant).is_some()
                                             && args.is_empty()
+                                )
+                                && matches!(
+                                    args[2].label.as_ref(),
+                                    Some((label, _)) if label == "digits"
                                 );
                             if (exact || rounded)
                                 && source_fact.package == destination_fact.package
@@ -135,15 +140,36 @@ impl<'a> Checker<'a> {
                                     );
                                     return Some(Type::Named(destination_name));
                                 }
-                                let destination = Type::Named(destination_name);
-                                let ty = if rounded {
-                                    args.pop();
-                                    destination
-                                } else {
-                                    Type::Result {
-                                        ok: Box::new(destination),
-                                        err: Box::new(Type::String),
+                                if rounded {
+                                    self.expect_core_arg(
+                                        method,
+                                        2,
+                                        &Type::Int,
+                                        &mut args[2],
+                                    );
+                                    if matches!(
+                                        &args[2].expr,
+                                        Expr::Unary(
+                                            crate::AST::UnOp::Neg,
+                                            inner,
+                                            _
+                                        ) if matches!(inner.as_ref(), Expr::Int(..))
+                                    ) {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0127",
+                                            "rounded unit conversion needs nonnegative digits"
+                                                .to_string(),
+                                            "digits counts destination decimal places"
+                                                .to_string(),
+                                            "write `digits: 0` or another nonnegative Int"
+                                                .to_string(),
+                                            Some(args[2].expr.span()),
+                                        ));
                                     }
+                                }
+                                let ty = Type::Result {
+                                    ok: Box::new(Type::Named(destination_name)),
+                                    err: Box::new(Type::String),
                                 };
                                 *resolved_ret = Some(ty.clone());
                                 Some(ty)

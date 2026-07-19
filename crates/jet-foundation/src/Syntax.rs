@@ -106,8 +106,21 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
 pub const TYPE_QUANTITY: &str = "\0Quantity";
 /// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
 pub const BOUND_QUANTITY: &str = "Quantity";
-/// D-QUANTITY-CONVERT1=B: the first closed explicit unit-rounding policy.
+/// D-QUANTITY-CONVERT1=B: the closed explicit unit-rounding policies.
+pub const ROUND_TOWARD_ZERO: &str = "TowardZero";
+pub const ROUND_FLOOR: &str = "Floor";
+pub const ROUND_CEILING: &str = "Ceiling";
 pub const ROUND_NEAREST_EVEN: &str = "NearestEven";
+
+pub fn unit_rounding_mode(name: &str) -> Option<crate::UnitRoundingMode> {
+    match name {
+        ROUND_TOWARD_ZERO => Some(crate::UnitRoundingMode::TowardZero),
+        ROUND_FLOOR => Some(crate::UnitRoundingMode::Floor),
+        ROUND_CEILING => Some(crate::UnitRoundingMode::Ceiling),
+        ROUND_NEAREST_EVEN => Some(crate::UnitRoundingMode::NearestEven),
+        _ => None,
+    }
+}
 
 /// Canonical `(Length, Time, Temperature)` exponent vectors for physical
 /// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is

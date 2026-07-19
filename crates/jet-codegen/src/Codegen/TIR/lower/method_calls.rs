@@ -2345,9 +2345,16 @@ pub(crate) fn lower_method_call(
             }
         }
         if let (Some(destination), Some(arg)) = (cx.unit_facts.get(&type_name), args.first()) {
-            let rounded = method.ends_with("_rounded");
             let exact_method = method.strip_suffix("_rounded").unwrap_or(method);
             let lowered = lower_expr(&arg.expr, cx, env);
+            let rounding = args.get(1).and_then(|mode| match &mode.expr {
+                Expr::EnumLit { type_name, variant, args, .. }
+                    if type_name.is_empty() && args.is_empty() =>
+                {
+                    Syntax::unit_rounding_mode(variant)
+                }
+                _ => None,
+            });
             let source = match &lowered.ty {
                 Type::Named(name) => cx.unit_facts.get(name),
                 _ => None,
@@ -2364,29 +2371,32 @@ pub(crate) fn lower_method_call(
                         .then_some(fact)
                 })
             });
-            if args.len() == 1 {
+            if args.len() == 1 || (args.len() == 3 && rounding.is_some()) {
                 if let Some(source) = source {
                     let scale = source.scale.div(&destination.scale)
                         .expect("sema validated unit scale");
                     let offset = source.offset.sub(&destination.offset)
                         .and_then(|value| value.div(&destination.scale))
                         .expect("sema validated unit offset");
-                    let fallible = !rounded && matches!(resolved_ret, Some(Type::Result { .. }));
+                    let fallible = matches!(resolved_ret, Some(Type::Result { .. }));
+                    let rounding = rounding.map(|mode| {
+                        (mode, Box::new(lower_expr(&args[2].expr, cx, env)))
+                    });
                     return TExpr {
-                        ty: if rounded || !fallible {
-                            Type::Float
-                        } else {
+                        ty: if fallible {
                             Type::Result {
                                 ok: Box::new(Type::Float),
                                 err: Box::new(Type::String),
                             }
+                        } else {
+                            Type::Float
                         },
                         kind: TExprKind::UnitConvert {
                             destination: type_name,
                             arg: Box::new(lowered),
                             scale,
                             offset,
-                            rounded,
+                            rounding,
                             fallible,
                             file: cx.file.clone(),
                             line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0

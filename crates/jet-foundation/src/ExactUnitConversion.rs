@@ -181,16 +181,56 @@ fn exact_integer(numerator: &Integer, denominator: &Integer) -> Option<Integer> 
     Some(quotient)
 }
 
-fn nearest_even_integer(numerator: &Integer, denominator: &Integer) -> Option<Integer> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i64)]
+pub enum UnitRoundingMode {
+    TowardZero,
+    Floor,
+    Ceiling,
+    NearestEven,
+}
+
+pub const UNIT_ROUNDING_NEGATIVE_DIGITS: &str =
+    "rounded unit conversion needs nonnegative digits";
+pub const UNIT_ROUNDING_UNREPRESENTABLE: &str =
+    "unit conversion overflows its runtime representation";
+
+fn rounded_integer(
+    numerator: &Integer,
+    denominator: &Integer,
+    mode: UnitRoundingMode,
+) -> Option<Integer> {
     let (mut quotient, remainder) = numerator.div_rem_abs(denominator)?;
-    let comparison = remainder.mul_small(2).abs_cmp(&denominator.abs());
-    if comparison == std::cmp::Ordering::Greater
-        || (comparison == std::cmp::Ordering::Equal && quotient.is_odd())
-    {
+    let sign = numerator.sign * denominator.sign;
+    let increment = match mode {
+        UnitRoundingMode::TowardZero => false,
+        UnitRoundingMode::Floor => sign < 0 && !remainder.is_zero(),
+        UnitRoundingMode::Ceiling => sign > 0 && !remainder.is_zero(),
+        UnitRoundingMode::NearestEven => {
+            let comparison = remainder.mul_small(2).abs_cmp(&denominator.abs());
+            comparison == std::cmp::Ordering::Greater
+                || (comparison == std::cmp::Ordering::Equal && quotient.is_odd())
+        }
+    };
+    if increment {
         quotient = quotient.add(&Integer::one());
     }
-    if !quotient.is_zero() { quotient.sign = numerator.sign * denominator.sign; }
+    if !quotient.is_zero() { quotient.sign = sign; }
     Some(quotient)
+}
+
+fn decimal_float(integer: &Integer, digits: usize) -> Option<f64> {
+    let negative = integer.sign < 0;
+    let mut decimal = integer.abs().decimal();
+    if digits != 0 {
+        if decimal.len() <= digits {
+            decimal.insert_str(0, &"0".repeat(digits + 1 - decimal.len()));
+        }
+        decimal.insert(decimal.len() - digits, '.');
+    }
+    if negative { decimal.insert(0, '-'); }
+    let value = decimal.parse::<f64>().ok()?;
+    value.is_finite().then_some(value)
 }
 
 fn exactly_represented_float(integer: &Integer) -> Option<f64> {
@@ -210,9 +250,22 @@ pub fn jet_unit_conversion_exact(value: f64, scale_num: &str, scale_den: &str, o
     exactly_represented_float(&exact_integer(&numerator, &denominator)?)
 }
 
-/// Applies the declared rational conversion, then rounds ties to even.
-pub fn jet_unit_conversion_rounded(value: f64, scale_num: &str, scale_den: &str, offset_num: &str, offset_den: &str) -> Option<f64> {
-    let (numerator, denominator) =
-        converted_ratio(value, scale_num, scale_den, offset_num, offset_den)?;
-    exactly_represented_float(&nearest_even_integer(&numerator, &denominator)?)
+/// Applies the declared rational conversion, then rounds to destination decimal places.
+pub fn jet_unit_conversion_rounded(
+    value: f64,
+    scale_num: &str,
+    scale_den: &str,
+    offset_num: &str,
+    offset_den: &str,
+    mode: UnitRoundingMode,
+    digits: i64,
+) -> Result<f64, &'static str> {
+    let digits = usize::try_from(digits).map_err(|_| UNIT_ROUNDING_NEGATIVE_DIGITS)?;
+    let (mut numerator, denominator) =
+        converted_ratio(value, scale_num, scale_den, offset_num, offset_den)
+            .ok_or(UNIT_ROUNDING_UNREPRESENTABLE)?;
+    for _ in 0..digits { numerator = numerator.mul_small(10); }
+    let integer = rounded_integer(&numerator, &denominator, mode)
+        .ok_or(UNIT_ROUNDING_UNREPRESENTABLE)?;
+    decimal_float(&integer, digits).ok_or(UNIT_ROUNDING_UNREPRESENTABLE)
 }

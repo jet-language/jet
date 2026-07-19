@@ -492,7 +492,7 @@ Implementation checkpoint (2026-07-19): the compiler normalizes exact ratios,
 validates the canonical base, and keeps one package-owned unit fact registry for
 dimension, kind, scale, and offset. Scaled and affine families implement the
 closed Point/Delta algebra, value-aware exact implicit conversion, fallible
-destination-owned exact conversion, `.NearestEven` rounded conversion,
+destination-owned exact conversion, the four explicit rounded-conversion modes,
 `explicit_units`, imported `Quantity<Dimension, Kind>` generics, concrete
 Codable identity, semantic inspection, API/SemVer identity, and AOT/JIT parity.
 
@@ -568,14 +568,23 @@ represented exactly is a compile error naming the destination-owned
 inexact mixing remains rejected.
 
 Conversion checks use the exact rational value represented by the source
-`Float`, scale, and point offset. Exact conversion succeeds only when that
-rational is an integer that the destination `Float` can represent exactly.
-`.NearestEven` rounds the rational before converting it to `Float`; a
-non-finite input or result outside the destination representation traps rather
-than producing `NaN` or infinity. AOT and resident execution use the same
-conversion mechanism. For an unknown unrestricted `Float`-backed value, only
-an identity scale and offset proves exact finite conversion over the complete
-source domain; integral coefficients alone are not proof.
+`Float`, scale, and point offset. `Destination.from_source(value)?` succeeds
+only when that rational is an integer that the destination `Float` can
+represent exactly. When precision loss is intentional,
+`Destination.from_source_rounded(value, mode, digits: n)?` first computes the
+same exact rational and then rounds to `n` nonnegative destination decimal
+places. `.TowardZero` truncates, `.Floor` rounds toward negative infinity,
+`.Ceiling` toward positive infinity, and `.NearestEven` chooses the even result
+at an exact tie (so `-2.5` becomes `-2`, while `-3.5` becomes `-4`). Point
+conversion includes the offset; Delta conversion never does. Integer-backed
+destinations require `digits: 0`; current physical-unit storage is `Float`. A
+negative `digits`, non-finite input, or result outside the destination
+representation is a conversion error carried by `Result`, never `NaN`, infinity,
+or a trap. AOT
+and resident execution use the same conversion mechanism. For an unknown
+unrestricted `Float`-backed value, only an identity scale and offset proves
+exact finite conversion over the complete source domain; integral coefficients
+alone are not proof.
 
 Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and
@@ -594,7 +603,7 @@ fits(3000millimeter)
 
 alt_km: Kilometer = 1500meter
 // error: 1500 meter is not an exact number of kilometer
-// fix: Kilometer.from_meter_rounded(1500meter, .NearestEven)
+// fix: Kilometer.from_meter_rounded(1500meter, .NearestEven, digits: 0)?
 
 # package.jet
 policy: .{ explicit_units: true }

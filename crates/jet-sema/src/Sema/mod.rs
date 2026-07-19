@@ -1492,7 +1492,9 @@ impl<'a> Checker<'a> {
             "E0127",
             "this implicit unit conversion would round".to_string(),
             "the exact scale or offset cannot be represented as an integer conversion at this boundary".to_string(),
-            format!("write `{destination_name}.{method}(expr)` to make the conversion explicit"),
+            format!(
+                "write `{destination_name}.{method}_rounded(expr, .NearestEven, digits: 0)?` or choose another rounding policy"
+            ),
             Some(span),
         )
     }

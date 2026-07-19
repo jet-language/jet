@@ -2416,7 +2416,7 @@ fn run() -> Void ? {
     ratio :: recovered / distance
     print(ratio)
     exact :: Meter.from_millimeter(3000millimeter)?
-    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven)
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0)?
     print("{(exact.raw())} {(rounded.raw())}")
 }
 "#, "physical_quantity");
@@ -2464,17 +2464,17 @@ fn run() -> Void ? {
     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
 }
-fn run() {
-    tie :: Meter.from_half_rounded(1half, .NearestEven)
-    above :: Meter.from_above_half_rounded(1above_half, .NearestEven)
+fn run() -> Void ? {
+    tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)?
+    above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)?
     negative_source :: ThreeHalves.from_float(-1.0)
-    negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven)
+    negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven, digits: 0)?
     tie_point :: TieOffsetPoint.from_float(0.0)
     above_point :: AboveOffsetPoint.from_float(0.0)
     below_point :: BelowOffsetPoint.from_float(0.0)
-    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven)
-    affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven)
-    affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven)
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven, digits: 0)?
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven, digits: 0)?
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven, digits: 0)?
     print("{(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
 }
 "#, "physical_quantity_rational_edges");
@@ -2485,20 +2485,73 @@ fn run() {
 
     let overflow = r#"
 @UnitFamily(Length, base: meter) { meter double(scale: 2) }
-fn run() {
+fn run() -> Void ? {
     source :: Double.from_float(1.7976931348623157e308)
-    value :: Meter.from_double_rounded(source, .NearestEven)
-    print(value.raw())
+    Meter.from_double_rounded(source, .NearestEven, digits: 0)?
 }
 "#;
-    match run_cranelift_outcome_without_fallback(overflow, "physical_quantity_rounded_overflow") {
-        RunOutcome::Problems(diags) => assert!(
-            diags.iter().any(|d| d.code == "E0953"
-                && d.why.contains("unit conversion overflows its runtime representation")),
-            "expected rounded unit-conversion overflow trap, got {diags:?}"
-        ),
-        outcome => panic!("expected rounded unit-conversion overflow trap, got {outcome:?}"),
+    assert_eq!(
+        run_cranelift_without_fallback(overflow, "physical_quantity_rounded_overflow"),
+        ProgramOutput::ran(
+            "".into(),
+            "unit conversion overflows its runtime representation\n".into(),
+            1,
+        )
+    );
+}
+
+#[test]
+fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
     }
+    let src = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+    eighth(scale: 1/8)
+    three_eighths(scale: 3/8)
+}
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    shifted(scale: 1, offset: 1/8)
+}
+fn run() -> Void ? {
+    positive :: Half.from_float(5.0)
+    negative :: Half.from_float(-5.0)
+    toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
+    floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)?
+    ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)?
+    nearest_even :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2)?
+    nearest_odd :: Meter.from_three_eighths_rounded(1three_eighths, .NearestEven, digits: 2)?
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(0.0), .Ceiling, digits: 2)?
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(0.0), .Ceiling, digits: 2)?
+    print("{(toward_zero.raw())} {(floor.raw())} {(ceiling.raw())} {(nearest_even.raw())} {(nearest_odd.raw())} {(point.raw())} {(delta.raw())}")
+}
+"#;
+    let expected = ProgramOutput::ran("2.0 -3.0 3.0 0.12 0.38 0.13 0.0\n".into(), "".into(), 0);
+    let resident = run_cranelift_without_fallback(src, "rounded_quantity_parity");
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_rounded_quantity_parity_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("rounded_quantity_parity.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => panic!("default dev failed rounded quantity parity: {diags:?}"),
+    };
+    let aot = compiled_binary_output(&dir, "rounded_quantity_parity", 0, "rounded_quantity_parity", &shown);
+    assert_eq!(resident, expected);
+    assert_eq!(default, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]

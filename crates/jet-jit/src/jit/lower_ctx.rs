@@ -1882,7 +1882,7 @@ impl LowerCtx<'_, '_> {
                 arg,
                 scale,
                 offset,
-                rounded,
+                rounding,
                 fallible,
                 ..
             } => {
@@ -1895,7 +1895,10 @@ impl LowerCtx<'_, '_> {
                 ]
                 .map(|ratio| self.runtime.heap.alloc_string(ratio))
                 .map(|id| self.b.ins().iconst(types::I64, id));
-                let host = if *rounded {
+                let mut call_args = vec![value, ratios[0], ratios[1], ratios[2], ratios[3]];
+                let host = if let Some((mode, digits)) = rounding {
+                    call_args.push(self.b.ins().iconst(types::I64, *mode as i64));
+                    call_args.push(self.lower_expr(digits)?);
                     self.host.unit_convert_rounded
                 } else if *fallible {
                     self.host.unit_convert_exact
@@ -1903,11 +1906,8 @@ impl LowerCtx<'_, '_> {
                     self.host.unit_convert_implicit
                 };
                 let host = self.module.declare_func_in_func(host, self.b.func);
-                let call = self.b.ins().call(
-                    host,
-                    &[value, ratios[0], ratios[1], ratios[2], ratios[3]],
-                );
-                if *rounded || !*fallible {
+                let call = self.b.ins().call(host, &call_args);
+                if !*fallible {
                     self.emit_trap_check()?;
                 }
                 Ok(self.b.inst_results(call)[0])

@@ -3413,8 +3413,10 @@ family with `base`, exact rational `scale`/`offset`, and stable package-owned AP
 identity. A family with any nonzero offset mints separate `Point` and `Delta`
 named types for every member. Sema owns the closed affine algebra and exactness:
 implicit conversion is value-aware and never rounds, destination-owned exact
-conversion returns `Result`, and `_rounded(..., .NearestEven)` is the explicit
-rounding path. Imported `Quantity<Dimension, Kind>` bounds preserve their
+conversion returns `Result`, and `_rounded(value, mode, digits: n)` is the
+fallible explicit rounding path. Its ratified modes are `.TowardZero`,
+`.Floor`, `.Ceiling`, and `.NearestEven`; `n` is a nonnegative count of
+destination decimal places. Imported `Quantity<Dimension, Kind>` bounds preserve their
 concrete unit through checking, API freeze, semantic inspection, Codable, AOT,
 and resident JIT lowering.
 
