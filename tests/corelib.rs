@@ -5538,6 +5538,141 @@ fn run() {
 }
 
 #[test]
+fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping base decoder parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_base_decoder_parity_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+
+fn show64(text: String) -> String {
+    if base64.decode(text) == {
+        Ok(bytes) -> { return "OK:{bytes}" }
+        Err(reason) -> { return "ERR:{reason}" }
+    }
+    return "unreachable"
+}
+
+fn show64url(text: String) -> String {
+    if base64.decode_url(text) == {
+        Ok(bytes) -> { return "OK:{bytes}" }
+        Err(reason) -> { return "ERR:{reason}" }
+    }
+    return "unreachable"
+}
+
+fn show32(text: String) -> String {
+    if base32.decode(text) == {
+        Ok(bytes) -> { return "OK:{bytes}" }
+        Err(reason) -> { return "ERR:{reason}" }
+    }
+    return "unreachable"
+}
+
+comptime standard_ws = show64("Z g = =\n")
+comptime standard_unpadded = show64("Zg")
+comptime standard_interior = show64("Zg=A")
+comptime standard_excess = show64("Zg====")
+comptime standard_bits = show64("Zh==")
+comptime standard_padding = show64("=AAA")
+comptime standard_alphabet = show64("Zg-=")
+comptime standard_size = show64("A")
+comptime url_outer_ws = show64url(" \tZg==\n")
+comptime url_interior = show64url("Zg=A")
+comptime url_standard_alphabet = show64url("+w")
+comptime url_bits = show64url("Zh")
+comptime url_padding = show64url("=AAA")
+comptime url_size = show64url("A")
+comptime base32_loose = show32("m=y======\n")
+comptime base32_bits = show32("MZ======")
+comptime base32_short = show32("A")
+comptime base32_alphabet = show32("M0======")
+
+fn run() {
+    r_standard_ws := show64("Z g = =\n")
+    r_standard_unpadded := show64("Zg")
+    r_standard_interior := show64("Zg=A")
+    r_standard_excess := show64("Zg====")
+    r_standard_bits := show64("Zh==")
+    r_standard_padding := show64("=AAA")
+    r_standard_alphabet := show64("Zg-=")
+    r_standard_size := show64("A")
+    r_url_outer_ws := show64url(" \tZg==\n")
+    r_url_interior := show64url("Zg=A")
+    r_url_standard_alphabet := show64url("+w")
+    r_url_bits := show64url("Zh")
+    r_url_padding := show64url("=AAA")
+    r_url_size := show64url("A")
+    r_base32_loose := show32("m=y======\n")
+    r_base32_bits := show32("MZ======")
+    r_base32_short := show32("A")
+    r_base32_alphabet := show32("M0======")
+    print("{standard_ws}|{r_standard_ws}")
+    print("{standard_unpadded}|{r_standard_unpadded}")
+    print("{standard_interior}|{r_standard_interior}")
+    print("{standard_excess}|{r_standard_excess}")
+    print("{standard_bits}|{r_standard_bits}")
+    print("{standard_padding}|{r_standard_padding}")
+    print("{standard_alphabet}|{r_standard_alphabet}")
+    print("{standard_size}|{r_standard_size}")
+    print("{url_outer_ws}|{r_url_outer_ws}")
+    print("{url_interior}|{r_url_interior}")
+    print("{url_standard_alphabet}|{r_url_standard_alphabet}")
+    print("{url_bits}|{r_url_bits}")
+    print("{url_padding}|{r_url_padding}")
+    print("{url_size}|{r_url_size}")
+    print("{base32_loose}|{r_base32_loose}")
+    print("{base32_bits}|{r_base32_bits}")
+    print("{base32_short}|{r_base32_short}")
+    print("{base32_alphabet}|{r_base32_alphabet}")
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);
+    assert_eq!(code, 0, "base decoder AOT parity fixture failed: {stderr}");
+    let expected = concat!(
+        "OK:[102]|OK:[102]\n",
+        "OK:[102]|OK:[102]\n",
+        "OK:[102]|OK:[102]\n",
+        "OK:[102]|OK:[102]\n",
+        "OK:[102]|OK:[102]\n",
+        "ERR:invalid base64 at byte 0: padding may appear only at the end|ERR:invalid base64 at byte 0: padding may appear only at the end\n",
+        "ERR:invalid base64 at byte 2: byte 0x2D is not in the standard base64 alphabet|ERR:invalid base64 at byte 2: byte 0x2D is not in the standard base64 alphabet\n",
+        "ERR:invalid base64 at byte 1: encoded length cannot represent whole bytes|ERR:invalid base64 at byte 1: encoded length cannot represent whole bytes\n",
+        "OK:[102]|OK:[102]\n",
+        "OK:[102]|OK:[102]\n",
+        "OK:[251]|OK:[251]\n",
+        "OK:[102]|OK:[102]\n",
+        "ERR:invalid base64url at byte 0: padding may appear only at the end|ERR:invalid base64url at byte 0: padding may appear only at the end\n",
+        "ERR:invalid base64url at byte 1: encoded length cannot represent whole bytes|ERR:invalid base64url at byte 1: encoded length cannot represent whole bytes\n",
+        "OK:[102]|OK:[102]\n",
+        "OK:[102]|OK:[102]\n",
+        "OK:[]|OK:[]\n",
+        "ERR:invalid base32 at byte 1: byte 0x30 is not in the base32 alphabet|ERR:invalid base32 at byte 1: byte 0x30 is not in the base32 alphabet\n",
+    );
+    assert_eq!(stdout, expected);
+    let dev_path = dir.join("base_decoder_parity.jet");
+    fs::write(&dev_path, source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new())),
+        other => panic!("base decoder default-dev parity fixture failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn xml_stream_reader_is_incremental_exact_and_terminal() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

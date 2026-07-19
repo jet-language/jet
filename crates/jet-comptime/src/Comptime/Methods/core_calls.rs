@@ -232,30 +232,119 @@ fn base64_encode(bytes: Vec<u8>) -> String {
     out
 }
 
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
-    fn digit(c: u8) -> Option<u8> {
-        BASE64_ALPHABET
-            .iter()
-            .position(|&d| d == c)
-            .map(|i| i as u8)
+fn base64_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
     }
-    let s = s.trim_end_matches('=');
-    let bytes = s.as_bytes();
-    if bytes.len() % 4 == 1 {
+}
+
+// D-ENCBASE-STRICT1=A: keep this byte-for-byte equivalent to the generated
+// runtime union until edition 2027 can select the ratified strict defaults.
+fn base64_decode_2026_aot(text: &str) -> Option<Vec<u8>> {
+    let input: Vec<u8> = text.bytes().filter(|&b| !b.is_ascii_whitespace()).collect();
+    if input.len() % 4 != 0 {
         return None;
     }
-    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-    for chunk in bytes.chunks(4) {
-        let d: Vec<u8> = chunk.iter().map(|&c| digit(c)).collect::<Option<_>>()?;
-        out.push((d[0] << 2) | (d.get(1).copied().unwrap_or(0) >> 4));
-        if d.len() > 2 {
-            out.push((d[1] << 4) | (d[2] >> 2));
-        }
-        if d.len() > 3 {
-            out.push((d[2] << 6) | d[3]);
+    let mut out = Vec::with_capacity(input.len() / 4 * 3);
+    for chunk in input.chunks(4) {
+        let a = base64_digit(chunk[0])?;
+        let b = base64_digit(chunk[1])?;
+        out.push((a << 2) | (b >> 4));
+        if chunk[2] != b'=' {
+            let c = base64_digit(chunk[2])?;
+            out.push((b << 4) | (c >> 2));
+            if chunk[3] != b'=' {
+                let d = base64_digit(chunk[3])?;
+                out.push((c << 6) | d);
+            }
         }
     }
     Some(out)
+}
+
+fn base64_decode_2026_comptime(text: &str) -> Option<Vec<u8>> {
+    let input = text.trim_end_matches('=').as_bytes();
+    if input.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(input.len() / 4 * 3);
+    for chunk in input.chunks(4) {
+        let digits: Vec<u8> = chunk
+            .iter()
+            .map(|&byte| base64_digit(byte))
+            .collect::<Option<_>>()?;
+        out.push((digits[0] << 2) | (digits.get(1).copied().unwrap_or(0) >> 4));
+        if digits.len() > 2 {
+            out.push((digits[1] << 4) | (digits[2] >> 2));
+        }
+        if digits.len() > 3 {
+            out.push((digits[2] << 6) | digits[3]);
+        }
+    }
+    Some(out)
+}
+
+fn base64_2026_error(text: &str, url: bool) -> String {
+    let label = if url { "base64url" } else { "base64" };
+    let alphabet = if url {
+        "URL-safe base64"
+    } else {
+        "standard base64"
+    };
+    for (offset, &byte) in text.as_bytes().iter().enumerate() {
+        let accepted = byte.is_ascii_alphanumeric()
+            || matches!(byte, b'=' | b'+' | b'/')
+            || (url && matches!(byte, b'-' | b'_'))
+            || byte.is_ascii_whitespace();
+        if !accepted {
+            return format!(
+                "invalid {label} at byte {offset}: byte 0x{byte:02X} is not in the {alphabet} alphabet"
+            );
+        }
+    }
+    if let Some(offset) = text.as_bytes().iter().position(|&byte| byte == b'=') {
+        if text.as_bytes()[offset + 1..]
+            .iter()
+            .any(|&byte| byte != b'=' && !byte.is_ascii_whitespace())
+        {
+            return format!(
+                "invalid {label} at byte {offset}: padding may appear only at the end"
+            );
+        }
+    }
+    format!(
+        "invalid {label} at byte {}: encoded length cannot represent whole bytes",
+        text.len()
+    )
+}
+
+fn base64_decode_2026(text: &str, url: bool) -> Result<Vec<u8>, String> {
+    let prepared = if url {
+        let mut value = text.trim().replace('-', "+").replace('_', "/");
+        while value.len() % 4 != 0 {
+            value.push('=');
+        }
+        value
+    } else {
+        text.to_string()
+    };
+    match (
+        base64_decode_2026_aot(&prepared),
+        base64_decode_2026_comptime(&prepared),
+    ) {
+        (Some(aot), Some(comptime)) if aot != comptime => Err(format!(
+            "invalid {} at byte {}: historical decoders disagree",
+            if url { "base64url" } else { "base64" },
+            text.len()
+        )),
+        (Some(bytes), _) | (_, Some(bytes)) => Ok(bytes),
+        (None, None) => Err(base64_2026_error(text, url)),
+    }
 }
 
 const BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -283,12 +372,14 @@ fn base32_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn base32_val(b: u8) -> Result<u8, String> {
+fn base32_val(b: u8, offset: usize) -> Result<u8, String> {
     match b {
         b'A'..=b'Z' => Ok(b - b'A'),
         b'a'..=b'z' => Ok(b - b'a'),
         b'2'..=b'7' => Ok(b - b'2' + 26),
-        _ => Err(format!("invalid base32 character: {:?}", b as char)),
+        _ => Err(format!(
+            "invalid base32 at byte {offset}: byte 0x{b:02X} is not in the base32 alphabet"
+        )),
     }
 }
 
@@ -296,8 +387,11 @@ fn base32_decode(text: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     let mut buffer: u32 = 0;
     let mut bits = 0u8;
-    for b in text.bytes().filter(|b| !b.is_ascii_whitespace() && *b != b'=') {
-        buffer = (buffer << 5) | base32_val(b)? as u32;
+    for (offset, b) in text.bytes().enumerate() {
+        if b.is_ascii_whitespace() || b == b'=' {
+            continue;
+        }
+        buffer = (buffer << 5) | base32_val(b, offset)? as u32;
         bits += 5;
         if bits >= 8 {
             out.push(((buffer >> (bits - 8)) & 0xff) as u8);
@@ -1465,12 +1559,9 @@ pub(super) fn apply_core_call(
         }
         ("core.encoding.base64", "decode") => {
             let s = as_string(one(0)?, span)?;
-            Ok(match base64_decode(s) {
-                Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                None => CtValue::ResErr(Box::new(CtValue::Str(format!(
-                    "`{}` isn't valid base64",
-                    s
-                )))),
+            Ok(match base64_decode_2026(s, false) {
+                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
             })
         }
         // --- core.encoding.base64 URL-safe variant (pure; mirrors AOT's
@@ -1487,16 +1578,9 @@ pub(super) fn apply_core_call(
         }
         ("core.encoding.base64", "decode_url") => {
             let s = as_string(one(0)?, span)?;
-            let mut padded = s.trim().replace('-', "+").replace('_', "/");
-            while padded.len() % 4 != 0 {
-                padded.push('=');
-            }
-            Ok(match base64_decode(&padded) {
-                Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                None => CtValue::ResErr(Box::new(CtValue::Str(format!(
-                    "`{}` isn't valid base64url",
-                    s
-                )))),
+            Ok(match base64_decode_2026(s, true) {
+                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
             })
         }
         // --- core.encoding.base32 (pure; mirrors AOT's `jet_std_base32_*`,
