@@ -83,6 +83,18 @@ pub fn net_method_return(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),
+        ("UdpSocket", "receive") if n_args == 2 => Some(Some(result_ty(
+            Type::Named("UdpPacket".to_string()),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UdpSocket", "send_to") if n_args == 3 => Some(Some(result_ty(
+            Type::Int,
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UnixListener", "accept") if n_args == 1 => Some(Some(result_ty(
+            Type::Named("UnixStream".to_string()),
+            Type::Named("NetError".to_string()),
+        ))),
         ("UnixStream" | "TlsStream", "read") if n_args == 2 => Some(Some(result_ty(
             Type::List(Box::new(u8_ty())),
             Type::Named("NetError".to_string()),

@@ -3480,8 +3480,10 @@ fn run() {
     server :: net.udp_bind("127.0.0.1:0") ?? panic("server bind")
     client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
     address :: net.udp_local_addr(server) ?? panic("server address")
-    sent :: net.udp_send_bytes_to(client, [0, 255, 1, 2, 3], address) ?? panic("send")
-    packet :: net.udp_receive(server, 3) ?? panic("receive")
+    budget :: Duration.seconds(1) ?? panic("deadline")
+    payload: [U8] :: [0, 255, 1, 2, 3]
+    sent :: client.send_to(payload, address, deadline: budget) ?? panic("send")
+    packet :: server.receive(3, deadline: budget) ?? panic("receive")
     print("{sent}:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
 }
 "#,
@@ -3768,15 +3770,15 @@ use core.net as net
 
 fn run() {{
     listener :: net.unix_listen("{socket}") ?? panic("listen")
+    budget :: Duration.seconds(1) ?? panic("budget")
     client := net.unix_connect("{socket}") ?? panic("connect")
-    server := net.unix_accept(listener) ?? panic("accept")
+    server := listener.accept(deadline: budget) ?? panic("accept")
     interest: NetReadyInterest :: .Read
     expired :: Duration.milliseconds(0) ?? panic("expired")
     if client.ready(interest, deadline: expired) == {{
         Ok(_) -> panic("expired readiness succeeded")
         Err(error) -> print(net.error_operation(error))
     }}
-    budget :: Duration.seconds(1) ?? panic("budget")
     payload: [U8] :: [7]
     client.write_all(payload, deadline: budget) ?? panic("write")
     print(server.read(1, deadline: budget) ?? panic("read"))

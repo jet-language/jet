@@ -1501,6 +1501,25 @@ fn jet_net_udp_receive(socket: &JetUdpSocket, limit: i64) -> Result<JetUdpPacket
     })
 }
 
+fn jet_net_udp_receive_deadline(
+    socket: &JetUdpSocket,
+    limit: i64,
+    deadline: &jet_std::Duration,
+) -> Result<JetUdpPacket, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "udp receive")?;
+    jet_net_udp_receive(socket, limit)
+}
+
+fn jet_net_udp_send_bytes_to_deadline(
+    socket: &JetUdpSocket,
+    data: &Vec<u8>,
+    addr: &JetSocketAddr,
+    deadline: &jet_std::Duration,
+) -> Result<i64, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "udp send")?;
+    jet_net_udp_send_bytes_to(socket, data, addr)
+}
+
 fn jet_net_udp_close(socket: &JetUdpSocket) -> Result<(), JetNetError> {
     socket.closed.store(true, std::sync::atomic::Ordering::Release);
     Ok(())
@@ -1593,8 +1612,19 @@ fn jet_net_unix_accept(listener: &JetUnixListener) -> Result<JetUnixStream, JetN
     }
 }
 
+#[cfg(unix)]
+fn jet_net_unix_accept_deadline(listener: &JetUnixListener, deadline: &jet_std::Duration) -> Result<JetUnixStream, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "unix accept")?;
+    jet_net_unix_accept(listener)
+}
+
 #[cfg(not(unix))]
 fn jet_net_unix_accept(_listener: &JetUnixListener) -> Result<JetUnixStream, JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail("unix accept", None, None, "unix sockets are not supported on this platform".to_string(), None)))
+}
+
+#[cfg(not(unix))]
+fn jet_net_unix_accept_deadline(_listener: &JetUnixListener, _deadline: &jet_std::Duration) -> Result<JetUnixStream, JetNetError> {
     Err(JetNetError::Unsupported(jet_net_detail("unix accept", None, None, "unix sockets are not supported on this platform".to_string(), None)))
 }
 

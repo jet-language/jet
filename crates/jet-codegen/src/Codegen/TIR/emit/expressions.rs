@@ -1607,6 +1607,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::UdpSocketClose => {
                     format!("{}jet_net_udp_close(&({}))", root, recv)
                 }
+                THandleOp::UdpSocketReceiveDeadline => format!(
+                    "{}jet_net_udp_receive_deadline(&({}), {}, &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::UdpSocketSendToDeadline => format!(
+                    "{}jet_net_udp_send_bytes_to_deadline(&({}), &({}), &({}), &({}))", root, recv, a(0), a(1), a(2)
+                ),
+                THandleOp::UnixListenerAcceptDeadline => format!(
+                    "{}jet_net_unix_accept_deadline(&({}), &({}))", root, recv, a(0)
+                ),
                 THandleOp::UnixStreamReadDeadline => format!(
                     "{}jet_net_unix_read_bytes_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1)
                 ),

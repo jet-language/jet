@@ -2519,6 +2519,9 @@ impl LowerCtx<'_, '_> {
             | THandleOp::TcpStreamReady
             | THandleOp::UdpSocketReady
             | THandleOp::UdpSocketClose
+            | THandleOp::UdpSocketReceiveDeadline
+            | THandleOp::UdpSocketSendToDeadline
+            | THandleOp::UnixListenerAcceptDeadline
             | THandleOp::UnixStreamReadDeadline
             | THandleOp::UnixStreamWriteAllDeadline
             | THandleOp::UnixStreamReady
