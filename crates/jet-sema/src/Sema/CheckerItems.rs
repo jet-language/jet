@@ -710,7 +710,7 @@ impl<'a> Checker<'a> {
         if enum_name == Syntax::DURATION_UNIT_TYPE {
             return true;
         }
-        if matches!(enum_name, "Overflow" | "FailurePolicy" | "DispatchState") {
+        if matches!(enum_name, "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome") {
             return true;
         }
         if matches!(enum_name, "NetShutdown" | "NetReadyInterest") {
@@ -1228,7 +1228,10 @@ impl<'a> Checker<'a> {
         args: &mut [EnumLitArg],
         span: Span,
     ) -> Type {
-        let ty = Type::Named(type_name.to_string());
+        let contextual_ty = self.expected_type.clone().filter(|ty| {
+            matches!(ty, Type::Apply { name, .. } if name == type_name)
+        });
+        let ty = contextual_ty.clone().unwrap_or_else(|| Type::Named(type_name.to_string()));
         let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
             self.diags.push(Diagnostic::error(
                 "E0119",
@@ -1308,6 +1311,12 @@ impl<'a> Checker<'a> {
                 }
             }
             VariantPayload::Single(expected, _) => {
+                let contextual_payload = match (&contextual_ty, type_name, variant) {
+                    (Some(Type::Apply { args, .. }), "HookDecision" | "HookOutcome", "Transform" | "Continue") => args.first(),
+                    (Some(Type::Apply { args, .. }), "HookDecision" | "HookOutcome", "Fail") => args.get(1),
+                    _ => None,
+                };
+                let expected = contextual_payload.unwrap_or(expected);
                 if args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0303",
@@ -1320,7 +1329,17 @@ impl<'a> Checker<'a> {
                 if let Some(EnumLitArg::Positional(e)) = args.first_mut() {
                     let et = self.infer(e);
                     if let Some(et) = &et {
-                        self.check_type_assignable(expected, &et, e.span());
+                        if contextual_payload.is_some() && et != expected {
+                            self.diags.push(Diagnostic::error(
+                                "E0108",
+                                format!("`{type_name}.{variant}` needs {}, not {}", expected.show(), et.show()),
+                                "the decision payload must match the hook's declared payload or error type".to_string(),
+                                type_fix_hint(expected, et),
+                                Some(e.span()),
+                            ));
+                        } else {
+                            self.check_type_assignable(expected, et, e.span());
+                        }
                     }
                     // D-EPPAYLOAD1 (I2 fix): same owning-position clone-insertion
                     // as a struct-lit field value — see `clone_borrowed_struct_field_value`.
@@ -1430,8 +1449,9 @@ impl<'a> Checker<'a> {
         if self.lookup(variant).is_some() || self.consts.contains_key(variant) {
             return None;
         }
-        let Type::Named(enum_name) = subj_ty else {
-            return None;
+        let enum_name = match subj_ty {
+            Type::Named(name) | Type::Apply { name, .. } => name,
+            _ => return None,
         };
         let variant_known = self
             .resolve_enum_variants_cloned(enum_name)
@@ -1488,8 +1508,9 @@ impl<'a> Checker<'a> {
             // Also handles JSON patterns written in the arm-head position
             // (the same call-as-pattern reuse JSON already relies on).
             Expr::Ident(variant, span) if subject_name.is_some() => {
-                let Type::Named(enum_name) = subj_ty else {
-                    return None;
+                let enum_name = match subj_ty {
+                    Type::Named(name) | Type::Apply { name, .. } => name,
+                    _ => return None,
                 };
                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
                 // D-TAG1: a bare group name is a unit-shaped subtree pattern.
@@ -1523,8 +1544,9 @@ impl<'a> Checker<'a> {
                 if self.lookup(binding).is_some() {
                     return None;
                 } // it's a real local
-                let Type::Named(enum_name) = subj_ty else {
-                    return None;
+                let enum_name = match subj_ty {
+                    Type::Named(name) | Type::Apply { name, .. } => name,
+                    _ => return None,
                 };
                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
                 let (_, payload) = variants.get(call.name.as_str())?;
@@ -1822,6 +1844,41 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
                 HashMap::new()
+            }
+            (
+                Type::Apply { name: enum_name, args },
+                Pattern::Variant { variant, bindings, .. },
+            ) if matches!(enum_name.as_str(), "HookDecision" | "HookOutcome") => {
+                let payload_ty = match (enum_name.as_str(), variant.as_str()) {
+                    ("HookDecision", "Continue" | "Cancel") | ("HookOutcome", "Cancel") => None,
+                    ("HookDecision", "Transform") | ("HookOutcome", "Continue") => args.first().cloned(),
+                    ("HookDecision" | "HookOutcome", "Fail") => args.get(1).cloned(),
+                    _ => {
+                        self.diags.push(Diagnostic::error(
+                            "E0305",
+                            format!("pattern `{variant}` doesn't belong to `{enum_name}`"),
+                            "pattern tests must name a variant on the value's enum type".to_string(),
+                            "check the variant spelling".to_string(),
+                            Some(span),
+                        ));
+                        return HashMap::new();
+                    }
+                };
+                let expected_count = usize::from(payload_ty.is_some());
+                if bindings.len() != expected_count {
+                    self.diags.push(Diagnostic::error(
+                        "E0306",
+                        format!("pattern `{variant}` expects {expected_count} binding{}, got {}", if expected_count == 1 { "" } else { "s" }, bindings.len()),
+                        "each payload field needs its own binding name".to_string(),
+                        if expected_count == 1 { format!("write `{variant}(value)`") } else { format!("write `{variant}`") },
+                        Some(span),
+                    ));
+                }
+                let mut result = HashMap::new();
+                if let (Some(ty), Some(crate::AST::PatSlot::Bind { name, .. })) = (payload_ty, bindings.first()) {
+                    result.insert(name.clone(), ty);
+                }
+                result
             }
             (
                 Type::Named(enum_name),

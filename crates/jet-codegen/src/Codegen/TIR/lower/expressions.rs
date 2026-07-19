@@ -1403,7 +1403,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .core_qualified_rust_type_name(enum_name)
                     .unwrap_or(enum_name.as_str());
                 if env.ty_of(enum_name).is_none()
-                    && matches!(enum_name.as_str(), "Overflow" | "FailurePolicy" | "DispatchState")
+                    && matches!(enum_name.as_str(), "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome")
                 {
                     return TExpr {
                         ty: Type::Named(enum_name.clone()),

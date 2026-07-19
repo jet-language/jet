@@ -54,6 +54,15 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
 }
 
 pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnostic {
+    if module == "core.event" && name == "policy_async" {
+        return Diagnostic::error(
+            "E1004",
+            "`event.policy_async` was retired".to_string(),
+            "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model".to_string(),
+            "use `event.async_result<T, E>(AsyncPolicy.{ capacity: n, overflow: .Block }, FailurePolicy.Collect)`".to_string(),
+            Some(span),
+        );
+    }
     let items = core_module_items(module);
     let mut fix = if items.is_empty() {
         "import a specific core module, like `import core.files as fs;`".to_string()

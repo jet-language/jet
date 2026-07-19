@@ -224,7 +224,7 @@ impl<'a> Checker<'a> {
                             // D-REACT1=B: reactive handle types.
                             | "Signal" | "Derived" | "Computed"
                             // D-EVENT1=D: first-party typed event/hook handles.
-                            | "Event" | "Hook"
+                            | "Event" | "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome"
                             // D-STREAMYIELD1: generator return type.
                             | "Stream"
                             // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.

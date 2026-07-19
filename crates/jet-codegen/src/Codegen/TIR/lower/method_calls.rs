@@ -1233,7 +1233,7 @@ pub(crate) fn lower_method_call(
         let recv_t = lower_expr(receiver, cx, env);
         let unit = unit_type();
         let result_ty = match (recv_type.as_deref(), method) {
-            (Some("Event"), "emit" | "emit_async") => Type::Named("EventTrace".to_string()),
+            (Some("Event"), "emit") => Type::Named("EventTrace".to_string()),
             (Some("AsyncEvent"), "emit_async") => match &recv_t.ty {
                 Type::Apply { args, .. } if args.len() >= 2 => Type::Apply {
                     name: "Task".to_string(),
@@ -1243,11 +1243,19 @@ pub(crate) fn lower_method_call(
             },
             (Some("Event"), "on" | "once" | "on_priority")
             | (Some("AsyncEvent"), "on" | "once" | "on_priority")
-            | (Some("Hook"), "on" | "once" | "on_priority") => {
+            | (Some("Hook"), "on" | "once" | "on_priority")
+            | (Some("DecisionHook"), "on" | "once" | "on_priority") => {
                 Type::Named("Subscription".to_string())
             }
             (Some("Hook"), "run") => match &recv_t.ty {
                 Type::Apply { args, .. } if args.len() >= 2 => args[1].clone(),
+                _ => Type::Named("Unknown".to_string()),
+            },
+            (Some("DecisionHook"), "run") => match &recv_t.ty {
+                Type::Apply { args, .. } if args.len() >= 2 => Type::Apply {
+                    name: "HookOutcome".to_string(),
+                    args: vec![args[0].clone(), args[1].clone()],
+                },
                 _ => Type::Named("Unknown".to_string()),
             },
             (Some("DispatchReport"), "trace") => Type::Named("EventTrace".to_string()),
@@ -1269,6 +1277,10 @@ pub(crate) fn lower_method_call(
             Type::Apply { name, args } if name == "AsyncEvent" && args.len() >= 2 => Some(Type::Result {
                 ok: Box::new(Type::Named("Void".to_string())),
                 err: Box::new(args[1].clone()),
+            }),
+            Type::Apply { name, args } if name == "DecisionHook" && args.len() >= 2 => Some(Type::Apply {
+                name: "HookDecision".to_string(),
+                args: vec![args[0].clone(), args[1].clone()],
             }),
             Type::Apply { args, .. } if args.len() >= 2 => args.get(1).cloned(),
             _ => None,

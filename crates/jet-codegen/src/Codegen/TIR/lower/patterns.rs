@@ -541,13 +541,20 @@ pub(crate) fn tir_add_pattern_bindings(
     cx: &Cx,
     pattern: &Pattern,
     env: &mut LowerEnv,
-    _subject_ty: Option<&Type>,
+    subject_ty: Option<&Type>,
 ) {
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
         } => {
-            let tys = variant_payload_types(cx, variant);
+            let hook_payload = match (subject_ty, variant.as_str()) {
+                (Some(Type::Apply { name, args }), "Continue" | "Transform")
+                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") => args.first().cloned(),
+                (Some(Type::Apply { name, args }), "Fail")
+                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") => args.get(1).cloned(),
+                _ => None,
+            };
+            let tys = hook_payload.map(|ty| vec![ty]).or_else(|| variant_payload_types(cx, variant));
             for (i, slot) in bindings.iter().enumerate() {
                 if let PatSlot::Bind { name, .. } = slot {
                     // Payload types are scalar/Char (the enum is covered), so the
@@ -563,7 +570,7 @@ pub(crate) fn tir_add_pattern_bindings(
         }
         Pattern::Or(alts, _) => {
             if let Some(first) = alts.first() {
-                tir_add_pattern_bindings(cx, first, env, _subject_ty);
+                tir_add_pattern_bindings(cx, first, env, subject_ty);
             }
         }
         _ => {}
@@ -616,6 +623,15 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     }
     if type_name == "DispatchState" {
         return format!("{}jet_std::JetDispatchState::{}", cx.root_prefix, variant);
+    }
+    if type_name == "HookPolicy" {
+        return format!("{}jet_std::JetHookPolicy::{}", cx.root_prefix, variant);
+    }
+    if type_name == "HookDecision" {
+        return format!("{}jet_std::JetHookDecision::{}", cx.root_prefix, variant);
+    }
+    if type_name == "HookOutcome" {
+        return format!("{}jet_std::JetHookOutcome::{}", cx.root_prefix, variant);
     }
     if matches!(type_name, "NetShutdown" | "NetReadyInterest") {
         return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);

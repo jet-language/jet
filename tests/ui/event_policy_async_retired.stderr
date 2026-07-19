@@ -1,0 +1,7 @@
+Error [E1004]: `event.policy_async` was retired
+  --> tests/ui/event_policy_async_retired.jet:4:21
+    |
+  4 |     policy :: event.policy_async(4)
+    |                     ^^^^^^^^^^^^
+ Why: a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model
+ Fix: use `event.async_result<T, E>(AsyncPolicy.{ capacity: n, overflow: .Block }, FailurePolicy.Collect)`

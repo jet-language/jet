@@ -1237,6 +1237,7 @@ impl<'a> Checker<'a> {
                     let resolved = self.expected_type.clone().and_then(|et| {
                         let name = match &et {
                             Type::Named(n) => Some(n.clone()),
+                            Type::Apply { name, .. } => Some(name.clone()),
                             Type::Option(inner) => match inner.as_ref() {
                                 Type::Named(n) => Some(n.clone()),
                                 _ => None,

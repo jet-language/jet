@@ -1274,6 +1274,7 @@ fn greet() -> String { return input() }
         assert!(is_event_handle_type(Some("Subscription")));
         assert!(is_event_handle_type(Some("EventScope")));
         assert!(is_event_handle_type(Some("EventTrace")));
+        assert!(is_event_handle_type(Some("DecisionHook")));
         assert!(!is_event_handle_type(Some("Signal")));
         assert!(is_event_method_name("on", 2));
         assert!(is_event_method_name("once", 2));
@@ -1281,6 +1282,7 @@ fn greet() -> String { return input() }
         assert!(is_event_method_name("emit", 1));
         assert!(is_event_method_name("emit_async", 1));
         assert!(is_event_method_name("run", 2));
+        assert!(is_event_method_name("run", 1));
         assert!(is_event_method_name("unsubscribe", 0));
         assert!(is_event_method_name("active_count", 0));
         assert!(is_event_method_name("summary", 0));
@@ -1289,9 +1291,10 @@ fn greet() -> String { return input() }
         assert!(core_call_covered("core.event", "new"));
         assert!(core_call_covered("core.event", "with_policy"));
         assert!(core_call_covered("core.event", "hook"));
+        assert!(core_call_covered("core.event", "decision_hook"));
         assert!(core_call_covered("core.event", "scope"));
         assert!(core_call_covered("core.event", "policy_sync"));
-        assert!(core_call_covered("core.event", "policy_async"));
+        assert!(!core_call_covered("core.event", "policy_async"));
         assert!(!core_call_covered("core.event", "subscribe"));
     }
 

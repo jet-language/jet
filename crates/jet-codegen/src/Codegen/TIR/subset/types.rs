@@ -44,7 +44,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
-        "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy"
+        "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError")) {
         return true;
     }
@@ -89,7 +89,7 @@ pub(crate) fn is_covered_event_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else { return false; };
     match name.as_str() {
         "Event" | "DispatchReport" | "DispatchFailure" => args.len() == 1 && is_subset_param_ty(&args[0], cx),
-        "Hook" | "AsyncEvent" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
+        "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome" | "AsyncEvent" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
         _ => false,
     }
 }

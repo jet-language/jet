@@ -91,6 +91,9 @@ impl<'a> Checker<'a> {
                 if self.imports.contains_key(name) || self.core_imports.contains_key(name) {
                     continue;
                 }
+                if self.is_known_enum(name) {
+                    continue;
+                }
                 if self.lookup(name).is_none() && !self.consts.contains_key(name) {
                     self.unknown_name(name, lam.span);
                 }

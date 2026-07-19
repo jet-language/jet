@@ -121,13 +121,6 @@ pub(crate) fn emit_tir_core_call(
         ("core.event", "policy_sync") => {
             format!("{}jet_std::JetEventPolicy::sync()", cx.root_prefix)
         }
-        ("core.event", "policy_async") => {
-            format!(
-                "{}jet_std::JetEventPolicy::async_buffered({})",
-                cx.root_prefix,
-                arg(0)
-            )
-        }
         ("core.event", "new") => {
             let elem = match ret_ty {
                 Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Int),
@@ -178,6 +171,19 @@ pub(crate) fn emit_tir_core_call(
                 cx.root_prefix,
                 cx.rust_type(&payload),
                 cx.rust_type(&result),
+                arg(0)
+            )
+        }
+        ("core.event", "decision_hook") => {
+            let (payload, error) = match ret_ty {
+                Type::Apply { args, .. } if args.len() >= 2 => (args[0].clone(), args[1].clone()),
+                _ => (Type::Int, Type::String),
+            };
+            format!(
+                "{}jet_std::JetDecisionHook::<{}, {}>::new({})",
+                cx.root_prefix,
+                cx.rust_type(&payload),
+                cx.rust_type(&error),
                 arg(0)
             )
         }

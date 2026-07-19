@@ -1992,18 +1992,6 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::Named(crate::Syntax::TYPE_EVENT_POLICY.to_string()));
                 }
-                ("core.event", "policy_async") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("policy_async", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("policy_async", 0, &Type::Int, &mut args[0]);
-                    return Some(Type::Named(crate::Syntax::TYPE_EVENT_POLICY.to_string()));
-                }
                 ("core.event", "new") => {
                     if !args.is_empty() {
                         self.diags
@@ -2112,6 +2100,35 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("hook", 0, &type_args[1], &mut args[0]);
                     return Some(Type::Apply {
                         name: crate::Syntax::TYPE_HOOK.to_string(),
+                        args: vec![type_args[0].clone(), type_args[1].clone()],
+                    });
+                }
+                ("core.event", "decision_hook") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity("decision_hook", 1, args.len(), span));
+                        for arg in args.iter_mut() { self.infer(&mut arg.expr); }
+                        return None;
+                    }
+                    if type_args.len() != 2 {
+                        self.diags.push(Diagnostic::error(
+                            "E0904",
+                            "`event.decision_hook` needs payload and error types".to_string(),
+                            "`DecisionHook<T, E>` transforms or cancels a typed payload and preserves typed failures".to_string(),
+                            "call it with explicit type arguments: `event.decision_hook<Request, Error>(HookPolicy.FirstCancelElseTransform)`".to_string(),
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                    self.check_declared_type(&type_args[0], span);
+                    self.check_declared_type(&type_args[1], span);
+                    self.expect_core_arg(
+                        "decision_hook",
+                        0,
+                        &Type::Named(crate::Syntax::TYPE_HOOK_POLICY.to_string()),
+                        &mut args[0],
+                    );
+                    return Some(Type::Apply {
+                        name: crate::Syntax::TYPE_DECISION_HOOK.to_string(),
                         args: vec![type_args[0].clone(), type_args[1].clone()],
                     });
                 }

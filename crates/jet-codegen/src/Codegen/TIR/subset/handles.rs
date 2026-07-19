@@ -732,8 +732,17 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 ],
             }
         }
+        ("core.event", "decision_hook") => {
+            return Type::Apply {
+                name: "DecisionHook".to_string(),
+                args: vec![
+                    Type::Named("Unknown".to_string()),
+                    Type::Named("Unknown".to_string()),
+                ],
+            }
+        }
         ("core.event", "scope") => return Type::Named("EventScope".to_string()),
-        ("core.event", "policy_sync" | "policy_async") => {
+        ("core.event", "policy_sync") => {
             return Type::Named("EventPolicy".to_string())
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.

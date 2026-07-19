@@ -187,6 +187,9 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == crate::Syntax::TYPE_HOOK => {
             hook_method_return(args, method, arg_count)
         }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_DECISION_HOOK => {
+            decision_hook_method_return(args, method, arg_count)
+        }
         Type::Named(n) if n == crate::Syntax::TYPE_SUBSCRIPTION => {
             subscription_method_return(method, arg_count)
         }
@@ -789,11 +792,11 @@ fn event_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Opti
         ("on" | "once", 2) | ("on_priority", 3) => Some(Some(Type::Named(
             crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
         ))),
-        ("emit" | "emit_async", 1) => Some(Some(Type::Named(
+        ("emit", 1) => Some(Some(Type::Named(
             crate::Syntax::TYPE_EVENT_TRACE.to_string(),
         ))),
         ("trace", 0) => Some(Some(Type::String)),
-        ("listener_count" | "queued_count", 0) => Some(Some(Type::Int)),
+        ("listener_count", 0) => Some(Some(Type::Int)),
         _ => {
             let _ = payload;
             None
@@ -829,6 +832,22 @@ fn hook_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
         ))),
         ("run", 2) => Some(Some(result)),
         ("trace", 0) => Some(Some(Type::String)),
+        ("listener_count", 0) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
+fn decision_hook_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let payload = args.first().cloned().unwrap_or(Type::Int);
+    let error = args.get(1).cloned().unwrap_or(Type::String);
+    match (method, nargs) {
+        ("on" | "once", 2) | ("on_priority", 3) => Some(Some(Type::Named(
+            crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
+        ))),
+        ("run", 1) => Some(Some(Type::Apply {
+            name: crate::Syntax::TYPE_HOOK_OUTCOME.to_string(),
+            args: vec![payload, error],
+        })),
         ("listener_count", 0) => Some(Some(Type::Int)),
         _ => None,
     }
@@ -1346,7 +1365,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         effect_bound: None,
                     },
                 ]),
-                "emit" | "emit_async" => Some(vec![payload]),
+                "emit" => Some(vec![payload]),
                 _ => Some(vec![]),
             }
         }
@@ -1393,6 +1412,35 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     },
                 ]),
                 "run" => Some(vec![payload, result]),
+                _ => Some(vec![]),
+            }
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_DECISION_HOOK => {
+            let payload = args.first().cloned().unwrap_or(Type::Int);
+            let error = args.get(1).cloned().unwrap_or(Type::String);
+            let decision = Type::Apply {
+                name: crate::Syntax::TYPE_HOOK_DECISION.to_string(),
+                args: vec![payload.clone(), error],
+            };
+            match method {
+                "on" | "once" => Some(vec![
+                    Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
+                    Type::Fn {
+                        params: vec![payload],
+                        ret: Some(Box::new(decision)),
+                        effect_bound: None,
+                    },
+                ]),
+                "on_priority" => Some(vec![
+                    Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
+                    Type::Int,
+                    Type::Fn {
+                        params: vec![payload],
+                        ret: Some(Box::new(decision)),
+                        effect_bound: None,
+                    },
+                ]),
+                "run" => Some(vec![payload]),
                 _ => Some(vec![]),
             }
         }

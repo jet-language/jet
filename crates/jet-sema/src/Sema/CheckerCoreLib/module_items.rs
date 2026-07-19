@@ -609,9 +609,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "new",
             "with_policy",
             "hook",
+            "decision_hook",
             "scope",
             "policy_sync",
-            "policy_async",
             "async_result",
         ],
         // D-HONESTNUM1=A: Measurement<T> constructor.

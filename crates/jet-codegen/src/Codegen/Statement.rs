@@ -25,6 +25,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_io = etype.map(|t| matches!(t, "IOError" | "IOOperation")).unwrap_or(false);
     let is_email = etype.is_some_and(|t| matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
+    let is_hook_outcome = etype == Some("HookOutcome");
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
     let is_key = {
         let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
@@ -50,6 +51,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 format!("{}jet_email::{rust}", cx.root_prefix)
             } else if t == "AuthError" {
                 format!("{}JetAuthError", cx.root_prefix)
+            } else if t == "HookOutcome" {
+                format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
                 format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
             } else {
@@ -68,7 +71,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON and Key variants keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_email || is_auth {
+        if is_json || is_key || is_io || is_email || is_auth || is_hook_outcome {
             v.to_string()
         } else {
             mangle_variant(v)

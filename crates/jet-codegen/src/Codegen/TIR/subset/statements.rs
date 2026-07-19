@@ -635,7 +635,7 @@ pub(crate) fn switch_in_subset(
         let Some(enum_name) = subj_enum else {
             return false;
         };
-        if !enum_is_covered(&enum_name, cx) {
+        if enum_name != "HookOutcome" && !enum_is_covered(&enum_name, cx) {
             return false;
         }
         for a in arms {

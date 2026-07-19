@@ -967,6 +967,30 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
+            if matches!(&recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_EVENT)
+                && matches!(method, "emit_async" | "queued_count")
+            {
+                let (what, fix) = if method == "emit_async" {
+                    (
+                        "`Event.emit_async` was retired",
+                        "construct an `AsyncEvent<T, E>` with `event.async_result`, then call `.emit_async(payload)`",
+                    )
+                } else {
+                    (
+                        "`Event.queued_count` was retired",
+                        "use `.queued_count()` on an `AsyncEvent<T, E>`",
+                    )
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0102",
+                    what.to_string(),
+                    "synchronous `Event<T>` dispatches immediately; only `AsyncEvent<T, E>` owns a scheduler queue".to_string(),
+                    fix.to_string(),
+                    Some(span),
+                ));
+                for arg in args.iter_mut() { self.infer(&mut arg.expr); }
+                return None;
+            }
             match &recv_ty {
                 Type::Apply { name, .. } if name == "Pool" && method == "add" => {
                     self.record_memory_event(crate::Sema::MemoryEvent::new(
@@ -2237,6 +2261,7 @@ impl<'a> Checker<'a> {
                     crate::Syntax::TYPE_EVENT
                         | crate::Syntax::TYPE_ASYNC_EVENT
                         | crate::Syntax::TYPE_HOOK
+                        | crate::Syntax::TYPE_DECISION_HOOK
                         | crate::Syntax::TYPE_DISPATCH_REPORT
                 ) {
                     if let Some(ret) =

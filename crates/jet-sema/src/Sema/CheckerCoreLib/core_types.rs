@@ -203,7 +203,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
         | "Signal" | "Derived" | "Computed"
         // D-EVENT1=D: first-party typed Event/Hook family.
-        | "Event" | "Hook" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace"
+        | "Event" | "Hook" | "DecisionHook" | "HookPolicy" | "HookDecision" | "HookOutcome"
+        | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace"
         | "AsyncEvent" | "AsyncPolicy" | "Overflow" | "FailurePolicy" | "DispatchReport" | "DispatchFailure" | "DispatchState" | "EventConfigError"
         // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
         | "Measurement"
@@ -738,14 +739,26 @@ pub(crate) fn core_event_variants(
 ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
     use crate::AST::VariantPayload;
     use crate::Diagnostics::Span;
-    let names: &[&str] = match enum_name {
-        "Overflow" => &["Block", "DropNewest", "DropOldest"],
-        "FailurePolicy" => &["StopFirst", "Collect", "Log", "Ignore"],
-        "DispatchState" => &["Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"],
-        _ => return None,
-    };
     let zero = Span::new(0, 0);
-    Some(names.iter().map(|name| ((*name).to_string(), (zero, VariantPayload::Unit))).collect())
+    let unit = |names: &[&str]| names.iter().map(|name| ((*name).to_string(), (zero, VariantPayload::Unit))).collect();
+    match enum_name {
+        "Overflow" => Some(unit(&["Block", "DropNewest", "DropOldest"])),
+        "FailurePolicy" => Some(unit(&["StopFirst", "Collect", "Log", "Ignore"])),
+        "DispatchState" => Some(unit(&["Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"])),
+        "HookPolicy" => Some(unit(&["FirstCancelElseTransform"])),
+        "HookDecision" => Some([
+            ("Continue".to_string(), (zero, VariantPayload::Unit)),
+            ("Transform".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
+            ("Cancel".to_string(), (zero, VariantPayload::Unit)),
+            ("Fail".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
+        ].into_iter().collect()),
+        "HookOutcome" => Some([
+            ("Continue".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
+            ("Cancel".to_string(), (zero, VariantPayload::Unit)),
+            ("Fail".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
+        ].into_iter().collect()),
+        _ => None,
+    }
 }
 
 /// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.

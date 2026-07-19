@@ -7740,11 +7740,11 @@ use core.event as event
 
 fn run() {
     scope :: event.scope()
-    ev :: event.with_policy<Int>(event.policy_async(2))
+    ev :: event.with_policy<Int>(event.policy_sync())
     sub :: ev.on(scope, (n) => { print("low {n}") })
     ev.on_priority(scope, 10, (n) => { print("high {n}") })
     ev.once(scope, (n) => { print("once {n}") })
-    print(ev.emit_async(1).summary())
+    print(ev.emit(1).summary())
     sub.unsubscribe()
     print(ev.emit(2).summary())
     print(scope.active_count())
@@ -7763,7 +7763,7 @@ fn run() {
     assert_eq!(code, 0, "event runtime failed: {stderr}");
     assert_eq!(
         stdout,
-        "high 1\nlow 1\nonce 1\nevent delivered=3 queued=1 dropped=0\nhigh 2\nevent delivered=1 queued=1 dropped=0\n1\nseen 7\nfallback\n"
+        "high 1\nlow 1\nonce 1\nevent delivered=3 queued=0 dropped=0\nhigh 2\nevent delivered=1 queued=0 dropped=0\n1\nseen 7\nfallback\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

@@ -229,6 +229,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Overflow" => Some("JetEventOverflow"),
         "FailurePolicy" => Some("JetFailurePolicy"),
         "DispatchState" => Some("JetDispatchState"),
+        "HookPolicy" => Some("JetHookPolicy"),
         "EventConfigError" => Some("JetEventConfigError"),
         "Stopwatch" => Some("Stopwatch"),
         // D-DET1: deterministic injected capability handles.
@@ -998,6 +999,11 @@ impl Cx {
             {
                 format!("{}jet_std::JetEventTrace", self.root_prefix)
             }
+            Type::Named(name)
+                if name == Syntax::TYPE_HOOK_POLICY && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetHookPolicy", self.root_prefix)
+            }
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
                 format!(
@@ -1239,6 +1245,30 @@ impl Cx {
             Type::Apply { name, args } if name == Syntax::TYPE_HOOK && args.len() == 2 => {
                 format!(
                     "{}jet_std::JetHook<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_DECISION_HOOK && args.len() == 2 => {
+                format!(
+                    "{}jet_std::JetDecisionHook<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_HOOK_DECISION && args.len() == 2 => {
+                format!(
+                    "{}jet_std::JetHookDecision<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_HOOK_OUTCOME && args.len() == 2 => {
+                format!(
+                    "{}jet_std::JetHookOutcome<{}, {}>",
                     self.root_prefix,
                     self.rust_type(&args[0]),
                     self.rust_type(&args[1])
@@ -2272,6 +2302,9 @@ fn register_core_event_enums(cx: &mut Cx) {
     const ENUMS: &[(&str, &[&str])] = &[
         ("Overflow", &["Block", "DropNewest", "DropOldest"]),
         ("FailurePolicy", &["StopFirst", "Collect", "Log", "Ignore"]),
+        ("HookPolicy", &["FirstCancelElseTransform"]),
+        ("HookOutcome", &["Continue", "Cancel", "Fail"]),
+        ("HookDecision", &["Continue", "Transform", "Cancel", "Fail"]),
         (
             "DispatchState",
             &[
