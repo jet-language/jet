@@ -80,7 +80,7 @@ fn strided_source_loop_projects_exact_arena_audit_multiplicity() {
             jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
         (diagnostics, facts)
     };
-    let source = |stride: &str| {
+    let source = |bound: u64, stride: &str| {
         format!(
             r#"use core.mem as mem
 
@@ -89,7 +89,7 @@ fn reserve() {{
     close(^arena)
 }}
 
-@Policy(arena_bounded(12)) fn run() {{
+@Policy(arena_bounded({bound})) fn run() {{
     loop item; [1, 2, 3, 4, 5]; {stride} {{
         print(item)
         reserve()
@@ -99,30 +99,42 @@ fn reserve() {{
         )
     };
 
-    let (diagnostics, facts) = check("jet_stride_arena_exact", &source("2"));
+    let (diagnostics, facts) = check("jet_stride_arena_exact", &source(12, "2"));
     assert!(
         !diagnostics
             .iter()
             .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
         "five items at stride two execute three 4-byte calls:\n{diagnostics:#?}"
     );
-    assert!(matches!(
-        facts.memory_projections.values().next(),
-        Some(jet::Sema::MemoryProjection::Proven)
-    ));
+    let run_12 = ("main::run".to_string(), jet::Sema::MemoryFact::ArenaBounded(12));
+    assert_eq!(
+        facts.memory_projections.get(&run_12),
+        Some(&jet::Sema::MemoryProjection::Proven)
+    );
     assert!(facts.solved["run"].contains("Io"));
 
-    let dynamic = source("stride").replace(
+    let (diagnostics, facts) = check("jet_stride_arena_tight", &source(11, "2"));
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
+    assert!(matches!(
+        facts.memory_projections.get(&(
+            "main::run".to_string(),
+            jet::Sema::MemoryFact::ArenaBounded(11)
+        )),
+        Some(jet::Sema::MemoryProjection::Violated { .. })
+    ));
+
+    let dynamic = source(12, "stride").replace(
         "@Policy(arena_bounded(12)) fn run() {",
         "@Policy(arena_bounded(12)) fn run() {\n    stride := 2",
     );
     let (diagnostics, facts) = check("jet_stride_arena_dynamic", &dynamic);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
     assert!(matches!(
-        facts.memory_projections.values().next(),
+        facts.memory_projections.get(&run_12),
         Some(jet::Sema::MemoryProjection::OpenWorld { reason, .. })
             if reason.contains("loop iteration count")
     ));
+    assert!(facts.solved["run"].contains("Io"));
 }
 
 #[test]
