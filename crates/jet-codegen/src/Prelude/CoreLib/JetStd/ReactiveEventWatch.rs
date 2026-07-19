@@ -270,8 +270,10 @@
         }
         pub fn unsubscribe(&self) {
             if self.active.replace(false) {
-                if let Some(active) = &self.shared_active {
-                    active.store(false, std::sync::atomic::Ordering::Release);
+                if self.shared_active.as_ref().is_some_and(|active| {
+                    !active.swap(false, std::sync::atomic::Ordering::AcqRel)
+                }) {
+                    return;
                 }
                 let cleanup = self.cleanup.borrow().clone();
                 if let Some(cleanup) = cleanup {
@@ -303,9 +305,6 @@
                 cancelled: Rc::new(Cell::new(false)),
                 hard_cancellers: Rc::new(RefCell::new(Vec::new())),
             }
-        }
-        fn cancelled(&self) -> bool {
-            self.cancelled.get()
         }
         fn track_hard_cancel<F: Fn() + 'static>(&self, owner_id: u64, cancel: F) {
             if self.cancelled.get() {
@@ -415,7 +414,10 @@
             once: bool,
             handler: F,
         ) -> JetSubscription {
-            let sub = JetSubscription::new();
+            let sub = scope.track(JetSubscription::new());
+            if !sub.active() {
+                return sub;
+            }
             let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.listeners.borrow_mut().push(JetListener {
                 id,
@@ -426,16 +428,22 @@
                 handler: Rc::new(handler),
             });
             let listeners = Rc::downgrade(&self.listeners);
-            jet_event_observe(
-                "Event", self.id, scope.id, id, 0, "Subscribed",
-                0, 0, 0, 0, "None", priority, "None", "None",
-            );
+            let event_id = self.id;
+            let owner_id = scope.id;
             sub.set_cleanup(move || {
                 if let Some(listeners) = listeners.upgrade() {
                     listeners.borrow_mut().retain(|listener| listener.id != id);
                 }
+                jet_event_observe(
+                    "Event", event_id, owner_id, id, 0, "Removed",
+                    0, 0, 0, 0, "None", priority, "None", "None",
+                );
             });
-            scope.track(sub)
+            jet_event_observe(
+                "Event", self.id, scope.id, id, 0, "Subscribed",
+                0, 0, 0, 0, "None", priority, "None", "None",
+            );
+            sub
         }
         pub fn emit(&self, payload: T) -> JetEventTrace {
             self.dispatch(payload)
@@ -732,13 +740,33 @@
         fn add<F, R>(&self, scope: &JetEventScope, priority: i64, once: bool, handler: F) -> JetSubscription
         where F: Fn(T) -> R + Send + Sync + 'static, R: JetIntoDispatchResult<E> {
             let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-            if scope.cancelled() {
-                active.store(false, std::sync::atomic::Ordering::Release);
-                return JetSubscription::shared(active);
+            let sub = scope.track(JetSubscription::shared(active.clone()));
+            if !sub.active() {
+                return sub;
             }
             let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.state.lock().unwrap().listeners.push(JetAsyncListener {
                 id, owner_id: scope.id, priority, once, active: active.clone(), handler: std::sync::Arc::new(move |payload| handler(payload).into_dispatch_result()),
+            });
+            let cancel_state = std::sync::Arc::downgrade(&self.state);
+            scope.track_hard_cancel(self.owner_id, move || {
+                if let Some(state) = cancel_state.upgrade() {
+                    Self::hard_cancel_state(&state);
+                }
+            });
+            let state = std::sync::Arc::downgrade(&self.state);
+            let event_id = self.owner_id;
+            let owner_id = scope.id;
+            let capacity = self.policy.capacity;
+            let overflow = self.policy.overflow.observation();
+            sub.set_cleanup(move || {
+                if let Some(state) = state.upgrade() {
+                    state.lock().unwrap().listeners.retain(|listener| listener.id != id);
+                }
+                jet_event_observe(
+                    "AsyncEvent", event_id, owner_id, id, 0, "Removed",
+                    -1, -1, -1, capacity, overflow, priority, "None", "None",
+                );
             });
             let (queued, blocked, running) = {
                 let state = self.state.lock().unwrap();
@@ -749,20 +777,7 @@
                 queued as i64, blocked as i64, running as i64, self.policy.capacity,
                 self.policy.overflow.observation(), priority, "None", "None",
             );
-            let cancel_state = std::sync::Arc::downgrade(&self.state);
-            scope.track_hard_cancel(self.owner_id, move || {
-                if let Some(state) = cancel_state.upgrade() {
-                    Self::hard_cancel_state(&state);
-                }
-            });
-            let sub = JetSubscription::shared(active);
-            let state = std::sync::Arc::downgrade(&self.state);
-            sub.set_cleanup(move || {
-                if let Some(state) = state.upgrade() {
-                    state.lock().unwrap().listeners.retain(|listener| listener.id != id);
-                }
-            });
-            scope.track(sub)
+            sub
         }
 
         pub fn emit_async(&self, payload: T) -> super::jet_std::JetTask<JetDispatchReport<E>> {
@@ -1073,6 +1088,14 @@
                                     std::sync::atomic::Ordering::Acquire,
                                 ).is_err() {
                                     return None;
+                                }
+                                if listener.once {
+                                    jet_event_observe(
+                                        "AsyncEvent", self.owner_id, listener.owner_id,
+                                        listener.id, entry.id, "Removed", -1, -1, -1,
+                                        self.policy.capacity, self.policy.overflow.observation(),
+                                        listener.priority, "None", "None",
+                                    );
                                 }
                                 Some((listener.priority, listener.id, listener.owner_id, listener.once, listener.active.clone(), listener.handler.clone()))
                             })
@@ -1419,7 +1442,10 @@
             once: bool,
             handler: F,
         ) -> JetSubscription {
-            let sub = JetSubscription::new();
+            let sub = scope.track(JetSubscription::new());
+            if !sub.active() {
+                return sub;
+            }
             let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.listeners.borrow_mut().push(JetDecisionHookListener {
                 id,
@@ -1430,16 +1456,22 @@
                 handler: Rc::new(handler),
             });
             let listeners = Rc::downgrade(&self.listeners);
-            jet_event_observe(
-                "DecisionHook", self.id, scope.id, id, 0, "Subscribed",
-                0, 0, 0, 0, "None", priority, "None", "None",
-            );
+            let event_id = self.id;
+            let owner_id = scope.id;
             sub.set_cleanup(move || {
                 if let Some(listeners) = listeners.upgrade() {
                     listeners.borrow_mut().retain(|listener| listener.id != id);
                 }
+                jet_event_observe(
+                    "DecisionHook", event_id, owner_id, id, 0, "Removed",
+                    0, 0, 0, 0, "None", priority, "None", "None",
+                );
             });
-            scope.track(sub)
+            jet_event_observe(
+                "DecisionHook", self.id, scope.id, id, 0, "Subscribed",
+                0, 0, 0, 0, "None", priority, "None", "None",
+            );
+            sub
         }
         pub fn run(&self, payload: T) -> JetHookOutcome<T, E> {
             match self.policy {

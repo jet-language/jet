@@ -110,6 +110,29 @@ fn run() {
     hook :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
     hook.on_priority(scope, 9, (secret: String) => HookDecision.Fail("HOOK_FAILURE_SECRET"))
     hook.run("HOOK_PAYLOAD_SECRET")
+
+    direct_scope :: event.scope()
+    direct :: event.new<Int>()
+    direct_sub :: direct.on(direct_scope, (n: Int) => {})
+    direct_sub.unsubscribe()
+
+    once_scope :: event.scope()
+    once_event :: event.new<Int>()
+    once_event.once(once_scope, (n: Int) => {})
+    once_event.emit(1)
+    once_event.emit(2)
+
+    cancel_scope :: event.scope()
+    cancel_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    cancel_hook.on(cancel_scope, (n: Int) => HookDecision.Continue)
+    cancel_scope.cancel()
+
+    rejected_scope :: event.scope()
+    rejected_scope.cancel()
+    rejected_event :: event.new<Int>()
+    rejected_event.on(rejected_scope, (n: Int) => {})
+    rejected_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    rejected_hook.on(rejected_scope, (n: Int) => HookDecision.Continue)
     print("READY")
     time.sleep(30000)
 }
@@ -134,7 +157,24 @@ fn run() {
     assert!(rendered.contains("priority=9"));
     assert!(rendered.contains("failure=Handler"));
     assert!(rendered.contains("terminal=Fail"));
-    assert_eq!(rendered.matches("lifecycle=DispatchStarted").count(), 2);
+    assert_eq!(rendered.matches("lifecycle=Subscribed").count(), 5);
+    assert_eq!(rendered.matches("lifecycle=Removed").count(), 3);
+    assert!(rendered
+        .lines()
+        .any(|line| line.contains("source=Event") && line.contains("lifecycle=Removed")));
+    assert!(rendered
+        .lines()
+        .any(|line| line.contains("source=DecisionHook") && line.contains("lifecycle=Removed")));
+    let removed_subscriptions = rendered
+        .lines()
+        .filter(|line| line.contains("lifecycle=Removed"))
+        .filter_map(|line| {
+            line.split_whitespace()
+                .find(|field| field.starts_with("subscription="))
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(removed_subscriptions.len(), 3, "{rendered}");
+    assert_eq!(rendered.matches("lifecycle=DispatchStarted").count(), 4);
 }
 
 #[test]
@@ -254,4 +294,44 @@ fn run() {
     let last = rendered.lines().last().unwrap();
     assert!(!first.contains("sequence=1 "), "old records were not evicted: {first}");
     assert!(last.contains("terminal=Delivered"));
+}
+
+#[test]
+fn concurrent_runtime_observations_keep_sequence_in_push_order() {
+    let Some(running) = spawn_observed(
+        "concurrent_sequence",
+        r#"
+use core.event as event
+use core.time as time
+
+fn run() {
+    scope :: event.scope()
+    concurrent :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    concurrent.on(scope, (n: Int) => { time.sleep(1) })
+    loop i := 0; i < 400; i++ { concurrent.emit_async(i) }
+    time.sleep(1500)
+    print("READY")
+    time.sleep(30000)
+}
+"#,
+    ) else {
+        return;
+    };
+    let (_snapshot, rendered) =
+        debugger_events(running.child.id(), "\"source\":\"AsyncEvent\"");
+    assert_eq!(rendered.lines().count(), 256);
+    let sequences = rendered
+        .lines()
+        .map(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("sequence="))
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        sequences.windows(2).all(|pair| pair[0] < pair[1]),
+        "concurrent observation order diverged from sequence order"
+    );
 }

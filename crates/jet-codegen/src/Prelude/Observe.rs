@@ -184,8 +184,8 @@ fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String
 fn jet_observe_event(mut event: JetObserveEvent) {
     use std::sync::atomic::Ordering;
     let Some(registry) = jet_observe_registry() else { return };
-    event.sequence = registry.next_event_sequence.fetch_add(1, Ordering::Relaxed);
     let mut events = registry.events.lock().unwrap();
+    event.sequence = registry.next_event_sequence.fetch_add(1, Ordering::Relaxed);
     if events.len() == JET_OBSERVE_EVENT_LIMIT {
         events.pop_front();
     }

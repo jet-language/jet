@@ -62,6 +62,7 @@ pub fn render(snapshot: &str) -> Result<String, String> {
             "lifecycle",
             &[
                 "Subscribed",
+                "Removed",
                 "DispatchStarted",
                 "Queued",
                 "Backpressured",
