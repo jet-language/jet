@@ -42,10 +42,24 @@ impl<'a> Lexer<'a> {
         let Some(fn_pos) = toks.iter().rposition(|t| matches!(t.kind, TokKind::KwFn)) else {
             return false;
         };
-        toks[..fn_pos].windows(2).any(|pair| {
-            matches!(pair[0].kind, TokKind::Hash)
-                && matches!(&pair[1].kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
-        })
+        let significant = toks[..fn_pos]
+            .iter()
+            .filter(|token| {
+                !matches!(
+                    token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::KwPub
+                )
+            })
+            .collect::<Vec<_>>();
+        matches!(
+            significant.as_slice(),
+            [.., hash, ffi, open, lang, close]
+                if matches!(hash.kind, TokKind::Hash)
+                    && matches!(&ffi.kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
+                    && matches!(open.kind, TokKind::LParen)
+                    && matches!(lang.kind, TokKind::Ident(_))
+                    && matches!(close.kind, TokKind::RParen)
+        )
     }
 
     pub(super) fn at(&self, i: usize) -> char {
@@ -511,5 +525,38 @@ impl<'a> Lexer<'a> {
             kind: TokKind::Char(ch),
             span: Span::new(start, self.pos(self.i)),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lex_raw;
+    use crate::Lexer::{StrTokPart, TokKind};
+
+    #[test]
+    fn raw_foreign_body_marker_does_not_capture_a_later_function() {
+        let source = r#"#FFI(c) fn foreign() -> Int {
+    """int64_t foreign(void) { return 1; }"""
+}
+
+fn ordinary(value: Int) {
+    text :: """
+value={value}
+"""
+}"#;
+        let (tokens, diagnostics) = lex_raw(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let strings = tokens
+            .iter()
+            .filter_map(|token| match &token.kind {
+                TokKind::Str(parts) => Some(parts),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(strings.len(), 2);
+        assert!(matches!(strings[0].as_slice(), [StrTokPart::Lit(_)]));
+        assert!(strings[1]
+            .iter()
+            .any(|part| matches!(part, StrTokPart::Interp(_))), "{strings:?}");
     }
 }

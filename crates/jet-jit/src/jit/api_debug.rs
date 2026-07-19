@@ -1,5 +1,5 @@
 use jet_codegen::Codegen::TIR::{self, TEnumPayload, TExpr, TExprKind, TIfCond, TStmt, TStrPart};
-use jet_foundation::{JitBackend::RunOutcome, AST::{ProgramBundle, Type}};
+use jet_foundation::{JitBackend::RunOutcome, AST::{Item, ProgramBundle, Type}};
 use std::collections::HashSet;
 
 use super::resident::{
@@ -532,6 +532,14 @@ pub fn resident_jit_safe_bundle(bundle: &ProgramBundle) -> bool {
 /// Test hook: empty string when covered; otherwise a short failure reason.
 #[doc(hidden)]
 pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
+    if bundle
+        .modules
+        .iter()
+        .flat_map(|module| &module.items)
+        .any(|item| matches!(item, Item::CModule(_) | Item::ExternRust(_)))
+    {
+        return "foreign ABI boundary requires the native build/link path; resident JIT has no foreign symbol resolver".to_string();
+    }
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return format!(
             "lower_jit_program returned None ({})",

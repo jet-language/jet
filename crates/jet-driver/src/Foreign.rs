@@ -8,7 +8,7 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use crate::AST::{ForeignLanguage, ForeignNamespace, ImportDecl, LoadedModule, ProgramBundle};
+use crate::AST::{ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule, ProgramBundle};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -449,6 +449,9 @@ fn materialize_namespace(
                 return Err(lex_diags);
             }
             let mut program = crate::Parser::parse(&tokens)?;
+            if language == ForeignLanguage::Cpp {
+                mark_cpp_callback_abi(&mut program.items);
+            }
             bundle.modules.push(LoadedModule {
                 path: cache_path,
                 display: format!("{}.{}", language.root(), lib),
@@ -484,6 +487,20 @@ fn materialize_namespace(
         policy_declarations: Vec::new(),
     });
     Ok(module_idx)
+}
+
+fn mark_cpp_callback_abi(items: &mut [Item]) {
+    for item in items {
+        let Item::Func(function) = item else { continue };
+        for param in &mut function.params {
+            if matches!(param.ty, crate::AST::Type::Fn { .. }) {
+                param.ty = crate::AST::Type::Tagged {
+                    marker: crate::AST::CPP_CALLBACK_ABI_MARKER.to_string(),
+                    inner: Box::new(param.ty.clone()),
+                };
+            }
+        }
+    }
 }
 
 fn synthetic_alias(language: ForeignLanguage, lib: &str) -> String {

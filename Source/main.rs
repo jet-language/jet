@@ -398,7 +398,7 @@ usage:
   {bin} gc report                   explain automatic-GC promotions and ownership rewrites
   {bin} self devtools <verb>        run checked developer generators
   {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
-  {bin} inspect bind cpp <header.hpp> --pkg <lib>   generate a cached C++ shim and Jet binding
+  {bin} inspect bind cpp <header.hpp> --target <triple> --clang <path> --ar <path>   generate an audited C++ shim and Jet binding
   {bin} inspect expand <file.{ext}> print semantic facts (D-EXPANDCLI1)
   {bin} inspect unsafe <file.{ext}> audit unsafe policy and typed obligations
   {bin} version                     print compiler version

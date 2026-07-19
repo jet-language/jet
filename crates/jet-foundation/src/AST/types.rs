@@ -94,6 +94,11 @@ impl Dimension {
 /// The NUL prefix cannot be written as a Jet marker identifier.
 pub const CORE_CRYPTO_NOMINAL_MARKER: &str = "\0core.crypto";
 
+/// Compiler-owned representation tag used by generated C++ facade functions.
+/// The tag keeps the source-level callback shape while telling the backend that
+/// this parameter is already a raw C function pointer, not a boxed Jet closure.
+pub const CPP_CALLBACK_ABI_MARKER: &str = "\0cpp.callback_abi";
+
 /// The access capability of a parameter / argument / receiver (D-MEM1, was
 /// D-CAP7/8/9/10).
 ///

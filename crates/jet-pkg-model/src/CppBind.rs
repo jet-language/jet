@@ -1,18 +1,42 @@
-//! D-FFI-CPP1=A: clang-discovered C++ surfaces lowered to a cached C ABI shim.
-//! The generated Jet module owns opaque class handles, translates exceptions
-//! to `CppError`, preserves callbacks, and exposes only explicit template
-//! instantiations. Unsupported declarations fail before native compilation.
+//! D-FFI-CPP1=A: clang-AST C++ surfaces lowered to a cached C ABI shim.
+//! Clang's JSON is the declaration source of truth. The binder never parses
+//! header text, and every native input participates in provenance/cache identity.
 
 use crate::JSON::{self, Json};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+const SCHEMA: &str = "jet-cpp-bind-v2";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateInstantiation {
+    pub qualified_name: String,
+    pub cpp_args: Vec<String>,
+    pub jet_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindOptions {
+    pub lib: String,
+    pub target: String,
+    pub clang: PathBuf,
+    pub archiver: PathBuf,
+    pub include_dirs: Vec<PathBuf>,
+    pub library_dirs: Vec<PathBuf>,
+    pub libraries: Vec<String>,
+    pub namespaces: Vec<String>,
+    pub templates: Vec<TemplateInstantiation>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BindResult {
     pub source: String,
     pub bound: Vec<String>,
+    /// Content-addressed archive. A stable projection is also materialized for
+    /// ordinary `use cpp.<lib>` discovery.
     pub archive: PathBuf,
     pub provenance: String,
 }
@@ -20,7 +44,7 @@ pub struct BindResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindError {
     Source(String),
-    ToolMissing,
+    ToolMissing(String),
     ToolFailed(String),
     Io(String),
 }
@@ -29,7 +53,7 @@ impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source(value) | Self::Io(value) => f.write_str(value),
-            Self::ToolMissing => f.write_str("the provisioned `clang++` tool was not found"),
+            Self::ToolMissing(value) => write!(f, "the selected `{value}` tool was not found"),
             Self::ToolFailed(value) => write!(f, "the C++ toolchain rejected the binding: {value}"),
         }
     }
@@ -49,17 +73,19 @@ impl Scalar {
             Self::Int => "Int",
             Self::Float => "Float",
             Self::Bool => "Bool",
-            Self::Callback => "fn(I32) --[]-> I32",
+            Self::Callback => "fn(Int) --[]-> Int",
         }
     }
+
     fn c(self) -> &'static str {
         match self {
             Self::Int => "int64_t",
             Self::Float => "double",
             Self::Bool => "bool",
-            Self::Callback => "int32_t (*)(int32_t)",
+            Self::Callback => "int64_t (*)(int64_t)",
         }
     }
+
     fn zero(self) -> &'static str {
         match self {
             Self::Float => "0.0",
@@ -74,6 +100,7 @@ struct Param {
     name: String,
     kind: Scalar,
 }
+
 #[derive(Clone)]
 struct Routine {
     cpp_name: String,
@@ -81,115 +108,102 @@ struct Routine {
     params: Vec<Param>,
     result: Scalar,
 }
+
 struct Class {
     name: String,
+    cpp_name: String,
     ctor: Vec<Param>,
     methods: Vec<Routine>,
 }
+
+struct FunctionTemplate {
+    cpp_name: String,
+    type_params: Vec<String>,
+    params: Vec<(String, String)>,
+    result: String,
+}
+
 struct Surface {
     classes: Vec<Class>,
     functions: Vec<Routine>,
+    templates: Vec<FunctionTemplate>,
 }
 
-pub fn bind(header: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindResult, BindError> {
-    if !ident(lib) {
-        return Err(BindError::Source(format!(
-            "`{lib}` is not a valid Jet library name"
-        )));
-    }
-    let clang = tool_path("clang++").ok_or(BindError::ToolMissing)?;
+pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindResult, BindError> {
+    validate_options(options)?;
     let canonical = std::fs::canonicalize(header)
         .map_err(|e| BindError::Io(format!("could not resolve `{}`: {e}", header.display())))?;
-    let ast = supervised(
-        Command::new(&clang)
-            .args(["-std=c++17", "-Xclang", "-ast-dump=json", "-fsyntax-only"])
-            .arg(&canonical),
-        Duration::from_secs(60),
-    )?;
-    if !ast.status.success() {
-        return Err(BindError::ToolFailed(launder(&ast.stderr)));
+    let header_bytes = std::fs::read(&canonical)
+        .map_err(|e| BindError::Io(format!("could not read `{}`: {e}", canonical.display())))?;
+    let asts = clang_asts(&canonical, options)?;
+    let mut ast_identity = Vec::new();
+    let mut surface = Surface {
+        classes: Vec::new(),
+        functions: Vec::new(),
+        templates: Vec::new(),
+    };
+    for ast in &asts {
+        ast_identity.extend_from_slice(&ast.stdout);
+        ast_identity.push(0);
+        let parsed = JSON::parse(&String::from_utf8_lossy(&ast.stdout))
+            .map_err(|e| BindError::ToolFailed(format!("clang returned malformed AST data: {e}")))?;
+        let projected = project_surface(&parsed, &canonical, &options.namespaces)?;
+        surface.classes.extend(projected.classes);
+        surface.functions.extend(projected.functions);
+        surface.templates.extend(projected.templates);
     }
-    let parsed = JSON::parse(&String::from_utf8_lossy(&ast.stdout))
-        .map_err(|e| BindError::ToolFailed(format!("clang returned malformed AST data: {e}")))?;
-    if count_declarations(&parsed) == 0 {
+    instantiate_templates(&mut surface, &options.templates)?;
+    if surface.classes.is_empty() && surface.functions.is_empty() {
         return Err(BindError::Source(
-            "clang found no functions, classes, or explicit template specializations".into(),
+            "clang found no bindable public scalar declarations in the selected namespaces".into(),
         ));
     }
-    let surface = parse_surface(source)?;
-    std::fs::create_dir_all(cache)
-        .map_err(|e| BindError::Io(format!("could not create the C++ binding cache: {e}")))?;
-    let build = cache.join(format!(".cpp-{lib}-build"));
-    let _ = std::fs::remove_dir_all(&build);
-    std::fs::create_dir_all(&build)
-        .map_err(|e| BindError::Io(format!("could not create the C++ build directory: {e}")))?;
-    let shim = render_cpp(&canonical, lib, &surface);
-    let cpp = build.join("shim.cpp");
-    let object = build.join("shim.o");
-    let proof = build.join(if cfg!(target_os = "macos") {
-        "proof.dylib"
-    } else {
-        "proof.so"
-    });
-    std::fs::write(&cpp, &shim)
-        .map_err(|e| BindError::Io(format!("could not write the C++ shim: {e}")))?;
-    run(
-        Command::new(&clang)
-            .args(["-std=c++17", "-fPIC", "-c"])
-            .arg(&cpp)
-            .arg("-o")
-            .arg(&object),
-        "clang++",
-    )?;
-    run(
-        Command::new(&clang)
-            .args(["-shared", "-Wl,--no-undefined"])
-            .arg(&object)
-            .arg("-o")
-            .arg(&proof),
-        "clang++",
-    )?;
-    let archive = cache.join(format!("libjet_cpp_{lib}.a"));
-    let _ = std::fs::remove_file(&archive);
-    run(
-        Command::new("ar").arg("rcs").arg(&archive).arg(&object),
-        "ar",
-    )?;
-    let jet = render_jet(lib, &surface);
+
+    let shim = render_cpp(&canonical, &options.lib, &surface);
+    let jet = render_jet(&options.lib, &surface);
     let version = supervised(
-        Command::new(&clang).arg("--version"),
+        Command::new(&options.clang).arg("--version"),
         Duration::from_secs(10),
+        "clang++",
     )?;
-    let mut identity = b"jet-cpp-bind-v1\0".to_vec();
-    identity.extend_from_slice(source.as_bytes());
-    identity.push(0);
-    identity.extend_from_slice(&ast.stdout);
-    identity.push(0);
-    identity.extend_from_slice(&version.stdout);
-    identity.push(0);
-    identity.extend_from_slice(shim.as_bytes());
-    identity.extend_from_slice(jet.as_bytes());
-    let provenance = format!(
-        "schema=jet-cpp-bind-v1\nsha256={}\nheader={}\nclang={}\nclasses={}\nfunctions={}\n",
-        crate::SHA256::sha256_hex(&identity),
-        canonical.display(),
-        clang.display(),
-        surface.classes.len(),
-        surface.functions.len()
+    if !version.status.success() {
+        return Err(BindError::ToolFailed(launder(&version.stderr)));
+    }
+    let identity = binding_identity(
+        &canonical,
+        &header_bytes,
+        &ast_identity,
+        &version.stdout,
+        &shim,
+        &jet,
+        options,
+        &options.target,
     );
+    let digest = crate::SHA256::sha256_hex(&identity);
+    let store = cache.join(&digest);
+    let archive = store.join(format!("libjet_cpp_{}.a", options.lib));
+    std::fs::create_dir_all(&store)
+        .map_err(|e| BindError::Io(format!("could not create the C++ binding cache: {e}")))?;
+
+    if !archive.is_file() {
+        build_archive(&canonical, &shim, &archive, &store, options)?;
+    }
+    materialize_projection(cache, &archive, options)?;
+
+    let provenance = render_provenance(&canonical, &digest, &surface, options);
     let bound = surface
         .classes
         .iter()
-        .flat_map(|c| {
-            std::iter::once(format!("new_{}", snake(&c.name))).chain(
-                c.methods
+        .flat_map(|class| {
+            std::iter::once(format!("new_{}", snake(&class.name))).chain(
+                class
+                    .methods
                     .iter()
-                    .map(|m| format!("{}.{}", c.name, m.jet_name)),
+                    .map(|method| format!("{}.{}", class.name, method.jet_name)),
             )
         })
-        .chain(surface.functions.iter().map(|f| f.jet_name.clone()))
+        .chain(surface.functions.iter().map(|function| function.jet_name.clone()))
         .collect();
-    let _ = std::fs::remove_dir_all(&build);
     Ok(BindResult {
         source: jet,
         bound,
@@ -198,265 +212,423 @@ pub fn bind(header: &Path, source: &str, lib: &str, cache: &Path) -> Result<Bind
     })
 }
 
-fn count_declarations(value: &Json) -> usize {
-    match value {
-        Json::Array(values) => values.iter().map(count_declarations).sum(),
-        Json::Object(map) => {
-            let here = map
-                .get("kind")
-                .and_then(|v| v.as_str().ok())
-                .is_some_and(|kind| {
-                    matches!(
-                        kind,
-                        "FunctionDecl"
-                            | "CXXRecordDecl"
-                            | "FunctionTemplateDecl"
-                            | "ClassTemplateSpecializationDecl"
-                    )
-                });
-            usize::from(here) + map.values().map(count_declarations).sum::<usize>()
-        }
-        _ => 0,
-    }
+#[doc(hidden)]
+pub fn cache_identity_for_test(header: &Path, options: &BindOptions, target: &str) -> String {
+    let bytes = std::fs::read(header).unwrap_or_default();
+    crate::SHA256::sha256_hex(&binding_identity(
+        header,
+        &bytes,
+        &[],
+        &[],
+        "",
+        "",
+        options,
+        target,
+    ))
 }
 
-fn parse_surface(source: &str) -> Result<Surface, BindError> {
-    let clean = strip_comments(source);
-    let mut classes = Vec::new();
-    let mut masked = clean.clone().into_bytes();
-    let mut cursor = 0;
-    while let Some((start, keyword)) = find_class(&clean, cursor) {
-        let name_start = start + keyword.len();
-        let rest = clean[name_start..].trim_start();
-        let name = rest
-            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-            .next()
-            .unwrap_or("");
-        if !ident(name) {
-            cursor = name_start;
-            continue;
-        }
-        let brace = name_start
-            + clean[name_start..]
-                .find('{')
-                .ok_or_else(|| BindError::Source(format!("class `{name}` has no body")))?;
-        let close = matching(&clean, brace, '{', '}')
-            .ok_or_else(|| BindError::Source(format!("class `{name}` has no closing brace")))?;
-        for byte in &mut masked[start..=close] {
-            *byte = b' ';
-        }
-        let body = &clean[brace + 1..close];
-        let public = public_body(body, keyword == "struct ");
-        let mut ctor = None;
-        let mut methods = Vec::new();
-        for declaration in declarations(public) {
-            if declaration.trim_start().starts_with('~') {
-                continue;
-            }
-            if let Some(parsed) = parse_routine(&declaration, Some(name))? {
-                if parsed.0 {
-                    ctor = Some(parsed.1.params);
-                } else {
-                    methods.push(parsed.1);
-                }
-            }
-        }
-        disambiguate(&mut methods);
-        let ctor = ctor.ok_or_else(|| {
-            BindError::Source(format!(
-                "class `{name}` needs one public scalar constructor"
-            ))
-        })?;
-        classes.push(Class {
-            name: name.to_string(),
-            ctor,
-            methods,
-        });
-        cursor = close + 1;
+fn validate_options(options: &BindOptions) -> Result<(), BindError> {
+    if !ident(&options.lib) {
+        return Err(BindError::Source(format!(
+            "`{}` is not a valid Jet library name",
+            options.lib
+        )));
     }
-    let outside = String::from_utf8(masked)
-        .map_err(|_| BindError::Source("the C++ header is not UTF-8".into()))?;
-    let mut functions = Vec::new();
-    for declaration in declarations(&outside) {
-        if let Some((ctor, routine)) = parse_routine(&declaration, None)? {
-            if !ctor {
-                functions.push(routine);
-            }
+    if options.target.trim().is_empty() {
+        return Err(BindError::Source("a selected target triple is required".into()));
+    }
+    for (name, path) in [("clang++", &options.clang), ("ar", &options.archiver)] {
+        if !path.is_absolute() || !path.is_file() {
+            return Err(BindError::ToolMissing(format!("{name}` at `{}`", path.display())));
         }
     }
-    disambiguate(&mut functions);
-    if classes.is_empty() && functions.is_empty() {
-        return Err(BindError::Source(
-            "no bindable public scalar C++ declarations were found".into(),
-        ));
+    for library in &options.libraries {
+        if !ident(library) {
+            return Err(BindError::Source(format!(
+                "`{library}` is not a safe native library name"
+            )));
+        }
     }
-    Ok(Surface { classes, functions })
+    for template in &options.templates {
+        if !ident(&template.jet_name)
+            || !qualified_ident(&template.qualified_name)
+            || template.cpp_args.iter().any(|arg| scalar(arg).is_none())
+        {
+            return Err(BindError::Source(format!(
+                "invalid explicit template request `{}`",
+                template.qualified_name
+            )));
+        }
+    }
+    Ok(())
 }
 
-fn find_class(source: &str, from: usize) -> Option<(usize, &'static str)> {
-    [
-        ("class ", source[from..].find("class ")),
-        ("struct ", source[from..].find("struct ")),
-    ]
-    .into_iter()
-    .filter_map(|(k, p)| p.map(|v| (from + v, k)))
-    .min_by_key(|v| v.0)
-}
-
-fn public_body(body: &str, default_public: bool) -> &str {
-    if let Some(start) = body.find("public:") {
-        let value = &body[start + 7..];
-        let end = [value.find("private:"), value.find("protected:")]
-            .into_iter()
-            .flatten()
-            .min()
-            .unwrap_or(value.len());
-        &value[..end]
-    } else if default_public {
-        body
+fn clang_asts(header: &Path, options: &BindOptions) -> Result<Vec<Output>, BindError> {
+    let filters = if options.namespaces.is_empty() {
+        vec![None]
     } else {
-        ""
+        options.namespaces.iter().map(|name| Some(name.as_str())).collect()
+    };
+    let mut outputs = Vec::new();
+    for filter in filters {
+        let mut command = Command::new(&options.clang);
+        command.args(["-std=c++17", "-Xclang", "-ast-dump=json"]);
+        if let Some(filter) = filter {
+            command.arg("-Xclang").arg(format!("-ast-dump-filter={filter}"));
+        }
+        command.args(["-fsyntax-only", "-target"]).arg(&options.target);
+        for dir in &options.include_dirs {
+            command.arg("-I").arg(dir);
+        }
+        command.arg(header);
+        let output = supervised(&mut command, Duration::from_secs(60), "clang++")?;
+        if !output.status.success() {
+            return Err(BindError::ToolFailed(launder(&output.stderr)));
+        }
+        outputs.push(output);
     }
+    Ok(outputs)
 }
 
-fn declarations(source: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let bytes = source.as_bytes();
-    let mut start = 0;
-    let mut i = 0;
-    let mut parens = 0;
-    while i < bytes.len() {
-        match bytes[i] as char {
-            '(' => parens += 1,
-            ')' => parens -= 1,
-            ';' if parens == 0 => {
-                let value = source[start..i].trim();
-                if value.contains('(') {
-                    out.push(value.to_string())
-                }
-                start = i + 1;
+fn binding_identity(
+    header: &Path,
+    header_bytes: &[u8],
+    ast: &[u8],
+    version: &[u8],
+    shim: &str,
+    jet: &str,
+    options: &BindOptions,
+    target: &str,
+) -> Vec<u8> {
+    let mut identity = Vec::new();
+    for value in [
+        SCHEMA.as_bytes(),
+        header.to_string_lossy().as_bytes(),
+        header_bytes,
+        ast,
+        version,
+        shim.as_bytes(),
+        jet.as_bytes(),
+        target.as_bytes(),
+        options.clang.to_string_lossy().as_bytes(),
+        options.archiver.to_string_lossy().as_bytes(),
+    ] {
+        identity.extend_from_slice(value);
+        identity.push(0);
+    }
+    for value in options
+        .include_dirs
+        .iter()
+        .chain(&options.library_dirs)
+        .map(|path| path.to_string_lossy().into_owned())
+        .chain(options.libraries.iter().cloned())
+        .chain(options.namespaces.iter().cloned())
+        .chain(options.templates.iter().flat_map(|request| {
+            std::iter::once(request.qualified_name.clone())
+                .chain(request.cpp_args.iter().cloned())
+                .chain(std::iter::once(request.jet_name.clone()))
+        }))
+    {
+        identity.extend_from_slice(value.as_bytes());
+        identity.push(0);
+    }
+    identity
+}
+
+fn project_surface(ast: &Json, header: &Path, selected: &[String]) -> Result<Surface, BindError> {
+    let mut surface = Surface {
+        classes: Vec::new(),
+        functions: Vec::new(),
+        templates: Vec::new(),
+    };
+    let canonical = header.to_string_lossy();
+    walk_ast(ast, &canonical, false, &mut Vec::new(), selected, &mut surface)?;
+    disambiguate(&mut surface.functions);
+    Ok(surface)
+}
+
+fn walk_ast(
+    value: &Json,
+    header: &str,
+    inherited_main: bool,
+    namespace: &mut Vec<String>,
+    selected: &[String],
+    surface: &mut Surface,
+) -> Result<(), BindError> {
+    let Some(map) = object(value) else { return Ok(()) };
+    let kind = string(map, "kind").unwrap_or("");
+    let in_main = location_file(map)
+        .map(|file| file == header)
+        .unwrap_or(inherited_main);
+
+    if kind == "NamespaceDecl" {
+        if let Some(name) = string(map, "name").filter(|name| !name.is_empty()) {
+            namespace.push(name.to_string());
+            for child in children(map) {
+                walk_ast(child, header, in_main, namespace, selected, surface)?;
             }
-            '{' if parens == 0 && source[start..i].contains('(') => {
-                let head = source[start..i].trim();
-                if !head.starts_with("template <") {
-                    out.push(head.to_string())
-                }
-                if let Some(close) = matching(source, i, '{', '}') {
-                    i = close;
-                    start = i + 1;
-                }
+            namespace.pop();
+            return Ok(());
+        }
+    }
+
+    let chosen = in_main && namespace_selected(namespace, selected);
+    if chosen {
+        match kind {
+            "CXXRecordDecl"
+                if bool_field(map, "completeDefinition") && !bool_field(map, "isImplicit") =>
+            {
+                surface.classes.push(parse_class(map, namespace)?);
+                return Ok(());
+            }
+            "FunctionTemplateDecl" => {
+                surface.templates.push(parse_template(map, namespace)?);
+                return Ok(());
+            }
+            "FunctionDecl" if !bool_field(map, "isImplicit") => {
+                surface.functions.push(parse_routine(map, qualified(namespace, string(map, "name").unwrap_or("")), None)?);
+                return Ok(());
             }
             _ => {}
         }
-        i += 1;
     }
-    out
+    for child in children(map) {
+        walk_ast(child, header, in_main, namespace, selected, surface)?;
+    }
+    Ok(())
 }
 
-fn parse_routine(raw: &str, class: Option<&str>) -> Result<Option<(bool, Routine)>, BindError> {
-    let raw = raw
-        .trim()
-        .trim_start_matches("inline ")
-        .trim_start_matches("explicit ")
-        .trim_start_matches("template ")
-        .trim();
-    if raw.starts_with("template <") || raw.contains("= delete") || raw.contains("= default") {
-        return Ok(None);
+fn parse_class(map: &BTreeMap<String, Json>, namespace: &[String]) -> Result<Class, BindError> {
+    let name = string(map, "name").unwrap_or("");
+    if !ident(name) {
+        return Err(BindError::Source("clang reported an unnamed C++ class".into()));
     }
-    let open = raw
-        .find('(')
-        .ok_or_else(|| BindError::Source(format!("unsupported declaration `{raw}`")))?;
-    let close = matching(raw, open, '(', ')')
-        .ok_or_else(|| BindError::Source(format!("unclosed parameter list in `{raw}`")))?;
-    let head = raw[..open].trim();
-    let mut words = head.split_whitespace().collect::<Vec<_>>();
-    let cpp_name = words.pop().unwrap_or("");
-    let constructor = class == Some(cpp_name);
-    if cpp_name.starts_with('~') {
-        return Ok(None);
-    }
-    let result = if constructor {
-        Scalar::Int
-    } else {
-        scalar(&words.join(" ")).ok_or_else(|| {
-            BindError::Source(format!(
-                "`{cpp_name}` has unsupported return type `{}`",
-                words.join(" ")
-            ))
-        })?
-    };
-    let params = parse_params(&raw[open + 1..close], cpp_name)?;
-    let jet_name = if constructor {
-        "new".into()
-    } else {
-        operator_name(cpp_name).unwrap_or_else(|| sanitize_template(cpp_name))
-    };
-    Ok(Some((
-        constructor,
-        Routine {
-            cpp_name: cpp_name.to_string(),
-            jet_name,
-            params,
-            result,
-        },
-    )))
-}
-
-fn parse_params(raw: &str, owner: &str) -> Result<Vec<Param>, BindError> {
-    if raw.trim().is_empty() || raw.trim() == "void" {
-        return Ok(Vec::new());
-    }
-    split_commas(raw)
-        .into_iter()
-        .enumerate()
-        .map(|(index, raw)| {
-            let raw = raw.trim();
-            if let Some(at) = raw.find("(*") {
-                let after = &raw[at + 2..];
-                let end = after.find(')').ok_or_else(|| {
-                    BindError::Source(format!("callback in `{owner}` has no name"))
-                })?;
-                let name = &after[..end];
-                if !ident(name)
-                    || raw[..at].trim() != "int32_t"
-                    || !after[end + 1..].contains("int32_t")
-                {
+    let mut public = string(map, "tagUsed") == Some("struct");
+    let mut ctor = None;
+    let mut methods = Vec::new();
+    for child in children(map) {
+        let Some(child) = object(child) else { continue };
+        match string(child, "kind").unwrap_or("") {
+            "AccessSpecDecl" => public = string(child, "access") == Some("public"),
+            "CXXConstructorDecl" if public && !bool_field(child, "isImplicit") => {
+                if ctor.is_some() {
                     return Err(BindError::Source(format!(
-                        "callback `{name}` in `{owner}` must be `int32_t (*name)(int32_t)`"
+                        "class `{name}` has multiple public constructors; select one in a smaller header"
                     )));
                 }
-                return Ok(Param {
-                    name: name.into(),
-                    kind: Scalar::Callback,
-                });
+                ctor = Some(parse_params(child, &BTreeMap::new())?);
             }
-            let mut words = raw.split_whitespace().collect::<Vec<_>>();
-            let name = words
-                .pop()
-                .unwrap_or("")
-                .trim_matches(|c| c == '&' || c == '*');
-            if !ident(name) {
-                return Err(BindError::Source(format!(
-                    "parameter {} in `{owner}` needs a name",
-                    index + 1
-                )));
+            "CXXMethodDecl" if public && !bool_field(child, "isImplicit") => {
+                methods.push(parse_routine(
+                    child,
+                    string(child, "name").unwrap_or("").to_string(),
+                    None,
+                )?);
             }
-            let kind = scalar(&words.join(" ")).ok_or_else(|| {
+            _ => {}
+        }
+    }
+    disambiguate(&mut methods);
+    Ok(Class {
+        name: name.to_string(),
+        cpp_name: qualified(namespace, name),
+        ctor: ctor.ok_or_else(|| {
+            BindError::Source(format!("class `{name}` needs one public scalar constructor"))
+        })?,
+        methods,
+    })
+}
+
+fn parse_template(
+    map: &BTreeMap<String, Json>,
+    namespace: &[String],
+) -> Result<FunctionTemplate, BindError> {
+    let name = string(map, "name").unwrap_or("");
+    let mut type_params = Vec::new();
+    let mut function = None;
+    for child in children(map) {
+        let Some(child) = object(child) else { continue };
+        match string(child, "kind").unwrap_or("") {
+            "TemplateTypeParmDecl" => {
+                if let Some(name) = string(child, "name") {
+                    type_params.push(name.to_string());
+                }
+            }
+            "FunctionDecl" => function = Some(child),
+            _ => {}
+        }
+    }
+    let function = function.ok_or_else(|| {
+        BindError::Source(format!("template `{name}` has no callable clang declaration"))
+    })?;
+    let result = return_type(function)?.to_string();
+    let params = raw_params(function)?;
+    Ok(FunctionTemplate {
+        cpp_name: qualified(namespace, name),
+        type_params,
+        params,
+        result,
+    })
+}
+
+fn instantiate_templates(
+    surface: &mut Surface,
+    requests: &[TemplateInstantiation],
+) -> Result<(), BindError> {
+    let mut names = BTreeSet::new();
+    for request in requests {
+        if !names.insert(request.jet_name.clone()) {
+            return Err(BindError::Source(format!(
+                "duplicate Jet template name `{}`",
+                request.jet_name
+            )));
+        }
+        let template = surface
+            .templates
+            .iter()
+            .find(|template| template.cpp_name == request.qualified_name)
+            .ok_or_else(|| {
                 BindError::Source(format!(
-                    "parameter `{name}` in `{owner}` has unsupported type `{}`",
-                    words.join(" ")
+                    "clang found no function template `{}` (selected templates: {})",
+                    request.qualified_name,
+                    surface.templates.iter().map(|template| template.cpp_name.as_str()).collect::<Vec<_>>().join(", ")
                 ))
             })?;
+        if template.type_params.len() != request.cpp_args.len() {
+            return Err(BindError::Source(format!(
+                "template `{}` needs {} type argument(s), not {}",
+                request.qualified_name,
+                template.type_params.len(),
+                request.cpp_args.len()
+            )));
+        }
+        let substitutions = template
+            .type_params
+            .iter()
+            .cloned()
+            .zip(request.cpp_args.iter().cloned())
+            .collect::<BTreeMap<_, _>>();
+        let params = template
+            .params
+            .iter()
+            .map(|(name, ty)| {
+                Ok(Param {
+                    name: name.clone(),
+                    kind: scalar_substituted(ty, &substitutions).ok_or_else(|| {
+                        BindError::Source(format!(
+                            "template `{}` parameter `{name}` has unsupported instantiated type `{ty}`",
+                            request.qualified_name
+                        ))
+                    })?,
+                })
+            })
+            .collect::<Result<Vec<_>, BindError>>()?;
+        let result = scalar_substituted(&template.result, &substitutions).ok_or_else(|| {
+            BindError::Source(format!(
+                "template `{}` has unsupported instantiated return type `{}`",
+                request.qualified_name, template.result
+            ))
+        })?;
+        surface.functions.push(Routine {
+            cpp_name: format!("{}<{}>", template.cpp_name, request.cpp_args.join(",")),
+            jet_name: request.jet_name.clone(),
+            params,
+            result,
+        });
+    }
+    disambiguate(&mut surface.functions);
+    Ok(())
+}
+
+fn parse_routine(
+    map: &BTreeMap<String, Json>,
+    cpp_name: String,
+    jet_name: Option<String>,
+) -> Result<Routine, BindError> {
+    let raw_name = string(map, "name").unwrap_or("");
+    let result = scalar(return_type(map)?).ok_or_else(|| {
+        BindError::Source(format!("`{cpp_name}` has an unsupported return type"))
+    })?;
+    Ok(Routine {
+        cpp_name,
+        jet_name: jet_name
+            .or_else(|| operator_name(raw_name))
+            .unwrap_or_else(|| snake(raw_name)),
+        params: parse_params(map, &BTreeMap::new())?,
+        result,
+    })
+}
+
+fn parse_params(
+    map: &BTreeMap<String, Json>,
+    substitutions: &BTreeMap<String, String>,
+) -> Result<Vec<Param>, BindError> {
+    raw_params(map)?
+        .into_iter()
+        .map(|(name, ty)| {
             Ok(Param {
-                name: name.into(),
-                kind,
+                name: name.clone(),
+                kind: scalar_substituted(&ty, substitutions).ok_or_else(|| {
+                    BindError::Source(format!(
+                        "parameter `{name}` has unsupported clang type `{ty}`"
+                    ))
+                })?,
             })
         })
         .collect()
 }
 
+fn raw_params(map: &BTreeMap<String, Json>) -> Result<Vec<(String, String)>, BindError> {
+    children(map)
+        .iter()
+        .filter_map(|value| object(value))
+        .filter(|value| string(value, "kind") == Some("ParmVarDecl"))
+        .enumerate()
+        .map(|(index, value)| {
+            Ok((
+                string(value, "name")
+                    .filter(|name| ident(name))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("arg{}", index + 1)),
+                qual_type(value)?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+fn return_type(map: &BTreeMap<String, Json>) -> Result<&str, BindError> {
+    let ty = qual_type(map)?;
+    ty.split_once(" (")
+        .map(|(result, _)| result.trim())
+        .ok_or_else(|| BindError::Source(format!("clang returned an invalid function type `{ty}`")))
+}
+
+fn qual_type(map: &BTreeMap<String, Json>) -> Result<&str, BindError> {
+    map.get("type")
+        .and_then(object)
+        .and_then(|value| string(value, "qualType"))
+        .ok_or_else(|| BindError::Source("clang omitted a declaration type".into()))
+}
+
+fn scalar_substituted(raw: &str, substitutions: &BTreeMap<String, String>) -> Option<Scalar> {
+    let replaced = substitutions
+        .get(raw.trim())
+        .map(String::as_str)
+        .unwrap_or(raw);
+    scalar(replaced)
+}
+
 fn scalar(raw: &str) -> Option<Scalar> {
-    let value = raw.replace("const", "").replace('&', "").trim().to_string();
+    let compact = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact == "int64_t (*)(int64_t)" {
+        return Some(Scalar::Callback);
+    }
+    let value = compact
+        .replace("const ", "")
+        .replace("volatile ", "")
+        .replace(['&', '*'], "")
+        .trim()
+        .to_string();
     match value.as_str() {
         "int64_t" | "long long" | "long" => Some(Scalar::Int),
         "double" => Some(Scalar::Float),
@@ -464,48 +636,70 @@ fn scalar(raw: &str) -> Option<Scalar> {
         _ => None,
     }
 }
-fn split_commas(raw: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let (mut start, mut depth) = (0, 0);
-    for (i, c) in raw.char_indices() {
-        match c {
-            '(' | '<' => depth += 1,
-            ')' | '>' => depth -= 1,
-            ',' if depth == 0 => {
-                out.push(&raw[start..i]);
-                start = i + 1
-            }
-            _ => {}
-        }
-    }
-    out.push(&raw[start..]);
-    out
+
+fn namespace_selected(namespace: &[String], selected: &[String]) -> bool {
+    selected.is_empty() || selected.iter().any(|choice| choice == &namespace.join("::"))
 }
+
+fn qualified(namespace: &[String], name: &str) -> String {
+    if namespace.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}::{name}", namespace.join("::"))
+    }
+}
+
+fn object(value: &Json) -> Option<&BTreeMap<String, Json>> {
+    match value {
+        Json::Object(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn string<'a>(map: &'a BTreeMap<String, Json>, key: &str) -> Option<&'a str> {
+    map.get(key).and_then(|value| match value {
+        Json::Str(value) => Some(value.as_str()),
+        _ => None,
+    })
+}
+
+fn bool_field(map: &BTreeMap<String, Json>, key: &str) -> bool {
+    matches!(map.get(key), Some(Json::Bool(true)))
+}
+
+fn children(map: &BTreeMap<String, Json>) -> &[Json] {
+    match map.get("inner") {
+        Some(Json::Array(values)) => values,
+        _ => &[],
+    }
+}
+
+fn location_file(map: &BTreeMap<String, Json>) -> Option<&str> {
+    map.get("loc").and_then(object).and_then(|loc| string(loc, "file"))
+}
+
 fn disambiguate(routines: &mut [Routine]) {
-    for i in 0..routines.len() {
-        let duplicate = routines
+    for index in 0..routines.len() {
+        if routines
             .iter()
             .enumerate()
-            .any(|(j, r)| i != j && r.jet_name == routines[i].jet_name);
-        if duplicate {
-            let labels = routines[i]
+            .any(|(other, routine)| other != index && routine.jet_name == routines[index].jet_name)
+        {
+            let labels = routines[index]
                 .params
                 .iter()
-                .map(|p| p.name.as_str())
+                .map(|param| param.name.as_str())
                 .collect::<Vec<_>>()
                 .join("_");
-            routines[i].jet_name = format!(
+            routines[index].jet_name = format!(
                 "{}_{}",
-                routines[i].jet_name,
-                if labels.is_empty() {
-                    "no_args"
-                } else {
-                    &labels
-                }
+                routines[index].jet_name,
+                if labels.is_empty() { "no_args" } else { &labels }
             );
         }
     }
 }
+
 fn operator_name(value: &str) -> Option<String> {
     Some(
         match value {
@@ -519,211 +713,305 @@ fn operator_name(value: &str) -> Option<String> {
         .into(),
     )
 }
-fn sanitize_template(value: &str) -> String {
-    if let Some((name, args)) = value.split_once('<') {
-        format!(
-            "{}_{}",
-            snake(name),
-            args.trim_end_matches('>')
-                .replace("int64_t", "int")
-                .replace("double", "float")
-                .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
-        )
+
+fn build_archive(
+    header: &Path,
+    shim: &str,
+    archive: &Path,
+    store: &Path,
+    options: &BindOptions,
+) -> Result<(), BindError> {
+    let build = store.join(".build");
+    let _ = std::fs::remove_dir_all(&build);
+    std::fs::create_dir_all(&build)
+        .map_err(|e| BindError::Io(format!("could not create the C++ build directory: {e}")))?;
+    let cpp = build.join("shim.cpp");
+    let object = build.join("shim.o");
+    let proof = build.join(if cfg!(target_os = "macos") {
+        "proof.dylib"
     } else {
-        snake(value)
+        "proof.so"
+    });
+    std::fs::write(&cpp, shim)
+        .map_err(|e| BindError::Io(format!("could not write the C++ shim: {e}")))?;
+
+    let mut compile = Command::new(&options.clang);
+    compile
+        .args(["-std=c++17", "-fPIC", "-c", "-target"])
+        .arg(&options.target);
+    for dir in &options.include_dirs {
+        compile.arg("-I").arg(dir);
+    }
+    compile.arg(&cpp).arg("-o").arg(&object);
+    run(&mut compile, "clang++")?;
+
+    let mut link = Command::new(&options.clang);
+    link.arg("-target").arg(&options.target).arg("-shared");
+    if cfg!(target_os = "macos") {
+        link.arg("-Wl,-undefined,error");
+    } else {
+        link.arg("-Wl,--no-undefined");
+    }
+    link.arg(&object);
+    add_link_inputs(&mut link, options);
+    link.arg("-o").arg(&proof);
+    run(&mut link, "clang++")?;
+
+    let mut ar = Command::new(&options.archiver);
+    ar.arg("rcs").arg(archive).arg(&object);
+    run(&mut ar, "ar")?;
+    let _ = std::fs::remove_dir_all(&build);
+    let _ = header;
+    Ok(())
+}
+
+fn add_link_inputs(command: &mut Command, options: &BindOptions) {
+    for dir in &options.library_dirs {
+        command.arg("-L").arg(dir);
+    }
+    for library in &options.libraries {
+        command.arg("-l").arg(library);
     }
 }
 
-fn render_jet(lib: &str, s: &Surface) -> String {
-    let abi = format!("jet_cpp_{lib}");
-    let mut o =
-        format!("@Extern module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n");
-    for c in &s.classes {
-        let n = snake(&c.name);
-        o.push_str(&format!("    fn {n}_new("));
-        jet_params(&mut o, &c.ctor);
-        o.push_str(&format!(
-            ") -> Int = \"{abi}_{n}_new\"\n    fn {n}_close(handle: Int) = \"{abi}_{n}_close\"\n"
+fn materialize_projection(
+    cache: &Path,
+    archive: &Path,
+    options: &BindOptions,
+) -> Result<(), BindError> {
+    std::fs::create_dir_all(cache)
+        .map_err(|e| BindError::Io(format!("could not create the C++ binding directory: {e}")))?;
+    std::fs::copy(archive, cache.join(format!("libjet_cpp_{}.a", options.lib)))
+        .map_err(|e| BindError::Io(format!("could not materialize the C++ archive: {e}")))?;
+    let mut links = String::new();
+    for dir in &options.library_dirs {
+        links.push_str("L\t");
+        links.push_str(&dir.to_string_lossy());
+        links.push('\n');
+    }
+    for library in &options.libraries {
+        links.push_str("l\t");
+        links.push_str(library);
+        links.push('\n');
+    }
+    std::fs::write(cache.join(format!("{}.link", options.lib)), links)
+        .map_err(|e| BindError::Io(format!("could not write C++ link provenance: {e}")))
+}
+
+fn render_provenance(
+    header: &Path,
+    digest: &str,
+    surface: &Surface,
+    options: &BindOptions,
+) -> String {
+    let mut value = format!(
+        "schema={SCHEMA}\nsha256={digest}\nheader={}\ntarget={}\nclang={}\narchiver={}\nclasses={}\nfunctions={}\n",
+        header.display(),
+        options.target,
+        options.clang.display(),
+        options.archiver.display(),
+        surface.classes.len(),
+        surface.functions.len()
+    );
+    for namespace in &options.namespaces {
+        value.push_str(&format!("namespace={namespace}\n"));
+    }
+    for dir in &options.include_dirs {
+        value.push_str(&format!("include={}\n", dir.display()));
+    }
+    for dir in &options.library_dirs {
+        value.push_str(&format!("library_search={}\n", dir.display()));
+    }
+    for library in &options.libraries {
+        value.push_str(&format!("library={library}\n"));
+    }
+    for template in &options.templates {
+        value.push_str(&format!(
+            "template={}<{}> as {}\n",
+            template.qualified_name,
+            template.cpp_args.join(","),
+            template.jet_name
         ));
-        for m in &c.methods {
-            o.push_str(&format!("    fn {n}_{}(handle: Int", m.jet_name));
-            if !m.params.is_empty() {
-                o.push_str(", ");
-                jet_params(&mut o, &m.params)
+    }
+    value
+}
+
+fn render_jet(lib: &str, surface: &Surface) -> String {
+    let abi = format!("jet_cpp_{lib}");
+    let mut out = format!(
+        "@Extern module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"
+    );
+    for class in &surface.classes {
+        let name = snake(&class.name);
+        out.push_str(&format!("    fn {name}_new("));
+        jet_params(&mut out, &class.ctor);
+        out.push_str(&format!(
+            ") -> Int = \"{abi}_{name}_new\"\n    fn {name}_close(handle: Int) = \"{abi}_{name}_close\"\n"
+        ));
+        for method in &class.methods {
+            out.push_str(&format!("    fn {name}_{}(handle: Int", method.jet_name));
+            if !method.params.is_empty() {
+                out.push_str(", ");
+                jet_params(&mut out, &method.params);
             }
-            o.push_str(&format!(
-                ") -> {} = \"{abi}_{n}_{}\"\n",
-                m.result.jet(),
-                m.jet_name
+            out.push_str(&format!(
+                ") -> {} = \"{abi}_{name}_{}\"\n",
+                method.result.jet(),
+                method.jet_name
             ));
         }
     }
-    for f in &s.functions {
-        o.push_str(&format!("    fn {}(", f.jet_name));
-        jet_params(&mut o, &f.params);
-        o.push_str(&format!(
+    for function in &surface.functions {
+        out.push_str(&format!("    fn {}(", function.jet_name));
+        jet_params(&mut out, &function.params);
+        out.push_str(&format!(
             ") -> {} = \"{abi}_{}\"\n",
-            f.result.jet(),
-            f.jet_name
+            function.result.jet(),
+            function.jet_name
         ));
     }
-    o.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
-    for c in &s.classes {
-        let n = snake(&c.name);
-        o.push_str(&format!(
-            "@SingleUse\npub struct {} {{ value: Int }}\n\npub fn new_{n}(",
-            c.name
+    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
+    for class in &surface.classes {
+        let name = snake(&class.name);
+        out.push_str(&format!(
+            "@SingleUse\npub struct {} {{ value: Int }}\n\npub fn new_{name}(",
+            class.name
         ));
-        jet_params(&mut o, &c.ctor);
-        o.push_str(&format!(
-            ") -> {} ? CppError {{\n    value :: abi.{n}_new(",
-            c.name
+        jet_params(&mut out, &class.ctor);
+        out.push_str(&format!(
+            ") -> {} ? CppError {{\n    value :: abi.{name}_new(",
+            class.name
         ));
-        jet_args(&mut o, &c.ctor);
-        o.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return Err(cpp_error(code)) }\n    return Ok(");
-        o.push_str(&format!("{}", c.name));
-        o.push_str(".{ value: value })\n}\n\n");
-        if !c.methods.is_empty() {
-            o.push_str(&format!("impl {} {{\n", c.name));
+        jet_args(&mut out, &class.ctor);
+        out.push_str(&format!(
+            ")\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
+            class.name
+        ));
+        if !class.methods.is_empty() {
+            out.push_str(&format!("impl {} {{\n", class.name));
         }
-        for m in &c.methods {
-            o.push_str(&format!("    pub fn {}(self", m.jet_name));
-            if !m.params.is_empty() {
-                o.push_str(", ");
-                jet_params(&mut o, &m.params)
+        for method in &class.methods {
+            out.push_str(&format!("    pub fn {}(self", method.jet_name));
+            if !method.params.is_empty() {
+                out.push_str(", ");
+                jet_params(&mut out, &method.params);
             }
-            o.push_str(&format!(
-                ") -> {} ? CppError {{\n        result_value :: abi.{n}_{}(self.value",
-                m.result.jet(),
-                m.jet_name
+            out.push_str(&format!(
+                ") -> {} ? CppError {{\n        result_value :: abi.{name}_{}(self.value",
+                method.result.jet(),
+                method.jet_name
             ));
-            if !m.params.is_empty() {
-                o.push_str(", ");
-                jet_args(&mut o, &m.params)
+            if !method.params.is_empty() {
+                out.push_str(", ");
+                jet_args(&mut out, &method.params);
             }
-            o.push_str(")\n        code :: abi.take_error()\n        if code != 0 { return Err(cpp_error(code)) }\n        return Ok(result_value)\n    }\n");
+            out.push_str(")\n        code :: abi.take_error()\n        if code != 0 { return Err(cpp_error(code)) }\n        return Ok(result_value)\n    }\n");
         }
-        if !c.methods.is_empty() {
-            o.push_str("}\n\n");
+        if !class.methods.is_empty() {
+            out.push_str("}\n\n");
         }
-        o.push_str(&format!("pub fn close_{n}(value: ^{}) {{\n    abi.{n}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n",c.name));
+        out.push_str(&format!("pub fn close_{name}(value: ^{}) {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
     }
-    for f in &s.functions {
-        // Keep callback entry points on the binder-owned raw C module. Sema
-        // must see the user's named pure function at the ABI call site, and
-        // codegen must lower that exact name to a stable callback symbol.
-        if f.params.iter().any(|p| p.kind == Scalar::Callback) {
-            continue;
-        }
-        o.push_str(&format!("pub fn {}(", f.jet_name));
-        jet_params(&mut o, &f.params);
-        o.push_str(&format!(
+    for function in &surface.functions {
+        out.push_str(&format!("pub fn {}(", function.jet_name));
+        jet_params(&mut out, &function.params);
+        out.push_str(&format!(
             ") -> {} ? CppError {{\n    result_value :: abi.{}(",
-            f.result.jet(),
-            f.jet_name
+            function.result.jet(),
+            function.jet_name
         ));
-        jet_args(&mut o, &f.params);
-        o.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return Err(cpp_error(code)) }\n    return Ok(result_value)\n}\n\n");
+        jet_args(&mut out, &function.params);
+        out.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return Err(cpp_error(code)) }\n    return Ok(result_value)\n}\n\n");
     }
-    o
+    out
 }
-fn jet_params(o: &mut String, p: &[Param]) {
-    for (i, p) in p.iter().enumerate() {
-        if i > 0 {
-            o.push_str(", ")
+
+fn jet_params(out: &mut String, params: &[Param]) {
+    for (index, param) in params.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
         }
-        o.push_str(&p.name);
-        o.push_str(": ");
-        o.push_str(p.kind.jet())
-    }
-}
-fn jet_args(o: &mut String, p: &[Param]) {
-    for (i, p) in p.iter().enumerate() {
-        if i > 0 {
-            o.push_str(", ")
-        }
-        o.push_str(&p.name)
+        out.push_str(&param.name);
+        out.push_str(": ");
+        out.push_str(param.kind.jet());
     }
 }
 
-fn render_cpp(header: &Path, lib: &str, s: &Surface) -> String {
+fn jet_args(out: &mut String, params: &[Param]) {
+    for (index, param) in params.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&param.name);
+    }
+}
+
+fn render_cpp(header: &Path, lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_cpp_{lib}");
-    let mut o=format!("#include <array>\n#include <cstdint>\n#include <cstdlib>\n#include <exception>\n#include <mutex>\n#include \"{}\"\nstatic thread_local int64_t jet_cpp_error;\nextern \"C\" int64_t {abi}_take_error(){{auto value=jet_cpp_error;jet_cpp_error=0;return value;}}\n",header.display());
-    for c in &s.classes {
-        let n = snake(&c.name);
-        o.push_str(&format!(
-            "static std::array<{},64> {n}_slots{{}}; static std::mutex {n}_lock;\n",
-            format!("{}*", c.name)
-        ));
-        o.push_str(&format!("extern \"C\" int64_t {abi}_{n}_new("));
-        cpp_params(&mut o, &c.ctor);
-        o.push_str("){jet_cpp_error=0;try{auto* value=new ");
-        o.push_str(&c.name);
-        o.push('(');
-        cpp_args(&mut o, &c.ctor);
-        o.push_str(&format!(");std::lock_guard<std::mutex> guard({n}_lock);for(size_t i=0;i<{n}_slots.size();++i)if(!{n}_slots[i]){{{n}_slots[i]=value;return i+1;}}delete value;jet_cpp_error=3;return 0;}}catch(...){{jet_cpp_error=1;return 0;}}}}\n"));
-        o.push_str(&format!("static {}* {n}_get(int64_t h){{if(h<1||h>64){{jet_cpp_error=2;return nullptr;}}std::lock_guard<std::mutex> guard({n}_lock);auto* value={n}_slots[h-1];if(!value)jet_cpp_error=2;return value;}}\n",c.name));
-        o.push_str(&format!("extern \"C\" void {abi}_{n}_close(int64_t h){{jet_cpp_error=0;try{{if(h<1||h>64){{jet_cpp_error=2;return;}}{}* value=nullptr;{{std::lock_guard<std::mutex> guard({n}_lock);value={n}_slots[h-1];{n}_slots[h-1]=nullptr;}}if(!value){{jet_cpp_error=2;return;}}delete value;}}catch(...){{jet_cpp_error=1;}}}}\n",c.name));
-        for m in &c.methods {
-            o.push_str(&format!(
-                "extern \"C\" {} {abi}_{n}_{}(int64_t handle",
-                m.result.c(),
-                m.jet_name
-            ));
-            if !m.params.is_empty() {
-                o.push_str(", ");
-                cpp_params(&mut o, &m.params)
+    let mut out = format!("#include <array>\n#include <cstdint>\n#include <cstdlib>\n#include <exception>\n#include <mutex>\n#include \"{}\"\nstatic thread_local int64_t jet_cpp_error;\nextern \"C\" int64_t {abi}_take_error(){{auto value=jet_cpp_error;jet_cpp_error=0;return value;}}\n", header.display());
+    for class in &surface.classes {
+        let name = snake(&class.name);
+        out.push_str(&format!("static std::array<{}*,64> {name}_slots{{}}; static std::mutex {name}_lock;\n", class.cpp_name));
+        out.push_str(&format!("extern \"C\" int64_t {abi}_{name}_new("));
+        cpp_params(&mut out, &class.ctor);
+        out.push_str("){jet_cpp_error=0;try{auto* value=new ");
+        out.push_str(&class.cpp_name);
+        out.push('(');
+        cpp_args(&mut out, &class.ctor);
+        out.push_str(&format!(");std::lock_guard<std::mutex> guard({name}_lock);for(size_t i=0;i<{name}_slots.size();++i)if(!{name}_slots[i]){{{name}_slots[i]=value;return i+1;}}delete value;jet_cpp_error=3;return 0;}}catch(...){{jet_cpp_error=1;return 0;}}}}\n"));
+        out.push_str(&format!("static {}* {name}_get(int64_t handle){{if(handle<1||handle>64){{jet_cpp_error=2;return nullptr;}}std::lock_guard<std::mutex> guard({name}_lock);auto* value={name}_slots[handle-1];if(!value)jet_cpp_error=2;return value;}}\n", class.cpp_name));
+        out.push_str(&format!("extern \"C\" void {abi}_{name}_close(int64_t handle){{jet_cpp_error=0;try{{if(handle<1||handle>64){{jet_cpp_error=2;return;}}{}* value=nullptr;{{std::lock_guard<std::mutex> guard({name}_lock);value={name}_slots[handle-1];{name}_slots[handle-1]=nullptr;}}if(!value){{jet_cpp_error=2;return;}}delete value;}}catch(...){{jet_cpp_error=1;}}}}\n", class.cpp_name));
+        for method in &class.methods {
+            out.push_str(&format!("extern \"C\" {} {abi}_{name}_{}(int64_t handle", method.result.c(), method.jet_name));
+            if !method.params.is_empty() {
+                out.push_str(", ");
+                cpp_params(&mut out, &method.params);
             }
-            o.push_str(&format!("){{jet_cpp_error=0;auto* self={n}_get(handle);if(!self)return {};try{{return self->{}(",m.result.zero(),m.cpp_name));
-            cpp_args(&mut o, &m.params);
-            o.push_str(&format!(
-                ");}}catch(...){{jet_cpp_error=1;return {};}}}}\n",
-                m.result.zero()
-            ));
+            out.push_str("){jet_cpp_error=0;auto* self=");
+            out.push_str(&format!("{name}_get(handle);if(!self)return {};try{{return self->{}(", method.result.zero(), method.cpp_name));
+            cpp_args(&mut out, &method.params);
+            out.push_str(&format!(");}}catch(...){{jet_cpp_error=1;return {};}}}}\n", method.result.zero()));
         }
     }
-    for f in &s.functions {
-        o.push_str(&format!(
-            "extern \"C\" {} {abi}_{}(",
-            f.result.c(),
-            f.jet_name
-        ));
-        cpp_params(&mut o, &f.params);
-        o.push_str(&format!("){{jet_cpp_error=0;try{{return {}(", f.cpp_name));
-        cpp_args(&mut o, &f.params);
-        o.push_str(&format!(
-            ");}}catch(...){{jet_cpp_error=1;return {};}}}}\n",
-            f.result.zero()
-        ));
+    for function in &surface.functions {
+        out.push_str(&format!("extern \"C\" {} {abi}_{}(", function.result.c(), function.jet_name));
+        cpp_params(&mut out, &function.params);
+        out.push_str("){jet_cpp_error=0;try{return ");
+        out.push_str(&function.cpp_name);
+        out.push('(');
+        cpp_args(&mut out, &function.params);
+        out.push_str(&format!(");}}catch(...){{jet_cpp_error=1;return {};}}}}\n", function.result.zero()));
     }
-    o
+    out
 }
-fn cpp_params(o: &mut String, p: &[Param]) {
-    if p.is_empty() {
-        o.push_str("void");
+
+fn cpp_params(out: &mut String, params: &[Param]) {
+    if params.is_empty() {
+        out.push_str("void");
         return;
     }
-    for (i, p) in p.iter().enumerate() {
-        if i > 0 {
-            o.push_str(", ")
+    for (index, param) in params.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
         }
-        if p.kind == Scalar::Callback {
-            o.push_str("int32_t (*");
-            o.push_str(&p.name);
-            o.push_str(")(int32_t)")
+        if param.kind == Scalar::Callback {
+            out.push_str("int64_t (*");
+            out.push_str(&param.name);
+            out.push_str(")(int64_t)");
         } else {
-            o.push_str(p.kind.c());
-            o.push(' ');
-            o.push_str(&p.name)
+            out.push_str(param.kind.c());
+            out.push(' ');
+            out.push_str(&param.name);
         }
     }
 }
-fn cpp_args(o: &mut String, p: &[Param]) {
-    for (i, p) in p.iter().enumerate() {
-        if i > 0 {
-            o.push_str(", ")
+
+fn cpp_args(out: &mut String, params: &[Param]) {
+    for (index, param) in params.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
         }
-        o.push_str(&p.name)
+        out.push_str(&param.name);
     }
 }
 
@@ -732,168 +1020,90 @@ struct Output {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
 }
-fn supervised(command: &mut Command, timeout: Duration) -> Result<Output, BindError> {
+
+fn supervised(command: &mut Command, timeout: Duration, tool: &str) -> Result<Output, BindError> {
     const CAP: usize = 64 * 1024 * 1024;
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            BindError::ToolMissing
+    let mut child = command.spawn().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool.into())
         } else {
-            BindError::Io(format!("could not start foreign tool: {e}"))
+            BindError::Io(format!("could not start `{tool}`: {error}"))
         }
     })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| BindError::Io("could not supervise stdout".into()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| BindError::Io("could not supervise stderr".into()))?;
+    let stdout = child.stdout.take().ok_or_else(|| BindError::Io("could not supervise stdout".into()))?;
+    let stderr = child.stderr.take().ok_or_else(|| BindError::Io("could not supervise stderr".into()))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + timeout;
     let status = loop {
-        match child
-            .try_wait()
-            .map_err(|e| BindError::Io(format!("could not supervise foreign tool: {e}")))?
-        {
-            Some(v) => break v,
+        match child.try_wait().map_err(|error| BindError::Io(format!("could not supervise `{tool}`: {error}")))? {
+            Some(status) => break status,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(BindError::ToolFailed(
-                    "the tool exceeded its time limit".into(),
-                ));
+                return Err(BindError::ToolFailed(format!("`{tool}` exceeded its time limit")));
             }
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
     Ok(Output {
         status,
-        stdout: out
-            .join()
-            .map_err(|_| BindError::Io("stdout reader failed".into()))??,
-        stderr: err
-            .join()
-            .map_err(|_| BindError::Io("stderr reader failed".into()))??,
+        stdout: out.join().map_err(|_| BindError::Io("stdout reader failed".into()))??,
+        stderr: err.join().map_err(|_| BindError::Io("stderr reader failed".into()))??,
     })
 }
+
 fn run(command: &mut Command, tool: &str) -> Result<(), BindError> {
-    let out = supervised(command, Duration::from_secs(60))?;
-    if out.status.success() {
+    let output = supervised(command, Duration::from_secs(60), tool)?;
+    if output.status.success() {
         Ok(())
     } else {
-        Err(BindError::ToolFailed(format!(
-            "{tool}: {}",
-            launder(&out.stderr)
-        )))
+        Err(BindError::ToolFailed(format!("{tool}: {}", launder(&output.stderr))))
     }
 }
+
 fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
     let mut out = Vec::new();
-    let mut buf = [0; 8192];
+    let mut buffer = [0; 8192];
     loop {
-        let n = input
-            .read(&mut buf)
-            .map_err(|e| BindError::Io(format!("could not read foreign output: {e}")))?;
-        if n == 0 {
+        let count = input.read(&mut buffer).map_err(|error| BindError::Io(format!("could not read foreign output: {error}")))?;
+        if count == 0 {
             break;
         }
-        let keep = (limit - out.len()).min(n);
-        out.extend_from_slice(&buf[..keep]);
+        let keep = (limit - out.len()).min(count);
+        out.extend_from_slice(&buffer[..keep]);
     }
     Ok(out)
 }
-fn launder(v: &[u8]) -> String {
-    let text = String::from_utf8_lossy(v);
+
+fn launder(value: &[u8]) -> String {
+    let text = String::from_utf8_lossy(value);
     text.lines()
         .map(str::trim)
-        .find(|v| v.contains("error:"))
-        .or_else(|| text.lines().map(str::trim).find(|v| !v.is_empty()))
-        .map(|v| v.chars().take(200).collect())
+        .find(|line| line.contains("error:"))
+        .or_else(|| text.lines().map(str::trim).find(|line| !line.is_empty()))
+        .map(|line| line.chars().take(240).collect())
         .unwrap_or_else(|| "the tool returned a failure status".into())
 }
-fn strip_comments(v: &str) -> String {
-    let mut o = String::new();
-    let mut c = v.chars().peekable();
-    while let Some(x) = c.next() {
-        if x == '/' && c.peek() == Some(&'/') {
-            for y in c.by_ref() {
-                if y == '\n' {
-                    o.push('\n');
-                    break;
-                }
-            }
-        } else if x == '/' && c.peek() == Some(&'*') {
-            c.next();
-            let mut p = '\0';
-            for y in c.by_ref() {
-                if p == '*' && y == '/' {
-                    break;
-                }
-                p = y
-            }
-        } else {
-            o.push(x)
-        }
-    }
-    o
-}
-fn matching(v: &str, open: usize, left: char, right: char) -> Option<usize> {
-    let mut depth = 0;
-    for (i, c) in v.char_indices().skip_while(|(i, _)| *i < open) {
-        if c == left {
-            depth += 1
-        } else if c == right {
-            depth -= 1;
-            if depth == 0 {
-                return Some(i);
-            }
-        }
-    }
-    None
-}
-fn tool_path(tool: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|v| std::env::split_paths(&v).collect::<Vec<_>>())
-        .map(|p| p.join(tool))
-        .find(|p| p.is_file())
-        .and_then(|p| std::fs::canonicalize(p).ok())
-}
-fn ident(v: &str) -> bool {
-    let mut c = v.chars();
-    matches!(c.next(),Some(x)if x.is_ascii_alphabetic()||x=='_')
-        && c.all(|x| x.is_ascii_alphanumeric() || x == '_')
-}
-fn snake(v: &str) -> String {
-    let mut o = String::new();
-    for (i, c) in v.chars().enumerate() {
-        if c.is_ascii_uppercase() && i > 0 {
-            o.push('_')
-        }
-        o.push(c.to_ascii_lowercase())
-    }
-    o
+
+fn ident(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn projects_owned_exception_template_callback_surface() {
-        let source="class Counter { public: Counter(int64_t start); int64_t add(int64_t value); int64_t add(double value); }; inline int64_t apply(int32_t (*callback)(int32_t), int64_t value) { return callback(static_cast<int32_t>(value)); } template int64_t twice<int64_t>(int64_t value);";
-        let surface = super::parse_surface(source).unwrap();
-        let jet = super::render_jet("demo", &surface);
-        let cpp = super::render_cpp(std::path::Path::new("demo.hpp"), "demo", &surface);
-        assert!(jet.contains("@SingleUse\npub struct Counter"));
-        assert!(jet.contains("impl Counter"));
-        assert!(jet.contains("CppError"));
-        assert!(jet.contains("fn(I32) --[]-> I32"));
-        assert!(jet.contains("add_value"));
-        assert!(jet.contains("twice_int"));
-        assert!(cpp.contains("extern \"C\""));
-        assert!(cpp.contains("catch(...)"));
-        assert!(cpp.contains("delete value"));
+fn qualified_ident(value: &str) -> bool {
+    value.split("::").all(ident)
+}
+
+fn snake(value: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if ch.is_ascii_uppercase() && index > 0 {
+            out.push('_');
+        }
+        out.push(ch.to_ascii_lowercase());
     }
+    out
 }

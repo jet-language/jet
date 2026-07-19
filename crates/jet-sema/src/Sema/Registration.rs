@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
             let line = line.trim();
             if let Some(rest) = line.strip_prefix("; clobbers ") {
                 for reg in rest.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()) {
-                    if !asm_register_allowed(reg) {
+                    if !asm_register_known(reg) {
                         bad = Some(format!("`{reg}` isn't an audited register on this target"));
                     }
                 }
@@ -412,8 +412,7 @@ fn inline_asm_integer_or_void(ty: &Type) -> bool {
         || matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit")
 }
 
-fn asm_register_allowed(reg: &str) -> bool {
-    if std::env::consts::ARCH != "x86_64" { return false; }
+fn asm_register_known(reg: &str) -> bool {
     matches!(reg.to_ascii_lowercase().as_str(), "rax" | "rbx" | "rcx" | "rdx" | "rsi" | "rdi" | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15")
 }
 

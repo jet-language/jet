@@ -1582,7 +1582,7 @@ pub(crate) fn run_bind(args: &[&String]) {
 }
 
 fn run_cpp_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind cpp <header.hpp> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    let usage = || eprintln!("usage: {} inspect bind cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         usage();
         exit(if args.is_empty() { ExitCodes::USAGE } else { 0 });
@@ -1590,19 +1590,57 @@ fn run_cpp_bind(args: &[&String]) {
     let header = args[0].as_str();
     let mut pkg = None;
     let mut out = None;
+    let mut target = None;
+    let mut clang = None;
+    let mut archiver = None;
+    let mut include_dirs = Vec::new();
+    let mut library_dirs = Vec::new();
+    let mut libraries = Vec::new();
+    let mut namespaces = Vec::new();
+    let mut templates = Vec::new();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
             "--pkg" => { pkg = args.get(index + 1).map(|v| v.to_string()); if pkg.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
             "-o" | "--out" => { out = args.get(index + 1).map(|v| v.to_string()); if out.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
+            "--target" => { target = args.get(index + 1).map(|v| v.to_string()); if target.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
+            "--clang" => { clang = args.get(index + 1).map(|v| v.to_string()); if clang.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
+            "--ar" => { archiver = args.get(index + 1).map(|v| v.to_string()); if archiver.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
+            "-I" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; include_dirs.push(std::path::PathBuf::from(value.as_str())); index += 2; }
+            "-L" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; library_dirs.push(std::path::PathBuf::from(value.as_str())); index += 2; }
+            "-l" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; libraries.push(value.to_string()); index += 2; }
+            "--namespace" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; namespaces.push(value.to_string()); index += 2; }
+            "--instantiate" => {
+                let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); };
+                let Some((qualified_name, rest)) = value.split_once('=') else { usage(); exit(ExitCodes::USAGE); };
+                let Some((cpp_types, jet_name)) = rest.rsplit_once(':') else { usage(); exit(ExitCodes::USAGE); };
+                templates.push(jet::CppBind::TemplateInstantiation {
+                    qualified_name: qualified_name.to_string(),
+                    cpp_args: cpp_types.split(',').map(str::to_string).collect(),
+                    jet_name: jet_name.to_string(),
+                });
+                index += 2;
+            }
             flag => { eprintln!("error: unknown `bind cpp` flag `{flag}`"); usage(); exit(ExitCodes::USAGE); }
         }
     }
+    let (Some(target), Some(clang), Some(archiver)) = (target, clang, archiver) else { usage(); exit(ExitCodes::USAGE); };
     let lib = pkg.unwrap_or_else(|| { let base = header.rsplit('/').next().unwrap_or(header); base.rsplit_once('.').map(|v| v.0).unwrap_or(base).to_ascii_lowercase() });
-    let source = std::fs::read_to_string(header).unwrap_or_else(|error| cpp_bind_error(header, &format!("the header could not be read ({error})")));
     let out_path = out.unwrap_or_else(|| format!(".jet/bindings/{}/{}.{}", jet::Syntax::CPP_MODULE_ROOT, lib, jet::Syntax::FILE_EXT));
     let cache = std::path::Path::new(&out_path).parent().unwrap_or_else(|| std::path::Path::new("."));
-    let result = jet::CppBind::bind(std::path::Path::new(header), &source, &lib, cache).unwrap_or_else(|error| cpp_bind_error(header, &error.to_string()));
+    let canonicalize = |path: std::path::PathBuf| std::fs::canonicalize(&path).unwrap_or_else(|error| cpp_bind_error(header, &format!("could not resolve selected native path `{}` ({error})", path.display())));
+    let options = jet::CppBind::BindOptions {
+        lib: lib.clone(),
+        target,
+        clang: canonicalize(std::path::PathBuf::from(clang)),
+        archiver: canonicalize(std::path::PathBuf::from(archiver)),
+        include_dirs: include_dirs.into_iter().map(canonicalize).collect(),
+        library_dirs: library_dirs.into_iter().map(canonicalize).collect(),
+        libraries,
+        namespaces,
+        templates,
+    };
+    let result = jet::CppBind::bind(std::path::Path::new(header), cache, &options).unwrap_or_else(|error| cpp_bind_error(header, &error.to_string()));
     if let Err(error) = std::fs::write(&out_path, &result.source) { cpp_bind_error(header, &format!("the generated cache could not be written ({error})")); }
     if let Err(error) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) { cpp_bind_error(header, &format!("the provenance could not be written ({error})")); }
     println!("bound {} C++ member{} from `{header}` → {out_path}", result.bound.len(), if result.bound.len() == 1 { "" } else { "s" });
@@ -1611,7 +1649,7 @@ fn run_cpp_bind(args: &[&String]) {
 fn cpp_bind_error(path: &str, why: &str) -> ! {
     eprintln!("Error [E3208]: Could not generate C++ bindings from `{path}`.");
     eprintln!(" Why: {why}.");
-    eprintln!(" Fix: expose public scalar classes/functions, explicit template instantiations, or int32_t callbacks, then rerun `jet inspect bind cpp`.");
+    eprintln!(" Fix: select an explicit target/toolchain, expose public scalar declarations, and request templates with `--instantiate`, then rerun `jet inspect bind cpp`.");
     exit(ExitCodes::USER_ERROR)
 }
 

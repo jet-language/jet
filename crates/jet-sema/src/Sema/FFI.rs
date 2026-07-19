@@ -4,6 +4,22 @@ use crate::Syntax;
 use crate::AST::{AccessConvention, CModule, ExternFn, ExternRustBlock, Type, VariantPayload};
 use std::collections::HashMap;
 
+pub(crate) fn cpp_callback_abi_type(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::CPP_CALLBACK_ABI_MARKER
+                && matches!(inner.as_ref(), Type::Fn { .. }) =>
+        {
+            Some(inner)
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn is_callback_boundary_param(is_c_abi: bool, ty: &Type) -> bool {
+    (is_c_abi && matches!(ty, Type::Fn { .. })) || cpp_callback_abi_type(ty).is_some()
+}
+
 pub(crate) fn check_extern_block(
     block: &ExternRustBlock,
     registry: &TypeRegistry,
@@ -96,7 +112,18 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
         // D-SG9: fixed-width integers/floats have a stable C ABI (`u8` … `i64`, `f32`).
         Type::IntN { .. } | Type::Float32 => true,
-        Type::Named(name) => c_named_type_ok(name, registry),
+        // Generated binding-cache modules are parsed after the entry module's
+        // builtin-type normalization pass. Nested callback signatures can
+        // therefore retain the canonical scalar spelling as `Named`; those
+        // spellings have the same stable ABI as their normalized variants.
+        Type::Named(name) => {
+            matches!(
+                name.as_str(),
+                "Int" | "Float" | "Bool" | "Char" | "String"
+                    | "I8" | "I16" | "I32" | "I64"
+                    | "U8" | "U16" | "U32" | "U64" | "F32"
+            ) || c_named_type_ok(name, registry)
+        }
         // No stable C ABI for these by value:
         Type::List(_)
         | Type::Map { .. }

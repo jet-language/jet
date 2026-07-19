@@ -1489,6 +1489,22 @@ impl Cx {
 }
 
 pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) -> String {
+    if let Type::Tagged { marker, inner } = ty {
+        if marker == crate::AST::CPP_CALLBACK_ABI_MARKER {
+            if let Type::Fn { params, ret, .. } = inner.as_ref() {
+                let params = params
+                    .iter()
+                    .map(|param| cx.rust_type(param))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = ret
+                    .as_deref()
+                    .map(|ret| format!(" -> {}", cx.rust_type(ret)))
+                    .unwrap_or_default();
+                return format!("extern \"C\" fn({params}){ret}");
+            }
+        }
+    }
     let base = cx.rust_type(ty);
     if matches!(ty, Type::Named(n) if cx.trait_names.contains(n))
         || matches!(ty, Type::TraitObject(_))

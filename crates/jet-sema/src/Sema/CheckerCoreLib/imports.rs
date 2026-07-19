@@ -233,10 +233,12 @@ impl<'a> Checker<'a> {
                     self.expected_type = Some(pty.clone());
                     let aty = self.infer(&mut arg.expr);
                     self.expected_type = saved;
-                    if sig.is_c_abi && matches!(pty, Type::Fn { .. }) {
+                    if crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, pty) {
                         let safe = match &arg.expr {
                             Expr::Ident(callback, _) => self.funcs.get(callback).is_some_and(|f| {
                                 !f.is_extern && f.is_foreign_thread_safe
+                            }) || aty.as_ref().is_some_and(|ty| {
+                                crate::Sema::FFI::cpp_callback_abi_type(ty).is_some()
                             }),
                             Expr::Lambda(lam) => crate::Sema::foreign_thread_safe_lambda(lam),
                             _ => false,

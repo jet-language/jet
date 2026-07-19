@@ -676,11 +676,28 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
             .join(ForeignLanguage::Cpp.bindings_subdir());
         let archive = dir.join(format!("libjet_cpp_{actual}.a"));
         if archive.is_file() {
-            return Ok(LinkFlags {
+            let mut flags = LinkFlags {
                 lib_dirs: vec![dir.display().to_string()],
-                link_names: vec![format!("static=jet_cpp_{actual}"), "stdc++".into()],
+                link_names: vec![format!("static=jet_cpp_{actual}")],
                 ..Default::default()
-            });
+            };
+            let metadata = dir.join(format!("{actual}.link"));
+            if let Ok(source) = std::fs::read_to_string(metadata) {
+                for line in source.lines() {
+                    if let Some(value) = line.strip_prefix("L\t") {
+                        if std::path::Path::new(value).is_absolute() {
+                            flags.lib_dirs.push(value.to_string());
+                            flags.rpath_dirs.push(value.to_string());
+                        }
+                    } else if let Some(value) = line.strip_prefix("l\t") {
+                        if value.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                            flags.link_names.push(value.to_string());
+                        }
+                    }
+                }
+            }
+            flags.link_names.push("stdc++".into());
+            return Ok(flags);
         }
         return Err(e3201(lib));
     }

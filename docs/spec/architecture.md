@@ -190,13 +190,18 @@ become dependencies of the compiler workspace crates.
    Do not put the dependency in the root or compiler-seam `Cargo.toml` files.
    Inline `#FFI(c|cpp|asm)` bodies use the same `FFI.rs` bridge and include the
    exact raw body, checked signature, target, and bridge schema in their cache
-   identity. C/C++ bodies compile behind generated C-ABI wrappers; asm lowers
+   identity, including the selected target and native toolchain identity.
+   C/C++ bodies compile behind generated C-ABI wrappers for that target; asm lowers
    only after sema has proved its named operands, return anchor, clobbers, and
    target contract.
    `jet inspect bind cpp` is owned by `CppBind.rs`: clang AST discovery produces
    a deterministic Jet module plus C-linkage shim/archive under
-   `.jet/bindings/cpp/`, with a provenance record hashing the header, clang
-   version/AST, generated sources, and schema.
+   `.jet/bindings/cpp/`. Clang JSON—not header text—is the declaration source of
+   truth. The content-addressed provenance hashes the header, selected
+   namespaces/templates, target, absolute clang/archiver identities, include and
+   library search inputs, link libraries, clang version/AST, generated sources,
+   and schema. The proof link uses the same inputs with undefined symbols denied;
+   final native link discovery reads the generated link sidecar.
 4. Thread the prepared `FfiLink` through `crates/jet-driver/src/Driver/mod.rs` and
    `CompileOutput`. `Source/CmdCompile.rs::build` is the real native link edge: it
    passes `--extern`/`-L dependency` to rustc and keeps missing-tool/library

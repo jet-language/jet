@@ -24,6 +24,19 @@ pub(super) fn lambda_block_tail<'a>(stmts: &'a [Stmt]) -> Option<(&'a [Stmt], &'
     }
 }
 
+fn callback_fn_type(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Fn { .. } => Some(ty),
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::CPP_CALLBACK_ABI_MARKER
+                && matches!(inner.as_ref(), Type::Fn { .. }) =>
+        {
+            Some(inner)
+        }
+        _ => None,
+    }
+}
+
 /// c109 Phase 13: the type of a lambda's body (its return), used for a `spawn`ed
 /// closure's `Task<T>` element type. Block bodies use the tail expression/return
 /// (same rule as sema), not `Unit`.
@@ -118,13 +131,17 @@ pub(crate) fn lower_one_call_arg(
                 kind: TExprKind::ResourceTake(env.rust_name_of(name)),
             }
         }
-        (Expr::Ident(name, _), Some((_, Type::Fn { .. }))) if a.flags.c_callback_symbol => TExpr {
+        (Expr::Ident(name, _), Some((_, ty)))
+            if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() => TExpr {
             ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
             kind: TExprKind::ConstInline(cx.mangle_name(name)),
         },
-        (Expr::Lambda(lam), Some((_, Type::Fn { params, ret, .. })))
-            if a.flags.c_callback_symbol =>
+        (Expr::Lambda(lam), Some((_, ty)))
+            if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
         {
+            let Type::Fn { params, ret, .. } = callback_fn_type(ty).unwrap() else {
+                unreachable!()
+            };
             let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
             let name = format!("__jet_c_callback_{}_{}", lam.span.start, lam.span.end);
             let ret = ret
@@ -172,7 +189,7 @@ pub(crate) fn lower_one_call_arg(
     let arc_clone = a.flags.shared_auto_clone;
     // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
     let fn_coerce = match &conv {
-        Some((_, Type::Fn { .. })) if a.flags.c_callback_symbol => None,
+        Some((_, ty)) if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() => None,
         Some((_, Type::Fn { .. })) => {
             // `already_boxed`: the value already produces a `Box::new(…)`. The AST
             // checks two cases — the emitted string starts with `Box::new(` (only a
@@ -205,7 +222,7 @@ pub(crate) fn lower_one_call_arg(
     let (borrow, mut_borrow) = match &conv {
         Some((AccessConvention::Read, t))
             if !t.is_scalar()
-                && !(a.flags.c_callback_symbol && matches!(t, Type::Fn { .. })) =>
+                && !(a.flags.c_callback_symbol && callback_fn_type(t).is_some()) =>
         {
             (true, false)
         }

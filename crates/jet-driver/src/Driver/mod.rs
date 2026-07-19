@@ -1118,7 +1118,11 @@ fn compile_bundle_path_build_inner(
         });
     }
 
-    let ffi = crate::FFI::prepare(&bundle).map_err(|diags| diags)?;
+    let ffi = match options.cross_target.as_deref() {
+        Some(target) => crate::FFI::prepare_for_target(&bundle, target),
+        None => crate::FFI::prepare(&bundle),
+    }
+    .map_err(|diags| diags)?;
     if options.web_target {
         let misses = crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref());
         if !misses.is_empty() {
@@ -1616,7 +1620,11 @@ fn compile_bundle_path_opts_full(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let ffi = match crate::FFI::prepare(&bundle) {
+    let ffi_result = match cross_target {
+        Some(target) => crate::FFI::prepare_for_target(&bundle, target),
+        None => crate::FFI::prepare(&bundle),
+    };
+    let ffi = match ffi_result {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };

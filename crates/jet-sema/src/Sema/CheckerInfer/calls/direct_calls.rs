@@ -1073,10 +1073,14 @@ impl<'a> Checker<'a> {
                     self.infer(&mut arg.expr)
                 };
                 self.memory_control_multiplier = memory_multiplier;
-                if sig.is_c_abi && matches!(effective_params.get(i), Some((_, Type::Fn { .. }))) {
+                if effective_params.get(i).is_some_and(|(_, ty)| {
+                    crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, ty)
+                }) {
                     let safe = match &arg.expr {
                         Expr::Ident(callback, _) => self.funcs.get(callback).is_some_and(|f| {
                             !f.is_extern && f.is_foreign_thread_safe
+                        }) || arg_ty.as_ref().is_some_and(|ty| {
+                            crate::Sema::FFI::cpp_callback_abi_type(ty).is_some()
                         }),
                         Expr::Lambda(lam) => crate::Sema::foreign_thread_safe_lambda(lam),
                         _ => false,

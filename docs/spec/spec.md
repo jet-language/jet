@@ -927,8 +927,15 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 
 Every foreign ecosystem mounts through one model: a language root plus library
 name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
-C and JS are the active namespace binders today. C uses the namespace surface
-(`use c.<lib>` / `@Extern module c.<lib>`). JS uses one `use js.<lib>` surface;
+C, C++, and JS are active namespace binders. C uses the namespace surface
+(`use c.<lib>` / `@Extern module c.<lib>`). C++ uses `use cpp.<lib>` over a
+clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
+explicitly, public scalar classes become owned opaque handles, exceptions become
+`T ? CppError`, pure named callbacks keep their checked C ABI, and template
+instantiations are requested on demand. `jet inspect bind cpp` requires the
+selected target and absolute clang/archiver paths; include/library search paths
+and link libraries are audited in binding provenance and reused at final link.
+JS uses one `use js.<lib>` surface;
 the host is target-dispatched, with browser JS on web targets and the native
 JS-on-WASM host on native targets. Generated JS binding caches live under
 `.jet/bindings/js/`: `<lib>.jet` carries the callable Jet surface and
@@ -937,6 +944,14 @@ JS-on-WASM host on native targets. Generated JS binding caches live under
 surface until the `rust.*` namespace migrates. Python and Swift roots are
 registered for their ratified binders; Swift's planned route is a typed bridge
 over generated C-ABI shims.
+
+The inline fourth tier is also implemented. `#FFI(c|cpp) fn` carries one exact
+triple-quoted raw body whose Jet signature remains the checked contract.
+`#FFI(asm) fn` is available only inside an audited `@Unsafe("reason")` region
+with `use core.mem`; its named operands, return anchor, clobbers, and selected
+target are checked before lowering. These native boundaries are not resident-JIT
+code: the JIT reports the foreign boundary by name, while native build/run owns
+execution and link proof.
 
 ## M7 — Rust FFI (`extern rust`, done)
 
