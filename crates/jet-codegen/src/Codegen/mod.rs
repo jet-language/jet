@@ -15,7 +15,11 @@ use crate::Sema::CompileMode;
 use crate::Syntax;
 use crate::Traits;
 use crate::AST::FfiLink;
-use crate::AST::{BenchDef, Item, Program, ProgramBundle, ResolvedOutput, TestDef, Type};
+use crate::AST::{
+    BenchDef, ElseBranch, Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef,
+    Type,
+};
+use std::collections::HashSet;
 
 mod CModule;
 mod Context;
@@ -805,7 +809,179 @@ pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
     out.push_str("impl<T: user_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n");
 }
 
-pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, out: &mut String) {
+fn collect_allocator_constructors(
+    stmts: &[Stmt],
+    cx: &Cx,
+    locals: &mut HashSet<String>,
+    found: &mut HashSet<String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Val(binding) => {
+                if let Expr::MethodCall { receiver, method, .. } = &binding.init {
+                    if let Some(name) = TIR::alloc_new_type(receiver, method, cx, locals) {
+                        found.insert(name.to_string());
+                    }
+                }
+                locals.insert(binding.name.clone());
+            }
+            Stmt::If(branch) => {
+                collect_allocator_nested(&branch.then_body, cx, locals, found, &[]);
+                let mut next = branch.else_branch.as_ref();
+                while let Some(else_branch) = next {
+                    match else_branch {
+                        ElseBranch::Else(body) => {
+                            collect_allocator_nested(body, cx, locals, found, &[]);
+                            break;
+                        }
+                        ElseBranch::ElseIf(branch) => {
+                            collect_allocator_nested(&branch.then_body, cx, locals, found, &[]);
+                            next = branch.else_branch.as_ref();
+                        }
+                    }
+                }
+            }
+            Stmt::For { var, var2, body, .. } => {
+                let mut names = vec![var.as_str()];
+                if let Some((name, _)) = var2 {
+                    names.push(name);
+                }
+                collect_allocator_nested(body, cx, locals, found, &names);
+            }
+            Stmt::Switch { arms, else_body, .. }
+            | Stmt::ComptimeSwitch { arms, else_body, .. } => {
+                for arm in arms {
+                    collect_allocator_nested(&arm.body, cx, locals, found, &[]);
+                }
+                if let Some(body) = else_body {
+                    collect_allocator_nested(body, cx, locals, found, &[]);
+                }
+            }
+            Stmt::CountedLoop { init, body, step, .. } => {
+                let mut scope = locals.clone();
+                scope.insert(init.name.clone());
+                collect_allocator_constructors(body, cx, &mut scope, found);
+                if let Some(step) = step.as_deref() {
+                    collect_allocator_constructors(std::slice::from_ref(step), cx, &mut scope, found);
+                }
+            }
+            Stmt::While { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::DebugOnly { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ComptimeBlock { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::ScopeMember { body, .. } => {
+                collect_allocator_nested(body, cx, locals, found, &[])
+            }
+            Stmt::ComptimeIf { then_body, else_body, selected_then, .. } => {
+                match selected_then {
+                    Some(true) => collect_allocator_nested(then_body, cx, locals, found, &[]),
+                    Some(false) => {
+                        if let Some(body) = else_body {
+                            collect_allocator_nested(body, cx, locals, found, &[]);
+                        }
+                    }
+                    None => {
+                        collect_allocator_nested(then_body, cx, locals, found, &[]);
+                        if let Some(body) = else_body {
+                            collect_allocator_nested(body, cx, locals, found, &[]);
+                        }
+                    }
+                }
+            }
+            Stmt::Off { .. }
+            | Stmt::Expr(_)
+            | Stmt::Assign { .. }
+            | Stmt::Return(..)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::BreakLabel(..)
+            | Stmt::ContinueLabel(..)
+            | Stmt::Yield(..) => {}
+        }
+    }
+}
+
+fn collect_allocator_nested(
+    body: &[Stmt],
+    cx: &Cx,
+    locals: &HashSet<String>,
+    found: &mut HashSet<String>,
+    extra: &[&str],
+) {
+    let mut scope = locals.clone();
+    scope.extend(extra.iter().map(|name| (*name).to_string()));
+    collect_allocator_constructors(body, cx, &mut scope, found);
+}
+
+fn collect_func_allocator_constructors(func: &Func, cx: &Cx, found: &mut HashSet<String>) {
+    let mut locals = func.params.iter().map(|param| param.name.clone()).collect();
+    collect_allocator_constructors(&func.body, cx, &mut locals, found);
+}
+
+fn allocator_constructor_types(items: &[Item], cx: &Cx) -> HashSet<String> {
+    let mut found = HashSet::new();
+    for item in items {
+        match item {
+            Item::Func(func) => collect_func_allocator_constructors(func, cx, &mut found),
+            Item::Struct(def) => {
+                for func in &def.methods {
+                    collect_func_allocator_constructors(func, cx, &mut found);
+                }
+                for block in &def.trait_impls {
+                    for func in &block.methods {
+                        collect_func_allocator_constructors(func, cx, &mut found);
+                    }
+                }
+            }
+            Item::Enum(def) => {
+                for func in &def.methods {
+                    collect_func_allocator_constructors(func, cx, &mut found);
+                }
+                for block in &def.trait_impls {
+                    for func in &block.methods {
+                        collect_func_allocator_constructors(func, cx, &mut found);
+                    }
+                }
+            }
+            Item::Impl(def) => {
+                for func in &def.methods {
+                    collect_func_allocator_constructors(func, cx, &mut found);
+                }
+            }
+            Item::Test(def) => {
+                let mut locals = HashSet::new();
+                collect_allocator_constructors(&def.body, cx, &mut locals, &mut found);
+            }
+            Item::Bench(def) => {
+                let mut locals = HashSet::new();
+                collect_allocator_constructors(&def.body, cx, &mut locals, &mut found);
+            }
+            Item::CodeModule(def) => {
+                if let Some(body) = &def.body {
+                    found.extend(allocator_constructor_types(body, cx));
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &mut String) {
     let root = &cx.root_prefix;
     let uses = |module: &str| {
         cx.used_core.iter().any(|usage| {
@@ -835,15 +1011,16 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, out: &mut String) {
             "impl user_Close for {root}JetTlsStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
         ));
     }
-    if uses(crate::Syntax::CORE_MEM_MODULE)
-        || uses(crate::Syntax::CORE_MEM_ALLOC_MODULE)
-    {
-        for ty in [
-            format!("{root}jet_mem::JetArena"),
-            format!("{root}jet_mem::JetBump"),
-            format!("{root}jet_mem::JetPool"),
-            format!("{root}jet_mem::JetFixed"),
-        ] {
+    let uses_mem = uses(crate::Syntax::CORE_MEM_MODULE)
+        || uses(crate::Syntax::CORE_MEM_ALLOC_MODULE);
+    let constructed_allocators = allocator_constructor_types(items, cx);
+    for (name, ty) in [
+        ("Arena", format!("{root}jet_mem::JetArena")),
+        ("Bump", format!("{root}jet_mem::JetBump")),
+        ("Pool", format!("{root}jet_mem::JetPool")),
+        ("Fixed", format!("{root}jet_mem::JetFixed")),
+    ] {
+        if uses_mem || constructed_allocators.contains(name) {
             out.push_str(&format!(
                 "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
@@ -1002,7 +1179,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     emit_synthetic_display_trait(&mut out);
     emit_synthetic_operator_traits(&mut out);
     emit_synthetic_close_trait(&mut out);
-    emit_synthetic_close_builtin_impls(&cx, &mut out);
+    emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
     emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
 
@@ -1355,7 +1532,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     emit_synthetic_display_trait(&mut out);
     emit_synthetic_operator_traits(&mut out);
     emit_synthetic_close_trait(&mut out);
-    emit_synthetic_close_builtin_impls(&cx, &mut out);
+    emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
     emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
 

@@ -243,6 +243,7 @@ fn run() {
     let user = common::strip_vetted_prelude_modules(&output.rust);
     assert!(user.contains("[std::mem::MaybeUninit::<u8>::uninit(); 256]"), "{user}");
     assert!(user.contains("JetFixed::over_uninit"), "{user}");
+    assert!(user.contains("impl user_Close for jet_mem::JetFixed"), "{user}");
 
     let over_src = r#"
 use core.mem
@@ -302,6 +303,25 @@ fn run() {
     )
     .expect_err("Fixed handles cannot be stored in aggregates");
     assert!(stored.iter().any(|code| code == "E0631"), "{stored:?}");
+}
+
+#[test]
+fn allocator_close_impls_require_resolved_core_constructors() {
+    let output = compile_jet(
+        r#"
+use core.mem as mem
+
+fn run() {
+    text := "mem.Fixed.new(size: 128); notmem.Fixed.new()"
+    // mem.Fixed.new(size: 128)
+    // notmem.Fixed.new()
+    print(text)
+}
+"#,
+    )
+    .expect("non-Core allocator lookalikes should compile");
+    let user = common::strip_vetted_prelude_modules(&output.rust);
+    assert!(!user.contains("impl user_Close for jet_mem::"), "{user}");
 }
 
 #[test]
