@@ -369,6 +369,12 @@ pub const REF_SOURCE_PATH: &str = "path";
 pub const REF_SOURCE_CRAN: &str = "cran";
 /// D-JPK-PROVIDERS2 / D-FFI-LUA1: direct LuaRocks ecosystem root.
 pub const REF_SOURCE_LUAROCKS: &str = "luarocks";
+/// D-FFI-RUBY1 / D-JPK7: direct RubyGems ecosystem root.
+pub const REF_SOURCE_RUBY: &str = "ruby";
+/// D-FFI-PERL1 / D-JPK7: direct CPAN ecosystem root.
+pub const REF_SOURCE_PERL: &str = "perl";
+/// D-FFI-PHP1 / D-JPK7: direct Packagist ecosystem root.
+pub const REF_SOURCE_PHP: &str = "php";
 
 /// D-JPK2/9: the Phase 1 verb set.
 pub const JETPACK_VERBS: &[&str] = &[

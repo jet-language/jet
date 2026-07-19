@@ -170,6 +170,15 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
                 );
                 return 2;
             }
+            RefSpec::Source::RubyGems | RefSpec::Source::Cpan | RefSpec::Source::Packagist => {
+                theme.error_coded(
+                    "E1270",
+                    "adapter draft needs source bytes",
+                    "a scripting-registry ref names a package, not an unpacked source tree.",
+                    "realize the exact registry package first, then adapt its locked source artifact.",
+                );
+                return 2;
+            }
         }
     };
     let name = source

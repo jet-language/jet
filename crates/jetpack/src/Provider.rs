@@ -22,8 +22,10 @@ use std::process::Command;
 mod remote;
 mod cran;
 mod luarocks;
+mod script_registry;
 use cran::CranProvider;
 use luarocks::LuaRocksProvider;
+use script_registry::{Kind as ScriptRegistryKind, ScriptRegistryProvider};
 
 use remote::{
     copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, source_cache_dir,
@@ -252,6 +254,22 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
+        ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
+            let project = ctx.project_dir?;
+            let kind = script_registry_kind(resolve_kind(spec, table, ctx.offline, ctx.store_dir))?;
+            let (output, source_hash, _repository, env) =
+                super::Lock::registry_realization(project, kind.label(), &spec.raw)?;
+            Some(super::Store::CacheExpectation {
+                identity: super::Store::CacheIdentity {
+                    source_fingerprint: source_hash,
+                    recipe_fingerprint: SHA256::sha256_hex(kind.recipe().as_bytes()),
+                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
+                    platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
+                },
+                owned_output: Some(PathBuf::from(output)),
+                allow_unsigned_local: true,
+            })
+        }
         // An inferred source realized offline defaults to nix with no lock-backed
         // identity to match; no early cache path.
         ProviderKind::Infer => None,
@@ -337,6 +355,8 @@ pub enum ProviderError {
     Cran(String),
     /// Native LuaRocks metadata, integrity, dependency, or installation failure.
     LuaRocks(String),
+    /// Native RubyGems/CPAN/Packagist metadata, integrity, or install failure.
+    Registry(&'static str, String),
     /// E1232 (D-MONOREF1): a monorepo source could not be fetched — the sparse
     /// subtree checkout and the full-clone fallback both failed.
     MonorepoFetch(String),
@@ -373,6 +393,7 @@ impl ProviderError {
             ProviderError::Offline(_) => Some("E1276"),
             ProviderError::Cran(_) => None,
             ProviderError::LuaRocks(_) => None,
+            ProviderError::Registry(_, _) => None,
             _ => None,
         }
     }
@@ -408,6 +429,9 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
         Source::Path => format!("path:{}", spec.package),
         Source::Cran => format!("cran:{}", spec.package),
         Source::LuaRocks => format!("luarocks:{}", spec.package),
+        Source::RubyGems => format!("ruby:{}", spec.package),
+        Source::Cpan => format!("perl:{}", spec.package),
+        Source::Packagist => format!("php:{}", spec.package),
         Source::Named(name) => {
             let upstream = table.upstream(name).unwrap_or(name);
             format!("{upstream}#{}", spec.package)
@@ -824,6 +848,9 @@ pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
         ProviderKind::Core => Box::new(CoreProvider),
         ProviderKind::Cran => Box::new(CranProvider),
         ProviderKind::LuaRocks => Box::new(LuaRocksProvider),
+        ProviderKind::RubyGems => Box::new(ScriptRegistryProvider(ScriptRegistryKind::RubyGems)),
+        ProviderKind::Cpan => Box::new(ScriptRegistryProvider(ScriptRegistryKind::Cpan)),
+        ProviderKind::Packagist => Box::new(ScriptRegistryProvider(ScriptRegistryKind::Packagist)),
         _ => Box::new(NixProvider),
     }
 }
@@ -848,17 +875,38 @@ pub fn resolve_kind(
     if matches!(spec.source, Source::LuaRocks) {
         return ProviderKind::LuaRocks;
     }
+    if matches!(spec.source, Source::RubyGems) {
+        return ProviderKind::RubyGems;
+    }
+    if matches!(spec.source, Source::Cpan) {
+        return ProviderKind::Cpan;
+    }
+    if matches!(spec.source, Source::Packagist) {
+        return ProviderKind::Packagist;
+    }
     let Source::Named(name) = &spec.source else { return ProviderKind::Nix; };
     match table.provider(name) {
         ProviderKind::Core => ProviderKind::Core,
         ProviderKind::Cran => ProviderKind::Cran,
         ProviderKind::LuaRocks => ProviderKind::LuaRocks,
+        ProviderKind::RubyGems => ProviderKind::RubyGems,
+        ProviderKind::Cpan => ProviderKind::Cpan,
+        ProviderKind::Packagist => ProviderKind::Packagist,
         ProviderKind::Nix => ProviderKind::Nix,
         // U9: peek the remote's `pkg.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
             Some(upstream) => infer_remote_kind(upstream, offline, cache_dir),
             None => ProviderKind::Nix,
         },
+    }
+}
+
+fn script_registry_kind(kind: ProviderKind) -> Option<ScriptRegistryKind> {
+    match kind {
+        ProviderKind::RubyGems => Some(ScriptRegistryKind::RubyGems),
+        ProviderKind::Cpan => Some(ScriptRegistryKind::Cpan),
+        ProviderKind::Packagist => Some(ScriptRegistryKind::Packagist),
+        _ => None,
     }
 }
 
@@ -1066,6 +1114,10 @@ fn stage_adapter_source(
         )),
         Source::LuaRocks => Err(ProviderError::Adapter(
             "LuaRocks packages must be realized before they can be adapter source bytes."
+                .to_string(),
+        )),
+        Source::RubyGems | Source::Cpan | Source::Packagist => Err(ProviderError::Adapter(
+            "scripting-registry packages must be realized before they can be adapter source bytes."
                 .to_string(),
         )),
         Source::Named(_) => Err(ProviderError::Adapter(

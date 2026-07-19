@@ -25,6 +25,12 @@ pub enum Source {
     Cran,
     /// A package from the LuaRocks registry (D-FFI-LUA1).
     LuaRocks,
+    /// A package from RubyGems (D-FFI-RUBY1).
+    RubyGems,
+    /// A distribution from CPAN (D-FFI-PERL1).
+    Cpan,
+    /// A package from Packagist (D-FFI-PHP1).
+    Packagist,
     /// A pack-declared named source, e.g. `stable` → a pinned nixpkgs (D-JPK17).
     Named(String),
 }
@@ -38,6 +44,9 @@ impl Source {
             Source::Path => Syntax::REF_SOURCE_PATH,
             Source::Cran => Syntax::REF_SOURCE_CRAN,
             Source::LuaRocks => Syntax::REF_SOURCE_LUAROCKS,
+            Source::RubyGems => Syntax::REF_SOURCE_RUBY,
+            Source::Cpan => Syntax::REF_SOURCE_PERL,
+            Source::Packagist => Syntax::REF_SOURCE_PHP,
             Source::Named(name) => name,
         }
     }
@@ -49,6 +58,9 @@ impl Source {
             || name == Syntax::REF_SOURCE_PATH
             || name == Syntax::REF_SOURCE_CRAN
             || name == Syntax::REF_SOURCE_LUAROCKS
+            || name == Syntax::REF_SOURCE_RUBY
+            || name == Syntax::REF_SOURCE_PERL
+            || name == Syntax::REF_SOURCE_PHP
     }
 
     fn builtin(name: &str) -> Option<Source> {
@@ -58,6 +70,9 @@ impl Source {
             n if n == Syntax::REF_SOURCE_PATH => Some(Source::Path),
             n if n == Syntax::REF_SOURCE_CRAN => Some(Source::Cran),
             n if n == Syntax::REF_SOURCE_LUAROCKS => Some(Source::LuaRocks),
+            n if n == Syntax::REF_SOURCE_RUBY => Some(Source::RubyGems),
+            n if n == Syntax::REF_SOURCE_PERL => Some(Source::Cpan),
+            n if n == Syntax::REF_SOURCE_PHP => Some(Source::Packagist),
             _ => None,
         }
     }
@@ -79,6 +94,9 @@ pub enum ProviderKind {
     Core,
     Cran,
     LuaRocks,
+    RubyGems,
+    Cpan,
+    Packagist,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
     /// `pkg.jet` (U9). Only the typed `github@…` surface produces this.
     Infer,
@@ -92,6 +110,9 @@ impl ProviderKind {
             "core" => ProviderKind::Core,
             "cran" => ProviderKind::Cran,
             "luarocks" => ProviderKind::LuaRocks,
+            "ruby" => ProviderKind::RubyGems,
+            "perl" => ProviderKind::Cpan,
+            "php" => ProviderKind::Packagist,
             _ => ProviderKind::Nix,
         }
     }
@@ -102,6 +123,9 @@ impl ProviderKind {
             ProviderKind::Core => "core",
             ProviderKind::Cran => "cran",
             ProviderKind::LuaRocks => "luarocks",
+            ProviderKind::RubyGems => "ruby",
+            ProviderKind::Cpan => "perl",
+            ProviderKind::Packagist => "php",
             // Never user-shown: resolved before any listing/diagnostic.
             ProviderKind::Infer => "infer",
         }
@@ -635,6 +659,31 @@ mod tests {
         assert_eq!(r.source, Source::LuaRocks);
         assert_eq!(r.package, "luasocket#version=3.1.0-1");
         assert_eq!(ProviderKind::parse("luarocks"), ProviderKind::LuaRocks);
+    }
+
+    #[test]
+    fn classifies_direct_scripting_registry_roots() {
+        for (raw, source, provider) in [
+            (
+                "ruby:rack#version=3.2.0",
+                Source::RubyGems,
+                ProviderKind::RubyGems,
+            ),
+            (
+                "perl:JSON-MaybeXS#version=1.004008",
+                Source::Cpan,
+                ProviderKind::Cpan,
+            ),
+            (
+                "php:monolog/monolog#version=3.9.0",
+                Source::Packagist,
+                ProviderKind::Packagist,
+            ),
+        ] {
+            let spec = classify(raw).unwrap();
+            assert_eq!(spec.source, source);
+            assert_eq!(ProviderKind::parse(spec.source.label()), provider);
+        }
     }
 
     #[test]

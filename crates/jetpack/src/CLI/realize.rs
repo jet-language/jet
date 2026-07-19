@@ -443,6 +443,11 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             reason,
             "use an exact `luarocks:<name>#version=<version>` ref and verify the repository metadata and source hash",
         ),
+        ProviderError::Registry(registry, reason) => theme.error(
+            &format!("could not realize the {registry} package"),
+            reason,
+            "use an exact `ruby:`, `perl:`, or `php:` ref and verify registry metadata and source hashes.",
+        ),
         // E1232: sparse subtree fetch + full-clone fallback both failed.
         ProviderError::MonorepoFetch(reason) => theme.error_coded(
             "E1232",

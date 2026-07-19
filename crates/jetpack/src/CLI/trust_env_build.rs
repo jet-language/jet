@@ -187,11 +187,33 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                 if !entry.bin.is_empty() {
                     bin_dirs.push(entry.bin);
                 }
-                for (file, variable) in [("lua-path", "LUA_PATH"), ("lua-cpath", "LUA_CPATH")] {
+                for (file, variable) in [
+                    ("lua-path", "LUA_PATH"),
+                    ("lua-cpath", "LUA_CPATH"),
+                    ("gem-home", "GEM_HOME"),
+                    ("gem-path", "GEM_PATH"),
+                    ("ruby-lib", "RUBYLIB"),
+                    ("perl5lib", "PERL5LIB"),
+                    ("composer-autoload", "COMPOSER_AUTOLOAD"),
+                ] {
                     if let Ok(value) = std::fs::read_to_string(std::path::Path::new(&entry.out).join(file)) {
                         let value = value.trim();
                         if !value.is_empty() {
-                            provider_vars.entry(variable.to_string()).or_default().push(value.to_string());
+                            let value = if matches!(file, "gem-home" | "gem-path" | "ruby-lib" | "perl5lib" | "composer-autoload") {
+                                value
+                                    .split(crate::Platform::path_separator())
+                                    .map(|path| {
+                                        let path = std::path::Path::new(path);
+                                        if path.is_absolute() { path.to_path_buf() } else { std::path::Path::new(&entry.out).join(path) }
+                                            .to_string_lossy()
+                                            .into_owned()
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(&crate::Platform::path_separator().to_string())
+                            } else {
+                                value.to_string()
+                            };
+                            provider_vars.entry(variable.to_string()).or_default().push(value);
                         }
                     }
                 }
@@ -235,7 +257,14 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     // threshold rule (`Shell::enter`) instead of a redundant summary line.
     Ok(Env {
         bin_dirs,
-        vars: provider_vars.into_iter().map(|(name, values)| (name, format!("{};;", values.join(";")))).collect(),
+        vars: provider_vars.into_iter().map(|(name, values)| {
+            let value = match name.as_str() {
+                "LUA_PATH" | "LUA_CPATH" => format!("{};;", values.join(";")),
+                "GEM_HOME" => values.into_iter().next().unwrap_or_default(),
+                _ => values.join(&crate::Platform::path_separator().to_string()),
+            };
+            (name, value)
+        }).collect(),
         refs: realized_refs,
         label: plan.label.clone(),
         prompt_path: plan.prompt_path,

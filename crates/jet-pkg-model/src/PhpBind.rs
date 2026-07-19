@@ -179,6 +179,12 @@ fn render_worker(functions: &[String]) -> String {
     format!(r#"<?php
 ini_set('display_errors', '0');
 error_reporting(0);
+$autoload = getenv('COMPOSER_AUTOLOAD');
+if ($autoload !== false && $autoload !== '') {{
+    foreach (explode(PATH_SEPARATOR, $autoload) as $file) {{
+        if ($file !== '') require_once $file;
+    }}
+}}
 require_once $argv[1];
 $allowed = [
 {allowed}
@@ -345,5 +351,12 @@ class Hidden { function method($input) {} }
     fn non_posix_hosts_fail_instead_of_emitting_a_posix_facade() {
         let error=super::require_supported_host(false).unwrap_err();
         assert_eq!(error,super::BindError::Source("persistent PHP bindings require a POSIX host process supervisor".into()));
+    }
+    #[test]
+    fn worker_loads_projected_composer_autoload_before_user_source() {
+        let worker=super::render_worker(&["run".into()]);
+        let autoload=worker.find("getenv('COMPOSER_AUTOLOAD')").unwrap();
+        let source=worker.find("require_once $argv[1]").unwrap();
+        assert!(autoload < source);
     }
 }

@@ -115,6 +115,14 @@ pub enum LockSource {
         source_hash: String,
         repository: String,
     },
+    /// D-FFI-RUBY1/PERL1/PHP1: exact foreign scripting-registry closure.
+    Registry {
+        registry: String,
+        reference: String,
+        output: String,
+        source_hash: String,
+        repository: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +191,10 @@ pub fn write(lock: &LockFile) -> String {
             LockSource::LuaRocks { reference, output, source_hash, repository } => format!(
                 "{{ luarocks = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\" }}",
                 escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository)
+            ),
+            LockSource::Registry { registry, reference, output, source_hash, repository } => format!(
+                "{{ registry = \"{}\", reference = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\" }}",
+                escape_str(registry), escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository)
             ),
         };
         out.push_str(&format!("source = {}\n", source_str));
@@ -651,6 +663,15 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
             repository: kv_field(s, "repository").unwrap_or_default(),
         });
     }
+    if let Some(registry) = kv_field(s, "registry") {
+        return Ok(LockSource::Registry {
+            registry,
+            reference: kv_field(s, "reference").unwrap_or_default(),
+            output: kv_field(s, "output").unwrap_or_default(),
+            source_hash: kv_field(s, "source-hash").unwrap_or_default(),
+            repository: kv_field(s, "repository").unwrap_or_default(),
+        });
+    }
     if let Some(url) = kv_field(s, "git") {
         let selector = if let Some(t) = kv_field(s, "tag") {
             format!("tag = \"{}\"", t)
@@ -973,6 +994,91 @@ pub fn luarocks_realization(
         if let LockSource::LuaRocks { reference: r, output, source_hash, repository } = pkg.source {
             if r == reference {
                 return Some((output, source_hash, repository, pkg.envelope?));
+            }
+        }
+    }
+    None
+}
+
+/// Record one exact RubyGems/CPAN/Packagist closure under the shared lock law.
+pub fn record_registry_realization(
+    project_root: &Path,
+    registry: &str,
+    name: &str,
+    version: &str,
+    reference: &str,
+    output: &str,
+    source_hash: &str,
+    repository: &str,
+    dependencies: Vec<String>,
+    envelope: LockEnvelope,
+) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            source_channels: Vec::new(),
+        });
+    lock.version = LOCK_VERSION;
+    let entry = LockedPackage {
+        name: name.to_string(),
+        version: version.to_string(),
+        source: LockSource::Registry {
+            registry: registry.to_string(),
+            reference: reference.to_string(),
+            output: output.to_string(),
+            source_hash: source_hash.to_string(),
+            repository: repository.to_string(),
+        },
+        locked: None,
+        fingerprint: source_hash.to_string(),
+        content_hash: None,
+        dependencies,
+        layer: None,
+        inferred_layer: None,
+        effects: Vec::new(),
+        effect_grants: Vec::new(),
+        envelope: Some(envelope),
+    };
+    if let Some(existing) = lock.packages.iter_mut().find(|package| {
+        package.name == name
+            && matches!(&package.source, LockSource::Registry { registry: value, .. } if value == registry)
+    }) {
+        *existing = entry;
+    } else {
+        lock.packages.push(entry);
+    }
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// Exact scripting-registry trust root for online drift checks and offline replay.
+pub fn registry_realization(
+    project_root: &Path,
+    registry: &str,
+    reference: &str,
+) -> Option<(String, String, String, LockEnvelope)> {
+    let lock = load(project_root)?;
+    for package in lock.packages {
+        if let LockSource::Registry {
+            registry: locked_registry,
+            reference: locked_reference,
+            output,
+            source_hash,
+            repository,
+        } = package.source
+        {
+            if locked_registry == registry && locked_reference == reference {
+                return Some((output, source_hash, repository, package.envelope?));
             }
         }
     }
