@@ -687,7 +687,14 @@ fn dependency_lines_with_context(text: &str) -> Vec<(String, String, bool)> {
 }
 
 fn table_header(line: &str) -> Option<&str> {
-    line.trim().strip_prefix('[')?.strip_suffix(']')
+    let rest = line.trim_start().strip_prefix('[')?;
+    let close = rest.find(']')?;
+    let suffix = rest[close + 1..].trim_start();
+    if !suffix.is_empty() && !suffix.starts_with('#') {
+        return None;
+    }
+    let header = rest[..close].trim();
+    (!header.is_empty()).then_some(header)
 }
 
 enum DependencyTable<'a> {
@@ -821,6 +828,23 @@ fn dependency_scanner_does_not_confuse_values_with_path_keys() {
     let dependencies = dependency_lines_with_context(manifest);
     assert!(!dependencies[0].2, "{dependencies:#?}");
     assert!(dependencies[1].2, "{dependencies:#?}");
+}
+
+#[test]
+fn dependency_scanner_accepts_commented_headers_and_rejects_junk() {
+    let manifest = "[dependencies.fake] junk\n\
+                    version = \"0\"\n\
+                    # D-VALID=A\n\
+                      [ dependencies.remote ] # valid Cargo header\n\
+                    version = \"1\"\n";
+    assert_eq!(
+        dependency_lines_with_context(manifest),
+        vec![(
+            "remote: version = \"1\"".into(),
+            "# D-VALID=A\n".into(),
+            false,
+        )]
+    );
 }
 
 // ---------------------------------------------------------------------------
