@@ -905,6 +905,7 @@ fn run() {{
     writer.write(encoding.DataEvent.Float(1e20)) ?? panic("decimal cutover")
     writer.write(encoding.DataEvent.Float(1e-7)) ?? panic("negative exponent")
     writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero")
+    writer.write(encoding.DataEvent.Int(9007199254740992)) ?? panic("exact Int boundary")
     writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
     writer.finish() ?? panic("finish")
@@ -952,7 +953,7 @@ fn run() {{
     assert_eq!(code, 0, "RFC 8785 stream test failed: {stderr}");
     assert_eq!(
         fs::read_to_string(&canonical_path).unwrap(),
-        "{\"𐀀\":1,\"\":[1e+30,100000000000000000000,1e-7,0]}"
+        "{\"𐀀\":1,\"\":[1e+30,100000000000000000000,1e-7,0,9007199254740992]}"
     );
     assert_eq!(
         stdout,
@@ -1051,6 +1052,7 @@ fn run() {{
 
     let source_path = dir.join("json_jcs_appendix_b.jet");
     fs::write(&source_path, &source).unwrap();
+    fs::write(&output, "poison: default-dev must replace this file").unwrap();
     match jet::Interpreter::dev_iteration(source_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout, stderr), (0, String::new(), String::new()));
