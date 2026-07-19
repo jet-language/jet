@@ -9,6 +9,8 @@ type TlsStream = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 struct JetTlsState {
     stream: TlsStream,
     server_name: String,
+    pending_read: Vec<u8>,
+    read_eof: bool,
     pending_write: Option<usize>,
     closing: bool,
 }
@@ -158,6 +160,8 @@ fn jet_net_tls_begin_inner(
         JetTlsState {
             stream: tls,
             server_name: server_name.clone(),
+            pending_read: Vec::new(),
+            read_eof: false,
             pending_write: None,
             closing: false,
         },
@@ -216,6 +220,29 @@ pub fn jet_net_tls_wants_impl(id: i64) -> Result<(bool, bool), String> {
     Ok((tls.conn.wants_read(), tls.conn.wants_write()))
 }
 
+pub fn jet_net_tls_read_ready_impl(id: i64) -> Result<bool, String> {
+    let mut streams = jet_net_tls_streams().lock().unwrap();
+    let state = streams
+        .get_mut(&id)
+        .ok_or_else(|| "TLS stream is closed".to_string())?;
+    if !state.pending_read.is_empty() || state.read_eof {
+        return Ok(true);
+    }
+    let mut byte = [0u8; 1];
+    match state.stream.read(&mut byte) {
+        Ok(0) => {
+            state.read_eof = true;
+            Ok(true)
+        }
+        Ok(n) => {
+            state.pending_read.extend_from_slice(&byte[..n]);
+            Ok(true)
+        }
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut) => Ok(false),
+        Err(error) => Err(format!("TLS read readiness failed: {}", error)),
+    }
+}
+
 pub fn jet_net_tls_abort_impl(id: i64) {
     jet_net_tls_streams().lock().unwrap().remove(&id);
     jet_net_tls_closed().lock().unwrap().insert(id);
@@ -254,14 +281,21 @@ pub fn jet_net_tls_read_step_impl(id: i64, limit: i64) -> Result<Option<Vec<u8>>
         return Err("TLS read limit must be positive".to_string());
     }
     let mut streams = jet_net_tls_streams().lock().unwrap();
-    let stream = &mut streams
+    let state = streams
         .get_mut(&id)
-        .ok_or_else(|| "TLS stream is closed".to_string())?
-        .stream;
+        .ok_or_else(|| "TLS stream is closed".to_string())?;
+    if !state.pending_read.is_empty() {
+        let take = std::cmp::min(limit as usize, state.pending_read.len());
+        return Ok(Some(state.pending_read.drain(..take).collect()));
+    }
+    if state.read_eof {
+        return Ok(Some(Vec::new()));
+    }
     let mut bytes = vec![0u8; std::cmp::min(limit as usize, 16 * 1024 * 1024)];
-    match stream.read(&mut bytes) {
+    match state.stream.read(&mut bytes) {
         Ok(n) => {
             bytes.truncate(n);
+            state.read_eof = n == 0;
             Ok(Some(bytes))
         }
         Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut) => Ok(None),

@@ -3774,6 +3774,10 @@ fn run() {{
     client := net.unix_connect("{socket}", deadline: budget) ?? panic("connect")
     server := listener.accept(deadline: budget) ?? panic("accept")
     client.set_timeout(budget) ?? panic("persistent timeout")
+    both: NetReadyInterest :: .ReadWrite
+    observed :: client.ready(both, deadline: budget) ?? panic("read-write readiness")
+    print(net.ready_readable(observed))
+    print(net.ready_writable(observed))
     interest: NetReadyInterest :: .Read
     expired :: Duration.milliseconds(0) ?? panic("expired")
     if client.ready(interest, deadline: expired) == {{
@@ -3790,7 +3794,7 @@ fn run() {{
     );
     let (code, stdout, stderr) = build_and_run(&dir, "unix_same_handle", &source, &[], None);
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "unix ready\n[7]\n");
+    assert_eq!(stdout, "false\ntrue\nunix ready\n[7]\n");
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -4210,14 +4214,18 @@ fn run() {
     cfg :: tls.ClientConfig.default().with_alpn(["http/1.0"])
     secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("tls handshake")
     request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
-    interest: NetReadyInterest :: .Write
+    interest: NetReadyInterest :: .ReadWrite
     readiness :: secure.ready(interest, deadline: budget) ?? panic("ready")
+    print(net.ready_readable(readiness))
     print(net.ready_writable(readiness))
     print(zero_rejected(&secure))
     empty: [U8] :: []
     empty_count :: send(&secure, empty) ?? panic("empty write")
     secure.write_all(request, deadline: budget) ?? panic("write bytes")
     print(empty_count)
+    read_interest: NetReadyInterest :: .Read
+    response_ready :: secure.ready(read_interest, deadline: budget) ?? panic("response ready")
+    print(net.ready_readable(response_ready))
     response :: secure.read(4096, deadline: budget) ?? panic("read bytes")
     print(response.len() > 0)
     secure.close() ?? panic("close notify")
@@ -4238,7 +4246,7 @@ fn run() {
     let _ = server.kill();
     let _ = server.wait();
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "true\ntrue\n0\ntrue\nclosed\n");
+    assert_eq!(stdout, "false\ntrue\ntrue\n0\ntrue\ntrue\nclosed\n");
 }
 
 #[test]

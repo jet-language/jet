@@ -1292,6 +1292,7 @@ struct JetRawIoInterest {
     slot: Arc<ParkSlot>,
     readable: bool,
     writable: bool,
+    ready: Arc<Mutex<(bool, bool)>>,
 }
 
 #[cfg(unix)]
@@ -1308,18 +1309,20 @@ impl JetRawIoPoller {
         handle: JetRawIoHandle,
         readable: bool,
         writable: bool,
-    ) -> (usize, Arc<ParkSlot>) {
+    ) -> (usize, Arc<ParkSlot>, Arc<Mutex<(bool, bool)>>) {
         let id = self.next_key.fetch_add(1, Ordering::Relaxed);
         let slot = ParkSlot::new();
+        let ready = Arc::new(Mutex::new((false, false)));
         self.interests.lock().unwrap().push(JetRawIoInterest {
             id,
             handle,
             slot: slot.clone(),
             readable,
             writable,
+            ready: ready.clone(),
         });
         self.notify.notify_one();
-        (id, slot)
+        (id, slot, ready)
     }
 
     fn unregister(&self, id: usize) {
@@ -1362,14 +1365,29 @@ impl JetRawIoPoller {
             if ready <= 0 {
                 continue;
             }
-            let ready_ids = descriptors
+            const POLLERR: i16 = 0x0008;
+            const POLLHUP: i16 = 0x0010;
+            const POLLNVAL: i16 = 0x0020;
+            let ready_events = descriptors
                 .iter()
                 .enumerate()
                 .filter(|(_, descriptor)| descriptor.revents != 0)
-                .filter_map(|(index, _)| descriptor_ids.get(index).copied())
-                .collect::<HashSet<_>>();
+                .filter_map(|(index, descriptor)| descriptor_ids.get(index).copied().map(|id| {
+                    let terminal = descriptor.revents & (POLLERR | POLLHUP | POLLNVAL) != 0;
+                    (id, descriptor.revents & POLLIN != 0 || terminal, descriptor.revents & POLLOUT != 0 || terminal)
+                }))
+                .collect::<Vec<_>>();
+            let ready_ids = ready_events.iter().map(|(id, _, _)| *id).collect::<HashSet<_>>();
             let slots = {
                 let mut interests = self.interests.lock().unwrap();
+                for interest in interests.iter() {
+                    if let Some((_, readable, writable)) = ready_events.iter().find(|(id, _, _)| *id == interest.id) {
+                        *interest.ready.lock().unwrap() = (
+                            interest.readable && *readable,
+                            interest.writable && *writable,
+                        );
+                    }
+                }
                 let slots = interests
                     .iter()
                     .filter(|interest| ready_ids.contains(&interest.id))
@@ -1409,9 +1427,9 @@ fn jet_scheduler_raw_io_wait(
     readable: bool,
     writable: bool,
     wait_kind: &str,
-) {
+) -> (bool, bool) {
     let poller = jet_raw_io_poller();
-    let (id, slot) = poller.register(handle, readable, writable);
+    let (id, slot, ready) = poller.register(handle, readable, writable);
     struct Registration(Arc<JetRawIoPoller>, usize);
     impl Drop for Registration {
         fn drop(&mut self) {
@@ -1420,6 +1438,8 @@ fn jet_scheduler_raw_io_wait(
     }
     let _registration = Registration(poller, id);
     jet_scheduler_yield(wait_kind, &slot, None);
+    let observed = *ready.lock().unwrap();
+    observed
 }
 
 #[cfg(unix)]
@@ -1432,7 +1452,20 @@ pub fn jet_scheduler_unix_stream_io_wait(
     let handle = stream
         .try_clone()
         .unwrap_or_else(|_| jet_scheduler_fatal("unix stream clone failed"));
-    jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind);
+    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind);
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_unix_stream_ready_wait(
+    stream: &std::os::unix::net::UnixStream,
+    read: bool,
+    write: bool,
+    wait_kind: &str,
+) -> (bool, bool) {
+    let handle = stream
+        .try_clone()
+        .unwrap_or_else(|_| jet_scheduler_fatal("unix stream clone failed"));
+    jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind)
 }
 
 #[cfg(unix)]
@@ -1443,7 +1476,7 @@ pub fn jet_scheduler_tcp_listener_io_wait(
     let handle = listener
         .try_clone()
         .unwrap_or_else(|_| jet_scheduler_fatal("tcp listener clone failed"));
-    jet_scheduler_raw_io_wait(JetRawIoHandle::TcpListener(handle), true, false, wait_kind);
+    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::TcpListener(handle), true, false, wait_kind);
 }
 
 #[cfg(not(unix))]
@@ -1462,7 +1495,7 @@ pub fn jet_scheduler_unix_listener_io_wait(
     let handle = listener
         .try_clone()
         .unwrap_or_else(|_| jet_scheduler_fatal("unix listener clone failed"));
-    jet_scheduler_raw_io_wait(JetRawIoHandle::UnixListener(handle), true, false, wait_kind);
+    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::UnixListener(handle), true, false, wait_kind);
 }
 
 #[cfg(unix)]
@@ -1475,7 +1508,7 @@ pub fn jet_scheduler_udp_io_wait(
     let handle = socket
         .try_clone()
         .unwrap_or_else(|_| jet_scheduler_fatal("udp socket clone failed"));
-    jet_scheduler_raw_io_wait(JetRawIoHandle::Udp(handle), read, write, wait_kind);
+    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::Udp(handle), read, write, wait_kind);
 }
 
 // jet:scheduler-native-end
