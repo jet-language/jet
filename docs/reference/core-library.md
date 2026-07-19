@@ -2419,7 +2419,7 @@ Beginner calls accept strings; expert calls accept typed
 | `listener.accept(deadline: Duration)` | `UnixStream ? NetError` | Same-listener per-call deadline override |
 | `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] ? NetError` / `() ? NetError` | Unix byte stream operations; same deadline/close law as TCP |
 | `unix_shutdown(stream, how)` / `unix_close(stream)` | `() ? NetError` | Explicit shutdown and idempotent close |
-| `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same-handle Unix deadlines, readiness, and lifecycle |
+| `stream.set_timeout(Duration)` / `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same-handle Unix persistent/per-call deadlines, readiness, and lifecycle |
 | `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? NetError` | System resolver config, timeout in ms |
 | `dns_txt(name, ms)` | `[String] ? NetError` | TXT records |
 | `dns_srv(name, ms)` | `[DnsSrv] ? NetError` | SRV records |

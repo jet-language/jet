@@ -2526,6 +2526,7 @@ impl LowerCtx<'_, '_> {
             | THandleOp::UnixStreamWriteAllDeadline
             | THandleOp::UnixStreamReady
             | THandleOp::UnixStreamClose
+            | THandleOp::UnixStreamSetTimeout
             | THandleOp::TlsStreamReadDeadline
             | THandleOp::TlsStreamWriteAllDeadline
             | THandleOp::TlsStreamReady

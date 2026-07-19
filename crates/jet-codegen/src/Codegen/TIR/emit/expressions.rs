@@ -1628,6 +1628,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::UnixStreamClose => format!(
                     "{}jet_net_unix_close(&mut ({}))", root, recv
                 ),
+                THandleOp::UnixStreamSetTimeout => format!(
+                    "{}jet_net_unix_set_timeout(&mut ({}), &({}))", root, recv, a(0)
+                ),
                 THandleOp::TlsStreamReadDeadline => format!(
                     "{}jet_net_tls_read_bytes_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1)
                 ),

@@ -255,6 +255,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("UnixStream", "write_all", 2) => THandleOp::UnixStreamWriteAllDeadline,
         ("UnixStream", "ready", 2) => THandleOp::UnixStreamReady,
         ("UnixStream", "close", 0) => THandleOp::UnixStreamClose,
+        ("UnixStream", "set_timeout", 1) => THandleOp::UnixStreamSetTimeout,
         ("TlsStream", "read", 2) => THandleOp::TlsStreamReadDeadline,
         ("TlsStream", "write_all", 2) => THandleOp::TlsStreamWriteAllDeadline,
         ("TlsStream", "ready", 2) => THandleOp::TlsStreamReady,

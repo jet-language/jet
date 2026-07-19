@@ -2396,6 +2396,7 @@ pub enum THandleOp {
     UnixStreamWriteAllDeadline,
     UnixStreamReady,
     UnixStreamClose,
+    UnixStreamSetTimeout,
     TlsStreamReadDeadline,
     TlsStreamWriteAllDeadline,
     TlsStreamReady,

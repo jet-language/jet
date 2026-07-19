@@ -217,6 +217,8 @@ pub struct JetUnixStream {
     closed: bool,
     read_shutdown: bool,
     write_shutdown: bool,
+    read_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
 }
 
 #[cfg(not(unix))]
@@ -1602,6 +1604,8 @@ fn jet_net_unix_accept(listener: &JetUnixListener) -> Result<JetUnixStream, JetN
                     closed: false,
                     read_shutdown: false,
                     write_shutdown: false,
+                    read_timeout_ms: None,
+                    write_timeout_ms: None,
                 });
             }
             Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
@@ -1653,6 +1657,8 @@ fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
             closed: false,
             read_shutdown: false,
             write_shutdown: false,
+            read_timeout_ms: None,
+            write_timeout_ms: None,
         })
 }
 
@@ -1693,6 +1699,7 @@ fn jet_net_unix_read_bytes(stream: &mut JetUnixStream, limit: i64) -> Result<Vec
             "unix read", None, None, "unix read limit must be positive".to_string(), None,
         )));
     }
+    let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
     let mut bytes = vec![0u8; std::cmp::min(limit as usize, 16 * 1024 * 1024)];
     loop {
         match stream.inner.read(&mut bytes) {
@@ -1728,6 +1735,7 @@ fn jet_net_unix_read_bytes(_stream: &mut JetUnixStream, _limit: i64) -> Result<V
 
 #[cfg(unix)]
 fn jet_net_unix_write_all_bytes(stream: &mut JetUnixStream, data: &Vec<u8>) -> Result<(), JetNetError> {
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     let mut offset = 0usize;
     while offset < data.len() {
         let wrote = jet_net_unix_write_slice(stream, &data[offset..])? as usize;
@@ -1754,6 +1762,7 @@ fn jet_net_unix_write_all_bytes_deadline(_stream: &mut JetUnixStream, _data: &Ve
 
 #[cfg(unix)]
 fn jet_net_unix_write_bytes(stream: &mut JetUnixStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     jet_net_unix_write_slice(stream, data)
 }
 
@@ -1823,6 +1832,21 @@ fn jet_net_unix_close(stream: &mut JetUnixStream) -> Result<(), JetNetError> {
 #[cfg(not(unix))]
 fn jet_net_unix_close(_stream: &mut JetUnixStream) -> Result<(), JetNetError> {
     Err(JetNetError::Unsupported(jet_net_detail("unix close", None, None, "unix sockets are not supported on this platform".to_string(), None)))
+}
+
+#[cfg(unix)]
+fn jet_net_unix_set_timeout(stream: &mut JetUnixStream, timeout: &jet_std::Duration) -> Result<(), JetNetError> {
+    jet_net_timeout(timeout.ms).map_err(|message| JetNetError::InvalidInput(jet_net_detail(
+        "set unix timeout", None, None, message, None,
+    )))?;
+    stream.read_timeout_ms = Some(timeout.ms);
+    stream.write_timeout_ms = Some(timeout.ms);
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn jet_net_unix_set_timeout(_stream: &mut JetUnixStream, _timeout: &jet_std::Duration) -> Result<(), JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail("set unix timeout", None, None, "unix sockets are not supported on this platform".to_string(), None)))
 }
 
 #[cfg(unix)]

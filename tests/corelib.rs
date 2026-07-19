@@ -3773,6 +3773,7 @@ fn run() {{
     budget :: Duration.seconds(1) ?? panic("budget")
     client := net.unix_connect("{socket}") ?? panic("connect")
     server := listener.accept(deadline: budget) ?? panic("accept")
+    client.set_timeout(budget) ?? panic("persistent timeout")
     interest: NetReadyInterest :: .Read
     expired :: Duration.milliseconds(0) ?? panic("expired")
     if client.ready(interest, deadline: expired) == {{

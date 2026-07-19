@@ -108,6 +108,10 @@ pub fn net_method_return(
             Type::Named("NetError".to_string()),
         ))),
         ("UnixStream" | "TlsStream", "close") if n_args == 0 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UnixStream", "set_timeout") if n_args == 1 => Some(Some(result_ty(
             unit,
             Type::Named("NetError".to_string()),
         ))),
