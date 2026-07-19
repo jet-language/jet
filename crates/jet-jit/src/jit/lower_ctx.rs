@@ -1672,22 +1672,20 @@ impl LowerCtx<'_, '_> {
             TExprKind::Field {
                 recv, field_rust, ..
             } => {
-                if record_type_key(&recv.ty).is_some_and(|name| name.contains("__")) {
-                    if let Some(method_rust) = field_rust.strip_suffix("()") {
-                        let key = Self::method_key(&recv.ty, method_rust)
-                            .ok_or_else(|| format!("jit computed field on {:?}", recv.ty))?;
-                        let func_id = self
-                            .func_ids
-                            .get(&key)
-                            .copied()
-                            .ok_or_else(|| format!("jit missing computed field `{key}`"))?;
-                        let receiver = self.lower_expr(recv)?;
-                        let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                        let call = self.b.ins().call(func_ref, &[receiver]);
-                        let result = self.b.inst_results(call)[0];
-                        self.emit_trap_check()?;
-                        return Ok(result);
-                    }
+                if let Some(method_rust) = field_rust.strip_suffix("()") {
+                    let key = Self::method_key(&recv.ty, method_rust)
+                        .ok_or_else(|| format!("jit computed field on {:?}", recv.ty))?;
+                    let func_id = self
+                        .func_ids
+                        .get(&key)
+                        .copied()
+                        .ok_or_else(|| format!("jit missing computed field `{key}`"))?;
+                    let receiver = self.lower_expr(recv)?;
+                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                    let call = self.b.ins().call(func_ref, &[receiver]);
+                    let result = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    return Ok(result);
                 }
                 let handle = self.lower_expr(recv)?;
                 let type_name = record_type_key(&recv.ty)

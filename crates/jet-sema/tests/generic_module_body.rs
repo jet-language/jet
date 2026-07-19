@@ -311,25 +311,36 @@ fn run() {}
 fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
     let (bundle, diagnostics) = check(r#"
 module outer<T, count: Int> {
-    module inner<U> { pub fn keep(value: T, other: U) -> T { return value } }
+    module inner<U> { pub fn keep(value: T, other: U) -> T { return ~value } }
     module fixed = inner<Int>
     module forward = fixed
 }
 module text_outer = outer<String, 3>
+module other_outer = outer<String, 4>
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-    let Item::CodeModule(outer) = bundle.modules[0].items.iter()
-        .find(|item| matches!(item, Item::CodeModule(m) if m.name == "text_outer")).unwrap() else { unreachable!() };
-    let inner = outer.body.as_ref().unwrap().iter().find_map(|item| match item {
+    let inner = bundle.modules[0].items.iter().find_map(|item| match item {
         Item::CodeModule(module) if module.name == "text_outer_fixed" => Some(module), _ => None,
-    }).expect("nested alias expanded");
+    }).expect("nested alias expanded into a checked module");
     let Item::Func(keep) = &inner.body.as_ref().unwrap()[0] else { panic!("nested function") };
     assert_eq!(keep.params[0].ty, Type::String);
     assert_eq!(keep.params[1].ty, Type::Int);
     assert_eq!(keep.return_type, Some(Type::String));
-    assert!(outer.body.as_ref().unwrap().iter().any(|item| matches!(item,
+    assert!(!bundle.modules[0].items.iter().any(|item| matches!(item,
         Item::CodeModule(module) if module.name == "text_outer_forward")));
+    let identity = inner.instance_identity.as_ref().expect("nested applicative identity");
+    assert_eq!(
+        identity.applications.iter().map(|application| application.name.as_str()).collect::<Vec<_>>(),
+        vec!["text_outer_fixed", "text_outer_forward"],
+    );
+    let other = bundle.modules[0].items.iter().find_map(|item| match item {
+        Item::CodeModule(module) if module.name == "other_outer_fixed" => Some(module), _ => None,
+    }).expect("different enclosing values keep distinct nested identities");
+    assert_ne!(
+        identity.fingerprint,
+        other.instance_identity.as_ref().unwrap().fingerprint,
+    );
 }
 
 #[test]

@@ -143,6 +143,131 @@ fn run() {}
         "type, value, and defining module path remain identity inputs"
     );
     let _ = std::fs::remove_dir_all(root);
+    assert_nested_generic_module_execution();
+    assert_closed_value_identity();
+}
+
+fn assert_nested_generic_module_execution() {
+    let source = r#"
+module outer<T, count: Int> {
+    module plain {
+        pub fn captured() -> Int { return count }
+    }
+    module inner<U, extra: Int> {
+        pub fn total(value: U) -> Int { return count + extra }
+    }
+    module closed = inner<T, count>
+    module forwarded = closed
+    pub fn result(value: T) -> Int {
+        return plain.captured() + closed.total(value) + forwarded.total(value)
+    }
+}
+module selected = outer<Int, 3>
+fn run() {
+    print(selected.result(1))
+}
+"#;
+    jet::compile(source).unwrap_or_else(|diags| {
+        panic!("nested ordinary-module generic template was dropped: {diags:#?}")
+    });
+    let root = std::env::temp_dir().join(format!(
+        "jet_generic_modules_nested_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create nested generic-module directory");
+    let main = root.join("main.jet");
+    std::fs::write(&main, source).expect("write nested generic-module program");
+    let index = jet_semindex::open(&main).expect("nested generic modules should index");
+    assert_eq!(
+        index.instances().len(),
+        2,
+        "outer and nested applications each have one applicative identity"
+    );
+    let nested = index
+        .instances()
+        .iter()
+        .find(|instance| {
+            instance
+                .applications
+                .iter()
+                .any(|application| application.name == "selected_closed")
+        })
+        .expect("nested generic-module instance fact");
+    assert_eq!(
+        nested
+            .applications
+            .iter()
+            .map(|application| application.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["selected_closed", "selected_forwarded"]
+    );
+    assert!(nested
+        .applications
+        .iter()
+        .all(|application| application.module_path == main.to_string_lossy()));
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(&main)
+        .output()
+        .expect("run nested generic-module program");
+    assert!(
+        output.status.success(),
+        "nested generic-module AOT run failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "15\n");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+fn assert_closed_value_identity() {
+    let source = r#"
+enum Mode { Fast Safe }
+module keyed<flag: Bool, count: Int, letter: Char, label: String, mode: Mode> {
+    pub fn value() -> Int { return count }
+}
+module same = keyed<true, 3, 'a', "x", Mode.Fast>
+module equivalent = keyed<1 < 2, 1 + 2, 'a', "x", Mode.Fast>
+module different_bool = keyed<false, 3, 'a', "x", Mode.Fast>
+module different_int = keyed<true, 4, 'a', "x", Mode.Fast>
+module different_char = keyed<true, 3, 'b', "x", Mode.Fast>
+module different_string = keyed<true, 3, 'a', "y", Mode.Fast>
+module different_enum = keyed<true, 3, 'a', "x", Mode.Safe>
+fn run() {}
+"#;
+    let root = std::env::temp_dir().join(format!(
+        "jet_generic_module_value_identity_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create value-identity directory");
+    let main = root.join("main.jet");
+    std::fs::write(&main, source).expect("write value-identity program");
+    let index = jet_semindex::open(&main).expect("closed values should index");
+    assert_eq!(
+        index.instances().len(),
+        6,
+        "normalized equivalents reuse one key; every closed value-kind change stays distinct"
+    );
+    let shared = index
+        .instances()
+        .iter()
+        .find(|instance| {
+            instance
+                .applications
+                .iter()
+                .any(|application| application.name == "same")
+        })
+        .expect("shared closed-value instance");
+    assert_eq!(
+        shared
+            .applications
+            .iter()
+            .map(|application| application.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["same", "equivalent"]
+    );
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

@@ -1354,12 +1354,17 @@ trait ModuleArgSpan{fn span(&self)->crate::Diagnostics::Span;}impl ModuleArgSpan
 fn expand_alias(
     alias: &ModuleAliasDef,
     consumer_module: usize,
+    application_module: &str,
+    instance_full_key: &[u8],
     templates: &std::collections::HashMap<String, TemplateInfo>,
     diags: &mut Vec<Diagnostic>,
     traits:&TraitRegistry,
     funcs:&HashMap<String,&Func>,
     globals:&HashMap<String,crate::AST::CtValue>,
     enums:&HashMap<String,bool>,
+    instances: &mut HashMap<ModuleInstanceKey, String>,
+    fingerprints: &mut HashMap<String, Vec<u8>>,
+    applications: &mut HashMap<String, Vec<crate::AST::ModuleInstanceApplication>>,
     resolved_args: Option<Vec<ResolvedModuleArg>>,
 ) -> Option<AliasExpansion> {
     let info = match templates.get(&alias.target) {
@@ -1455,6 +1460,19 @@ fn expand_alias(
         }
     }
     definition_types.extend(type_args.clone());
+    for item in &template.body {
+        let local = match item {
+            Item::CodeModule(module) => Some(module.name.as_str()),
+            Item::ModuleAlias(module) => Some(module.name.as_str()),
+            _ => None,
+        };
+        if let Some(local) = local {
+            definition_types.insert(
+                local.to_string(),
+                Type::Named(module_value_name(&alias.name, local)),
+            );
+        }
+    }
 
     // Constants specialize in declaration order. Their evaluated definition-site
     // values are then available to later constants and every template function.
@@ -1580,6 +1598,17 @@ fn expand_alias(
                 def, &alias.name, &definition_types, &definition_values,
             )));
         }
+        if let Item::CodeModule(module) = item {
+            let mut module = specialize_nested_code_module(
+                module,
+                &info.params,
+                &resolved_args,
+                &definition_types,
+                &definition_values,
+            );
+            module.name = module_value_name(&alias.name, &module.name);
+            declarations.push(Item::CodeModule(module));
+        }
     }
 
     let mut body: Vec<Item> = source_items
@@ -1606,7 +1635,6 @@ fn expand_alias(
                 &definition_types,
                 &definition_values,
             ))),
-            Item::CodeModule(module) => Some(Item::CodeModule(specialize_nested_code_module(module, &info.params, &resolved_args, &definition_types, &definition_values))),
             Item::Const(_) => None,
             _ => None,
         })
@@ -1639,8 +1667,9 @@ fn expand_alias(
         let nested_funcs: HashMap<String, &Func> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
             let Item::Func(def) = item else { return None }; Some((def.name.clone(), def))
         }).collect();
+        let enclosing_identity = crate::SHA256::sha256_hex(instance_full_key);
         let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
-            let full_key = definition_full_key("nested", "", &info.definition_id, &def.name);
+            let full_key = definition_full_key("nested", "", &enclosing_identity, &def.name);
             (def.name.clone(), TemplateInfo { def: def.clone(), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
                 params: resolve_params(def, &nested_traits, &nested_enums, diags),
                 source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone() })
@@ -1653,13 +1682,69 @@ fn expand_alias(
             .map(|def| (def.name.clone(), def)).collect();
         let mut ordered: Vec<&ModuleAliasDef> = nested_alias_defs.iter().collect();
         ordered.sort_by_key(|def| local_alias_depth(def, &nested_aliases));
+        let mut nested_projections = HashMap::new();
         for nested_alias in ordered {
             let Some(mut resolved_alias) = resolve_local_alias(nested_alias, &nested_aliases, &nested_templates, diags) else { continue };
             resolved_alias.name = module_value_name(&alias.name, &nested_alias.name);
-            if let Some(expansion) = expand_alias(&resolved_alias, consumer_module, &nested_templates,
-                diags, &nested_traits, &nested_funcs, &definition_values, &nested_enums, None) {
-                body.push(Item::CodeModule(expansion.module));
+            let Some(nested_info) = nested_templates.get(&resolved_alias.target) else { continue };
+            let Some(args) = resolve_args(
+                &resolved_alias,
+                nested_info,
+                &nested_traits,
+                &nested_funcs,
+                &definition_values,
+                &nested_enums,
+                diags,
+            ) else { continue };
+            let key = instance_key(nested_info, &args, &HashMap::new());
+            let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
+            let application = crate::AST::ModuleInstanceApplication {
+                name: resolved_alias.name.clone(),
+                source_module: application_module.to_string(),
+                semantic_identity: format!("instance:{fingerprint}"),
+                span: resolved_alias.name_span,
+            };
+            applications
+                .entry(fingerprint.clone())
+                .or_default()
+                .push(application);
+            if let Some(canonical) = instances.get(&key) {
+                nested_projections.insert(
+                    resolved_alias.name.clone(),
+                    Type::Named(canonical.clone()),
+                );
+                continue;
+            }
+            if let Some(mut expansion) = expand_alias(&resolved_alias, consumer_module, application_module, &key.bytes(), &nested_templates,
+                diags, &nested_traits, &nested_funcs, &definition_values, &nested_enums,
+                instances, fingerprints, applications, Some(args)) {
+                let identity = instance_identity(
+                    &key,
+                    nested_info,
+                    &resolved_alias,
+                    application_module,
+                );
+                register_instance_fingerprint(
+                    fingerprints,
+                    &identity,
+                    resolved_alias.span,
+                );
+                expansion.module.instance_identity = Some(identity);
+                instances.insert(key, resolved_alias.name.clone());
+                declarations.push(Item::CodeModule(expansion.module));
                 declarations.extend(expansion.declarations);
+            }
+        }
+        if !nested_projections.is_empty() {
+            for item in &mut body {
+                let Item::Func(func) = item else { continue };
+                for param in &mut func.params {
+                    param.ty = crate::Generics::substitute_type(&param.ty, &nested_projections);
+                }
+                if let Some(ret) = &mut func.return_type {
+                    *ret = crate::Generics::substitute_type(ret, &nested_projections);
+                }
+                substitute_stmts(&mut func.body, &nested_projections, &HashMap::new());
             }
         }
     }
@@ -2118,7 +2203,22 @@ pub(crate) fn expand_generic_module_aliases(
                     projections.insert(alias.name.clone(), canonical.clone());
                     continue;
                 }
-                if let Some(mut cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums, Some(args)) {
+                if let Some(mut cm) = expand_alias(
+                    &resolved,
+                    module_idx,
+                    &module.display,
+                    &key.bytes(),
+                    &templates,
+                    diags,
+                    &traits,
+                    &funcs,
+                    &globals,
+                    &enums,
+                    &mut bundle_instances,
+                    &mut fingerprint_keys,
+                    &mut instance_applications,
+                    Some(args),
+                ) {
                     let identity = instance_identity(&key, info, &resolved, &module.display);
                     register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
                     cm.module.instance_identity = Some(identity);

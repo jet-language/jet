@@ -173,11 +173,7 @@ impl<'a> JitMeta<'a> {
         let (enum_part, variant) = prefix.rsplit_once("::")?;
         let enum_name = enum_part.strip_prefix("user_").unwrap_or(enum_part);
         let variants = self.enum_variants.get(enum_name)?;
-        let variant = if enum_name.contains("__") {
-            variant.split_once('(').map_or(variant, |(head, _)| head)
-        } else {
-            variant
-        };
+        let variant = variant.split_once('(').map_or(variant, |(head, _)| head);
         let variant_key = variant.strip_prefix("user_").unwrap_or(variant);
         variants
             .iter()

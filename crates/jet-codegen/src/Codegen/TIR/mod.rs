@@ -142,22 +142,6 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
     let mut funcs = Vec::new();
     let mut have_run = false;
-    let instance_modules: std::collections::HashSet<_> = module
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            Item::CodeModule(cm) if cm.instance_identity.is_some() => Some(cm.name.as_str()),
-            _ => None,
-        })
-        .collect();
-    let operator_traits = [
-        crate::Syntax::TRAIT_ADD,
-        crate::Syntax::TRAIT_SUB,
-        crate::Syntax::TRAIT_MUL,
-        crate::Syntax::TRAIT_DIV,
-        crate::Syntax::TRAIT_EQUATABLE,
-        crate::Syntax::TRAIT_COMPARABLE,
-    ];
     cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
         match item {
@@ -184,15 +168,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     funcs.push(lowered);
                 }
             }
-            Item::Impl(imp)
-                if instance_modules
-                    .iter()
-                    .any(|module_name| imp.type_name.starts_with(&format!("{module_name}__")))
-                    || imp
-                        .trait_name
-                        .as_deref()
-                        .is_some_and(|trait_name| operator_traits.contains(&trait_name)) =>
-            {
+            Item::Impl(imp) => {
                 for method in &imp.methods {
                     let mut lowered = if let Some(trait_name) = &imp.trait_name {
                         if !tir_covers_trait_method(method, &imp.type_name, &cx, trait_name) {
