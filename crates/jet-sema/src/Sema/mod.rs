@@ -1276,6 +1276,10 @@ impl<'a> Checker<'a> {
             {
                 match &args[0].expr {
                     Expr::Float(value, _, _) => Some(*value),
+                    Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match &**inner {
+                        Expr::Float(value, _, _) => Some(-*value),
+                        _ => None,
+                    },
                     _ => None,
                 }
             }

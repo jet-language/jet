@@ -225,6 +225,31 @@ fn takes_meter(value: Meter) { print(value.raw()) }
         );
     }
 
+    let direct_negative = format!(
+        "{family}\nfn run() {{ takes_meter(Double.from_float(-1.0)) }}\n"
+    );
+    assert!(
+        check_codes_of(&direct_negative).is_empty(),
+        "direct negative literal has an exact scale-2 conversion"
+    );
+
+    let bound_negative = format!(
+        "{family}\nfn run() {{ value :: Double.from_float(-2.0)\n takes_meter(value) }}\n"
+    );
+    assert!(
+        check_codes_of(&bound_negative).is_empty(),
+        "immutable negative literal binding preserves its exact value"
+    );
+
+    let inexact_negative = format!(
+        "{family}\nfn run() {{ takes_meter(Double.from_float(-0.25)) }}\n"
+    );
+    assert_eq!(
+        check_codes_of(&inexact_negative),
+        vec!["E0127"],
+        "negative literal proof must still reject an inexact conversion"
+    );
+
     let identity = r#"
 @UnitFamily(Length, base: meter) {
     meter
