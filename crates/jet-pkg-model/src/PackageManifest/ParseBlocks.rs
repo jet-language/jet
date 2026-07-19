@@ -61,7 +61,7 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
             return Err(ManifestError::BadMemoryPolicy { detail: format!("`{name}` is not a registered package policy") });
         };
         let value = match key {
-            crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc if raw.trim() == "true" => crate::Policy::PolicyValue::Enabled,
+            crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits if raw.trim() == "true" => crate::Policy::PolicyValue::Enabled,
             crate::Policy::PolicyKey::ArenaBounded => {
                 let n = raw.trim().parse::<u64>().map_err(|_| ManifestError::BadMemoryPolicy { detail: format!("`{name}` needs a positive byte limit") })?;
                 if n == 0 { return Err(ManifestError::BadMemoryPolicy { detail: format!("`{name}` needs a positive byte limit") }); }
@@ -80,7 +80,7 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
         };
         out.push(crate::Policy::PolicyDeclaration { key, value, scope: crate::Policy::PolicyScope::Package, span: crate::Diagnostics::Span::new(0, 0), target: None, source: "package.jet".to_string() });
     }
-    for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc] {
+    for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc, crate::Policy::PolicyKey::ExplicitUnits] {
         crate::Policy::resolve(key, out.clone()).map_err(|error| ManifestError::BadMemoryPolicy { detail: format!("conflicting `{}` declarations: {error:?}", key.name()) })?;
     }
     Ok(out)

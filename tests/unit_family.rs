@@ -120,6 +120,7 @@ fn affine_point_and_delta_have_distinct_public_identities() {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
+
 pub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }
 pub fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
 "#;
@@ -131,6 +132,204 @@ pub fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
         "fn target() -> CelsiusPoint{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=5463/20}"));
     assert!(snapshot.funcs.iter().any(|func| func.signature ==
         "fn tolerance() -> CelsiusDelta{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=0}"));
+}
+
+#[test]
+fn affine_point_delta_algebra_and_conversion_compile() {
+    let src = r#"
+@UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+fn run() {
+    freezing :: CelsiusPoint.from_float(0.0)
+    step :: CelsiusDelta.from_float(5.0)
+    warmer :: freezing + step
+    drift :: warmer - freezing
+    total :: drift + step
+    absolute :: KelvinPoint.from_celsius_point(warmer)
+    relative :: KelvinDelta.from_celsius_delta(total)
+    print("{(absolute.raw())} {(relative.raw())}")
+}
+"#;
+    let codes = codes_of(src);
+    assert!(codes.is_empty(), "Point/Delta model must be one complete algebra: {codes:?}");
+}
+
+#[test]
+fn exact_same_dimension_conversion_covers_arithmetic_arguments_and_bindings() {
+    let src = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+}
+fn takes_millimeter(value: Millimeter) { print("{(value.raw())}") }
+fn run() {
+    coarse :: 3meter
+    fine :: 42millimeter
+    total :: coarse + fine
+    takes_millimeter(3meter)
+    binding: Millimeter :: 4meter
+    print("{(total.raw())} {(binding.raw())}")
+}
+"#;
+    let codes = codes_of(src);
+    assert!(codes.is_empty(), "exact implicit conversions must share one path: {codes:?}");
+}
+
+#[test]
+fn quantity_generic_bound_preserves_concrete_unit_and_kind() {
+    let src = r#"
+@UnitFamily(Length, base: meter) { meter }
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn run() { source :: 3meter; value :: keep(^source); print("{(value.raw())}") }
+"#;
+    let codes = codes_of(src);
+    assert!(codes.is_empty(), "Quantity bounds must accept a determined concrete unit: {codes:?}");
+}
+
+#[test]
+fn quantity_generic_bound_rejects_wrong_dimension_and_kind() {
+    let wrong_dimension = r#"
+@UnitFamily(Length) { meter }
+@UnitFamily(Time) { second }
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn run() { source :: 3second; keep(^source) }
+"#;
+    assert_eq!(codes_of(wrong_dimension), vec!["E0905"]);
+
+    let wrong_kind = r#"
+@UnitFamily(Temperature, base: kelvin) { kelvin celsius(offset: 27315/100) }
+fn keep<Q: Quantity<Temperature, .Delta>>(value: ^Q) -> Q { return value }
+fn run() { source :: CelsiusPoint.from_float(3.0); keep(^source) }
+"#;
+    assert_eq!(codes_of(wrong_kind), vec!["E0905"]);
+
+    let undetermined = r#"
+fn choose<Q: Quantity<Length, .Linear>>() {}
+fn run() { choose() }
+"#;
+    assert_eq!(codes_of(undetermined), vec!["E0904"]);
+}
+
+#[test]
+fn imported_quantity_generic_preserves_concrete_type() {
+    if !tir_support::have_rustc() {
+        return;
+    }
+    let units = r#"
+pub @UnitFamily(Length) { meter }
+pub fn sample() -> Meter { return 2meter }
+pub fn raw_meter(value: Meter) -> Float { return value.raw() }
+"#;
+    let main = r#"
+use "units" as units
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn run() {
+    source :: units.sample()
+    same :: keep(^source)
+    print(units.raw_meter(same))
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run_multi(
+        "quantity_generic_import",
+        "main.jet",
+        &[("units.jet", units), ("main.jet", main)],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2.0\n");
+}
+
+#[test]
+fn explicit_units_policy_requires_destination_owned_conversion() {
+    let implicit = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+}
+@Policy(explicit_units)
+fn run() {
+    total :: 1meter + 1millimeter
+    print("{(total.raw())}")
+}
+"#;
+    assert_eq!(codes_of(implicit), vec!["E0127"]);
+
+    let explicit = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+}
+@Policy(explicit_units)
+fn run() {
+    total :: 1meter + Meter.from_millimeter(1millimeter)
+    print("{(total.raw())}")
+}
+"#;
+    assert!(codes_of(explicit).is_empty());
+
+    let module_scoped = r#"
+@Policy(explicit_units)
+@UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
+fn run() { total :: 1meter + 1millimeter; print(total.raw()) }
+"#;
+    assert_eq!(codes_of(module_scoped), vec!["E0127"]);
+
+    let block_scoped = r#"
+@UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
+fn run() {
+    @Policy(explicit_units) {
+        total :: 1meter + 1millimeter
+        print(total.raw())
+    }
+}
+"#;
+    assert_eq!(codes_of(block_scoped), vec!["E0127"]);
+}
+
+#[test]
+fn implicit_unit_conversion_rejects_rounding_and_overflow_boundaries() {
+    let rounding = r#"
+@UnitFamily(Length, base: meter) {
+    meter
+    thirdish(scale: 2/3)
+}
+fn run() { value :: 1meter + 1thirdish; print("{(value.raw())}") }
+"#;
+    assert_eq!(codes_of(rounding), vec!["E0127"]);
+
+    let overflow = format!(
+        "@UnitFamily(Length, base: meter) {{ meter giant(scale: {}) }}\nfn run() {{ value :: 1giant + 1meter; print(\"{{(value.raw())}}\") }}",
+        "9".repeat(400)
+    );
+    assert_eq!(codes_of(&overflow), vec!["E0127"]);
+
+    let explicit_overflow = format!(
+        "@UnitFamily(Length, base: meter) {{ meter giant(scale: {}) }}\nfn run() {{ value :: Meter.from_giant(1giant); print(\"{{(value.raw())}}\") }}",
+        "9".repeat(400)
+    );
+    assert_eq!(codes_of(&explicit_overflow), vec!["E0127"]);
+}
+
+#[test]
+fn physical_unit_codable_round_trips_as_its_concrete_type() {
+    if !tir_support::have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.encoding.json as json
+@UnitFamily(Length) { meter }
+fn run() {
+    value :: 3meter
+    wire :: json.to_string(value)
+    back :: json.decode<Meter>(wire) ?? panic("decode")
+    print(wire)
+    print(back.raw())
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run("quantity_codable", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3.0\n3.0\n");
 }
 
 /// A member name is usable as a distinct type in a signature; construction,

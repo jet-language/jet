@@ -152,7 +152,17 @@ impl<'a> Parser<'a> {
             Ok(bounds)
         } else {
             let (name, _) = self.expect_ident("for a trait bound")?;
-            Ok(vec![name])
+            if name == Syntax::BOUND_QUANTITY && matches!(self.peek().kind, TokKind::Lt) {
+                self.expect_type_args_open("quantity bound")?;
+                let (dimension, _) = self.expect_ident("for a quantity dimension")?;
+                self.expect(TokKind::Comma, "after the quantity dimension")?;
+                self.expect(TokKind::Dot, "before the quantity kind")?;
+                let (kind, _) = self.expect_ident("for a quantity kind")?;
+                self.expect_type_args_close("after the quantity bound")?;
+                Ok(vec![crate::Generics::quantity_bound(&dimension, &kind)])
+            } else {
+                Ok(vec![name])
+            }
         }
     }
 

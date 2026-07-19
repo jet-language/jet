@@ -388,7 +388,12 @@ impl<'a> Checker<'a> {
                 (Some(_), Some(actual)) if !annot_valid => actual,
                 (Some(annot), Some(actual)) => {
                     let annot = self.resolve_type(annot.clone());
-                    let actual = self.resolve_type(actual.clone());
+                    let mut actual = self.resolve_type(actual.clone());
+                    if annot != actual
+                        && self.implicitly_convert_unit(&mut b.init, &annot, &actual)
+                    {
+                        actual = annot.clone();
+                    }
                     // D-SG9: a fixed-width literal is range-checked and re-typed in
                     // `infer` (E1003), so it arrives matching `annot`. A non-literal
                     // width mismatch falls to E0108 below — no implicit narrowing or

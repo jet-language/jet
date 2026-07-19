@@ -87,6 +87,80 @@ impl<'a> Checker<'a> {
     /// rewritten to `.clone()` so the generated Rust never moves a field out
     /// of its struct.
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
+        // D-QUANTITY-CONVERT1=B: explicit destination-owned unit conversion
+        // elaborates to the same raw/scale/offset/from_float expression used
+        // by implicit conversion.
+        let conversion_span = e.span();
+        let explicit_unit_conversion = if let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = &mut *e
+        {
+            if args.len() == 1 {
+                if let Expr::Ident(destination_name, _) = receiver.as_ref() {
+                    if let Some((destination_name, destination_fact)) = self
+                        .unit_fact_for_type(&Type::Named(destination_name.clone()))
+                    {
+                        let source_ty = self.infer(&mut args[0].expr);
+                        if let Some((source_name, source_fact)) = source_ty
+                            .as_ref()
+                            .and_then(|ty| self.unit_fact_for_type(ty))
+                        {
+                            let source_leaf =
+                                source_name.rsplit('.').next().unwrap_or(&source_name);
+                            let expected = Syntax::conversion_method_for_source(source_leaf);
+                            if method == &expected
+                                && source_fact.family == destination_fact.family
+                                && source_fact.dimension == destination_fact.dimension
+                                && source_fact.kind == destination_fact.kind
+                            {
+                                if !source_fact.conversion_is_finite_to(&destination_fact) {
+                                    self.diags.push(
+                                        self.unit_conversion_overflow_diagnostic(conversion_span),
+                                    );
+                                    return Some(Type::Named(destination_name));
+                                }
+                                let source_span = args[0].span;
+                                let source_expr = std::mem::replace(
+                                    &mut args[0].expr,
+                                    Expr::Absent(source_span),
+                                );
+                                Some((
+                                    self.unit_conversion_expr(
+                                        source_expr,
+                                        &source_name,
+                                        &source_fact,
+                                        &destination_name,
+                                        &destination_fact,
+                                        conversion_span,
+                                    ),
+                                    Type::Named(destination_name),
+                                ))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some((replacement, ty)) = explicit_unit_conversion {
+            *e = replacement;
+            return Some(ty);
+        }
+
         let borrowed = std::mem::take(&mut self.borrow_ctx);
         let ty = self.infer_inner(e);
         if !borrowed {

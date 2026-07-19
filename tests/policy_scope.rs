@@ -90,3 +90,14 @@ fn organization_policy_document_is_exact_and_fails_closed() {
     assert!(jet::PackageManifest::parse_policy_document("policy: .{ unsafe: .Obligations").is_err());
     assert!(jet::PackageManifest::parse_policy_document("policy: .{ unsafe: .Obligations }\npackage: .{}").is_err());
 }
+
+#[test]
+fn package_policy_document_accepts_explicit_units() {
+    let declarations = jet::PackageManifest::parse_policy_document(
+        "policy: .{ explicit_units: true }\n",
+    )
+    .unwrap();
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0].key, PolicyKey::ExplicitUnits);
+    assert_eq!(declarations[0].value, PolicyValue::Enabled);
+}

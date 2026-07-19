@@ -1718,6 +1718,8 @@ pub(crate) fn check_func_body_bundle(
         func_pub: &st.func_pub,
         func_pkg_pub: &st.func_pkg_pub,
         module_path: &st.module_path,
+        policy_declarations: &st.policy_declarations,
+        current_function_span: f.span,
         reference_anchors,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],

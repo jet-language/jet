@@ -1,5 +1,6 @@
 use super::{
-    AccessConvention, ConstDef, CtValue, ErrorConvDef, Expr, MetaAttr, MigrationDecl, Stmt, Type,
+    AccessConvention, ConstDef, CtValue, Dimension, ErrorConvDef, Expr, MetaAttr, MigrationDecl,
+    Stmt, Type,
 };
 use crate::Diagnostics::Span;
 
@@ -1243,6 +1244,9 @@ pub struct DistinctDef {
     /// the base type's wire representation.
     pub is_codable_as_base: bool,
     pub codable_as_base_span: Option<Span>,
+    /// D-QUANTITY-TYPE1=A: compiler-only physical quantity facts carried by a
+    /// concrete D-QUAL3 type. `None` for ordinary distinct types.
+    pub quantity: Option<(Dimension, QuantityKind)>,
     pub name: String,
     pub name_span: Span,
     pub base: Type,
@@ -1252,6 +1256,23 @@ pub struct DistinctDef {
     /// span-of-the-`(lo..hi)`-clause)`.
     pub range: Option<(i64, i64, Span)>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QuantityKind {
+    Linear,
+    Point,
+    Delta,
+}
+
+impl QuantityKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Linear => "Linear",
+            Self::Point => "Point",
+            Self::Delta => "Delta",
+        }
+    }
 }
 
 /// D-QUAL3 (ratified 2026-06-24): unit-family declaration —
@@ -1334,8 +1355,16 @@ impl UnitFamilyDef {
                     comparable_span: None,
                     is_printable: false,
                     printable_span: None,
-                    is_codable_as_base: false,
+                    is_codable_as_base: Dimension::for_family(&self.family).is_some(),
                     codable_as_base_span: None,
+                    quantity: Dimension::for_family(&self.family).map(|dimension| {
+                        let kind = if affine {
+                            if is_point { QuantityKind::Point } else { QuantityKind::Delta }
+                        } else {
+                            QuantityKind::Linear
+                        };
+                        (dimension, kind)
+                    }),
                     name,
                     name_span: member.name_span,
                     base: Type::Float,

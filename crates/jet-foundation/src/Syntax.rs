@@ -104,6 +104,8 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
 // D-SHAPE-QUANTITY1=A adds no source spelling. Physical dimensions use this
 // unwriteable internal type marker and the compiler-owned identity table below.
 pub const TYPE_QUANTITY: &str = "\0Quantity";
+/// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
+pub const BOUND_QUANTITY: &str = "Quantity";
 
 /// Canonical `(Length, Time, Temperature)` exponent vectors for physical
 /// dimension identities ratified by D-SHAPE-QUANTITY1=A. Currency is

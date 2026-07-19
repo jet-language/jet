@@ -414,11 +414,37 @@ module.exports = grammar({
     bench_block: ($) => seq("@", "Bench", "(", $.string_literal, ")", $.block),
 
     // ── Type params / generics ─────────────────────────────────────────────
-    // `<T>`, `<T, U>`, with optional trait bounds `<T: Comparable>`.
+    // `<T>`, `<T, U>`, ordinary trait bounds, and the ratified physical-unit
+    // bound `<Q: Quantity<Length, .Linear>>`.
     type_params: ($) => seq("<", commaSep1($.type_param), ">"),
 
     type_param: ($) =>
-      seq($.type_identifier, optional(seq(":", sep1($.type_identifier, "+")))),
+      seq(
+        $.type_identifier,
+        optional(
+          seq(
+            ":",
+            choice(
+              $.quantity_bound,
+              seq(
+                $.type_identifier,
+                repeat(seq("+", $.type_identifier)),
+              ),
+            ),
+          ),
+        ),
+      ),
+
+    quantity_bound: ($) =>
+      seq(
+        "Quantity",
+        token.immediate("<"),
+        field("dimension", $.type_identifier),
+        ",",
+        ".",
+        field("kind", choice("Linear", "Point", "Delta")),
+        ">",
+      ),
 
     // ── Param list ─────────────────────────────────────────────────────────
     param_list: ($) => seq("(", commaSep(choice($.self_param, $.param)), ")"),

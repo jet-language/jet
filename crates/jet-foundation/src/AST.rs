@@ -26,7 +26,7 @@ pub use items::{
     ProtocolDecl, StateDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, Func, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout, CEnumTag,
-    Marker, StructDef, TypeAliasDef, DistinctDef, UnitFamilyDef, UnitFamilyMember, UnitRatio, EnumDef,
+    Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitFamilyDef, UnitFamilyMember, UnitRatio, EnumDef,
     EnumGroup, Variant, VariantPayload, VariantField, ImplDef, Field,
 };
 

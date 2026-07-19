@@ -2026,6 +2026,16 @@ fn describe<T: [Renderable, Loud]>(item: T) -> String {
 }
 
 #[test]
+fn fmt_preserves_quantity_dimension_kind_bound() {
+    let src = "\
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q {
+    return value
+}
+";
+    assert_fmt_stable(src, "quantity dimension/kind generic bound");
+}
+
+#[test]
 fn fmt_preserves_view_call_range_args() {
     // D-SHAPE-PLACE1=A: `.view(a..b)` is retained only so sema can teach E0214,
     // but formatter recovery must still preserve the retired source losslessly.

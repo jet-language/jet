@@ -36,7 +36,47 @@ fn builtin_type_registry() -> TypeRegistry {
         groups: HashMap::new(), methods: HashMap::new(), single_use: false,
         must_use: false, c_layout_tag: None,
     });
-    TypeRegistry { types, unit_dimensions: HashMap::new(), computed_fields: HashMap::new() }
+    TypeRegistry { types, unit_dimensions: HashMap::new(), unit_facts: HashMap::new(), computed_fields: HashMap::new() }
+}
+
+fn unit_fact(
+    family: &crate::AST::UnitFamilyDef,
+    type_name: &str,
+    dimension: crate::AST::Dimension,
+) -> Option<UnitFact> {
+    let affine = family.base.is_some()
+        && family
+            .members
+            .iter()
+            .any(|member| member.offset != crate::AST::UnitRatio::zero());
+    family.members.iter().find_map(|member| {
+        let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
+        let kind = if affine {
+            if type_name == format!("{stem}Point") {
+                QuantityKind::Point
+            } else if type_name == format!("{stem}Delta") {
+                QuantityKind::Delta
+            } else {
+                return None;
+            }
+        } else if type_name == stem {
+            QuantityKind::Linear
+        } else {
+            return None;
+        };
+        Some(UnitFact {
+            family: family.family.clone(),
+            member: member.name.clone(),
+            dimension,
+            scale: member.scale.clone(),
+            offset: if kind == QuantityKind::Point {
+                member.offset.clone()
+            } else {
+                crate::AST::UnitRatio::zero()
+            },
+            kind,
+        })
+    })
 }
 
 fn is_fallible_void_entry_return(ty: &Type) -> bool {
@@ -934,6 +974,7 @@ fn check_bundle_opts_for_output(
             core_imports: HashMap::new(),
             tests: HashMap::new(),
             trait_reg: TraitRegistry::default(),
+            policy_declarations: m.policy_declarations.clone(),
             code_modules: HashMap::new(),
             code_module_identities: HashMap::new(),
             unqualified: HashMap::new(),
@@ -1169,6 +1210,9 @@ fn check_bundle_opts_for_output(
                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                         if let Some(dimension) = dimension {
                             st.registry.unit_dimensions.insert(d.name.clone(), dimension);
+                            if let Some(fact) = unit_fact(uf, &d.name, dimension) {
+                                st.registry.unit_facts.insert(d.name.clone(), fact);
+                            }
                         }
                         st.type_pub
                             .insert(d.name.clone(), d.is_pub && !d.is_package_pub);
@@ -1218,6 +1262,7 @@ fn check_bundle_opts_for_output(
                         TypeRegistry {
                             types,
                             unit_dimensions: st.registry.unit_dimensions.clone(),
+                            unit_facts: st.registry.unit_facts.clone(),
                             computed_fields: st.registry.computed_fields.clone(),
                         }
                     });
@@ -1501,6 +1546,21 @@ fn check_bundle_opts_for_output(
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_items(&module.items, &mut diags);
+        for (type_name, fact) in &st.registry.unit_facts {
+            if let Some(dimension) = fact.dimension.family_name() {
+                st.trait_reg.trait_impls.insert((
+                    type_name.clone(),
+                    crate::Generics::quantity_bound(dimension, fact.kind.name()),
+                ));
+                for capability in [crate::Generics::ENCODE, crate::Generics::DECODE] {
+                    st.trait_reg
+                        .derives
+                        .entry(type_name.clone())
+                        .or_default()
+                        .insert(capability.to_string());
+                }
+            }
+        }
         // D-SERDE: validate `@[Codable]`/`@[Encode]`/`@[Decode]` markers (E2407–E2412)
         // now that the trait registry resolves field/variant types — keeps the emitted
         // `impl`s rustc-clean (I2).

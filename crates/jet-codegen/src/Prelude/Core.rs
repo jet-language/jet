@@ -10,6 +10,14 @@ trait JetDebug {
     fn jet_debug(&self) -> String;
 }
 
+/// D-QUANTITY-TYPE1=A: internal compile-time bridge for physical-unit generic
+/// bounds. Concrete unit identity stays in the
+/// monomorphized type; this trait adds no runtime metadata.
+trait JetQuantity: Sized {
+    fn raw(&self) -> f64;
+    fn from_float(value: f64) -> Self;
+}
+
 // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
 // Drop consumes it exactly once; declaration order gives reverse cleanup order.
 struct JetDeferredClose<F: FnOnce()> {

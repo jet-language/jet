@@ -261,6 +261,7 @@ impl<'a> Parser<'a> {
                 printable_span,
                 is_codable_as_base,
                 codable_as_base_span,
+                quantity: None,
                 name,
                 name_span,
                 base,

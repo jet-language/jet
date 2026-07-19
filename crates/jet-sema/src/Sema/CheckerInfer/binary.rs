@@ -9,6 +9,134 @@ use crate::AST::{BinOp, Dimension, Expr, Pattern, Type};
 use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
+    fn unit_ratio_expr(value: &crate::AST::UnitRatio, span: Span) -> Expr {
+        let numerator = value.num.to_string().parse::<f64>().unwrap_or_else(|_| {
+            if value.num.is_negative() { f64::NEG_INFINITY } else { f64::INFINITY }
+        });
+        let denominator = value.den.to_string().parse::<f64>().unwrap_or(f64::INFINITY);
+        Expr::Binary(
+            BinOp::Div,
+            Box::new(Expr::Float(numerator, span, false)),
+            Box::new(Expr::Float(denominator, span, false)),
+            span,
+        )
+    }
+
+    fn unit_raw(expr: Expr, type_name: &str, span: Span) -> Expr {
+        Expr::MethodCall {
+            receiver: Box::new(expr),
+            method: "raw".to_string(),
+            method_span: span,
+            type_args: Vec::new(),
+            args: Vec::new(),
+            recv_type: Some(type_name.to_string()),
+            resolved_ret: Some(Type::Float),
+        }
+    }
+
+    pub(crate) fn unit_conversion_expr(
+        &self,
+        expr: Expr,
+        source_name: &str,
+        source: &UnitFact,
+        destination_name: &str,
+        destination: &UnitFact,
+        span: Span,
+    ) -> Expr {
+        if source_name == destination_name {
+            return expr;
+        }
+        let raw = Self::unit_raw(expr, source_name, span);
+        let (scale, offset) = source
+            .conversion_parts_to(destination)
+            .expect("unit conversion ratios were validated");
+        let stored = Expr::Binary(
+            BinOp::Add,
+            Box::new(Expr::Binary(
+                BinOp::Mul,
+                Box::new(raw),
+                Box::new(Self::unit_ratio_expr(&scale, span)),
+                span,
+            )),
+            Box::new(Self::unit_ratio_expr(&offset, span)),
+            span,
+        );
+        Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(destination_name.to_string(), span)),
+            method: Syntax::numeric_conversion_method("Float")
+                .expect("Float conversion is registered")
+                .to_string(),
+            method_span: span,
+            type_args: Vec::new(),
+            args: vec![crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr: stored,
+                span,
+                flags: crate::AST::CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            recv_type: None,
+            resolved_ret: Some(Type::Named(destination_name.to_string())),
+        }
+    }
+
+    fn convert_unit_operand(
+        &self,
+        operand: &mut Box<Expr>,
+        source_name: &str,
+        source: &UnitFact,
+        destination_name: &str,
+        destination: &UnitFact,
+        span: Span,
+    ) {
+        let old = std::mem::replace(operand, Box::new(Expr::Absent(span)));
+        *operand = Box::new(self.unit_conversion_expr(
+            *old,
+            source_name,
+            source,
+            destination_name,
+            destination,
+            span,
+        ));
+    }
+
+    fn unit_wrapped_binary(
+        &self,
+        op: BinOp,
+        left: Expr,
+        left_name: &str,
+        right: Expr,
+        right_name: &str,
+        destination_name: &str,
+        span: Span,
+    ) -> Expr {
+        let raw = Expr::Binary(
+            op,
+            Box::new(Self::unit_raw(left, left_name, span)),
+            Box::new(Self::unit_raw(right, right_name, span)),
+            span,
+        );
+        Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(destination_name.to_string(), span)),
+            method: Syntax::numeric_conversion_method("Float")
+                .expect("Float conversion is registered")
+                .to_string(),
+            method_span: span,
+            type_args: Vec::new(),
+            args: vec![crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr: raw,
+                span,
+                flags: crate::AST::CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            recv_type: None,
+            resolved_ret: Some(Type::Named(destination_name.to_string())),
+        }
+    }
+
     fn operator_expr_type(&self, expr: &Expr) -> Option<Type> {
         match expr {
             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
@@ -256,9 +384,141 @@ impl<'a> Checker<'a> {
         // normalized before the ordinary nominal/numeric operator rules.
         // Unit-family declarations remain nominal for +/-, while */ derives a
         // package-independent erased quantity type.
+        let lunit = self.unit_fact_for_type(&lt);
+        let runit = self.unit_fact_for_type(&rt);
         let ldim = self.quantity_dimension(&lt);
         let rdim = self.quantity_dimension(&rt);
         if ldim.is_some() || rdim.is_some() {
+            if let (Some((lname, lfact)), Some((rname, rfact))) = (&lunit, &runit) {
+                if lfact.dimension == rfact.dimension && lfact.family == rfact.family {
+                    use QuantityKind::{Delta, Linear, Point};
+                    match (op, lfact.kind, rfact.kind) {
+                        (BinOp::Add | BinOp::Sub, Linear, Linear)
+                        | (BinOp::Add | BinOp::Sub, Delta, Delta) => {
+                            let left_wins = lfact.scale.abs() <= rfact.scale.abs();
+                            let (dest_name, dest_fact) = if left_wins {
+                                (lname, lfact)
+                            } else {
+                                (rname, rfact)
+                            };
+                            let source_name = if left_wins { rname } else { lname };
+                            if self.reject_implicit_unit_conversion(dest_name, source_name, span) {
+                                return Some(Type::Named(dest_name.clone()));
+                            }
+                            self.convert_unit_operand(lhs, lname, lfact, dest_name, dest_fact, span);
+                            self.convert_unit_operand(rhs, rname, rfact, dest_name, dest_fact, span);
+                            return Some(Type::Named(dest_name.clone()));
+                        }
+                        (BinOp::Add, Point, Delta) | (BinOp::Sub, Point, Delta) => {
+                            let Some(delta_name) = self.counterpart_unit_type(lname, lfact, Delta) else {
+                                return None;
+                            };
+                            let (_, delta_fact) = self
+                                .unit_fact_for_type(&Type::Named(delta_name.clone()))
+                                .expect("counterpart unit fact");
+                            if self.reject_implicit_unit_conversion(&delta_name, rname, span) {
+                                return Some(Type::Named(lname.clone()));
+                            }
+                            let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                            let right = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                            let right = self.unit_conversion_expr(
+                                right,
+                                rname,
+                                rfact,
+                                &delta_name,
+                                &delta_fact,
+                                span,
+                            );
+                            *replacement = Some(self.unit_wrapped_binary(
+                                op, left, lname, right, &delta_name, lname, span,
+                            ));
+                            return Some(Type::Named(lname.clone()));
+                        }
+                        (BinOp::Add, Delta, Point) => {
+                            let Some(delta_name) = self.counterpart_unit_type(rname, rfact, Delta) else {
+                                return None;
+                            };
+                            let (_, delta_fact) = self
+                                .unit_fact_for_type(&Type::Named(delta_name.clone()))
+                                .expect("counterpart unit fact");
+                            if self.reject_implicit_unit_conversion(&delta_name, lname, span) {
+                                return Some(Type::Named(rname.clone()));
+                            }
+                            let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                            let right = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                            let left = self.unit_conversion_expr(
+                                left,
+                                lname,
+                                lfact,
+                                &delta_name,
+                                &delta_fact,
+                                span,
+                            );
+                            *replacement = Some(self.unit_wrapped_binary(
+                                BinOp::Add, right, rname, left, &delta_name, rname, span,
+                            ));
+                            return Some(Type::Named(rname.clone()));
+                        }
+                        (BinOp::Sub, Point, Point) => {
+                            let left_wins = lfact.scale.abs() <= rfact.scale.abs();
+                            let (point_name, point_fact) = if left_wins {
+                                (lname, lfact)
+                            } else {
+                                (rname, rfact)
+                            };
+                            let Some(delta_name) = self.counterpart_unit_type(point_name, point_fact, Delta) else {
+                                return None;
+                            };
+                            let source_name = if left_wins { rname } else { lname };
+                            if self.reject_implicit_unit_conversion(point_name, source_name, span) {
+                                return Some(Type::Named(delta_name));
+                            }
+                            let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                            let right = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                            let left = self.unit_conversion_expr(
+                                left, lname, lfact, point_name, point_fact, span,
+                            );
+                            let right = self.unit_conversion_expr(
+                                right, rname, rfact, point_name, point_fact, span,
+                            );
+                            *replacement = Some(self.unit_wrapped_binary(
+                                BinOp::Sub,
+                                left,
+                                point_name,
+                                right,
+                                point_name,
+                                &delta_name,
+                                span,
+                            ));
+                            return Some(Type::Named(delta_name));
+                        }
+                        (BinOp::Add, Point, Point) | (BinOp::Sub, Delta, Point) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0127",
+                                format!("operator `{}` is not available between `{}` and `{}`", op.spell(), lname, rname),
+                                "affine points are positions; only point + delta, point - delta, point - point, and delta + delta are defined".to_string(),
+                                "subtract two points for a delta, or add a matching Delta to a point".to_string(),
+                                Some(span),
+                            ));
+                            return None;
+                        }
+                        (BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge, left_kind, right_kind)
+                            if left_kind == right_kind =>
+                        {
+                            let left_wins = lfact.scale.abs() <= rfact.scale.abs();
+                            let (dest_name, dest_fact) = if left_wins { (lname, lfact) } else { (rname, rfact) };
+                            let source_name = if left_wins { rname } else { lname };
+                            if self.reject_implicit_unit_conversion(dest_name, source_name, span) {
+                                return Some(Type::Bool);
+                            }
+                            self.convert_unit_operand(lhs, lname, lfact, dest_name, dest_fact, span);
+                            self.convert_unit_operand(rhs, rname, rfact, dest_name, dest_fact, span);
+                            return Some(Type::Bool);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             match op {
                 BinOp::Add | BinOp::Sub => {
                     if let (Some(ldim), Some(rdim)) = (ldim, rdim) {

@@ -9,7 +9,9 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
-use crate::AST::{AccessConvention, Expr, ExternFn, Func, Stmt, Type, VariantPayload};
+use crate::AST::{
+    AccessConvention, Expr, ExternFn, Func, QuantityKind, Stmt, Type, VariantPayload,
+};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -97,11 +99,63 @@ pub(crate) enum TypeDef {
     },
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct UnitFact {
+    family: String,
+    member: String,
+    dimension: crate::AST::Dimension,
+    scale: crate::AST::UnitRatio,
+    offset: crate::AST::UnitRatio,
+    kind: QuantityKind,
+}
+
+impl UnitFact {
+    fn conversion_parts_to(
+        &self,
+        destination: &Self,
+    ) -> Option<(crate::AST::UnitRatio, crate::AST::UnitRatio)> {
+        let scale = self.scale.div(&destination.scale).ok()?;
+        let offset = self
+            .offset
+            .sub(&destination.offset)
+            .ok()?
+            .div(&destination.scale)
+            .ok()?;
+        Some((scale, offset))
+    }
+
+    fn conversion_is_exact_to(&self, destination: &Self) -> bool {
+        self.conversion_parts_to(destination).is_some_and(|(scale, offset)| {
+            scale.den.to_string() == "1" && offset.den.to_string() == "1"
+        })
+    }
+
+    fn conversion_is_finite_to(&self, destination: &Self) -> bool {
+        self.conversion_parts_to(destination).is_some_and(|(scale, offset)| {
+            [scale, offset].into_iter().all(|value| {
+                value
+                    .num
+                    .to_string()
+                    .parse::<f64>()
+                    .is_ok_and(f64::is_finite)
+                    && value
+                        .den
+                        .to_string()
+                        .parse::<f64>()
+                        .is_ok_and(f64::is_finite)
+            })
+        })
+    }
+}
+
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
     /// D-SHAPE-QUANTITY1=A: unit-family member type -> normalized physical
     /// dimension. Currency and unknown families are intentionally absent.
     unit_dimensions: HashMap<String, crate::AST::Dimension>,
+    /// #603: the one normalized source of truth for concrete unit conversion,
+    /// affine kind, and algebra facts.
+    unit_facts: HashMap<String, UnitFact>,
     /// D-FIELDPOL1: struct name → computed field name → (span, declared
     /// type). A computed field never appears in `TypeDef::Struct::fields`
     /// (it's not a stored field, and is never required/allowed in a struct
@@ -117,6 +171,10 @@ impl TypeRegistry {
 
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
         self.unit_dimensions.get(name).copied()
+    }
+
+    pub(crate) fn unit_fact(&self, name: &str) -> Option<&UnitFact> {
+        self.unit_facts.get(name)
     }
 
     fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool)]> {
@@ -951,6 +1009,7 @@ pub(crate) struct ModuleState {
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     trait_reg: TraitRegistry,
+    policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
     /// `math.double(x)` resolves to `user_math__double(x)` when `math` is in here.
     code_modules: HashMap<String, String>,
@@ -991,6 +1050,8 @@ pub(crate) struct Checker<'a> {
     /// D-PUBPKG1=A: package-scoped function visibility flags.
     func_pkg_pub: &'a HashMap<String, bool>,
     module_path: &'a str,
+    policy_declarations: &'a [crate::Policy::PolicyDeclaration],
+    current_function_span: Span,
     reference_anchors: &'a mut HashMap<(String, usize, usize), Effects::DefinitionAnchorFact>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
@@ -1185,6 +1246,206 @@ pub(crate) struct Checker<'a> {
     /// `global_addr_taken` parameter) so `@InlineAlways` (E0918) can be
     /// checked once every function has run through here.
     inline_addr_taken: HashSet<String>,
+}
+
+impl<'a> Checker<'a> {
+    pub(crate) fn unit_fact_for_type(&self, ty: &Type) -> Option<(String, UnitFact)> {
+        let Type::Named(name) = ty else { return None };
+        if let Some(fact) = self.registry.unit_fact(name) {
+            return Some((name.clone(), fact.clone()));
+        }
+        if let Some((module, leaf)) = name.split_once('.') {
+            return self.modules.and_then(|modules| {
+                self.imports
+                    .get(module)
+                    .and_then(|index| modules.get(*index))
+                    .and_then(|candidate| candidate.registry.unit_fact(leaf))
+                    .map(|fact| (name.clone(), fact.clone()))
+            });
+        }
+        None
+    }
+
+    pub(crate) fn counterpart_unit_type(
+        &self,
+        source_name: &str,
+        fact: &UnitFact,
+        kind: QuantityKind,
+    ) -> Option<String> {
+        let stem = crate::AST::UnitFamilyDef::type_name(&fact.member);
+        let leaf = match kind {
+            QuantityKind::Linear => stem,
+            QuantityKind::Point => format!("{stem}Point"),
+            QuantityKind::Delta => format!("{stem}Delta"),
+        };
+        let candidate = source_name
+            .split_once('.')
+            .map_or_else(|| leaf.clone(), |(module, _)| format!("{module}.{leaf}"));
+        self.unit_fact_for_type(&Type::Named(candidate.clone()))
+            .filter(|(_, other)| other.family == fact.family && other.kind == kind)
+            .map(|_| candidate)
+    }
+
+    pub(crate) fn type_satisfies_bound(&self, ty: &Type, bound: &str) -> bool {
+        if let Some((dimension, kind)) = crate::Generics::parse_quantity_bound(bound) {
+            return self.unit_fact_for_type(ty).is_some_and(|(_, fact)| {
+                fact.family == dimension && fact.kind.name() == kind
+            });
+        }
+        self.trait_reg.type_implements_trait(ty, bound)
+    }
+
+    pub(crate) fn unit_conversion_overflow_diagnostic(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0127",
+            "this unit conversion overflows its runtime representation".to_string(),
+            "the declared exact scale or offset is outside Float's finite range".to_string(),
+            "choose units with a finite conversion boundary".to_string(),
+            Some(span),
+        )
+    }
+
+    pub(crate) fn implicitly_convert_unit(
+        &mut self,
+        expr: &mut Expr,
+        destination_ty: &Type,
+        source_ty: &Type,
+    ) -> bool {
+        let Some((destination_name, destination_fact)) = self.unit_fact_for_type(destination_ty)
+        else {
+            return false;
+        };
+        let Some((source_name, source_fact)) = self.unit_fact_for_type(source_ty) else {
+            return false;
+        };
+        if destination_fact.family != source_fact.family
+            || destination_fact.dimension != source_fact.dimension
+            || destination_fact.kind != source_fact.kind
+        {
+            return false;
+        }
+        if !source_fact.conversion_is_finite_to(&destination_fact) {
+            self.diags
+                .push(self.unit_conversion_overflow_diagnostic(expr.span()));
+            return true;
+        }
+        if !source_fact.conversion_is_exact_to(&destination_fact) {
+            self.diags.push(self.inexact_unit_diagnostic(
+                &destination_name,
+                &source_name,
+                expr.span(),
+            ));
+            return true;
+        }
+        if self.explicit_units_enabled() && destination_name != source_name {
+            self.diags.push(self.explicit_units_diagnostic(
+                &destination_name,
+                &source_name,
+                expr.span(),
+            ));
+            return true;
+        }
+        let span = expr.span();
+        let source_expr = std::mem::replace(expr, Expr::Absent(span));
+        *expr = self.unit_conversion_expr(
+            source_expr,
+            &source_name,
+            &source_fact,
+            &destination_name,
+            &destination_fact,
+            span,
+        );
+        true
+    }
+
+    pub(crate) fn explicit_units_enabled(&self) -> bool {
+        let base = self.policy_declarations.iter().any(|declaration| {
+            declaration.key == crate::Policy::PolicyKey::ExplicitUnits
+                && (matches!(
+                    declaration.scope,
+                    crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module
+                ) || (declaration.scope == crate::Policy::PolicyScope::Function
+                    && declaration.target == Some(self.current_function_span)))
+        });
+        base || self.memory_policy_stack.last().is_some_and(|region| {
+            region
+                .declarations
+                .iter()
+                .any(|declaration| declaration.key == crate::Policy::PolicyKey::ExplicitUnits)
+        })
+    }
+
+    pub(crate) fn explicit_units_diagnostic(
+        &self,
+        destination_name: &str,
+        source_name: &str,
+        span: Span,
+    ) -> Diagnostic {
+        let source_leaf = source_name.rsplit('.').next().unwrap_or(source_name);
+        let method = crate::Syntax::conversion_method_for_source(source_leaf);
+        Diagnostic::error(
+            "E0127",
+            "`explicit_units` requires a written conversion".to_string(),
+            format!(
+                "this scope does not convert `{source_name}` to `{destination_name}` implicitly"
+            ),
+            format!("write `{destination_name}.{method}(expr)`"),
+            Some(span),
+        )
+    }
+
+    pub(crate) fn reject_implicit_unit_conversion(
+        &mut self,
+        destination_name: &str,
+        source_name: &str,
+        span: Span,
+    ) -> bool {
+        if let (Some((_, destination)), Some((_, source))) = (
+            self.unit_fact_for_type(&Type::Named(destination_name.to_string())),
+            self.unit_fact_for_type(&Type::Named(source_name.to_string())),
+        ) {
+            if !source.conversion_is_finite_to(&destination) {
+                self.diags
+                    .push(self.unit_conversion_overflow_diagnostic(span));
+                return true;
+            }
+            if !source.conversion_is_exact_to(&destination) {
+                self.diags.push(self.inexact_unit_diagnostic(
+                    destination_name,
+                    source_name,
+                    span,
+                ));
+                return true;
+            }
+        }
+        if self.explicit_units_enabled() && destination_name != source_name {
+            self.diags.push(self.explicit_units_diagnostic(
+                destination_name,
+                source_name,
+                span,
+            ));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn inexact_unit_diagnostic(
+        &self,
+        destination_name: &str,
+        source_name: &str,
+        span: Span,
+    ) -> Diagnostic {
+        let source_leaf = source_name.rsplit('.').next().unwrap_or(source_name);
+        let method = crate::Syntax::conversion_method_for_source(source_leaf);
+        Diagnostic::error(
+            "E0127",
+            "this implicit unit conversion would round".to_string(),
+            "the exact scale or offset cannot be represented as an integer conversion at this boundary".to_string(),
+            format!("write `{destination_name}.{method}(expr)` to make the conversion explicit"),
+            Some(span),
+        )
+    }
 }
 
 pub mod ApiFreeze;

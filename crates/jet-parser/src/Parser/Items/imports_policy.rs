@@ -38,7 +38,7 @@ impl<'a> Parser<'a> {
                     ));
                 };
                 let value = match key {
-                    crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc => crate::Policy::PolicyValue::Enabled,
+                    crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits => crate::Policy::PolicyValue::Enabled,
                     crate::Policy::PolicyKey::ArenaBounded => {
                         self.expect(TokKind::LParen, &format!("after `{name}`"))?;
                         let TokKind::Int(n, _) = self.peek().kind else { return Err(Diagnostic::error("E0355", format!("`{name}` needs a byte ceiling"), "a memory threshold must have a positive compile-time limit".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); };
@@ -1247,7 +1247,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc] {
+            for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc, crate::Policy::PolicyKey::ExplicitUnits] {
                 let module_chain = self.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module).cloned().collect::<Vec<_>>();
                 if let Err(error) = crate::Policy::resolve(key, module_chain) {
                     let span = match error { crate::Policy::PolicyError::ProhibitedScope { span, .. } | crate::Policy::PolicyError::Widening { span, .. } => span, crate::Policy::PolicyError::Conflict { second, .. } => second };

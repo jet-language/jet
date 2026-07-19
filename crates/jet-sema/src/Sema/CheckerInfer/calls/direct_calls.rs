@@ -977,7 +977,7 @@ impl<'a> Checker<'a> {
                                 param
                                     .bounds
                                     .iter()
-                                    .find(|bound| !self.trait_reg.type_implements_trait(ty, bound))
+                                    .find(|bound| !self.type_satisfies_bound(ty, bound))
                                     .map(|bound| (ty, bound))
                             }) {
                                 self.diags.push(e0905(
@@ -1127,7 +1127,12 @@ impl<'a> Checker<'a> {
     
                 if let Some(arg_ty) = &arg_ty {
                     let param_ty = self.resolve_type(param_ty.clone());
-                    let arg_ty = self.resolve_type(arg_ty.clone());
+                    let mut arg_ty = self.resolve_type(arg_ty.clone());
+                    if param_ty != arg_ty
+                        && self.implicitly_convert_unit(&mut arg.expr, &param_ty, &arg_ty)
+                    {
+                        arg_ty = param_ty.clone();
+                    }
                     let reported = self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
                     // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
                     // will emit .to_vec() on the argument.
@@ -1373,7 +1378,11 @@ impl<'a> Checker<'a> {
                 } else {
                     self.trait_reg.instantiate_type(t, &generic_subst)
                 };
-                self.resolve_type(t)
+                if self.unit_fact_for_type(&t).is_some() {
+                    t
+                } else {
+                    self.resolve_type(t)
+                }
             }))
         }
     

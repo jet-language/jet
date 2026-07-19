@@ -33,6 +33,20 @@ pub const SUB: &str = "Sub";
 pub const MUL: &str = "Mul";
 pub const DIV: &str = "Div";
 
+pub fn quantity_bound(dimension: &str, kind: &str) -> String {
+    format!("{}<{}, .{}>", Syntax::BOUND_QUANTITY, dimension, kind)
+}
+
+pub fn is_quantity_bound(bound: &str) -> bool {
+    parse_quantity_bound(bound).is_some()
+}
+
+pub fn parse_quantity_bound(bound: &str) -> Option<(&str, &str)> {
+    let body = bound.strip_prefix("Quantity<")?.strip_suffix('>')?;
+    let (dimension, kind) = body.split_once(", .")?;
+    (!dimension.is_empty() && !kind.is_empty()).then_some((dimension, kind))
+}
+
 pub const BUILTIN_TRAITS: &[&str] = &[
     PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, CLOSE,
     ADD, SUB, MUL, DIV,
@@ -264,7 +278,9 @@ pub fn rust_type_param_list(
                 .bounds
                 .iter()
                 .filter_map(|b| {
-                    if matches!(b.as_str(), IO_READER | IO_WRITER) {
+                    if is_quantity_bound(b) {
+                        Some("JetQuantity".to_string())
+                    } else if matches!(b.as_str(), IO_READER | IO_WRITER) {
                         rust_trait_bound(b).map(str::to_string)
                     } else if is_builtin_trait(b) {
                         rust_trait_bound(b).map(str::to_string)

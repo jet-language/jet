@@ -1564,6 +1564,12 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         "impl user_{} {{\n    pub fn raw(&self) -> {} {{ {} }}\n}}\n\n",
         d.name, base_rust, raw_value
     ));
+    if d.quantity.is_some() {
+        out.push_str(&format!(
+            "impl crate::JetQuantity for user_{n} {{\n    fn raw(&self) -> f64 {{ self.0 }}\n    fn from_float(value: f64) -> Self {{ user_{n}(value) }}\n}}\n\n",
+            n = d.name
+        ));
+    }
     if let Some((lo, hi, _)) = d.range {
         out.push_str(&format!(
             "impl user_{n} {{\n    pub fn try_new(__v: {base}) -> Result<user_{n}, String> {{\n        if __v >= {lo} && __v <= {hi} {{ Ok(user_{n}(__v)) }} else {{ Err(format!(\"value {{}} is outside {n}'s range {lo}..{hi}\", __v)) }}\n    }}\n}}\n\n",
@@ -1617,13 +1623,13 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     // D-CAPBUNDLE1 `@CodableAsBase`: encode/decode via the base type's own
     // wire representation (`user_Encode`/`user_Decode`, the same traits
     // struct/enum `@[Codable]` derives target — I8: one wire mechanism).
-    if d.is_codable_as_base {
+    if d.is_codable_as_base && !cx.used_core.is_empty() {
         out.push_str(&format!(
-            "impl user_Encode for user_{n} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{ (self.0).jet_encode() }}\n}}\n\n",
+            "impl crate::user_Encode for user_{n} {{\n    fn jet_encode(&self) -> crate::jet_std::DataTree {{ crate::user_Encode::jet_encode(&self.0) }}\n}}\n\n",
             n = d.name
         ));
         out.push_str(&format!(
-            "impl user_Decode for user_{n} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{ Ok(user_{n}(<{base} as user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
+            "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, crate::jet_std::DecodeError> {{ Ok(user_{n}(<{base} as crate::user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
             n = d.name,
             base = base_rust
         ));
