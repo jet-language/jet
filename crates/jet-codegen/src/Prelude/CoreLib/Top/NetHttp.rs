@@ -509,6 +509,13 @@ fn jet_net_operation_deadline(timeout_ms: Option<i64>) -> Option<JetDeadlineGuar
     Some(jet_ctx_push_deadline(deadline))
 }
 
+fn jet_net_explicit_deadline(deadline: &jet_std::Duration, operation: &str) -> Result<Option<JetDeadlineGuard>, JetNetError> {
+    jet_net_timeout(deadline.ms).map_err(|message| {
+        JetNetError::InvalidInput(jet_net_detail(operation, None, None, message, None))
+    })?;
+    Ok(jet_net_operation_deadline(Some(deadline.ms)))
+}
+
 fn jet_net_deadline_timeout(operation: &str) -> JetNetError {
     JetNetError::Timeout(jet_net_detail(
         operation,
@@ -761,6 +768,11 @@ fn jet_net_tls_read_bytes(stream: &mut JetTlsStream, limit: i64) -> Result<Vec<u
     }
 }
 
+fn jet_net_tls_read_bytes_deadline(stream: &mut JetTlsStream, limit: i64, deadline: &jet_std::Duration) -> Result<Vec<u8>, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls read")?;
+    jet_net_tls_read_bytes(stream, limit)
+}
+
 fn jet_net_tls_read_text(stream: &mut JetTlsStream) -> Result<String, JetNetError> {
     let bytes = jet_net_tls_read_bytes(stream, 8192)?;
     String::from_utf8(bytes).map_err(|error| JetNetError::InvalidInput(jet_net_detail(
@@ -801,6 +813,11 @@ fn jet_net_tls_write_all_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Res
     Ok(())
 }
 
+fn jet_net_tls_write_all_bytes_deadline(stream: &mut JetTlsStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<(), JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls write all")?;
+    jet_net_tls_write_all_bytes(stream, data)
+}
+
 fn jet_net_tls_write_text(stream: &mut JetTlsStream, text: &String) -> Result<(), JetNetError> {
     jet_net_tls_write_all_bytes(stream, &text.as_bytes().to_vec())
 }
@@ -813,6 +830,21 @@ fn jet_net_tls_close(stream: &mut JetTlsStream) -> Result<(), JetNetError> {
         }
         jet_net_tls_scheduler_wait(stream, false, true, "tls close")?;
     }
+}
+
+fn jet_net_tls_ready(
+    stream: &JetTlsStream,
+    interest: JetNetReadyInterest,
+    deadline: &jet_std::Duration,
+) -> Result<JetNetReady, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "tls ready")?;
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout("tls ready"));
+    }
+    let read = matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite);
+    let write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
+    jet_net_tls_scheduler_wait(stream, read, write, "tls ready")?;
+    Ok(JetNetReady { readable: read, writable: write })
 }
 
 fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result<(), JetNetError> {
@@ -1568,8 +1600,22 @@ fn jet_net_unix_accept(_listener: &JetUnixListener) -> Result<JetUnixStream, Jet
 
 #[cfg(unix)]
 fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
-    let inner = std::os::unix::net::UnixStream::connect(path)
-        .map_err(|e| jet_net_io_error("unix connect", Some(path.clone()), e))?;
+    let address = path.clone();
+    let worker_address = address.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = sender.send(std::os::unix::net::UnixStream::connect(worker_address));
+    });
+    let inner = loop {
+        match receiver.try_recv() {
+            Ok(Ok(stream)) => break stream,
+            Ok(Err(error)) => return Err(jet_net_io_error("unix connect", Some(address), error)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => jet_net_scheduler_park("unix connect", 5)?,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return Err(JetNetError::Other(jet_net_detail(
+                "unix connect", Some(address), None, "unix connect worker stopped without a result".to_string(), None,
+            ))),
+        }
+    };
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("unix connect", Some(path.clone()), e))?;
     Ok(JetUnixStream {
@@ -1632,6 +1678,17 @@ fn jet_net_unix_read_bytes(stream: &mut JetUnixStream, limit: i64) -> Result<Vec
     }
 }
 
+#[cfg(unix)]
+fn jet_net_unix_read_bytes_deadline(stream: &mut JetUnixStream, limit: i64, deadline: &jet_std::Duration) -> Result<Vec<u8>, JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "unix read")?;
+    jet_net_unix_read_bytes(stream, limit)
+}
+
+#[cfg(not(unix))]
+fn jet_net_unix_read_bytes_deadline(_stream: &mut JetUnixStream, _limit: i64, _deadline: &jet_std::Duration) -> Result<Vec<u8>, JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail("unix read", None, None, "unix sockets are not supported on this platform".to_string(), None)))
+}
+
 #[cfg(not(unix))]
 fn jet_net_unix_read_bytes(_stream: &mut JetUnixStream, _limit: i64) -> Result<Vec<u8>, JetNetError> {
     Err(JetNetError::Unsupported(jet_net_detail(
@@ -1652,6 +1709,17 @@ fn jet_net_unix_write_all_bytes(stream: &mut JetUnixStream, data: &Vec<u8>) -> R
         offset += wrote;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn jet_net_unix_write_all_bytes_deadline(stream: &mut JetUnixStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<(), JetNetError> {
+    let _deadline = jet_net_explicit_deadline(deadline, "unix write all")?;
+    jet_net_unix_write_all_bytes(stream, data)
+}
+
+#[cfg(not(unix))]
+fn jet_net_unix_write_all_bytes_deadline(_stream: &mut JetUnixStream, _data: &Vec<u8>, _deadline: &jet_std::Duration) -> Result<(), JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail("unix write", None, None, "unix sockets are not supported on this platform".to_string(), None)))
 }
 
 #[cfg(unix)]
@@ -1725,6 +1793,28 @@ fn jet_net_unix_close(stream: &mut JetUnixStream) -> Result<(), JetNetError> {
 #[cfg(not(unix))]
 fn jet_net_unix_close(_stream: &mut JetUnixStream) -> Result<(), JetNetError> {
     Err(JetNetError::Unsupported(jet_net_detail("unix close", None, None, "unix sockets are not supported on this platform".to_string(), None)))
+}
+
+#[cfg(unix)]
+fn jet_net_unix_ready(
+    stream: &JetUnixStream,
+    interest: JetNetReadyInterest,
+    deadline: &jet_std::Duration,
+) -> Result<JetNetReady, JetNetError> {
+    if stream.closed { return Err(jet_net_closed("unix ready")); }
+    let _deadline = jet_net_explicit_deadline(deadline, "unix ready")?;
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout("unix ready"));
+    }
+    let read = matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite);
+    let write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
+    jet_net_unix_scheduler_wait(&stream.inner, read, write, "unix ready")?;
+    Ok(JetNetReady { readable: read, writable: write })
+}
+
+#[cfg(not(unix))]
+fn jet_net_unix_ready(_stream: &JetUnixStream, _interest: JetNetReadyInterest, _deadline: &jet_std::Duration) -> Result<JetNetReady, JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail("unix ready", None, None, "unix sockets are not supported on this platform".to_string(), None)))
 }
 
 fn jet_net_dns_system_servers() -> Vec<String> {

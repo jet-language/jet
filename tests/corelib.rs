@@ -3754,6 +3754,45 @@ fn run() {{
 
 #[cfg(unix)]
 #[test]
+fn core_net_unix_same_handle_deadline_readiness_and_close() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_unix_same_handle_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let socket = jet_string_path(&dir.join("same-handle.sock"));
+    let source = format!(
+        r#"
+use core.net as net
+
+fn run() {{
+    listener :: net.unix_listen("{socket}") ?? panic("listen")
+    client := net.unix_connect("{socket}") ?? panic("connect")
+    server := net.unix_accept(listener) ?? panic("accept")
+    interest: NetReadyInterest :: .Read
+    expired :: Duration.milliseconds(0) ?? panic("expired")
+    if client.ready(interest, deadline: expired) == {{
+        Ok(_) -> panic("expired readiness succeeded")
+        Err(error) -> print(net.error_operation(error))
+    }}
+    budget :: Duration.seconds(1) ?? panic("budget")
+    payload: [U8] :: [7]
+    client.write_all(payload, deadline: budget) ?? panic("write")
+    print(server.read(1, deadline: budget) ?? panic("read"))
+    client.close() ?? panic("close")
+    client.close() ?? panic("second close")
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "unix_same_handle", &source, &[], None);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "unix ready\n[7]\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn core_net_udp_and_unix_waits_use_typed_scheduler_interrupts() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_net_datagram_unix_interrupts_{}",
@@ -4166,13 +4205,19 @@ fn run() {
     tcp :: net.tcp_connect("127.0.0.1:$PORT") ?? panic("tcp")
     secure := tls.client(^tcp, "localhost") ?? panic("tls handshake")
     request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
+    budget :: Duration.seconds(1) ?? panic("deadline")
+    interest: NetReadyInterest :: .Write
+    readiness :: secure.ready(interest, deadline: budget) ?? panic("ready")
+    print(net.ready_writable(readiness))
     print(zero_rejected(&secure))
-    empty_count :: send(&secure, request) ?? panic("write bytes")
+    empty: [U8] :: []
+    empty_count :: send(&secure, empty) ?? panic("empty write")
+    secure.write_all(request, deadline: budget) ?? panic("write bytes")
     print(empty_count)
-    response :: receive(&secure, 4096) ?? panic("read bytes")
+    response :: secure.read(4096, deadline: budget) ?? panic("read bytes")
     print(response.len() > 0)
-    tls.close(&secure) ?? panic("close notify")
-    tls.close(&secure) ?? panic("idempotent close")
+    secure.close() ?? panic("close notify")
+    secure.close() ?? panic("idempotent close")
     if receive(&secure, 1) == {
         Ok(_) -> panic("closed read succeeded")
         Err(error) -> {
@@ -4189,7 +4234,7 @@ fn run() {
     let _ = server.kill();
     let _ = server.wait();
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "true\n0\ntrue\nclosed\n");
+    assert_eq!(stdout, "true\ntrue\n0\ntrue\nclosed\n");
 }
 
 #[test]

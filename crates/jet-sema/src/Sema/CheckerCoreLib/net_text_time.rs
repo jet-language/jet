@@ -80,6 +80,22 @@ pub fn net_method_return(
             Type::Named("NetError".to_string()),
         ))),
         ("UdpSocket", "close") if n_args == 0 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UnixStream" | "TlsStream", "read") if n_args == 2 => Some(Some(result_ty(
+            Type::List(Box::new(u8_ty())),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UnixStream" | "TlsStream", "write_all") if n_args == 2 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UnixStream" | "TlsStream", "ready") if n_args == 2 => Some(Some(result_ty(
+            Type::Named("NetReady".to_string()),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("UnixStream" | "TlsStream", "close") if n_args == 0 => Some(Some(result_ty(
             unit,
             Type::Named("NetError".to_string()),
         ))),

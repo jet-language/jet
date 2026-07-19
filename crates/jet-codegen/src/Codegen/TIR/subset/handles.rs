@@ -248,6 +248,14 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("TcpStream", "close", 0) => THandleOp::TcpStreamClose,
         ("UdpSocket", "ready", 2) => THandleOp::UdpSocketReady,
         ("UdpSocket", "close", 0) => THandleOp::UdpSocketClose,
+        ("UnixStream", "read", 2) => THandleOp::UnixStreamReadDeadline,
+        ("UnixStream", "write_all", 2) => THandleOp::UnixStreamWriteAllDeadline,
+        ("UnixStream", "ready", 2) => THandleOp::UnixStreamReady,
+        ("UnixStream", "close", 0) => THandleOp::UnixStreamClose,
+        ("TlsStream", "read", 2) => THandleOp::TlsStreamReadDeadline,
+        ("TlsStream", "write_all", 2) => THandleOp::TlsStreamWriteAllDeadline,
+        ("TlsStream", "ready", 2) => THandleOp::TlsStreamReady,
+        ("TlsStream", "close", 0) => THandleOp::TlsStreamClose,
         // c109 Phase 19: the four arena allocators (`alloc`/`reset`). Sema sets
         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`

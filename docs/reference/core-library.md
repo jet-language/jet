@@ -2417,6 +2417,7 @@ Beginner calls accept strings; expert calls accept typed
 | `unix_accept(listener)` | `UnixStream ? NetError` | Accept one Unix stream; scheduler-aware cancellation and deadlines |
 | `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] ? NetError` / `() ? NetError` | Unix byte stream operations; same deadline/close law as TCP |
 | `unix_shutdown(stream, how)` / `unix_close(stream)` | `() ? NetError` | Explicit shutdown and idempotent close |
+| `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same-handle Unix deadlines, readiness, and lifecycle |
 | `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? NetError` | System resolver config, timeout in ms |
 | `dns_txt(name, ms)` | `[String] ? NetError` | TXT records |
 | `dns_srv(name, ms)` | `[DnsSrv] ? NetError` | SRV records |
@@ -2448,6 +2449,7 @@ The built module exposes only this byte/text stream surface:
 | `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? NetError` / `() ? NetError` | Scheduler-aware partial or complete byte write |
 | `write_text(stream, text)` | `() ? NetError` | Write the complete text payload |
 | `close(stream)` | `() ? NetError` | Send close-notify; repeated close is harmless |
+| `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same TLS handle, explicit per-call deadlines, readiness, and close-notify lifecycle |
 
 TLS handshake, read, write, and close-notify use the consumed socket's shared
 readiness path. Ambient cancellation and the earliest ambient or inherited

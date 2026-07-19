@@ -1607,6 +1607,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::UdpSocketClose => {
                     format!("{}jet_net_udp_close(&({}))", root, recv)
                 }
+                THandleOp::UnixStreamReadDeadline => format!(
+                    "{}jet_net_unix_read_bytes_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::UnixStreamWriteAllDeadline => format!(
+                    "{}jet_net_unix_write_all_bytes_deadline(&mut ({}), &({}), &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::UnixStreamReady => format!(
+                    "{}jet_net_unix_ready(&({}), {}, &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::UnixStreamClose => format!(
+                    "{}jet_net_unix_close(&mut ({}))", root, recv
+                ),
+                THandleOp::TlsStreamReadDeadline => format!(
+                    "{}jet_net_tls_read_bytes_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::TlsStreamWriteAllDeadline => format!(
+                    "{}jet_net_tls_write_all_bytes_deadline(&mut ({}), &({}), &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::TlsStreamReady => format!(
+                    "{}jet_net_tls_ready(&({}), {}, &({}))", root, recv, a(0), a(1)
+                ),
+                THandleOp::TlsStreamClose => format!(
+                    "{}jet_net_tls_close(&mut ({}))", root, recv
+                ),
                 // c109 Phase 19: arena allocator methods (byte-for-byte the AST arms).
                 THandleOp::AllocAlloc => {
                     let a0 = emit_tir_expr(&args[0], cx);
