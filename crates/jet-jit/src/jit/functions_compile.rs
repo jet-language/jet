@@ -253,7 +253,7 @@ pub(crate) fn compile_program(
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     for f in &program.funcs {
         let sig = func_signature(module, f)?;
-        let id = if f.name == "run" {
+        let id = if f.name == program.entry {
             match existing_main {
                 Some(id) => id,
                 None => module

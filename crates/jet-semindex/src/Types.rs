@@ -350,6 +350,7 @@ pub struct OutputEntryFact {
     pub reference_span: SourceSpan,
     pub params: Vec<String>,
     pub return_type: Option<String>,
+    pub authority: String,
     pub effects: Vec<String>,
 }
 

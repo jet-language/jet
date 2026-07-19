@@ -191,6 +191,11 @@ pub const OUTPUT_KINDS: &[&str] = &[
 ];
 pub const OUTPUT_FIELD_NAME: &str = "name";
 pub const OUTPUT_FIELD_ENTRY: &str = "entry";
+pub const OUTPUT_DEFAULTS: &str = "defaults"; // D-ECO-OUTPUT-DEFAULT1=A
+pub const OUTPUT_DEFAULT_RUN: &str = "run"; // D-ECO-OUTPUT-DEFAULT1=A
+pub const OUTPUT_DEFAULT_CHECK: &str = "check"; // D-ECO-OUTPUT-DEFAULT1=A
+pub const OUTPUT_DEFAULT_ENTER: &str = "enter"; // D-ECO-OUTPUT-DEFAULT1=A
+pub const TYPE_OUTPUT_DEFAULTS: &str = "__OutputDefaults"; // internal AST tag
 /// D-JOS-VMTEST1: the type name of a `vmtest.<name>` contribution record.
 pub const TYPE_VMTEST: &str = "VmTest";
 

@@ -501,6 +501,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--small", help: "with build/run: smallest binary (S15)" },
     // D-JPK-TASKRUN1 (card #476): run a `@Task fn` instead of `fn run`.
     FlagSpec { long: "--task", help: "with run: invoke a `@Task fn` by name (D-JPK-TASKRUN1)" },
+    FlagSpec { long: "--output", help: "with run: invoke one runnable Output by checked address (D-ECO-OUTPUT-DEFAULT1)" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },

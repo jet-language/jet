@@ -290,6 +290,31 @@ impl<'a> Parser<'a> {
                 resolved_output: None,
             })
         }
+
+        /// D-ECO-OUTPUT-DEFAULT1=A: checked Output defaults keep the ratified
+        /// `defaults: .{ run: address, ... }` source spelling.
+        pub(in crate::Parser) fn output_defaults_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            let start = self.peek().span.start;
+            let (name, name_span) = self.expect_ident("for Output defaults")?;
+            self.expect(TokKind::Colon, "after `defaults`")?;
+            let value = self.expr()?;
+            self.expect(TokKind::Semi, "after Output defaults")?;
+            Ok(ConstDef {
+                span: Span::new(start, self.prev_end()),
+                name,
+                name_span,
+                value,
+                meta: None,
+                attrs: Vec::new(),
+                rust_kind: crate::AST::RustConstKind::Const,
+                is_comptime: false,
+                ct: None,
+                ty: Some(crate::AST::Type::Named(Syntax::TYPE_OUTPUT_DEFAULTS.to_string())),
+                is_persist: false,
+                persist_span: None,
+                resolved_output: None,
+            })
+        }
     
         /// S57 (M9.5): `comptime name = expr;` — a compile-time constant binding.
         pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {

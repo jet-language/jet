@@ -373,8 +373,22 @@ impl OutputKind {
 
 /// Checked identity carried into codegen, dev, and tooling. Names are display
 /// facts only; `module` + `definition` are the semantic link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputCallableAuthority {
+    SafeJet,
+}
+
+impl OutputCallableAuthority {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SafeJet => "safe-jet",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedOutput {
+    pub address: String,
     pub kind: OutputKind,
     pub output_name: String,
     pub module: usize,
@@ -390,7 +404,11 @@ pub struct ResolvedOutput {
     pub return_type: Option<Type>,
     pub reference: Span,
     pub definition: Span,
+    /// Runnable Outputs never grant FFI or unsafe authority. The exact solved
+    /// ordinary Jet effect row remains in `effects`.
+    pub authority: OutputCallableAuthority,
     pub effects: Vec<String>,
+    pub selected: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

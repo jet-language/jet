@@ -978,6 +978,29 @@ fn main() {
         }
         found
     };
+    let output_name: Option<String> = {
+        let mut found = None;
+        let mut i = 0;
+        while i < jet_argv.len() {
+            let a = &jet_argv[i];
+            if let Some(value) = a.strip_prefix("--output=") {
+                found = Some(value.to_string());
+                break;
+            }
+            if a == "--output" {
+                found = Some(
+                    jet_argv
+                        .get(i + 1)
+                        .filter(|value| !value.starts_with('-'))
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+                break;
+            }
+            i += 1;
+        }
+        found
+    };
     let mode = OutputMode {
         json,
         color: parse_color(jet_argv),
@@ -995,11 +1018,14 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" || a == "--task" {
+            if a == "-p" || a == "--task" || a == "--output" {
                 skip_next = true;
                 continue;
             }
             if a.starts_with("--task=") {
+                continue;
+            }
+            if a.starts_with("--output=") {
                 continue;
             }
             if a.as_str() == "-" || !a.starts_with('-') {
@@ -1040,6 +1066,13 @@ fn main() {
             exit(ExitCodes::OK);
         }
     };
+    if let Some(output) = output_name.as_deref() {
+        if cmd != "run" || output.is_empty() {
+            eprintln!("error: `--output` needs a runnable Output address with `jet run`");
+            eprintln!(" fix: write `jet run --output <address> <file.{}>`", jet::Syntax::FILE_EXT);
+            exit(ExitCodes::USAGE);
+        }
+    }
 
     // D-OBSERVE-LIVE1=A: dev sessions expose bounded scheduler facts by
     // default; other executions opt in explicitly. Generated programs derive
@@ -1079,6 +1112,7 @@ fn main() {
                 capabilities_json,
                 sbom,
                 named_profile.as_deref(),
+                output_name.as_deref(),
                 &program_args,
                 mode,
             );
@@ -1889,6 +1923,7 @@ fn main() {
                                     capabilities_json,
                                     sbom,
                                     named_profile.as_deref(),
+                                    output_name.as_deref(),
                                     &program_args,
                                     mode,
                                 );
@@ -2129,6 +2164,7 @@ fn main() {
                 capabilities_json,
                 sbom,
                 named_profile.as_deref(),
+                output_name.as_deref(),
                 &program_args,
                 mode,
             );

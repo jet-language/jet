@@ -151,6 +151,7 @@ pub(crate) fn run_compile_cmd(
     capabilities_json: bool,
     sbom: bool,
     named_profile: Option<&str>,
+    output_name: Option<&str>,
     program_args: &[&String],
     mode: OutputMode,
 ) {
@@ -238,7 +239,11 @@ pub(crate) fn run_compile_cmd(
     } else {
         "run"
     };
-    let native_key = if !is_web && cross_target.is_none() && (cmd == "build" || cmd == "run") {
+    let native_key = if output_name.is_none()
+        && !is_web
+        && cross_target.is_none()
+        && (cmd == "build" || cmd == "run")
+    {
         native_cache_key(file, &profile_tag, mode_tag)
     } else {
         None
@@ -280,7 +285,17 @@ pub(crate) fn run_compile_cmd(
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
 
-    let compile_result = if cmd == "build" {
+    let compile_result = if let Some(output) = output_name {
+        jet::compile_output_with_options(
+            file,
+            output,
+            freestanding,
+            allow_impure,
+            is_web,
+            is_plugin,
+            cross_target,
+        )
+    } else if cmd == "build" {
         jet::compile_programmable_build_opts(
             file,
             build_grants,

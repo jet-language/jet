@@ -662,7 +662,7 @@ pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
         return false;
     }
     let main_ok = program.funcs.iter().any(|f| {
-        f.name == "run"
+        f.name == program.entry
             && f.params.is_empty()
             && (f.ret.is_none()
                 || matches!(&f.ret, Some(Type::Result { ok, err })

@@ -145,6 +145,7 @@ fn output_fields<'a>(args: &'a [EnumLitArg], span: Span, diags: &mut Vec<Diagnos
 
 fn resolve_output_callable(
     module_idx: usize,
+    address: String,
     kind: crate::AST::OutputKind,
     output_name: String,
     entry: &Expr,
@@ -298,6 +299,7 @@ fn resolve_output_callable(
         format!("user_{module_alias}::user_{source_name}")
     };
     Some(crate::AST::ResolvedOutput {
+        address,
         kind,
         output_name,
         module: target,
@@ -310,13 +312,52 @@ fn resolve_output_callable(
         reference: entry.span(),
         definition: states[target].func_spans.get(&semantic_name)
             .or_else(|| states[target].func_spans.get(&source_name)).copied().unwrap_or(entry.span()),
+        authority: crate::AST::OutputCallableAuthority::SafeJet,
         effects: Vec::new(),
+        selected: false,
     })
 }
 
-fn resolve_outputs(bundle: &mut ProgramBundle, states: &[ModuleState], mode: CompileMode, diags: &mut Vec<Diagnostic>) {
+fn output_default(bundle: &ProgramBundle, field: &str, diags: &mut Vec<Diagnostic>) -> Option<String> {
+    let value = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+        let Item::Const(value) = item else { return None };
+        matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT_DEFAULTS)
+            .then_some(&value.value)
+    })?;
+    let Expr::StructLit { fields, .. } = value else {
+        diags.push(output_error(
+            "`defaults:` needs one checked record".to_string(),
+            "Output defaults map singular tool intents to Output addresses".to_string(),
+            "write `defaults: .{ run: app }`".to_string(),
+            value.span(),
+        ));
+        return None;
+    };
+    fields.iter().find_map(|(name, _, value)| {
+        if name != field { return None; }
+        match value {
+            Expr::Ident(address, _) => Some(address.clone()),
+            _ => {
+                diags.push(output_error(
+                    format!("default `{field}` is not an Output address"),
+                    "defaults use checked Output references, not text or calls".to_string(),
+                    format!("write `{field}: output_name`"),
+                    value.span(),
+                ));
+                None
+            }
+        }
+    })
+}
+
+fn resolve_outputs(
+    bundle: &mut ProgramBundle,
+    states: &[ModuleState],
+    mode: CompileMode,
+    explicit: Option<&str>,
+    diags: &mut Vec<Diagnostic>,
+) {
     let mut resolved = Vec::new();
-    let mut executable_names = Vec::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         for (item_idx, item) in module.items.iter().enumerate() {
             let Item::Const(value) = item else { continue };
@@ -365,21 +406,62 @@ fn resolve_outputs(bundle: &mut ProgramBundle, states: &[ModuleState], mode: Com
                 diags.push(output_error(format!("{kind:?} Output is missing `entry:`"), "every runnable Output links to one checked function".to_string(), "add `entry: function_name`".to_string(), *span));
                 continue;
             };
-            if let Some(fact) = resolve_output_callable(module_idx, kind, output_name, entry, bundle, states, diags) {
-                if kind == crate::AST::OutputKind::Executable { executable_names.push(fact.output_name.clone()); }
+            if let Some(fact) = resolve_output_callable(module_idx, value.name.clone(), kind, output_name, entry, bundle, states, diags) {
                 resolved.push((module_idx, item_idx, fact));
             }
         }
     }
+    let has_legacy_run = bundle.modules[bundle.entry].items.iter().any(|item| {
+        matches!(item, Item::Func(function) if function.name == "run")
+    });
+    if mode == CompileMode::Run {
+        if let Some(address) = explicit {
+            if let Some((_, _, fact)) = resolved.iter_mut().find(|(_, _, fact)| fact.address == address) {
+                fact.selected = true;
+            } else {
+                let mut choices = resolved.iter().map(|(_, _, fact)| fact.address.clone()).collect::<Vec<_>>();
+                choices.sort();
+                diags.push(output_error(
+                    format!("no runnable Output has address `{address}`"),
+                    "an explicit Output address must name one checked runnable Output".to_string(),
+                    format!("choose one of: {}", choices.join(", ")),
+                    Span::new(0, 0),
+                ));
+            }
+        } else if !has_legacy_run {
+            let executable = resolved.iter().enumerate()
+                .filter(|(_, (_, _, fact))| fact.kind == crate::AST::OutputKind::Executable)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            if executable.len() == 1 {
+                resolved[executable[0]].2.selected = true;
+            } else if executable.len() > 1 {
+                let default = output_default(bundle, Syntax::OUTPUT_DEFAULT_RUN, diags);
+                if let Some(default) = default {
+                    if let Some(index) = executable.iter().copied().find(|index| resolved[*index].2.address == default) {
+                        resolved[index].2.selected = true;
+                    } else {
+                        diags.push(output_error(
+                            format!("default `run` names incompatible Output `{default}`"),
+                            "the run default must name an Executable Output in this Package".to_string(),
+                            "point `defaults.run` at one of the listed Executable addresses".to_string(),
+                            Span::new(0, 0),
+                        ));
+                    }
+                } else {
+                    let mut names = executable.iter().map(|index| resolved[*index].2.address.clone()).collect::<Vec<_>>();
+                    names.sort();
+                    diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output or a checked default".to_string(), format!("choose an explicit Output or add `defaults: .{{ run: {} }}`; candidates: {}", names[0], names.join(", ")), None));
+                }
+            }
+        }
+    } else if mode == CompileMode::Test {
+        for (_, _, fact) in &mut resolved {
+            fact.selected = fact.kind == crate::AST::OutputKind::Check;
+        }
+    }
     for (module, item, fact) in resolved {
         if let Item::Const(value) = &mut bundle.modules[module].items[item] { value.resolved_output = Some(fact); }
-    }
-    if mode == CompileMode::Run
-        && !bundle.modules[bundle.entry].items.iter().any(|item| matches!(item, Item::Func(function) if function.name == "run"))
-        && executable_names.len() > 1
-    {
-        executable_names.sort();
-        diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output".to_string(), format!("choose an explicit Output or set the checked default; candidates: {}", executable_names.join(", ")), None));
     }
 }
 
@@ -724,6 +806,33 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
     check_bundle_opts(bundle, mode, false, false).0
 }
 
+/// Check one explicitly addressed runnable Output. Sema marks that resolved
+/// callable as the sole runtime entry; lower tiers consume only the fact.
+pub fn check_bundle_for_output(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    output: &str,
+) -> Vec<Diagnostic> {
+    check_bundle_opts_for_output(bundle, mode, false, false, Some(output)).0
+}
+
+pub fn check_bundle_for_output_opts(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    output: &str,
+    freestanding: bool,
+    allow_impure: bool,
+) -> Vec<Diagnostic> {
+    check_bundle_opts_for_output(
+        bundle,
+        mode,
+        freestanding,
+        allow_impure,
+        Some(output),
+    )
+    .0
+}
+
 /// Like `check_bundle` but also returns effect facts for D-SEMINDEX1.
 pub fn check_bundle_with_effect_facts(
     bundle: &mut ProgramBundle,
@@ -747,6 +856,16 @@ pub(crate) fn check_bundle_opts(
     mode: CompileMode,
     freestanding: bool,
     allow_impure: bool,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    check_bundle_opts_for_output(bundle, mode, freestanding, allow_impure, None)
+}
+
+fn check_bundle_opts_for_output(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    freestanding: bool,
+    allow_impure: bool,
+    explicit_output: Option<&str>,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = super::BudgetSpecs::validate_bundle(bundle);
     diags.extend(super::Casing::validate_bundle(bundle));
@@ -1766,7 +1885,7 @@ pub(crate) fn check_bundle_opts(
 
     // D-SHAPE-OUTPUT-CALLABLE1: freeze every runnable Output to the ordinary
     // function it resolves to before entry selection or lowering can inspect it.
-    resolve_outputs(bundle, &states, mode, &mut diags);
+    resolve_outputs(bundle, &states, mode, explicit_output, &mut diags);
 
     // Parity with the single-file path: `@static` and address-taken consts
     // must lower to Rust `static` in bundle mode too.
@@ -1862,7 +1981,12 @@ pub(crate) fn check_bundle_opts(
     let entry = &states[bundle.entry];
     if mode == CompileMode::Run || mode == CompileMode::Eval {
         let entry_items = &bundle.modules[bundle.entry].items;
-        if let Some(run_fn) = entry_items.iter().find_map(|i| match i {
+        let has_selected_output = entry_items.iter().any(|item| {
+            matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected))
+        });
+        if has_selected_output {
+            // The selected Output contract was checked before body checking.
+        } else if let Some(run_fn) = entry_items.iter().find_map(|i| match i {
             Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         }) {
@@ -1903,23 +2027,16 @@ pub(crate) fn check_bundle_opts(
                 diags.push(e1308(Some(run_fn.name_span)));
             }
         } else if !entry_items.iter().any(|item| {
-            matches!(
-                item,
-                Item::Const(value)
-                    if matches!(
-                        (&value.ty, &value.value),
-                        (
-                            Some(Type::Named(ty)),
-                            Expr::EnumLit { variant, .. }
-                        ) if ty == Syntax::TYPE_OUTPUT && variant == "Executable"
-                    )
-            )
+            matches!(item, Item::Const(value) if matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT))
         }) {
             diags.push(no_run_error());
         }
     }
     match mode {
-        CompileMode::Test if entry.tests.is_empty() => {
+        CompileMode::Test if entry.tests.is_empty()
+            && !bundle.modules[bundle.entry].items.iter().any(|item| {
+                matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected && output.kind == crate::AST::OutputKind::Check))
+            }) => {
             diags.push(Diagnostic::error(
                 "E0601",
                 format!("no `@{}` blocks found to run", Syntax::KW_TEST),

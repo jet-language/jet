@@ -246,11 +246,13 @@ fn semindex_reconstructs_checked_output_callable() {
     assert_eq!(output.name, "checked-output");
     assert_eq!(output.entry.name, "launch");
     assert!(output.entry.identity.ends_with("::launch"));
+    assert_eq!(output.entry.authority, "safe-jet");
     assert_ne!(output.entry.definition_span, output.entry.reference_span);
     let json = index.to_json();
     for field in [
         "\"outputs\":[{",
         "\"entry\":{\"identity\"",
+        "\"authority\":\"safe-jet\"",
         "\"effects\":[\"Io\"]",
     ] {
         assert!(json.contains(field), "semindex JSON missing {field}: {json}");

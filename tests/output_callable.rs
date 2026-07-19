@@ -1,7 +1,41 @@
 use jet::Interpreter::RunOutcome;
 use jet::AST::{Expr, Item, OutputKind, Type};
+use jet::JitBackend::JitBackend;
+use jet_jit::CraneliftBackend;
 
 mod common;
+
+struct RejectJitFallback;
+
+impl JitBackend for RejectJitFallback {
+    fn run(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
+        panic!("resident JIT unexpectedly used its fallback")
+    }
+
+    fn hot_swap(
+        &mut self,
+        _: &str,
+        _: &jet::AST::ProgramBundle,
+        _: bool,
+    ) -> Result<RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
+        panic!("resident JIT unexpectedly used its fallback")
+    }
+
+    fn restart(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
+        panic!("resident JIT unexpectedly used its fallback")
+    }
+}
+
+fn checked_bundle(source: &str, tag: &str, mode: jet::Sema::CompileMode) -> jet::AST::ProgramBundle {
+    let dir = common::unique_tmp(tag);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(&file, source).unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, mode);
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    bundle
+}
 
 #[test]
 fn parser_retains_typed_output_function_reference() {
@@ -76,6 +110,31 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
 }
 
 #[test]
+fn resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallback() {
+    if !jet_jit::cranelift_host_supported() {
+        return;
+    }
+    let v1 = checked_bundle(
+        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() { print(\"v1\") }\n",
+        "jet_output_resident_v1",
+        jet::Sema::CompileMode::Run,
+    );
+    let v2 = checked_bundle(
+        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() -> Void ? { return Err(\"selected boom\") }\n",
+        "jet_output_resident_v2",
+        jet::Sema::CompileMode::Run,
+    );
+    assert!(jet_jit::resident_jit_safe_bundle(&v1));
+    assert!(jet_jit::resident_jit_safe_bundle(&v2));
+
+    let mut backend = CraneliftBackend::new(RejectJitFallback);
+    let first = backend.run(&v1, false);
+    assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
+    let swapped = backend.hot_swap("start", &v2, false).expect("resident hot swap");
+    assert!(matches!(swapped, RunOutcome::Ran { ref stderr, exit_code: 1, .. } if stderr == "selected boom\n"));
+}
+
+#[test]
 fn qualified_entry_keeps_one_definition_and_effect_identity() {
     let dir = common::unique_tmp("jet_output_callable_qualified");
     std::fs::create_dir_all(&dir).unwrap();
@@ -104,6 +163,7 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
         !output.effects.is_empty(),
         "effect row should be copied from sema"
     );
+    assert_eq!(output.authority.as_str(), "safe-jet");
     assert!(facts.reference_anchors.values().any(|anchor| {
         anchor.module_path == output.source_path && anchor.def_span == output.definition
     }));
@@ -144,12 +204,98 @@ fn runnable_contracts_and_selection_fail_in_sema() {
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));
+    assert!(codes(
+        "app: Output :: .Executable.{ name: \"demo\", entry: start }\n@Unsafe(\"raw boundary\") fn start() {}\n",
+        jet::Sema::CompileMode::Check,
+    )
+    .contains(&"E1321".to_string()));
     let ambiguity = codes(
         "one: Output :: .Executable.{ name: \"one\", entry: first }\ntwo: Output :: .Executable.{ name: \"two\", entry: second }\nfn first() {}\nfn second() {}\n",
         jet::Sema::CompileMode::Run,
     );
     assert_eq!(ambiguity.iter().filter(|code| *code == "E1321").count(), 1);
     assert!(!ambiguity.contains(&"E0101".to_string()), "{ambiguity:?}");
+}
+
+#[test]
+fn checked_default_selects_one_of_multiple_executables() {
+    let bundle = checked_bundle(
+        "one: Output :: .Executable.{ name: \"one\", entry: first };\ntwo: Output :: .Executable.{ name: \"two\", entry: second };\ndefaults: .{ run: two };\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
+        "jet_output_checked_default",
+        jet::Sema::CompileMode::Run,
+    );
+    let selected = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+        let Item::Const(value) = item else { return None };
+        value.resolved_output.as_ref().filter(|output| output.selected)
+    }).expect("checked default selects one Output");
+    assert_eq!(selected.address, "two");
+    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    assert!(rust.contains("jet_runtime_boundary(|| user_second())"), "{rust}");
+    assert!(!rust.contains("jet_runtime_boundary(|| user_first())"), "{rust}");
+}
+
+#[test]
+fn explicit_service_address_reaches_tir_and_real_cli_runtime() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = common::unique_tmp("jet_output_service_cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        "app: Output :: .Executable.{ name: \"app\", entry: launch };\napi: Output :: .Service.{ name: \"api\", entry: serve };\nfn launch() { print(\"app\") }\nfn serve() { print(\"service\") }\n",
+    )
+    .unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle_for_output(
+        &mut bundle,
+        jet::Sema::CompileMode::Run,
+        "api",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let tir = jet::Codegen::TIR::lower_jit_program(&bundle).expect("Service lowers through TIR");
+    assert_eq!(tir.entry, "serve");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--output", "api", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .output()
+        .expect("run explicit Service Output");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "service\n");
+}
+
+#[test]
+fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = common::unique_tmp("jet_output_check_cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        "unit: Output :: .Check.{ name: \"unit\", entry: verify_unit };\nrelease: Output :: .Check.{ name: \"release\", entry: verify_release };\nfn verify_unit() {}\nfn verify_release() -> Void ? { return Err(\"release blocked\") }\n",
+    )
+    .unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Test);
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let rust = jet::Codegen::emit_bundle_tests(&bundle, None);
+    assert!(rust.contains("fn jet_output_check_0()"), "{rust}");
+    assert!(rust.contains("fn jet_output_check_1()"), "{rust}");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["test", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .output()
+        .expect("run Check Output harness");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("unit: pass"), "{stdout}");
+    assert!(stdout.contains("release: FAIL"), "{stdout}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("release blocked"));
 }
 
 #[test]
@@ -198,4 +344,32 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
     assert!(rust.contains("__jet_cli_spec_Args"), "{rust}");
     assert!(rust.contains("user_launch(&__args)"), "{rust}");
+}
+
+#[test]
+fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = common::unique_tmp("jet_output_callable_imported_cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("helper.jet"),
+        "@[Cli]\npub struct Args { value: Int }\n\npub fn launch(args: Args) -> Void ? {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
+    )
+    .unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        "use \"helper\"\napp: Output :: .Executable.{ name: \"demo\", entry: helper.launch };\n",
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", file.to_str().unwrap(), "--", "--value", "42"])
+        .current_dir(&dir)
+        .output()
+        .expect("run imported typed Output");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("imported boom"));
 }

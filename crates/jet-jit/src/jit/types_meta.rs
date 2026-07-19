@@ -121,11 +121,7 @@ pub(crate) fn func_has_receiver(tir: &TFunc) -> bool {
 }
 
 pub(crate) fn jit_fn_name(name: &str) -> String {
-    if name == "run" {
-        "jet_jit_main".to_string()
-    } else {
-        format!("jet_jit_fn_{}", name.replace("::", "__"))
-    }
+    format!("jet_jit_fn_{}", name.replace("::", "__"))
 }
 
 pub(crate) struct JitMeta<'a> {

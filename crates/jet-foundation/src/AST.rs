@@ -34,7 +34,8 @@ pub use items::{
 mod patterns;
 pub use patterns::{
     PatSlot, Pattern, StrMatchPart, StructPatField, BindName, BindPattern, OrFallback,
-    EnumLitArg, ConstAttr, ConstDef, OutputKind, ResolvedOutput, RustConstKind,
+    EnumLitArg, ConstAttr, ConstDef, OutputCallableAuthority, OutputKind, ResolvedOutput,
+    RustConstKind,
     BinMatchPart, BinSpec, BinEndian,
 };
 

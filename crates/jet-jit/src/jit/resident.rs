@@ -87,7 +87,7 @@ pub(crate) fn resident_teardown() {
 
 pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String> {
     let main_returns_result = program.funcs.iter().any(|func| {
-        func.name == "run" && matches!(func.ret, Some(Type::Result { .. }))
+        func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     let need_create = RESIDENT_MODULE.with(|slot| slot.borrow().is_none());
     if need_create {
@@ -217,7 +217,7 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
     let (mut module, host) = new_jit_module()?;
     let main_id = compile_program(&mut module, &host, program, &mut runtime, None)?;
     let main_returns_result = program.funcs.iter().any(|func| {
-        func.name == "run" && matches!(func.ret, Some(Type::Result { .. }))
+        func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
     RESIDENT_MODULE.with(|slot| {

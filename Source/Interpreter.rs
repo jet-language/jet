@@ -87,15 +87,12 @@ fn collect_funcs(bundle: &ProgramBundle) -> HashMap<String, &Func> {
     funcs
 }
 
-/// The legacy `run` spelling wins. Otherwise sema's sole checked Executable
-/// fact names the exact function; dev never re-resolves the Output expression.
+/// An explicit Output wins. Otherwise the legacy `run` spelling or sema's
+/// checked default names the exact function; dev never re-resolves it.
 fn selected_entry<'a>(
     bundle: &'a ProgramBundle,
     funcs: &'a HashMap<String, &'a Func>,
 ) -> Option<&'a Func> {
-    if let Some(run) = funcs.get("run") {
-        return Some(*run);
-    }
     let output = bundle
         .modules
         .get(bundle.entry)?
@@ -108,10 +105,13 @@ fn selected_entry<'a>(
             value
                 .resolved_output
                 .as_ref()
-                .filter(|output| output.kind == crate::AST::OutputKind::Executable)
-        })?;
-    let module = bundle.modules.get(output.module)?;
-    function_at(&module.items, output.definition)
+                .filter(|output| output.selected)
+        });
+    if let Some(output) = output {
+        let module = bundle.modules.get(output.module)?;
+        return function_at(&module.items, output.definition);
+    }
+    funcs.get("run").copied()
 }
 
 fn function_at(items: &[Item], definition: crate::Diagnostics::Span) -> Option<&Func> {

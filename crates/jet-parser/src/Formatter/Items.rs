@@ -1041,6 +1041,13 @@ impl<'a> Fmt<'a> {
             self.write(";");
             return;
         }
+        if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT_DEFAULTS) {
+            self.write(Syntax::OUTPUT_DEFAULTS);
+            self.write(": ");
+            self.fmt_expr(&c.value, Prec::OrFallback);
+            self.write(";");
+            return;
+        }
         // D-PERSIST1: `@Persist` precedes the const's other attrs.
         if c.is_persist {
             self.write(&format!("@{} ", Syntax::CONTRACT_PERSIST));

@@ -621,12 +621,19 @@ pub(crate) fn emit_cli_entry_if_needed(
         _ => None,
     });
     let output = items.iter().find_map(|item| match item {
-        Item::Const(value) => value.resolved_output.as_ref().filter(|output| {
-            output.kind == crate::AST::OutputKind::Executable
-        }),
+        Item::Const(value) => value.resolved_output.as_ref().filter(|output| output.selected),
         _ => None,
     });
-    let (callable, params, fallible) = if let Some(run_fn) = run_fn {
+    let (callable, params, fallible) = if let Some(output) = output {
+        (
+            output.lowered_name.clone(),
+            output.params.clone(),
+            output
+                .return_type
+                .as_ref()
+                .is_some_and(is_fallible_void_type),
+        )
+    } else if let Some(run_fn) = run_fn {
         let params = cx.sigs.get("run").cloned().unwrap_or_else(|| {
             run_fn
                 .params
@@ -639,26 +646,12 @@ pub(crate) fn emit_cli_entry_if_needed(
             params,
             is_fallible_void_entry_return(run_fn),
         )
-    } else if let Some(output) = output {
-        (
-            output.lowered_name.clone(),
-            output.params.clone(),
-            output
-                .return_type
-                .as_ref()
-                .is_some_and(is_fallible_void_type),
-        )
     } else {
         return;
     };
     if params.is_empty() {
-        if fallible {
-            out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    if let Err(__jet_err) = jet_runtime_boundary(|| {callable}()) {{\n        eprintln!(\"{{}}\", __jet_err);\n        std::process::exit(1);\n    }}\n}}\n\n",
-            ));
-        } else {
-            out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    jet_runtime_boundary(|| {callable}());\n}}\n\n"));
-        }
+        let invoke = emit_entry_invocation(&callable, None, fallible, "    ");
+        out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{invoke}}}\n\n"));
         return;
     }
     if params.len() != 1 {
@@ -698,11 +691,11 @@ pub(crate) fn emit_cli_entry_if_needed(
         _ => None,
     }) {
         if s.derives.iter().any(|(t, _)| t == "Cli") {
+            let call_arg = arg_expr("__args");
+            let invoke = emit_entry_invocation(&callable, Some(&call_arg), fallible, "                ");
             out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ jet_runtime_boundary(|| {callable}({call_arg})); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 name = name,
-                callable = callable,
-                call_arg = arg_expr("__args"),
             ));
         }
         return;
@@ -722,8 +715,25 @@ pub(crate) fn emit_cli_entry_if_needed(
             &param_rust,
             &callable,
             &arg_expr,
+            fallible,
             out,
         );
+    }
+}
+
+fn emit_entry_invocation(
+    callable: &str,
+    argument: Option<&str>,
+    fallible: bool,
+    indent: &str,
+) -> String {
+    let call = argument.map_or_else(|| format!("{callable}()"), |arg| format!("{callable}({arg})"));
+    if fallible {
+        format!(
+            "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    eprintln!(\"{{}}\", __jet_err);\n{indent}    std::process::exit(1);\n{indent}}}\n"
+        )
+    } else {
+        format!("{indent}jet_runtime_boundary(|| {call});\n")
     }
 }
 
@@ -755,6 +765,7 @@ fn emit_cli_subcommand_entry(
     enum_rust: &str,
     callable: &str,
     arg_expr: &dyn Fn(&str) -> String,
+    fallible: bool,
     out: &mut String,
 ) {
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
@@ -772,12 +783,12 @@ fn emit_cli_subcommand_entry(
         };
         let tag = mangle_variant(&v.name);
         let ctor = format!("{enum_rust}::{tag}(__payload)");
+        let call_arg = arg_expr(&ctor);
+        let invoke = emit_entry_invocation(callable, Some(&call_arg), fallible, "                        ");
         arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ jet_runtime_boundary(|| {callable}({call_arg})); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),
             payload = payload_name,
-            callable = callable,
-            call_arg = arg_expr(&ctor),
         ));
     }
     let _ = cx;

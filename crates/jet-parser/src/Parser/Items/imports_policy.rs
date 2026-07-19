@@ -649,6 +649,12 @@ impl<'a> Parser<'a> {
                     {
                         self.output_def().map(Item::Const)
                     }
+                    TokKind::Ident(name)
+                        if name == Syntax::OUTPUT_DEFAULTS
+                            && matches!(self.peek2().kind, TokKind::Colon) =>
+                    {
+                        self.output_defaults_def().map(Item::Const)
+                    }
                     TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) => self.func().map(Item::Func),
                     TokKind::At if self.at_meta_attr() => {
                         if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {

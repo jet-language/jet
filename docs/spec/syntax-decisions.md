@@ -4544,6 +4544,9 @@ return means success, and `?` carries failure without lifecycle result types.
 *(ratified 2026-07-15)*: `jet test` runs every Check Output. Singular intents
 select in order: explicit address, legacy zero-config entry, sole compatible
 Output, checked `defaults:` entry, then an ambiguity error listing choices.
+`jet run --output api package.jet` is the explicit form; `defaults: .{ run: app };`
+is checked against the Package's Executable Output addresses. Explicit
+selection wins even when a legacy `fn run` exists.
 
 **D-SHAPE-INTERNAL1=A — `pub _name` is soft-public** *(ratified 2026-07-15)*:
 outside use is allowed with one unsuppressible warning, but the name is omitted
@@ -4691,5 +4694,7 @@ edge before retesting. Implemented end to end on card #681.
 D-ECO-OUTPUT-CALLCONTRACT1=A**: typed runnable Outputs now parse and format as
 closed Output values, sema resolves `entry:` through ordinary function
 resolution and exact role contracts, and the resolved callable identity feeds
-AOT, dev/JIT, semantic navigation, effects, inspection, and Canvas. E1321 owns
-stale, mismatched, and ambiguous links. Implemented end to end on card #544.
+AOT, dev/JIT, semantic navigation, solved effects, safe authority, inspection,
+and Canvas. Checked defaults and explicit addresses select Executable or
+Service entries; `jet test` runs every Check. E1321 owns stale, mismatched, and
+ambiguous links. Implemented end to end on card #544.

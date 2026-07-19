@@ -148,23 +148,21 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let entry_name = module
         .items
         .iter()
-        .find_map(|item| match item {
-            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
-                Some("run".to_string())
-            }
-            _ => None,
-        })
-        .or_else(|| {
-            module.items.iter().find_map(|item| {
+        .find_map(|item| {
                 let Item::Const(value) = item else { return None };
                 value.resolved_output.as_ref().and_then(|output| {
-                    (output.kind == crate::AST::OutputKind::Executable
+                    (output.selected
                         && output.module == bundle.entry
                         && output.params.is_empty())
                     .then(|| output.semantic_name.clone())
                 })
             })
-        })?;
+        .or_else(|| module.items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
+                Some("run".to_string())
+            }
+            _ => None,
+        }))?;
     cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
         match item {
@@ -431,22 +429,18 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         &extern_funcs,
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
-    let selected = module
-        .items
-        .iter()
-        .find_map(|item| match item {
-            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
-                Some("run".to_string())
-            }
-            _ => None,
-        })
-        .or_else(|| module.items.iter().find_map(|item| match item {
+    let selected = module.items.iter().find_map(|item| match item {
             Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
-                (output.kind == crate::AST::OutputKind::Executable
+                (output.selected
                     && output.module == bundle.entry
                     && output.params.is_empty())
                 .then(|| output.semantic_name.clone())
             }),
+            _ => None,
+        }).or_else(|| module.items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
+                Some("run".to_string())
+            }
             _ => None,
         }));
     let Some(selected) = selected else {

@@ -22,12 +22,13 @@ fn json_output(value: &OutputFact) -> String {
     let effects = value.entry.effects.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
     let return_type = value.entry.return_type.as_ref().map_or_else(|| "null".to_string(), |value| json_str(value));
     format!(
-        "{{\"binding\":{},\"kind\":{},\"name\":{},\"module_path\":{},\"span\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"effects\":[{}]}}}}",
+        "{{\"binding\":{},\"kind\":{},\"name\":{},\"module_path\":{},\"span\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"authority\":{},\"effects\":[{}]}}}}",
         json_str(&value.binding), json_str(&value.kind), json_str(&value.name),
         json_str(&value.module_path), json_span(value.span),
         json_str(&value.entry.identity), json_str(&value.entry.name),
         json_str(&value.entry.module_path), json_span(value.entry.definition_span),
-        json_span(value.entry.reference_span), params, return_type, effects,
+        json_span(value.entry.reference_span), params, return_type,
+        json_str(&value.entry.authority), effects,
     )
 }
 

@@ -29,6 +29,7 @@ pub fn compile_bundle_path_opts(
         false,
         false,
         cross_target,
+        None,
     )
 }
 
@@ -61,6 +62,7 @@ pub fn compile_bundle_path_with_target_profile(
         false,
         false,
         Some(profile.triple.as_str()),
+        None,
     )
     .map_err(TargetProfileCompileError::Diagnostics)
 }
@@ -73,7 +75,7 @@ pub fn compile_bundle_path_opts_plugin(
     mode: crate::Sema::CompileMode,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_full(file, mode, false, false, false, true, false, cross_target)
+    compile_bundle_path_opts_full(file, mode, false, false, false, true, false, cross_target, None)
 }
 
 /// Like `compile_bundle_path_opts`, but `debug_linemap = true` routes codegen
@@ -99,6 +101,38 @@ pub fn compile_bundle_path_opts_dbg(
         false,
         debug_linemap,
         cross_target,
+        None,
+    )
+}
+
+/// Compile one explicitly addressed runnable Output. Selection is resolved in
+/// sema and carried into every lower tier as one checked callable fact.
+pub fn compile_bundle_path_output(
+    file: &str,
+    output: &str,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_output_opts(file, output, false, false, false, false, None)
+}
+
+pub fn compile_bundle_path_output_opts(
+    file: &str,
+    output: &str,
+    freestanding: bool,
+    allow_impure: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_full(
+        file,
+        crate::Sema::CompileMode::Run,
+        freestanding,
+        allow_impure,
+        web_target,
+        plugin_target,
+        false,
+        cross_target,
+        Some(output),
     )
 }
 
@@ -1526,6 +1560,7 @@ fn compile_bundle_path_opts_full(
     plugin_target: bool,
     debug_linemap: bool,
     cross_target: Option<&str>,
+    explicit_output: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
     // `--target=<triple>` flag E2-M15 already threads through (host OS when
@@ -1544,7 +1579,15 @@ fn compile_bundle_path_opts_full(
     if timing {
         timer.lap("load"); // lex + parse + module resolution
     }
-    let diags = if freestanding {
+    let diags = if let Some(output) = explicit_output {
+        crate::Sema::check_bundle_for_output_opts(
+            &mut bundle,
+            mode,
+            output,
+            freestanding,
+            allow_impure,
+        )
+    } else if freestanding {
         crate::Sema::check_bundle_freestanding(&mut bundle, mode)
     } else if allow_impure {
         crate::Sema::check_bundle_allow_impure(&mut bundle, mode)

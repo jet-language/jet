@@ -114,8 +114,8 @@ pub fn jit_dump_main_stmts(bundle: &ProgramBundle) -> Vec<String> {
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return vec!["<no program>".into()];
     };
-    let Some(m) = program.funcs.iter().find(|f| f.name == "run") else {
-        return vec!["<no run>".into()];
+    let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
+        return vec!["<no entry>".into()];
     };
     m.body
         .iter()
@@ -130,8 +130,8 @@ pub fn jit_dump_main_ops(bundle: &ProgramBundle) -> Vec<String> {
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return vec!["TStmt::<no program>".into()];
     };
-    let Some(m) = program.funcs.iter().find(|f| f.name == "run") else {
-        return vec!["TStmt::<no run>".into()];
+    let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
+        return vec!["TStmt::<no entry>".into()];
     };
     let mut out = Vec::new();
     collect_stmt_ops(&m.body, &mut out);
@@ -398,7 +398,7 @@ fn collect_expr_ops(expr: &TExpr, out: &mut Vec<String>) {
 pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
     let program = TIR::lower_jit_program(bundle)?;
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let m = program.funcs.iter().find(|f| f.name == "run")?;
+    let m = program.funcs.iter().find(|f| f.name == program.entry)?;
     for s in &m.body {
         if let TStmt::Region(body) = s {
             for inner in body {
@@ -418,7 +418,7 @@ pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
 pub fn jit_main_uncovered_detail(bundle: &ProgramBundle) -> Option<String> {
     let program = TIR::lower_jit_program(bundle)?;
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let m = program.funcs.iter().find(|f| f.name == "run")?;
+    let m = program.funcs.iter().find(|f| f.name == program.entry)?;
     for (i, s) in m.body.iter().enumerate() {
         if resident_safe_stmt(s, &names) {
             continue;
@@ -540,7 +540,7 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
     };
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let main_ok = program.funcs.iter().any(|f| {
-        f.name == "run"
+        f.name == program.entry
             && f.params.is_empty()
             && (f.ret.is_none()
                 || matches!(&f.ret, Some(Type::Result { ok, err })
@@ -550,13 +550,13 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
     });
     if !main_ok {
         for f in &program.funcs {
-            if f.name == "run" {
+            if f.name == program.entry {
                 if let Some(d) = resident_safe_func_detail(f, &names) {
-                    return format!("run not resident-safe: {d}");
+                    return format!("entry not resident-safe: {d}");
                 }
             }
         }
-        return "run not resident-safe".to_string();
+        return "entry not resident-safe".to_string();
     }
     for f in &program.funcs {
         if !resident_safe_func(f, &names) {

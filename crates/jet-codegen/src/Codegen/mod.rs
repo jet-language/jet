@@ -15,7 +15,7 @@ use crate::Sema::CompileMode;
 use crate::Syntax;
 use crate::Traits;
 use crate::AST::FfiLink;
-use crate::AST::{BenchDef, Item, Program, ProgramBundle, TestDef};
+use crate::AST::{BenchDef, Item, Program, ProgramBundle, ResolvedOutput, TestDef, Type};
 
 mod CModule;
 mod Context;
@@ -1452,7 +1452,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 /// (unit or property) is invoked through its `jet_test_N()` entry; the loop is
 /// identical whichever kind it is.
 fn emit_test_main(tests: &[&TestDef], out: &mut String) {
-    emit_test_main_cov(tests, out, false)
+    emit_test_main_cov(tests, &[], out, false)
 }
 
 /// D-TESTKIT1=A (gaps #3/#4): filter, shuffle, and parallel-with-isolation. The
@@ -1470,7 +1470,12 @@ fn emit_test_main(tests: &[&TestDef], out: &mut String) {
 ///     set (CLI `--serial`).
 /// Reporting always walks results in (possibly shuffled) `slots` order, so
 /// output is deterministic regardless of which thread finishes first.
-fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
+fn emit_test_main_cov(
+    tests: &[&TestDef],
+    checks: &[&ResolvedOutput],
+    out: &mut String,
+    coverage: bool,
+) {
     out.push_str("#[derive(Clone, Copy)]\n");
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
     out.push_str("fn main() {\n");
@@ -1484,6 +1489,13 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
         out.push_str(&format!(
             "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: jet_test_{} }},\n",
             name, skip, !test.params.is_empty(), i
+        ));
+    }
+    for (i, check) in checks.iter().enumerate() {
+        let name = escape_rust_str(&check.output_name);
+        out.push_str(&format!(
+            "        JetTestSlot {{ name: {}, skip: false, property: false, run: jet_output_check_{} }},\n",
+            name, i
         ));
     }
     out.push_str("    ];\n");
@@ -1552,6 +1564,19 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     }
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
+}
+
+fn emit_output_check_fns(checks: &[&ResolvedOutput], out: &mut String) {
+    for (i, check) in checks.iter().enumerate() {
+        out.push_str(&format!("fn jet_output_check_{i}() -> Result<(), String> {{\n"));
+        let fallible = matches!(check.return_type, Some(Type::Result { .. }));
+        if fallible {
+            out.push_str(&format!("    {}()\n", check.lowered_name));
+        } else {
+            out.push_str(&format!("    {}();\n    Ok(())\n", check.lowered_name));
+        }
+        out.push_str("}\n\n");
+    }
 }
 
 /// Does any test in the set declare property parameters (D-TEST1)? Drives whether
@@ -1862,9 +1887,15 @@ pub fn emit_bundle_tests_cov(
             _ => None,
         })
         .collect();
+    let checks = bundle.modules.iter().flat_map(|module| module.items.iter()).filter_map(|item| {
+        let Item::Const(value) = item else { return None };
+        value.resolved_output.as_ref().filter(|output| {
+            output.selected && output.kind == crate::AST::OutputKind::Check
+        })
+    }).collect::<Vec<_>>();
     assert!(
-        !tests.is_empty(),
-        "emit_bundle_tests called with no test blocks"
+        !tests.is_empty() || !checks.is_empty(),
+        "emit_bundle_tests called with no test blocks or Check Outputs"
     );
     let want_prop_prelude = any_property_test(&tests);
 
@@ -1964,7 +1995,8 @@ pub fn emit_bundle_tests_cov(
     emit_program_items(&cx, &entry.items, &mut out, false);
 
     emit_test_fns(&cx, &tests, &mut out);
-    emit_test_main_cov(&tests, &mut out, coverage);
+    emit_output_check_fns(&checks, &mut out);
+    emit_test_main_cov(&tests, &checks, &mut out, coverage);
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     ))))

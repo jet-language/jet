@@ -227,6 +227,7 @@ impl SymbolDB {
                         reference_span: output.reference.into(),
                         params: output.params.iter().map(|(_, ty)| ty.name()).collect(),
                         return_type: output.return_type.as_ref().map(AST::Type::name),
+                        authority: output.authority.as_str().to_string(),
                         effects: output.effects.clone(),
                     },
                 })

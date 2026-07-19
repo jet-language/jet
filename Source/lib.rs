@@ -320,6 +320,31 @@ pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, V
     Driver::compile_bundle_path_with_entry(file, entry_fn)
 }
 
+/// Compile one explicitly addressed runnable Output.
+pub fn compile_with_output(file: &str, output: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    Driver::compile_bundle_path_output(file, output)
+}
+
+pub fn compile_output_with_options(
+    file: &str,
+    output: &str,
+    freestanding: bool,
+    allow_impure: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    Driver::compile_bundle_path_output_opts(
+        file,
+        output,
+        freestanding,
+        allow_impure,
+        web_target,
+        plugin_target,
+        cross_target,
+    )
+}
+
 /// In-memory web-target compile (used by integration tests).
 pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     Driver::compile_src_with_options(

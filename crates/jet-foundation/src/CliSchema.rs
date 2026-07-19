@@ -127,30 +127,20 @@ pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
 }
 
 fn selected_entry_type(items: &[Item]) -> Option<&str> {
-    items.iter().find_map(|item| match item {
-        Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
-            match &function.params[0].ty {
-                Type::Named(name) => Some(name.as_str()),
-                _ => None,
-            }
-        }
-        _ => None,
-    }).or_else(|| items.iter().find_map(|item| {
+    items.iter().find_map(|item| {
         let Item::Const(value) = item else { return None };
         let output = value.resolved_output.as_ref()?;
-        if output.kind != crate::AST::OutputKind::Executable || output.params.len() != 1 {
+        if !output.selected
+            || output.kind != crate::AST::OutputKind::Executable
+            || output.params.len() != 1
+        {
             return None;
         }
         match &output.params[0].1 {
             Type::Named(name) => Some(name.as_str()),
             _ => None,
         }
-    }))
-}
-
-fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
-    let entry = &bundle.modules[bundle.entry];
-    if let Some(name) = entry.items.iter().find_map(|item| match item {
+    }).or_else(|| items.iter().find_map(|item| match item {
         Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
             match &function.params[0].ty {
                 Type::Named(name) => Some(name.as_str()),
@@ -158,19 +148,35 @@ fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
             }
         }
         _ => None,
-    }) {
-        return Some((bundle.entry, name));
-    }
-    entry.items.iter().find_map(|item| {
+    }))
+}
+
+fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
+    let entry = &bundle.modules[bundle.entry];
+    if let Some(selected) = entry.items.iter().find_map(|item| {
         let Item::Const(value) = item else { return None };
         let output = value.resolved_output.as_ref()?;
-        if output.kind != crate::AST::OutputKind::Executable || output.params.len() != 1 {
+        if !output.selected
+            || output.kind != crate::AST::OutputKind::Executable
+            || output.params.len() != 1
+        {
             return None;
         }
         match &output.params[0].1 {
             Type::Named(name) => Some((output.module, name.as_str())),
             _ => None,
         }
+    }) {
+        return Some(selected);
+    }
+    entry.items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
+            match &function.params[0].ty {
+                Type::Named(name) => Some((bundle.entry, name.as_str())),
+                _ => None,
+            }
+        }
+        _ => None,
     })
 }
 
