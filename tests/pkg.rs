@@ -73,22 +73,20 @@ fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process
 fn install_closed_status_crypto_helper(home: &Path) {
     use std::os::unix::fs::PermissionsExt;
 
-    let previous_home = std::env::var_os("HOME");
-    std::env::set_var("HOME", home);
     let helper = jetpack::FFI::cached_crypto_helper_path();
-    match previous_home {
-        Some(value) => std::env::set_var("HOME", value),
-        None => std::env::remove_var("HOME"),
-    }
-
-    let release = helper.parent().unwrap();
-    let cache_key = release
+    let cache_key = helper
         .parent()
+        .and_then(Path::parent)
         .and_then(Path::parent)
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         .unwrap();
-    fs::create_dir_all(release).unwrap();
+    let release = home
+        .join(".cache/jet/ffi")
+        .join(cache_key)
+        .join("target/release");
+    let helper = release.join("jet-crypto-helper");
+    fs::create_dir_all(&release).unwrap();
     fs::write(
         release.join(format!("libjet_ffi_{cache_key}.rlib")),
         b"test cache sentinel",
@@ -3795,7 +3793,9 @@ fn cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free() {
     let home = tmp.join("home");
     let keys = tmp.join("keys");
     fs::create_dir_all(&home).unwrap();
+    let process_home = std::env::var_os("HOME");
     install_closed_status_crypto_helper(&home);
+    assert_eq!(std::env::var_os("HOME"), process_home);
 
     let out = jet_cmd_env(
         &["registry", "keygen"],
