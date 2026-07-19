@@ -129,7 +129,8 @@ fn call_with_labels() {
 // ============================================================================
 // CONTROL FLOW
 // ============================================================================
-// One loop keyword; the header picks the mode (S19). break / continue (S23).
+// One loop keyword; the header picks the mode (S19). `break` exits;
+// contextual `next` advances the current turn (S23/D-LOOP-CONTROLWORD1).
 
 fn control() {
     // infinite
@@ -143,7 +144,8 @@ fn control() {
         n = n - 1
     }
 
-    // iteration; ranges are inclusive (S22), optional `step` (S72)
+    // source iteration; ranges are inclusive (S22), and optional stride is the
+    // third semicolon clause (D-LOOP-HEADER2/D-LOOP-ADVANCE2)
     sum := 0
     loop i; 1..5 {
         sum = sum + i
@@ -157,27 +159,23 @@ fn control() {
         print(word)
     }
 
-    // counted loop — three-part header with semicolons (D-LOOP-SEMICOLON1)
+    // state loop — mutable initializer, condition, and optional afterthought
+    // are semicolon clauses (D-LOOP-HEADER2)
     total := 0
-    loop i := 0; i < 5; i += 1 {
+    loop i: Int := 0; i < 5; i += 1 {
         total += i
     }
-
-    // labeled loops + labeled break/continue (D-LABEL1; labels keep `@`, D-ATTR3)
-    //<<< Owner Labeled Loops: Modify syntax for consistency.
-    // HAVE:
-    @outer loop row; [1, 2, 3] {
-        loop col; [1, 2, 3] {
-            break @outer
-        }
+    loop retries := 0; retries < 3 {
+        retries += 1                 // afterthought omitted; advance in body
     }
-    // WANT:
+
+    // labels use suffix `@` on declarations and control targets (D-LOOPLABEL2)
     outer@ loop row; [1, 2, 3] {
         loop col; [1, 2, 3] {
+            if col == 2 { next outer@ }
             break outer@
         }
     }
-    //>>> tracked: #30 D-LOOPLABEL2
 }
 
 // `if` is the universal branching keyword (D-IF1).
@@ -340,16 +338,14 @@ impl FileErr.Fallible {
 //     cfg :: load()?
 // }
 
-// # RATIFIED, NOT YET IMPLEMENTED (S81)
-// `?? next` — inside a loop, skip this turn when the value is failed/empty,
-// else bind the success value. (`KW_QUESTION_CONTINUE` exists in Syntax.rs but
-// has no parser/sema support yet.)
-// fn skip_bad(lines: [String]) {
-//     loop raw; lines {
-//         line :: next(raw)?? next
-//         print(line)
-//     }
-// }
+// Bare `?? next` is contextual loop control: skip this turn when the value is
+// failed/empty, otherwise bind the success value (S81/D-CTXWORD1).
+fn skip_bad(lines: [String]) {
+    loop raw; lines {
+        line :: parse_line(raw) ?? next
+        print(line)
+    }
+}
 
 
 // ============================================================================

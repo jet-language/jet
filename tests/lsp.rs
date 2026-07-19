@@ -2226,7 +2226,11 @@ fn run() {
     // view and .view stay comment content
     next()
     cursor.next()
-    loop { next }
+    loop {
+        value :: maybe() ?? next
+        next
+    }
+    outer@ loop { next outer@ }
 }
 fn next() -> Int { return 1 }
 "#;
@@ -2314,16 +2318,18 @@ fn next() -> Int { return 1 }
     assert!(
         tokens
             .iter()
-            .any(|token| token.text == "next" && token.token_type == TOKEN_KEYWORD),
-        "standalone loop `next` should be a contextual keyword token: {tokens:?}"
+            .filter(|token| token.text == "next" && token.token_type == TOKEN_KEYWORD)
+            .count()
+            == 3,
+        "standalone, labeled, and bare `?? next` should be contextual keyword tokens: {tokens:?}"
     );
     assert!(
         tokens
             .iter()
             .filter(|token| token.text == "next" && token.token_type == TOKEN_VARIABLE)
             .count()
-            >= 2,
-        "`fn next` and `.next` must remain ordinary identifiers: {tokens:?}"
+            == 3,
+        "`fn next`, `.next`, and statement-start `next()` must remain variables: {tokens:?}"
     );
 
     for retired in ["val", "mut", "take", "view"] {

@@ -998,7 +998,7 @@ module.exports = grammar({
 
     // `lo..hi` inclusive range (S22).
     range_expr: ($) =>
-      prec.left(5, seq($._expr, "..", $._expr, optional(seq("step", $._expr)))),
+      prec.left(5, seq($._expr, "..", $._expr)),
 
     unary_expr: ($) => prec.right(9, seq(choice("-", "!"), $._expr)),
 

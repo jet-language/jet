@@ -3068,7 +3068,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     loop key, value; counts {
         total += value
     }
-    loop cursor := 0; cursor < 1; cursor += 1 {
+    loop cursor: Int := 0; cursor < 1; cursor += 1 {
         total += cursor
     }
 }
@@ -3089,6 +3089,12 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     ] {
         assert!(graph.contains(field), "unified loop graph missing {field}: {graph}");
     }
+    for exact in [
+        "\"role\":\"initializer\",\"source\":\"cursor: Int := 0\"",
+        "\"role\":\"afterthought\",\"source\":\"cursor += 1\"",
+    ] {
+        assert!(graph.contains(exact), "unified loop graph missing exact clause {exact}: {graph}");
+    }
 
     let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
     let before = fs::read_to_string(&path).unwrap();
@@ -3100,6 +3106,38 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
         .expect("edit list source nested in loop header");
     let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("loop item; [1, 2, 3, 4]; 2"), "{after}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph before header edits");
+    let initializer_id = field_before(
+        &graph,
+        "\"source\":\"cursor: Int := 0\"",
+        "inline_expr_id",
+    );
+    let edit_initializer = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"cursor: Int := 1\"}}",
+        jet::Canvas::source_revision(&after), initializer_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &edit_initializer)
+        .expect("edit complete typed state initializer clause");
+
+    let after_initializer = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph before afterthought edit");
+    let afterthought_id = field_before(
+        &graph,
+        "\"source\":\"cursor += 1\"",
+        "inline_expr_id",
+    );
+    let edit_afterthought = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"cursor += 2\"}}",
+        jet::Canvas::source_revision(&after_initializer), afterthought_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &edit_afterthought)
+        .expect("edit complete state afterthought clause");
+    let after_headers = fs::read_to_string(&path).unwrap();
+    assert!(
+        after_headers.contains("loop cursor: Int := 1; cursor < 1; cursor += 2"),
+        "{after_headers}"
+    );
 }
 
 #[test]

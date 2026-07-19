@@ -510,10 +510,25 @@ fn next_significant(tokens: &[Token], idx: usize) -> Option<usize> {
 }
 
 fn is_contextual_next(tokens: &[Token], idx: usize) -> bool {
-    matches!(
-        previous_significant(tokens, idx).map(|idx| &tokens[idx].kind),
-        Some(TokKind::LBrace | TokKind::Semi | TokKind::QuestionQuestion)
-    )
+    let previous = previous_significant(tokens, idx).map(|idx| &tokens[idx].kind);
+    let next_idx = next_significant(tokens, idx);
+    let next = next_idx.map(|idx| &tokens[idx].kind);
+    if matches!(previous, Some(TokKind::QuestionQuestion)) {
+        return matches!(next, Some(TokKind::Semi | TokKind::RBrace));
+    }
+    if !matches!(previous, Some(TokKind::LBrace | TokKind::Semi)) {
+        return false;
+    }
+    matches!(next, Some(TokKind::Semi | TokKind::RBrace))
+        || next_idx.is_some_and(|label_idx| {
+            matches!(tokens[label_idx].kind, TokKind::Ident(_))
+                && next_significant(tokens, label_idx).is_some_and(|at_idx| {
+                    matches!(tokens[at_idx].kind, TokKind::At)
+                        && next_significant(tokens, at_idx).is_some_and(|end_idx| {
+                            matches!(tokens[end_idx].kind, TokKind::Semi | TokKind::RBrace)
+                        })
+                })
+        })
 }
 
 fn is_trivia(tok: &Token) -> bool {

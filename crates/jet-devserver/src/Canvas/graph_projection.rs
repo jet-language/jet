@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use jet_driver::AST::{self, Expr, Item, Stmt};
+use jet_driver::Diagnostics::Span;
 use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, SymbolKind};
 
 use super::graph_helpers::{
@@ -768,19 +769,22 @@ fn project_stmt(
                 vec!["control"],
                 vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
             );
-            add_inline(g, &node_id, ordinal, "init", src, init.name_span);
+            let initializer_span = Span::new(init.name_span.start, init.init.span().end);
             let init_pin = add_pin(g, &node_id, "initializer", "input", "Value", "", false);
-            connect_expr_to_input(g, index, src, &init.init, ordinal * 10, "initializer", &node_id, &init_pin, x - 220, y);
+            connect_expr_to_input_with_span(g, index, src, &init.init, initializer_span, ordinal * 10, "initializer", &node_id, &init_pin, x - 220, y);
             let cond_pin = add_pin(g, &node_id, "condition", "input", "Bool", "", false);
             connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", &node_id, &cond_pin, x - 220, y + 30);
             if let Some(step) = step {
                 let afterthought = match step.as_ref() {
-                    Stmt::Assign { value, .. } | Stmt::Expr(value) => Some(value),
+                    Stmt::Assign { target, value, .. } => {
+                        Some((value, Span::new(target.span().start, expr_source_end(value))))
+                    }
+                    Stmt::Expr(value) => Some((value, value.span())),
                     _ => None,
                 };
-                if let Some(afterthought) = afterthought {
+                if let Some((afterthought, afterthought_span)) = afterthought {
                     let pin = add_pin(g, &node_id, "afterthought", "input", "Value", "", false);
-                    connect_expr_to_input(g, index, src, afterthought, ordinal * 10 + 2, "afterthought", &node_id, &pin, x - 220, y + 60);
+                    connect_expr_to_input_with_span(g, index, src, afterthought, afterthought_span, ordinal * 10 + 2, "afterthought", &node_id, &pin, x - 220, y + 60);
                 }
             }
             project_stmt_block(g, index, src, body, ordinal * 100 + 30, x + 230, y + 200);
@@ -1211,12 +1215,50 @@ fn connect_expr_to_input(
     x: i32,
     y: i32,
 ) {
+    connect_expr_to_input_with_span(
+        g,
+        index,
+        src,
+        expr,
+        expr.span(),
+        ordinal,
+        role,
+        owner_node_id,
+        input_pin,
+        x,
+        y,
+    );
+}
+
+fn expr_source_end(expr: &Expr) -> usize {
+    match expr {
+        // Sema expands compound assignment with the target span on the new
+        // binary node; the original RHS child retains the source end.
+        Expr::Binary(_, left, right, _) => expr_source_end(left).max(expr_source_end(right)),
+        _ => expr.span().end,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn connect_expr_to_input_with_span(
+    g: &mut GraphBuilder,
+    index: &SemIndex,
+    src: &str,
+    expr: &Expr,
+    inline_span: Span,
+    ordinal: usize,
+    role: &str,
+    owner_node_id: &str,
+    input_pin: &str,
+    x: i32,
+    y: i32,
+) {
     let provider_y = data_provider_y(y, ordinal);
     if let Some(out) = project_value_node(g, index, src, expr, ordinal, role, x, provider_y) {
-        add_inline(g, owner_node_id, ordinal, role, src, expr.span());
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
     } else if pure_leaf(expr) {
-        add_inline(g, owner_node_id, ordinal, role, src, expr.span());
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         wire_ident_refs(g, expr, input_pin);
     } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
