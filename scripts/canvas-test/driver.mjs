@@ -115,6 +115,7 @@ export class CdpDriver {
   }
 
   async navigate(url) {
+    if (this.failure) throw this.failure;
     const loaded = this.waitForEvent("Page.loadEventFired", this.pageSession);
     await this.send("Page.navigate", { url }, this.pageSession);
     await loaded;
@@ -184,11 +185,14 @@ export class CdpDriver {
   }
 
   waitForEvent(method, sessionId = undefined, timeoutMs = 15000) {
+    if (this.failure) return Promise.reject(this.failure);
     return new Promise((resolve, reject) => {
       const key = sessionId ? `${sessionId}:${method}` : method;
       const timer = setTimeout(() => {
         const listeners = this.sessions.get(key) || [];
-        this.sessions.set(key, listeners.filter((listener) => listener.resolve !== resolve));
+        const remaining = listeners.filter((listener) => listener.resolve !== resolve);
+        if (remaining.length) this.sessions.set(key, remaining);
+        else this.sessions.delete(key);
         reject(new Error(`CDP event timeout: ${method}`));
       }, timeoutMs);
       const listeners = this.sessions.get(key) || [];
